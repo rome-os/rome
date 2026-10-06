@@ -1,7 +1,12 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import {
+  chooseConnection,
+  connectionRefusalMessage,
+  createAppLogger,
+  getCurrentActionContext,
+} from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -9,8 +14,8 @@ import type {
   ConversationId,
   ConversationRepository,
   MessageReceipt,
+  ChannelsService,
   PreviewPayload,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 import type { SendMessageInput, SendMessageChatInput, SendMessageEmailInput } from "./types.js";
 export type { SendMessageInput, SendMessageOutput } from "./types.js";
@@ -235,27 +240,27 @@ async function resolveChatThreadId(
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
-async function resolveConnectionIdForService(
-  talkRouter: TalkRouter,
-  service: string,
+/**
+ * Refuse a channel no Connection can send on before anything else is checked,
+ * so an unconfigured channel is not reported as a bad attachment or a missing
+ * guardian mapping. The rule and its texts are the SDK's, which the channels
+ * service applies again when it sends.
+ */
+async function requireSendableChannel(
+  channels: ChannelsService,
+  channel: string,
   requested?: string,
-): Promise<string> {
-  const matches = (await talkRouter.list()).filter((connection) => connection.service === service);
-  if (requested) {
-    if (!matches.some((connection) => connection.connectionId === requested)) {
-      throw new Error(`Connection "${requested}" does not provide channel "${service}"`);
-    }
-    return requested;
+): Promise<void> {
+  const backing =
+    (await channels.list()).find((candidate) => candidate.name === channel)?.connectionIds ?? [];
+  const choice = chooseConnection(backing, requested);
+  if ("refused" in choice) {
+    throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
   }
-  if (matches.length === 0) throw new Error(`No Talk connection registered for "${service}"`);
-  if (matches.length > 1) {
-    throw new Error(`Channel "${service}" has multiple connections; connectionId is required`);
-  }
-  return matches[0]!.connectionId;
 }
 
 export async function executeSendMessage(
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   input: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
@@ -263,7 +268,9 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  const connectionId = await resolveConnectionIdForService(talkRouter, channel, input.connectionId);
+  await requireSendableChannel(channels, channel, input.connectionId);
+  // The channels service chooses the Connection among those backing it.
+  const via = input.connectionId ? { connectionId: input.connectionId } : undefined;
 
   const safeInput = await validateAttachmentSources(input);
 
@@ -285,19 +292,24 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
-      kind: "email",
-      text,
-      parts,
-      attachments: safeInput.attachments,
-      turnId,
-      to: email.to,
-      cc: email.cc,
-      bcc: email.bcc,
-      subject: email.subject,
-      html: email.html,
-      inReplyToMessageId: replyTarget,
-    });
+    const delivery = await channels.send(
+      channel,
+      threadId as ConversationId,
+      {
+        kind: "email",
+        text,
+        parts,
+        attachments: safeInput.attachments,
+        turnId,
+        to: email.to,
+        cc: email.cc,
+        bcc: email.bcc,
+        subject: email.subject,
+        html: email.html,
+        inReplyToMessageId: replyTarget,
+      },
+      via,
+    );
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
     return delivery.messageId
@@ -318,13 +330,18 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
-    text,
-    parts,
-    attachments: safeInput.attachments,
-    replyToMessageId: chat.replyToMessageId,
-    turnId,
-  });
+  const delivery = await channels.send(
+    channel,
+    threadId as ConversationId,
+    {
+      text,
+      parts,
+      attachments: safeInput.attachments,
+      replyToMessageId: chat.replyToMessageId,
+      turnId,
+    },
+    via,
+  );
   await recordDeliveredConversationMessageBestEffort(
     deps,
     input,
@@ -341,7 +358,7 @@ export async function executeSendMessage(
  */
 export function createSendMessageAction(
   config: ActionConfig,
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   deps: SendMessageRuntimeDeps = {},
 ): Action {
   return {
@@ -436,7 +453,7 @@ export function createSendMessageAction(
       required: ["channel"],
     },
     execute: async (input: Record<string, unknown>): Promise<ActionResult> =>
-      executeSendMessage(talkRouter, input as unknown as SendMessageInput, deps),
+      executeSendMessage(channels, input as unknown as SendMessageInput, deps),
     // Ground-truth render of the bound call. Pure over args (no I/O), so it
     // surfaces the message body and channel — the decision-relevant facts — but
     // deliberately omits the raw threadId/channelUserId recipient, which would
@@ -458,11 +475,11 @@ export function createSendMessageAction(
 
 export function createAction(
   config: ActionConfig,
-  deps: { talkRouter: TalkRouter } & SendMessageRuntimeDeps & {
+  deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
       appContext?: { repositories?: { conversations?: ConversationRepository } };
     },
 ): Action {
-  return createSendMessageAction(config, deps.talkRouter, {
+  return createSendMessageAction(config, deps.channelsService, {
     ...deps,
     conversations: deps.conversations ?? deps.appContext?.repositories?.conversations,
   });

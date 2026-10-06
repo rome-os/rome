@@ -19,6 +19,8 @@ dist-report/
 .npmrc
 csc_link.txt
 data/
+# s6 reads a service's readiness check from its data/ directory.
+!scripts/docker/s6-rc.d/*/data/
 scratch/sessions/
 *.tsbuildinfo
 .next/

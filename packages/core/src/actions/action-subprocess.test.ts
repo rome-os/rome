@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ActionEvent, StreamAgentMessage } from "@rome-os/app-runtime";
+import type { ActionEvent, StreamAgentEvent } from "@rome-os/app-runtime";
 import { ActionEngine } from "./engine.js";
 import { ActionCancelledError, ActionWorkerExitError } from "./action-errors.js";
 import {
@@ -110,9 +110,9 @@ function payload(
   };
 }
 
-async function collect(run: AsyncIterable<unknown>): Promise<StreamAgentMessage[]> {
-  const messages: StreamAgentMessage[] = [];
-  for await (const message of run) messages.push(message as StreamAgentMessage);
+async function collect(run: AsyncIterable<unknown>): Promise<StreamAgentEvent[]> {
+  const messages: StreamAgentEvent[] = [];
+  for await (const message of run) messages.push(message as StreamAgentEvent);
   return messages;
 }
 
@@ -122,7 +122,7 @@ async function collectValues<T>(values: AsyncIterable<T>): Promise<T[]> {
   return collected;
 }
 
-function contents(messages: StreamAgentMessage[]): Array<string | undefined> {
+function contents(messages: StreamAgentEvent[]): Array<string | undefined> {
   return messages.map((message) => (message as { content?: string }).content);
 }
 
@@ -228,9 +228,9 @@ describe("main-owned action subprocess", () => {
       "agent.session.runTurn",
       async (request, context) => {
         agentRequests.push(request);
-        const stream = context.openStream<StreamAgentMessage>("agent.turn:turn-b");
-        stream.send({ type: "text", content: "agent-chunk" } as StreamAgentMessage);
-        stream.send({ type: "result", content: "agent-result" } as StreamAgentMessage);
+        const stream = context.openStream<StreamAgentEvent>("agent.turn:turn-b");
+        stream.send({ type: "text", content: "agent-chunk" } as StreamAgentEvent);
+        stream.send({ type: "result", content: "agent-result" } as StreamAgentEvent);
         stream.close();
         return {
           turnId: "turn-b",

@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { UsageSummaryBlock } from "@/components/chat/blocks/UsageSummaryBlock";
+import { UsageSummaryView } from "@/components/chat/entries/UsageSummaryView";
 import {
   TraceDrawer,
   traceDrawerContentInsetClass,
@@ -153,7 +153,7 @@ describe("TraceDrawer subagent usage", () => {
         loadStoredTrace={loadStoredTrace}
         renderInlineBlock={(block) =>
           block.type === "result" && block.accounting ? (
-            <UsageSummaryBlock accounting={block.accounting} />
+            <UsageSummaryView accounting={block.accounting} />
           ) : null
         }
         renderRunBlocks={() => null}

@@ -34,7 +34,7 @@
 // epoch and the old epoch's in-flight probe fault is discarded).
 
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,
@@ -371,6 +371,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
     capabilities: {
       talker: {
         needs: ["session"] as const,
+        history: true,
         build(creds, kit): Talker {
           const settings = telegramUserSettingsFromMaterial(creds.session.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -482,7 +483,11 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
               };
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter),
+                history: historyFeature(adapter, {
+                  channel: "telegram_user",
+                  // The account's own lines, the way the adapter tells them apart.
+                  isOwn: (message) => (message.rawEvent as { out?: unknown } | null)?.out === true,
+                }),
                 directory,
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;

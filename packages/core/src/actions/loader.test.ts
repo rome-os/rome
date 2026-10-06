@@ -136,4 +136,41 @@ describe("ActionLoader", () => {
       (loader as unknown as ActionLoaderPrivate).readActionConfig(yamlPath),
     ).rejects.toThrow("favor-required actions cannot require approval in v1");
   });
+
+  function favorActionYaml(from: string): string {
+    return writeActionYaml(
+      [
+        "name: buy_report",
+        "type: custom",
+        "description: Buy a report",
+        "complexity: simple",
+        "speed: fast",
+        "reliability: high",
+        "sideEffects: write",
+        "favorRequirement:",
+        "  amount: 25",
+        "  title: Summarize a report",
+        "  displayFields:",
+        "    - label: Report",
+        `      from: "${from}"`,
+      ].join("\n"),
+    );
+  }
+
+  it("accepts JSONPath favor display-field pointers", async () => {
+    const loader = new ActionLoader();
+    const config = (await (loader as unknown as ActionLoaderPrivate).readActionConfig(
+      favorActionYaml("$.reportUrl"),
+    )) as { favorRequirement?: { displayFields: Array<{ from: string }> } };
+
+    expect(config.favorRequirement?.displayFields[0]?.from).toBe("$.reportUrl");
+  });
+
+  it("rejects bare-key favor display-field pointers", async () => {
+    const loader = new ActionLoader();
+
+    await expect(
+      (loader as unknown as ActionLoaderPrivate).readActionConfig(favorActionYaml("reportUrl")),
+    ).rejects.toThrow('must be a JSONPath into the action args, e.g. "$.reportUrl"');
+  });
 });

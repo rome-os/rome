@@ -205,3 +205,11 @@ export {
   type ToolbarProps,
 } from "./toolbar.js";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./tooltip.js";
+
+export {
+  UiScaleProvider,
+  useUiScale,
+  type UiScale,
+  type UiScalePreference,
+  type UiScaleProviderProps,
+} from "./ui-scale.js";

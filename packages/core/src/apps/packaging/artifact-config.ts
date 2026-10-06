@@ -13,7 +13,14 @@ const FavorRequirementSchema = z
         z
           .object({
             label: z.string().min(1),
-            from: z.string().min(1),
+            // Rome Cloud renders display fields from the request args with a
+            // JSONPath-style pointer ("$.reportUrl"). A bare key ("reportUrl")
+            // passes a plain string check but makes every favor request fail
+            // at checkout with `Unsupported template pointer`, so reject it at
+            // load/pack time instead.
+            from: z
+              .string()
+              .regex(/^\$\.\S/, 'must be a JSONPath into the action args, e.g. "$.reportUrl"'),
           })
           .strict(),
       )

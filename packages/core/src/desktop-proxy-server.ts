@@ -1,44 +1,37 @@
 import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import net from "node:net";
-import { wechatUserDisplay } from "./channels/wechat-user.js";
 import type { DrizzleDb } from "./db/index.js";
 import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
+import { desktopSlot } from "./desktops.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("desktop-proxy");
 
 const PREFIX = "/desktop-proxy";
-/** WeChat's own display (`WECHAT_USER_DISPLAY`), shown at /desktop/wechat. Same
- *  mount, same auth posture as the shared desktop: only the upstream differs. */
-const WECHAT_PREFIX = `${PREFIX}/wechat`;
+const SHARED_SEGMENT = "websockify";
 
-/** The websockify port and the path it sees, for a request under `/desktop-proxy`.
- *  Null for WeChat's view unless WeChat is enabled with its own display, the only
- *  case in which the entrypoint starts its websockify: nothing of ours listens on
- *  that port otherwise, and the shared websockify ignores the path. */
-export function desktopUpstream(pathname: string): { port: number; path: string } | null {
-  if (pathname === WECHAT_PREFIX || pathname.startsWith(`${WECHAT_PREFIX}/`)) {
-    if (!ownDisplayActive()) return null;
-    return {
-      port: Number(process.env.ROME_WECHAT_NOVNC_PORT ?? 6081),
-      path: pathname.slice(WECHAT_PREFIX.length) || "/",
-    };
+/**
+ * The websockify port and the path it sees, for an upgrade under `/desktop-proxy`.
+ * `/desktop-proxy` and `/desktop-proxy/websockify` go to the shared desktop,
+ * whose websockify ignores the path. Any other first segment names a desktop:
+ * it and everything under it go to that desktop's websockify, and resolve to
+ * null when the table has no such desktop.
+ */
+export function desktopUpstream(rawUrl: string): { port: number; path: string } | null {
+  const rest = rawUrl.slice(PREFIX.length);
+  const named = /^\/([^/?]+)(.*)$/.exec(rest);
+  if (named && named[1] !== SHARED_SEGMENT) {
+    const slot = desktopSlot(named[1]!);
+    if (!slot) return null;
+    const tail = named[2]!;
+    return { port: slot.novncPort, path: tail.startsWith("/") ? tail : `/${tail}` };
   }
   return {
     port: Number(process.env.ROME_NOVNC_PORT ?? 6080),
-    path: pathname.slice(PREFIX.length) || "/",
+    path: rest || "/",
   };
-}
-
-/** Fail closed: a value the shared rule rejects has no display of ours either. */
-function ownDisplayActive(): boolean {
-  try {
-    return wechatUserDisplay() !== null;
-  } catch {
-    return false;
-  }
 }
 
 function buildUpstreamUpgradeRequest(

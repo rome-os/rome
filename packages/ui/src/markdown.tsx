@@ -466,6 +466,10 @@ function MarkdownImpl({
         mermaid={mermaidOptions}
         plugins={STREAMDOWN_PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
+        // Streamdown caps a table at 300px by default and scrolls the rest
+        // inside the table. Rome sets a table as text in the column, so it
+        // grows to its full height like a paragraph.
+        tableMaxHeight={0}
         urlTransform={urlTransform}
       >
         {children}

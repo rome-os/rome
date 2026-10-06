@@ -74,7 +74,8 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
-    talkRouter?: { list: ReturnType<typeof rs.fn> };
+    channelsService?: unknown;
+    connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -105,7 +106,8 @@ function makeServer(
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    talkRouter: overrides.talkRouter,
+    channelsService: overrides.channelsService,
+    connectionRegistry: overrides.connectionRegistry,
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -215,21 +217,71 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toMatch(/apps\.create: invalid params/);
   });
 
-  it("serves the current main-process Talk connection list", async () => {
-    const list = rs
-      .fn()
-      .mockResolvedValueOnce([{ connectionId: "discord-1", service: "discord" }])
-      .mockResolvedValueOnce([{ connectionId: "wechat-1", service: "wechat" }]);
-    const { server } = makeServer({ talkRouter: { list } });
-    const fake = makeFakeWorker();
-    server.attach(fake.worker);
+  describe("channels.*", () => {
+    it("serves the channel list, sends and reads by channel name", async () => {
+      const service = {
+        list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
+        send: rs.fn(async () => ({ messageId: "m1" })),
+        query: rs.fn(async () => []),
+        history: rs.fn(async () => []),
+      };
+      const { server } = makeServer({ channelsService: service });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
 
-    const first = await rpc(fake, "talk.list", {});
-    const second = await rpc(fake, "talk.list", {});
+      const listed = await rpc(fake, "channels.list", {});
+      const sent = await rpc(fake, "channels.send", {
+        channel: "discord",
+        conversationId: "c1",
+        message: { text: "hi" },
+        connectionId: "discord-1",
+      });
+      await rpc(fake, "channels.query", {
+        channel: "discord",
+        since: "2026-09-29T10:00:00.000Z",
+        limit: 5,
+      });
+      await rpc(fake, "channels.history", { channel: "discord", conversationId: "c1" });
 
-    expect(first.result).toEqual([{ connectionId: "discord-1", service: "discord" }]);
-    expect(second.result).toEqual([{ connectionId: "wechat-1", service: "wechat" }]);
-    expect(list).toHaveBeenCalledTimes(2);
+      expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
+      expect(sent.result).toEqual({ messageId: "m1" });
+      expect(service.send).toHaveBeenCalledWith(
+        "discord",
+        "c1",
+        { text: "hi" },
+        { connectionId: "discord-1" },
+      );
+      expect(service.query).toHaveBeenCalledWith("discord", {
+        since: new Date("2026-09-29T10:00:00.000Z"),
+        limit: 5,
+      });
+      expect(service.history).toHaveBeenCalledWith("discord", { conversationId: "c1" });
+    });
+
+    it("rejects a read with no channel", async () => {
+      const { server } = makeServer({ channelsService: { query: rs.fn() } });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "channels.query", {});
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+    });
+
+    it("refuses a query naming a Connection, which it cannot honour", async () => {
+      const query = rs.fn(async () => []);
+      const { server } = makeServer({ channelsService: { query } });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const response = await rpc(fake, "channels.query", {
+        channel: "telegram_user",
+        connectionId: "tg-b",
+      });
+
+      expect(response.error).toMatch(/channels\.query: invalid params/);
+      expect(query).not.toHaveBeenCalled();
+    });
   });
 
   it("enables an app and echoes the result when params are valid", async () => {

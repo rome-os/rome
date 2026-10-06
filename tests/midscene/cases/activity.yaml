@@ -1,0 +1,32 @@
+cases:
+  - name: ACT-03 Review requests and inspect an accepted webhook payload
+    tags:
+      - activity
+      - shard-4
+    steps:
+      - app.open:
+          path: /activity
+      - aiAct: >-
+          In the yellow pending-approvals banner above the status filters, click the action on
+          its right ("Review" or "查看") once to show the pending requests, then stop.
+      - aiAssert: >-
+          The "Pending" status filter chip is selected (orange), and the feed lists three
+          pending connection requests from "Alex" for the "Telegram",
+          "Discord", and "Feishu" channels, with Approve and Reject actions.
+      - aiAct: >-
+          Click the "All" status filter chip above the Activity feed to restore the mixed feed.
+          Do not click any sidebar item, and stop after selecting the filter.
+      - aiAssert: >-
+          The "All" status filter chip is selected (orange), rather than "Pending".
+      - aiAct: >-
+          Scroll down the Activity feed until the "Webhook received for weather_forecast" row is
+          visible. Do not open its Payload disclosure yet.
+      - aiAct: >-
+          In the weather_forecast webhook card, open the small chevron row labeled "Payload"
+          directly below its "Execution hook-3..." line. Click the chevron or label only when it
+          is visible at its current screen position, then leave it expanded.
+      - aiAct: >-
+          Scroll until the expanded webhook payload's "location" field with value "cabin" is
+          visible. Leave the Payload disclosure open.
+      - aiAssert: >-
+          The expanded webhook payload visibly contains the "location" field with value "cabin".

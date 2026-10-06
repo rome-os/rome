@@ -48,6 +48,11 @@ describe("webchat model selector", () => {
       providerId: "openai",
       model: "gpt-6-astra",
     });
+    expect(resolveWebchatLargeModelSelection("gpt-6-1-sol")).toMatchObject({
+      id: "gpt-6-1-sol",
+      providerId: "openai",
+      model: "gpt-6.1-sol",
+    });
     expect(resolveWebchatLargeModelSelection("gpt-6-sol")).toMatchObject({
       providerId: "openai",
       model: "gpt-6-sol",

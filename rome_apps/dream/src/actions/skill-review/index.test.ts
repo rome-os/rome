@@ -1,5 +1,7 @@
-import { describe, it, expect } from "@rstest/core";
+import { sql } from "drizzle-orm";
+import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { createAction } from "./index.js";
 
@@ -99,5 +101,48 @@ describe("skill_review", () => {
 
     expect(runCalls).toHaveLength(1);
     expect(runCalls[0].prompt).toContain("explicit-session-42");
+  });
+});
+
+describe("skill_review against the system schema", () => {
+  let testDb: TestDb;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+
+  afterEach(() => {
+    testDb.close();
+  });
+
+  function seedSession(id: string, type: string, createdAt: number): void {
+    testDb.db.run(sql`
+      INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
+      VALUES (${id}, ${id}, ${type}, ${createdAt}, ${createdAt})
+    `);
+  }
+
+  it("reviews the newest webchat session, not a newer channel or background run", async () => {
+    seedSession("older-web", "webchat", 1700000000);
+    seedSession("newest-web", "webchat", 1700000100);
+    seedSession("group-chat", "channel", 1700000200);
+    seedSession("dream-run", "action", 1700000300);
+
+    const runCalls: Array<{ prompt: string }> = [];
+    const deps = {
+      agentRunner: {
+        async *run(params: { prompt: string }) {
+          runCalls.push(params);
+          yield { type: "result", content: "done" };
+        },
+      } as unknown as AgentRunner,
+      appContext: { db: { connection: testDb.db } },
+    } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner }>;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect(runCalls).toHaveLength(1);
+    expect(runCalls[0].prompt).toContain("newest-web");
   });
 });

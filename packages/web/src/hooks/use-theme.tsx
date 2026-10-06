@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ThemeContext, type ThemeContextValue } from "./theme-context";
@@ -17,6 +18,17 @@ import {
 } from "../lib/theme";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const scale = useUiScale();
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.getAttribute("data-ui-scale");
+    root.setAttribute("data-ui-scale", scale);
+    return () => {
+      if (previous === null) root.removeAttribute("data-ui-scale");
+      else root.setAttribute("data-ui-scale", previous);
+    };
+  }, [scale]);
+
   const [preference, setPreferenceState] = useState<ThemePreference>(() => readStoredPreference());
   const [systemDark, setSystemDark] = useState<boolean>(() => systemPrefersDark());
   const [theme, setThemeState] = useState<ThemeName>(() => readStoredThemeName());

@@ -29,7 +29,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
@@ -51,7 +51,7 @@ import type {
   Talker,
 } from "../types.js";
 import {
-  historyFeature,
+  historyLinesFeature,
   inboundMediaFeature,
   toInboundMessage,
   toMessageReceipt,
@@ -242,6 +242,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
     capabilities: {
       talker: {
         needs: ["inbox"] as const,
+        history: true,
         build(creds, kit): Talker {
           const material = creds.inbox.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
@@ -299,7 +300,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter),
+                history: historyLinesFeature(adapter, "email"),
               };
               return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
             },

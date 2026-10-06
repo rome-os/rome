@@ -21,7 +21,7 @@ import { SessionsRepository } from "../db/repositories/sessions.js";
 import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
 import type { Action } from "../actions/types.js";
-import type { NormalizedMessage, AgentMessage } from "../types.js";
+import type { NormalizedMessage, AgentEvent } from "../types.js";
 import { createTestDb, MockProviderAdapter, type TestDb } from "./helpers.js";
 
 export const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "agents");
@@ -149,7 +149,7 @@ export function makeSingleActionProvider(
   actionName: string,
   input: Record<string, unknown>,
 ): ModelProvider {
-  const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentMessage> {
+  const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentEvent> {
     const id = randomUUID();
     yield { type: "tool_use", id, tool: actionName, input };
     await params.executeAction(actionName, input);

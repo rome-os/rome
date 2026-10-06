@@ -184,7 +184,11 @@
       "default": "./dist/tooltip.js"
     },
     "./styles.css": "./src/styles.css",
-    "./markdown.css": "./src/markdown.css"
+    "./markdown.css": "./src/markdown.css",
+    "./ui-scale": {
+      "types": "./dist/ui-scale.d.ts",
+      "default": "./dist/ui-scale.js"
+    }
   },
   "files": [
     "dist",

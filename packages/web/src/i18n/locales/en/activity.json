@@ -20,6 +20,7 @@
       "errors": "Errors",
       "events": "Events"
     },
+    "filterStatus": "Activity status",
     "filters": {
       "all": "All",
       "pending": "Pending",

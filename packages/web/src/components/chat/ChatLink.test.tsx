@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { ThemeProvider } from "@/hooks/use-theme";
 import { ChatLink } from "./ChatLink";
+import ChatMarkdown from "./ChatMarkdown";
 import {
   WorkspaceStoreContext,
   createWorkspaceStore,
@@ -294,6 +296,21 @@ describe("ChatLink", () => {
     fireEvent.click(screen.getByText("calendar"));
 
     expect(autoPlaceApp).toHaveBeenCalledWith("calendar", undefined, undefined, true);
+  });
+
+  it("opens an app tile from a rendered chat message link", () => {
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ThemeProvider>
+        <ChatMarkdown>{"Open [Issue Triage](/apps/issue-triage)."}</ChatMarkdown>
+      </ThemeProvider>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByRole("link", { name: "Issue Triage" }));
+
+    expect(autoPlaceApp).toHaveBeenCalledWith("issue-triage", undefined, undefined, true);
   });
 
   it("preserves the in-app sub-route for a deep /apps link", () => {

@@ -27,7 +27,8 @@ import { whatsAppMessages } from "./whatsapp-messages.js";
  *
  * Where an answer comes from is the channel's business. WhatsApp's and
  * LinkedIn's address books and stores read tables a sync fills; every service
- * with a Talk backs its channel's `send` and `inbound` through its Connection.
+ * with a Talk backs its channel's `send` and `inbound` through its Connection,
+ * and a Talk that reads the platform's history backs its channel's `messages`.
  * A channel answering the same questions from a live API call implements the
  * same ports and joins the same way.
  *
@@ -43,8 +44,9 @@ export function channelList(deps: {
    *  It contributes a live store and an address book of the guardian's own
    *  contacts, read straight from the client's database rather than a sync. */
   wechatUserReader?: WechatUserReader;
-  /** The Connections that back `send` and `inbound`. Every registered service
-   *  with a Talk contributes a channel; absent, no channel has either port. */
+  /** The Connections that back `send`, `inbound` and, where no store does,
+   *  `messages`. Every registered service with a Talk contributes a channel;
+   *  absent, no channel has those ports. */
   connections?: ConnectionPortsDeps;
 }): Channels {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
@@ -73,8 +75,9 @@ export function channelList(deps: {
     inbound: ports.get(read.name)?.inbound ?? null,
   }));
   for (const [name, backed] of ports) {
-    if (reads.some((read) => read.name === name) || (!backed.send && !backed.inbound)) continue;
-    channels.push({ name, accounts: null, messages: null, ...backed });
+    if (reads.some((read) => read.name === name)) continue;
+    if (!backed.send && !backed.inbound && !backed.messages) continue;
+    channels.push({ name, accounts: null, ...backed });
   }
   return channels;
 }

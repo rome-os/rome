@@ -60,7 +60,10 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
+import { sendApprovalCard } from "./actions/approval-card.js";
+import { createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
+import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -252,9 +255,12 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db);
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
-  const wechatUserReader = config.wechatUserEnabled
-    ? new WechatUserReader(new WechatUserRuntime())
-    : undefined;
+  // The channel list and the Connection's Talk share this one client runtime.
+  const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
+  const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
+  // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
+  // the same client, and needs no connection.
+  const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -311,6 +317,14 @@ async function main() {
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     }),
   );
+  // How app actions — here and, over RPC, in workers — send and read on
+  // channels by name. The channel list is built further down, and the service
+  // answers from the Connections alone until then (startup hooks, approvals).
+  let builtChannels: ReturnType<typeof channelList> | undefined;
+  const channelsService = createChannelsService({
+    channels: () => builtChannels,
+    router: talkRouter,
+  });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
@@ -499,36 +513,7 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   // The "openai" provider runs over the codex app-server JSON-RPC surface
@@ -762,7 +747,7 @@ async function main() {
   const appActionDeps = {
     agentRunner,
     resolveArtifactReference,
-    talkRouter,
+    channelsService,
     conversationSettings,
     capabilityDiscovery,
     personMappingRepo,
@@ -786,11 +771,11 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === "email",
-        );
-        if (matches.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-        return (await connectionRegistry.ingest(matches[0]!.connectionId, {
+        const email = (await channelsService.list()).find((channel) => channel.name === "email");
+        if (email?.connectionIds.length !== 1) {
+          return { status: "skipped", reason: "channel_inactive" };
+        }
+        return (await connectionRegistry.ingest(email.connectionIds[0]!, {
           rawBody,
           signature,
         })) as EmailInboundResult;
@@ -1020,9 +1005,10 @@ async function main() {
     // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
-    // The personal WeChat connection is opt-in; its key recovery runs a local
-    // debugger in this container, needing no host execution.
-    wechatUserEnabled: config.wechatUserEnabled,
+    // The personal WeChat connection is opt-in: its runtime exists only when
+    // config `wechatUserEnabled` is on, and its presence registers the
+    // connection. Its key recovery runs a local debugger in this container.
+    ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
   // Built after every descriptor is registered: each service with a Talk backs
   // its channel's send and inbound ports.
@@ -1033,6 +1019,7 @@ async function main() {
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
   });
+  builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
@@ -1043,9 +1030,9 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        talkRouter,
         conversationSettings,
         chatStop,
+        channels,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1067,20 +1054,18 @@ async function main() {
       }
     }
   }
+  // The hook subscribes to every channel that can receive, and a channel's
+  // subscription follows whatever backs it, so no unlock needs the hook again.
   await messageHook.register();
-  connectionRegistry.onUnlocked("talk", (connection) => {
-    messageHook.registerConnection(connection.id, connection.service);
-  });
   // App-keys refreshes recreate this hook: it is instantiated once and held by
-  // the subscription closures above, so an env value captured in its module
-  // graph would otherwise outlive the key edit. The let-binding is the single
-  // handle — the onUnlocked callback reads it at call time, so a swap re-routes
-  // future unlocks, and register() on the fresh instance re-subscribes the
-  // already-unlocked connections via talkRouter.list().
+  // the channels' subscriptions, so an env value captured in its module graph
+  // would otherwise outlive the key edit. The let-binding is the single handle,
+  // and register() on the fresh instance re-subscribes every channel that can
+  // receive.
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: { actionEngine, talkRouter, conversationSettings, chatStop },
+        deps: { actionEngine, conversationSettings, chatStop, channels },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;
@@ -1146,7 +1131,7 @@ async function main() {
   });
 
   const workerRpcServer = new WorkerRpcServer({
-    talkRouter,
+    channelsService,
     connectionRegistry,
     conversationSettings,
     routinesRepo,
@@ -1279,6 +1264,7 @@ async function main() {
       provisionNodeCaller,
       nodeDevices,
       talkRouter,
+      channelsService,
       conversationSettings,
       actionEngine,
       actionLoader,
@@ -1307,6 +1293,7 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
+      wechatApp,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
@@ -1460,9 +1447,9 @@ async function main() {
   await runJournalCleanup();
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
-  const activeChannels = [
-    ...new Set((await talkRouter.list()).map((connection) => connection.service)),
-  ];
+  const activeChannels = (await channelsService.list())
+    .filter((channel) => channel.connectionIds.length > 0)
+    .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
   const agentNames = Array.from(agentLoader.getAll().keys());
   const discoveredServers = Object.keys(capabilityDiscovery.getCdpMcpServers());

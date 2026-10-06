@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { NormalizedMessage, AgentMessage, AgentConfig, OutgoingMessage } from "../types.js";
+import type { NormalizedMessage, AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -42,13 +42,8 @@ import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
-import type {
-  ConversationId,
-  TalkFeatureMap,
-  ConversationSettingsControl,
-  InboundMessage,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -61,6 +56,7 @@ import type { Channel, Channels } from "../channels/channel.js";
 import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
+import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -154,13 +150,13 @@ export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number
   return { db: counted as DrizzleDb, passes: () => passes };
 }
 
-// MockModelProvider — returns predetermined AgentMessage sequences
+// MockModelProvider — returns predetermined AgentEvent sequences
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
   readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
-  private responses: AgentMessage[][];
+  private responses: AgentEvent[][];
   private callIndex = 0;
 
   /** Track all calls made to run() for assertions */
@@ -168,11 +164,11 @@ export class MockModelProvider implements ModelProvider {
   /** Track all openSession calls for assertions */
   sessions: ModelSessionParams[] = [];
 
-  constructor(responses: AgentMessage[][] = []) {
+  constructor(responses: AgentEvent[][] = []) {
     this.responses = responses;
   }
 
-  async *run(params: ModelRunParams): AsyncIterable<AgentMessage> {
+  async *run(params: ModelRunParams): AsyncIterable<AgentEvent> {
     this.calls.push(params);
     const messages = this.responses[this.callIndex++] ?? [];
     for (const msg of messages) {
@@ -335,14 +331,14 @@ const emptyConversationSettings: ConversationSettingsControl = {
 // createMockAgentRunner — mock returning predetermined responses
 
 export function createMockAgentRunner(
-  responses: AgentMessage[][] = [],
+  responses: AgentEvent[][] = [],
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
 
   return {
     calls,
-    async *run(params: RunParams): AsyncIterable<AgentMessage> {
+    async *run(params: RunParams): AsyncIterable<AgentEvent> {
       calls.push(params);
       const messages = responses[callIndex++] ?? [];
       for (const msg of messages) {
@@ -524,7 +520,7 @@ export async function buildTestDeps(
   const appStore = createAppStoreService({ appCatalog });
 
   // The agent loader stays real but unloaded. Core agent YAMLs cannot load
-  // here: `core:main` references the `coding:planning` subagent,
+  // here: `core:main` references the `assistant:explore` subagent,
   // and the loader fail-closes on unresolvable core-owned refs — production
   // only has a valid `main` because required first-party apps are installed
   // before startApi. Tests that exercise agent turns load fixture agents
@@ -639,6 +635,7 @@ export async function buildTestDeps(
 
   return {
     talkRouter,
+    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
@@ -704,6 +701,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
+    wechatApp: null,
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },

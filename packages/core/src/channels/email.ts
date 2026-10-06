@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { v4 as uuid } from "uuid";
 import type { Attachment, NormalizedMessage, OutgoingMessage } from "@rome-os/app-runtime";
+import type { HistoryLine } from "./types.js";
 import type { ProviderAdapter } from "./adapter.js";
 import { createLogger } from "../logger.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -551,6 +552,12 @@ export class EmailAdapter implements ProviderAdapter {
    * state, and dispatches nothing — it only reads and shapes.
    */
   async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
+    return (await this.fetchHistoryLines(threadId, windowHours)).map((line) => line.message);
+  }
+
+  /** {@link fetchHistory}, each line with whether this inbox sent it — the
+   *  read's own decision, carried with the line it was made for. */
+  async fetchHistoryLines(threadId: string | null, windowHours: number): Promise<HistoryLine[]> {
     // `fetch_channel_history` accepts arbitrary numeric input from agents, so a
     // NaN/Infinity/negative window would throw on `toISOString()` or invert the
     // window into the future. Clamp to the default first, matching the other
@@ -617,17 +624,17 @@ export class EmailAdapter implements ProviderAdapter {
 
     // 2. Hydrate full bodies (bounded concurrency); a pull miss falls back to the
     //    list preview rather than dropping the message.
-    const normalized = await mapWithConcurrency(matched, HISTORY_HYDRATE_CONCURRENCY, (item) =>
-      this.historyItemToMessage(item),
+    const lines = await mapWithConcurrency(matched, HISTORY_HYDRATE_CONCURRENCY, (item) =>
+      this.historyItemToLine(item),
     );
 
     // 3. Oldest-first, matching the other channels' fetchHistory contract.
-    return normalized.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    return lines.sort((a, b) => a.message.timestamp.getTime() - b.message.timestamp.getTime());
   }
 
-  // Shape one listed message into a NormalizedMessage, hydrating its body. No
-  // side effects — see fetchHistory.
-  private async historyItemToMessage(item: RomeMailListItem): Promise<NormalizedMessage> {
+  // Shape one listed message into a NormalizedMessage, hydrating its body, and
+  // say whether this inbox sent it. No side effects — see fetchHistory.
+  private async historyItemToLine(item: RomeMailListItem): Promise<HistoryLine> {
     let text = (item.preview ?? "").trim();
     let full: RomeMailMessage | undefined;
     try {
@@ -660,7 +667,7 @@ export class EmailAdapter implements ProviderAdapter {
     const parts = downloadableParts(full?.attachments ?? []);
     const attachments: Attachment[] = attachmentsFromParts(parts);
 
-    return {
+    const message: NormalizedMessage = {
       id: item.providerMessageId,
       channel: "email",
       // The list already excludes unauthenticated mail, so no `unauthenticated:`
@@ -675,6 +682,7 @@ export class EmailAdapter implements ProviderAdapter {
       attachments,
       rawEvent: full ?? item,
     };
+    return { message, own: isOutbound };
   }
 
   private verifySignature(rawBody: string, signature: string): boolean {

@@ -17,6 +17,12 @@ import {
 const t = (key: string) => key;
 const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
+const mockFindActiveSubmission = rs.hoisted(() => rs.fn(() => null));
+const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
+
+rs.mock("@/hooks/use-tab-status", () => ({
+  useChatTabStatus: mockUseChatTabStatus,
+}));
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
@@ -86,7 +92,7 @@ rs.mock("@/components/chat/MessageList", () => ({
   MessageList: ({ live }: { live: { identity: { name: string } } }) => (
     <div data-testid="message-list">{live.identity.name}</div>
   ),
-  findActiveSubmission: () => null,
+  findActiveSubmission: mockFindActiveSubmission,
   findLastSubmission: () => null,
   hasPendingApprovalConfirmation: () => false,
 }));
@@ -103,9 +109,9 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   ),
 }));
 
-rs.mock("@/components/chat/blocks", () => ({
-  renderFlatBlocks: () => null,
-  renderSingleBlock: () => null,
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
 }));
 
 rs.mock("@/lib/chat-api", () => {
@@ -195,6 +201,28 @@ afterEach(() => {
   rs.clearAllMocks();
   rs.unstubAllGlobals();
   MockEventSource.instances = [];
+});
+
+describe("Chat read marking", () => {
+  it("leaves a chat unread while its tab is hidden, then marks it on return", async () => {
+    const { markSessionRead } = await import("@/lib/chat-api");
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(markSessionRead).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+  });
 });
 
 describe("Chat agent identity", () => {
@@ -483,6 +511,46 @@ describe("Chat turn stream lifecycle", () => {
     });
     expect(replacementSignal?.aborted).toBe(false);
     expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+  });
+});
+
+describe("Chat tab status", () => {
+  afterEach(() => {
+    mockFindActiveSubmission.mockReturnValue(null);
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+  });
+
+  it("counts a specialist submission waiting on Approve as needing the guardian", async () => {
+    mockFindActiveSubmission.mockReturnValue({ messageId: "sub-1", payload: { plan: "x" } });
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(listSessionMessages).mockImplementation(async (sessionId: string) =>
+      sessionId === "session-1"
+        ? [
+            {
+              id: "m-handoff",
+              sessionId: "session-1",
+              turnId: "turn-1",
+              role: "assistant",
+              content: JSON.stringify([
+                {
+                  type: "handoff",
+                  toolUseId: "h1",
+                  appId: "workflow-studio",
+                  childSessionId: "child-1",
+                  payload: { agentLabel: "Planner" },
+                },
+              ]),
+              createdAt: "2026-10-05T00:00:00.000Z",
+            },
+          ]
+        : [],
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    await waitFor(() =>
+      expect(mockUseChatTabStatus).toHaveBeenLastCalledWith(false, true, expect.any(Number)),
+    );
   });
 });
 

@@ -4,7 +4,7 @@ How a [channel](../concepts/messaging.md#channels) is connected: the server-owne
 
 ## Channel ports
 
-A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send` and `inbound`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
+A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound` and `messages`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
 
 ### Invariants
 
@@ -14,9 +14,27 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - Inbound runs the channel's admission before any subscriber hears an event. On a channel that pairs accounts ([Account pairing](#account-pairing)), pairing codes and messages from accounts the guardian has not approved never reach a subscriber. Any other channel delivers every sender, and the subscriber decides what a stranger gets. An admission that has not decided within fifteen seconds fails closed: that message is not delivered, and the conversation's next message is admitted in order.
 - Inbound delivers only what a subscriber may answer. Rome's own sends, the guardian's messages from another device, reactions, edits and frames with no text or attachments stay out of it. The complete record is `messages`.
 - The `send` port reaches one account directly through `direct`, where the channel offers it. While no Connection exists for the channel, that lookup rejects as a send does, which is how People tells an unconnected channel from one that cannot be written to. A Connection that exists but has no live Talk reads as a channel that cannot be written to, as it did before.
+- The `send` port shows a typing indicator through `activity`, where the channel offers it. It is cosmetic, and nothing waits on it.
+- An inbound event carries its conversation's `ConversationRef`, the address that conversation settings and stop take, so a subscriber does not track what backs the channel.
+- An inbound event's message is a `ChannelMessage`, the record `messages` answers: it names the channel and says it came inbound.
 - Inbound is live and at most once. Nothing is acknowledged or replayed, and a subscriber catches up by reading `messages`.
+- `messages` answers one `query` for what was said on the channel: every conversation or one, since a moment or not, newest first. It answers the record `inbound` delivers, plus the channel and the direction, whether a copy Rome keeps or the platform holds the data, and a caller cannot tell which. Neither kind is complete: a copy holds what was synced, and a live read what the platform returns.
+- Only a copy Rome keeps answers the per-person reads a People timeline makes (`messages.byAccount`). A channel without one leaves them null, and People reads it from Rome's own transcript instead.
+- A channel with no store of its own, such as a Telegram user account, Discord, email or webchat, answers `query` through its Connection's history read. Without a `since`, that read covers the last day, and a caller wanting more names one. While no Connection exists for the channel, the read rejects as a send does.
+- That read is a live platform call, and one over every conversation is costly. So a read is shared for thirty seconds with later queries over the same whole-hour window, for the same conversation or for all of them. A wider read does not answer a narrower query, since a Connection cuts what it answers within its window (Discord keeps the oldest hundred lines of each channel). A failed read is not kept. A shared read answers what a fresh one would, older by at most thirty seconds.
+- That read goes to the first Connection backing the channel. A channel two Connections back (two Telegram accounts) reads one of them through `query`. A caller that means a particular one names it to the channels service below.
 - Every subscriber hears every event. A subscriber hears one conversation's events one at a time, in arrival order. Different conversations and different subscribers never wait on each other, so one slow or failing handler holds up only its own conversation for its own subscriber. A handler that never settles stops that conversation for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a conversation with twenty events waiting. A conversation holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
+
+### Channels for app actions
+
+App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels with the Connections that back each, sends, and reads `messages`, all by channel name. In a worker the same calls cross to the main process over RPC.
+
+- It is the only path an action sends or reads history by. The main process and a worker answer the same call identically, which a worker's direct Connection lookup could not.
+- It chooses the Connection: the one an action names, which must back the channel, or else the channel's only one. With several and none named, it refuses rather than guessing.
+- `query` is the general read. `history` is the read `fetch_channel_history` has always made, with the windows and pages the retired per-channel reads cut, oldest first. It is kept only so the tool's output does not change.
+- Admission and pairing stay in the router that dispatches a Connection's inbound events, and an account directory stays on the Connection. The service adds no path around either.
+- A Connection's Talk, its features (history, inbound media, typing, the directory, direct messaging) and the router that dispatches them are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). No app receives them. An app reaches a channel through this service or a hook's `channels`.
 
 ## Connection setup
 

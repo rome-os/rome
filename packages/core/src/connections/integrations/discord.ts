@@ -15,15 +15,8 @@
 
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
-import type {
-  ChatStopHandler,
-  TalkActivity,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkHistory,
-  TalkInboundMedia,
-} from "@rome-os/app-runtime";
+import type { ChatStopHandler, TalkActivity, TalkInboundMedia } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
@@ -36,6 +29,7 @@ import {
   historyQueryLimit,
   historyWindowHours,
   normalizedFromInbound,
+  toHistoryMessage,
   toInboundMessage,
   toMessageReceipt,
 } from "./talk-features.js";
@@ -252,6 +246,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     capabilities: {
       talker: {
         needs: ["bot"] as const,
+        history: true,
         build(creds, kit): Talker {
           const token = creds.bot.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -309,7 +304,11 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                     input.conversationId ?? null,
                     historyWindowHours(input.since),
                   );
-                  return messages.slice(0, historyQueryLimit(input.limit)).map(toInboundMessage);
+                  // The read leaves bot messages out, so every line is one a
+                  // person wrote and Rome was told.
+                  return messages
+                    .slice(0, historyQueryLimit(input.limit))
+                    .map((message) => toHistoryMessage(message, "discord"));
                 },
               };
               const inboundMedia: TalkInboundMedia = {

@@ -1,7 +1,7 @@
-import type { ChatMessage, StreamBlock } from "@/lib/chat-types";
+import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { prettyAgentName } from "@/lib/agent-name";
-import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: many flat per-session message lists → one renderable view.
 // This is the single place the multi-session handoff tree is merged. No React,
@@ -73,7 +73,7 @@ function indexHandoffs(
   const msgs = messagesBySession.get(sessionId) ?? [];
   const openByToolUseId = new Map<string, HandoffNode>();
   for (const msg of msgs) {
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (msg.role === "user") {
         if (b.type === "interaction_result" && b.toolUseId) {
           const node = openByToolUseId.get(b.toolUseId);
@@ -153,7 +153,7 @@ function buildDisplayMessages(
       if (seedText && userMessageText(msg.content).trim() === seedText.trim()) continue;
     }
     out.push(msg);
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (b.type === "handoff" && b.childSessionId) pendingChildren.push(b.childSessionId);
     }
   }
@@ -180,7 +180,7 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 // guardian is.
 const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
 
-function isAutoDismissedCard(b: StreamBlock): boolean {
+function isAutoDismissedCard(b: ChatEntry): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render?.builtin === true &&
@@ -201,7 +201,7 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   const openCards = new Map<string, Set<string>>();
   for (const msg of messages) {
     let userTextReply = false;
-    for (const b of parseMessageBlocks(msg)) {
+    for (const b of parseMessageEntries(msg)) {
       if (
         msg.role === "assistant" &&
         (b.type === "pending_interaction" || b.type === "handoff") &&
@@ -282,6 +282,39 @@ export function buildChatView(
     seedByChild,
     interactionResults,
   };
+}
+
+// Whether the floor session is parked on a card the guardian has not answered
+// yet (an ask_question card, a connect-AI card, an app component). Only the
+// floor session's latest turn counts, meaning every assistant message that
+// shares the turn id of its last message: the card is saved mid-turn and the
+// turn's closing text and recap land after it under the same id. A card from
+// an earlier turn is no longer what the agent waits on, and a backend-initiated
+// turn (an approval continuation) starts a new id without a user message.
+// Pass the floor's running turn while one streams: a backend turn persists its
+// messages only when it ends, so until then the transcript still closes on the
+// previous turn, whose cards it has moved past.
+export function isAwaitingGuardian(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  const { displayMessages, floorSessionId, interactionResults } = view;
+  const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return false;
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
+    if (msg.role !== "assistant") continue;
+    const waiting = parseMessageEntries(msg).some(
+      (b) =>
+        b.type === "pending_interaction" &&
+        !!b.toolUseId &&
+        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
+    );
+    if (waiting) return true;
+  }
+  return false;
 }
 
 // Render rows: group the flat transcript into speaker blocks. Pure data — the

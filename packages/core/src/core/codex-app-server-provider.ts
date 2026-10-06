@@ -3,17 +3,18 @@
 // model/env/auth/accounting helpers live in codex/common.ts.
 //
 // The app-server exposes `agentMessage.phase` (commentary | final_answer) and
-// `item/agentMessage/delta` streaming. Mapping `phase` → AgentMessage
+// `item/agentMessage/delta` streaming. Mapping `phase` → AgentEvent
 // `turnPhase` promotes Codex in-turn commentary into the answer flow,
 // consumed by the same UI that serves Anthropic. See
 // KEEP-INTURN-TEXT-RESEARCH.md §6/§7.
 //
 // The JSON-RPC transport lives in app-server-client.ts; the
-// notification→AgentMessage translation is below. Headless config:
+// notification→AgentEvent translation is below. Headless config:
 // sandbox=danger-full-access + approvalPolicy=never, so Rome's per-action
 // approval gate (inside the Rome tool facade) is the only gate and no server→client
 // approval round-trips are needed.
 
+import type { AgentErrorCode, TurnErrorEvent } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type {
   ModelProvider,
@@ -49,6 +50,9 @@ import {
   type ItemCompletedNotification,
   type ItemStartedNotification,
   type AgentMessageDeltaNotification,
+  type CommandExecutionOutputDeltaNotification,
+  type ReasoningSummaryTextDeltaNotification,
+  type ReasoningTextDeltaNotification,
   type DynamicToolSpec,
   type MessagePhase,
   type ReasoningEffort,
@@ -74,8 +78,12 @@ import {
   stripLegacyReasoningSuffix,
   type Usage,
 } from "./codex/common.js";
-import type { AgentMessage, AgentPlan, AgentPlanStepStatus } from "../types.js";
+import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
+import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import { codexToolItemIsError } from "./codex/tool-result-error.js";
+import type { FacadeToolResult } from "./mcp-facade.js";
+import { codexStop } from "./stop-reason.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./codex-auth-revoked.js";
 import { markCodexAuthRevoked } from "../lib/codex-cli-auth.js";
 import { createLogger } from "../logger.js";
@@ -114,6 +122,9 @@ function buildThreadConfigurationOverrides(
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
+    // Rome turns update_plan calls into plan updates. Codex 0.153.4 made the
+    // tool opt-in (openai/codex#41744).
+    "tools.update_plan.enabled": true,
   };
   if (params.externalMcpServers && Object.keys(params.externalMcpServers).length > 0) {
     config.mcp_servers = params.externalMcpServers;
@@ -339,10 +350,17 @@ interface ActiveTurn {
    *  means the turn ends with an `error` block instead of a `result`. */
   failed: boolean;
   errorMessage: string | null;
-  /** Set to `"usage_limit"` (exhausted codex quota) or `"auth_revoked"` (the
-   *  stored credentials were revoked server-side) so the terminal `error` block
-   *  can carry the classification for state refresh and UI handling. */
-  errorCode: "usage_limit" | "auth_revoked" | null;
+  /** Classification of the failure (for example `"usage_limit"` for exhausted
+   *  codex quota, `"auth_revoked"` for credentials revoked server-side) so the
+   *  terminal `error` block can carry it for state refresh and UI handling. */
+  errorCode: AgentErrorCode | null;
+  /** HTTP status codex reported for the failed request, if any. */
+  errorHttpStatus?: number;
+  /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
+  nativeStatus: string | null;
+  /** Last reasoning part each in-flight reasoning item streamed, by item id.
+   *  Lives and dies with the turn, so an unfinished item leaves nothing behind. */
+  reasoningDeltaParts: Map<string, string>;
 }
 
 interface CodexAppServerProviderOptions {
@@ -354,8 +372,22 @@ interface CodexAppServerProviderOptions {
 }
 
 interface CodexFailureClassification {
-  code: "usage_limit" | "auth_revoked" | null;
+  code: AgentErrorCode | null;
+  httpStatus?: number;
   pending?: Promise<void>;
+}
+
+/** Terminal `error` block for a classified codex failure. */
+function codexErrorEvent(
+  error: string,
+  classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
+): TurnErrorEvent {
+  return {
+    type: "error",
+    error,
+    ...(classification.code ? { code: classification.code } : {}),
+    ...(classification.httpStatus !== undefined ? { httpStatus: classification.httpStatus } : {}),
+  };
 }
 
 async function persistCodexAuthRevoked(
@@ -378,7 +410,7 @@ async function persistCodexAuthRevoked(
 }
 
 /**
- * Classify a failed codex turn's error into the terminal `ErrorMessage.code`.
+ * Classify a failed codex turn's error into the terminal `TurnErrorEvent.code`.
  * Usage-limit takes precedence — an exhausted quota is not an auth problem. A
  * revoked credential also persists the marker that downgrades the
  * settings badge to "needs re-login" (best-effort; see `markCodexAuthRevoked`).
@@ -397,7 +429,11 @@ function classifyCodexFailure(
       pending: persistCodexAuthRevoked(options.onAuthRevoked),
     };
   }
-  return { code: null };
+  const info = classifyCodexErrorInfo(turnError);
+  return {
+    code: info.code ?? null,
+    ...(info.httpStatus !== undefined ? { httpStatus: info.httpStatus } : {}),
+  };
 }
 
 export class CodexAppServerProvider implements ModelProvider {
@@ -509,7 +545,7 @@ export class CodexAppServerProvider implements ModelProvider {
     let resolveSourceStarted: (() => void) | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
     let appliedReasoningEffort: string | undefined;
-    const dynamicToolOutputs = new Map<string, unknown>();
+    const dynamicToolOutputs = new Map<string, FacadeToolResult>();
     const usageByTurnId = new Map<
       string,
       { usage: ThreadTokenUsage; hasNewRequestUsage: boolean }
@@ -547,6 +583,7 @@ export class CodexAppServerProvider implements ModelProvider {
       if (isAgentMessageItem(item)) {
         if (lifecycle !== "completed") return;
         if (!item.text) return;
+        const blockId = typeof item.id === "string" && item.id ? item.id : undefined;
         const turnPhase = mapPhase(item.phase);
         // The final answer is carried by the terminal `result` block; commentary
         // is promoted by the UI. (Anthropic provider mirrors this split.)
@@ -554,16 +591,25 @@ export class CodexAppServerProvider implements ModelProvider {
           if (activeTurn) activeTurn.finalText = item.text;
         }
         if (params.outputSchema) return;
-        const msg: AgentMessage = turnPhase
-          ? { type: "text", content: item.text, turnPhase }
-          : { type: "text", content: item.text };
+        const msg: AgentEvent = {
+          type: "text",
+          content: item.text,
+          ...(turnPhase ? { turnPhase } : {}),
+          ...(blockId ? { blockId } : {}),
+        };
         turnSink.push(msg);
         return;
       }
       if (isReasoningItem(item)) {
         if (lifecycle !== "completed") return;
+        activeTurn?.reasoningDeltaParts.delete(item.id);
         const text = [...item.summary, ...item.content].filter(Boolean).join("\n").trim();
-        if (text) turnSink.push({ type: "thinking", content: text });
+        if (text)
+          turnSink.push(
+            item.id
+              ? { type: "thinking", content: text, blockId: item.id }
+              : { type: "thinking", content: text },
+          );
         return;
       }
       // Image generation: the `imageGeneration` item carries the inline image
@@ -628,6 +674,7 @@ export class CodexAppServerProvider implements ModelProvider {
             ? (rec.result ?? rec.error ?? item)
             : item,
         endedAt: new Date().toISOString(),
+        isError: codexToolItemIsError(item, dynamicOutput?.isError),
       });
     };
 
@@ -669,7 +716,38 @@ export class CodexAppServerProvider implements ModelProvider {
           const p = params2 as AgentMessageDeltaNotification;
           if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
           if (p.delta && !params.outputSchema)
-            (activeTurn?.sink ?? sink).push({ type: "text_delta", content: p.delta });
+            activeTurn.sink.push(
+              p.itemId
+                ? { type: "text_delta", content: p.delta, blockId: p.itemId }
+                : { type: "text_delta", content: p.delta },
+            );
+          return;
+        }
+        case Notify.reasoningSummaryTextDelta:
+        case Notify.reasoningTextDelta: {
+          const p = params2 as ReasoningSummaryTextDeltaNotification &
+            Partial<ReasoningTextDeltaNotification>;
+          if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
+          if (!p.delta || !p.itemId) return;
+          // The completed `thinking` block joins every summary and content part
+          // with a newline; separate parts the same way while streaming.
+          const part = `${method}:${p.summaryIndex ?? p.contentIndex ?? 0}`;
+          const previousPart = activeTurn.reasoningDeltaParts.get(p.itemId);
+          activeTurn.reasoningDeltaParts.set(p.itemId, part);
+          const content =
+            previousPart !== undefined && previousPart !== part ? `\n${p.delta}` : p.delta;
+          activeTurn.sink.push({ type: "thinking_delta", blockId: p.itemId, content });
+          return;
+        }
+        case Notify.commandExecutionOutputDelta: {
+          const p = params2 as CommandExecutionOutputDeltaNotification;
+          if (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId)) return;
+          if (!p.delta || !p.itemId) return;
+          activeTurn.sink.push({
+            type: "tool_output_delta",
+            toolUseId: p.itemId,
+            content: p.delta,
+          });
           return;
         }
         case Notify.itemStarted: {
@@ -717,6 +795,7 @@ export class CodexAppServerProvider implements ModelProvider {
           if (activeTurn) {
             if (activeTurn.turnId && activeTurn.turnId !== p.turn?.id) return;
             activeTurn.completed = true;
+            activeTurn.nativeStatus = p.turn?.status ?? null;
             if (p.turn?.status === "failed") {
               // `turn.error` is a structured `TurnError` object (camelCase),
               // not a string — extract the human message and classify quota
@@ -725,6 +804,7 @@ export class CodexAppServerProvider implements ModelProvider {
               activeTurn.errorMessage = codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               const classification = classifyCodexFailure(p.turn?.error, this.options);
               activeTurn.errorCode = classification.code;
+              activeTurn.errorHttpStatus = classification.httpStatus;
               if (classification.pending) activeTurn.pending.push(classification.pending);
             } else if (params.outputSchema && p.turn?.status !== "completed") {
               activeTurn.failed = true;
@@ -752,14 +832,13 @@ export class CodexAppServerProvider implements ModelProvider {
             activeTurn.failed = true;
             activeTurn.errorMessage = message;
             activeTurn.errorCode = code;
+            activeTurn.errorHttpStatus = classification.httpStatus;
             if (classification.pending) activeTurn.pending.push(classification.pending);
             activeTurn.resolveDone();
           } else {
             if (classification.pending) void classification.pending;
             // Out-of-turn error: no turn to attach to, emit directly.
-            sink.push(
-              code ? { type: "error", error: message, code } : { type: "error", error: message },
-            );
+            sink.push(codexErrorEvent(message, classification));
           }
           return;
         }
@@ -890,6 +969,8 @@ export class CodexAppServerProvider implements ModelProvider {
         failed: false,
         errorMessage: null,
         errorCode: null,
+        nativeStatus: null,
+        reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
       const effort = normalizeEffort(inputs.at(-1)?.reasoningEffort ?? params.reasoningEffort);
@@ -928,9 +1009,10 @@ export class CodexAppServerProvider implements ModelProvider {
         if (!closed && !runtime.isClosed()) {
           if (turn.errorMessage) {
             runtime.sink.push(
-              turn.errorCode
-                ? { type: "error", error: turn.errorMessage, code: turn.errorCode }
-                : { type: "error", error: turn.errorMessage },
+              codexErrorEvent(turn.errorMessage, {
+                code: turn.errorCode,
+                httpStatus: turn.errorHttpStatus,
+              }),
             );
           } else {
             if (runtime === sourceRuntime && turn.turnId) {
@@ -942,6 +1024,7 @@ export class CodexAppServerProvider implements ModelProvider {
               agentName: params.agentName,
               appStoreListingId: params.appStoreListingId,
               reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
+              stop: codexStop(turn.nativeStatus ?? undefined),
               stopReason: turn.failed ? "error" : "end_turn",
               durationMs: Date.now() - turn.startedAt,
             });
@@ -982,11 +1065,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(
-            classification.code
-              ? { type: "error", error: message, code: classification.code }
-              : { type: "error", error: message },
-          );
+          runtime.sink.push(codexErrorEvent(message, classification));
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();

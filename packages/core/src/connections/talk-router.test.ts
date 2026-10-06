@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ConversationId,
-  InboundMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkFeatureName } from "./types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";

@@ -236,13 +236,15 @@ function LocationProbe() {
 }
 
 describe("AppsIndexPage reactivity", () => {
-  it("starts an update chat in the app's remembered source project", async () => {
+  it("chats with an app in its source project, beside the app", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
         installedCard({
           id: "weather",
           displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
           source: { mode: "source", path: "/projects/apps/weather" },
           projectPath: "apps/weather",
         }),
@@ -252,14 +254,43 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    await user.click(await screen.findByRole("menuitem", { name: "Start chat here" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
     expect(screen.getByTestId("location").textContent).toBe(
-      JSON.stringify({ pathname: "/chat", state: { projectPath: "apps/weather" } }),
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }], projectPath: "apps/weather" },
+      }),
     );
   });
 
-  it("does not offer an update chat without a remembered source project", async () => {
+  it("chats beside an app that has no source project", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({
+          id: "weather",
+          displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByLabelText("More actions for Weather"));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+    expect(screen.getByTestId("location").textContent).toBe(
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }] },
+      }),
+    );
+  });
+
+  it("offers no chat for an app with neither a page nor a source project", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [installedCard({ id: "weather", displayName: "Weather" })],
@@ -268,7 +299,7 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    expect(screen.queryByRole("menuitem", { name: "Start chat here" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Chat with app" })).toBeNull();
   });
 
   it("offers Remix only for an installed Store app whose local manifest includes source", async () => {

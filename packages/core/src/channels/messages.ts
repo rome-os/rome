@@ -1,16 +1,20 @@
 /**
- * What was said to a channel's accounts, as one store holds it. `Accounts` (accounts.ts) answers who a channel can reach, and this
- * answers what passed between Rome and them.
+ * What was said on a channel, however the channel holds it. `Accounts`
+ * (accounts.ts) answers who a channel can reach, and this answers what passed
+ * between Rome and them.
  *
- * A message is a {@link Message}, however the store was asked for it. A
- * store holds one history and ranks it one way, and every read below cuts that
- * one ranking. The shape, the ordering and the cursor are the message module's
- * (`@rome/api-types/message`), stated once there so a store and a person's
- * timeline cut the same ranking: a second shape here would be a second ranking
- * of the same rows, which is a page boundary the two ends disagree about.
+ * Two shapes answer, one per question:
+ *
+ * - `query` answers a {@link ChannelMessage}, the one record every port speaks:
+ *   the one `inbound` delivers, with the channel and the direction added.
+ * - The account reads answer a {@link Message}, the People timeline's record,
+ *   because that timeline merges several stores and pages them with one cursor.
+ *   Its ordering and cursor are the message module's (`@rome/api-types/message`),
+ *   stated once there so a store and a person's timeline cut the same ranking.
  */
 
 import type { Message } from "@rome/api-types/message";
+import type { ChannelMessage, ChannelMessageQuery } from "@rome-os/app-runtime";
 
 /**
  * One account a store reads for, named by every address it answers to —
@@ -32,24 +36,6 @@ export interface MessageAccount {
   addresses: readonly string[];
 }
 
-/**
- * One conversation a store reads for: the thread a message was said in, named
- * by the platform's own id for it, on the channel that holds it.
- *
- * The pair rather than the id alone, for the reason an account carries its
- * channel — two channels are free to spell an id the same way and mean two
- * different threads.
- *
- * A direct conversation is addressed by the person on it, so on a channel that
- * keys a thread by who is on it the id is also an address of their account. A
- * group conversation is addressed by the group and by nobody on it, so no
- * account names it and only this names it.
- */
-export interface MessageConversation {
-  channel: string;
-  id: string;
-}
-
 export interface MessageRead {
   accounts: readonly MessageAccount[];
   /** The entry the previous page ended on. Null or absent for the first page. */
@@ -57,23 +43,95 @@ export interface MessageRead {
   limit: number;
 }
 
-export interface ConversationRead {
-  conversation: MessageConversation;
-  /** The entry the previous page ended on. Null or absent for the first page. */
-  after?: Message | null;
-  limit: number;
+/** What `query` asks for: the SDK's {@link ChannelMessageQuery}, so the
+ *  defaults and the cap are stated once. `queryLimit` applies them. */
+export type MessageQuery = ChannelMessageQuery;
+
+const DEFAULT_QUERY_LIMIT = 100;
+export const MAX_QUERY_LIMIT = 1_000;
+
+/** What a People timeline entry says about a message beyond the line itself. */
+export type MessageDetail = Pick<Message, "sender" | "conversation" | "attachments">;
+
+/**
+ * The detail a {@link ChannelMessage} carries, as a timeline entry carries it.
+ * A store answering both reads maps a row to a `ChannelMessage` once and takes
+ * the entry's detail from it, so the two reads describe one row the same way.
+ */
+export function channelMessageDetail(message: ChannelMessage): MessageDetail {
+  const detail: MessageDetail = {
+    sender: { id: message.senderId || null, name: message.senderDisplayName || null },
+    conversation: {
+      id: message.conversationId,
+      name: message.thread?.name ?? null,
+      kind: message.thread?.kind ?? null,
+    },
+  };
+  if (message.attachments.length > 0) {
+    detail.attachments = message.attachments.map((attachment) => ({
+      type: attachment.type,
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(attachment.fileName ? { fileName: attachment.fileName } : {}),
+      ...(attachment.caption ? { caption: attachment.caption } : {}),
+    }));
+  }
+  return detail;
 }
 
 /**
- * One message store, asked for a set of accounts or for a conversation.
+ * The earliest instant a query reads from, rounded up to a whole second: every
+ * store here keeps seconds, so a `since` inside a second answers only the
+ * seconds after it rather than the one it falls in.
+ */
+export function querySince(since: Date | undefined): Date {
+  if (!since) return new Date(0);
+  return new Date(Math.ceil(since.getTime() / 1000) * 1000);
+}
+
+/** The number of messages a query asks for, defaulted and capped. */
+export function queryLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) return DEFAULT_QUERY_LIMIT;
+  return Math.max(1, Math.min(Math.floor(limit), MAX_QUERY_LIMIT));
+}
+
+/**
+ * What was said on one channel.
+ *
+ * `query` is the one read every channel answers, whoever holds the data. A
+ * channel reading a copy Rome keeps and one asking the platform live answer
+ * the same record in the same order, and no caller can tell them apart. What
+ * does differ is left to the port rather than the caller: a live read costs a
+ * platform call and fails while nothing backs the channel, and neither kind is
+ * complete — a copy holds what was synced, and a live read what the platform
+ * hands back within its own limits.
+ */
+export interface Messages {
+  /**
+   * The channel's newest messages that match, newest first: every direction,
+   * every conversation unless one is named, groups included.
+   *
+   * A conversation the channel holds nothing of answers an empty list, the same
+   * answer as one it has never heard of.
+   */
+  query(request: MessageQuery): Promise<ChannelMessage[]>;
+
+  /**
+   * The reads a People timeline makes per person, where the channel keeps a
+   * copy that can answer them at a directory's scale. Null where it does not.
+   */
+  readonly byAccount: AccountMessages | null;
+}
+
+/**
+ * One store asked for a set of accounts: what a People timeline reads.
  *
  * A set of accounts is read as one history: a person holds several accounts and
  * an account several addresses, and the caller wants the messages merged, not
  * one sequence per address.
  *
- * One law binds the three account-scoped verbs. Call the *full read* of a set
- * of accounts the `read` with no cursor and a limit large enough to hold
- * everything the store can answer for them:
+ * One law binds the three verbs. Call the *full read* of a set of accounts the
+ * `read` with no cursor and a limit large enough to hold everything the store
+ * can answer for them:
  *
  * - `count` is the length of the full read.
  * - `latest` is its first entry, and null when the full read is empty.
@@ -87,12 +145,14 @@ export interface ConversationRead {
  * an account. There is no `holds` verb — a second way to ask the same question
  * is a second answer to disagree with.
  *
- * `read`, `count` and `latest` answer direct threads only. A group
- * conversation is addressed by the group rather than by any person on it, so no
- * address of an account names it and none of its messages reaches those three.
- * `readConversation` is what reaches it.
+ * The three answer direct threads only. A group conversation is addressed by
+ * the group rather than by any person on it, so no address of an account names
+ * it and none of its messages reaches these reads. `Messages.query` reaches it.
+ *
+ * Not every store is a channel's: Rome's own transcript and the sentinel's log
+ * answer these reads for every channel at once.
  */
-export interface Messages {
+export interface AccountMessages {
   /**
    * The store's newest messages for `accounts`, at most `limit` of them, every
    * one strictly after `after`, in `compareMessages` order — newest
@@ -117,27 +177,4 @@ export interface Messages {
    * it in one pass over a whole directory rather than one page per row.
    */
   latest(accounts: readonly MessageAccount[]): Promise<Message | null>;
-
-  /**
-   * The store's newest messages in `conversation`, on `read`'s terms exactly:
-   * at most `limit`, every one strictly after `after`, newest first and total.
-   *
-   * Every message of the conversation, including the ones the account-scoped
-   * verbs answer none of. A group's messages are the case that makes the verb
-   * worth having, and a direct conversation is answered here too — one store
-   * asked a second way, not a second store.
-   *
-   * Every store owes this verb, and none declines it. A store answering the
-   * account reads holds the rows a conversation read wants — it is the same
-   * history keyed the other way — so there is no way to say "not this one"
-   * here. A store that genuinely could not answer would be a second interface,
-   * and splitting one is a change to make when there is a store to make it for.
-   *
-   * An empty page is the whole answer for a conversation the store holds no
-   * messages of. A conversation the store has never heard of and one it holds
-   * empty are answered the same way: no caller has the question that tells
-   * them apart, and a store that failed the first would refuse a conversation
-   * that exists on the channel and has simply not been mirrored yet.
-   */
-  readConversation(request: ConversationRead): Promise<Message[]>;
 }

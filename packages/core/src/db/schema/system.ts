@@ -707,6 +707,11 @@ export const romeAgentMessages = sqliteTable(
     index("idx_rome_agent_messages_session_id").on(table.sessionId),
     index("idx_rome_agent_messages_turn_id").on(table.turnId),
     index("idx_rome_agent_messages_role_created_at").on(table.role, table.createdAt),
+    // A session's newest trace, for the sidebar's lastTurnFailed. Without it
+    // SQLite walks the role index across every session's traces.
+    index("idx_rome_agent_messages_session_trace")
+      .on(table.sessionId, table.createdAt)
+      .where(sql`${table.role} = 'trace'`),
     index("idx_rome_agent_messages_platform_message")
       .on(table.sessionId, table.platformMessageId)
       .where(sql`${table.platformMessageId} IS NOT NULL`),

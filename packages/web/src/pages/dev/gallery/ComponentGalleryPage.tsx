@@ -1,3 +1,4 @@
+import { usePreviewScale } from "@/hooks/use-preview-scale";
 import { useEffect, useState } from "react";
 import { ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,7 @@ export default function ComponentGalleryPage() {
     setTheme: setThemeName,
     themes,
   } = useTheme();
+  const { scale, setScale } = usePreviewScale();
   const [nav, setNav] = useState<NavSection[]>([]);
   const [navOpen, setNavOpen] = useState(false);
 
@@ -133,6 +135,20 @@ export default function ComponentGalleryPage() {
               value={preference}
               onValueChange={(value) => setPreference(value as ThemePreference)}
             />
+            <div className="flex items-center gap-2">
+              <span className="text-aux text-muted-foreground">Control scale</span>
+              <SegmentedControl
+                aria-label="Preview scale"
+                size="sm"
+                value={scale}
+                onValueChange={setScale}
+                options={[
+                  { value: "auto", label: "Auto" },
+                  { value: "medium", label: "Medium" },
+                  { value: "large", label: "Large" },
+                ]}
+              />
+            </div>
             <nav aria-label="Component table of contents" className="lg:hidden">
               <Popover open={navOpen} onOpenChange={setNavOpen}>
                 <PopoverTrigger asChild>

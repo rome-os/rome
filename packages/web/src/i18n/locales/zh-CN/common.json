@@ -39,7 +39,11 @@
     "title": "最近对话",
     "newChat": "新对话",
     "empty": "还没有对话",
-    "unread": "未读",
+    "rowStatus": {
+      "running": "正在回复",
+      "failed": "出错停止了",
+      "done": "已完成 · 有新回复"
+    },
     "delete": "删除对话",
     "deleteConfirm": "永久删除该对话？此操作无法撤销。",
     "archive": "归档对话",
@@ -185,7 +189,43 @@
   },
   "desktop": {
     "iframeTitle": "Rome 桌面",
-    "wechatIframeTitle": "微信桌面"
+    "namedIframeTitle": "Rome 桌面“{{name}}”",
+    "notFound": "没有名为“{{name}}”的桌面。"
+  },
+  "wechatApp": {
+    "loading": "正在检查微信…",
+    "loadFailed": "无法检查微信状态",
+    "installFailed": "无法安装微信",
+    "startFailed": "无法启动微信",
+    "retry": "重试",
+    "unavailable": {
+      "title": "微信未启用",
+      "description": "这个实例关闭了 WECHAT_USER_ENABLED。要开启微信，把它设为 true 并重启 Rome。"
+    },
+    "absent": {
+      "title": "微信未安装",
+      "description": "Rome 会下载一次微信桌面客户端，然后在这里打开它。下载需要几分钟。",
+      "action": "安装微信",
+      "failed": "安装没有完成：{{error}}"
+    },
+    "installing": {
+      "title": "正在安装微信",
+      "description": "Rome 正在下载微信客户端，完成后会在这里打开。离开这个页面不会中断下载。"
+    },
+    "stopped": {
+      "title": "微信未运行",
+      "description": "微信客户端已安装在这个实例上。",
+      "action": "启动微信",
+      "failed": "微信没有启动：{{error}}"
+    },
+    "starting": {
+      "title": "正在启动微信"
+    },
+    "sharedDesktop": {
+      "title": "微信正在共享桌面上运行",
+      "description": "微信在共享桌面上运行时，这个桌面是空的。",
+      "action": "打开共享桌面"
+    }
   },
   "chat": {
     "add": "打开一个应用",

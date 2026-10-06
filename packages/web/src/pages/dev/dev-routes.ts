@@ -70,11 +70,11 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./ConnectionGalleryPage")),
       },
       {
-        path: "/dev/chat-blocks",
-        title: "Transcript blocks",
+        path: "/dev/chat-entries",
+        title: "Chat entries",
         description:
-          "Every component renderSingleBlock dispatches to, rendered from a literal StreamBlock — the blocks an agent state gates, which no product route renders on load.",
-        Component: lazy(() => import("./ChatBlocksPage")),
+          "Every component renderSingleEntry dispatches to, rendered from a literal ChatEntry — the entries an agent state gates, which no product route renders on load.",
+        Component: lazy(() => import("./ChatEntriesPage")),
       },
       {
         path: "/dev/mdx",

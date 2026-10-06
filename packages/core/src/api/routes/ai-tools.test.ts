@@ -9,6 +9,7 @@ import { aiToolsRoutes } from "./ai-tools.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { settings } from "../../db/schema.js";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import * as anthropicLoginModule from "../../lib/anthropic-login.js" with {
   rstest: "importActual",
 };
@@ -935,5 +936,73 @@ describe("Claude logout API", () => {
       process.env.PATH = originalPath;
       await fs.rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Rome credits API", () => {
+  async function get(path: string) {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      const app = new Hono().route("/", aiToolsRoutes(deps));
+      const res = await app.request(path);
+      return { status: res.status, body: (await res.json()) as unknown };
+    } finally {
+      testDb.close();
+    }
+  }
+
+  afterEach(() => {
+    setInstanceTokenInMemory(null);
+    rs.unstubAllEnvs();
+    rs.unstubAllGlobals();
+  });
+
+  it("returns no credits for an instance not signed in to Rome Cloud", async () => {
+    setInstanceTokenInMemory(null);
+    expect(await get("/ai-tools/rome-credits")).toEqual({ status: 200, body: { credits: null } });
+  });
+
+  it("returns the account balance from Rome Cloud", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    setInstanceTokenInMemory("romeinst_route_test");
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () =>
+        Response.json({
+          enabled: true,
+          grantedMicros: "10000000",
+          balanceMicros: "9000000",
+          reservedMicros: "0",
+          availableMicros: "9000000",
+          models: [],
+          requests: [],
+        }),
+      ),
+    );
+    expect(await get("/ai-tools/rome-credits")).toEqual({
+      status: 200,
+      body: {
+        credits: {
+          grantedMicros: "10000000",
+          balanceMicros: "9000000",
+          availableMicros: "9000000",
+          enabled: true,
+        },
+      },
+    });
+  });
+
+  it("answers 503 when Rome Cloud cannot be reached", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    setInstanceTokenInMemory("romeinst_route_test");
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => {
+        throw new Error("connect ECONNREFUSED");
+      }),
+    );
+    const { status } = await get("/ai-tools/rome-credits");
+    expect(status).toBe(503);
   });
 });

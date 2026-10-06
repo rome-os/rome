@@ -31,8 +31,21 @@ afterEach(async () => {
   cleanup();
   localStorage.clear();
   rs.restoreAllMocks();
+  rs.unstubAllGlobals();
   await i18n.changeLanguage("en");
 });
+
+function stubCoarsePointer() {
+  rs.stubGlobal(
+    "matchMedia",
+    rs.fn((query: string) => ({
+      matches: query === "(hover: none) and (pointer: coarse)",
+      media: query,
+      addEventListener: rs.fn(),
+      removeEventListener: rs.fn(),
+    })),
+  );
+}
 
 const testNewsFeed = {
   version: 1,
@@ -156,6 +169,33 @@ describe("ChatComponent agent identity", () => {
 });
 
 describe("ChatComponent empty home", () => {
+  it("focuses the draft composer so typing works without a click", async () => {
+    const user = userEvent.setup();
+    renderChatComponent();
+
+    const composer = screen.getByRole("textbox");
+    expect(document.activeElement).toBe(composer);
+
+    await user.keyboard("Hello Rome");
+    expect((composer as HTMLTextAreaElement).value).toBe("Hello Rome");
+  });
+
+  it("does not autofocus the draft composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent();
+
+    expect(document.activeElement).not.toBe(screen.getByRole("textbox"));
+  });
+
+  it("prefills a draft without focusing the composer on touch devices", () => {
+    stubCoarsePointer();
+    renderChatComponent({ initialDraftText: "Plan a trip" });
+
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(composer.value).toBe("Plan a trip");
+    expect(document.activeElement).not.toBe(composer);
+  });
+
   it("shows horizontally scrollable pinned chats and Rome News above a bottom composer", async () => {
     const user = userEvent.setup();
     const homeData = {

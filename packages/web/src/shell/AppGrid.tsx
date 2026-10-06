@@ -14,8 +14,9 @@ import {
   ExternalLink,
   FolderKanban,
   GripVertical,
+  Info,
+  MessageCircle,
   MessagesSquare,
-  PanelRightOpen,
   Pencil,
   Pin,
   PinOff,
@@ -138,6 +139,7 @@ interface CachedApp {
   status: string;
   origin?: AppOrigin;
   installedAt?: string | null;
+  projectPath?: string | null;
 }
 
 function parsePins(raw: unknown): PinnedEntry[] | null {
@@ -197,6 +199,7 @@ function writeLocalApps(apps: InstalledAppCard[]): void {
       status: a.status,
       origin: a.origin,
       installedAt: a.installedAt ?? null,
+      projectPath: a.projectPath,
     }));
     localStorage.setItem(APPS_CACHE_KEY, JSON.stringify(cached));
   } catch {}
@@ -306,60 +309,123 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
   );
 
   const openAppInSplitView = useCallback(
-    (appId: string) => {
+    (app: InstalledAppCard | CachedApp) => {
       const currentChat = location.pathname === "/chat" || location.pathname.startsWith("/chat/");
       const destination = currentChat
         ? `${location.pathname}${location.search}${location.hash}`
         : "/chat";
+      // Outside a chat, Chat with app starts a new one in the app's source
+      // folder, as the app actions menu does. Inside a chat, the app joins the
+      // conversation and the chat keeps its folder.
+      const projectPath = location.pathname.startsWith("/chat/") ? null : app.projectPath;
       navigate(destination, {
-        state: { widgets: [{ type: "app", appId }] },
+        state: {
+          widgets: [{ type: "app", appId: app.id }],
+          ...(projectPath ? { projectPath } : {}),
+        },
       });
     },
     [location.hash, location.pathname, location.search, navigate],
   );
 
+  // A plain click on a sidebar row already opens it in place, so the menu's
+  // open is the one a click cannot do: a new tab — wherever there are tabs.
+  const renderOpenMenuItem = (href: string, onSelect?: () => void): React.ReactNode => (
+    <ContextMenuItem asChild onSelect={onSelect}>
+      {canOpenNewTab ? (
+        <a href={href} target="_blank" rel="noopener noreferrer">
+          <ExternalLink aria-hidden />
+          {tApps("installed.openNewTabTitle")}
+        </a>
+      ) : (
+        <Link to={href}>
+          <AppWindow aria-hidden />
+          {tApps("installed.openButton")}
+        </Link>
+      )}
+    </ContextMenuItem>
+  );
+
+  // Rome's own surfaces sit in the same pin list as apps, so their rows answer
+  // a right-click the same way. Split view is the one app action they lack:
+  // the chat's side panel hosts app widgets only. The store row already leaves
+  // the page, so it offers just Unpin, and the required pins offer no Unpin.
+  const withBuiltinContextMenu = (
+    entry: BuiltinNavEntry,
+    trigger: React.ReactNode,
+  ): React.ReactNode => {
+    const canUnpin = !REQUIRED_BUILTIN_PINS.some((pin) => pin.id === entry.id);
+    // Without tabs the open item is a plain Open, which a menu earns only
+    // beside Unpin; alone it would repeat a click and take over a long-press.
+    const canOpen = entry.id !== "store" && (canOpenNewTab || canUnpin);
+    if (!canOpen && !canUnpin) return trigger;
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {canOpen ? renderOpenMenuItem(entry.href) : null}
+          {canOpen && canUnpin ? <ContextMenuSeparator /> : null}
+          {canUnpin ? (
+            <ContextMenuItem
+              onSelect={() =>
+                persistPins(pins.filter((pin) => !(pin.type === "builtin" && pin.id === entry.id)))
+              }
+            >
+              <PinOff aria-hidden />
+              {tApps("installed.unpin")}
+            </ContextMenuItem>
+          ) : null}
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  };
+
+  // onSelect runs after any item, for a caller that must close its own menu.
   const withAppContextMenu = (
     app: InstalledAppCard | CachedApp,
     trigger: React.ReactNode,
     pinned = true,
+    onSelect?: () => void,
   ): React.ReactNode => {
     if (!app.href) return trigger;
     return (
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
-          {/* A plain click on the icon already opens the app in place, so the
-              menu's open is the one a click cannot do: a new tab — wherever
-              there are tabs. */}
-          <ContextMenuItem asChild>
-            {canOpenNewTab ? (
-              <a href={app.href} target="_blank" rel="noopener noreferrer">
-                <ExternalLink aria-hidden />
-                {tApps("installed.openNewTabTitle")}
-              </a>
-            ) : (
-              <Link to={app.href}>
-                <AppWindow aria-hidden />
-                {tApps("installed.openButton")}
-              </Link>
-            )}
+          {renderOpenMenuItem(app.href, onSelect)}
+          <ContextMenuItem
+            onSelect={() => {
+              openAppInSplitView(app);
+              onSelect?.();
+            }}
+          >
+            <MessageCircle aria-hidden />
+            {tApps("installed.chatWithApp")}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => openAppInSplitView(app.id)}>
-            <PanelRightOpen aria-hidden />
-            {tApps("installed.openSplitTitle")}
+          <ContextMenuItem asChild onSelect={onSelect}>
+            <Link to={`/app-details/${encodeURIComponent(app.id)}`}>
+              <Info aria-hidden />
+              {tApps("installed.viewDetails")}
+            </Link>
           </ContextMenuItem>
           <ContextMenuSeparator />
           {pinned ? (
             <ContextMenuItem
-              onSelect={() =>
-                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)))
-              }
+              onSelect={() => {
+                persistPins(pins.filter((pin) => !(pin.type === "app" && pin.id === app.id)));
+                onSelect?.();
+              }}
             >
               <PinOff aria-hidden />
               {tApps("installed.unpin")}
             </ContextMenuItem>
           ) : (
-            <ContextMenuItem onSelect={() => persistPins([...pins, { type: "app", id: app.id }])}>
+            <ContextMenuItem
+              onSelect={() => {
+                persistPins([...pins, { type: "app", id: app.id }]);
+                onSelect?.();
+              }}
+            >
               <Pin aria-hidden />
               {tApps("installed.pin")}
             </ContextMenuItem>
@@ -445,28 +511,31 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
               if (entry.id === "store") {
                 return (
                   <Tooltip key={`builtin-${pin.id}`}>
-                    <TooltipTrigger asChild>
-                      {inDesktopApp ? (
-                        <button
-                          type="button"
-                          onClick={() => setStoreOpen(true)}
-                          aria-label={label}
-                          className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
-                        >
-                          {renderBuiltinIcon(entry)}
-                        </button>
-                      ) : (
-                        <a
-                          href={APP_STORE_BROWSE_URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={label}
-                          className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
-                        >
-                          {renderBuiltinIcon(entry)}
-                        </a>
-                      )}
-                    </TooltipTrigger>
+                    {withBuiltinContextMenu(
+                      entry,
+                      <TooltipTrigger asChild>
+                        {inDesktopApp ? (
+                          <button
+                            type="button"
+                            onClick={() => setStoreOpen(true)}
+                            aria-label={label}
+                            className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
+                          >
+                            {renderBuiltinIcon(entry)}
+                          </button>
+                        ) : (
+                          <a
+                            href={APP_STORE_BROWSE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={label}
+                            className={`${RAIL_LINK_CLASS} ${IDLE_CLASS}`}
+                          >
+                            {renderBuiltinIcon(entry)}
+                          </a>
+                        )}
+                      </TooltipTrigger>,
+                    )}
                     <TooltipContent side="right">{label}</TooltipContent>
                   </Tooltip>
                 );
@@ -474,15 +543,18 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
               const active = isEntryActive(location.pathname, entry.href);
               return (
                 <Tooltip key={`builtin-${pin.id}`}>
-                  <TooltipTrigger asChild>
-                    <Link
-                      to={entry.href}
-                      aria-label={label}
-                      className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-                    >
-                      {renderBuiltinIcon(entry)}
-                    </Link>
-                  </TooltipTrigger>
+                  {withBuiltinContextMenu(
+                    entry,
+                    <TooltipTrigger asChild>
+                      <Link
+                        to={entry.href}
+                        aria-label={label}
+                        className={`${RAIL_LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+                      >
+                        {renderBuiltinIcon(entry)}
+                      </Link>
+                    </TooltipTrigger>,
+                  )}
                   <TooltipContent side="right">{label}</TooltipContent>
                 </Tooltip>
               );
@@ -520,7 +592,9 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
             apps={recentApps}
             unopenedIds={unopenedIds}
             pathname={location.pathname}
-            wrapWithContextMenu={(app, trigger) => withAppContextMenu(app, trigger, false)}
+            wrapWithContextMenu={(app, trigger, onSelect) =>
+              withAppContextMenu(app, trigger, false, onSelect)
+            }
           />
           {onSearch ? (
             <>
@@ -566,7 +640,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         <button
           type="button"
           aria-label={t("sidebar.edit")}
-          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
         >
           <Ellipsis className="h-4 w-4" aria-hidden />
         </button>
@@ -709,42 +783,51 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
                 const entry = builtinMap.get(pin.id);
                 if (!entry) return null;
                 if (entry.id === "store") {
-                  return inDesktopApp ? (
-                    <button
-                      key={`builtin-${pin.id}`}
-                      type="button"
-                      onClick={() => setStoreOpen(true)}
-                      title={t(entry.labelKey)}
-                      className={`${LINK_CLASS} hover:bg-surface-hover`}
-                    >
-                      {renderBuiltinIcon(entry)}
-                      <span className="flex-1 truncate">{t(entry.labelKey)}</span>
-                    </button>
-                  ) : (
-                    <a
-                      key={`builtin-${pin.id}`}
-                      href={APP_STORE_BROWSE_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={t(entry.labelKey)}
-                      className={`${LINK_CLASS} hover:bg-surface-hover`}
-                    >
-                      {renderBuiltinIcon(entry)}
-                      <span className="flex-1 truncate">{t(entry.labelKey)}</span>
-                    </a>
+                  return (
+                    <Fragment key={`builtin-${pin.id}`}>
+                      {withBuiltinContextMenu(
+                        entry,
+                        inDesktopApp ? (
+                          <button
+                            type="button"
+                            onClick={() => setStoreOpen(true)}
+                            title={t(entry.labelKey)}
+                            className={`${LINK_CLASS} hover:bg-surface-hover`}
+                          >
+                            {renderBuiltinIcon(entry)}
+                            <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+                          </button>
+                        ) : (
+                          <a
+                            href={APP_STORE_BROWSE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={t(entry.labelKey)}
+                            className={`${LINK_CLASS} hover:bg-surface-hover`}
+                          >
+                            {renderBuiltinIcon(entry)}
+                            <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+                          </a>
+                        ),
+                      )}
+                    </Fragment>
                   );
                 }
                 const active = isEntryActive(location.pathname, entry.href);
                 return (
-                  <Link
-                    key={`builtin-${pin.id}`}
-                    to={entry.href}
-                    title={t(entry.labelKey)}
-                    className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
-                  >
-                    {renderBuiltinIcon(entry)}
-                    <span className="flex-1 truncate">{t(entry.labelKey)}</span>
-                  </Link>
+                  <Fragment key={`builtin-${pin.id}`}>
+                    {withBuiltinContextMenu(
+                      entry,
+                      <Link
+                        to={entry.href}
+                        title={t(entry.labelKey)}
+                        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+                      >
+                        {renderBuiltinIcon(entry)}
+                        <span className="flex-1 truncate">{t(entry.labelKey)}</span>
+                      </Link>,
+                    )}
+                  </Fragment>
                 );
               }
 

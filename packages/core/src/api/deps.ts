@@ -43,14 +43,16 @@ import type { SystemUpgradeService } from "../system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
   ConversationSettingsControl,
-  TalkRouter,
+  ChannelsService,
 } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../connections/types.js";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
+import type { WechatApp } from "../desktop-apps/wechat-app.js";
 
 export interface ApiConfig {
   port: number;
@@ -71,6 +73,8 @@ export interface ApiConfig {
  */
 export interface ApiDeps {
   talkRouter: TalkRouter;
+  /** The channels this Rome has, by name. */
+  channelsService: ChannelsService;
   conversationSettings: ConversationSettingsControl;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get">;
@@ -126,6 +130,8 @@ export interface ApiDeps {
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
+  /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
+  wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:

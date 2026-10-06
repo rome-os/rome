@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 import { Cross2Icon, DownloadIcon } from "@radix-ui/react-icons";
 import type {
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
@@ -12,7 +12,7 @@ import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
 import { isTraceScrollNearBottom } from "./scroll-follow";
 import { turnApiPath } from "./turn-api";
-import { TraceUsageOptionsContext } from "@/components/chat/blocks/UsageSummaryBlock";
+import { TraceUsageOptionsContext } from "@/components/chat/entries/UsageSummaryView";
 
 export type TraceDrawerTarget =
   | {
@@ -103,8 +103,8 @@ export function TraceDrawer({
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   // Resolve a stored trace's segments. Defaults to the authed content endpoint;
   // the share page passes a map-backed resolver so traces render from the frozen
   // snapshot. A thrown error surfaces as the drawer's retryable error state.

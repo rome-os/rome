@@ -39,7 +39,11 @@
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
-    "unread": "Unread",
+    "rowStatus": {
+      "running": "Replying now",
+      "failed": "Stopped with an error",
+      "done": "Done · new replies"
+    },
     "delete": "Delete",
     "deleteConfirm": "Delete this chat permanently? This can't be undone.",
     "archive": "Archive",
@@ -185,7 +189,43 @@
   },
   "desktop": {
     "iframeTitle": "Rome Desktop",
-    "wechatIframeTitle": "WeChat desktop"
+    "namedIframeTitle": "Rome desktop “{{name}}”",
+    "notFound": "There is no desktop called “{{name}}”."
+  },
+  "wechatApp": {
+    "loading": "Checking WeChat…",
+    "loadFailed": "Could not check WeChat",
+    "installFailed": "Could not install WeChat",
+    "startFailed": "Could not start WeChat",
+    "retry": "Try again",
+    "unavailable": {
+      "title": "WeChat is not enabled",
+      "description": "WECHAT_USER_ENABLED is off on this instance. To turn WeChat on, set it to true and restart Rome."
+    },
+    "absent": {
+      "title": "WeChat is not installed",
+      "description": "Rome downloads the WeChat desktop client once and opens it here. The download takes a few minutes.",
+      "action": "Install WeChat",
+      "failed": "Install did not finish: {{error}}"
+    },
+    "installing": {
+      "title": "Installing WeChat",
+      "description": "Rome is downloading the WeChat client and opens it here when it finishes. Leaving this page does not stop the download."
+    },
+    "stopped": {
+      "title": "WeChat is not running",
+      "description": "The WeChat client is installed on this instance.",
+      "action": "Start WeChat",
+      "failed": "WeChat did not start: {{error}}"
+    },
+    "starting": {
+      "title": "Starting WeChat"
+    },
+    "sharedDesktop": {
+      "title": "WeChat is running on the shared desktop",
+      "description": "This desktop stays empty while WeChat runs there.",
+      "action": "Open the shared desktop"
+    }
   },
   "chat": {
     "add": "Open an app",

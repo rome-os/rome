@@ -177,9 +177,11 @@
       "cacheWrite": "Cache write",
       "input": "Input",
       "output": "Output",
+      "reasoning": "Reasoning",
       "context": "Context",
       "mainContext": "Main context"
-    }
+    },
+    "reasoningHint": "Included in output. Some providers report an estimate, and a total counts only the runs that report it."
   },
   "approvals": {
     "headerPending": "Guardian approval needed",
@@ -221,6 +223,12 @@
     "uploadFiles": "Upload files",
     "dropFiles": "Drop files to upload",
     "removeFile": "Remove {{name}}",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetZoom": "Reset",
+    "zoomLevel": "Zoom",
+    "previewImage": "Preview",
+    "closeImagePreview": "Close",
     "filePill": "#File {{index}}",
     "uploadProgressFor": "Upload progress for {{name}}",
     "cancelUpload": "Cancel",
@@ -269,6 +277,7 @@
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt61Sol": "GPT-6.1 Sol",
       "gpt6Sol": "GPT-6 Sol",
       "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",

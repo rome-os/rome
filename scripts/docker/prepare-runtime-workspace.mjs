@@ -14,7 +14,6 @@ const rootFiles = [
   ".dockerignore",
   "Caddyfile",
   "Dockerfile",
-  "docker-entrypoint.sh",
   "package.json",
   "pnpm-lock.yaml",
   "sshd_config",
@@ -163,7 +162,7 @@ async function main() {
   await copyPath("example_apps");
   copiedTopLevelPaths.add("example_apps");
 
-  // OpenCLI plugins ship as plain source too: docker-entrypoint.sh registers
+  // OpenCLI plugins ship as plain source too: rome-init.sh registers
   // every /app/opencli-plugins/<site>/ dir with the in-container opencli at
   // boot, and silently skips registration when the dir is absent — so leaving
   // this out of the context ships an image that quietly falls back to the

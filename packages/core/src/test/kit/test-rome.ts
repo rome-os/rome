@@ -41,8 +41,8 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { TalkRouter } from "@rome-os/app-runtime";
-import type { AgentConfig, AgentMessage } from "../../types.js";
+import type { TalkRouter } from "../../connections/types.js";
+import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 
@@ -125,7 +125,7 @@ export interface TestRome {
   seed: TestRomeSeed;
   channel(name: string): FakeChannelEndpoint;
   /** Run one agent turn through the real runner/session stack; collects messages. */
-  runAgent(params: Partial<RunParams> & { prompt: string }): Promise<AgentMessage[]>;
+  runAgent(params: Partial<RunParams> & { prompt: string }): Promise<AgentEvent[]>;
   cleanup(): Promise<void>;
 }
 
@@ -357,7 +357,7 @@ async function buildHarness(
       return endpoint;
     },
     async runAgent(params) {
-      const messages: AgentMessage[] = [];
+      const messages: AgentEvent[] = [];
       for await (const msg of agentRunner.run({ agentName: "main", ...params })) {
         messages.push(msg);
       }

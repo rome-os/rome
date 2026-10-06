@@ -15,7 +15,7 @@
  *
  * // Via direct function call from the local action module
  * import { executeSendMessage } from "./index.js";
- * await executeSendMessage(talkRouter, {
+ * await executeSendMessage(channels, {
  *   channel: "discord",
  *   threadId: "123456",
  *   text: "Hello!",
@@ -62,8 +62,8 @@ interface SendMessageBase {
    */
   turnId?: string;
   /**
-   * Structured message parts (text with optional turnPhase/blockIx, cards, …). When
-   * provided, rich-content channels (webchat) render/persist these instead of
+   * Structured message parts (text with optional turnPhase/blockId/blockIx,
+   * cards, …). When provided, rich-content channels (webchat) render/persist these instead of
    * the plain `text` path; other channels ignore them and fall back to `text`.
    * Supplied by the orchestrating route (e.g. the webchat turn finalizer that
    * persists in-turn commentary + final answer), not by agent tool calls — so

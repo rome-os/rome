@@ -208,6 +208,25 @@ const sessionSelectFields = {
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
+
+// Whether the session's latest turn ended in an error, read from the
+// `turn_end` block of its newest trace. A turn still running has no
+// `turn_end` yet and a stopped turn ends `interrupted`, so neither counts.
+// `created_at` has one-second precision, so rowid (insertion order) breaks
+// ties between turns that start in the same second.
+export const sessionLastTurnFailed = sql<boolean>`coalesce((
+  select json_extract(b."content", '$.status') = 'error'
+  from "rome_agent_trace_blocks" b
+  where b."message_id" = (
+    select m."id" from "rome_agent_messages" m
+    where m."session_id" = "rome_sessions"."id" and m."role" = 'trace'
+    order by m."created_at" desc, m."rowid" desc
+    limit 1
+  )
+  and json_extract(b."content", '$.type') = 'turn_end'
+  order by b."seq" desc
+  limit 1
+), 0)`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;
 const SQL_LIKE_ESCAPE = "\\";
@@ -1211,7 +1230,7 @@ export class WebChatRepository {
           ? isNotNull(romeSessions.archivedAt)
           : undefined;
     return this.db
-      .select(sessionSelectFields)
+      .select({ ...sessionSelectFields, lastTurnFailed: sessionLastTurnFailed })
       .from(romeSessions)
       .where(and(eq(romeSessions.type, "webchat"), archivePredicate))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
@@ -1540,7 +1559,7 @@ export class WebChatRepository {
 
   async updateUserInput(
     sessionId: string,
-    status: import("@rome-os/app-runtime").InputStatusMessage,
+    status: import("@rome-os/app-runtime").InputStatusEvent,
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)
@@ -1720,7 +1739,7 @@ export class WebChatRepository {
    *
    * The stub insert (first batch only), block inserts, and accounting bump
    * commit in one transaction: a failed append leaves no partial state, so
-   * the caller's `persistedTraceBlockCount` cursor stays truthful and a
+   * the caller's `persistedTraceEventCount` cursor stays truthful and a
    * retry re-appends the same `startSeq` without double-counting. A replay
    * that *would* double-write trips the (message_id, seq) primary key and
    * fails loudly instead.
@@ -1731,7 +1750,7 @@ export class WebChatRepository {
     turnId: string | null;
     /** 0-based index of the first block in `blocks` within the whole trace. */
     startSeq: number;
-    /** Pre-shaped trace blocks (already passed through toTraceBlock). */
+    /** Pre-shaped trace blocks (already passed through toTraceEvent). */
     blocks: unknown[];
     trigger?: RomeAgentTraceTriggerMetadata;
     transcriptMessages?: RomeAgentTranscriptMessageInput[];

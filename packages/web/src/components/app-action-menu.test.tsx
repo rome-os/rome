@@ -52,7 +52,7 @@ function makeLifecycle(overrides: Partial<AppLifecycle> = {}): AppLifecycle {
     requestUninstall: rs.fn(),
     requestPublish: rs.fn(),
     requestAccess: rs.fn(),
-    startChatToUpdate: rs.fn(),
+    chatWithApp: rs.fn(),
     dialogs: null,
     ...overrides,
   };
@@ -238,7 +238,7 @@ describe("getAppActionMenuEntries", () => {
       entry.onSelect();
     };
     select("chat");
-    expect(lifecycle.startChatToUpdate).toHaveBeenCalledWith(app);
+    expect(lifecycle.chatWithApp).toHaveBeenCalledWith(app);
     select("uninstall");
     expect(lifecycle.requestUninstall).toHaveBeenCalledWith(app, false);
     select("uninstall-purge");

@@ -7,7 +7,7 @@
 //      ConnectionRegistry (the route-driven scheme's renew answers "re-confer").
 
 import { afterEach, describe, expect, it } from "@rstest/core";
-import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ConversationId, NormalizedMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import type { WechatAdapterConfig } from "../../channels/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -153,6 +153,8 @@ describe("wechat descriptor shape", () => {
     expect(adapters[0].sent).toEqual([{ channelUserId: "addr-1", threadId: "addr-1", text: "hi" }]);
     const inboundMedia = conn.talk!.feature("inboundMedia");
     const message = {
+      channel: "wechat",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "addr-1" as ConversationId,
       senderId: "user-1",
@@ -160,7 +162,7 @@ describe("wechat descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
       raw: { channel: "wechat", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
   });
 

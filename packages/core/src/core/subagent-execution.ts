@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSessionManager, StreamAgentMessage } from "./agent-session.js";
+import type { AgentSessionManager } from "./agent-session.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
@@ -33,7 +34,7 @@ export interface SubagentExecution {
   sessionId: string;
   turnId: string;
   agentName: string;
-  events: AsyncIterable<StreamAgentMessage>;
+  events: AsyncIterable<StreamAgentEvent>;
   completion: Promise<SubagentCompletion>;
   interrupt(reason?: string): Promise<void>;
 }
@@ -172,10 +173,10 @@ export function createSubagentExecutionService(deps: {
         interrupt,
       });
 
-      const events = (): AsyncIterable<StreamAgentMessage> => ({
+      const events = (): AsyncIterable<StreamAgentEvent> => ({
         [Symbol.asyncIterator]() {
           const queued = [...stream.messages()];
-          const waiters: Array<(value: IteratorResult<StreamAgentMessage>) => void> = [];
+          const waiters: Array<(value: IteratorResult<StreamAgentEvent>) => void> = [];
           let done = stream.finished;
           const unsubscribe = stream.subscribe((message) => {
             const waiter = waiters.shift();
@@ -188,13 +189,13 @@ export function createSubagentExecutionService(deps: {
             while (waiters.length > 0) waiters.shift()?.({ value: undefined, done: true });
           });
           return {
-            next(): Promise<IteratorResult<StreamAgentMessage>> {
+            next(): Promise<IteratorResult<StreamAgentEvent>> {
               const value = queued.shift();
               if (value) return Promise.resolve({ value, done: false });
               if (done) return Promise.resolve({ value: undefined, done: true });
               return new Promise((resolve) => waiters.push(resolve));
             },
-            return(): Promise<IteratorResult<StreamAgentMessage>> {
+            return(): Promise<IteratorResult<StreamAgentEvent>> {
               unsubscribe();
               return Promise.resolve({ value: undefined, done: true });
             },
@@ -240,7 +241,7 @@ export function createSubagentExecutionService(deps: {
         let resultText = "";
         let structuredOutput: unknown;
         let hasStructuredOutput = false;
-        let terminalError: Extract<StreamAgentMessage, { type: "error" }> | undefined;
+        let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let cancelled = false;
         try {
           for await (const message of handle.events) {

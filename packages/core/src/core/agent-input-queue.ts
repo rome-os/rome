@@ -1,11 +1,11 @@
-import type { AgentInputState, InputStatusMessage } from "@rome-os/app-runtime";
+import type { AgentInputState, InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput, SendTurnOptions } from "./agent-session.js";
 import type { ModelSession } from "./agent-runner.js";
 
 export interface SubmitInputOptions extends SendTurnOptions {
   /** Called once per actual run, including a late input's follow-up run. */
   onTurn(handle: AgentTurnHandle): void;
-  onInputStatus?(status: InputStatusMessage): Promise<void> | void;
+  onInputStatus?(status: InputStatusEvent): Promise<void> | void;
 }
 
 export interface AgentInputReceipt {
@@ -91,7 +91,7 @@ export class AgentInputQueue {
     this.flush();
   }
 
-  async observe(event: InputStatusMessage, turnId: string): Promise<void> {
+  async observe(event: InputStatusEvent, turnId: string): Promise<void> {
     const entry = this.entries.get(event.inputId);
     if (!entry) return;
     entry.turnId = turnId;
@@ -210,7 +210,7 @@ export class AgentInputQueue {
 
   private update(entry: Entry, state: AgentInputState): Promise<void> {
     entry.state = state;
-    const event: InputStatusMessage = {
+    const event: InputStatusEvent = {
       type: "input_status",
       inputId: entry.input.inputId,
       turnId: entry.turnId,

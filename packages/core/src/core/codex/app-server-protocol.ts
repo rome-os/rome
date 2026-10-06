@@ -105,6 +105,29 @@ export interface AgentMessageDeltaNotification {
   itemId: string;
   delta: string;
 }
+/** `item/reasoning/summaryTextDelta`: a delta of a reasoning summary part. */
+export interface ReasoningSummaryTextDeltaNotification {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  delta: string;
+  summaryIndex: number;
+}
+/** `item/reasoning/textDelta`: a delta of raw reasoning content. */
+export interface ReasoningTextDeltaNotification {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  delta: string;
+  contentIndex: number;
+}
+/** `item/commandExecution/outputDelta`: output a running command produced. */
+export interface CommandExecutionOutputDeltaNotification {
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  delta: string;
+}
 export interface TurnStartedNotification {
   threadId: string;
   turn: { id: string; [k: string]: unknown };
@@ -307,6 +330,9 @@ export const Notify = {
   itemStarted: "item/started",
   itemCompleted: "item/completed",
   agentMessageDelta: "item/agentMessage/delta",
+  reasoningSummaryTextDelta: "item/reasoning/summaryTextDelta",
+  reasoningTextDelta: "item/reasoning/textDelta",
+  commandExecutionOutputDelta: "item/commandExecution/outputDelta",
   tokenUsageUpdated: "thread/tokenUsage/updated",
   error: "error",
 } as const;

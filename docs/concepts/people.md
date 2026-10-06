@@ -91,6 +91,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it or approves its pairing.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**

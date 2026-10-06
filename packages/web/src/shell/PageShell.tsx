@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PageTitle } from "@rome-os/ui/page";
 import { cn } from "@/lib/utils";
 
 /** Padding every routed page shares. Lives here so no page can drift off it.
@@ -78,7 +79,7 @@ export function PageHeader({
         {leading}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h1 className="text-title text-foreground">{title}</h1>
+            <PageTitle>{title}</PageTitle>
             {titleAside}
           </div>
           {description != null && (

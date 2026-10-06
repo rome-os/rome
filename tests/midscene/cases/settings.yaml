@@ -1,0 +1,59 @@
+cases:
+  - name: SET-01 Open the appearance-mode choices
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/appearance
+      - aiAct: >-
+          Click the visible "Appearance mode" select once, then stop with its choices open.
+      - aiAssert: >-
+          The Appearance mode menu is open and offers System, Light, and Dark choices.
+  - name: SET-02 Open connection details
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/connections
+      - aiAct: >-
+          Click the visible Telegram connection row once. Stop as soon as its connection-detail
+          dialog is open; do not look for an "Open Telegram" button.
+      - aiAssert: >-
+          A Telegram connection detail dialog is open and shows its connected status and account
+          information rather than an error.
+  - name: SET-03 Inspect channel activation settings
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/channels
+      - aiAct: >-
+          Click the visible "Rome / can you see active chats?" conversation card once, then stop.
+      - aiAssert: >-
+          The card's configuration sections are shown, including an "Activation" section ("Rome in
+          this conversation"), a "Respond" policy set to "Only when mentioned", and "Reply
+          placement" options ("Native thread", "Inline").
+  - name: SET-04 Open advanced developer settings
+    tags:
+      - settings
+      - shard-5
+    steps:
+      - app.open:
+          path: /settings/advanced
+      - aiAct: >-
+          Scroll through Advanced settings until the "Developer Settings" disclosure is visible
+          and open it once. Then scroll down until its heading is near the top of the screen, and
+          stop.
+      - aiAssert: >-
+          The Developer Settings section is expanded and shows the "Fable" setting directly below
+          its heading.
+      # The section is taller than one screen, so the heading and the switch are
+      # checked in separate screenshots.
+      - aiAct: >-
+          Scroll farther down within the expanded Developer Settings section until the "Show
+          Claude and ChatGPT usage" switch is visible. Leave the section expanded.
+      - aiAssert: >-
+          The "Show Claude and ChatGPT usage" switch is visible.

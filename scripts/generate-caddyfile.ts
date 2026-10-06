@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Container-boot Caddyfile + gateway-page generator. Runs from
- * docker-entrypoint.sh before Caddy starts, when the daemon isn't up yet.
+ * scripts/docker/rome-init.sh before Caddy starts, when the daemon isn't up yet.
  *
  * Uses the canonical pure generators in `packages/core/src/lib/` so the
  * output is identical to what the runtime regenerator emits when the

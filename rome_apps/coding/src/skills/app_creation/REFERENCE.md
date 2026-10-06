@@ -80,7 +80,6 @@ api:                             # Optional — enables the HTTP API
   entry: api/index               # Without extension
 
 agents:                          # Optional — app-private agents
-  - agents/planning.yaml
   - agents/coding.yaml
 
 actions:                         # Optional — action directories the app exposes
@@ -131,7 +130,7 @@ Use these fixed ids instead of guessing the owner of a platform artifact:
 | Call a connected provider API | `connector:connector_proxy` |
 | Core agents | `core:main`, `core:envoy` |
 | General-purpose agents | `assistant:assistant`, `assistant:explore` |
-| Coding agents | `coding:planning`, `coding:coding` |
+| Coding agent | `coding:coding` |
 | App authoring skills | `coding:app_creation`, `coding:workflow_creation`, `coding:app_remix`, `coding:app_verification` |
 
 For an app whose id is `notes`, an action definition is `name: notes_create`,
@@ -408,20 +407,24 @@ export function createAction(
   form returns `{ executionId }` after main accepts it, not the action result.
 - `appContext.listRoutines()` — list registered routines.
 - `agentRunner.run({ agentName, prompt })` — stream-run an agent; returns
-  an async iterable of `AgentMessage`. Handle each message by `msg.type`.
+  an async iterable of `AgentEvent`. Handle each event by `event.type`.
   Full example in
   [Actions calling actions / agents](#actions-calling-actions--agents).
 
-  The stream's event vocabulary has three categories:
+  The stream's events fall into four groups, each exported as a type
+  (`AgentBlockEvent`, `AgentDeltaEvent`, `AgentLifecycleEvent`,
+  `AgentOtherEvent`). `AgentMessage` and the `*Message` names are deprecated
+  aliases of the same types.
 
-  | Category | Types | Semantics |
+  | Group | Types | Semantics |
   | --- | --- | --- |
-  | Lifecycle | `turn_start`, `turn_end`, `session_init` | Bracketing: `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `session_init` describes the session. |
-  | Content | `thinking`, `text`, `tool_use`, `tool_result`, `structured_output`, `result`, `error` | Durable blocks. `structured_output` is reserved for interactive handback submissions. `result`/`error` is the agent's terminal block (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. |
-  | Transient | `text_delta` | Streaming preview of an in-flight `text` block; never persisted — ignore unless you render live text. |
+  | Block | `text`, `thinking`, `tool_use`, `tool_result` | One completed block each. A `text` or `thinking` block is identified by its `blockId` when the provider gives one. A `tool_use` is identified by its `id`, which the `tool_result` that answers it carries as `toolUseId`. |
+  | Delta | `text_delta`, `thinking_delta`, `tool_input_delta`, `tool_output_delta` | Increments of a block still being produced; never persisted — ignore unless you render live output. Each carries its block's identity when the block has one: `text_delta` and `thinking_delta` the `blockId` of their `text` or `thinking` block, `tool_input_delta` and `tool_output_delta` the `toolUseId` of their `tool_use` and `tool_result`. The complete block normally follows; discard deltas left unmatched when the turn ends. |
+  | Lifecycle | `session_init`, `turn_start`, `turn_end`, `input_status`, `result`, `error` | `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `result`/`error` is an agent's terminal event (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. `session_init` describes the session; `input_status` reports each user input's state. |
+  | Other | `subagent_start`, `subagent_result`, `structured_output`, `plan_update` | Subagent activity, accepted structured output (reserved for interactive handback submissions), and the provider's plan. |
 
   Typical consumption: read `sessionId` from `turn_start` (to resume the
-  session later), accumulate or forward content blocks, and take the final
+  session later), accumulate or forward block events, and take the final
   answer from `result.content`.
 
 **Custom deps:** widen the factory signature with
@@ -685,7 +688,7 @@ points:
   an acceptance receipt `{ executionId }`, not an `ActionResult`; use the ID
   to inspect or cancel the independent execution.
 - **`agentRunner.run({ agentName, prompt, ... })`** — streams an agent.
-  Returns `AsyncIterable<AgentMessage>` and must be consumed event by
+  Returns `AsyncIterable<AgentEvent>` and must be consumed event by
   event. While running, the agent will call the actions declared on its
   yaml `actions:` allowlist through LLM tool-use — you **do not** manually
   orchestrate those tool calls.

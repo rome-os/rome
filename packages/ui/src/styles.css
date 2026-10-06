@@ -149,8 +149,6 @@
   --popover: var(--surface-elevated);
   --popover-foreground: var(--surface-foreground);
 
-  --control-h-sm: var(--rome-size-28);
-  --control-h-md: var(--rome-size-32);
   --control-h-lg: var(--rome-size-44);
 
   --control-gap: 6px;
@@ -162,32 +160,14 @@
   --control-r-md: 10px;
   --control-r-lg: 12px;
 
-  --control-px-start-sm: 10px;
-  --control-px-start-md: 12px;
   --control-px-start-lg: 16px;
 
-  --control-px-center-sm: 10px;
-  --control-px-center-md: 14px;
   --control-px-center-lg: 18px;
-
-  /* Compatibility aliases for app artifacts built against the field names. */
-  --field-px-sm: var(--control-px-start-sm);
-  --field-px-md: var(--control-px-start-md);
-  --field-px-lg: var(--control-px-start-lg);
 
   --badge-h: 22px;
   --badge-px: 9px;
   --badge-gap: 6px;
 
-  /* List row geometry. The height is a floor rather than a fixed size: a row
-     holding a title and a description grows past it, and every step lands on
-     the 4px grid. Two steps, because a list is either dense or comfortable.
-     Each floor is written as its `--control-h-*` step plus 8px rather than as
-     the step it happens to equal, so a row clears the control it holds by the
-     same margin at either step and a retune of the control scale carries the
-     row scale with it. Today that resolves to 36px and 40px. */
-  --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
-  --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
   --row-px-sm: var(--rome-space-2);
   --row-px-md: var(--rome-space-3);
   --row-py-sm: var(--rome-space-1);
@@ -212,10 +192,12 @@
   --rome-font-size-14: 0.875rem;
   --rome-font-size-15: 0.9375rem;
   --rome-font-size-16: 1rem;
+  --rome-font-size-17: 1.0625rem;
   --rome-font-size-18: 1.125rem;
   --rome-font-size-20: 1.25rem;
   --rome-font-size-22: 1.375rem;
   --rome-font-size-24: 1.5rem;
+  --rome-font-size-28: 1.75rem;
   --rome-font-size-30: 1.875rem;
 
   /* Every step composes its size step to a line box on the 4px spacing grid, so
@@ -233,8 +215,10 @@
   --rome-line-height-123: calc(1 / 0.8125);
   --rome-line-height-125: 1.25;
   --rome-line-height-127: calc(1.75 / 1.375);
+  --rome-line-height-129: calc(2.25 / 1.75);
   --rome-line-height-133: calc(4 / 3);
   --rome-line-height-140: calc(1.75 / 1.25);
+  --rome-line-height-141: calc(1.5 / 1.0625);
   --rome-line-height-143: calc(1.25 / 0.875);
   --rome-line-height-150: 1.5;
 }
@@ -304,6 +288,119 @@
   --text-aux--line-height: var(--rome-line-height-123);
   --text-aux--letter-spacing: 0;
   --text-aux--font-weight: 400;
+}
+
+/* Platform scales. UiScaleProvider selects a scope; components only read
+   these variables. Medium is the standalone default. Both sets redeclare
+   derived aliases so nested providers and shadow hosts resolve them locally. */
+:root,
+:host,
+[data-ui-scale="medium"] {
+  --control-h-sm: var(--rome-size-28);
+  --control-h-md: var(--rome-size-32);
+  --control-px-start-sm: 10px;
+  --control-px-start-md: 12px;
+  --control-px-center-sm: 10px;
+  --control-px-center-md: 14px;
+  /* Compatibility aliases resolve at the current scope. */
+  --field-px-sm: var(--control-px-start-sm);
+  --field-px-md: var(--control-px-start-md);
+  --field-px-lg: var(--control-px-start-lg);
+  /* Rows clear their controls by the same inset at either scale. */
+  --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
+  --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
+  --text-ui: var(--rome-font-size-14);
+  --text-ui--line-height: var(--rome-line-height-143);
+  --text-ui--font-weight: 400;
+  --text-composer: var(--rome-font-size-16);
+  --text-composer--line-height: var(--rome-line-height-125);
+  --text-composer--font-weight: 400;
+  --text-section: var(--rome-font-size-15);
+  --text-section--line-height: var(--rome-line-height-133);
+  --text-section--font-weight: 500;
+  --text-aux: var(--rome-font-size-13);
+  --text-aux--line-height: var(--rome-line-height-123);
+  --text-aux--font-weight: 400;
+  --text-badge: var(--rome-font-size-13);
+  --text-badge--line-height: var(--rome-line-height-123);
+  --text-badge--font-weight: 500;
+  --control-h-xs: var(--rome-size-24);
+  --control-px-center-xs: var(--rome-space-2);
+  --control-min-h: 0px;
+  --control-filter-px: var(--rome-space-3);
+  --calendar-cell: var(--rome-size-28);
+  --control-calendar-px: var(--rome-space-2);
+  --tabs-h: var(--rome-size-32);
+  --segment-min-w: 0px;
+  --segment-hit-inset: 0px;
+  --switch-thumb-md: var(--rome-size-16);
+  --switch-thumb-sm: var(--rome-size-12);
+  --switch-width-md: var(--rome-size-32);
+  --switch-width-sm: var(--rome-size-24);
+  --switch-hit-inset-x: var(--rome-space-3);
+  --field-min-font-size: 0px;
+  --control-action-offset: var(--rome-space-2);
+  --control-action-offset-sm: var(--rome-space-1);
+  --markdown-action-py: var(--rome-space-1);
+  --markdown-zoom-direction: column;
+  --markdown-band-height: var(--rome-space-8);
+}
+
+[data-ui-scale="large"],
+:host([data-ui-scale="large"]) {
+  --text-ui: var(--rome-font-size-17);
+  --text-ui--line-height: var(--rome-line-height-141);
+
+  --text-composer: var(--rome-font-size-17);
+  --text-composer--line-height: var(--rome-line-height-141);
+
+  --text-section: var(--rome-font-size-17);
+  --text-section--line-height: var(--rome-line-height-141);
+  --text-section--font-weight: 600;
+
+  --text-aux: var(--rome-font-size-15);
+  --text-aux--line-height: var(--rome-line-height-133);
+
+  --text-badge: var(--rome-font-size-15);
+  --text-badge--line-height: var(--rome-line-height-133);
+
+  --control-h-sm: var(--rome-size-44);
+  --control-h-md: var(--rome-size-44);
+  --control-px-start-sm: 14px;
+  --control-px-start-md: 16px;
+  --control-px-center-sm: 16px;
+  --control-px-center-md: 18px;
+  --control-h-xs: var(--rome-size-44);
+  --control-px-center-xs: var(--rome-space-4);
+  --control-min-h: var(--rome-size-44);
+  --control-filter-px: var(--rome-space-4);
+  --calendar-cell: var(--rome-size-44);
+  --control-calendar-px: 0px;
+  --tabs-h: calc(var(--rome-size-44) + var(--rome-space-2) + 1px);
+  --segment-min-w: var(--rome-size-44);
+  --segment-hit-inset: 5px;
+  --switch-thumb-md: calc(var(--rome-size-28) - 2px);
+  --switch-thumb-sm: var(--switch-thumb-md);
+  --switch-width-md: var(--rome-size-48);
+  --switch-width-sm: var(--switch-width-md);
+  --switch-hit-inset-x: 0px;
+  --field-min-font-size: var(--rome-font-size-16);
+  --control-action-offset: var(--rome-space-4);
+  --control-action-offset-sm: var(--rome-space-3);
+  --markdown-action-py: 0px;
+  --markdown-zoom-direction: row;
+  --markdown-band-height: auto;
+  --field-px-sm: var(--control-px-start-sm);
+  --field-px-md: var(--control-px-start-md);
+  --field-px-lg: var(--control-px-start-lg);
+  --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
+  --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
+}
+
+@layer base {
+  :is(input, textarea, select) {
+    font-size: max(var(--field-min-font-size), var(--text-ui));
+  }
 }
 
 /* ─────────────────────────── MARKDOWN TOKENS ──────────────────────────────

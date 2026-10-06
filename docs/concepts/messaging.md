@@ -8,6 +8,7 @@ A message is one thing somebody said — a line a person sent to Rome, or one Ro
 
 - Every message names the account that sent or received it and the channel that carried it. Who that account belongs to is the account's [link](people.md#link), so who said something changes only when a link does, retroactively and over their whole history.
 - A message goes one of two ways: to Rome, or from it. Every message declares which, and there is no third direction.
+- A message carries who said it, the conversation it was said in, and what came attached, wherever the record it was read from kept them. It is one record whichever way Rome reads it: delivered as it arrives, or read back later.
 - A message is what was said, which is not the same as what Rome holds. A platform that keeps its own record has the conversation back past the point Rome started watching. Where Rome keeps the only record, the history starts when Rome did.
 
 **Not to be confused with:**

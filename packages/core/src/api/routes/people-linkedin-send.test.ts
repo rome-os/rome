@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type { TalkRouter } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../../connections/types.js";
 import type {
   OutboxMessage,
   OutboxPage,

@@ -199,7 +199,7 @@ describe("Recent zone, expanded sidebar", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toEqual(["Open in new tab", "Open in split view", "Pin to sidebar"]);
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Pin to sidebar"]);
   });
 
   it("keeps Edit mode's Add list complete and without a New badge", async () => {
@@ -244,6 +244,38 @@ describe("Recent zone, collapsed rail", () => {
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
     ).toEqual(["Delta"]);
+  });
+
+  it("gives an overflow app the same context menu as a tile", async () => {
+    seed(
+      [
+        fixture("a", "Alpha"),
+        fixture("b", "Bravo"),
+        fixture("c", "Charlie"),
+        fixture("d", "Delta"),
+      ],
+      { a: minutesAgo(1), b: minutesAgo(2), c: minutesAgo(3), d: minutesAgo(4) },
+    );
+    const user = userEvent.setup();
+    renderSidebar(true);
+
+    await user.click(await screen.findByRole("button", { name: "More recent apps" }));
+    const more = await screen.findByRole("menu");
+    fireEvent.contextMenu(within(more).getByRole("menuitem", { name: "Delta" }));
+
+    // The context menu is modal, so it hides the More list from the
+    // accessibility tree; the list itself stays open underneath.
+    const contextMenu = await screen.findByRole("menu");
+    expect(contextMenu).not.toBe(more);
+    expect(
+      within(contextMenu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open in new tab", "Chat with app", "View details", "Pin to sidebar"]);
+
+    // A choice closes the More list too, instead of leaving it over the page.
+    await user.click(within(contextMenu).getByRole("menuitem", { name: "View details" }));
+    await waitFor(() => expect(screen.queryAllByRole("menu", { hidden: true })).toEqual([]));
   });
 
   it("has no More button with three or fewer, and no tiles at all with none", async () => {

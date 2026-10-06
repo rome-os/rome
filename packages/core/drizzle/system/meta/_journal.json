@@ -463,6 +463,13 @@
       "when": 1790304863386,
       "tag": "0066_session_working_dir",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1791255498880,
+      "tag": "0067_session_trace_index",
+      "breakpoints": true
     }
   ]
 }

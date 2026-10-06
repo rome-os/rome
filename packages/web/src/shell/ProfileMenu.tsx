@@ -74,7 +74,7 @@ export function ProfileMenu() {
             type="button"
             aria-label={t("profile.menuLabel")}
             title={title ?? t("profile.menuLabel")}
-            className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="rounded-full outline-none transition hover:opacity-80 focus-visible:ring-3 focus-visible:ring-ring/50 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
           >
             <Avatar>
               {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}

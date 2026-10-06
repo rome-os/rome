@@ -33,7 +33,7 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
 }
 
 // Chat links open in the workspace, and fenced blocks can be collapsed.
-// Chat blocks import this instead of `@/components/markdown`.
+// Chat entries import this instead of `@/components/markdown`.
 export default function ChatMarkdown({ disclosureStateKey, ...props }: ChatMarkdownProps) {
   return (
     <ChatCodeBlockScopeContext.Provider value={disclosureStateKey ?? null}>

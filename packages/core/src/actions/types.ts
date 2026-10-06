@@ -22,6 +22,9 @@ export interface FavorRequirementConfig {
   amount: number;
   title: string;
   summary?: string;
+  /** Fields shown on the payer's consent screen. `from` is a JSONPath into
+   * the action args, e.g. `{ label: "Report", from: "$.reportUrl" }`; a bare
+   * key like `"reportUrl"` is rejected. */
   displayFields?: Array<{ label: string; from: string }>;
 }
 
