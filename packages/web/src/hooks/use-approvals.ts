@@ -4,6 +4,7 @@ import { useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-q
 import { useTranslation } from "react-i18next";
 import type { Approval } from "@/pages/ActivityPage";
 import { fetchJson } from "@/lib/fetch-json";
+import { emitSessionsChanged } from "@/lib/session-events";
 
 export const APPROVALS_QUERY_KEY = ["approvals"] as const;
 
@@ -43,6 +44,8 @@ export function useResolveApproval() {
         fallback: t("pairing.resolveFailed"),
       }),
     onError: (error) => toast.error(error.message),
+    // A resolved approval can clear a chat's "waiting" mark in the sidebar.
+    onSuccess: () => emitSessionsChanged(),
     onSettled: () => client.invalidateQueries({ queryKey: APPROVALS_QUERY_KEY }),
   });
 }

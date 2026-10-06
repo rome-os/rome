@@ -244,6 +244,7 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
 ) or "rome_sessions"."id" in (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
+  and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;

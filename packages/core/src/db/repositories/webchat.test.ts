@@ -1143,6 +1143,8 @@ describe("WebChatRepository", () => {
         });
       await approval("sess-approval");
       await approval("sess-approved", "approved");
+      // A pending approval outside any chat must not turn the others' false into null.
+      await approvals.create({ type: "action_execution", requestedBy: "agent", description: "x" });
 
       const rows = await repo.listSessions();
       const waiting = (id: string) => rows.find((row) => row.id === id)?.awaitingGuardian;
