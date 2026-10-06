@@ -232,8 +232,9 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
 // pending in this chat. Any answer to a card is saved as a user message, so a
 // card after the last one is still open. rowid is insertion order. Every reply
 // adds an auto-approved row to `approvals`, so the pending thread ids are
-// collected once per list rather than scanned per chat. json_valid skips a
-// non-JSON row, which would otherwise fail the whole list.
+// collected once per list rather than scanned per chat. json_valid and the
+// object check skip rows that aren't block arrays (non-JSON, or legacy plain
+// text), which would otherwise fail the whole list.
 export const sessionAwaitingGuardian = sql<boolean>`(exists (
   select 1 from "rome_agent_messages" m, json_each(m."content") part
   where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
@@ -242,7 +243,7 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
     select max(u."rowid") from "rome_agent_messages" u
     where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
   ), 0)
-  and json_extract(part."value", '$.type') = 'pending_interaction'
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 ) or "rome_sessions"."id" in (
   select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'

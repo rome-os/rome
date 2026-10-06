@@ -1139,6 +1139,8 @@ describe("WebChatRepository", () => {
         '[{"type":"text","text":"a \\"pending_interaction\\" part"}]',
       );
       await repo.addMessage("m-7", "sess-bad", "assistant", "not json");
+      await repo.addMessage("m-8", "sess-bad", "assistant", '"plain text"');
+      await repo.addMessage("m-9", "sess-bad", "assistant", '["plain text"]');
       const approvals = new ApprovalsRepository(testDb.db);
       const approval = (sessionId: string, status?: "approved") =>
         approvals.create({
