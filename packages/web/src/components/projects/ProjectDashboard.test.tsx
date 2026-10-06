@@ -285,7 +285,7 @@ describe("ProjectDashboard", () => {
     expect(within(rows[2]).getByText("25%")).toBeTruthy();
     expect(within(rows[3]).getByText("$0.00")).toBeTruthy();
     expect(within(rows[4]).getByText("$4.00")).toBeTruthy();
-    expect(within(table).getByText("Share of spend")).toBeTruthy();
+    expect(within(table).getAllByRole("columnheader")[1].textContent).toBe("Share of spend");
 
     fireEvent.click(screen.getByRole("radio", { name: "14 days" }));
 

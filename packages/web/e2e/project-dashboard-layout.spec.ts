@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from "@playwright/test";
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type {
   ProjectDashboardChat,
   ProjectDashboardProviderUsage,
@@ -16,7 +16,13 @@ function providerUsage(provider: string, costUsd: number): ProjectDashboardProvi
   };
 }
 
-async function mockDashboard(context: BrowserContext) {
+const DEFAULT_PROVIDERS = [
+  providerUsage("anthropic", 1_624.87),
+  providerUsage("openai", 584.99),
+  providerUsage("google", 12.5),
+];
+
+async function mockDashboard(context: BrowserContext, providers = DEFAULT_PROVIDERS) {
   const chats: ProjectDashboardChat[] = Array.from({ length: 20 }, (_, index) => ({
     createdAt: "2026-09-01T12:00:00.000Z",
     id: `layout-chat-${index}`,
@@ -26,11 +32,6 @@ async function mockDashboard(context: BrowserContext) {
     title: `Chat ${index}`,
     updatedAt: "2026-09-01T12:00:00.000Z",
   }));
-  const providers = [
-    providerUsage("anthropic", 1_624.87),
-    providerUsage("openai", 584.99),
-    providerUsage("google", 12.5),
-  ];
   const dashboard: ProjectDashboardResponse = {
     availableProjectPaths: [],
     chats,
@@ -86,4 +87,68 @@ test("the provider period control fits a phone-width dashboard", async ({ contex
   expect(overflow).toBeLessThanOrEqual(0);
   await allTime.click();
   await expect(allTime).toHaveAttribute("aria-checked", "true");
+});
+
+async function openPhoneOverview(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 800 });
+  await page.goto("/projects");
+  // Phones open the Files tab first.
+  await page.getByRole("radio", { name: "Overview" }).click();
+  return page.getByRole("table", { name: /^Usage by provider/ });
+}
+
+// How far the table's rightmost visible cell reaches past its panel's content box.
+// Positive means a figure is clipped or spills over the panel border.
+async function tableOverflow(table: Locator) {
+  return table.evaluate((element) => {
+    const panel = element.closest("section");
+    if (!panel) return Number.POSITIVE_INFINITY;
+    const contentRight =
+      panel.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(panel).paddingRight);
+    const cells = [...element.querySelectorAll("th, td")].filter(
+      (cell) => cell.getClientRects().length > 0,
+    );
+    return Math.max(...cells.map((cell) => cell.getBoundingClientRect().right)) - contentRight;
+  });
+}
+
+for (const width of [375, 320]) {
+  test(`the provider table fits a ${width}px phone dashboard`, async ({ context, page }) => {
+    await mockDashboard(context);
+    const table = await openPhoneOverview(page, width);
+
+    expect(await tableOverflow(table)).toBeLessThanOrEqual(0);
+    await expect(table.getByRole("columnheader", { name: "Spend" })).toBeVisible();
+    await expect(table.getByRole("cell", { name: "$1624.9" })).toBeVisible();
+    // Share is of spend, so the token total gives way first.
+    await expect(table.getByRole("columnheader", { name: "Tokens" })).toBeHidden();
+  });
+}
+
+test("a phone dashboard keeps tokens when no run reported a cost", async ({ context, page }) => {
+  await mockDashboard(context, [providerUsage("anthropic", 0), providerUsage("openai", 0)]);
+  const table = await openPhoneOverview(page, 375);
+
+  expect(await tableOverflow(table)).toBeLessThanOrEqual(0);
+  await expect(table.getByRole("columnheader", { name: "Tokens" })).toBeVisible();
+  await expect(table.getByRole("columnheader", { name: "Spend" })).toBeHidden();
+});
+
+test("a wide dashboard shows every provider column", async ({ context, page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await mockDashboard(context);
+  await page.goto("/projects");
+
+  const table = page.getByRole("table", { name: /^Usage by provider/ });
+  const headers = table.getByRole("columnheader");
+  await expect(headers).toHaveText([
+    "Provider",
+    "Share of spend",
+    "Input",
+    "Output",
+    "Cached",
+    "Tokens",
+    "Spend",
+  ]);
+  expect(await tableOverflow(table)).toBeLessThanOrEqual(0);
 });

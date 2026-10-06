@@ -579,10 +579,14 @@ const providerHeaderCellClassName =
   "h-8 px-2 text-left align-middle text-aux font-normal whitespace-nowrap text-muted-foreground";
 // Narrow dashboards keep the share and the totals; the token split drops first.
 const providerDetailClassName = "@max-[640px]/project-dashboard:hidden";
+// Phone dashboards keep only the total the share is computed from, so the share
+// and the figure beside it always measure the same thing.
+const providerOffBasisClassName = "@max-[480px]/project-dashboard:hidden";
 
 type ProviderUsageFigureSet = Omit<ProjectProviderUsageRow, "key">;
 
 const PROVIDER_TABLE_COLUMNS: Array<{
+  basis?: UsageMetric;
   detail: boolean;
   format: (figures: ProviderUsageFigureSet) => string;
   key: string;
@@ -591,8 +595,20 @@ const PROVIDER_TABLE_COLUMNS: Array<{
   { detail: true, format: (figures) => fmtTokens(figures.input), key: "input", label: "Input" },
   { detail: true, format: (figures) => fmtTokens(figures.output), key: "output", label: "Output" },
   { detail: true, format: (figures) => fmtTokens(figures.cached), key: "cached", label: "Cached" },
-  { detail: false, format: (figures) => fmtTokens(figures.total), key: "total", label: "Tokens" },
-  { detail: false, format: (figures) => fmtCost(figures.cost), key: "cost", label: "Spend" },
+  {
+    basis: "tokens",
+    detail: false,
+    format: (figures) => fmtTokens(figures.total),
+    key: "total",
+    label: "Tokens",
+  },
+  {
+    basis: "cost",
+    detail: false,
+    format: (figures) => fmtCost(figures.cost),
+    key: "cost",
+    label: "Spend",
+  },
 ];
 
 function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse }) {
@@ -625,7 +641,7 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
     if (a.key === "other" || b.key === "other") return a.key === "other" ? 1 : -1;
     return shareOf(b) - shareOf(a);
   });
-  const shareLabel = shareBasis === "cost" ? "Share of spend" : "Share of tokens";
+  const shareLabelSuffix = shareBasis === "cost" ? " of spend" : " of tokens";
 
   return (
     <section className="flex shrink-0 flex-col gap-2 rounded-12 border border-border bg-surface p-4">
@@ -663,7 +679,8 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
                 Provider
               </th>
               <th scope="col" className={providerHeaderCellClassName}>
-                {shareLabel}
+                Share
+                <span className={providerOffBasisClassName}>{shareLabelSuffix}</span>
               </th>
               {PROVIDER_TABLE_COLUMNS.map((column) => (
                 <th
@@ -672,7 +689,7 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
                   className={cn(
                     providerHeaderCellClassName,
                     "w-[11%] text-right",
-                    column.detail && providerDetailClassName,
+                    providerColumnHiddenClassName(column, shareBasis),
                   )}
                 >
                   {column.label}
@@ -682,7 +699,12 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
           </thead>
           <tbody>
             {sortedRows.map((row) => (
-              <ProviderUsageTableRow key={row.key} row={row} share={shareOf(row)} />
+              <ProviderUsageTableRow
+                key={row.key}
+                row={row}
+                share={shareOf(row)}
+                shareBasis={shareBasis}
+              />
             ))}
           </tbody>
           {sortedRows.length > 1 && (
@@ -698,7 +720,7 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
                   Total
                 </th>
                 <td className={providerCellClassName} />
-                <ProviderUsageFigures figures={total} />
+                <ProviderUsageFigures figures={total} shareBasis={shareBasis} />
               </tr>
             </tfoot>
           )}
@@ -708,7 +730,15 @@ function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse
   );
 }
 
-function ProviderUsageTableRow({ row, share }: { row: ProjectProviderUsageRow; share: number }) {
+function ProviderUsageTableRow({
+  row,
+  share,
+  shareBasis,
+}: {
+  row: ProjectProviderUsageRow;
+  share: number;
+  shareBasis: UsageMetric;
+}) {
   const series = PROVIDER_SERIES[row.key];
   return (
     <tr>
@@ -719,8 +749,11 @@ function ProviderUsageTableRow({ row, share }: { row: ProjectProviderUsageRow; s
         </span>
       </th>
       <td className={providerCellClassName}>
-        <span className="flex items-center gap-3">
-          <span className="h-1.5 min-w-8 flex-1 overflow-hidden rounded-full bg-surface-muted">
+        {/* The bar takes whatever width the figures leave, so it shrinks before any figure
+            clips. Below a 340px dashboard it would be a few pixels wide, so the percentage
+            stands alone. */}
+        <span className="flex items-center gap-3 @max-[480px]/project-dashboard:gap-2">
+          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-muted @max-[340px]/project-dashboard:hidden">
             <span
               className="block h-full w-full origin-left rounded-full transition-transform duration-200 ease-in-out motion-reduce:transition-none"
               style={{ background: series.color, transform: `scaleX(${Math.min(1, share)})` }}
@@ -731,16 +764,33 @@ function ProviderUsageTableRow({ row, share }: { row: ProjectProviderUsageRow; s
           </span>
         </span>
       </td>
-      <ProviderUsageFigures figures={row} />
+      <ProviderUsageFigures figures={row} shareBasis={shareBasis} />
     </tr>
   );
 }
 
-function ProviderUsageFigures({ figures }: { figures: ProviderUsageFigureSet }) {
+function providerColumnHiddenClassName(
+  column: (typeof PROVIDER_TABLE_COLUMNS)[number],
+  shareBasis: UsageMetric,
+): string | false {
+  if (column.detail) return providerDetailClassName;
+  return column.basis !== undefined && column.basis !== shareBasis && providerOffBasisClassName;
+}
+
+function ProviderUsageFigures({
+  figures,
+  shareBasis,
+}: {
+  figures: ProviderUsageFigureSet;
+  shareBasis: UsageMetric;
+}) {
   return PROVIDER_TABLE_COLUMNS.map((column) => (
     <td
       key={column.key}
-      className={cn(providerNumericCellClassName, column.detail && providerDetailClassName)}
+      className={cn(
+        providerNumericCellClassName,
+        providerColumnHiddenClassName(column, shareBasis),
+      )}
     >
       {column.format(figures)}
     </td>
