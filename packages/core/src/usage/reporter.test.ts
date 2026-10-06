@@ -111,10 +111,9 @@ describe("UsageReporter", () => {
     );
     await reporter().tick();
     expect(requests).toEqual([]);
-    expect(await settings.get(ACTION_RUN_CURSOR_KEY)).toEqual({
+    expect(await settings.get(ACTION_RUN_CURSOR_KEY)).toMatchObject({
       finishedAt: "2026-10-06T12:00:00.000Z",
       id: "",
-      reporting: true,
     });
   });
 
@@ -174,7 +173,7 @@ describe("UsageReporter", () => {
     expect(requests[1].events.map((event) => event.eventId)).toEqual(["too-recent"]);
   });
 
-  it("keeps events queued while signed out, and does not report runs from that period later", async () => {
+  it("ships nothing while signed out, and nothing from that period after signing in again", async () => {
     const r = reporter();
     await r.tick();
     access = null;
@@ -190,11 +189,12 @@ describe("UsageReporter", () => {
     expect(requests).toEqual([]);
     expect(await outbox.peek(10)).toHaveLength(1);
 
-    access = ACCESS;
+    // Signing in again mints a new credential, which Rome Cloud treats as a
+    // new instance.
+    access = { ...ACCESS, token: "romeinst_reenrolled" };
     await r.tick();
-    expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
-      ["turn-1"],
-    ]);
+    expect(requests).toEqual([]);
+    expect(await outbox.peek(10)).toEqual([]);
   });
 
   it("does not report a run that finished signed out inside the sweep lag once the instance signs in", async () => {
@@ -205,7 +205,7 @@ describe("UsageReporter", () => {
     now = new Date("2026-10-06T12:01:00.000Z");
     await r.tick();
 
-    access = ACCESS;
+    access = { ...ACCESS, token: "romeinst_reenrolled" };
     now = new Date("2026-10-06T12:02:00.000Z");
     await r.tick();
     await finishedRoot(
@@ -219,6 +219,37 @@ describe("UsageReporter", () => {
 
     expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
       ["signed-in-run"],
+    ]);
+  });
+
+  it("never ships usage from an earlier enrollment under a new instance credential", async () => {
+    const r = reporter();
+    await r.tick();
+    access = null;
+    await outbox.enqueue(turn("old-enrollment"));
+    // Re-enrolled before the next tick, so no sweep saw the sign-out.
+    access = { ...ACCESS, token: "romeinst_reenrolled" };
+    await finishedRoot(
+      "between-ticks",
+      "news.digest",
+      "app:news",
+      new Date("2026-10-06T12:00:30Z"),
+    );
+    now = new Date("2026-10-06T12:01:00.000Z");
+    await r.tick();
+    expect(requests).toEqual([]);
+
+    await outbox.enqueue(turn("new-enrollment"));
+    await finishedRoot(
+      "signed-in-run",
+      "news.digest",
+      "app:news",
+      new Date("2026-10-06T12:01:30Z"),
+    );
+    now = new Date("2026-10-06T12:02:00.000Z");
+    await r.tick();
+    expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
+      ["new-enrollment", "signed-in-run"],
     ]);
   });
 

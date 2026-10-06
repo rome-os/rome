@@ -1,6 +1,7 @@
 // Ships queued usage events to Rome Cloud and queues finished action runs.
 // Contract: docs/concepts/rome-cloud.md#usage-reporting.
 
+import { createHash } from "node:crypto";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
@@ -28,8 +29,11 @@ const REQUEST_TIMEOUT_MS = 15_000;
 interface ActionRunCursor {
   finishedAt: string;
   id: string;
-  /** Whether the sweep that wrote this cursor was signed in. */
-  reporting?: boolean;
+  /**
+   * Fingerprint of the instance credential the sweep that wrote this cursor
+   * ran under, or null when it ran signed out.
+   */
+  credential?: string | null;
 }
 
 export interface RomeCloudAccess {
@@ -38,7 +42,7 @@ export interface RomeCloudAccess {
 }
 
 export interface UsageReporterDeps {
-  outbox: Pick<UsageOutboxRepository, "enqueue" | "peek" | "remove" | "pruneBefore">;
+  outbox: Pick<UsageOutboxRepository, "enqueue" | "peek" | "remove" | "pruneBefore" | "clear">;
   executions: Pick<ActionExecutionsRepository, "findFinishedTopLevelAfter">;
   settings: Pick<SettingsRepository, "get" | "set">;
   attribution: Pick<UsageAttributionResolver, "forActionRun">;
@@ -96,19 +100,29 @@ export class UsageReporter {
     }
   }
 
-  // A run is reported only if the sweeps on both sides of it were signed in.
-  // The first sweep, a signed-out sweep, and the first sweep after signing in
-  // move the cursor to now without reporting, because a run in the lag window
-  // or between sweeps may have finished while signed out.
+  // A run is reported only if the sweeps on both sides of it ran under the
+  // same instance credential. The first sweep, a signed-out sweep, and the
+  // first sweep under a new credential move the cursor to now without
+  // reporting, because a run in the lag window or between sweeps may have
+  // finished while signed out. A new credential is a new instance in Rome
+  // Cloud, so events queued under the old one are dropped rather than
+  // reported as the new instance's.
   private async sweepActionRuns(): Promise<void> {
     const now = this.now();
     const stored = await this.deps.settings.get<ActionRunCursor>(ACTION_RUN_CURSOR_KEY);
-    const reporting = this.deps.access() !== null;
-    if (!stored || !reporting || stored.reporting === false) {
+    const access = this.deps.access();
+    const credential = access ? createHash("sha256").update(access.token).digest("hex") : null;
+    if (!stored || !credential || stored.credential !== credential) {
+      if (stored && credential) {
+        const dropped = await this.deps.outbox.clear();
+        if (dropped > 0) {
+          log.info("dropped usage events queued under an earlier enrollment", { dropped });
+        }
+      }
       await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
         finishedAt: now.toISOString(),
         id: "",
-        reporting,
+        credential,
       } satisfies ActionRunCursor);
       return;
     }
@@ -141,7 +155,7 @@ export class UsageReporter {
         await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
           finishedAt: last.finishedAt.toISOString(),
           id: last.id,
-          reporting: true,
+          credential,
         } satisfies ActionRunCursor);
       }
       if (rows.length < SWEEP_PAGE_SIZE) return;

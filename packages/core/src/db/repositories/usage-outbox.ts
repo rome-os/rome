@@ -34,6 +34,12 @@ export class UsageOutboxRepository {
     await this.db.delete(usageOutbox).where(inArray(usageOutbox.seq, seqs));
   }
 
+  /** Drops every queued event. Returns how many were dropped. */
+  async clear(): Promise<number> {
+    const removed = await this.db.delete(usageOutbox).returning({ seq: usageOutbox.seq });
+    return removed.length;
+  }
+
   /** Drops events queued before `cutoff`. Returns how many were dropped. */
   async pruneBefore(cutoff: Date): Promise<number> {
     const removed = await this.db
