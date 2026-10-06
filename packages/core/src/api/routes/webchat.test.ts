@@ -4163,6 +4163,51 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
+    it("reports a running chat in the list and on the status stream", async () => {
+      const sessionId = "sess-status";
+      await deps.webchatRepo.createSession(sessionId, "Status");
+      const { routes: app, runtime } = createWebchatRuntime(deps);
+      const statusRes = await app.request("/chat/status/events");
+      expect(statusRes.status).toBe(200);
+      const reader = statusRes.body!.getReader();
+      let streamed = "";
+      const readUntil = async (needle: string) => {
+        while (!streamed.includes(needle)) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          streamed += new TextDecoder().decode(chunk.value);
+        }
+        expect(streamed).toContain(needle);
+      };
+      const listed = async () => {
+        const rows = (await (await app.request("/chat/sessions")).json()) as Array<{
+          id: string;
+          running: boolean;
+          lastTurnFailed: boolean;
+        }>;
+        return rows.find((row) => row.id === sessionId);
+      };
+
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await gate;
+        emit({ type: "error", error: "boom" });
+        emit({ type: "turn_end", turnId: "status-turn", status: "error", durationMs: 1 });
+      });
+
+      await readUntil(`{"sessionId":"${sessionId}","running":true}`);
+      expect(await listed()).toMatchObject({ running: true, lastTurnFailed: false });
+
+      release();
+      await task;
+      await readUntil(`{"sessionId":"${sessionId}","running":false}`);
+      expect(await listed()).toMatchObject({ running: false, lastTurnFailed: true });
+      await reader.cancel();
+    });
+
     it("refuses a backend continuation on a side chat", async () => {
       // Side chats hold no scheduled wake-ups (they get no defer tool) and do
       // not host approval continuations. Resuming one here would reopen its

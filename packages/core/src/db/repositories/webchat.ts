@@ -208,6 +208,23 @@ const sessionSelectFields = {
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
+
+// Whether the session's latest turn ended in an error, read from the
+// `turn_end` block of its newest trace. A turn still running has no
+// `turn_end` yet and a stopped turn ends `interrupted`, so neither counts.
+const sessionLastTurnFailed = sql<boolean>`coalesce((
+  select json_extract(b."content", '$.status') = 'error'
+  from "rome_agent_trace_blocks" b
+  where b."message_id" = (
+    select m."id" from "rome_agent_messages" m
+    where m."session_id" = "rome_sessions"."id" and m."role" = 'trace'
+    order by m."created_at" desc, m."id" desc
+    limit 1
+  )
+  and json_extract(b."content", '$.type') = 'turn_end'
+  order by b."seq" desc
+  limit 1
+), 0)`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;
 const SQL_LIKE_ESCAPE = "\\";
@@ -1211,7 +1228,7 @@ export class WebChatRepository {
           ? isNotNull(romeSessions.archivedAt)
           : undefined;
     return this.db
-      .select(sessionSelectFields)
+      .select({ ...sessionSelectFields, lastTurnFailed: sessionLastTurnFailed })
       .from(romeSessions)
       .where(and(eq(romeSessions.type, "webchat"), archivePredicate))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));

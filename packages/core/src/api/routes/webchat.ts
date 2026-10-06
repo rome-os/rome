@@ -684,6 +684,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
 
+  /** Listeners told when a session starts or stops running a turn. */
+  const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  const isSessionRunning = (sessionId: string): boolean =>
+    activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false;
+  const notifyRunning = (sessionId: string): void => {
+    const event = { sessionId, running: isSessionRunning(sessionId) };
+    for (const listener of runningListeners) listener(event);
+  };
+
   const getStoredWebchatSession = async (
     c: Context,
     sessionId: string,
@@ -751,6 +760,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       activeStreams.set(sessionId, [stream]);
     }
     streamsByTurnId.set(stream.turnId, stream);
+    notifyRunning(sessionId);
   };
 
   /**
@@ -1707,6 +1717,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // already attached received it live; this only affects future replays.
     stream.events.delete("assistant_text");
     stream.resolveFinish();
+    notifyRunning(stream.sessionId);
     if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
     stream.cleanupTimer = setTimeout(() => {
       removeStream(stream);
@@ -1906,9 +1917,45 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const sessions = await deps.webchatRepo.listSessions(status);
     return c.json(
-      sessions.map((session) => toWebchatSessionResponse(session, session.messageCount)),
+      sessions.map((session) => ({
+        ...toWebchatSessionResponse(session, session.messageCount),
+        running: isSessionRunning(session.id),
+        lastTurnFailed: session.lastTurnFailed,
+      })),
     );
   });
+
+  // One stream for the whole sidebar: a `session_running` event whenever a
+  // chat starts or stops running a turn. Clients refetch the list on a stop to
+  // pick up unread and lastTurnFailed. Outside `/chat/sessions/` so no
+  // `:id` route can claim the path.
+  app.get("/chat/status/events", (c) =>
+    streamSSE(c, async (sse) => {
+      let close!: () => void;
+      let finished = false;
+      const closed = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      const listener = (event: { sessionId: string; running: boolean }) => {
+        // Fire-and-forget so a stalled client can't hold up the stream that
+        // is starting or finishing.
+        sse.writeSSE({ event: "session_running", data: JSON.stringify(event) }).catch(finish);
+      };
+      const heartbeat = setInterval(() => {
+        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+      }, 20_000);
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearInterval(heartbeat);
+        runningListeners.delete(listener);
+        close();
+      }
+      runningListeners.add(listener);
+      sse.onAbort(finish);
+      await closed;
+    }),
+  );
 
   // Register before `/chat/sessions/:id` so "search" is not captured as an ID.
   app.get("/chat/sessions/search", async (c) => {

@@ -1053,6 +1053,39 @@ describe("WebChatRepository", () => {
       await expect(repo.getSession("sess-arch")).resolves.toMatchObject({ archivedAt: null });
     });
 
+    it("flags listSessions rows whose latest turn ended in an error", async () => {
+      const turnEnd = (turnId: string, status: string) => ({
+        type: "turn_end",
+        turnId,
+        status,
+        durationMs: 1,
+      });
+      const trace = (sessionId: string, messageId: string, blocks: unknown[]) =>
+        repo.appendTraceBlocks({ messageId, sessionId, turnId: messageId, startSeq: 0, blocks });
+      await repo.createSession("sess-failed", "Failed");
+      await repo.createSession("sess-recovered", "Recovered");
+      await repo.createSession("sess-stopped", "Stopped");
+      await repo.createSession("sess-running", "Running");
+      await repo.createSession("sess-empty", "Empty");
+      await trace("sess-failed", "trace-1", [
+        { type: "error", error: "boom" },
+        turnEnd("trace-1", "error"),
+      ]);
+      await trace("sess-recovered", "trace-1a", [turnEnd("trace-1a", "error")]);
+      await trace("sess-recovered", "trace-2a", [turnEnd("trace-2a", "completed")]);
+      await trace("sess-stopped", "trace-1b", [turnEnd("trace-1b", "interrupted")]);
+      await trace("sess-running", "trace-1c", [turnEnd("trace-1c", "error")]);
+      await trace("sess-running", "trace-2c", [{ type: "text", content: "working" }]);
+
+      const rows = await repo.listSessions();
+      const failed = (id: string) => rows.find((row) => row.id === id)?.lastTurnFailed;
+      expect(failed("sess-failed")).toBe(true);
+      expect(failed("sess-recovered")).toBe(false);
+      expect(failed("sess-stopped")).toBe(false);
+      expect(failed("sess-running")).toBe(false);
+      expect(failed("sess-empty")).toBe(false);
+    });
+
     it("exposes archivedAt in listSessions rows", async () => {
       const archivedAt = new Date("2026-07-14T12:00:00.000Z");
       await repo.createSession("sess-arch", "Archive me");
