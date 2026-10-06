@@ -1024,7 +1024,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             }
             if (await consumeStream(res, sessionId, turnId)) break;
             delayMs = TURN_RESUME_BASE_DELAY_MS;
-          } else {
+          } else if (sessionId === floorSessionIdRef.current) {
+            // The composer banner belongs to the floor; a background turn
+            // retries quietly.
             shownError = t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
@@ -1033,6 +1035,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         } finally {
           releaseTurnStreamController(turnId, controller);
         }
+        // Only Stop's force-release or unmount aborts our controller. Either
+        // already settled the turn, so leave now; waiting out the backoff
+        // would hold the send bookkeeping and swallow an immediate new send.
+        if (controller.signal.aborted) return;
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
         if (!ownsEntry()) return;

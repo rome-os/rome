@@ -507,6 +507,33 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
+  it("follows a turn sent right after Stop releases a dead stream", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
+    rs.mocked(postSessionTurn)
+      .mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } })
+      .mockResolvedValueOnce({ ok: true, data: { turnId: "turn-2" } });
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      const composer = () => screen.getByTestId("chat-composer").getAttribute("data-streaming");
+
+      fireEvent.click(screen.getByTestId("send-button"));
+      await waitFor(() => expect(composer()).toBe("true"));
+      fireEvent.click(screen.getByTestId("stop-button"));
+      await waitFor(() => expect(composer()).toBe("false"));
+
+      fireEvent.click(screen.getByTestId("send-button"));
+      // Well inside the 1 s resume backoff: the new turn gets its own follower.
+      await waitFor(
+        () => expect(openTurnStream).toHaveBeenCalledWith("turn-2", expect.any(Object)),
+        { timeout: 500 },
+      );
+      expect(composer()).toBe("true");
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    }
+  });
+
   it("keeps a background turn's replayed trace and widgets from retargeting the host", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const encoder = new TextEncoder();
