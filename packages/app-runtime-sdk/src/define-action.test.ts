@@ -144,3 +144,56 @@ describe("defineAction", () => {
     expect(action.preview).toBeUndefined();
   });
 });
+
+describe("defineAction routine trigger payload", () => {
+  async function seenInput(schema: z.ZodType, args: Record<string, unknown>) {
+    let seen: unknown;
+    const action = defineAction({
+      config,
+      schema,
+      execute: async (input) => {
+        seen = input;
+        return { status: "ok" } as const;
+      },
+    });
+    const result = await action.execute(args);
+    return { result, seen };
+  }
+
+  it("lets a strict schema run under a routine that adds __triggerPayload", async () => {
+    const { result, seen } = await seenInput(z.strictObject({ x: z.string() }), {
+      x: "hi",
+      __triggerPayload: {},
+    });
+
+    expect(result.status).toBe("ok");
+    expect(seen).toEqual({ x: "hi" });
+  });
+
+  it("still rejects other unknown keys on a strict schema", async () => {
+    const { result } = await seenInput(z.strictObject({ x: z.string() }), {
+      x: "hi",
+      extra: 1,
+    });
+
+    expect(result.status).toBe("error");
+  });
+
+  it("passes __triggerPayload to a schema that declares it", async () => {
+    const { seen } = await seenInput(
+      z.strictObject({ x: z.string(), __triggerPayload: z.unknown().optional() }),
+      { x: "hi", __triggerPayload: { id: 1 } },
+    );
+
+    expect(seen).toEqual({ x: "hi", __triggerPayload: { id: 1 } });
+  });
+
+  it("passes __triggerPayload to a loose schema", async () => {
+    const { seen } = await seenInput(z.looseObject({ x: z.string() }), {
+      x: "hi",
+      __triggerPayload: { id: 1 },
+    });
+
+    expect(seen).toEqual({ x: "hi", __triggerPayload: { id: 1 } });
+  });
+});

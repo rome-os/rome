@@ -395,6 +395,8 @@ export type ActionResult<T = unknown> =
   | { status: "handoff"; handoff: Handoff }
   | { status: "place_widget"; placement: PlaceWidget };
 
+const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
+
 /**
  * Build an {@link Action} from a Zod input schema. The schema is the single
  * source of truth: it generates the model-facing JSON Schema (`inputSchema`),
@@ -426,13 +428,27 @@ export function defineAction<S extends z.ZodType>(spec: {
   const invalidInputMessage = (error: z.ZodError): string =>
     `Invalid input for ${spec.config.name}: ${z.prettifyError(error)}`;
 
+  // A routine adds `__triggerPayload` to every action's args. A schema that
+  // forbids unknown keys and does not declare it would reject every routine
+  // run, so drop the key for that schema alone. A loose schema still sees it.
+  const dropsTriggerPayload =
+    inputSchema.additionalProperties === false &&
+    !Object.hasOwn((inputSchema.properties as object | undefined) ?? {}, TRIGGER_PAYLOAD_KEY);
+  const parse = (args: Record<string, unknown>) => {
+    if (dropsTriggerPayload && Object.hasOwn(args, TRIGGER_PAYLOAD_KEY)) {
+      const { [TRIGGER_PAYLOAD_KEY]: _payload, ...rest } = args;
+      return spec.schema.safeParse(rest);
+    }
+    return spec.schema.safeParse(args);
+  };
+
   const previewFn = spec.preview;
 
   return {
     config: spec.config,
     inputSchema,
     execute: async (args, context) => {
-      const parsed = spec.schema.safeParse(args);
+      const parsed = parse(args);
       if (!parsed.success) {
         return { status: "error", error: invalidInputMessage(parsed.error) };
       }
@@ -440,7 +456,7 @@ export function defineAction<S extends z.ZodType>(spec: {
     },
     ...(previewFn && {
       preview: (args: Record<string, unknown>): PreviewPayload => {
-        const parsed = spec.schema.safeParse(args);
+        const parsed = parse(args);
         if (!parsed.success) {
           return {
             kind: "generic",
