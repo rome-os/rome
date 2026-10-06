@@ -122,8 +122,11 @@ export class UsageReporter {
     const access = this.deps.access();
     const credential = access ? credentialFingerprint(access.token) : null;
     if (!stored || !credential || stored.credential !== credential) {
+      // finished_at is stored in whole seconds, so a cursor inside a second
+      // would still admit that second's earlier runs. Start at the next one.
+      const nextSecond = new Date((Math.floor(now.getTime() / 1000) + 1) * 1000);
       await this.deps.settings.set(ACTION_RUN_CURSOR_KEY, {
-        finishedAt: now.toISOString(),
+        finishedAt: nextSecond.toISOString(),
         id: "",
         credential,
       } satisfies ActionRunCursor);

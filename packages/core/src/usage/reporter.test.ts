@@ -121,7 +121,7 @@ describe("UsageReporter", () => {
     await reporter().tick();
     expect(requests).toEqual([]);
     expect(await settings.get(ACTION_RUN_CURSOR_KEY)).toMatchObject({
-      finishedAt: "2026-10-06T12:00:00.000Z",
+      finishedAt: "2026-10-06T12:00:01.000Z",
       id: "",
     });
   });
@@ -227,6 +227,27 @@ describe("UsageReporter", () => {
     expect(requests.map((request) => request.events.map((event) => event.eventId))).toEqual([
       ["signed-in-run"],
     ]);
+  });
+
+  it("does not report a run that finished signed out in the same second as the sign-in sweep", async () => {
+    const r = reporter();
+    access = null;
+    await r.tick();
+    // finished_at is stored in whole seconds, so this run compares equal to a
+    // cursor anywhere in 12:00:00.
+    await finishedRoot(
+      "same-second",
+      "news.digest",
+      "app:news",
+      new Date("2026-10-06T12:00:00.100Z"),
+    );
+    access = ACCESS;
+    now = new Date("2026-10-06T12:00:00.500Z");
+    await r.tick();
+    now = new Date("2026-10-06T12:01:00.000Z");
+    await r.tick();
+
+    expect(requests).toEqual([]);
   });
 
   it("ships each event only under the credential it was recorded under", async () => {
