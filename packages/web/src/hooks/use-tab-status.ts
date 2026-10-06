@@ -58,8 +58,9 @@ function iconLink(): HTMLLinkElement | null {
   return document.querySelector<HTMLLinkElement>('link[rel="icon"]');
 }
 
-// Glyph geometry in icon.svg's 52-unit grid, bottom-right corner: a dot, an
-// exclamation mark, a check mark. Shape tells the states apart without color.
+// Glyph geometry in icon.svg's 52-unit grid, bottom-right corner: an open ring
+// (the sidebar's spinner, held still), an exclamation mark, a check mark. Shape
+// tells the states apart without color.
 const GRID = 52;
 
 function traceGlyph(
@@ -71,9 +72,21 @@ function traceGlyph(
   ctx.lineJoin = "round";
   ctx.lineWidth = gap ? 11.5 : 5;
   if (status === "working") {
+    if (gap) {
+      ctx.beginPath();
+      ctx.arc(43, 43, 10.5, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.25;
     ctx.beginPath();
-    ctx.arc(43, 43, gap ? 10.5 : 7, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(43, 43, 6.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(43, 43, 6.5, -Math.PI / 2, Math.PI);
+    ctx.stroke();
   } else if (status === "needs-you") {
     ctx.beginPath();
     ctx.moveTo(45, 29);
