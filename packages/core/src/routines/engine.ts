@@ -179,6 +179,7 @@ export class RoutineEngine {
       executionId: rootExecutionId,
       status: "running",
       payload,
+      firedBy: opts.manual ? "run_now" : routine.trigger.type,
     });
 
     // Captured inside the span callback and returned to the caller so a manual

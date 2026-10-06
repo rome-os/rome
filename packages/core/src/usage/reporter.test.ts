@@ -18,11 +18,11 @@ const ACCESS: RomeCloudAccess = { token: "romeinst_test", origin: "https://rome.
 const REENROLLED: RomeCloudAccess = { ...ACCESS, token: "romeinst_reenrolled" };
 const CREDENTIAL = credentialFingerprint(ACCESS.token);
 const attribution: Pick<UsageAttributionResolver, "forActionRun"> = {
-  forActionRun: (row) =>
+  forActionRun: async (row) =>
     row.initiator?.startsWith("routine:")
-      ? { kind: "routine", appId: null }
+      ? { kind: "routine", appId: null, trigger: "schedule" }
       : row.initiator?.startsWith("app:")
-        ? { kind: "app", appId: "@rome/news" }
+        ? { kind: "app", appId: "@rome/news", trigger: row.actor ? "user" : "background" }
         : null,
 };
 
@@ -32,6 +32,7 @@ function turn(eventId: string): UsageEvent {
     eventId,
     kind: "chat",
     appId: null,
+    trigger: "user",
     status: "completed",
     provider: "openai",
     model: "gpt-6-sol",
@@ -161,6 +162,7 @@ describe("UsageReporter", () => {
         eventId: "routine-run",
         kind: "routine",
         appId: null,
+        trigger: "schedule",
         status: "success",
         durationMs: 25,
         occurredAt: "2026-10-06T12:00:30.000Z",
@@ -170,6 +172,7 @@ describe("UsageReporter", () => {
         eventId: "app-run",
         kind: "app",
         appId: "@rome/news",
+        trigger: "background",
         status: "success",
         durationMs: 25,
         occurredAt: "2026-10-06T12:00:40.000Z",

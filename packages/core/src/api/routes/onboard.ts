@@ -138,6 +138,7 @@ export function onboardRoutes(deps: ApiDeps): Hono {
     });
 
     issueGuardianSession(c, userId);
+    deps.loginUsage.recordLogin("onboard");
 
     return c.json({ success: true });
   });

@@ -9,6 +9,12 @@ export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
 /** Who paid the model provider for a turn. */
 export type UsageFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
+/**
+ * What set the work off: a person, a schedule or poll, an event or webhook, or
+ * an app's own code with no person behind it.
+ */
+export type UsageTrigger = "user" | "schedule" | "event" | "background" | "unknown";
+
 export interface TurnUsageEvent {
   type: "turn";
   /** The Rome turn id. */
@@ -16,6 +22,7 @@ export interface TurnUsageEvent {
   kind: UsageKind;
   /** App Store listing id, `local` for an app from outside the store, or null. */
   appId: string | null;
+  trigger: UsageTrigger;
   status: AgentTurnStatus;
   provider: string;
   model: string | null;
@@ -38,9 +45,27 @@ export interface ActionRunUsageEvent {
   eventId: string;
   kind: "app" | "routine";
   appId: string | null;
+  trigger: UsageTrigger;
   status: "success" | "error" | "cancelled";
   durationMs: number | null;
   occurredAt: string;
 }
 
-export type UsageEvent = TurnUsageEvent | ActionRunUsageEvent;
+/** How the guardian signed in. */
+export type LoginMethod =
+  | "password"
+  | "onboard"
+  | "oauth"
+  | "handoff"
+  | "rome_cloud"
+  | "rome_cloud_native";
+
+/** One guardian sign-in to this instance. */
+export interface LoginUsageEvent {
+  type: "login";
+  eventId: string;
+  kind: LoginMethod;
+  occurredAt: string;
+}
+
+export type UsageEvent = TurnUsageEvent | ActionRunUsageEvent | LoginUsageEvent;

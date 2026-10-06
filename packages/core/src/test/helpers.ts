@@ -717,6 +717,7 @@ export async function buildTestDeps(
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
     isCloudAuthEnabled: async () => false,
+    loginUsage: { recordLogin: () => {} },
     channelPortMap,
   };
 }

@@ -209,6 +209,8 @@ export class ActionExecutionsRepository {
         actionName: actionExecutions.actionName,
         status: actionExecutions.status,
         initiator: actionExecutions.initiator,
+        actor: actionExecutions.actor,
+        rootExecutionId: actionExecutions.rootExecutionId,
         durationMs: actionExecutions.durationMs,
         finishedAt: actionExecutions.finishedAt,
       })

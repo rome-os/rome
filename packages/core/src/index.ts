@@ -25,6 +25,7 @@ import { UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
+import type { SessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -673,8 +674,21 @@ async function main() {
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
-      getExecutionInitiator: async (id) =>
-        (await actionExecutionsRepo.findById(id))?.initiator ?? null,
+      getExecution: async (id) => {
+        const row = await actionExecutionsRepo.findById(id);
+        return row
+          ? {
+              initiator: row.initiator,
+              actor: (row.actor ?? null) as SessionActor | null,
+              rootExecutionId: row.rootExecutionId,
+            }
+          : null;
+      },
+      // A retried fire runs under a new root with no routine run, so it falls
+      // back to the routine's trigger.
+      getRoutineFiredBy: async ({ rootExecutionId, routineName }) =>
+        (await routineRunsRepo.findFiredBy(rootExecutionId)) ??
+        (await routinesRepo.findTriggerTypeByName(routineName)),
     },
     createUsageAppDirectory({ agentLoader, actionRegistry, appCatalog }),
   );
@@ -1352,6 +1366,7 @@ async function main() {
       favorService,
       systemUpgradeService,
       isCloudAuthEnabled,
+      loginUsage: usageRecorder,
       connectionRegistry,
       setupManager,
     };

@@ -1,5 +1,6 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
-import type { UsageKind } from "./events.js";
+import type { SessionActor } from "../lib/session-actor.js";
+import type { UsageKind, UsageTrigger } from "./events.js";
 
 // A subagent can delegate again, and a fork can be forked. Lineage deeper than
 // this is treated as unreachable rather than walked further.
@@ -14,9 +15,23 @@ interface SessionRow {
   triggerActionName: string | null;
 }
 
+interface ExecutionRow {
+  initiator: string | null;
+  actor: SessionActor | null;
+  rootExecutionId: string;
+}
+
 export interface UsageAttributionSources {
   getSession(id: string): Promise<SessionRow | null>;
-  getExecutionInitiator(executionId: string): Promise<string | null>;
+  getExecution(executionId: string): Promise<ExecutionRow | null>;
+  /**
+   * What fired the routine run rooted at `rootExecutionId`: a trigger type, or
+   * `run_now` for a manual run. Null when that is not known.
+   */
+  getRoutineFiredBy(params: {
+    rootExecutionId: string;
+    routineName: string;
+  }): Promise<string | null>;
 }
 
 /**
@@ -33,6 +48,7 @@ export interface UsageAppDirectory {
 export interface UsageAttribution {
   kind: UsageKind;
   appId: string | null;
+  trigger: UsageTrigger;
 }
 
 /**
@@ -59,7 +75,10 @@ export class UsageAttributionResolver {
     const agentAppId = this.apps.forAgent(params.agentName);
     const own = await this.sources.getSession(params.romeSessionId);
     if (!own) {
-      return { kind: kindForSessionType(params.fallbackType) ?? "other", appId: agentAppId };
+      const kind = kindForSessionType(params.fallbackType);
+      return kind
+        ? { kind, appId: agentAppId, trigger: "user" }
+        : { kind: "other", appId: agentAppId, trigger: "unknown" };
     }
     let session: SessionRow = own;
     for (let depth = 0; isChildSession(session) && depth < MAX_LINEAGE_DEPTH; depth++) {
@@ -70,20 +89,29 @@ export class UsageAttributionResolver {
       session = parent;
     }
     const direct = kindForSessionType(session.type);
-    if (direct) return { kind: direct, appId: agentAppId };
-    if (session.type !== "action") return { kind: "other", appId: agentAppId };
+    if (direct) return { kind: direct, appId: agentAppId, trigger: "user" };
+    if (session.type !== "action") return { kind: "other", appId: agentAppId, trigger: "unknown" };
 
-    // Every execution in a chain carries the chain's initiator. The execution
-    // that started the agent is a stored row. A routine's root id is not.
+    // Every execution in a chain carries the chain's initiator and actor. The
+    // execution that started the agent is a stored row. A routine's root id is
+    // not, but its routine run is keyed by it.
     const executionId = session.triggerExecutionId ?? session.rootActionExecutionId;
-    const initiator = executionId ? await this.sources.getExecutionInitiator(executionId) : null;
+    const execution = executionId ? await this.sources.getExecution(executionId) : null;
+    const initiator = execution?.initiator ?? null;
+    const trigger = await this.triggerFor({
+      initiator,
+      actor: execution?.actor ?? null,
+      rootExecutionId: session.rootActionExecutionId ?? execution?.rootExecutionId ?? null,
+    });
     const fromInitiator = this.fromInitiator(initiator);
-    if (fromInitiator) return { ...fromInitiator, appId: fromInitiator.appId ?? agentAppId };
+    if (fromInitiator) {
+      return { ...fromInitiator, appId: fromInitiator.appId ?? agentAppId, trigger };
+    }
     const actionAppId = session.triggerActionName
       ? this.apps.forAction(session.triggerActionName)
       : null;
-    if (actionAppId) return { kind: "app", appId: actionAppId };
-    return { kind: "other", appId: agentAppId };
+    if (actionAppId) return { kind: "app", appId: actionAppId, trigger };
+    return { kind: "other", appId: agentAppId, trigger };
   }
 
   /**
@@ -92,27 +120,67 @@ export class UsageAttributionResolver {
    * app's action are reported. An agent's tool call, channel delivery, and
    * startup work are not: their model work is already counted by turn events.
    */
-  forActionRun(row: {
-    actionName: string;
-    initiator: string | null;
-  }): (UsageAttribution & { kind: "app" | "routine" }) | null {
+  async forActionRun(
+    row: ExecutionRow & { actionName: string },
+  ): Promise<(UsageAttribution & { kind: "app" | "routine" }) | null> {
     const actionAppId = this.apps.forAction(row.actionName);
     const fromInitiator = this.fromInitiator(row.initiator);
-    if (fromInitiator) return { ...fromInitiator, appId: fromInitiator.appId ?? actionAppId };
-    if (row.initiator === "webhook" && actionAppId) return { kind: "app", appId: actionAppId };
-    return null;
+    const reported = fromInitiator
+      ? { ...fromInitiator, appId: fromInitiator.appId ?? actionAppId }
+      : row.initiator === "webhook" && actionAppId
+        ? { kind: "app" as const, appId: actionAppId }
+        : null;
+    return reported ? { ...reported, trigger: await this.triggerFor(row) } : null;
+  }
+
+  // A person in the chain wins. Otherwise a routine run reports what fired it,
+  // a webhook is an event, and an app's own call has no person behind it. A
+  // guardian reached over loopback is the agent or a CLI in the container.
+  private async triggerFor(params: {
+    initiator: string | null;
+    actor: SessionActor | null;
+    rootExecutionId: string | null;
+  }): Promise<UsageTrigger> {
+    const { initiator, actor } = params;
+    if (actor && !(actor.kind === "guardian" && actor.via === "loopback")) return "user";
+    if (initiator?.startsWith("routine:") && params.rootExecutionId) {
+      const firedBy = await this.sources.getRoutineFiredBy({
+        rootExecutionId: params.rootExecutionId,
+        routineName: initiator.slice("routine:".length),
+      });
+      return triggerForRoutineFire(firedBy);
+    }
+    if (initiator === "webhook") return "event";
+    if (initiator?.startsWith("app:")) return "background";
+    return "unknown";
   }
 
   // Initiators are `routine:<name>` and `app:<appId>`, among others that do
   // not decide the kind. Routine names stay on the instance.
   private fromInitiator(
     initiator: string | null,
-  ): (UsageAttribution & { kind: "app" | "routine" }) | null {
+  ): Omit<UsageAttribution & { kind: "app" | "routine" }, "trigger"> | null {
     if (initiator?.startsWith("routine:")) return { kind: "routine", appId: null };
     if (initiator?.startsWith("app:")) {
       return { kind: "app", appId: this.apps.forApp(initiator.slice("app:".length)) };
     }
     return null;
+  }
+}
+
+function triggerForRoutineFire(firedBy: string | null): UsageTrigger {
+  switch (firedBy) {
+    case "run_now":
+    case "manual":
+      return "user";
+    case "schedule":
+    case "poll":
+      return "schedule";
+    case "event-bus":
+    case "webhook":
+      return "event";
+    default:
+      return "unknown";
   }
 }
 

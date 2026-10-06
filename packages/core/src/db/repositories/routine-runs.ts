@@ -34,6 +34,7 @@ export class RoutineRunsRepository {
     executionId: string;
     status: RoutineRunStatus;
     payload?: Record<string, unknown>;
+    firedBy?: string;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
@@ -43,6 +44,7 @@ export class RoutineRunsRepository {
       executionId: data.executionId,
       status: data.status,
       payload: (data.payload ?? null) as unknown,
+      firedBy: data.firedBy ?? null,
       firedAt: now,
       durationMs: null,
       error: null,
@@ -70,6 +72,17 @@ export class RoutineRunsRepository {
   async findById(id: string): Promise<RoutineRun | null> {
     const rows = await this.db.select().from(routineRuns).where(eq(routineRuns.id, id)).limit(1);
     return rows[0] ? toRoutineRun(rows[0]) : null;
+  }
+
+  /** What fired the run rooted at `executionId`: a trigger type or `run_now`.
+   * Null when no run has that root or the run predates the column. */
+  async findFiredBy(executionId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ firedBy: routineRuns.firedBy })
+      .from(routineRuns)
+      .where(eq(routineRuns.executionId, executionId))
+      .limit(1);
+    return rows[0]?.firedBy ?? null;
   }
 
   async findByRoutineId(
