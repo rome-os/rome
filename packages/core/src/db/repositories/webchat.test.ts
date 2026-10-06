@@ -7,6 +7,7 @@ import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema
 import {
   WebChatRepository,
   channelConversationId,
+  sessionAwaitingGuardian,
   sessionLastTurnFailed,
   validateTurnRecapAudioUrl,
 } from "./webchat.js";
@@ -1150,6 +1151,28 @@ describe("WebChatRepository", () => {
       expect(waiting("sess-mention")).toBe(false);
       expect(waiting("sess-approval")).toBe(true);
       expect(waiting("sess-approved")).toBe(false);
+    });
+
+    it("reads pending approvals once per list, not once per chat", () => {
+      const sqlite = (
+        testDb.db as unknown as {
+          $client: {
+            prepare(sql: string): { all(...values: unknown[]): Array<{ detail: string }> };
+          };
+        }
+      ).$client;
+      const query = testDb.db
+        .select({ awaitingGuardian: sessionAwaitingGuardian })
+        .from(romeSessions)
+        .toSQL();
+      const details = sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+        .all(...query.params)
+        .map((row) => row.detail)
+        .join("\n");
+
+      // An uncorrelated list subquery runs once; a correlated one per chat.
+      expect(details).toMatch(/^LIST SUBQUERY \d+\nSCAN a$/m);
     });
 
     it("finds each listed session's newest trace through its session index", () => {

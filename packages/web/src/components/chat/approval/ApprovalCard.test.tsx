@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ApprovalRecord } from "@/lib/chat-types";
+import { CHAT_SESSIONS_CHANGED_EVENT } from "@/lib/session-events";
 import { ApprovalCard } from "./ApprovalCard";
 
 const mockUseTabStatus = rs.hoisted(() => rs.fn());
@@ -96,5 +97,21 @@ describe("ApprovalCard tab status", () => {
 
     fireEvent.click(screen.getByText("approvals.actions.approve"));
     await waitFor(() => expect(lastTabStatus()).toBe("idle"));
+  });
+
+  it("tells the sidebar to refresh once the guardian rejects", async () => {
+    mockFetchApproval.mockResolvedValue(record({ status: "pending" }));
+    mockResolveApproval.mockResolvedValue({ ok: true });
+    const changed = rs.fn();
+    window.addEventListener(CHAT_SESSIONS_CHANGED_EVENT, changed);
+    try {
+      mountCard();
+      await waitFor(() => expect(lastTabStatus()).toBe("needs-you"));
+
+      fireEvent.click(screen.getByText("approvals.actions.reject"));
+      await waitFor(() => expect(changed).toHaveBeenCalled());
+    } finally {
+      window.removeEventListener(CHAT_SESSIONS_CHANGED_EVENT, changed);
+    }
   });
 });

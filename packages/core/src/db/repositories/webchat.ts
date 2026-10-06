@@ -230,7 +230,9 @@ export const sessionLastTurnFailed = sql<boolean>`coalesce((
 // Whether the session waits on the guardian: a card (question, connect-AI,
 // app component) posted since their last message, or an approval still
 // pending in this chat. Any answer to a card is saved as a user message, so a
-// card after the last one is still open. rowid is insertion order.
+// card after the last one is still open. rowid is insertion order. Every reply
+// adds an auto-approved row to `approvals`, so the pending thread ids are
+// collected once per list rather than scanned per chat.
 export const sessionAwaitingGuardian = sql<boolean>`(exists (
   select 1 from "rome_agent_messages" m, json_each(m."content") part
   where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
@@ -239,10 +241,9 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
     where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
   ), 0)
   and json_extract(part."value", '$.type') = 'pending_interaction'
-) or exists (
-  select 1 from "approvals" a
+) or "rome_sessions"."id" in (
+  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
   where a."status" = 'pending'
-  and json_extract(a."payload", '$.channelContext.threadId') = "rome_sessions"."id"
 ))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;

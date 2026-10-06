@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchApproval, resolveApproval } from "@/lib/chat-api";
 import { sameApproval } from "@/lib/chat-helpers";
+import { emitSessionsChanged } from "@/lib/session-events";
 import type { ApprovalCardStatus, ApprovalRecord } from "@/lib/chat-types";
 import { deriveCardStatus, isTerminalCardStatus } from "./derive-card-status";
 
@@ -168,6 +169,9 @@ export function useApprovalCard({
           executionError: prev?.executionError ?? null,
         };
       });
+      // The sidebar's "waiting" mark counts pending approvals, and a reject
+      // starts no tracked turn that would refresh it.
+      emitSessionsChanged();
       // Pull fresh state quickly to confirm + catch the executionState
       // transition from queued → succeeded without waiting for next poll.
       for (const delay of POST_RESOLVE_REFETCH_DELAYS_MS) {
