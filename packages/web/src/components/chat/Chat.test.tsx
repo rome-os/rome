@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
+import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import {
   deleteSession,
   interruptTurn,
@@ -506,7 +507,7 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
-  it("keeps a background turn's replayed trace from retargeting the host", async () => {
+  it("keeps a background turn's replayed trace and widgets from retargeting the host", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     const encoder = new TextEncoder();
     const dropping: ReadableStreamDefaultController<Uint8Array>[] = [];
@@ -528,6 +529,7 @@ describe("Chat turn stream lifecycle", () => {
                 c.enqueue(
                   encoder.encode(
                     'event: segment_upsert\ndata: {"id":"seg-1","kind":"text"}\n\n' +
+                      'event: widget_placement\ndata: {"appId":"notes"}\n\n' +
                       'event: done\ndata: {"success":true}\n\n',
                   ),
                 );
@@ -580,6 +582,7 @@ describe("Chat turn stream lifecycle", () => {
       expect(onSessionMessage).not.toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: "session-1", segment: expect.anything() }),
       );
+      expect(autoPlaceApp).not.toHaveBeenCalled();
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
       rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);

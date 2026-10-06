@@ -974,7 +974,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 route?: string;
                 params?: Record<string, string | number | boolean>;
               };
-              if (appId) autoPlaceApp(appId, route, params);
+              // The floor owns the workspace; a background turn's replayed
+              // placement would remount (and reset) a widget in use.
+              if (appId && sessionId === floorSessionIdRef.current) {
+                autoPlaceApp(appId, route, params);
+              }
             } catch {
               // ignore parse errors
             }
