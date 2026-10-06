@@ -32,6 +32,8 @@ export interface AgentTurnStreamRegistry {
   get(turnId: string): ActiveAgentTurnStream | undefined;
   getActiveByConversation(ref: ConversationRef): ActiveAgentTurnStream | undefined;
   listBySession(sessionId: string): ActiveAgentTurnStream[];
+  /** Calls `listener` with the session id whenever one of its turns starts or finishes. */
+  onSessionChange(listener: (sessionId: string) => void): () => void;
 }
 
 const FINISHED_STREAM_TTL_MS = 30_000;
@@ -43,6 +45,10 @@ function conversationKey(ref: ConversationRef): string {
 export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
   const streams = new Map<string, MutableAgentTurnStream>();
   const activeByConversation = new Map<string, MutableAgentTurnStream>();
+  const sessionListeners = new Set<(sessionId: string) => void>();
+  const notifySession = (sessionId: string) => {
+    for (const listener of sessionListeners) listener(sessionId);
+  };
 
   return {
     register(input) {
@@ -85,6 +91,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
             activeByConversation.delete(conversationKey(input.conversation));
           }
           resolveFinished();
+          notifySession(input.sessionId);
           setTimeout(() => {
             if (streams.get(input.turnId) === stream) streams.delete(input.turnId);
           }, FINISHED_STREAM_TTL_MS).unref?.();
@@ -94,6 +101,7 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       if (input.conversation) {
         activeByConversation.set(conversationKey(input.conversation), stream);
       }
+      notifySession(input.sessionId);
       return stream;
     },
 
@@ -110,6 +118,13 @@ export function createAgentTurnStreamRegistry(): AgentTurnStreamRegistry {
       return [...streams.values()].filter(
         (stream) => stream.sessionId === sessionId && !stream.finished,
       );
+    },
+
+    onSessionChange(listener) {
+      sessionListeners.add(listener);
+      return () => {
+        sessionListeners.delete(listener);
+      };
     },
   };
 }

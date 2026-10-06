@@ -686,12 +686,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
+  // turns in the shared registry, such as a side chat's first answer.
   const isSessionRunning = (sessionId: string): boolean =>
-    activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false;
+    (activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false) ||
+    deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // Sessions running right now, so a status stream can open with a snapshot.
+  const runningSessions = new Set<string>();
   const notifyRunning = (sessionId: string): void => {
     const event = { sessionId, running: isSessionRunning(sessionId) };
+    if (event.running) runningSessions.add(sessionId);
+    else runningSessions.delete(sessionId);
     for (const listener of runningListeners) listener(event);
   };
+  deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -1917,18 +1925,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const sessions = await deps.webchatRepo.listSessions(status);
     return c.json(
-      sessions.map((session) => ({
-        ...toWebchatSessionResponse(session, session.messageCount),
-        running: isSessionRunning(session.id),
-        lastTurnFailed: session.lastTurnFailed,
-      })),
+      sessions.map((session) => {
+        const running = isSessionRunning(session.id);
+        return {
+          ...toWebchatSessionResponse(session, session.messageCount),
+          running,
+          // A new turn's trace is written a moment after it starts, so until
+          // then the newest trace is the previous turn's. Running wins.
+          lastTurnFailed: session.lastTurnFailed && !running,
+        };
+      }),
     );
   });
 
-  // One stream for the whole sidebar: a `session_running` event whenever a
-  // chat starts or stops running a turn. Clients refetch the list on a stop to
-  // pick up unread and lastTurnFailed. Outside `/chat/sessions/` so no
-  // `:id` route can claim the path.
+  // One stream for the whole sidebar: a `session_running` event for each chat
+  // running when it opens, then one whenever a chat starts or stops running a
+  // turn. Clients refetch the list on a stop to pick up unread and
+  // lastTurnFailed. Outside `/chat/sessions/` so no `:id` route can claim the
+  // path.
   app.get("/chat/status/events", (c) =>
     streamSSE(c, async (sse) => {
       let close!: () => void;
@@ -1952,6 +1966,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         close();
       }
       runningListeners.add(listener);
+      for (const sessionId of runningSessions) listener({ sessionId, running: true });
       sse.onAbort(finish);
       await closed;
     }),

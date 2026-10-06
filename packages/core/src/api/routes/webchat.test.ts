@@ -4206,6 +4206,55 @@ describe("Webchat API", () => {
       await readUntil(`{"sessionId":"${sessionId}","running":false}`);
       expect(await listed()).toMatchObject({ running: false, lastTurnFailed: true });
       await reader.cancel();
+
+      // A retry hides the old failure while it runs, and a stream opened
+      // mid-turn starts with a snapshot of it.
+      let releaseRetry!: () => void;
+      const retryGate = new Promise<void>((resolve) => {
+        releaseRetry = resolve;
+      });
+      const retry = runtime.enqueueSessionTask(sessionId, () => retryGate);
+      await rs.waitFor(async () => expect((await listed())?.running).toBe(true));
+      expect(await listed()).toMatchObject({ lastTurnFailed: false });
+      const lateReader = (await app.request("/chat/status/events")).body!.getReader();
+      const first = new TextDecoder().decode((await lateReader.read()).value);
+      expect(first).toContain(`{"sessionId":"${sessionId}","running":true}`);
+      await lateReader.cancel();
+      releaseRetry();
+      await retry;
+    });
+
+    it("counts a turn in the shared turn registry as running", async () => {
+      const sessionId = "sess-branch";
+      await deps.webchatRepo.createSession(sessionId, "Branch");
+      const { routes: app } = createWebchatRuntime(deps);
+      const reader = (await app.request("/chat/status/events")).body!.getReader();
+      const running = async () => {
+        const rows = (await (await app.request("/chat/sessions")).json()) as Array<{
+          id: string;
+          running: boolean;
+        }>;
+        return rows.find((row) => row.id === sessionId)?.running;
+      };
+
+      const turn = deps.agentTurnStreamRegistry.register({
+        sessionId,
+        turnId: "branch-turn",
+        agentName: "main",
+      });
+      expect(await running()).toBe(true);
+      turn.finish();
+      expect(await running()).toBe(false);
+
+      let streamed = "";
+      while (!streamed.includes(`"running":false`)) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        streamed += new TextDecoder().decode(chunk.value);
+      }
+      expect(streamed).toContain(`{"sessionId":"${sessionId}","running":true}`);
+      expect(streamed).toContain(`{"sessionId":"${sessionId}","running":false}`);
+      await reader.cancel();
     });
 
     it("refuses a backend continuation on a side chat", async () => {

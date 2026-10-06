@@ -212,13 +212,15 @@ const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer
 // Whether the session's latest turn ended in an error, read from the
 // `turn_end` block of its newest trace. A turn still running has no
 // `turn_end` yet and a stopped turn ends `interrupted`, so neither counts.
-const sessionLastTurnFailed = sql<boolean>`coalesce((
+// `created_at` has one-second precision, so rowid (insertion order) breaks
+// ties between turns that start in the same second.
+export const sessionLastTurnFailed = sql<boolean>`coalesce((
   select json_extract(b."content", '$.status') = 'error'
   from "rome_agent_trace_blocks" b
   where b."message_id" = (
     select m."id" from "rome_agent_messages" m
     where m."session_id" = "rome_sessions"."id" and m."role" = 'trace'
-    order by m."created_at" desc, m."id" desc
+    order by m."created_at" desc, m."rowid" desc
     limit 1
   )
   and json_extract(b."content", '$.type') = 'turn_end'

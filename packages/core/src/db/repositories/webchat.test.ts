@@ -3,7 +3,12 @@ import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
-import { WebChatRepository, channelConversationId, validateTurnRecapAudioUrl } from "./webchat.js";
+import {
+  WebChatRepository,
+  channelConversationId,
+  sessionLastTurnFailed,
+  validateTurnRecapAudioUrl,
+} from "./webchat.js";
 
 // Records which statement entry points (`select`, `insert`, `update`, `delete`,
 // `transaction`) a repository reaches for on the connection itself, so a test
@@ -1077,13 +1082,53 @@ describe("WebChatRepository", () => {
       await trace("sess-running", "trace-1c", [turnEnd("trace-1c", "error")]);
       await trace("sess-running", "trace-2c", [{ type: "text", content: "working" }]);
 
+      // Same-second turns: the newer trace's id sorts first, so only insertion
+      // order picks the right one.
+      await repo.createSession("sess-retry-ok", "Retry ok");
+      await repo.createSession("sess-retry-failed", "Retry failed");
+      rs.useFakeTimers({ toFake: ["Date"] });
+      try {
+        rs.setSystemTime(new Date("2026-10-05T12:00:00.100Z"));
+        await trace("sess-retry-ok", "trace-z1", [turnEnd("trace-z1", "error")]);
+        await trace("sess-retry-failed", "trace-z2", [turnEnd("trace-z2", "completed")]);
+        rs.setSystemTime(new Date("2026-10-05T12:00:00.900Z"));
+        await trace("sess-retry-ok", "trace-a1", [turnEnd("trace-a1", "completed")]);
+        await trace("sess-retry-failed", "trace-a2", [turnEnd("trace-a2", "error")]);
+      } finally {
+        rs.useRealTimers();
+      }
+
       const rows = await repo.listSessions();
       const failed = (id: string) => rows.find((row) => row.id === id)?.lastTurnFailed;
+      expect(failed("sess-retry-ok")).toBe(false);
+      expect(failed("sess-retry-failed")).toBe(true);
       expect(failed("sess-failed")).toBe(true);
       expect(failed("sess-recovered")).toBe(false);
       expect(failed("sess-stopped")).toBe(false);
       expect(failed("sess-running")).toBe(false);
       expect(failed("sess-empty")).toBe(false);
+    });
+
+    it("finds each listed session's newest trace through its session index", () => {
+      const sqlite = (
+        testDb.db as unknown as {
+          $client: {
+            prepare(sql: string): { all(...values: unknown[]): Array<{ detail: string }> };
+          };
+        }
+      ).$client;
+      const query = testDb.db
+        .select({ lastTurnFailed: sessionLastTurnFailed })
+        .from(romeSessions)
+        .toSQL();
+      const details = sqlite
+        .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+        .all(...query.params)
+        .map((row) => row.detail)
+        .join("\n");
+
+      expect(details).toContain("idx_rome_agent_messages_session_trace");
+      expect(details).not.toContain("idx_rome_agent_messages_role_created_at");
     });
 
     it("exposes archivedAt in listSessions rows", async () => {
