@@ -255,7 +255,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
 
 /**
  * The chat's name, linking to the chat. Its tooltip shows the full name while
- * the sidebar is too narrow to show it whole, and the row's status.
+ * the sidebar is too narrow to show it whole.
  */
 function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
