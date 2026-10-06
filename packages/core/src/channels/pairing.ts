@@ -1,4 +1,5 @@
-import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkRouter } from "../connections/types.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -56,6 +57,19 @@ export function createPairingAdmission(deps: {
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
+    // Replies go out in the background: the decision never depends on them,
+    // and the router admits a conversation's messages one at a time, so a send
+    // that hangs must not hold up the next message.
+    // Accepted trade-off: the "paired" confirmation is not ordered against the
+    // conversation's next reply, so on a slow provider it can arrive after the
+    // agent's first answer. Approval is recorded before the send, so only the
+    // order of the two bot messages is at stake.
+    const reply = (text: string): void => {
+      router.send(connectionId, message.conversationId, { text }).catch(() => {
+        // Provider errors may include the rejected request body. Do not log them.
+        log.error("pairing reply failed", { connectionId, senderId: message.senderId });
+      });
+    };
     const guidance = `🔗 Pair ${pairingAccount(service, message.senderId, message.senderDisplayName, message.senderUsername)} with Rome.\n\nOpen \`Settings\` → \`Connections\` in the Rome Web UI.\n\nLearn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`;
     try {
       if (isPairingCodeMessage(message.text)) {
@@ -70,8 +84,7 @@ export function createPairingAdmission(deps: {
             },
             deps.talkGrants(service),
           );
-          if (request?.guide)
-            await router.send(connectionId, message.conversationId, { text: guidance });
+          if (request?.guide) reply(guidance);
           return false;
         }
         const result = deps.approvalsRepo.verifyPairing({
@@ -86,19 +99,19 @@ export function createPairingAdmission(deps: {
           outcome: result.outcome,
         });
         if (result.outcome === "resolved" && result.approval.status === "approved") {
-          await router.send(connectionId, message.conversationId, {
-            text: pairingSuccess(
+          reply(
+            pairingSuccess(
               service,
               message.senderId,
               message.senderDisplayName,
               message.senderUsername,
             ),
-          });
+          );
         }
         if (result.outcome === "invalid_code" && "notify" in result && result.notify) {
-          await router.send(connectionId, message.conversationId, {
-            text: "The code was not accepted. Check the pending request in Settings → Connections or Activity. After five failed attempts, ask the guardian to approve it there.",
-          });
+          reply(
+            "The code was not accepted. Check the pending request in Settings → Connections or Activity. After five failed attempts, ask the guardian to approve it there.",
+          );
         }
         return false;
       }
@@ -121,7 +134,7 @@ export function createPairingAdmission(deps: {
         deps.talkGrants(service),
       );
       if (request?.guide) {
-        await router.send(connectionId, message.conversationId, { text: guidance });
+        reply(guidance);
         log.info("pairing guidance sent", { approvalId: request.approval.id, connectionId });
       }
       return false;

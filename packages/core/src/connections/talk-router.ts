@@ -1,17 +1,23 @@
-import type {
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  OutgoingMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkFeatureName, TalkRouter } from "./types.js";
 import type { Connection, ConnectionId } from "./types.js";
 import type { ConnectionRegistry } from "./registry.js";
 import { createLogger } from "../logger.js";
+import { KeyedMutex } from "../lib/keyed-mutex.js";
 
 const log = createLogger("talk-router");
+
+/** Decides whether a subscriber may hear an inbound message (pairing). */
+type Admission = (
+  connectionId: string,
+  service: string,
+  message: InboundMessage,
+  router: TalkRouter,
+) => Promise<boolean>;
+
+/** How long one admission may hold its conversation. Pairing admission is a
+ *  few database reads, so fifteen seconds means the database is stuck. */
+export const ADMISSION_TIMEOUT_MS = 15_000;
 
 export class ConnectionTalkRouter implements TalkRouter {
   private readonly handlers = new Map<
@@ -21,14 +27,13 @@ export class ConnectionTalkRouter implements TalkRouter {
 
   private readonly attached = new Map<ConnectionId, () => void>();
 
+  /** Admits one message at a time per connection and conversation. */
+  private readonly admissions = new KeyedMutex();
+
   constructor(
     private readonly registry: ConnectionRegistry,
-    private readonly admit?: (
-      connectionId: string,
-      service: string,
-      message: InboundMessage,
-      router: TalkRouter,
-    ) => Promise<boolean>,
+    private readonly admit?: Admission,
+    private readonly options: { admissionTimeoutMs?: number } = {},
   ) {
     registry.onUnlocked("talk", (connection) => this.attach(connection));
   }
@@ -96,13 +101,70 @@ export class ConnectionTalkRouter implements TalkRouter {
     const previous = this.attached.get(connection.id);
     previous?.();
     const detach = talk.subscribe(async (message) => {
-      if (this.admit && !(await this.admit(connection.id, connection.service, message, this)))
+      if (!this.admit) {
+        await this.startHandlers(connection.id, message);
         return;
-      await Promise.all(
-        [...(this.handlers.get(connection.id) ?? [])].map((handler) => handler(message)),
-      );
+      }
+      const started = await this.admitInOrder(connection, message, this.admit);
+      if (started) await started.handled;
     });
     this.attached.set(connection.id, detach);
+  }
+
+  /** Admission awaits the database, and pooled queries can finish in either
+   *  order. Each message's admission waits for the previous one in its
+   *  conversation, and an admitted message's handlers start before the next
+   *  admission begins, so handlers hear a conversation in arrival order.
+   *  An admission therefore holds up its conversation's next message for as
+   *  long as it runs; pairing admission waits only on its reads and sends its
+   *  replies in the background. An admission that runs past the timeout fails
+   *  closed: the message is not admitted, and the next one proceeds in order.
+   *  The handlers' completion is returned inside an object so the conversation
+   *  is released once they start, not once they finish. */
+  private admitInOrder(
+    connection: Connection,
+    message: InboundMessage,
+    admit: Admission,
+  ): Promise<{ handled: Promise<unknown> } | null> {
+    const key = `${connection.id}\0${message.conversationId}`;
+    return this.admissions.runExclusive(key, async () => {
+      if (!(await this.admitWithin(connection, message, admit))) return null;
+      return { handled: this.startHandlers(connection.id, message) };
+    });
+  }
+
+  private async admitWithin(
+    connection: Connection,
+    message: InboundMessage,
+    admit: Admission,
+  ): Promise<boolean> {
+    const timeoutMs = this.options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<false>((resolve) => {
+      timer = setTimeout(() => {
+        log.warn("admission timed out; message not admitted", {
+          connectionId: connection.id,
+          conversationId: message.conversationId,
+          messageId: message.messageId,
+          timeoutMs,
+        });
+        resolve(false);
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        admit(connection.id, connection.service, message, this),
+        timedOut,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private startHandlers(connectionId: ConnectionId, message: InboundMessage): Promise<unknown> {
+    return Promise.all(
+      [...(this.handlers.get(connectionId) ?? [])].map((handler) => handler(message)),
+    );
   }
 
   private requireTalk(connectionId: string) {
@@ -116,6 +178,7 @@ export class ConnectionTalkRouter implements TalkRouter {
 export function createTalkRouter(
   registry: ConnectionRegistry,
   admit?: ConstructorParameters<typeof ConnectionTalkRouter>[1],
+  options?: ConstructorParameters<typeof ConnectionTalkRouter>[2],
 ): ConnectionTalkRouter {
-  return new ConnectionTalkRouter(registry, admit);
+  return new ConnectionTalkRouter(registry, admit, options);
 }

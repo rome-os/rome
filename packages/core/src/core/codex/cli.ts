@@ -75,12 +75,15 @@ export function spawnCodex(args: string[], options: SpawnOptions = {}): ChildPro
 
 /** Spawn `codex app-server`, framing JSON-RPC over newline-delimited stdio.
  *  stdio is always piped — the JSON-RPC transport reads/writes the child's
- *  streams — so the returned process has non-null stdin/stdout/stderr. */
+ *  streams — so the returned process has non-null stdin/stdout/stderr.
+ *  `configArgs` are root `-c key=value` overrides, placed before the
+ *  subcommand. */
 export function spawnCodexAppServer(
   options: Omit<SpawnOptionsWithoutStdio, "stdio"> = {},
+  configArgs: readonly string[] = [],
 ): ChildProcessWithoutNullStreams {
   const { command, argsPrefix } = resolveCodexExecutable();
-  return spawn(command, [...argsPrefix, "app-server", "--listen", "stdio://"], {
+  return spawn(command, [...argsPrefix, ...configArgs, "app-server", "--listen", "stdio://"], {
     ...options,
     stdio: ["pipe", "pipe", "pipe"],
   });

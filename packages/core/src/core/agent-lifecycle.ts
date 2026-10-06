@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AgentStop,
   AgentTurnFinishedEvent,
   AgentTurnFinishedHook,
   AgentTurnRef,
@@ -105,10 +106,10 @@ export function createAgentTurnRef(params: {
 
 export function classifyAgentTurnStatus(params: {
   terminalKind?: "result" | "error";
-  stopReason?: string;
+  stop?: AgentStop;
   interrupted: boolean;
 }): AgentTurnStatus {
-  if (params.interrupted || params.stopReason === "interrupted") {
+  if (params.interrupted || params.stop?.reason === "interrupted") {
     return "interrupted";
   }
   if (params.terminalKind === "error") {

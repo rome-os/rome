@@ -2,9 +2,12 @@ import type { NormalizedMessage, OutgoingMessage } from "./types.js";
 import type { ChannelSendResult } from "@rome-os/app-runtime";
 
 /**
- * The message-moving port resolved by the rest of Rome. Concrete channel
- * adapters retain their lifecycle methods for registry integrations, but the
- * registry exclusively owns starting and stopping transports.
+ * The shape a provider's transport class takes inside its Connection
+ * integration (connections/integrations/). It is not a port: the rest of Rome
+ * reaches a channel through `Channel` (channel.ts), whose `send` and `inbound`
+ * a Connection's Talk backs. Only an integration wrapping its transport, and
+ * that transport's own tests, should name this. The registry exclusively owns
+ * starting and stopping transports.
  */
 export interface ProviderAdapter {
   readonly channelName: string;

@@ -14,7 +14,7 @@ import { Toggle } from "./toggle.js";
 afterEach(cleanup);
 
 /**
- * One vocabulary, one height per name: `sm` is 28px and `md` 36px on every
+ * One vocabulary, one height per name: `sm` is 28px and `md` 32px on every
  * inline control, because each reads the same `--control-h-*` step.
  *
  * These assert the token a control resolves its height through rather than a
@@ -343,31 +343,28 @@ describe("the shared control size vocabulary", () => {
     });
   });
 
-  describe("the steps that sit off the scale", () => {
-    it("keeps the xs Button at 24px, below the smallest step", () => {
+  describe("the Button family steps outside the shared vocabulary", () => {
+    it("sizes the xs Button through its platform token", () => {
       render(<Button size="xs">Save</Button>);
       const cls = screen.getByRole("button").className;
 
       // A chip-sized button for dense toolbars, with no field counterpart to
       // line up with — so it names no shared step and joins no row.
-      expect(cls).toContain("h-6");
-      expect(cls).not.toContain("--control-h-");
+      expect(cls).toContain("h-[var(--control-h-xs)]");
     });
 
-    it("pads the xs Button from a spacing step, neither group carrying one", () => {
+    it("pads the xs Button through its centered platform inset", () => {
       render(<Button size="xs">Save</Button>);
       const cls = screen.getByRole("button").className;
 
-      expect(cls).toContain("px-2");
-      expect(cls).not.toContain("--control-px-");
+      expect(cls).toContain("px-[var(--control-px-center-xs)]");
     });
 
-    it("keeps the xs IconButton at 24px, below the smallest step", () => {
+    it("sizes the xs IconButton through its platform token", () => {
       render(<IconButton size="xs" label="Close" icon={<span aria-hidden>x</span>} />);
       const cls = screen.getByRole("button", { name: "Close" }).className;
 
-      expect(cls).toContain("size-6");
-      expect(cls).not.toContain("--control-h-");
+      expect(cls).toContain("size-[var(--control-h-xs)]");
     });
 
     it("matches IconButton to Button's square variant at every step both carry", () => {

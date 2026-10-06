@@ -177,9 +177,11 @@
       "cacheWrite": "缓存写入",
       "input": "输入",
       "output": "输出",
+      "reasoning": "推理",
       "context": "上下文",
       "mainContext": "主智能体上下文"
-    }
+    },
+    "reasoningHint": "已计入输出。部分提供方报告的是估算值；合计只包含报告了该数值的运行。"
   },
   "approvals": {
     "headerPending": "需要守护者批准",
@@ -221,6 +223,12 @@
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置",
+    "zoomLevel": "缩放",
+    "previewImage": "预览",
+    "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -269,6 +277,7 @@
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt61Sol": "GPT-6.1 Sol",
       "gpt6Sol": "GPT-6 Sol",
       "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",

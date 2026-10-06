@@ -47,10 +47,11 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
-  TalkFeatureMap,
-  TalkFeatureName,
-  TalkRouter,
-  InboundMessage,
+  ChannelHistoryRead,
+  ChannelMessage,
+  ChannelMessageQuery,
+  ChannelSummary,
+  ChannelsService,
   MessageReceipt,
   OutgoingMessage,
   ListConversationSettingsInput,
@@ -195,53 +196,54 @@ export class AppStoreProxy implements AppStoreReader {
   }
 }
 
-/** Worker-side proxy for the live main-process Talk router. */
-export class TalkRouterProxy implements TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>> {
-    return getWorkerRpc().call("talk.list", {});
+/** A history line as it crosses the worker RPC, its timestamp serialized. */
+type WireChannelMessage = Omit<ChannelMessage, "timestamp"> & { timestamp: Date | string };
+
+function fromWire(messages: WireChannelMessage[]): ChannelMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    timestamp: message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
+  }));
+}
+
+/** Worker-side proxy for the main process's channels service. */
+export class ChannelsServiceProxy implements ChannelsService {
+  list(): Promise<ChannelSummary[]> {
+    return getWorkerRpc().call("channels.list", {});
   }
 
-  subscribe(
-    _connectionId: string,
-    _handler: (message: InboundMessage) => Promise<void>,
-  ): () => void {
-    throw new Error("Talk subscriptions are only available in the main process");
-  }
-
-  async send(
-    connectionId: string,
+  send(
+    channel: string,
     conversationId: ConversationId,
     message: OutgoingMessage,
+    options?: { connectionId?: string },
   ): Promise<MessageReceipt> {
-    return getWorkerRpc().call<MessageReceipt>("talk.send", {
-      connectionId,
+    return getWorkerRpc().call<MessageReceipt>("channels.send", {
+      channel,
       conversationId,
       message,
+      ...(options?.connectionId ? { connectionId: options.connectionId } : {}),
     });
   }
 
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null {
-    if (name !== "history") return null;
-    return {
-      query: async (input: {
-        conversationId?: ConversationId;
-        since?: Date;
-        limit?: number;
-      }): Promise<InboundMessage[]> => {
-        const messages = await getWorkerRpc().call<
-          Array<Omit<InboundMessage, "timestamp"> & { timestamp: Date | string }>
-        >("talk.history.query", {
-          connectionId,
-          ...input,
-          ...(input.since ? { since: input.since.toISOString() } : {}),
-        });
-        return messages.map((message) => ({
-          ...message,
-          timestamp:
-            message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
-        }));
-      },
-    } as unknown as TalkFeatureMap[K];
+  async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+    return fromWire(
+      await getWorkerRpc().call<WireChannelMessage[]>("channels.query", {
+        channel,
+        ...query,
+        ...(query.since ? { since: query.since.toISOString() } : {}),
+      }),
+    );
+  }
+
+  async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
+    return fromWire(
+      await getWorkerRpc().call<WireChannelMessage[]>("channels.history", {
+        channel,
+        ...input,
+        ...(input.since ? { since: input.since.toISOString() } : {}),
+      }),
+    );
   }
 }
 

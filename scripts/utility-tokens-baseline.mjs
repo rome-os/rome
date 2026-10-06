@@ -60,7 +60,7 @@ export const BASELINE = {
     "md:text-[3.35rem]": 1,
     "text-[2.65rem]": 1,
   },
-  "packages/web/src/components/chat/blocks/TracePayload.tsx": { "border-black/10": 2 },
+  "packages/web/src/components/chat/entries/TracePayload.tsx": { "border-black/10": 2 },
   "packages/web/src/components/codex-device-login-modal.tsx": {
     "bg-[#f59e0b]": 1,
     "text-[#f59e0b]": 1,

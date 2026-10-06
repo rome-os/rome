@@ -37,12 +37,8 @@ import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
-import type {
-  TalkActivity,
-  TalkDirectory,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { TalkActivity } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,

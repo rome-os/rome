@@ -67,5 +67,4 @@ export interface WhatsAppSyncSink {
   upsertContacts(contacts: WaContactInput[]): Promise<void>;
   upsertChats(chats: WaChatInput[]): Promise<void>;
   upsertMessages(messages: WaMessageInput[]): Promise<void>;
-  fetchHistory?(threadJid: string | null, since: Date): Promise<WaHistoryMessage[]>;
 }

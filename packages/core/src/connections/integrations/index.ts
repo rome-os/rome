@@ -6,6 +6,7 @@ import type { PersonMappingRepository } from "../../db/repositories/person-mappi
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
@@ -74,8 +75,11 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
-  /** Offer the personal WeChat connection (config `wechatUserEnabled`). */
-  wechatUserEnabled?: boolean;
+  /** The personal WeChat client runtime, present only when config
+   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
+   *  the channel list's reader shares it, so the account is read through one
+   *  client. */
+  wechatUserRuntime?: WechatUserRuntime;
 }
 
 /**
@@ -98,12 +102,13 @@ export function registerBuiltinConnections(
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(createWechatDescriptor());
-  // The personal WeChat connection is opt-in (see config `wechatUserEnabled`).
+  // The personal WeChat connection is opt-in: boot passes its runtime only when
+  // config `wechatUserEnabled` is on.
   // It runs the client in this container and recovers its store key with a
   // local debugger, so it needs no host execution — only the container's own
   // capability to ptrace the client it launches.
-  if (deps.wechatUserEnabled) {
-    registry.register(createWechatUserDescriptor());
+  if (deps.wechatUserRuntime) {
+    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
   }
   registry.register(
     createFeishuDescriptor({

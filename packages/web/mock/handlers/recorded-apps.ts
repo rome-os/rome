@@ -108,8 +108,8 @@ const counts = {
 const missing = () =>
   HttpResponse.json({ error: "This item is not included in the demo." }, { status: 404 });
 
-// These bundles use the real app host. Keep their unrecorded API calls local,
-// including writes, when mock mode runs with a backend proxy.
+// These bundles use the real app host. Their recorded API calls, including
+// writes, remain inside the mock worker.
 export const recordedAppHandlers = [
   ...definitions.map((app) =>
     http.get(`/api/apps/${app.id}/manifest`, ({ request }) => {

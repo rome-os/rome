@@ -42,9 +42,9 @@ const ROUTES = [
   "/dev/styleguide",
   "/dev/typography",
   "/dev/connections",
-  // Transcript blocks. Each renders only for a particular agent state, so this
+  // Chat entries. Each renders only for a particular agent state, so this
   // route is the only place the sweep sees one at all.
-  "/dev/chat-blocks",
+  "/dev/chat-entries",
 ];
 
 /** Mirrors the control slots `collectRowHeightViolations` compares. */

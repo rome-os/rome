@@ -7,7 +7,7 @@ import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
-import type { TalkRouter } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../../connections/types.js";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {

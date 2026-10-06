@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, Ellipsis, Pin } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RECENT_APPS_VISIBLE } from "@/lib/recent-apps";
@@ -154,7 +154,7 @@ interface RecentAppsRailProps<T extends RecentSidebarApp> {
   apps: T[];
   unopenedIds: ReadonlySet<string>;
   pathname: string;
-  wrapWithContextMenu: (app: T, trigger: ReactNode) => ReactNode;
+  wrapWithContextMenu: (app: T, trigger: ReactNode, onSelect?: () => void) => ReactNode;
 }
 
 // Rail form of the zone. A rail is the mode the guardian chose for being
@@ -167,6 +167,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
   wrapWithContextMenu,
 }: RecentAppsRailProps<T>) {
   const { t } = useTranslation("common");
+  const [moreOpen, setMoreOpen] = useState(false);
 
   if (apps.length === 0) return null;
 
@@ -205,7 +206,7 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
         );
       })}
       {overflow.length > 0 ? (
-        <DropdownMenu>
+        <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
@@ -221,14 +222,23 @@ export function RecentAppsRail<T extends RecentSidebarApp>({
             <TooltipContent side="right">{t("sidebar.moreRecentApps")}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent side="right" align="start">
+            {/* Overflow rows answer a right-click like the tiles above them. The
+                context menu sits on top of this one, so a choice there closes
+                both. */}
             {overflow.map((app) =>
               app.href ? (
-                <DropdownMenuItem key={app.id} asChild>
-                  <Link to={app.href}>
-                    <SidebarAppIcon app={app} />
-                    {app.displayName}
-                  </Link>
-                </DropdownMenuItem>
+                <Fragment key={app.id}>
+                  {wrapWithContextMenu(
+                    app,
+                    <DropdownMenuItem asChild>
+                      <Link to={app.href}>
+                        <SidebarAppIcon app={app} />
+                        {app.displayName}
+                      </Link>
+                    </DropdownMenuItem>,
+                    () => setMoreOpen(false),
+                  )}
+                </Fragment>
               ) : null,
             )}
           </DropdownMenuContent>

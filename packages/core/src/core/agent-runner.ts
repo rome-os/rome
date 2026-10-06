@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from "uuid";
-import type { AgentMessage, McpServerConfig, ReasoningEffort } from "../types.js";
+import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
+import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
@@ -262,7 +263,7 @@ export interface ModelSession {
   /** A disposed provider execution must be reopened before another turn. */
   readonly isClosed?: boolean;
   /** Single, lifetime stream of AgentMessages produced by the provider. */
-  readonly events: AsyncIterable<AgentMessage>;
+  readonly events: AsyncIterable<AgentEvent>;
 
   /**
    * Provider-specific thread id, set after the first turn for providers that
@@ -273,6 +274,15 @@ export interface ModelSession {
 
   /** Opaque checkpoint for the most recent successfully completed provider turn. */
   readonly lastCompletedTurnCheckpoint?: string;
+
+  /**
+   * The provider's own id for the most recent turn that reached it, whatever
+   * its outcome. Unset for providers that mint no turn ids of their own.
+   */
+  readonly lastProviderTurnId?: string;
+
+  /** Who pays the model provider for a turn that ends now. Unset when unknown. */
+  readonly funding?: UsageFunding;
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;
@@ -301,18 +311,18 @@ export interface ModelSession {
  */
 export function createSessionFromRun(
   providerId: ProviderId,
-  run: (params: ModelRunParams) => AsyncIterable<AgentMessage>,
+  run: (params: ModelRunParams) => AsyncIterable<AgentEvent>,
   params: ModelSessionParams,
 ): ModelSession {
   // Standard async-queue: emit() either hands the value to a waiting
   // consumer (resolvers FIFO) or buffers it for the next next() call. Don't
   // share a single `pending` slot — back-to-back emits would clobber each
   // other since the consumer hasn't had a chance to await again yet.
-  const buffer: AgentMessage[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
+  const buffer: AgentEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentMessage) => {
+  const emit = (msg: AgentEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       const r = resolvers.shift()!;
@@ -322,15 +332,15 @@ export function createSessionFromRun(
     }
   };
 
-  const events: AsyncIterable<AgentMessage> = {
+  const events: AsyncIterable<AgentEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentMessage>> {
+        async next(): Promise<IteratorResult<AgentEvent>> {
           if (buffer.length > 0) {
             return { value: buffer.shift()!, done: false };
           }
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentMessage>>((resolve) => {
+          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -402,11 +412,11 @@ export function createSessionFromRun(
  * fallback result rather than hanging, so the session never wedges.
  */
 export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: AgentMessage[] = [];
-  const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
+  const buffer: AgentEvent[] = [];
+  const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
   let closed = false;
 
-  const emit = (msg: AgentMessage) => {
+  const emit = (msg: AgentEvent) => {
     if (closed) return;
     if (resolvers.length > 0) {
       resolvers.shift()!({ value: msg, done: false });
@@ -415,13 +425,13 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     }
   };
 
-  const events: AsyncIterable<AgentMessage> = {
+  const events: AsyncIterable<AgentEvent> = {
     [Symbol.asyncIterator]() {
       return {
-        async next(): Promise<IteratorResult<AgentMessage>> {
+        async next(): Promise<IteratorResult<AgentEvent>> {
           if (buffer.length > 0) return { value: buffer.shift()!, done: false };
           if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<AgentMessage>>((resolve) => {
+          return await new Promise<IteratorResult<AgentEvent>>((resolve) => {
             resolvers.push(resolve);
           });
         },
@@ -478,7 +488,7 @@ export class AgentRunner {
     return this.agentLoader.has(name);
   }
 
-  async *run(params: RunParams): AsyncIterable<AgentMessage> {
+  async *run(params: RunParams): AsyncIterable<AgentEvent> {
     // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
     // runs). Real conversations always pass a `channelThreadKey`.
     const requestedChannelThreadKey = params.channelThreadKey ?? `${params.agentName}:${uuidv4()}`;
@@ -585,7 +595,7 @@ export class AgentRunner {
     return await this.agentSessionManager.acquireBySessionId(sessionId, agentName, init);
   }
 
-  async *runForked(params: ForkRunParams): AsyncIterable<AgentMessage> {
+  async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
     const source = this.agentSessionManager.peek({
       agentName: params.agentName,
       channelThreadKey: params.channelThreadKey,
@@ -680,7 +690,7 @@ export class AgentRunner {
    */
   private async createForkTraceRecorder(
     params: ForkRunParams,
-    turnStart: Extract<AgentMessage, { type: "turn_start" }>,
+    turnStart: Extract<AgentEvent, { type: "turn_start" }>,
     sourceRomeSessionId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;

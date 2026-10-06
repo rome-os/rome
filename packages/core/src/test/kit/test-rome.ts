@@ -10,9 +10,12 @@ import type { Tracer } from "@opentelemetry/api";
 import {
   createTestDb,
   buildAgentConfig,
+  channelNamed,
   createMockTalkRouter,
-  mockChannelLookup,
+  mockConnections,
 } from "../helpers.js";
+import type { Accounts } from "../../channels/accounts.js";
+import { channelList } from "../../channels/channel-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -38,8 +41,8 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { TalkRouter } from "@rome-os/app-runtime";
-import type { AgentConfig, AgentMessage } from "../../types.js";
+import type { TalkRouter } from "../../connections/types.js";
+import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 
@@ -49,6 +52,11 @@ import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js"
 // approval handler are all the production classes, so tests assert outcomes
 // (DB rows, outbound messages, prompts the model saw) instead of stub calls.
 
+/** An address book with nobody in it: this kit reads no People. */
+const noAccounts: Accounts = {
+  listAccounts: async () => ({ accounts: [] }),
+  resolve: async () => null,
+};
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
@@ -117,7 +125,7 @@ export interface TestRome {
   seed: TestRomeSeed;
   channel(name: string): FakeChannelEndpoint;
   /** Run one agent turn through the real runner/session stack; collects messages. */
-  runAgent(params: Partial<RunParams> & { prompt: string }): Promise<AgentMessage[]>;
+  runAgent(params: Partial<RunParams> & { prompt: string }): Promise<AgentEvent[]>;
   cleanup(): Promise<void>;
 }
 
@@ -288,7 +296,14 @@ async function buildHarness(
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter, channelEndpoints),
+    channel: channelNamed(
+      channelList({
+        db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+        connections: mockConnections(talkRouter, channelEndpoints),
+      }),
+    ),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
@@ -342,7 +357,7 @@ async function buildHarness(
       return endpoint;
     },
     async runAgent(params) {
-      const messages: AgentMessage[] = [];
+      const messages: AgentEvent[] = [];
       for await (const msg of agentRunner.run({ agentName: "main", ...params })) {
         messages.push(msg);
       }

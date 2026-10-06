@@ -14,11 +14,13 @@
 // screen, not a decision taken off it.
 //
 // Whether a channel can be sent to at all is the channel's own declaration:
-// `talk.feature("directMessaging")`. A talker that does not offer it cannot be
-// written to from here, without a read-only flag threaded through anything.
+// its `send` port's `direct`. A channel whose sending cannot reach an account
+// directly cannot be written to from here, without a read-only flag threaded
+// through anything.
 
-import type { ConversationId, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
 import type { AccountSendState } from "@rome/api-types/people";
+import { ChannelNotConnected, type ChannelSend, type Channels } from "../channels/channel.js";
 
 export interface SendAccount {
   channel: string;
@@ -26,13 +28,16 @@ export interface SendAccount {
 }
 
 export interface SendDeps {
-  talkRouter: Pick<TalkRouter, "list" | "feature" | "send">;
+  channels: Channels;
 }
 
-/** A resolved target: the connection to send on, and the conversation on it
- *  that reaches this account. */
+/** A resolved target: the channel's send port, and the conversation on it
+ *  that reaches this account. It names the channel, not the Connection: the
+ *  port finds the channel's Connection again when it sends. A service holds at
+ *  most one Connection, so that is the one the conversation was resolved on,
+ *  unless the Connection was replaced in between. This is deliberate. */
 export interface SendTarget {
-  connectionId: string;
+  send: ChannelSend;
   conversationId: ConversationId;
 }
 
@@ -41,76 +46,62 @@ export type Resolution = { ok: true; target: SendTarget } | { ok: false; send: R
 export type RefusedState = Exclude<AccountSendState, "yes">;
 
 /**
- * The connection that answers for a channel, or null when none does.
- *
- * A lookup rather than a choice: `connections.service` carries a unique index
- * (`connections_service_unique`), so a service has at most one connection and
- * "which one is this account on" is a question that cannot arise.
- */
-async function connectionFor(deps: SendDeps, channel: string): Promise<string | null> {
-  const connections = await deps.talkRouter.list();
-  return connections.find((connection) => connection.service === channel)?.connectionId ?? null;
-}
-
-/**
- * Everything true before a body may be handed to a talker, or which of the
+ * Everything true before a body may be handed to a channel, or which of the
  * three ways it is not.
  *
- * The two cheap answers come first and cost no provider call: whether the
- * channel is connected, and whether its talker does direct messaging at all.
- * Only the third — does a thread reaching this account exist — can be
- * expensive, and on the channels where the address is already the conversation
- * it is not.
+ * Whether the channel does direct messaging is a synchronous read of its send
+ * port. Only asking for the thread that reaches this account can reach a
+ * provider, and it is also what says no Connection exists for the channel:
+ * the port rejects with {@link ChannelNotConnected} then, as a send would.
  */
-export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
-  const connectionId = await connectionFor(deps, account.channel);
-  if (connectionId === null) return { ok: false, send: "not-connected" };
-
-  const direct = deps.talkRouter.feature(connectionId, "directMessaging");
-  if (!direct) return { ok: false, send: "unsupported" };
+async function sendStateOf(
+  deps: SendDeps,
+  account: SendAccount,
+): Promise<{ state: RefusedState } | { state: "yes"; target: SendTarget }> {
+  const channel = deps.channels.find((candidate) => candidate.name === account.channel);
+  // A channel Rome does not know is one no connection answers for.
+  if (!channel) return { state: "not-connected" };
+  const send = channel.send;
+  const direct = send?.direct ?? null;
+  if (!send || !direct) return { state: "unsupported" };
 
   // A channel that throws asking for a thread is a channel that could not
   // produce one, which is the same answer as null and the same answer the
   // person read already gives for this account. Letting it escape would make
   // the send path report a 500 where the read reported `no-conversation`, so
   // the two would disagree about one condition.
-  const conversationId = await direct.conversationFor(account.channelUserId).catch(() => null);
-  if (conversationId === null) return { ok: false, send: "no-conversation" };
+  let conversationId: ConversationId | null;
+  try {
+    conversationId = await direct.conversationFor(account.channelUserId);
+  } catch (err) {
+    if (err instanceof ChannelNotConnected) return { state: "not-connected" };
+    conversationId = null;
+  }
+  if (conversationId === null) return { state: "no-conversation" };
+  return { state: "yes", target: { send, conversationId } };
+}
 
-  return { ok: true, target: { connectionId, conversationId } };
+export async function resolveSendTarget(deps: SendDeps, account: SendAccount): Promise<Resolution> {
+  const resolved = await sendStateOf(deps, account);
+  return resolved.state === "yes"
+    ? { ok: true, target: resolved.target }
+    : { ok: false, send: resolved.state };
 }
 
 /**
  * Whether Rome can send to each of the given accounts, positionally.
  *
- * Over every account at once because it is read for a whole listing: the
- * connection list is read once for all of them rather than once per row, and
- * `feature` is a synchronous registry lookup. Only `conversationFor` can reach
- * a provider, and it is asked once per account — cheap on the channels in
- * play, and the reason a channel that keys threads separately has to be
- * priced before it is added to a listing read.
+ * Only `conversationFor` can reach a provider, and it is asked once per
+ * account — cheap on the channels in play, and the reason a channel that keys
+ * threads separately has to be priced before it is added to a listing read. A
+ * listing must not fail because one account of one person could not be priced.
  */
 export async function readSendStates(
   deps: SendDeps,
   accounts: readonly SendAccount[],
 ): Promise<AccountSendState[]> {
-  if (accounts.length === 0) return [];
-
-  const connections = await deps.talkRouter.list();
-  const byService = new Map(connections.map((c) => [c.service, c.connectionId]));
-
   return await Promise.all(
-    accounts.map(async (account): Promise<AccountSendState> => {
-      const connectionId = byService.get(account.channel);
-      if (connectionId === undefined) return "not-connected";
-      const direct = deps.talkRouter.feature(connectionId, "directMessaging");
-      if (!direct) return "unsupported";
-      // A provider that throws here is a channel that cannot answer, which is
-      // the same fact as one that answers null. A listing must not fail
-      // because one account of one person could not be priced.
-      const conversationId = await direct.conversationFor(account.channelUserId).catch(() => null);
-      return conversationId === null ? "no-conversation" : "yes";
-    }),
+    accounts.map(async (account) => (await sendStateOf(deps, account)).state),
   );
 }
 
@@ -123,14 +114,10 @@ export interface SendReceipt {
 /**
  * Hand the text to the channel.
  *
- * Throws whatever the talker throws — the caller records the failure, because
+ * Throws whatever the channel throws — the caller records the failure, because
  * only it knows which outbox row is waiting on the answer.
  */
-export async function sendToTarget(
-  deps: SendDeps,
-  target: SendTarget,
-  text: string,
-): Promise<SendReceipt> {
-  const receipt = await deps.talkRouter.send(target.connectionId, target.conversationId, { text });
+export async function sendToTarget(target: SendTarget, text: string): Promise<SendReceipt> {
+  const receipt = await target.send.send(target.conversationId, { text });
   return { messageId: receipt.messageId ?? null };
 }

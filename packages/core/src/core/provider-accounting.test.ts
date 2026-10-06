@@ -53,6 +53,17 @@ describe("provider-accounting", () => {
     expect(impliedCostUsd).toBeCloseTo(22.05);
   });
 
+  it("prices Anthropic Sonnet 5.5 at $2/$10 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-sonnet-5-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    });
+
+    expect(impliedCostUsd).toBeCloseTo(14.7);
+  });
+
   it("matches model aliases with dated suffixes", () => {
     const accounting = buildAgentAccounting({
       provider: "anthropic",
@@ -205,6 +216,22 @@ describe("provider-accounting", () => {
 
     expect(calculateImpliedCostUsd("openai", "gpt-6-sol", usage, rawUsage)).toBeCloseTo(24.4);
     expect(calculateImpliedCostUsd("openai", "gpt-6-luna", usage, rawUsage)).toBeCloseTo(1.22);
+  });
+
+  it("prices GPT-6.1 Sol with its halved cache-read rate", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol:high", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol-2026-09-29", usage)).toBeCloseTo(14.6);
+    expect(
+      calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage, { input_tokens: 272_001 }),
+    ).toBeCloseTo(24.2);
   });
 
   it("applies GPT-5.6 long-context input and output multipliers", () => {

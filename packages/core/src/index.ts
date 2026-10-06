@@ -18,7 +18,13 @@ import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
-import { getConfiguredInstanceOrigin } from "./lib/rome-cloud-origin.js";
+import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
+import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
+import { createUsageAppDirectory } from "./usage/app-directory.js";
+import { UsageAttributionResolver } from "./usage/attribution.js";
+import { codexFunding } from "./usage/funding.js";
+import { UsageRecorder } from "./usage/recorder.js";
+import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -60,7 +66,10 @@ import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { channelList } from "./channels/channel-list.js";
+import { sendApprovalCard } from "./actions/approval-card.js";
+import { createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
+import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./db/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -252,9 +261,12 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db);
   // The personal WeChat account contributes a people-timeline source only when
   // the connection is enabled; its store is the client's own database, read live.
-  const wechatUserReader = config.wechatUserEnabled
-    ? new WechatUserReader(new WechatUserRuntime())
-    : undefined;
+  // The channel list and the Connection's Talk share this one client runtime.
+  const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
+  const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
+  // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
+  // the same client, and needs no connection.
+  const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -291,6 +303,7 @@ async function main() {
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
+  const usageOutboxRepo = new UsageOutboxRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
@@ -311,6 +324,14 @@ async function main() {
         connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     }),
   );
+  // How app actions — here and, over RPC, in workers — send and read on
+  // channels by name. The channel list is built further down, and the service
+  // answers from the Connections alone until then (startup hooks, approvals).
+  let builtChannels: ReturnType<typeof channelList> | undefined;
+  const channelsService = createChannelsService({
+    channels: () => builtChannels,
+    router: talkRouter,
+  });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
   // mapping repo (guardian-link auto-mapping). Drives the generic setup
@@ -499,36 +520,7 @@ async function main() {
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   // The "openai" provider runs over the codex app-server JSON-RPC surface
@@ -558,6 +550,14 @@ async function main() {
     appServerManager: codexAppServerManager,
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
+    funding: () => {
+      const account = aiToolState.get().codex;
+      return codexFunding({
+        defaultProvider: codexAppServerManager.getDefaultProvider(),
+        accountType: account.accountType,
+        loggedIn: account.loggedIn,
+      });
+    },
   });
   const modelResolver = createModelResolver({
     aiToolState,
@@ -575,19 +575,6 @@ async function main() {
   };
   const lifecycleDispatcher = createAgentLifecycleDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
-  });
-  const unsubscribeAIToolTurnFinished = lifecycleDispatcher.onFinished((event) => {
-    // Provider failures update auth/quota state directly. Do not immediately
-    // replace that stronger runtime signal with a usage probe that may lag it.
-    if (event.status === "error") return;
-    const provider = event.output.accounting?.provider;
-    if (provider !== "openai" && provider !== "anthropic") return;
-    void aiToolState.refresh(provider).catch((err) => {
-      log.warn("AI tool state refresh after turn failed", {
-        provider,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
   });
   // Turn-middleware onion. Shares the same app-runtime services as the
   // lifecycle dispatcher (the `agentRunner` field is filled in below, before
@@ -678,6 +665,27 @@ async function main() {
     activeRegistry: activeSubagentRegistry,
     turnStreams: agentTurnStreamRegistry,
   });
+  const romeCloudAccess = (): RomeCloudAccess | null => {
+    const token = getInstanceToken();
+    const origin = getRomeCloudOrigin();
+    return token && origin ? { token, origin } : null;
+  };
+  const usageAttribution = new UsageAttributionResolver(
+    {
+      getSession: (id) => webchatRepo.getSession(id),
+      getExecutionInitiator: async (id) =>
+        (await actionExecutionsRepo.findById(id))?.initiator ?? null,
+    },
+    createUsageAppDirectory({ agentLoader, actionRegistry, appCatalog }),
+  );
+  const usageRecorder = new UsageRecorder({
+    outbox: usageOutboxRepo,
+    attribution: usageAttribution,
+    credential: () => {
+      const access = romeCloudAccess();
+      return access ? credentialFingerprint(access.token) : null;
+    },
+  });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
@@ -696,6 +704,7 @@ async function main() {
       turnMiddleware: turnMiddlewareChain,
       resolveProviderSessionReset: async (ref) =>
         (await conversationSettings.get(ref)).effective.session.reset,
+      usageRecorder,
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -775,7 +784,7 @@ async function main() {
   const appActionDeps = {
     agentRunner,
     resolveArtifactReference,
-    talkRouter,
+    channelsService,
     conversationSettings,
     capabilityDiscovery,
     personMappingRepo,
@@ -799,11 +808,11 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === "email",
-        );
-        if (matches.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-        return (await connectionRegistry.ingest(matches[0]!.connectionId, {
+        const email = (await channelsService.list()).find((channel) => channel.name === "email");
+        if (email?.connectionIds.length !== 1) {
+          return { status: "skipped", reason: "channel_inactive" };
+        }
+        return (await connectionRegistry.ingest(email.connectionIds[0]!, {
           rawBody,
           signature,
         })) as EmailInboundResult;
@@ -1033,9 +1042,10 @@ async function main() {
     // The Rome Cloud-OAuth conferral setups (github/slack/google) read/write the
     // oauth_pending_attempts table for the begin-redirect + return-leg redeem.
     db,
-    // The personal WeChat connection is opt-in; its key recovery runs a local
-    // debugger in this container, needing no host execution.
-    wechatUserEnabled: config.wechatUserEnabled,
+    // The personal WeChat connection is opt-in: its runtime exists only when
+    // config `wechatUserEnabled` is on, and its presence registers the
+    // connection. Its key recovery runs a local debugger in this container.
+    ...(wechatUserRuntime ? { wechatUserRuntime } : {}),
   });
   // Built after every descriptor is registered: each service with a Talk backs
   // its channel's send and inbound ports.
@@ -1046,6 +1056,7 @@ async function main() {
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
   });
+  builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
@@ -1056,9 +1067,9 @@ async function main() {
     try {
       const loadedHook = await createChannelMessageHookFromCatalog(appCatalog, {
         actionEngine,
-        talkRouter,
         conversationSettings,
         chatStop,
+        channels,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1080,20 +1091,18 @@ async function main() {
       }
     }
   }
+  // The hook subscribes to every channel that can receive, and a channel's
+  // subscription follows whatever backs it, so no unlock needs the hook again.
   await messageHook.register();
-  connectionRegistry.onUnlocked("talk", (connection) => {
-    messageHook.registerConnection(connection.id, connection.service);
-  });
   // App-keys refreshes recreate this hook: it is instantiated once and held by
-  // the subscription closures above, so an env value captured in its module
-  // graph would otherwise outlive the key edit. The let-binding is the single
-  // handle — the onUnlocked callback reads it at call time, so a swap re-routes
-  // future unlocks, and register() on the fresh instance re-subscribes the
-  // already-unlocked connections via talkRouter.list().
+  // the channels' subscriptions, so an env value captured in its module graph
+  // would otherwise outlive the key edit. The let-binding is the single handle,
+  // and register() on the fresh instance re-subscribes every channel that can
+  // receive.
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: { actionEngine, talkRouter, conversationSettings, chatStop },
+        deps: { actionEngine, conversationSettings, chatStop, channels },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;
@@ -1159,7 +1168,7 @@ async function main() {
   });
 
   const workerRpcServer = new WorkerRpcServer({
-    talkRouter,
+    channelsService,
     connectionRegistry,
     conversationSettings,
     routinesRepo,
@@ -1292,6 +1301,7 @@ async function main() {
       provisionNodeCaller,
       nodeDevices,
       talkRouter,
+      channelsService,
       conversationSettings,
       actionEngine,
       actionLoader,
@@ -1320,6 +1330,7 @@ async function main() {
       db,
       settingsRepo,
       computerUse,
+      wechatApp,
       appKeysRepo,
       appKeyInjector,
       refreshAppRuntime: refreshAppRuntimeEnv,
@@ -1473,9 +1484,9 @@ async function main() {
   await runJournalCleanup();
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
-  const activeChannels = [
-    ...new Set((await talkRouter.list()).map((connection) => connection.service)),
-  ];
+  const activeChannels = (await channelsService.list())
+    .filter((channel) => channel.connectionIds.length > 0)
+    .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
   const agentNames = Array.from(agentLoader.getAll().keys());
   const discoveredServers = Object.keys(capabilityDiscovery.getCdpMcpServers());
@@ -1519,6 +1530,16 @@ async function main() {
   // signal it clears the credential (DB + cache), which flips the instance back
   // to "not enrolled" and routes the dashboard to the connect flow.
   const stopInstanceHeartbeat = startInstanceIdentityHeartbeat({ store: settingsRepo });
+
+  // Report turns and app or routine runs to Rome Cloud while signed in.
+  const usageReporter = new UsageReporter({
+    outbox: usageOutboxRepo,
+    executions: actionExecutionsRepo,
+    settings: settingsRepo,
+    attribution: usageAttribution,
+    access: romeCloudAccess,
+  });
+  usageReporter.start();
 
   // Self-provision the webhook-relay mailbox using the durable instance token
   //: present it to Rome Cloud, store the returned credential, and point
@@ -1584,10 +1605,17 @@ async function main() {
     await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
 
+    try {
+      await usageRecorder.flush();
+      await usageReporter.stop();
+      shutdownLog.info("usage reporter stopped");
+    } catch (err) {
+      shutdownLog.error("error stopping usage reporter", { error: err });
+    }
+
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    unsubscribeAIToolTurnFinished();
     unsubscribeCodexAccountChanged();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");

@@ -3,7 +3,7 @@ import type { ExecutionJournalRepository } from "../db/repositories/execution-jo
 import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../core/types.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import type { JournalEntry } from "./replay.js";
 import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { createLogger } from "../logger.js";
@@ -142,10 +142,10 @@ export class ApprovalHandler {
   private async executeApprovedAction(
     approvalId: string,
     payload: ApprovalPayload,
-    emit?: (msg: AgentMessage & { agent?: string }) => void,
+    emit?: (msg: AgentEvent & { agent?: string }) => void,
   ): Promise<void> {
     const agentName = payload.agentName ?? "main";
-    // The trace stream is shaped around AgentMessage, so we synthesize a
+    // The trace stream is shaped around AgentEvent, so we synthesize a
     // tool_use/tool_result pair to make this deferred execution visible in
     // the chat. The `approval:` prefix keeps the id distinguishable from
     // SDK-issued `toolu_*` ids and makes it queryable back to the approval row.
@@ -188,6 +188,7 @@ export class ApprovalHandler {
         toolUseId: traceId,
         tool: payload.actionName,
         output: result,
+        isError: result.status === "error",
         agent: agentName,
       });
 
@@ -226,6 +227,7 @@ export class ApprovalHandler {
         toolUseId: traceId,
         tool: payload.actionName,
         output: { error: "Action execution failed. See server logs for details." },
+        isError: true,
         agent: agentName,
       });
       try {

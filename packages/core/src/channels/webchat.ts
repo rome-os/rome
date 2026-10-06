@@ -8,7 +8,7 @@ import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 
 const log = createLogger("webchat");
 const DEFAULT_HISTORY_WINDOW_HOURS = 24;
-const GUARDIAN_CHANNEL_USER_ID = "guardian";
+export const WEBCHAT_GUARDIAN_USER_ID = "guardian";
 
 function prettyAgentName(name: string | null): string {
   if (!name || isCoreMainAgentId(name)) return "Rome";
@@ -105,7 +105,7 @@ export class WebChatAdapter implements ProviderAdapter {
 
   private historyRowToNormalized(row: StoredWebchatHistoryMessage): NormalizedMessage {
     const isUser = row.role === "user";
-    const channelUserId = isUser ? GUARDIAN_CHANNEL_USER_ID : (row.sessionAgentName ?? "main");
+    const channelUserId = isUser ? WEBCHAT_GUARDIAN_USER_ID : (row.sessionAgentName ?? "main");
     return {
       id: row.id,
       channel: "webchat",

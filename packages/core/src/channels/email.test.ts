@@ -561,6 +561,41 @@ describe("EmailAdapter.fetchHistory", () => {
     expect(provider.getMessage).toHaveBeenCalledTimes(2);
   });
 
+  it("recognises its own sends however the inbox address is written", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [
+          listItem({ providerMessageId: "mine", labels: ["sent"], from: "slug@mail.romeos.cc" }),
+          listItem({ providerMessageId: "theirs", receivedAt: new Date(2000).toISOString() }),
+        ],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    // The configured address in display-name form, with capitals.
+    const adapter = makeAdapter(provider, { address: "Rome <Slug@Mail.RomeOS.cc>" });
+
+    const lines = await adapter.fetchHistoryLines(null, 24);
+
+    expect(lines.map((line) => [line.message.id, line.own])).toEqual([
+      ["mine", true],
+      ["theirs", false],
+    ]);
+  });
+
+  it("counts a line labelled sent as its own even with no address to match", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [listItem({ providerMessageId: "sent", labels: ["sent"], from: "" })],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    const adapter = makeAdapter(provider, { address: "" });
+
+    const [line] = await adapter.fetchHistoryLines(null, 24);
+
+    expect(line?.own).toBe(true);
+  });
+
   it("filters to a single thread when threadId is given", async () => {
     const provider = makeProvider({
       listMessages: rs.fn(async () => ({

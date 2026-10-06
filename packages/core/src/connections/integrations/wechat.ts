@@ -20,7 +20,7 @@
 // CredentialRejected{ grant: "account" }. Any other terminal poll failure is a
 // Disconnected.
 
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   getDefaultWechatStatePath,
   isWechatAuthError,

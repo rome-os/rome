@@ -15,6 +15,7 @@ export type WebchatLargeModelSelectionId =
   | "claude-haiku"
   | "claude-fable"
   | "gpt-6-astra"
+  | "gpt-6-1-sol"
   | "gpt-6-sol"
   | "gpt-6-luna"
   | "gpt-5-6-sol"
@@ -58,7 +59,7 @@ export const WEBCHAT_LARGE_MODEL_SELECTIONS: Record<ModelSelectionId, WebchatLar
     "claude-sonnet": {
       id: "claude-sonnet",
       providerId: "anthropic",
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     },
     "claude-haiku": {
       id: "claude-haiku",
@@ -74,6 +75,11 @@ export const WEBCHAT_LARGE_MODEL_SELECTIONS: Record<ModelSelectionId, WebchatLar
       id: "gpt-6-astra",
       providerId: "openai",
       model: "gpt-6-astra",
+    },
+    "gpt-6-1-sol": {
+      id: "gpt-6-1-sol",
+      providerId: "openai",
+      model: "gpt-6.1-sol",
     },
     "gpt-6-sol": {
       id: "gpt-6-sol",

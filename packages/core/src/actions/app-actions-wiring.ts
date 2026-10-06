@@ -3,9 +3,14 @@ import type { ActionRegistryImpl } from "./registry.js";
 import type { ActionEngine } from "./engine.js";
 import type { Action, ActionConfig } from "./types.js";
 import type { ChannelMessageHook } from "../hooks/types.js";
+import { createLogger, type Logger } from "../logger.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { ActionExecutionContext, AppRuntimeRepositories } from "@rome-os/app-runtime";
+import type {
+  ActionExecutionContext,
+  AppRuntimeRepositories,
+  ChannelMessageHookDeps,
+} from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
@@ -65,7 +70,6 @@ export function assertRequiredHookPresent<T>(hook: T | null, hookName: string): 
 export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
-    registerConnection() {},
     unregister() {},
   };
 }
@@ -102,6 +106,40 @@ function makeAppLookup(catalog: AppCatalog): AppLookup {
   };
 }
 
+/**
+ * Deps that @rome-os/app-runtime 0.7 removed, answered for that release with
+ * the change an app built against 0.6 has to make, rather than with a
+ * `Cannot read properties of undefined` from deep inside the app. Each is a
+ * non-enumerable getter, so copying or listing the deps never trips it. It is
+ * still an own property, so `"talkRouter" in deps` answers true while the
+ * getter is here: an app feature-testing with `in` must read the value.
+ *
+ * TODO(0.8): remove, with REMOVED_HOOK_DEPS and withRemovedDeps.
+ */
+const REMOVED_ACTION_DEPS: Record<string, string> = {
+  talkRouter:
+    "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
+};
+// TODO(0.8): remove, with REMOVED_ACTION_DEPS and withRemovedDeps.
+const REMOVED_HOOK_DEPS: Record<string, string> = {
+  talkRouter:
+    "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",
+};
+
+function withRemovedDeps<T extends object>(deps: T, removed: Record<string, string>): T {
+  for (const [name, migration] of Object.entries(removed)) {
+    if (name in deps) continue;
+    Object.defineProperty(deps, name, {
+      configurable: true,
+      enumerable: false,
+      get() {
+        throw new Error(migration);
+      },
+    });
+  }
+  return deps;
+}
+
 function createAppActionRuntimeDeps(
   record: AppActionRecord,
   catalog: AppCatalog,
@@ -113,20 +151,23 @@ function createAppActionRuntimeDeps(
     throw new Error(`App "${record.metadata.ownerId}" is not resolved in the catalog`);
   }
 
-  return {
-    ...deps,
-    ...(record.metadata.ownerId === "system" && services.hostExecution
-      ? { hostExecution: services.hostExecution }
-      : {}),
-    appContext: createRomeAppContext(app, {
-      catalog,
-      db: services.db,
-      actionEngine: services.actionEngine,
-      routinesRepo: services.routinesRepo,
-      repositories: services.repositories,
-      favorService: services.favorService,
-    }),
-  } satisfies AppActionRuntimeDeps<Record<string, unknown>>;
+  return withRemovedDeps(
+    {
+      ...deps,
+      ...(record.metadata.ownerId === "system" && services.hostExecution
+        ? { hostExecution: services.hostExecution }
+        : {}),
+      appContext: createRomeAppContext(app, {
+        catalog,
+        db: services.db,
+        actionEngine: services.actionEngine,
+        routinesRepo: services.routinesRepo,
+        repositories: services.repositories,
+        favorService: services.favorService,
+      }),
+    } satisfies AppActionRuntimeDeps<Record<string, unknown>>,
+    REMOVED_ACTION_DEPS,
+  );
 }
 
 function createLazyAppAction(
@@ -184,9 +225,11 @@ export async function registerAppActions(
     }
 
     try {
-      const action = await instantiateActionFromDirectory(record.config, record.directory, {
-        ...createAppActionRuntimeDeps(record, catalog, deps, services),
-      });
+      const action = await instantiateActionFromDirectory(
+        record.config,
+        record.directory,
+        createAppActionRuntimeDeps(record, catalog, deps, services),
+      );
       actionRegistry.register(action, record.metadata);
       loaded.push(name);
     } catch (err) {
@@ -250,9 +293,12 @@ export function createAppActionsSubscriber(
   };
 }
 
+const hookLog = createLogger("channel-message-hook-loader");
+
 export async function createChannelMessageHookFromCatalog(
   catalog: AppCatalog,
-  deps: unknown,
+  deps: ChannelMessageHookDeps,
+  log: Pick<Logger, "warn"> = hookLog,
 ): Promise<ChannelMessageHook | null> {
   const hooks = catalog.listArtifacts("hook");
   const hookRef = hooks.find((artifact) => artifact.publicName === "channel-message");
@@ -264,7 +310,19 @@ export async function createChannelMessageHookFromCatalog(
   const module = await importModuleWithCacheBuster(entryPath);
 
   if (typeof module.createHook === "function") {
-    return module.createHook(deps) as ChannelMessageHook;
+    const hook = module.createHook(
+      withRemovedDeps({ ...deps }, REMOVED_HOOK_DEPS),
+    ) as ChannelMessageHook;
+    // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
+    // removed registerConnection, which the host no longer calls: it would hear
+    // nothing and say nothing. Name the migration instead.
+    if (typeof (hook as { registerConnection?: unknown }).registerConnection === "function") {
+      log.warn(
+        "channel-message hook defines the removed registerConnection; subscribe through deps.channels in register()",
+        { owner: hookRef.ownerId },
+      );
+    }
+    return hook;
   }
 
   throw new Error(
@@ -285,7 +343,7 @@ export async function createChannelMessageHookFromCatalog(
  */
 export function createChannelMessageHookReloader(options: {
   catalog: AppCatalog;
-  deps: unknown;
+  deps: ChannelMessageHookDeps;
   getCurrent: () => ChannelMessageHook;
   setCurrent: (hook: ChannelMessageHook) => void;
   onSkip?: (reason: string) => void;

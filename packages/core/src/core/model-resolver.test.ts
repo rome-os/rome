@@ -1,14 +1,18 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelProvider } from "./agent-runner.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
-import { createModelResolver, ENABLE_FABLE_SETTING_KEY } from "./model-resolver.js";
+import {
+  createModelResolver,
+  ENABLE_FABLE_SETTING_KEY,
+  TIER_MODEL_MAPPINGS_SETTING_KEY,
+} from "./model-resolver.js";
 
 const codex = { id: "openai", displayName: "Codex" } as ModelProvider;
 const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
 
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
-  settings: { enableFable?: unknown } = {},
+  settings: { enableFable?: unknown; tierModelMappings?: unknown } = {},
 ) {
   const value: AIToolStateValue = {
     codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
@@ -20,7 +24,11 @@ function resolver(
     providers: [claude, codex],
     settingsRepo: {
       get: async <T = unknown>(key: string): Promise<T | null> =>
-        (key === ENABLE_FABLE_SETTING_KEY ? (settings.enableFable ?? null) : null) as T | null,
+        (key === ENABLE_FABLE_SETTING_KEY
+          ? (settings.enableFable ?? null)
+          : key === TIER_MODEL_MAPPINGS_SETTING_KEY
+            ? (settings.tierModelMappings ?? null)
+            : null) as T | null,
     },
   });
 }
@@ -29,7 +37,7 @@ describe("ModelResolver", () => {
   it("maps Codex tiers through Sol, Terra, and Luna", async () => {
     await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
     await expect(resolver().getModelProvider({ tier: "medium" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
@@ -53,6 +61,56 @@ describe("ModelResolver", () => {
     });
     await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
+    });
+  });
+
+  it("uses a configured model ID for each provider and tier", async () => {
+    const r = resolver(
+      {},
+      {
+        tierModelMappings: {
+          openai: { large: "custom-codex", medium: "custom-codex-medium" },
+          anthropic: { small: "custom-claude" },
+        },
+      },
+    );
+
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "custom-codex",
+    });
+    await expect(
+      r.getModelProvider({ tier: "medium", providerId: "openai" }),
+    ).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "custom-codex-medium",
+    });
+    await expect(
+      r.getModelProvider({ tier: "small", providerId: "anthropic" }),
+    ).resolves.toMatchObject({
+      modelProvider: claude,
+      model: "custom-claude",
+    });
+  });
+
+  it("falls back to the built-in model when a configured mapping is invalid or absent", async () => {
+    const r = resolver(
+      {},
+      {
+        tierModelMappings: {
+          openai: { large: "   ", medium: 12 },
+          anthropic: "not-an-object",
+        },
+      },
+    );
+
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      model: "gpt-6.1-sol",
+    });
+    await expect(
+      r.getModelProvider({ tier: "medium", providerId: "anthropic" }),
+    ).resolves.toMatchObject({
+      model: "claude-sonnet-5-5",
     });
   });
 
@@ -88,7 +146,7 @@ describe("ModelResolver", () => {
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
 
     settings.enableFable = true;
@@ -109,6 +167,22 @@ describe("ModelResolver", () => {
     });
   });
 
+  it("uses an Anthropic large mapping instead of Fable's model ID", async () => {
+    await expect(
+      resolver(
+        {},
+        {
+          enableFable: true,
+          tierModelMappings: { anthropic: { large: "custom-claude-large" } },
+        },
+      ).getModelProvider({ tier: "large" }),
+    ).resolves.toMatchObject({
+      // Fable still selects Claude as the preferred provider for a large tier.
+      modelProvider: claude,
+      model: "custom-claude-large",
+    });
+  });
+
   it("falls back to Codex when Fable is enabled but Claude is unavailable", async () => {
     await expect(
       resolver(
@@ -117,7 +191,7 @@ describe("ModelResolver", () => {
       ).getModelProvider({ tier: "large" }),
     ).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
   });
 
@@ -135,7 +209,7 @@ describe("ModelResolver", () => {
 
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
     await expect(
       r.getModelProvider({ tier: "large", providerId: "anthropic" }),
@@ -179,6 +253,38 @@ describe("ModelResolver", () => {
       provider: "openai",
       reason: "not_logged_in",
     });
+  });
+
+  it("resolves GPT-6.1 Sol selections and exact aliases with Sol access", async () => {
+    await expect(
+      resolver().getModelProvider({ tier: "large", providerId: "openai" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+    await expect(
+      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+    await expect(
+      resolver().getModelProvider({ tier: "large", selectionId: "gpt-6-sol" }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6-sol" });
+
+    const unavailable = resolver({
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: false, lunaAccess: false },
+    });
+    await expect(
+      unavailable.getModelProvider({ tier: "large", selectionId: "gpt-6-1-sol" }),
+    ).rejects.toMatchObject({ code: "model_unavailable", reason: "model_access_denied" });
+
+    for (const model of ["gpt-6.1-sol", "gpt-6.1-sol:high", "gpt-6.1-sol-2026-10-01:high"]) {
+      await expect(
+        resolver().getModelProvider({ exact: { providerId: "openai", model } }),
+      ).resolves.toMatchObject({ modelProvider: codex, model });
+      await expect(
+        unavailable.getModelProvider({ exact: { providerId: "openai", model } }),
+      ).rejects.toMatchObject({
+        code: "model_unavailable",
+        provider: "openai",
+        reason: "model_access_denied",
+      });
+    }
   });
 
   it("keeps explicit Astra/Sol/Luna exact and never falls back", async () => {

@@ -1,7 +1,8 @@
 import "./styles.css";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { fetchAppApi, type RomeAppBootstrap } from "@rome-os/app-web-sdk";
-import { CircleAlert, LayoutTemplate, RefreshCw } from "lucide-react";
+import { CircleAlert, LayoutTemplate, TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@rome-os/ui/alert";
 import { Button } from "@rome-os/ui/button";
 import {
@@ -23,7 +24,6 @@ import {
   PageHeading,
   PageTitle,
   Section,
-  SectionActions,
   SectionDescription,
   SectionHeader,
   SectionHeading,
@@ -39,32 +39,41 @@ interface AppStatus {
   status: string;
 }
 
-export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBootstrap }) {
-  const [status, setStatus] = useState<AppStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [defaultView, setDefaultView] = useState("overview");
+// Every query stays current without the guardian asking: it refetches on an
+// interval while the page is visible and again when the tab regains focus. A
+// failed refetch keeps the last good data, so the UI can show it with a warning.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
 
-  async function loadStatus(): Promise<void> {
-    setRefreshing(true);
-    setError(null);
-    try {
-      const response = await fetchAppApi("status");
-      if (!response.ok) {
-        throw new Error(`Status request failed (${response.status})`);
-      }
-      const data = (await response.json()) as AppStatus;
-      setStatus(data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRefreshing(false);
-    }
+async function fetchStatus(): Promise<AppStatus> {
+  const response = await fetchAppApi("status");
+  if (!response.ok) {
+    throw new Error(`Status request failed (${response.status})`);
   }
+  return (await response.json()) as AppStatus;
+}
 
-  useEffect(() => {
-    void loadStatus();
-  }, []);
+export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBootstrap }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppPage />
+    </QueryClientProvider>
+  );
+}
+
+function AppPage() {
+  const [defaultView, setDefaultView] = useState("overview");
+  const { data: status, error: queryError } = useQuery({
+    queryKey: ["status"],
+    queryFn: fetchStatus,
+  });
+  const error = queryError?.message ?? null;
 
   return (
     <Page className="min-h-full bg-[var(--app-canvas)]">
@@ -126,15 +135,17 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
                 Live read from <code>GET /api/apps/__APP_ID__/status</code>.
               </SectionDescription>
             </SectionHeading>
-            <SectionActions>
-              <Button onClick={() => void loadStatus()} disabled={refreshing}>
-                {refreshing ? <Spinner size="sm" label="Refreshing status" /> : <RefreshCw />}
-                {refreshing ? "Refreshing…" : "Refresh"}
-              </Button>
-            </SectionActions>
           </SectionHeader>
 
-          {error ? (
+          {error && status ? (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>Updates are failing</AlertTitle>
+              <AlertDescription>Showing the last loaded status. {error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {error && !status ? (
             <Alert variant="destructive">
               <CircleAlert />
               <AlertTitle>Status unavailable</AlertTitle>

@@ -47,6 +47,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  isAwaitingGuardian,
   type AgentIdentity,
   type HandoffNode,
 } from "@/components/chat/chat-view";
@@ -59,8 +60,9 @@ import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { useSseEvents } from "@/hooks/use-sse-events";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
   MessageList,
   type BlockActions,
@@ -81,7 +83,7 @@ import type {
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
-  StreamBlock,
+  ChatEntry,
 } from "@/lib/chat-types";
 import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
@@ -309,6 +311,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
+  // Turns in this chat the server reported finished (a terminal stream event).
+  // A dropped connection ends the local stream but not the turn, so it never
+  // counts here.
+  const [turnEnds, setTurnEnds] = useState(0);
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
@@ -530,8 +536,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
   const runningTurnId = floorSessionStream?.turnId ?? null;
   const isActiveSessionStreaming = !!floorSessionStream;
+  const awaitingGuardian = useMemo(
+    () => isAwaitingGuardian(view, runningTurnId),
+    [view, runningTurnId],
+  );
   // Typewriter-paced reveal of the latest assistant text block — the SSE
-  // stream updates in provider-sized chunks; this smooths them into typing.
+  // stream updates in provider-sized deltas; this smooths them into typing.
   // Keyed by turn + block: a new block retypes from zero (delayed fold — it
   // replaces the previous block the moment its first delta arrives).
   const liveAssistantText = useSmoothText(
@@ -582,8 +592,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     };
   }, []);
 
+  // A chat that changes while its tab is hidden stays unread, so the sidebar
+  // and other devices show it as new until the guardian comes back.
+  const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        hiddenReadsRef.current.add(id);
+        return;
+      }
       try {
         await apiMarkSessionRead(id);
         notifySessionsChanged();
@@ -593,6 +610,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [notifySessionsChanged],
   );
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") return;
+      const ids = [...hiddenReadsRef.current];
+      hiddenReadsRef.current.clear();
+      for (const id of ids) void markSessionRead(id);
+    };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
@@ -825,6 +852,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
@@ -842,6 +870,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
@@ -895,7 +924,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             try {
               const status = JSON.parse(
                 evt.data,
-              ) as import("@rome/api-types/trace-segments").InputStatusMessage;
+              ) as import("@rome/api-types/trace-segments").InputStatusEvent;
               setMessages((prev) => {
                 const next = new Map(prev);
                 next.set(
@@ -943,7 +972,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // After stream ends, reload messages from DB (gets both trace + assistant)
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
+    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
   );
 
   useEffect(() => {
@@ -1412,6 +1441,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
   );
+  // A submission waiting on Approve is the specialist asking the guardian, the
+  // same as an open card.
+  useChatTabStatus(
+    isActiveSessionStreaming,
+    awaitingGuardian || activeSubmission !== null,
+    turnEnds,
+  );
 
   // Verbal approval: the specialist relays the guardian's "yes" via
   // confirm_output → a `handback_approved` marker. Resolve with the standing
@@ -1857,13 +1893,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           onClose={closeTraceDrawer}
           hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block as ChatEntry, key, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks as ChatEntry[], {
               onApprovalResolved: refreshActiveSession,
               compact: true,
               live,

@@ -16,6 +16,7 @@ const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ASSETS = [
   "channels/wechat-user-helper.py",
   "channels/wechat-user-launch-driver.py",
+  "channels/wechat-user-send-driver.py",
   "channels/vendor/wcdb_key_tool.py",
 ];
 

@@ -19,6 +19,8 @@ const CONFIG_ENV_KEYS = [
   "ROME_HOST_EXECUTION_ENABLED",
   "WECHAT_USER_ENABLED",
   "WECHAT_USER_DISPLAY",
+  "ROME_WECHAT_VNC_PORT",
+  "ROME_WECHAT_NOVNC_PORT",
   "ROME_ENABLE_CDP_AUTOMATION",
   "WEB_PORT",
   "WEB_HOST",
@@ -69,7 +71,28 @@ describe("loadConfig()", () => {
     rs.stubEnv("WECHAT_USER_DISPLAY", value);
     expect(() => loadConfig()).toThrow("Invalid configuration");
   });
-  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled, like the entrypoint", () => {
+  it.each([
+    ["ROME_WECHAT_VNC_PORT", "abc"],
+    ["ROME_WECHAT_NOVNC_PORT", "65536"],
+  ])("rejects %s=%s at boot while WeChat is enabled", (key, value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv(key, value);
+    expect(() => loadConfig()).toThrow("WeChat's desktop");
+  });
+  it("names the fix when the shared DISPLAY is WeChat's default display", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":100");
+    expect(() => loadConfig()).toThrow(
+      "Set WECHAT_USER_DISPLAY to a display other than DISPLAY (:100)",
+    );
+  });
+  it("ignores WeChat's desktop ports while WeChat is disabled", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("ROME_WECHAT_VNC_PORT", "abc");
+    expect(() => loadConfig()).not.toThrow();
+  });
+  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled", () => {
     rs.stubEnv("WECHAT_USER_ENABLED", "false");
     rs.stubEnv("WECHAT_USER_DISPLAY", "not-a-display");
     expect(() => loadConfig()).not.toThrow();

@@ -1,0 +1,2 @@
+cd /app
+/etc/s6-overlay/scripts/rome-init

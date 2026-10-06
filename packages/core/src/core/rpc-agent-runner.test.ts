@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "../actions/ipc.js";
 import { RpcAgentRunner } from "./rpc-agent-runner.js";
 import type { RunTurnRequest, RunTurnResponse } from "./agent-session-bridge.js";
-import type { StreamAgentMessage } from "@rome-os/app-runtime";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 
 /** In-memory transport pair: messages sent on one side arrive on the other. */
 function createTransportPair(): [IpcTransport, IpcTransport] {
@@ -32,7 +32,7 @@ function createTransportPair(): [IpcTransport, IpcTransport] {
 
 interface FakeMainOptions {
   /** Messages to stream for each turn, keyed by prompt. */
-  turns: Map<string, StreamAgentMessage[]>;
+  turns: Map<string, StreamAgentEvent[]>;
   requests?: RunTurnRequest[];
 }
 
@@ -48,7 +48,7 @@ function attachFakeMain(rpc: IpcRpc, options: FakeMainOptions): void {
     options.requests?.push(req);
     const turnId = `turn-${++turnCounter}`;
     const messages = options.turns.get(req.input.prompt) ?? [];
-    const stream = ctx.openStream<StreamAgentMessage>(`agent.turn:${turnId}`);
+    const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${turnId}`);
     void (async () => {
       for (const msg of messages) {
         stream.send(msg);
@@ -64,22 +64,22 @@ function attachFakeMain(rpc: IpcRpc, options: FakeMainOptions): void {
   });
 }
 
-async function collect(iter: AsyncIterable<unknown>): Promise<StreamAgentMessage[]> {
-  const out: StreamAgentMessage[] = [];
-  for await (const msg of iter) out.push(msg as StreamAgentMessage);
+async function collect(iter: AsyncIterable<unknown>): Promise<StreamAgentEvent[]> {
+  const out: StreamAgentEvent[] = [];
+  for await (const msg of iter) out.push(msg as StreamAgentEvent);
   return out;
 }
 
-function turnMessages(label: string): StreamAgentMessage[] {
+function turnMessages(label: string): StreamAgentEvent[] {
   return [
-    { type: "text", content: `${label}-chunk` } as StreamAgentMessage,
-    { type: "result", content: `${label}-result` } as StreamAgentMessage,
+    { type: "text", content: `${label}-chunk` } as StreamAgentEvent,
+    { type: "result", content: `${label}-result` } as StreamAgentEvent,
   ];
 }
 
 describe("RpcAgentRunner turn stream routing", () => {
   function setup(
-    turns: Map<string, StreamAgentMessage[]>,
+    turns: Map<string, StreamAgentEvent[]>,
     requests?: RunTurnRequest[],
   ): RpcAgentRunner {
     const [mainTransport, workerTransport] = createTransportPair();
@@ -104,8 +104,8 @@ describe("RpcAgentRunner turn stream routing", () => {
         [
           "p1",
           [
-            { type: "session_init", sessionId: "runtime-session" } as StreamAgentMessage,
-            { type: "result", content: "done" } as StreamAgentMessage,
+            { type: "session_init", sessionId: "runtime-session" } as StreamAgentEvent,
+            { type: "result", content: "done" } as StreamAgentEvent,
           ],
         ],
       ]),
@@ -198,7 +198,7 @@ describe("RpcAgentRunner turn stream routing", () => {
     // must hand the full stream to the late claimer.
     const many = Array.from(
       { length: 50 },
-      (_, i) => ({ type: "text", content: `c${i}` }) as StreamAgentMessage,
+      (_, i) => ({ type: "text", content: `c${i}` }) as StreamAgentEvent,
     );
     const runner = setup(new Map([["p1", many]]));
     const msgs = await collect(runner.run({ agentName: "a", prompt: "p1" }));

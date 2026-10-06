@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
-import { getThinkingBlockPreview } from "@/components/chat/blocks/ThinkingBlock";
+import { getThinkingBlockPreview } from "@/components/chat/entries/ThinkingBlock";
 
 export function LiveTurnActivity({
   snapshot,

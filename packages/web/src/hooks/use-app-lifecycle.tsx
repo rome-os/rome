@@ -76,9 +76,19 @@ export interface AppLifecycle {
   requestUninstall: (app: InstalledAppCard, purge: boolean) => void;
   requestPublish: (app: InstalledAppCard) => void;
   requestAccess: (app: InstalledAppCard) => void;
-  startChatToUpdate: (app: InstalledAppCard) => void;
+  chatWithApp: (app: InstalledAppCard) => void;
   /** Render once per page — the uninstall/publish confirms and access dialog. */
   dialogs: ReactNode;
+}
+
+function hasAppPage(app: InstalledAppCard): boolean {
+  return app.hasFrontend && app.href !== null;
+}
+
+// Chat with app opens a new chat in the app's source folder, beside the app's
+// own page. An app with neither would get only a blank chat, so it offers none.
+export function canChatWithApp(app: InstalledAppCard): boolean {
+  return hasAppPage(app) || app.projectPath !== null;
 }
 
 export function useAppLifecycle(
@@ -493,7 +503,21 @@ export function useAppLifecycle(
         emails,
       },
       {
-        onSuccess: () => setAccessTarget(null),
+        // A shared mode keeps the dialog open so its link can be copied right
+        // away; the target takes the saved mode, which enables copy.
+        onSuccess: (_result, { mode }) => {
+          if (mode === "private" || !app.fullHref || !shareableOrigin()) {
+            setAccessTarget(null);
+            return;
+          }
+          setAccessDialogError("");
+          setAccessTarget({
+            ...app,
+            accessMode: mode,
+            isPublic: mode === "public",
+            cloudAllowedEmails: emails,
+          });
+        },
         onError: (err) =>
           setAccessDialogError(
             err instanceof Error ? err.message : t("installed.errors.publicAccessFailed"),
@@ -502,9 +526,13 @@ export function useAppLifecycle(
     );
   };
 
-  const startChatToUpdate = (app: InstalledAppCard) => {
-    if (!app.projectPath) return;
-    navigate("/chat", { state: { projectPath: app.projectPath } });
+  const chatWithApp = (app: InstalledAppCard) => {
+    navigate("/chat", {
+      state: {
+        ...(hasAppPage(app) ? { widgets: [{ type: "app", appId: app.id }] } : {}),
+        ...(app.projectPath ? { projectPath: app.projectPath } : {}),
+      },
+    });
   };
 
   const uninstallDialogOpen = uninstallTarget !== null;
@@ -531,14 +559,25 @@ export function useAppLifecycle(
   const shareOrigin = shareableOrigin();
   const accessShareUrl =
     accessTarget?.fullHref && shareOrigin ? `${shareOrigin}${accessTarget.fullHref}` : null;
-  // The link only opens once the picked mode is saved, and saving closes the
-  // dialog, so copy waits for a saved shared mode. The Clipboard API exists in
+  // The link only opens once the picked mode is saved, so copy waits for a
+  // saved shared mode. The Clipboard API exists in
   // secure contexts only; elsewhere the field, which selects on focus, is the
   // way to copy.
   const accessSavedMode: AppAccessMode | null = accessTarget
     ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
     : null;
   const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
+  // Nothing left to save: the dismiss button reads "Done" rather than "Cancel".
+  // Save stays enabled, since re-saving is how a guardian retries a save whose
+  // policy was stored but whose proxy reload failed.
+  const accessSavedEmails = accessTarget?.cloudAllowedEmails ?? [];
+  const accessDraftUnsaved =
+    accessLinkUnsaved ||
+    (accessModeDraft === "cloud-email" &&
+      (accessEmailInput.trim() !== "" ||
+        accessEmailsDraft.length !== accessSavedEmails.length ||
+        // The server stores the list as a sorted set, so order is no change.
+        accessEmailsDraft.some((email) => !accessSavedEmails.includes(email))));
   const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
   const copyAccessShareUrl = () => {
     if (!accessShareUrl) return;
@@ -774,7 +813,9 @@ export function useAppLifecycle(
             onClick={cancelAccessDialog}
             disabled={accessSaving}
           >
-            {t("installed.accessDialog.cancel")}
+            {accessDraftUnsaved
+              ? t("installed.accessDialog.cancel")
+              : t("installed.accessDialog.done")}
           </Button>
           <Button
             type="button"
@@ -807,7 +848,7 @@ export function useAppLifecycle(
     requestUninstall,
     requestPublish,
     requestAccess,
-    startChatToUpdate,
+    chatWithApp,
     dialogs,
   };
 }

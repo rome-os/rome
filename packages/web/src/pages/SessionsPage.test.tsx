@@ -22,9 +22,9 @@ rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   traceDrawerContentInsetClass: () => "",
 }));
 
-rs.mock("@/components/chat/blocks", () => ({
-  renderFlatBlocks: () => null,
-  renderSingleBlock: () => null,
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
 }));
 
 rs.mock("@/components/chat/ChatComposer", () => ({

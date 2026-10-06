@@ -3,6 +3,7 @@ export * from "./auth.js";
 export * from "./bootstrap.js";
 export * from "./conversation-settings.js";
 export * from "./favors.js";
+export * from "./rome-credits.js";
 export * from "./persons.js";
 export * from "./projects.js";
 export * from "./sessions.js";

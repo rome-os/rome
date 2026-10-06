@@ -1,9 +1,16 @@
 // WebChat trace wire DTOs. Session model: docs/concepts/sessions.md.
 
-import type { AgentPlan, RomeSessionRef } from "@rome-os/app-runtime";
+import type {
+  AgentErrorCode,
+  AgentErrorProvider,
+  AgentErrorReason,
+  AgentPlan,
+  AgentStop,
+  RomeSessionRef,
+} from "@rome-os/app-runtime";
 export type {
   AgentInputState,
-  InputStatusMessage,
+  InputStatusEvent,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,
@@ -17,16 +24,16 @@ export interface AppRefDto {
   iconUrl: string;
 }
 
-export type TraceBlockType = TraceBlockDto["type"];
+export type TraceEventType = TraceEventDto["type"];
 
-interface TraceBlockBase {
+interface TraceEventBase {
   /** Sub-agent that produced this block: "main" | "envoy" | <subagent>. */
   agent?: string;
 }
 
 export type RomeSessionRefDto = RomeSessionRef;
 
-export interface SessionInitBlock extends TraceBlockBase {
+export interface TraceSessionInitEvent extends TraceEventBase {
   type: "session_init";
   sessionId: string;
   romeSession?: RomeSessionRefDto;
@@ -35,7 +42,7 @@ export interface SessionInitBlock extends TraceBlockBase {
   projectPath?: string;
 }
 
-export interface TurnStartBlock extends TraceBlockBase {
+export interface TraceTurnStartEvent extends TraceEventBase {
   type: "turn_start";
   turnId: string;
   sessionId: string;
@@ -43,7 +50,7 @@ export interface TurnStartBlock extends TraceBlockBase {
 }
 
 /** Follows the terminal result or error and closes its turn. */
-export interface TurnEndBlock extends TraceBlockBase {
+export interface TraceTurnEndEvent extends TraceEventBase {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
@@ -55,7 +62,7 @@ export interface TurnEndBlock extends TraceBlockBase {
   durationMs: number;
 }
 
-export interface TextBlock extends TraceBlockBase {
+export interface TextBlock extends TraceEventBase {
   type: "text";
   content: string;
   /** Provider-agnostic role of this text within its turn. `commentary` =
@@ -68,12 +75,12 @@ export interface TextBlock extends TraceBlockBase {
   turnPhase?: "commentary" | "final";
 }
 
-export interface ThinkingBlock extends TraceBlockBase {
+export interface ThinkingBlock extends TraceEventBase {
   type: "thinking";
   content: string;
 }
 
-export interface ToolUseBlock extends TraceBlockBase {
+export interface ToolUseBlock extends TraceEventBase {
   type: "tool_use";
   tool: string;
   input: unknown;
@@ -82,16 +89,19 @@ export interface ToolUseBlock extends TraceBlockBase {
   startedAt?: string;
 }
 
-export interface ToolResultBlock extends TraceBlockBase {
+export interface ToolResultBlock extends TraceEventBase {
   type: "tool_result";
   tool: string;
   output: unknown;
   /** Provider-issued ID of the corresponding tool use. */
   toolUseId?: string;
   endedAt?: string;
+  /** See `ToolResultMessage.isError`. Absent on blocks recorded before it
+   *  existed and from producers that cannot tell. */
+  isError?: boolean;
 }
 
-export interface SubagentStartBlock extends TraceBlockBase {
+export interface TraceSubagentStartEvent extends TraceEventBase {
   type: "subagent_start";
   toolUseId: string;
   agentName: string;
@@ -101,8 +111,8 @@ export interface SubagentStartBlock extends TraceBlockBase {
   startedAt?: string;
 }
 
-export type SubagentResultBlock =
-  | (TraceBlockBase & {
+export type TraceSubagentResultEvent =
+  | (TraceEventBase & {
       type: "subagent_result";
       toolUseId: string;
       agentName: string;
@@ -112,7 +122,7 @@ export type SubagentResultBlock =
       output: unknown;
       endedAt?: string;
     })
-  | (TraceBlockBase & {
+  | (TraceEventBase & {
       type: "subagent_result";
       toolUseId: string;
       agentName: string;
@@ -128,6 +138,8 @@ export interface TraceTokenUsage {
   cacheWriteTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /** Subset of `outputTokens`; see `AgentTokenUsage.reasoningTokens`. */
+  reasoningTokens?: number;
 }
 
 export interface TraceContextUsage {
@@ -152,6 +164,8 @@ export interface TraceAccounting {
   context?: TraceContextUsage;
   costUsd?: number;
   numTurns?: number;
+  stop?: AgentStop;
+  /** @deprecated Read `stop.reason`. */
   stopReason?: string;
   durationMs?: number;
   rawUsage?: Record<string, unknown>;
@@ -163,51 +177,47 @@ export interface TraceAccounting {
   usageByModel?: TraceModelUsage[];
 }
 
-export interface ResultBlock extends TraceBlockBase {
+export interface TraceResultEvent extends TraceEventBase {
   type: "result";
   content: string;
   structuredOutput?: unknown;
   accounting?: TraceAccounting;
 }
 
-export interface ErrorBlock extends TraceBlockBase {
+export interface TraceErrorEvent extends TraceEventBase {
   type: "error";
   error: string;
   accounting?: TraceAccounting;
-  code?:
-    | "usage_limit"
-    | "auth_revoked"
-    | "model_provider_unavailable"
-    | "model_unavailable"
-    | "no_model_provider_available";
-  provider?: "openai" | "anthropic";
-  reason?: "not_logged_in" | "quota_exhausted" | "model_access_denied" | "no_available_provider";
+  code?: AgentErrorCode;
+  httpStatus?: number;
+  provider?: AgentErrorProvider;
+  reason?: AgentErrorReason;
 }
 
-export interface StructuredOutputBlock extends TraceBlockBase {
+export interface TraceStructuredOutputEvent extends TraceEventBase {
   type: "structured_output";
   payload: unknown;
 }
 
-export interface PlanUpdateBlock extends TraceBlockBase {
+export interface TracePlanUpdateEvent extends TraceEventBase {
   type: "plan_update";
   plan: AgentPlan;
 }
 
-export type TraceBlockDto =
-  | SessionInitBlock
-  | TurnStartBlock
-  | TurnEndBlock
+export type TraceEventDto =
+  | TraceSessionInitEvent
+  | TraceTurnStartEvent
+  | TraceTurnEndEvent
   | TextBlock
   | ThinkingBlock
   | ToolUseBlock
   | ToolResultBlock
-  | SubagentStartBlock
-  | SubagentResultBlock
-  | ResultBlock
-  | ErrorBlock
-  | StructuredOutputBlock
-  | PlanUpdateBlock;
+  | TraceSubagentStartEvent
+  | TraceSubagentResultEvent
+  | TraceResultEvent
+  | TraceErrorEvent
+  | TraceStructuredOutputEvent
+  | TracePlanUpdateEvent;
 
 export interface TraceRunSegment {
   kind: "run";
@@ -216,7 +226,7 @@ export interface TraceRunSegment {
   app: AppRefDto;
   count: number;
   /** Paired tool or subagent invocation blocks in time order. */
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   /** Sum of (endedAt − startedAt) over paired steps; undefined if any step
    *  in the run is missing a timestamp. */
   durationMs?: number;
@@ -224,14 +234,14 @@ export interface TraceRunSegment {
   ordinal: number;
 }
 
-export interface TraceBlockSegment {
+export interface TraceEventSegment {
   kind: "block";
   id: string;
-  block: TraceBlockDto;
+  block: TraceEventDto;
   ordinal: number;
 }
 
-export type TraceSegment = TraceRunSegment | TraceBlockSegment;
+export type TraceSegment = TraceRunSegment | TraceEventSegment;
 
 export type TraceSubagentStatus = "running" | "completed" | "failed" | "cancelled";
 
@@ -259,7 +269,7 @@ export interface TraceSummary {
   totalDurationMs?: number;
   /** Authoritative outcome from the latest `turn_end` block. Absent while the
    *  turn is still running and on legacy traces without lifecycle brackets. */
-  turnStatus?: TurnEndBlock["status"];
+  turnStatus?: TraceTurnEndEvent["status"];
   /** Per-app invocation totals for the icon-strip tooltip. Keyed by app.id. */
   invocationCounts: Record<string, number>;
   /** True when the turn was interrupted by the user via Stop. */

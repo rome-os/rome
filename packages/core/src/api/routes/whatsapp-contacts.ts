@@ -36,15 +36,15 @@ export function whatsappContactsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "text is required" }, 400);
     }
 
-    const connections = (await deps.talkRouter.list()).filter(
-      (connection) => connection.service === "whatsapp",
+    const whatsapp = (await deps.channelsService.list()).find(
+      (channel) => channel.name === "whatsapp",
     );
-    if (connections.length !== 1) {
+    if (whatsapp?.connectionIds.length !== 1) {
       return c.json({ error: "WhatsApp is not connected" }, 503);
     }
 
     try {
-      await deps.talkRouter.send(connections[0]!.connectionId, jid as ConversationId, { text });
+      await deps.channelsService.send("whatsapp", jid as ConversationId, { text });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 502);
     }

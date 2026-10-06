@@ -1,10 +1,11 @@
-// `rome_agent_messages` as a {@link Messages} store: what Rome was told and
+// `rome_agent_messages` as an {@link AccountMessages} store: what Rome was told and
 // what it said back, for every channel with no mirror of its own.
 
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb } from "../db/index.js";
 import type { MessagePart } from "../types.js";
-import type { Messages } from "./messages.js";
+import type { Message } from "@rome/api-types/message";
+import type { AccountMessages, MessageDetail } from "./messages.js";
 import { scopePairs, sqlMessages } from "./messages-sql.js";
 
 /**
@@ -46,18 +47,16 @@ export function agentMessageOutbound(role: SQL, senderId: SQL): SQL {
 }
 
 /**
- * Rome's own transcript of a channel conversation.
+ * Rome's own transcript of a channel conversation, read for accounts.
  *
- * Reached through the session's thread either way it is asked. A channel
- * session is keyed by the thread it belongs to, so a session addressed by the
- * account is that account's direct conversation, and a conversation names the
- * same column by its own id — the two scopes select the same way and differ
- * only in what they subtract. A group's session is addressed by the group
- * rather than by anyone on it, so it is named by no account and reached only by
- * naming the group. Which sender a message carries makes no difference: a line
- * the account wrote into a group belongs to the group's thread.
+ * Reached through the session's thread. A channel session is keyed by the
+ * thread it belongs to, so a session addressed by the account is that account's
+ * direct conversation. A group's session is addressed by the group rather than
+ * by anyone on it, so no account names it. Which sender a message carries makes
+ * no difference: a line the account wrote into a group belongs to the group's
+ * thread.
  */
-export function agentMessages(db: DrizzleDb): Messages {
+export function agentMessages(db: DrizzleDb): AccountMessages {
   // No `channel`: the transcript holds every channel that has no mirror of its
   // own, side by side, so it is scoped by the pair throughout.
   return sqlMessages({
@@ -65,14 +64,11 @@ export function agentMessages(db: DrizzleDb): Messages {
     view(scope) {
       const addressed = scopePairs(scope.keys, sql`s.source_channel`, sql`s.source_thread_id`);
       if (addressed === null) return null;
-      const held =
-        scope.by === "account"
-          ? // Addressing already leaves a group out, since a group's session is
-            // keyed by the group and no account answers to that. Said again on
-            // the store's own terms so the guarantee survives a caller that
-            // hands over a group id as if it were an account's address.
-            sql`${addressed} AND coalesce(s.source_thread_type, '') <> 'group'`
-          : addressed;
+      // Addressing already leaves a group out, since a group's session is keyed
+      // by the group and no account answers to that. Said again on the store's
+      // own terms so the guarantee survives a caller that hands over a group id
+      // as if it were an account's address.
+      const held = sql`${addressed} AND coalesce(s.source_thread_type, '') <> 'group'`;
       return sql`
         SELECT
           s.source_channel AS source,
@@ -80,7 +76,8 @@ export function agentMessages(db: DrizzleDb): Messages {
           m.created_at AS at,
           ${agentMessageOutbound(sql`m.role`, sql`m.sender_id`)} AS outbound,
           'agent:' || m.id AS ref,
-          m.content AS body
+          m.content AS body,
+          m.id AS detail_key
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
@@ -93,7 +90,45 @@ export function agentMessages(db: DrizzleDb): Messages {
           AND m.role IN ('user', 'assistant', 'notification')`;
     },
     body: messageContentText,
+    detail: {
+      of: (key) => sql`(
+        SELECT json_object(
+          'senderId', m.sender_id,
+          'senderName', m.sender_name,
+          'threadId', s.source_thread_id,
+          'threadName', s.source_thread_name,
+          'threadType', s.source_thread_type
+        )
+        FROM rome_agent_messages m
+        JOIN rome_sessions s ON s.id = m.session_id
+        WHERE m.id = ${key}
+      )`,
+      map: transcriptDetail,
+    },
   });
+}
+
+/** Who said a transcript line and in which session's thread, as the row
+ *  recorded them. Rome's own lines carry no sender, the way the sentinel log
+ *  reads them. A private thread is a direct one, and a thread type with no kind
+ *  of its own reads as unknown. */
+function transcriptDetail(raw: Record<string, unknown>, entry: Message): MessageDetail {
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
+  const detail: MessageDetail = {};
+  const sender = { id: text(raw.senderId), name: text(raw.senderName) };
+  if (entry.direction === "inbound" && (sender.id !== null || sender.name !== null)) {
+    detail.sender = sender;
+  }
+  const threadId = text(raw.threadId);
+  if (threadId !== null) {
+    const type = text(raw.threadType);
+    detail.conversation = {
+      id: threadId,
+      name: text(raw.threadName),
+      kind: type === "private" ? "dm" : type === "group" || type === "topic" ? type : null,
+    };
+  }
+  return detail;
 }
 
 /** The line a stored agent message renders as: its text parts, joined.

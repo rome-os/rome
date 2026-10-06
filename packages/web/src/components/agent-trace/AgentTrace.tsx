@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ChevronRightIcon } from "@radix-ui/react-icons";
-import type { TraceBlockDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
+import type { TraceEventDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
 import { CollapsedTraceSummary, formatDuration } from "./CollapsedTraceSummary";
 import { TraceRunRow } from "./TraceRunRow";
@@ -18,8 +18,8 @@ export function TraceBody({
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const { t } = useTranslation("activity");

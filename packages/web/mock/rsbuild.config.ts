@@ -6,19 +6,17 @@ import baseConfig from "../rsbuild.config";
 /**
  * Build config for mock mode — the full dashboard SPA served without a
  * backend. The entry starts an MSW service worker (fixtures in ./handlers)
- * before loading the real src/main.tsx, so every /api call is answered
- * in-browser from typed fixtures.
+ * before loading the real src/main.tsx, so fixture-backed /api calls are
+ * answered in-browser.
  *
  * This is deliberately a SEPARATE entry point rather than a
  * dev branch in the SPA: `pnpm build` reads ../rsbuild.config.ts, whose single
  * entry is src/main.tsx, so neither MSW nor any fixture is ever bundled into
  * the dashboard.
  *
- * The base config is reused wholesale — same shell template, same env
- * handling, same proxy. The proxy stays on purpose: MSW answers handled
- * routes before they hit the network, and unhandled ones pass through to a
- * real backend on INTERNAL_API_PORT when you have one running, which lets
- * mock mode also serve as a "override one endpoint" tool.
+ * The base config supplies the shell and build settings. Ordinary mock mode
+ * keeps its backend proxy for endpoint overrides. rsbuild.e2e.config.ts
+ * disables that proxy for Midscene runs.
  *
  * Run: `pnpm --filter rome-web dev:mock` (http://localhost:3200).
  */
@@ -58,6 +56,10 @@ export default defineConfig({
   source: {
     ...baseConfig.source,
     entry: { index: resolve(mockDir, "main.tsx") },
+    define: {
+      ...baseConfig.source?.define,
+      "import.meta.env.ROME_MOCK_STRICT_E2E": "false",
+    },
   },
   server: {
     ...baseConfig.server,

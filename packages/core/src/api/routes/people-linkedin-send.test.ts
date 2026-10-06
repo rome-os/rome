@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type { TalkRouter } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../../connections/types.js";
 import type {
   OutboxMessage,
   OutboxPage,
@@ -10,7 +10,13 @@ import type {
 import { createLinkedInDescriptor } from "../../connections/integrations/linkedin.js";
 import type { Credential, RuntimeKit } from "../../connections/types.js";
 import type { OpencliResult } from "../../channels/linkedin-cli.js";
-import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  buildTestDeps,
+  createTestDb,
+  testChannels,
+  type TestDb,
+  type TestDeps,
+} from "../../test/helpers.js";
 import { peopleRoutes } from "./people.js";
 
 const MEMBER = "ACoAARecipient";
@@ -61,6 +67,11 @@ describe("LinkedIn replies through People", () => {
       feature: (_id, name) => talker.feature(name),
       send: (...args) => send(...args),
     };
+    // The channel list over that router, with LinkedIn's Connection behind it.
+    deps.channels = testChannels(
+      { ...deps, channelPortMap: new Map([["linkedin", null]]) },
+      deps.talkRouter,
+    );
     person = await deps.personMappingRepo.create({
       displayName: "LinkedIn Recipient",
       bondLevel: "acquaintance",

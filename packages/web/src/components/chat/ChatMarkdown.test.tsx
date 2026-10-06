@@ -8,7 +8,7 @@ import Markdown from "@/components/markdown";
 import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
-import { CompactTextBlock } from "./blocks/TextBlock";
+import { CompactTextBlock } from "./entries/TextBlock";
 import ChatMarkdown from "./ChatMarkdown";
 
 const i18n = createInstance();

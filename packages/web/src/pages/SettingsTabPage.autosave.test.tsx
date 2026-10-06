@@ -30,10 +30,11 @@ function ok(json: unknown): Response {
   return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
 }
 
-function mockSettingsBackend() {
+function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
   const calls: FetchCall[] = [];
   const settings = {
     sentinelReviewIntervalMinutes: 60,
+    ...initialSettings,
   };
 
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -158,6 +159,28 @@ describe("SettingsPage Advanced autosave", () => {
         url: "/api/settings",
         method: "PUT",
         body: { enableFable: true },
+      }),
+    );
+  });
+
+  it("saves trimmed, per-provider tier model mappings", async () => {
+    const calls = mockSettingsBackend({
+      tierModelMappings: { openai: { large: "gpt-6-astra" } },
+    });
+    const user = userEvent.setup();
+    renderAdvancedSettings();
+
+    const largeModel = await screen.findByLabelText("Codex large model ID");
+    expect((largeModel as HTMLInputElement).value).toBe("gpt-6-astra");
+    await user.clear(largeModel);
+    await user.type(largeModel, "  gpt-6-sol-2026-04-01  ");
+    await user.click(screen.getByRole("button", { name: "Save mappings" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: "/api/settings",
+        method: "PUT",
+        body: { tierModelMappings: { openai: { large: "gpt-6-sol-2026-04-01" } } },
       }),
     );
   });

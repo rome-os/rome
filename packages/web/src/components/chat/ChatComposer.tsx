@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -41,7 +42,7 @@ import type {
   ReasoningEffort,
   ChatErrorNotice,
 } from "@/lib/chat-types";
-import { ErrorBlock } from "./blocks/ErrorBlock";
+import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
 import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
@@ -181,10 +182,10 @@ export interface ChatComposerProps {
 const TEXTAREA_MIN_HEIGHT = "1lh";
 const TEXTAREA_MAX_HEIGHT = 240;
 
-function clampTextareaHeight(el: HTMLTextAreaElement) {
+function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT) + "px";
-  el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + "px";
+  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
@@ -297,6 +298,22 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentTrayRef = useRef<HTMLDivElement>(null);
+  const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
+
+  useLayoutEffect(() => {
+    const tray = attachmentTrayRef.current;
+    if (!tray) return;
+    // Attachments share the text area's height budget so previews cannot push
+    // the toolbar below the viewport when the draft already fills the input.
+    const measure = () => {
+      setTextareaMaxHeight(Math.max(0, TEXTAREA_MAX_HEIGHT - tray.getBoundingClientRect().height));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(tray);
+    return () => observer.disconnect();
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   // State drives the UI, while the ref closes the same-event gap before React
@@ -318,11 +335,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // box would otherwise stay at its previous (potentially maxed-out) height
   // and not shrink back to a single line. We mirror the onInput math here
   // and let React re-apply it after every value change.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    clampTextareaHeight(el);
-  }, [inputText]);
+    clampTextareaHeight(el, textareaMaxHeight);
+  }, [inputText, textareaMaxHeight]);
 
   //      draft seed via location.state), update the chip — but only while we
   //      still have the default-or-stale value so we don't trample on a
@@ -487,7 +504,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         requestAnimationFrame(() => {
           const el = textareaRef.current;
           if (!el) return;
-          clampTextareaHeight(el);
+          clampTextareaHeight(el, textareaMaxHeight);
           if (options?.focus !== false) el.focus();
           el.setSelectionRange(text.length, text.length);
         });
@@ -542,6 +559,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }),
     [
       addPendingFiles,
+      textareaMaxHeight,
       impersonationEnabled,
       selectedPersonId,
       reasoningEffort,
@@ -962,7 +980,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </ButtonGroup>
       )}
       {streamError && (
-        <ErrorBlock
+        <ErrorEventView
           presentation="status"
           className="mb-2"
           error={typeof streamError === "string" ? streamError : streamError.message}
@@ -1022,12 +1040,16 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
-        <PendingUploadsList
-          uploads={pendingUploads}
-          onRemove={removePendingUpload}
-          disabled={isComposerBusy}
-          uploadProgress={uploadInFlight ? uploadProgress : undefined}
-        />
+        {/* flow-root keeps the tray's bottom margin inside this box, so the
+            measured height is the full space the tray takes from the input. */}
+        <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
+          <PendingUploadsList
+            uploads={pendingUploads}
+            onRemove={removePendingUpload}
+            disabled={isComposerBusy}
+            uploadProgress={uploadInFlight ? uploadProgress : undefined}
+          />
+        </div>
         <SlashSkillMenu
           ref={slashMenuRef}
           open={slashMenuOpen && !isComposerBusy}
@@ -1070,9 +1092,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
                     style={{
                       minHeight: TEXTAREA_MIN_HEIGHT,
-                      maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
+                      maxHeight: `${textareaMaxHeight}px`,
                     }}
-                    onInput={(e) => clampTextareaHeight(e.target as HTMLTextAreaElement)}
+                    onInput={(e) =>
+                      clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
+                    }
                     disabled={isComposerBusy}
                   />
                 }

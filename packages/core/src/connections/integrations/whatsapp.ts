@@ -24,7 +24,7 @@
 // → CredentialRejected{ grant: "session" }; any other terminal → Disconnected.
 
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
 import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -48,7 +48,6 @@ import {
 } from "./whatsapp-auth-state.js";
 import {
   addressIsConversationFeature,
-  historyFeature,
   inboundMediaFeature,
   toInboundMessage,
   toMessageReceipt,
@@ -344,7 +343,6 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const features: Partial<TalkFeatureMap> = {
                 inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter),
                 // A WhatsApp direct chat is addressed by the contact's own JID,
                 // so the address is already the conversation.
                 directMessaging: addressIsConversationFeature(),

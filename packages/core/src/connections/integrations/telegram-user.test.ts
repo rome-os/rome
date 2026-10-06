@@ -18,9 +18,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ConversationId,
-  InboundMessage,
   NormalizedMessage,
   OutgoingMessage,
+  ChannelMessage,
 } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
@@ -202,6 +202,8 @@ describe("telegram_user descriptor shape", () => {
     const h = buildTalker();
     h.start();
     const message = {
+      channel: "telegram_user",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "dialog-1" as ConversationId,
       senderId: "999",
@@ -209,12 +211,18 @@ describe("telegram_user descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
       raw: { channel: "telegram_user", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
+    } satisfies ChannelMessage;
     await expect(h.talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
     expect(fakeState.stopped).toBe(true);
+  });
+
+  // The flag is what gives the channel a \`messages\` port; the feature is what
+  // answers it. A Talk offering one without the other is unreachable or broken.
+  it("declares the history its Talk offers", () => {
+    expect(makeTelegramUserDescriptor().capabilities.talker?.history).toBe(true);
   });
 
   it("exposes provider-neutral history", async () => {

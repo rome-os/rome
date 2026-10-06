@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { trackAppOpen } from "@/lib/analytics";
@@ -156,6 +157,7 @@ export function RomeAppHost({
   styleUrls: string[];
   bootstrap: RomeAppBootstrap;
 }) {
+  const scale = useUiScale();
   const rootRef = useRef<HTMLDivElement>(null);
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
@@ -182,7 +184,7 @@ export function RomeAppHost({
         mountedModule = module;
         await module.mount(mountRoot, currentBootstrap);
         // Both page surfaces (embedded + full) mount through here; the inline
-        // chat surface has its own mount path in AppComponentBlock. Together
+        // chat surface has its own mount path in AppComponentView. Together
         // the two call sites are the complete record of app
         // opens — including surfaces that never change the URL.
         trackAppOpen(appId, currentBootstrap.shell.mode);
@@ -217,5 +219,5 @@ export function RomeAppHost({
     );
   }
 
-  return <div ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
+  return <div data-ui-scale={scale} ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
 }

@@ -6,7 +6,7 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import {
@@ -41,7 +41,7 @@ function createProvider(id: ProviderId) {
   const openSession = rs.fn(async (params: ModelSessionParams) => {
     const session = createSessionFromRun(
       id,
-      async function* (input): AsyncIterable<AgentMessage> {
+      async function* (input): AsyncIterable<AgentEvent> {
         calls.push(input);
         yield { type: "result", content: "done" };
       },
@@ -66,8 +66,8 @@ function healthyState() {
   };
 }
 
-async function collect(events: AsyncIterable<AgentMessage>): Promise<AgentMessage[]> {
-  const messages: AgentMessage[] = [];
+async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
+  const messages: AgentEvent[] = [];
   for await (const message of events) messages.push(message);
   return messages;
 }
@@ -186,8 +186,8 @@ describe("agent model pins through AgentSessionManager", () => {
     });
     await collect(resumed.sendTurn({ prompt: "continue" }).events);
     expect(anthropic.calls.map((call) => call.model)).toEqual([
-      "claude-sonnet-5",
-      "claude-sonnet-5",
+      "claude-sonnet-5-5",
+      "claude-sonnet-5-5",
     ]);
     expect(openai.openSession).not.toHaveBeenCalled();
   });

@@ -32,8 +32,15 @@ export function createAction(
       let sessionId = args.sessionId as string | undefined;
 
       if (!sessionId) {
+        // rome_sessions also holds channel and background runs, including this
+        // review's own agent session; keep to the old webchat_sessions rows.
         const row = appContext.db.connection.get(
-          sql`SELECT id FROM webchat_sessions ORDER BY created_at DESC LIMIT 1`,
+          sql`
+            SELECT id FROM rome_sessions
+            WHERE type IN ('webchat', 'webchat_handoff')
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
         ) as { id: string } | undefined;
         if (!row) {
           return { status: "ok", data: { result: "No webchat sessions found." } };

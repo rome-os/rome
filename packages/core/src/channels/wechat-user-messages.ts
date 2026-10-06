@@ -14,7 +14,16 @@
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
-import type { ConversationRead, MessageAccount, MessageRead, Messages } from "./messages.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import {
+  channelMessageDetail,
+  queryLimit,
+  querySince,
+  type AccountMessages,
+  type MessageAccount,
+  type MessageRead,
+  type Messages,
+} from "./messages.js";
 import {
   isWechatUserSessionRejected,
   WechatUserStorePending,
@@ -46,6 +55,32 @@ function toMessage(message: WechatUserMessage): Message {
     body: message.text || null,
     direction: message.isSelf ? "outbound" : "inbound",
     ref: message.id,
+    ...channelMessageDetail(toWechatUserChannelMessage(message)),
+  };
+}
+
+/**
+ * A reader message as a {@link ChannelMessage}. `senderId` falls back to the
+ * conversation for an authorless system notice, because an empty sender reads
+ * downstream as an unknown person rather than as the chat. The reader keeps no
+ * attachments, only a placeholder line for them.
+ */
+export function toWechatUserChannelMessage(message: WechatUserMessage): ChannelMessage {
+  return {
+    channel: WECHAT_USER_CHANNEL,
+    direction: message.isSelf ? "outbound" : "inbound",
+    messageId: message.id,
+    conversationId: message.conversationId as ConversationId,
+    senderId: message.senderId || message.conversationId,
+    ...(message.senderName ? { senderDisplayName: message.senderName } : {}),
+    text: message.text,
+    attachments: [],
+    timestamp: new Date(message.timestamp * 1000),
+    thread: {
+      kind: message.isGroup ? "group" : "dm",
+      ...(message.conversationName ? { name: message.conversationName } : {}),
+    },
+    raw: message,
   };
 }
 
@@ -63,13 +98,31 @@ function directAddresses(accounts: readonly MessageAccount[]): string[] {
 /**
  * `Messages` over the personal WeChat store, read live through the reader.
  *
- * Paging without a native cursor: the reader answers the newest messages
+ * `query` asks the reader directly, every conversation unless one is named.
+ *
+ * The account reads page without a native cursor: the reader answers the newest messages
  * at-or-before a timestamp, so a page after a cursor fetches a bounded window
  * ending at the cursor's second, including every tie, and drops what the cursor covered
  * ({@link isAfterMessageCursor}). `compareMessages` is the one ranking both a
  * store and a person's timeline cut, so the local sort matches every consumer.
  */
 export function wechatUserMessages(reader: WechatUserReader): Messages {
+  return {
+    async query({ conversationId, since, limit }) {
+      const messages = await reader.messages({
+        ...(conversationId ? { conversationId } : {}),
+        ...(since ? { since: querySince(since) } : {}),
+        limit: queryLimit(limit),
+      });
+      // The reader answers oldest first, same-second messages included; the
+      // port answers newest first.
+      return messages.map(toWechatUserChannelMessage).reverse();
+    },
+    byAccount: wechatUserAccountMessages(reader),
+  };
+}
+
+function wechatUserAccountMessages(reader: WechatUserReader): AccountMessages {
   async function windowFor(
     addresses: readonly string[],
     opts: { before?: Message | null; limit: number },
@@ -118,21 +171,6 @@ export function wechatUserMessages(reader: WechatUserReader): Messages {
       if (addresses.length === 0) return null;
       const newest = await windowFor(addresses, { limit: 1 });
       return newest[0] ?? null;
-    },
-
-    async readConversation({ conversation, after, limit }: ConversationRead): Promise<Message[]> {
-      if (conversation.channel !== WECHAT_USER_CHANNEL) return [];
-      const before = after ? new Date(after.timestamp * 1000) : undefined;
-      const messages = await reader
-        .messages({
-          conversationId: conversation.id,
-          includeBoundaryTies: true,
-          ...(before ? { before } : {}),
-          limit: windowSize(limit),
-        })
-        .then((rows) => rows.map(toMessage).sort(compareMessages))
-        .catch(() => [] as Message[]);
-      return page(messages, after, limit);
     },
   };
 }

@@ -290,6 +290,31 @@ describe("AIToolState", () => {
     await claudeRefresh;
   });
 
+  it("preserves startup and hourly probes for both providers without probing cached reads", async () => {
+    rs.useFakeTimers();
+    const codexStatus = rs.fn(async () => ({ loggedIn: true }));
+    const claudeStatus = rs.fn(async () => ({ loggedIn: true }));
+    const codexUsage = rs.fn(async () => null);
+    const claudeUsage = rs.fn(async () => null);
+    const allProbes = { codexStatus, claudeStatus, codexUsage, claudeUsage };
+    const state = createAIToolState({ probes: allProbes });
+    try {
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+      await state.refresh();
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+
+      for (let read = 0; read < 20; read += 1) state.get();
+      await rs.advanceTimersByTimeAsync(60 * 60 * 1000 - 1);
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(1);
+
+      await rs.advanceTimersByTimeAsync(1);
+      for (const probe of Object.values(allProbes)) expect(probe).toHaveBeenCalledTimes(2);
+    } finally {
+      state.close();
+      rs.useRealTimers();
+    }
+  });
+
   it("runs all provider checks on the hourly timer", async () => {
     rs.useFakeTimers();
     const codexStatus = rs.fn(async () => ({

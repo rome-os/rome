@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, InboundMessage, TalkRouter } from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkRouter } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -111,6 +112,38 @@ describe("channel pairing approvals", () => {
     await expect(notifyPairingResolution(router, result.approval)).resolves.toBeUndefined();
     expect((await repo.findById(request.id))?.status).toBe("approved");
     expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
+  });
+
+  it("decides admission without waiting for its reply to send", async () => {
+    seedConnection("telegram");
+    // A reply that never settles must not hold up the admission decision, which
+    // gates every later message in the conversation.
+    const send = rs.fn<TalkRouter["send"]>(() => new Promise(() => {}));
+    const router = { send, feature: () => null } as unknown as TalkRouter;
+    const admit = createPairingAdmission({
+      talkGrants,
+      approvalsRepo: repo,
+      personMappingRepo: new PersonMappingRepository(testDb.db),
+    });
+
+    const admitted = await admit(
+      "connection",
+      "telegram",
+      {
+        senderId: "123",
+        conversationId: "group" as ConversationId,
+        messageId: "request",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(),
+        thread: { kind: "group" },
+        addressing: "mention",
+      },
+      router,
+    );
+
+    expect(admitted).toBe(false);
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it.each([

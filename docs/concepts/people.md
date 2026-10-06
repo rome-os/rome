@@ -91,6 +91,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it or approves its pairing.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**
@@ -105,7 +106,7 @@ The outbox holds messages Rome has been asked to send and has not yet seen arriv
 **Contracts:**
 
 - A send names the [account](#account) it is for. Rome never chooses one on the guardian's behalf, on any evidence: a timeline entry names its channel and not its address, so no rule can tell two accounts on one channel apart, and reaching for a second channel when the first is down delivers somewhere nobody picked. A surface may preselect an account, and must show which one it picked.
-- A channel can be sent to only if it says so. `talk.feature("directMessaging")` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
+- A channel can be sent to only if it says so. Its `send` port's `direct` answering null is the whole declaration, so a channel Rome mirrors but cannot write to needs no flag of its own.
 - An outbox row is exactly a send whose message is not on the timeline yet. It is derived from that comparison rather than cleared by anything, so no delivery callback can be missed and the two reads cannot disagree.
 - A message is recognized as arrived by the id the channel gave back, never by its text or its timing. A channel offering direct messaging must return one.
 - A failed send stays until the guardian retries it or discards it. A retry reuses the row, so it never reads as a second message they did not write.

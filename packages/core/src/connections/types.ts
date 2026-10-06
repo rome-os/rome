@@ -4,15 +4,97 @@
 // the `expiresAt` envelope).
 
 import type {
+  Attachment,
+  ChannelMessage,
+  ConversationDescriptor,
   ConversationId,
-  InboundMessage,
+  MessageAddressing,
   MessageReceipt,
+  MessageReplyReference,
   OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
+  TalkActivity,
+  TalkDirectMessaging,
+  TalkInboundMedia,
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
+
+// ── Talk ─────────────────────────────────────────────────────────────────────
+// A Connection's conversational surface, as its builder implements it and the
+// router dispatches it. Core-internal: apps reach channels through the
+// channels service (actions) or a hook's `channels`, never through a Talk.
+
+/** A message as a Talk delivers it, before a channel names itself and the
+ *  direction on it ({@link ChannelMessage}). Provider-native data is an opaque
+ *  pass-through token reserved for a feature on the same provider. */
+export interface InboundMessage {
+  messageId: string;
+  conversationId: ConversationId;
+  /** Parent conversation when this message belongs to a native thread. */
+  parentConversationId?: ConversationId;
+  senderId: string;
+  senderDisplayName?: string;
+  senderUsername?: string;
+  text: string;
+  attachments: Attachment[];
+  timestamp: Date;
+  replyTo?: MessageReplyReference;
+  thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  addressing?: MessageAddressing;
+  raw?: unknown;
+}
+
+/**
+ * The platform's own history of a Connection's conversations: at most `limit`
+ * of them at or after `since`, oldest first, each saying which channel carried
+ * it and which way it went. It backs `messages.query` for a channel with no
+ * store of its own (channels/connection-ports.ts).
+ */
+export interface TalkHistory {
+  query(input: {
+    conversationId?: ConversationId;
+    since?: Date;
+    limit?: number;
+  }): Promise<ChannelMessage[]>;
+}
+
+/** The conversations a Connection can see, for conversation settings. */
+export interface TalkDirectory {
+  listConversations(input: {
+    query?: string;
+    cursor?: string;
+    limit: number;
+    includeTopics?: boolean;
+  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
+}
+
+export interface TalkFeatureMap {
+  history: TalkHistory;
+  inboundMedia: TalkInboundMedia;
+  activity: TalkActivity;
+  directory: TalkDirectory;
+  directMessaging: TalkDirectMessaging;
+}
+
+export type TalkFeatureName = keyof TalkFeatureMap;
+
+export interface Talk {
+  subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
+  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
+  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
+}
+
+/** Routing keyed by Connection id: pairing and ordered admission run here,
+ *  before a channel's inbound hears anything. */
+export interface TalkRouter {
+  list(): Promise<Array<{ connectionId: string; service: string }>>;
+  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
+  send(
+    connectionId: string,
+    conversationId: ConversationId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt>;
+  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
+}
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
@@ -27,15 +109,7 @@ export type ProfileRecord = Record<string, unknown>;
 
 // OutgoingMessage is the existing @rome-os/app-runtime shape (phase 2 collapses
 // the message contract; do not invent a new shape now).
-export type {
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+export type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 
 export interface OperationCall {
   operation: string;
@@ -263,6 +337,10 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
+      /** True when the Talk reads the platform's own history, so the channel it
+       *  backs answers `messages.query` through it. Absent means it does not:
+       *  the channel's messages come from a store, or from nowhere. */
+      history?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

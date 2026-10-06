@@ -187,6 +187,39 @@ describe("Markdown", () => {
     expect(container.textContent).toContain("$10");
   });
 
+  it("drops an empty item that ends a list, which would render a bare bullet", () => {
+    for (const md of ["- a\n- b\n-\n", "* a\n* b\n* ", "1. a\n2. b\n3. "]) {
+      const { container, unmount } = renderMd(md);
+      const items = [...container.querySelectorAll("li")].map((li) => li.textContent);
+      expect(items).toEqual(["a", "b"]);
+      unmount();
+    }
+  });
+
+  it("drops a nested list's trailing empty item, and a list left with none", () => {
+    const { container } = renderMd("- a\n  - b\n  -\n\ntext\n\n-\n");
+    // One outer list holding one nested list; the bare `-` after the text
+    // leaves no list of its own.
+    expect(container.querySelectorAll("ul")).toHaveLength(2);
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector("li li")?.textContent).toBe("b");
+  });
+
+  it("keeps an empty item inside a list", () => {
+    const { container } = renderMd("- a\n-\n- b");
+
+    expect(container.querySelectorAll("li")).toHaveLength(3);
+  });
+
+  it("lets a table grow to its full height instead of scrolling inside a cap", () => {
+    const rows = Array.from({ length: 20 }, (_, i) => `| row ${i} | value ${i} |`).join("\n");
+    const { container } = renderMd(`| Key | Value |\n| --- | --- |\n${rows}`);
+    const scroller = container.querySelector('[data-streamdown="table"]')?.parentElement;
+
+    expect(scroller).not.toBeNull();
+    expect(scroller?.style.maxHeight).toBe("");
+  });
+
   it("marks compact mode without changing semantic element roles", () => {
     const { container } = renderMd("# Title\n\nBody", {
       compact: true,

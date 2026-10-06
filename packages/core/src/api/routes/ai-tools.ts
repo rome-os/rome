@@ -20,6 +20,8 @@ import {
 } from "../../lib/anthropic-compatible-providers.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
+import { fetchRomeCredits } from "../../lib/rome-credits.js";
+import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
 // Re-exported for existing consumers (and the ai-tools route tests) that import
 // the usage parser from this module.
@@ -65,6 +67,17 @@ export function aiToolsRoutes(
       },
       anthropicCompatible: state.claude.anthropicCompatible ?? null,
     });
+  });
+
+  // Rome Cloud owns the balance; every instance of the account reads the same one.
+  app.get("/ai-tools/rome-credits", async (c) => {
+    try {
+      const body: RomeCreditsResponse = { credits: await fetchRomeCredits() };
+      return c.json(body);
+    } catch (err) {
+      log.warn("Rome credits unavailable", { error: getErrorMessage(err) });
+      return c.json({ error: getErrorMessage(err) }, 503);
+    }
   });
 
   app.get("/ai-tools/usage", (c) => {

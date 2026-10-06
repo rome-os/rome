@@ -80,6 +80,14 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     expect(rows[0].content).toContain("hello from talk");
   });
 
+  // The flag is what gives the channel a \`messages\` port; the feature is what
+  // answers it. A Talk offering one without the other is unreachable or broken.
+  it("declares the history its Talk offers", () => {
+    expect(makeWebchatDescriptor({ webchatRepo: {} as never }).capabilities.talker?.history).toBe(
+      true,
+    );
+  });
+
   it("forwards fetchHistory to the wrapped adapter", async () => {
     await repo.createSession("sess-2", "History Session");
     await repo.addMessage(

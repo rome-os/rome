@@ -1,5 +1,6 @@
+import { HttpResponse, http } from "msw";
 import { setupWorker } from "msw/browser";
-import { handlers } from "./handlers";
+import { handlers, strictE2eHandlers } from "./handlers";
 import { renderApp } from "../src/main";
 import "./embedded-tour.css";
 
@@ -12,9 +13,20 @@ if (
 
 // Register the interception worker before the app boots, so the AuthGate's
 // very first /api/health + /api/bootstrap probes are already answered by
-// fixtures. Unhandled requests fall through to the dev-server proxy (a real
-// backend, when one is running) untouched.
-const worker = setupWorker(...handlers);
+// fixtures. Strict E2E mode also blocks external requests and unmocked API
+// routes. Ordinary mock mode keeps the backend proxy and recorded-app assets.
+const strictE2e = import.meta.env.ROME_MOCK_STRICT_E2E;
+const worker = setupWorker(
+  ...(strictE2e
+    ? [
+        http.all("*", ({ request }) => {
+          if (new URL(request.url).origin !== window.location.origin) return HttpResponse.error();
+        }),
+      ]
+    : []),
+  ...handlers,
+  ...(strictE2e ? strictE2eHandlers : []),
+);
 
 void (async () => {
   try {

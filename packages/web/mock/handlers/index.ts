@@ -7,7 +7,7 @@ import type {
 } from "@rome/api-types/conversation-settings";
 import type {
   AppRefDto,
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
@@ -21,12 +21,13 @@ import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
+  ChatEntry,
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
   ProjectCatalog,
   ProjectOption,
-  StreamBlock,
+  SkillSummary,
   TurnInfo,
 } from "@/lib/chat-types";
 import type {
@@ -70,7 +71,21 @@ const identity: DashboardIdentity = {
   avatarUrl: null,
 };
 
-const text = (content: string, turnPhase?: "commentary" | "final"): StreamBlock =>
+const skills: SkillSummary[] = [
+  {
+    name: "@ray/scoped-app:identity_probe",
+    localName: "identity_probe",
+    description: "Scoped identity probe",
+    tools: [],
+    ownerType: "app",
+    ownerId: "@ray/scoped-app",
+    ownerLabel: "Scoped App",
+    ownerDescription: "Scoped app test fixture",
+    iconUrl: null,
+  },
+];
+
+const text = (content: string, turnPhase?: "commentary" | "final"): ChatEntry =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -106,9 +121,9 @@ const millisBetween = (from?: string, to?: string): number | undefined => {
  * else stands alone as a `block` segment. `ordinal` is the drawer's render
  * order and runs across both kinds.
  */
-function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
+function traceSegmentsOf(blocks: TraceEventDto[]): TraceSegment[] {
   const segments: TraceSegment[] = [];
-  let run: TraceBlockDto[] = [];
+  let run: TraceEventDto[] = [];
   const flushRun = () => {
     if (run.length === 0) return;
     const steps = run.filter((b) => b.type === "tool_use" || b.type === "subagent_start");
@@ -118,7 +133,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
     const durations = steps.map((start) => {
       const id = start.type === "tool_use" ? start.id : start.toolUseId;
       const end = run.find(
-        (block): block is Extract<TraceBlockDto, { type: "tool_result" | "subagent_result" }> =>
+        (block): block is Extract<TraceEventDto, { type: "tool_result" | "subagent_result" }> =>
           (block.type === "tool_result" || block.type === "subagent_result") &&
           block.toolUseId === id,
       );
@@ -164,7 +179,7 @@ function traceSegmentsOf(blocks: TraceBlockDto[]): TraceSegment[] {
 
 /** Read-time aggregation over the turn's blocks — never stored beside them, so
  *  deriving it here is what keeps the trigger's counts honest. */
-function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
+function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
   // Both invocation-start kinds count. A delegated turn is a step and observes
   // an app exactly as a tool call does, so counting only `tool_use` would leave
   // a turn showing a subagent chip while its trigger claimed nothing ran.
@@ -211,15 +226,15 @@ function traceSummaryOf(blocks: TraceBlockDto[]): TraceSummary {
  * the grouped layout (and its trace subtitle slot) reachable in mock mode.
  *
  * `reply` carries only what the real API persists as MessagePart[] — text,
- * cards, recaps. Anything a run produced goes in `traceBlocks`.
+ * cards, recaps. Anything a run produced goes in `traceEvents`.
  */
 const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | StreamBlock[],
-  reply: StreamBlock[],
-  traceBlocks?: TraceBlockDto[],
+  prompt: string | ChatEntry[],
+  reply: ChatEntry[],
+  traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
   const at = (offsetMs: number) => new Date(Date.parse(startedAt) + offsetMs).toISOString();
@@ -233,10 +248,10 @@ const turn = (
       createdAt: startedAt,
     },
   ];
-  if (traceBlocks?.length) {
+  if (traceEvents?.length) {
     const traceId = `${turnId}-trace`;
-    const summary = traceSummaryOf(traceBlocks);
-    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceBlocks), summary };
+    const summary = traceSummaryOf(traceEvents);
+    traceSnapshots[traceId] = { segments: traceSegmentsOf(traceEvents), summary };
     rows.push({
       id: traceId,
       sessionId,
@@ -262,7 +277,7 @@ const turn = (
 
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
-// StreamBlocks exactly as the real API stores it, so what renders here goes
+// ChatEntries exactly as the real API stores it, so what renders here goes
 // through the production parse path rather than a mock-only shortcut.
 //
 // ChatSearchDialog ranks title/project matches itself and *appends* sessions
@@ -691,14 +706,15 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
-  session("mock-chat-1", "Morning brief tweaks", "default"),
-  session("mock-chat-2", "Draft launch email", "website-redesign"),
-  session("mock-chat-3", "Weekly planning"),
+  // One chat per sidebar mark: running, failed, and done with new replies.
+  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
+  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
   session("mock-chat-4", "Plumber for the leak"),
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as StreamBlock[])
+  (JSON.parse(message.content) as ChatEntry[])
     .filter((b) => b.type === "text" && typeof b.content === "string")
     .map((b) => b.content)
     .join(" ");
@@ -916,10 +932,9 @@ const projectFileHandlers = fileBrowserHandlers({
 /**
  * The two remaining reads the Settings page makes. The page holds its
  * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. Left unhandled
- * they fall through to the dev proxy, which only resolves quickly when a
- * refused connection is waiting on the other end — so the page renders on a
- * developer's machine and hangs where nothing is listening.
+ * waits on the Composio status alongside `/api/connections`. In strict E2E
+ * mode, unhandled reads hit the 503 fallback and leave those panels in an
+ * error state. These fixtures keep the page usable without a backend.
  */
 const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
 
@@ -1022,11 +1037,17 @@ export const handlers = [
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // Held open without events: the fixture's running flags never change.
+  http.get("/api/chat/status/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   http.get("/api/chat/sessions/search", ({ request }) => {
     const query = new URL(request.url).searchParams.get("q") ?? "";
     return HttpResponse.json(searchMatches(query));
   }),
   http.get("/api/chat/agents", () => HttpResponse.json(chatAgents)),
+  http.get("/api/skills", () => HttpResponse.json({ skills })),
   // The trace drawer's two loaders. Both answer `{ trace }` and both return a
   // null trace rather than a 404 for a turn that produced no run, which is the
   // drawer's "nothing recorded" state rather than its error state.
@@ -1106,7 +1127,7 @@ export const handlers = [
     return HttpResponse.json(created);
   }),
   // The Memory page's folder panel leads with this read, so an unhandled
-  // status leaves the landing view spinning on the dev proxy. Unlinked, which
+  // status leaves the landing view without a usable fixture. Unlinked, which
   // is the state a fresh instance is in and the one that offers Connect.
   http.get("/api/sync/status", () => HttpResponse.json({ state: "unlinked" } satisfies SyncStatus)),
   http.get("/api/sync/sources", () => HttpResponse.json({ sources: syncSources })),
@@ -1176,8 +1197,8 @@ export const handlers = [
   http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
   http.get("/api/connections", () => HttpResponse.json(connections)),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
-  // above without this would leave every one of those buttons escaping to the
-  // dev proxy. Teardown is real here, the way the route runs it: the grant
+  // above without this would make every one of those buttons fail locally.
+  // Teardown is real here, the way the route runs it: the grant
   // relocks, its identity clears, and the row itself stays so the service is
   // still offered. Reconnecting needs a setup ceremony mock mode does not have
   // (see "What mock mode cannot do"), so a disconnect here is one-way until
@@ -1253,4 +1274,17 @@ export const handlers = [
   // dir and the memory dir a person's dossier links into.
   ...projectFileHandlers,
   ...memoryFileHandlers,
+];
+
+export const strictE2eHandlers = [
+  http.post("/api/chat/sessions", () =>
+    HttpResponse.json({ error: "/api/chat/sessions is unavailable in mock mode" }, { status: 503 }),
+  ),
+  http.post("/api/auth/login", () => HttpResponse.json({ error: "Login failed" }, { status: 401 })),
+  http.all("/api/*", ({ request }) =>
+    HttpResponse.json(
+      { error: `Unmocked API request: ${request.method} ${new URL(request.url).pathname}` },
+      { status: 503 },
+    ),
+  ),
 ];

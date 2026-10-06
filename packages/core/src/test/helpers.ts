@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { NormalizedMessage, AgentMessage, AgentConfig, OutgoingMessage } from "../types.js";
+import type { NormalizedMessage, AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -42,13 +42,8 @@ import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
-import type {
-  ConversationId,
-  TalkFeatureMap,
-  ConversationSettingsControl,
-  InboundMessage,
-  TalkRouter,
-} from "@rome-os/app-runtime";
+import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
+import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -57,10 +52,11 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
-import type { Channel } from "../channels/channel.js";
-import { connectionPorts, type ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { Channel, Channels } from "../channels/channel.js";
+import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
+import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
@@ -154,13 +150,13 @@ export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number
   return { db: counted as DrizzleDb, passes: () => passes };
 }
 
-// MockModelProvider — returns predetermined AgentMessage sequences
+// MockModelProvider — returns predetermined AgentEvent sequences
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
   readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
-  private responses: AgentMessage[][];
+  private responses: AgentEvent[][];
   private callIndex = 0;
 
   /** Track all calls made to run() for assertions */
@@ -168,11 +164,11 @@ export class MockModelProvider implements ModelProvider {
   /** Track all openSession calls for assertions */
   sessions: ModelSessionParams[] = [];
 
-  constructor(responses: AgentMessage[][] = []) {
+  constructor(responses: AgentEvent[][] = []) {
     this.responses = responses;
   }
 
-  async *run(params: ModelRunParams): AsyncIterable<AgentMessage> {
+  async *run(params: ModelRunParams): AsyncIterable<AgentEvent> {
     this.calls.push(params);
     const messages = this.responses[this.callIndex++] ?? [];
     for (const msg of messages) {
@@ -219,28 +215,46 @@ export class MockProviderAdapter implements ProviderAdapter {
   }
 }
 
-/** The channel a mock Talk router backs, by name, built by the production
- *  `connectionPorts` over a registry holding one `test:<name>` Connection with
- *  a Talk per mock adapter. A name with no mock adapter has no channel, as in
- *  `channelList`. */
-export function mockChannelLookup(
+/** The Connections a mock Talk router answers for, as `channelList` reads
+ *  them: one `test:<name>` Connection with a Talk per mock adapter. */
+export function mockConnections(
   talkRouter: TalkRouter,
   adapters: ReadonlyMap<string, unknown>,
-): (name: string) => Channel | null {
-  const registry: ConnectionPortsDeps["registry"] = {
-    find: (service) =>
-      adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
-    getDescriptor: (service) =>
-      adapters.has(service)
-        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
-        : null,
-    onUnlocked: () => {},
-    registeredServices: () => [...adapters.keys()],
+): ConnectionPortsDeps {
+  return {
+    registry: {
+      find: (service) =>
+        adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
+      getDescriptor: (service) =>
+        adapters.has(service)
+          ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+          : null,
+      onUnlocked: () => {},
+      registeredServices: () => [...adapters.keys()],
+    },
+    router: talkRouter,
   };
-  return (name) => {
-    const ports = connectionPorts({ registry, router: talkRouter }, name);
-    return ports ? { name, ...ports, accounts: null, messages: null } : null;
-  };
+}
+
+/** The harness's channel list over `talkRouter`, built by the production
+ *  `channelList`. A test that swaps the router rebuilds the list with it. */
+export function testChannels(
+  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts"> & {
+    channelPortMap: ReadonlyMap<string, unknown>;
+  },
+  talkRouter: TalkRouter,
+): Channels {
+  return channelList({
+    db: deps.db,
+    whatsAppAccounts: deps.whatsAppAccounts,
+    linkedInAccounts: deps.linkedInAccounts,
+    connections: mockConnections(talkRouter, deps.channelPortMap),
+  });
+}
+
+/** Look a channel up by name, as the backend-turn runner does. */
+export function channelNamed(channels: Channels): (name: string) => Channel | null {
+  return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
 export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
@@ -317,14 +331,14 @@ const emptyConversationSettings: ConversationSettingsControl = {
 // createMockAgentRunner — mock returning predetermined responses
 
 export function createMockAgentRunner(
-  responses: AgentMessage[][] = [],
+  responses: AgentEvent[][] = [],
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
 
   return {
     calls,
-    async *run(params: RunParams): AsyncIterable<AgentMessage> {
+    async *run(params: RunParams): AsyncIterable<AgentEvent> {
       calls.push(params);
       const messages = responses[callIndex++] ?? [];
       for (const msg of messages) {
@@ -458,7 +472,11 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const channels = channelList({ db, whatsAppAccounts, linkedInAccounts });
+  const talkRouter = createMockTalkRouter(channelPortMap);
+  const channels = testChannels(
+    { db, whatsAppAccounts, linkedInAccounts, channelPortMap },
+    talkRouter,
+  );
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
@@ -478,8 +496,6 @@ export async function buildTestDeps(
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
-
-  const talkRouter = createMockTalkRouter(channelPortMap);
 
   const actionRegistry = new ActionRegistryImpl([]);
   const actionEngine = new ActionEngine(
@@ -504,7 +520,7 @@ export async function buildTestDeps(
   const appStore = createAppStoreService({ appCatalog });
 
   // The agent loader stays real but unloaded. Core agent YAMLs cannot load
-  // here: `core:main` references the `coding:planning` subagent,
+  // here: `core:main` references the `assistant:explore` subagent,
   // and the loader fail-closes on unresolvable core-owned refs — production
   // only has a valid `main` because required first-party apps are installed
   // before startApi. Tests that exercise agent turns load fixture agents
@@ -585,7 +601,7 @@ export async function buildTestDeps(
   const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: mockChannelLookup(talkRouter, channelPortMap),
+    channel: channelNamed(channels),
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -619,6 +635,7 @@ export async function buildTestDeps(
 
   return {
     talkRouter,
+    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
@@ -684,6 +701,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
+    wechatApp: null,
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },

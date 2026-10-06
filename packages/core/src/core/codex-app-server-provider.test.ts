@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { UsageFunding } from "../usage/events.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
   ModelSessionParams,
 } from "./agent-runner.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 
 // Capture the transport so tests can drive server→client notifications and
 // assert the requests the provider issues.
@@ -134,13 +135,13 @@ function usage(
 }
 
 // Drain session.events until a terminal `result`/`error` arrives.
-async function collectUntilTerminal(session: ModelSession): Promise<AgentMessage[]> {
-  const out: AgentMessage[] = [];
+async function collectUntilTerminal(session: ModelSession): Promise<AgentEvent[]> {
+  const out: AgentEvent[] = [];
   for await (const msg of session.events) {
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
-    out.push(stripped as unknown as AgentMessage);
+    out.push(stripped as unknown as AgentEvent);
     if (msg.type === "result" || msg.type === "error") break;
   }
   return out;
@@ -265,6 +266,9 @@ describe("CodexAppServerProvider", () => {
     expect((startCall![1] as { config: Record<string, unknown> }).config).not.toHaveProperty(
       "mcp_servers",
     );
+    expect((startCall![1] as { config: Record<string, unknown> }).config).toMatchObject({
+      "tools.update_plan.enabled": true,
+    });
     expect(startCall![1]).toMatchObject({
       dynamicTools: expect.arrayContaining([
         expect.objectContaining({ name: "list_actions" }),
@@ -1355,8 +1359,13 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     expect(msgs.filter((m) => m.type === "text")).toEqual([
-      { type: "text", content: "Let me check the weather.", turnPhase: "commentary" },
-      { type: "text", content: "It's sunny.", turnPhase: "final" },
+      {
+        type: "text",
+        content: "Let me check the weather.",
+        turnPhase: "commentary",
+        blockId: "m1",
+      },
+      { type: "text", content: "It's sunny.", turnPhase: "final", blockId: "m2" },
     ]);
     const result = msgs.find((m) => m.type === "result");
     expect(result).toMatchObject({ type: "result", content: "It's sunny." });
@@ -1377,6 +1386,8 @@ describe("CodexAppServerProvider", () => {
           cache_write_tokens: 0,
           reasoning_tokens: 0,
         },
+        stop: { reason: "completed", raw: "completed" },
+        stopReason: "end_turn",
       },
     });
 
@@ -1386,6 +1397,137 @@ describe("CodexAppServerProvider", () => {
     );
     // Codex applies each turn's own effort and reports it in its own terms.
     expect(session.appliedReasoningEffort).toBe("xhigh");
+    await session.close();
+  });
+
+  it("reports a codex-initiated interrupt as an interrupted stop on the result", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "partial", phase: "final_answer" },
+          threadId: "thr-1",
+          turnId: "turn-1",
+          completedAtMs: 0,
+        });
+        // Codex ends the turn itself; Rome never calls interrupt().
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "interrupted" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go" });
+    const result = (await collected).find((m) => m.type === "result");
+
+    expect(requestMock).not.toHaveBeenCalledWith("turn/interrupt", expect.anything());
+    expect(result).toMatchObject({
+      type: "result",
+      accounting: { stop: { reason: "interrupted", raw: "interrupted" }, stopReason: "end_turn" },
+    });
+    // The adapter still offers this turn as a checkpoint; AgentSession is
+    // what declines to persist it for an interrupted turn.
+    expect(session.lastCompletedTurnCheckpoint).toBe("turn-1");
+    await session.close();
+  });
+
+  it("streams reasoning, answer text, and command output with the item ids as block ids", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const at = { threadId: "thr-1", turnId: "turn-1" };
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: "Plan",
+          summaryIndex: 0,
+        });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: " it.",
+          summaryIndex: 0,
+        });
+        n("item/reasoning/summaryTextDelta", {
+          ...at,
+          itemId: "rs_1",
+          delta: "Run.",
+          summaryIndex: 1,
+        });
+        // A delta for another turn is not this turn's.
+        n("item/reasoning/summaryTextDelta", {
+          threadId: "thr-1",
+          turnId: "turn-0",
+          itemId: "rs_0",
+          delta: "stale",
+          summaryIndex: 0,
+        });
+        n("item/completed", {
+          ...at,
+          item: { type: "reasoning", id: "rs_1", summary: ["Plan it.", "Run."], content: [] },
+          completedAtMs: 0,
+        });
+        const command = { type: "commandExecution", id: "cmd_1", command: "seq 1 2", cwd: "/w" };
+        n("item/started", { ...at, item: { ...command, status: "inProgress" }, startedAtMs: 0 });
+        n("item/commandExecution/outputDelta", { ...at, itemId: "cmd_1", delta: "1\n" });
+        n("item/commandExecution/outputDelta", { ...at, itemId: "cmd_1", delta: "2\n" });
+        n("item/completed", {
+          ...at,
+          item: { ...command, status: "completed", exitCode: 0, aggregatedOutput: "1\n2\n" },
+          completedAtMs: 0,
+        });
+        n("item/agentMessage/delta", { ...at, itemId: "msg_1", delta: "Done" });
+        n("item/completed", {
+          ...at,
+          item: { type: "agentMessage", id: "msg_1", text: "Done", phase: "final_answer" },
+          completedAtMs: 0,
+        });
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "go" });
+    const msgs = await collected;
+
+    expect(
+      msgs
+        .filter((m) =>
+          ["thinking_delta", "thinking", "tool_output_delta", "text_delta", "text"].includes(
+            m.type,
+          ),
+        )
+        .map((m) => {
+          const { startedAt: _s, endedAt: _e, ...rest } = m as Record<string, unknown>;
+          return rest;
+        }),
+    ).toEqual([
+      { type: "thinking_delta", blockId: "rs_1", content: "Plan" },
+      { type: "thinking_delta", blockId: "rs_1", content: " it." },
+      // A new summary part starts on its own line, as in the completed block.
+      { type: "thinking_delta", blockId: "rs_1", content: "\nRun." },
+      { type: "thinking", content: "Plan it.\nRun.", blockId: "rs_1" },
+      { type: "tool_output_delta", toolUseId: "cmd_1", content: "1\n" },
+      { type: "tool_output_delta", toolUseId: "cmd_1", content: "2\n" },
+      { type: "text_delta", content: "Done", blockId: "msg_1" },
+      { type: "text", content: "Done", turnPhase: "final", blockId: "msg_1" },
+    ]);
+    // The command's tool_use and tool_result keep the ids the output deltas use.
+    expect(msgs.find((m) => m.type === "tool_use")).toMatchObject({ id: "cmd_1", tool: "Bash" });
+    expect(msgs.find((m) => m.type === "tool_result")).toMatchObject({ toolUseId: "cmd_1" });
     await session.close();
   });
 
@@ -1916,7 +2058,60 @@ describe("CodexAppServerProvider", () => {
     // The tool_result output is the unwrapped MCP result, so the webchat drain
     // loop can read pendingInteraction off it.
     const result = msgs.find((m) => m.type === "tool_result");
-    expect(result).toMatchObject({ tool: "ask_question", output: mcpResult });
+    expect(result).toMatchObject({ tool: "ask_question", output: mcpResult, isError: false });
+    await session.close();
+  });
+
+  it("marks a command that exited non-zero as a failed tool result", async () => {
+    const provider = new CodexAppServerProvider();
+    const commandItem = (id: string, exitCode: number | null, status: string) => ({
+      type: "commandExecution",
+      id,
+      command: "/bin/sh -lc 'pnpm app:install'",
+      cwd: "/workspace",
+      status,
+      commandActions: [],
+      aggregatedOutput: exitCode === 0 ? "ok" : "boom",
+      exitCode,
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        for (const [id, exitCode, status] of [
+          ["cmd_ok", 0, "completed"],
+          ["cmd_fail", 3, "failed"],
+        ] as const) {
+          n("item/started", {
+            item: commandItem(id, null, "inProgress"),
+            threadId: "thr-1",
+            turnId: "turn-1",
+            startedAtMs: 0,
+          });
+          n("item/completed", {
+            item: commandItem(id, exitCode, status),
+            threadId: "thr-1",
+            turnId: "turn-1",
+            completedAtMs: 0,
+          });
+        }
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "install" });
+    const results = (await collected).filter((m) => m.type === "tool_result");
+
+    expect(results).toMatchObject([
+      { toolUseId: "cmd_ok", tool: "Bash", isError: false },
+      { toolUseId: "cmd_fail", tool: "Bash", isError: true },
+    ]);
     await session.close();
   });
 
@@ -2090,7 +2285,7 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     const text = msgs.find((m) => m.type === "text");
-    expect(text).toEqual({ type: "text", content: "plain answer" });
+    expect(text).toEqual({ type: "text", content: "plain answer", blockId: "m1" });
     expect(msgs.find((m) => m.type === "result")).toMatchObject({ content: "plain answer" });
     await session.close();
   });
@@ -2132,6 +2327,38 @@ describe("CodexAppServerProvider", () => {
       code: "usage_limit",
     });
     expect(onQuotaExhausted).toHaveBeenCalledTimes(1);
+    await session.close();
+  });
+
+  it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
+    let funding: UsageFunding = "byok";
+    const provider = new CodexAppServerProvider({ funding: () => funding });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification!("turn/completed", {
+          threadId: "thr-1",
+          turn: { id: "turn-1", status: "failed", error: { message: "upstream failed" } },
+        });
+        return { turn: { id: "turn-1" } };
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    expect(session.lastProviderTurnId).toBeUndefined();
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    expect((await collected).at(-1)).toMatchObject({ type: "error" });
+
+    // A failed turn is no resume checkpoint, but it still reached the provider.
+    expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
+    expect(session.lastProviderTurnId).toBe("turn-1");
+    expect(session.funding).toBe("byok");
+    funding = "rome_credits";
+    expect(session.funding).toBe("rome_credits");
     await session.close();
   });
 
@@ -2185,7 +2412,7 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("does not tag a non-usage-limit turn failure", async () => {
+  it("tags a server-side turn failure as transient rather than usage_limit", async () => {
     const provider = new CodexAppServerProvider();
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") {
@@ -2212,8 +2439,54 @@ describe("CodexAppServerProvider", () => {
     const msgs = await collected;
 
     const err = msgs.find((m) => m.type === "error");
-    expect(err).toMatchObject({ type: "error", error: "stream disconnected" });
-    expect((err as { code?: string }).code).toBeUndefined();
+    expect(err).toMatchObject({ type: "error", error: "stream disconnected", code: "transient" });
+    await session.close();
+  });
+
+  it("carries the HTTP status and context-window code from codexErrorInfo", async () => {
+    const provider = new CodexAppServerProvider();
+    let turnNumber = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        turnNumber += 1;
+        const turnId = `turn-${turnNumber}`;
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: turnId } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: turnId,
+            status: "failed",
+            error:
+              turnNumber === 1
+                ? {
+                    message: "connection failed",
+                    codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 503 } },
+                  }
+                : { message: "context full", codexErrorInfo: "contextWindowExceeded" },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    let collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "first" });
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      type: "error",
+      code: "transient",
+      httpStatus: 503,
+    });
+
+    collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "second" });
+    const second = (await collected).find((m) => m.type === "error");
+    expect(second).toMatchObject({ type: "error", code: "context_window_exceeded" });
+    expect(second).not.toHaveProperty("httpStatus");
     await session.close();
   });
 });

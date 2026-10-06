@@ -44,7 +44,7 @@ import {
   traceDrawerContentInsetClass,
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import {
@@ -62,7 +62,7 @@ import type {
   ChatMessage,
   RomeSessionRecord,
   RomeSessionsPageResult,
-  StreamBlock,
+  ChatEntry,
 } from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
@@ -1167,13 +1167,13 @@ function ReadOnlySessionChat({
           allowSubagentUsage
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block as ChatEntry, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks as ChatEntry[], {
               onApprovalResolved: NO_OP,
               compact: true,
               live,

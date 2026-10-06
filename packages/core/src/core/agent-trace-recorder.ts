@@ -8,11 +8,12 @@ import type {
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import type { AgentMessage, MessagePart } from "../types.js";
+import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
-import { toTraceBlock, type TraceableAgentMessage } from "../api/helpers.js";
+import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { isTransientDelta } from "./agent-message.js";
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -84,18 +85,18 @@ export class AgentTraceRecorder {
 
   constructor(private input: AgentTraceRecorderInput) {}
 
-  async record(msg: AgentMessage & { agent?: string }): Promise<void> {
+  async record(msg: AgentEvent & { agent?: string }): Promise<void> {
     await this.recordBatch([msg], this.seq);
   }
 
   async recordBatch(
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
     startSeq = this.seq,
   ): Promise<void> {
     const blocks = messages.flatMap((msg) =>
-      msg.type === "text_delta" || msg.type === "input_status"
+      isTransientDelta(msg) || msg.type === "input_status"
         ? []
-        : [toTraceBlock(msg as TraceableAgentMessage & { agent?: string })],
+        : [toTraceEvent(msg as TraceableEvent & { agent?: string })],
     );
     if (blocks.length === 0) return;
     await this.ensureSession();
@@ -184,7 +185,7 @@ export class AgentTraceRecorder {
 
   private transcriptMessages(
     sessionId: string,
-    messages: (AgentMessage & { agent?: string })[],
+    messages: (AgentEvent & { agent?: string })[],
   ): RomeAgentTranscriptMessageInput[] {
     if (!this.shouldPersistTranscript()) return [];
     const rows: RomeAgentTranscriptMessageInput[] = [];
@@ -248,7 +249,7 @@ function transcriptMessageId(
 
 export async function recordAgentTraceBestEffort(
   recorder: AgentTraceRecorder | null,
-  msg: AgentMessage & { agent?: string },
+  msg: AgentEvent & { agent?: string },
   log: Pick<Logger, "warn">,
   context: { turnId: string; source: string },
 ): Promise<void> {

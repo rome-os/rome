@@ -1,12 +1,12 @@
-import { createAppLogger } from "@rome-os/app-runtime";
+import { chooseConnection, createAppLogger } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
   ActionResult,
   Attachment,
+  ChannelMessage,
+  ChannelsService,
   ConversationId,
-  InboundMessage,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("fetch_channel_history");
@@ -38,10 +38,26 @@ interface StructuredMessage {
   attachments: StructuredAttachment[];
 }
 
-function toStructuredMessages(messages: InboundMessage[]): StructuredMessage[] {
+/**
+ * The name a line is shown under. A message names its sender only as the
+ * channel recorded them, so the fallbacks for an unnamed one are this tool's,
+ * and each channel keeps the ones it has always shown: the guardian's own
+ * WhatsApp lines as "You", a WhatsApp group line with no recorded sender as
+ * "Unknown", and an unnamed LinkedIn sender as no name at all.
+ */
+function senderLabel(channel: string, m: ChannelMessage): string {
+  if (channel === "whatsapp") {
+    if (m.direction === "outbound") return "You";
+    return m.senderDisplayName ?? (m.senderId === "" ? "Unknown" : m.senderId);
+  }
+  if (channel === "linkedin") return m.senderDisplayName ?? "";
+  return m.senderDisplayName ?? m.senderId;
+}
+
+function toStructuredMessages(channel: string, messages: ChannelMessage[]): StructuredMessage[] {
   return messages.map((m) => ({
     id: m.messageId,
-    displayName: m.senderDisplayName ?? m.senderId,
+    displayName: senderLabel(channel, m),
     timestamp: m.timestamp.toISOString(),
     threadId: m.conversationId,
     threadName: m.thread?.name,
@@ -56,13 +72,13 @@ function toStructuredMessages(messages: InboundMessage[]): StructuredMessage[] {
   }));
 }
 
-function formatMessages(messages: InboundMessage[], windowHours: number): string {
+function formatMessages(channel: string, messages: ChannelMessage[], windowHours: number): string {
   if (messages.length === 0) {
     return "(No messages found in the requested window.)";
   }
 
   // Group by threadName (or threadId as fallback)
-  const threads = new Map<string, InboundMessage[]>();
+  const threads = new Map<string, ChannelMessage[]>();
   for (const msg of messages) {
     const key = msg.thread?.name ?? msg.conversationId;
     let bucket = threads.get(key);
@@ -89,7 +105,7 @@ function formatMessages(messages: InboundMessage[], windowHours: number): string
           text = text ? `${text} [attachments: ${names}]` : `[attachments: ${names}]`;
         }
         if (!text) return null;
-        return `[${time}] **${m.senderDisplayName ?? m.senderId}**: ${text}`;
+        return `[${time}] **${senderLabel(channel, m)}**: ${text}`;
       })
       .filter(Boolean);
 
@@ -107,8 +123,11 @@ function formatMessages(messages: InboundMessage[], windowHours: number): string
     : header + "(No readable messages found.)";
 }
 
-export function createAction(config: ActionConfig, deps: { talkRouter: TalkRouter }): Action {
-  const { talkRouter } = deps;
+export function createAction(
+  config: ActionConfig,
+  deps: { channelsService: ChannelsService },
+): Action {
+  const { channelsService: channels } = deps;
 
   return {
     config,
@@ -144,33 +163,30 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
-      const connections = (await talkRouter.list()).filter((item) => item.service === channel);
-      if (connections.length === 0) {
+      // The SDK's rule, which the service applies again in `history`, but
+      // answered in the texts this tool has always given.
+      const connections =
+        (await channels.list()).find((item) => item.name === channel)?.connectionIds ?? [];
+      const choice = chooseConnection(connections);
+      if ("refused" in choice && choice.refused === "none") {
         return {
           status: "error",
           error: `Channel "${channel}" is not configured or not running.`,
         };
       }
 
-      if (connections.length > 1) {
+      if ("refused" in choice) {
         return {
           status: "error",
           error: `Channel "${channel}" has multiple connections; connectionId is required.`,
         };
       }
-      const history = talkRouter.feature(connections[0]!.connectionId, "history");
-      if (!history) {
-        return {
-          status: "error",
-          error: `Channel "${channel}" does not support history fetching.`,
-        };
-      }
 
       log.info("fetching channel history", { channel, threadId, windowHours });
 
-      let messages: InboundMessage[];
+      let messages: ChannelMessage[];
       try {
-        messages = await history.query({
+        messages = await channels.history(channel, {
           ...(threadId ? { conversationId: threadId as ConversationId } : {}),
           since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
         });
@@ -199,14 +215,14 @@ export function createAction(config: ActionConfig, deps: { talkRouter: TalkRoute
         channel,
         messageCount: messages.length,
         windowHours,
-        content: formatMessages(messages, windowHours),
+        content: formatMessages(channel, messages, windowHours),
       };
 
       // Opt-in: only add the structured array when explicitly requested, so
       // existing callers (LLM agents, the `dream` action) keep the exact same
       // payload and token footprint they have today.
       if (includeMessages) {
-        data.messages = toStructuredMessages(messages);
+        data.messages = toStructuredMessages(channel, messages);
       }
 
       return { status: "ok", data };

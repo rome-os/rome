@@ -12,7 +12,7 @@
 
 import { matchesSendRequest, type OutboxMessage } from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { conversationPlatformMessageId } from "../db/repositories/webchat.js";
 import type { OutboxAccount, OutboxRepository, OutboxRow } from "../db/repositories/outbox.js";
@@ -133,7 +133,7 @@ async function attempt(
 ): Promise<OutboxMessage> {
   let receipt: Awaited<ReturnType<typeof sendToTarget>>;
   try {
-    receipt = await sendToTarget(deps, target, row.text);
+    receipt = await sendToTarget(target, row.text);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await deps.outboxRepo.refused(row.id, message);
@@ -250,7 +250,7 @@ async function record(deps: OutboxDeps, row: OutboxRow, messageId: string | null
  */
 export async function readOutbox(
   deps: OutboxDeps,
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accounts: readonly MessageAccount[],
 ): Promise<OutboxMessage[]> {
   const rows = await deps.outboxRepo.forAccounts(

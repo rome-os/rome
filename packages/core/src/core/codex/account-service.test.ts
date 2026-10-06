@@ -157,6 +157,20 @@ describe("SharedCodexAccountService", () => {
     service.close();
   });
 
+  it("uses auth.json when the credits default hides the guardian's OpenAI account", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
+    const service = createService(rpc);
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      loggedIn: true,
+      authMode: "chatgpt",
+      planType: "plus",
+      email: "file@example.com",
+    });
+    service.close();
+  });
+
   it("owns browser and device login attempts on the same RPC connection", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/login/start", {
@@ -233,6 +247,22 @@ describe("SharedCodexAccountService", () => {
     rpc.notify("account/updated", { authMode: "chatgpt", planType: "plus" });
     expect(changed).toHaveBeenCalledTimes(2);
     service.close();
+  });
+
+  it.each([
+    "account/updated",
+    "account/rateLimits/updated",
+  ])("preserves %s notifications and unsubscribes on close", (notification) => {
+    const rpc = new FakeAccountRpc();
+    const service = createService(rpc);
+    const changed = rs.fn();
+    service.onAccountChanged(changed);
+
+    rpc.notify(notification, {});
+    expect(changed).toHaveBeenCalledTimes(1);
+    service.close();
+    rpc.notify(notification, {});
+    expect(changed).toHaveBeenCalledTimes(1);
   });
 
   it("logs out through the shared RPC and clears an active login", async () => {

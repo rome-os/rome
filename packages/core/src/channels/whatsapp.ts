@@ -523,19 +523,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
     this.handler = handler;
   }
 
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
-    const fetchHistory = this.syncSink?.fetchHistory;
-    if (!fetchHistory) {
-      throw new Error("WhatsApp history store is not available");
-    }
-
-    const safeWindowHours = Number.isFinite(windowHours) && windowHours > 0 ? windowHours : 24;
-    const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
-    const threadJid = threadId ? this.canonicalJid(threadId) : null;
-    const rows = await fetchHistory.call(this.syncSink, threadJid, since);
-    return rows.map((row) => this.historyRowToNormalized(row));
-  }
-
   async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
     if (message.attachments.length === 0) return message.attachments;
     const raw = message.rawEvent as WAMessage | undefined;
@@ -662,34 +649,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
     return attachments;
   }
 
-  private historyRowToNormalized(row: WaHistoryMessage): NormalizedMessage {
-    const threadId = this.canonicalJid(row.chatJid);
-    const threadType = row.isGroup || threadId.endsWith("@g.us") ? "group" : "private";
-    const senderJid = row.senderJid ? this.canonicalJid(row.senderJid) : null;
-    const channelUserId = row.fromMe
-      ? (this.selfPnJid() ?? senderJid ?? threadId)
-      : threadType === "group"
-        ? (senderJid ?? threadId)
-        : threadId;
-    const text = historyText(row);
-
-    return {
-      id: row.id,
-      channel: "whatsapp",
-      channelUserId,
-      displayName: row.fromMe
-        ? "You"
-        : (row.senderName ?? row.pushName ?? row.senderPhoneNumber ?? senderJid ?? "Unknown"),
-      threadId,
-      threadName: row.chatName ?? row.chatPhoneNumber ?? undefined,
-      threadType,
-      timestamp: row.timestamp,
-      text,
-      attachments: historyAttachments(row),
-      rawEvent: row,
-    };
-  }
-
   private async fetchLatestWaWebVersion(): Promise<[number, number, number] | null> {
     if (process.env.NODE_ENV === "test" || process.env.VITEST) {
       return null;
@@ -728,45 +687,6 @@ export class WhatsAppAdapter implements ProviderAdapter {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function historyText(row: WaHistoryMessage): string {
-  if (row.type === "reaction") {
-    const emoji = row.text?.trim() || "reaction";
-    return row.reactsToId ? `Reacted ${emoji} to message ${row.reactsToId}` : `Reacted ${emoji}`;
-  }
-  const text = row.text?.trim() ?? "";
-  if (text) return text;
-  if (row.hasMedia) {
-    return `[${row.type ?? "media"}]`;
-  }
-  return "";
-}
-
-function historyAttachments(row: WaHistoryMessage): Attachment[] {
-  if (!row.hasMedia) return [];
-  const type = historyAttachmentType(row.type);
-  if (!type) return [];
-  const text = row.text?.trim();
-  return [
-    {
-      type,
-      ...(text ? { caption: text } : {}),
-    },
-  ];
-}
-
-function historyAttachmentType(type: string | null): Attachment["type"] | null {
-  switch (type) {
-    case "image":
-    case "video":
-    case "audio":
-    case "document":
-    case "sticker":
-      return type;
-    default:
-      return null;
-  }
 }
 
 // WhatsApp timestamps arrive as unix seconds, either a plain number or a

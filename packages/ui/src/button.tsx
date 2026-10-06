@@ -55,20 +55,19 @@ const buttonVariants = cva(
       },
       // Height, radius, gap and padding all come from the --control-* scale in
       // globals.css so a Button and an Input on the same row match exactly:
-      // `sm` is 28px, `md` 36px and `lg` 44px on every control that names them.
+      // `sm` is 28px, `md` 32px and `lg` 44px on every control that names them.
       // A centred label reads the `center` group; `align` below swaps in the
       // `start` group when the label becomes an alignment edge. `xs` is
-      // deliberately below the scale — a 24px chip-sized button for dense
-      // toolbars, with no field counterpart to line up with — so it pads from a
-      // spacing step, neither group carrying a step that low.
+      // outside the shared two-step vocabulary. Its own height and centered
+      // inset tokens follow the selected platform scale.
       size: {
-        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+        xs: "h-[var(--control-h-xs)] gap-1 rounded-[var(--control-r-sm)] px-[var(--control-px-center-xs)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-[var(--control-h-sm)] gap-[var(--control-gap)] rounded-[var(--control-r-sm)] px-[var(--control-px-center-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         md: SIZE_MD,
         /** @deprecated Spelling of `md` that predates the shared vocabulary. */
         default: SIZE_MD,
         "icon-xs":
-          "size-6 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+          "size-[var(--control-h-xs)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
           "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-md": SIZE_ICON_MD,
@@ -117,7 +116,7 @@ const buttonVariants = cva(
       // that edge, the distance it sits from the label. The glyph names its
       // side with `data-icon`, because a bare-text label leaves a lone glyph
       // both first and last element child. Square members hold no padding,
-      // `xs` reads no token, and a start-aligned glyph sits on the alignment
+      // `xs` keeps symmetric padding, and a start-aligned glyph sits on the alignment
       // edge, so none of those take it.
       {
         align: "center",

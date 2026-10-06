@@ -134,7 +134,14 @@ interface SettingsData {
   enableFable?: boolean;
   enableImpersonation?: boolean;
   showAiToolUsage?: boolean;
+  tierModelMappings?: TierModelMappings;
 }
+
+type ModelTier = "large" | "medium" | "small";
+type ConfigurableProviderId = "openai" | "anthropic";
+type TierModelMappings = Partial<
+  Record<ConfigurableProviderId, Partial<Record<ModelTier, string>>>
+>;
 
 interface TailscaleDevice {
   id: string;
@@ -1114,6 +1121,7 @@ function DeveloperSettingsSection({
       <Section className="mt-3">
         <FormRows>
           <FableAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
@@ -1150,6 +1158,109 @@ function FableAdvancedSection({
       onChange={toggle}
       disabled={saving}
     />
+  );
+}
+
+const TIER_MODEL_MAPPING_FIELDS: Array<{
+  provider: ConfigurableProviderId;
+  tier: ModelTier;
+  placeholder: string;
+}> = [
+  { provider: "openai", tier: "large", placeholder: "gpt-6.1-sol" },
+  { provider: "openai", tier: "medium", placeholder: "gpt-5.6-terra" },
+  { provider: "openai", tier: "small", placeholder: "gpt-6-luna" },
+  { provider: "anthropic", tier: "large", placeholder: "claude-opus-5-5[1m]" },
+  { provider: "anthropic", tier: "medium", placeholder: "claude-sonnet-5-5" },
+  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-4-5-20251001" },
+];
+
+function normalizeTierModelMappings(value: unknown): TierModelMappings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const mappings: TierModelMappings = {};
+  for (const provider of ["openai", "anthropic"] as const) {
+    const providerMappings = (value as Record<string, unknown>)[provider];
+    if (
+      !providerMappings ||
+      typeof providerMappings !== "object" ||
+      Array.isArray(providerMappings)
+    ) {
+      continue;
+    }
+    for (const tier of ["large", "medium", "small"] as const) {
+      const model = (providerMappings as Record<string, unknown>)[tier];
+      if (typeof model === "string" && model.trim()) {
+        mappings[provider] = { ...mappings[provider], [tier]: model.trim() };
+      }
+    }
+  }
+  return mappings;
+}
+
+function TierModelMappingsAdvancedSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [mappings, setMappings] = useState(() =>
+    normalizeTierModelMappings(settings.tierModelMappings),
+  );
+
+  function update(provider: ConfigurableProviderId, tier: ModelTier, model: string) {
+    setMappings((current) => ({
+      ...current,
+      [provider]: { ...current[provider], [tier]: model },
+    }));
+  }
+
+  function save() {
+    const normalized = normalizeTierModelMappings(mappings);
+    setMappings(normalized);
+    void onSave({ tierModelMappings: normalized });
+  }
+
+  return (
+    <FormRow className="block">
+      <FormRowHeading>
+        <FormRowLabel>{t("advanced.tierModelMappings.title")}</FormRowLabel>
+        <FormRowDescription>{t("advanced.tierModelMappings.description")}</FormRowDescription>
+      </FormRowHeading>
+      <FormRows className="mt-3 max-w-none">
+        {TIER_MODEL_MAPPING_FIELDS.map(({ provider, tier, placeholder }) => {
+          const id = `tier-model-${provider}-${tier}`;
+          return (
+            <FormRow key={id}>
+              <FormRowHeading>
+                <FormRowLabel htmlFor={id}>
+                  {t(`advanced.tierModelMappings.${provider}.${tier}`)}
+                </FormRowLabel>
+              </FormRowHeading>
+              <FormRowControl>
+                <Input
+                  id={id}
+                  className="w-64"
+                  value={mappings[provider]?.[tier] ?? ""}
+                  placeholder={placeholder}
+                  onChange={(event) => update(provider, tier, event.target.value)}
+                  disabled={saving}
+                />
+              </FormRowControl>
+            </FormRow>
+          );
+        })}
+      </FormRows>
+      <p className="mt-2 text-aux text-muted-foreground">
+        {t("advanced.tierModelMappings.fableNote")}
+      </p>
+      <Button type="button" size="sm" className="mt-3" onClick={save} disabled={saving}>
+        {t("advanced.tierModelMappings.save")}
+      </Button>
+    </FormRow>
   );
 }
 

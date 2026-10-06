@@ -1,12 +1,12 @@
 import type { ActionEvent } from "@rome-os/app-runtime";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { actionExecutionContext } from "./context.js";
 
-export type StreamAgentMessage = AgentMessage & { agent?: string };
+export type StreamAgentEvent = AgentEvent & { agent?: string };
 
 export interface AgentMessageRuntimeEvent {
   type: "agent_message";
-  message: StreamAgentMessage;
+  message: StreamAgentEvent;
 }
 
 export interface PublicActionRuntimeEvent {
@@ -69,7 +69,7 @@ function assertJsonValue(value: unknown, path: string, seen: Set<object>): void 
   seen.delete(value);
 }
 
-export function emitAgentMessage(message: StreamAgentMessage): void {
+export function emitAgentMessage(message: StreamAgentEvent): void {
   const observer = actionExecutionContext.getStore()?.runtimeObserver;
   observer?.onRuntimeEvent?.({
     type: "agent_message",

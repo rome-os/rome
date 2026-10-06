@@ -4,13 +4,13 @@
 //
 // Read from the same stores as the page in timeline.ts, claimed in the order
 // `assignAccounts` defines and for the reason stated there, through the same
-// `Messages` verbs. That is what makes the row and the page one answer: the
-// preview is the store's `latest`, which `Messages` binds to the head of the
+// `AccountMessages` verbs. That is what makes the row and the page one answer: the
+// preview is the store's `latest`, which `AccountMessages` binds to the head of the
 // history its `read` pages, and the number beside it is that history's `count`.
 
 import { latestDynamic, type AccountDynamic } from "@rome/api-types/people";
 import { compareMessages, type Message } from "@rome/api-types/message";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { assignAccountHeads } from "./timeline.js";
 
 /** A person's history at a glance. `latest` is null exactly when
@@ -50,18 +50,18 @@ export interface PeopleActivity {
  * queries as a single person.
  */
 export async function readPeopleActivity(
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accountsByPerson: readonly (readonly MessageAccount[])[],
 ): Promise<PersonActivity[]> {
   return (await readActivity(stores, accountsByPerson)).perPerson;
 }
 
 export async function readActivity(
-  stores: readonly Messages[],
+  stores: readonly AccountMessages[],
   accountsByPerson: readonly (readonly MessageAccount[])[],
 ): Promise<PeopleActivity> {
   const owned = await assignAccountHeads(stores, accountsByPerson.flat());
-  const owner = new Map<MessageAccount, Messages>();
+  const owner = new Map<MessageAccount, AccountMessages>();
   const perAccount = new Map<MessageAccount, Message>();
   for (const [account, { store, head }] of owned) {
     owner.set(account, store);
@@ -73,7 +73,7 @@ export async function readActivity(
   // history, so this is the same read the page makes, and a message that two
   // addresses of a person both name is one message in both.
   const summaries = accountsByPerson.flatMap((accounts, person) => {
-    const byStore = new Map<Messages, MessageAccount[]>();
+    const byStore = new Map<AccountMessages, MessageAccount[]>();
     for (const account of accounts) {
       const store = owner.get(account);
       if (store === undefined) continue;

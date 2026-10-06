@@ -3,8 +3,8 @@ import { Check } from "lucide-react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks } from "@/components/chat/blocks";
-import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
+import { renderFlatEntries } from "@/components/chat/entries";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
@@ -24,7 +24,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 // The block-level callbacks + resolved-interaction map threaded into
-// renderFlatBlocks — a single bag instead of six loose props.
+// renderFlatEntries — a single bag instead of six loose props.
 export interface BlockActions {
   onApprovalResolved: () => void;
   onSubmitAppComponent: (
@@ -93,7 +93,7 @@ export interface MessageListProps {
 // approval-resolution turn (interaction_result only, no text) does NOT count,
 // so it can't supersede the card it's resolving.
 function isHumanReply(msg: ChatMessage): boolean {
-  return parseMessageBlocks(msg).some(
+  return parseMessageEntries(msg).some(
     (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0,
   );
 }
@@ -107,7 +107,7 @@ export function findActiveSubmission(
   let active: { messageId: string; payload: Record<string, unknown> } | null = null;
   for (const msg of messages) {
     if (msg.role === "assistant") {
-      const card = parseMessageBlocks(msg).find((b) => b.type === "submission_card");
+      const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
       if (card?.payload && typeof card.payload === "object") {
         active = { messageId: msg.id, payload: card.payload as Record<string, unknown> };
       }
@@ -125,7 +125,7 @@ export function findLastSubmission(messages: ChatMessage[]): Record<string, unkn
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
-    const card = parseMessageBlocks(msg).find((b) => b.type === "submission_card");
+    const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
     if (card?.payload && typeof card.payload === "object") {
       return card.payload as Record<string, unknown>;
     }
@@ -137,7 +137,7 @@ export function findLastSubmission(messages: ChatMessage[]): Record<string, unkn
 // `handback_approved` block with no later submission superseding it).
 export function hasPendingApprovalConfirmation(messages: ChatMessage[]): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const blocks = parseMessageBlocks(messages[i]);
+    const blocks = parseMessageEntries(messages[i]);
     if (blocks.some((b) => b.type === "handback_approved")) return true;
     if (blocks.some((b) => b.type === "submission_card")) return false;
   }
@@ -183,7 +183,7 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
     if (row.kind !== "agent") continue;
     for (const message of row.messages) {
       if (!message.turnId) continue;
-      for (const part of parseMessageBlocks(message)) {
+      for (const part of parseMessageEntries(message)) {
         if (part.type !== "text" || part.blockIx === undefined) continue;
         index.set(`${message.turnId}:${part.blockIx}`, row);
       }
@@ -198,7 +198,7 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
 function turnCopyText(messages: ChatMessage[]): string {
   const parts: string[] = [];
   for (const m of messages) {
-    for (const b of parseMessageBlocks(m)) {
+    for (const b of parseMessageEntries(m)) {
       if (b.type === "text" && typeof b.content === "string" && b.content.trim()) {
         parts.push(b.content);
       }
@@ -272,7 +272,7 @@ const RowView = memo(function RowView({
   const showBranch = showFeedback && summary?.turnStatus === "completed";
   const subagents = summary?.subagents;
   const recapMessageId = row.messages.find((message) =>
-    parseMessageBlocks(message).some((block) => block.type === "turn_recap"),
+    parseMessageEntries(message).some((block) => block.type === "turn_recap"),
   )?.id;
   return (
     <MessageRow
@@ -288,11 +288,11 @@ const RowView = memo(function RowView({
       className="group"
     >
       {row.messages.map((m) => {
-        const blocks = parseMessageBlocks(m);
+        const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {
           return (
             <div key={m.id}>
-              {renderFlatBlocks(blocks, {
+              {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
                 turnId: m.turnId ?? undefined,
@@ -305,7 +305,7 @@ const RowView = memo(function RowView({
         const recap = blocks[recapIndex];
         return (
           <div key={m.id}>
-            {renderFlatBlocks(blocks.slice(0, recapIndex), {
+            {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
@@ -324,7 +324,7 @@ const RowView = memo(function RowView({
                   : undefined
               }
             />
-            {renderFlatBlocks(blocks.slice(recapIndex + 1), {
+            {renderFlatEntries(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
@@ -336,7 +336,7 @@ const RowView = memo(function RowView({
         // rome-live-caret appends the pulsing live dot after the last rendered
         // character (see globals.css).
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
             ...actions,
             turnId: live.runningTurnId ?? undefined,
           })}
@@ -356,7 +356,7 @@ const RowView = memo(function RowView({
         // the row visible while the feedback draft is open (its popover is
         // portaled, so group-focus-within can't see it) and once a rating is
         // recorded.
-        <div className="-ml-2 mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
+        <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
           {copyText ? <CopyMessageButton text={copyText} /> : null}
           {showFeedback && feedbackTurn?.turnId ? (
             <TurnFeedbackButtons
@@ -421,7 +421,7 @@ function StandaloneLiveTail({
     >
       {live.text ? (
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
             ...actions,
             turnId: live.runningTurnId ?? undefined,
           })}

@@ -1,5 +1,8 @@
 import { createLogger } from "../../logger.js";
+import { getInstanceToken } from "../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
+import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -34,6 +37,8 @@ interface StoredThreadBinding {
 interface Connection {
   client: CodexAppServerConnection;
   generation: number;
+  defaultProvider: string | null;
+  invalidate(): void;
 }
 
 export interface CodexAppServerConnection {
@@ -51,7 +56,12 @@ export interface CodexThreadHandle {
 
 export interface CodexAppServerManagerOptions {
   cwd?: string;
+  /** Fixed child env. Defaults to the allowlist plus the instance credential, read at each spawn. */
   env?: Record<string, string>;
+  /** Additional fixed root `-c` overrides, applied before Rome's provider configuration. */
+  configArgs?: readonly string[];
+  /** Codex's process-wide model provider. Null uses the guardian's OpenAI login. */
+  defaultProvider?: string | null;
   createClient?: (options: AppServerClientOptions) => CodexAppServerConnection;
 }
 
@@ -61,6 +71,8 @@ function defaultCodexEnvironment(): Record<string, string> {
     const value = process.env[key];
     if (typeof value === "string") env[key] = value;
   }
+  const instanceToken = getInstanceToken();
+  if (instanceToken) env[ROME_CREDITS_TOKEN_ENV] = instanceToken;
   return env;
 }
 
@@ -93,7 +105,8 @@ function buildThreadResumeParams(threadId: string, config: ThreadStartParams): T
 
 export class CodexAppServerManager {
   private readonly cwd: string;
-  private readonly env: Record<string, string>;
+  private readonly env: Record<string, string> | undefined;
+  private readonly configArgs: readonly string[] | undefined;
   private readonly createClient: (options: AppServerClientOptions) => CodexAppServerConnection;
   private readonly bindings = new Map<string, StoredThreadBinding>();
   private readonly notificationListeners = new Map<
@@ -103,19 +116,55 @@ export class CodexAppServerManager {
   private readonly exitListeners = new Set<CodexAppServerExitListener>();
   private connection: Connection | null = null;
   private connectionPromise: Promise<Connection> | null = null;
-  private startingClient: CodexAppServerConnection | null = null;
+  private startingConnection: Connection | null = null;
+  private defaultProvider: string | null;
+  // A→B→A restores defaultProvider, so this distinguishes the first, closed
+  // client from a current one while it is still initializing.
+  private connectionEpoch = 0;
   private nextGeneration = 1;
   private closed = false;
 
   constructor(options: CodexAppServerManagerOptions = {}) {
     this.cwd = options.cwd ?? process.cwd();
-    this.env = options.env ?? defaultCodexEnvironment();
+    this.env = options.env;
+    this.configArgs = options.configArgs;
+    this.defaultProvider = options.defaultProvider ?? null;
     this.createClient =
       options.createClient ?? ((clientOptions) => new AppServerClient(clientOptions));
   }
 
   async warmup(): Promise<void> {
     await this.ensureConnection();
+  }
+
+  /** The provider Codex turns run on: null for the guardian's own login. */
+  getDefaultProvider(): string | null {
+    return this.defaultProvider;
+  }
+
+  /**
+   * Replace Codex immediately with a process whose default provider is
+   * `provider`. This deliberately has the same effect as an app-server exit:
+   * active turns fail, while idle threads lazily resume on their next request.
+   */
+  setDefaultProvider(provider: string | null): void {
+    if (this.closed) throw new Error("codex app-server manager is closed");
+    if (this.defaultProvider === provider) return;
+    this.defaultProvider = provider;
+    this.connectionEpoch += 1;
+
+    const connection = this.connection;
+    const startingConnection = this.startingConnection;
+    connection?.invalidate();
+    startingConnection?.invalidate();
+    this.connection = null;
+    // Do not make a later request join an initialization that has the old
+    // process default. Closing that client rejects its own in-flight callers.
+    this.connectionPromise = null;
+    const error = new Error("codex app-server exited (code null)");
+    this.failCurrentGeneration(connection?.generation, error);
+    connection?.client.close();
+    if (!connection && startingConnection) startingConnection.client.close();
   }
 
   /** Issue a process-global app-server request on the shared connection. */
@@ -142,7 +191,7 @@ export class CodexAppServerManager {
     };
   }
 
-  /** Subscribe to unexpected exits of an initialized shared connection. */
+  /** Subscribe to an exit or deliberate replacement of the shared connection. */
   onExit(listener: CodexAppServerExitListener): () => void {
     this.exitListeners.add(listener);
     return () => this.exitListeners.delete(listener);
@@ -226,8 +275,10 @@ export class CodexAppServerManager {
     this.bindings.clear();
     this.notificationListeners.clear();
     this.exitListeners.clear();
-    this.startingClient?.close();
-    this.startingClient = null;
+    this.startingConnection?.invalidate();
+    this.startingConnection?.client.close();
+    this.startingConnection = null;
+    this.connection?.invalidate();
     this.connection?.client.close();
     this.connection = null;
     this.connectionPromise = null;
@@ -273,27 +324,59 @@ export class CodexAppServerManager {
     if (this.connectionPromise) return await this.connectionPromise;
 
     const generation = this.nextGeneration++;
-    this.connectionPromise = this.createConnection(generation).finally(() => {
+    const connectionEpoch = this.connectionEpoch;
+    let connectionPromise!: Promise<Connection>;
+    connectionPromise = this.createConnection(
+      generation,
+      this.defaultProvider,
+      connectionEpoch,
+    ).finally(() => {
+      if (this.connectionPromise !== connectionPromise) return;
       this.connectionPromise = null;
     });
+    this.connectionPromise = connectionPromise;
     return await this.connectionPromise;
   }
 
-  private async createConnection(generation: number): Promise<Connection> {
+  private async createConnection(
+    generation: number,
+    defaultProvider: string | null,
+    connectionEpoch: number,
+  ): Promise<Connection> {
     const startedAt = Date.now();
     let exited = false;
+    let invalidated = false;
     let client!: CodexAppServerConnection;
     client = this.createClient({
       cwd: this.cwd,
-      env: this.env,
-      onNotification: (method, params) => this.routeNotification(method, params),
-      onServerRequest: async (method, params) => await this.routeServerRequest(method, params),
+      env: this.env ?? defaultCodexEnvironment(),
+      configArgs: [
+        ...(this.configArgs ?? []),
+        ...codexAppServerConfigArgs(getRomeCloudOrigin(), defaultProvider),
+      ],
+      onNotification: (method, params) => {
+        // close() can leave stdout callbacks buffered; do not route them after replacement.
+        if (!invalidated) this.routeNotification(method, params);
+      },
+      onServerRequest: async (method, params) => {
+        if (invalidated) return {};
+        return await this.routeServerRequest(method, params);
+      },
       onExit: (code) => {
         exited = true;
+        invalidated = true;
         this.handleExit(client, generation, code);
       },
     });
-    this.startingClient = client;
+    const connection = {
+      client,
+      generation,
+      defaultProvider,
+      invalidate: () => {
+        invalidated = true;
+      },
+    };
+    this.startingConnection = connection;
     client.start();
     try {
       await client.request(Method.initialize, {
@@ -303,7 +386,9 @@ export class CodexAppServerManager {
       client.notify(Method.initialized, {});
       if (exited) throw new Error("codex app-server exited during initialization");
       if (this.closed) throw new Error("codex app-server manager closed during initialization");
-      const connection = { client, generation };
+      if (connectionEpoch !== this.connectionEpoch) {
+        throw new Error("codex app-server was replaced during initialization");
+      }
       this.connection = connection;
       log.info("codex shared app-server initialized", {
         generation,
@@ -311,10 +396,11 @@ export class CodexAppServerManager {
       });
       return connection;
     } catch (err) {
+      connection.invalidate();
       client.close();
       throw err;
     } finally {
-      if (this.startingClient === client) this.startingClient = null;
+      if (this.startingConnection === connection) this.startingConnection = null;
     }
   }
 
@@ -368,8 +454,13 @@ export class CodexAppServerManager {
     code: number | null,
   ): void {
     if (this.closed || this.connection?.client !== client) return;
-    this.connection = null;
     const error = new Error(`codex app-server exited (code ${code ?? "null"})`);
+    this.connection.invalidate();
+    this.connection = null;
+    this.failCurrentGeneration(generation, error);
+  }
+
+  private failCurrentGeneration(generation: number | undefined, error: Error): void {
     for (const listener of this.exitListeners) {
       try {
         listener(error);
@@ -380,7 +471,7 @@ export class CodexAppServerManager {
       }
     }
     for (const binding of this.bindings.values()) {
-      if (binding.generation !== generation) continue;
+      if (generation !== undefined && binding.generation !== generation) continue;
       binding.generation = 0;
       try {
         binding.callbacks.onExit(error);

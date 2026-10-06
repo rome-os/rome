@@ -23,7 +23,7 @@ describe("backend turn delivery", () => {
     }));
     const wechat: Channel = {
       name: "wechat",
-      send: { send },
+      send: { send, direct: null, activity: null },
       inbound: null,
       accounts: null,
       messages: null,

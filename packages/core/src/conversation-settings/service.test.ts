@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ConversationDescriptor,
-  ConversationId,
-  ConversationRef,
-  TalkDirectory,
-} from "@rome-os/app-runtime";
+import type { ConversationDescriptor, ConversationId, ConversationRef } from "@rome-os/app-runtime";
+import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";

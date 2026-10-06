@@ -3,14 +3,13 @@ import type { DrizzleDb } from "../db/index.js";
 import { romeSessions, sentinelLog } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
 import {
-  testMessagesContract,
+  testAccountMessagesContract,
   WHOLE_HISTORY,
   type MessagesContractSubject,
 } from "./messages-contract.js";
 import { sentinelLogMessages } from "./messages-sentinel.js";
-import type { MessageConversation } from "./messages.js";
 
-// `sentinel_log` read as a `Messages` store, holding exactly what
+// `sentinel_log` read as an `AccountMessages` store, holding exactly what
 // `sentinelLogSource` holds today: one row as the two lines it records, and
 // the threads Rome knows to be groups subtracted.
 
@@ -21,8 +20,6 @@ const GROUP = "tg-group-1";
 
 const account = { channel: CHANNEL, addresses: [DIRECT, DIRECT_ALT] };
 const silent = [{ channel: CHANNEL, addresses: ["tg-nobody"] }];
-const groupThread: MessageConversation = { channel: CHANNEL, id: GROUP };
-const emptyThread: MessageConversation = { channel: CHANNEL, id: "tg-nothing-logged" };
 
 function row(
   db: DrizzleDb,
@@ -76,9 +73,8 @@ async function seed(db: DrizzleDb) {
   // An empty reply is no reply.
   await row(db, "quiet", { at: 1200, text: "hm", response: "", threadId: "tg-quiet-thread" });
 
-  // Out of every account's scope: the thread a group session covers, which only
-  // a conversation read reaches, and another sender. Two rows in the group, so
-  // the four lines they record are enough to page.
+  // Out of every account's scope: the thread a group session covers, and
+  // another sender.
   await row(db, "in-group", { at: 900, text: "hi all", response: "hello", threadId: GROUP });
   await row(db, "in-group-2", { at: 950, text: "still here", response: "yep", threadId: GROUP });
   await row(db, "stranger", { at: 1300, text: "who?", channelUserId: "tg-stranger" });
@@ -125,28 +121,15 @@ describe("sentinelLogMessages", () => {
     expect(await refs()).not.toContain("sentinel:in-group:reply");
   });
 
-  // The row names its thread as well as its sender, so a conversation read
-  // keys on the thread — which is the only way to the group the account reads
-  // subtract.
-  it("answers a group thread asked for as a conversation", async () => {
-    const page = await sentinelLogMessages(db).readConversation({
-      conversation: groupThread,
-      limit: WHOLE_HISTORY,
-    });
-    expect(page.map((entry) => entry.ref)).toEqual([
-      "sentinel:in-group-2:reply",
-      "sentinel:in-group-2",
-      "sentinel:in-group:reply",
-      "sentinel:in-group",
-    ]);
-  });
-
-  it("keeps a conversation on its own channel", async () => {
-    const elsewhere = await sentinelLogMessages(db).readConversation({
-      conversation: { channel: "discord", id: GROUP },
-      limit: WHOLE_HISTORY,
-    });
-    expect(elsewhere).toEqual([]);
+  it("names the sender and the thread the row recorded", async () => {
+    const entries = await page();
+    const inbound = entries.find((entry) => entry.ref === "sentinel:answered");
+    const outbound = entries.find((entry) => entry.ref === "sentinel:answered:reply");
+    expect(inbound?.sender).toEqual({ id: DIRECT, name: null });
+    expect(inbound?.conversation).toEqual({ id: DIRECT, name: null, kind: null });
+    // Rome's reply: the log does not record Rome as a sender.
+    expect(outbound?.sender).toBeUndefined();
+    expect(outbound?.conversation?.id).toBe(DIRECT);
   });
 
   it("subtracts only a group on the row's own channel", async () => {
@@ -188,7 +171,7 @@ describe("sentinelLogMessages", () => {
 // fresh one per case would only buy migrations.
 let enrolled: Promise<MessagesContractSubject> | null = null;
 
-testMessagesContract("sentinelLogMessages", () => {
+testAccountMessagesContract("sentinelLogMessages", () => {
   enrolled ??= (async () => {
     const { db } = createTestDb();
     await seed(db);
@@ -196,8 +179,6 @@ testMessagesContract("sentinelLogMessages", () => {
       messages: sentinelLogMessages(db),
       accounts: [account],
       silent,
-      conversation: groupThread,
-      silentConversation: emptyThread,
     };
   })();
   return enrolled;

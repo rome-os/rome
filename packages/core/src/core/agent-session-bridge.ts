@@ -10,7 +10,7 @@ import type {
   CurrentActionContext,
   MessageReplyReference,
   RomeSessionRef,
-  StreamAgentMessage,
+  StreamAgentEvent,
 } from "@rome-os/app-runtime";
 import type {
   AgentSessionInit,
@@ -213,7 +213,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - requestStartedAt,
         });
 
-        const stream = ctx.openStream<StreamAgentMessage>(`agent.turn:${handle.turnId}`);
+        const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.turnId}`);
         // Drain the per-turn events into the IPC stream.
         void (async () => {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;

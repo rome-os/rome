@@ -11,9 +11,10 @@ function buildDeps(opts: { adapter?: SendSpy | null } = {}): {
 } {
   const adapter = opts.adapter === undefined ? rs.fn(async () => undefined) : opts.adapter;
   const deps = {
-    talkRouter: {
-      list: async () =>
-        adapter ? [{ connectionId: "connection:whatsapp", service: "whatsapp" }] : [],
+    channelsService: {
+      list: async () => [
+        { name: "whatsapp", connectionIds: adapter ? ["connection:whatsapp"] : [] },
+      ],
       send: adapter ?? rs.fn(),
     },
     whatsAppStoreRepo: {
@@ -45,10 +46,7 @@ describe("POST /whatsapp/contacts/:jid/send", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    // channelUserId is unused by the adapter, so the JID is passed for both args.
-    expect(adapter).toHaveBeenCalledWith("connection:whatsapp", JID, {
-      text: "hello there",
-    });
+    expect(adapter).toHaveBeenCalledWith("whatsapp", JID, { text: "hello there" });
   });
 
   it("rejects an empty message with 400 and never touches the adapter", async () => {

@@ -48,8 +48,8 @@ describe("control scale", () => {
     const cls = screen.getByRole("button", { name: "Save" }).className;
 
     // The glyph correction applies on the shared steps, which have a token
-    // inset; `xs` pads from a raw spacing step and stays symmetric.
-    expect(cls).toContain("px-2");
+    // inset; `xs` uses its own inset and stays symmetric.
+    expect(cls).toContain("px-[var(--control-px-center-xs)]");
     expect(cls).not.toContain("has-data-[icon=inline-end]:pr-");
     expect(cls).not.toContain("has-data-[icon=inline-start]:pl-");
   });
@@ -100,8 +100,8 @@ describe("control scale", () => {
     const cls = screen.getByRole("button", { name: "Close" }).className;
 
     // 24px is the WCAG 2.5.8 minimum — the step has nowhere to shrink to, and
-    // a touch surface pairs it with `touch-target` to clear the 44px floor.
-    expect(cls).toContain("size-6");
+    // the large platform scale raises that token to the 44px floor.
+    expect(cls).toContain("size-[var(--control-h-xs)]");
   });
 
   it("names an IconButton for assistive tech and for the tooltip", () => {

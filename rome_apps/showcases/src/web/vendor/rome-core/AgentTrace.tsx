@@ -8,7 +8,7 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "../shims/i18n";
 import { ChevronDownIcon, ChevronRightIcon } from "../shims/icons";
-import type { TraceBlockDto, TraceSegment, TraceSummary } from "../../../trace/types.js";
+import type { TraceEventDto, TraceSegment, TraceSummary } from "../../../trace/types.js";
 import { CollapsedTraceSummary, formatDuration } from "./CollapsedTraceSummary";
 import { TraceRunRow } from "./TraceRunRow";
 
@@ -61,8 +61,8 @@ export function TraceBody({
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const { t } = useTranslation("activity");
@@ -122,8 +122,8 @@ export function AgentTrace({
   onFirstOpen?: () => void;
   defaultOpen?: boolean;
   live?: boolean;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const hasOpenedRef = useRef(defaultOpen);

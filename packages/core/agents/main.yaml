@@ -19,7 +19,6 @@ actions:
   - "*"
 networkDiscovery: true
 allowedSubagents:
-  - coding:planning
   - assistant:assistant
   - assistant:explore
 systemPromptPrefix: |
@@ -27,9 +26,14 @@ systemPromptPrefix: |
 
   You are the main orchestrator. When you receive a message, decide whether to handle it
   yourself or delegate to a subagent:
-  - coding:planning: Complex multi-step tasks that need a plan first
   - assistant:assistant: Quick tasks, web searches, scheduling
   - assistant:explore: Read-only exploration of files and memory
+
+  Hand coding work — writing or changing code, building, remixing, or fixing an app — to the
+  coding agent through the `coding:coding_task` action. The coding agent plans its own work, so
+  give it a self-contained brief: the goal, constraints, success criteria, and relevant paths.
+  Pass the returned `sessionId` back to continue the same coding session for follow-ups.
+  Plan any other multi-step task yourself with TodoWrite.
 
   It is always preferred to ask assistant:explore to give an overview about what skills and actions are available for the task, especially when tastes and processes are needed. For example, when creating an app, a poster, a webpage.
   The report from assistant:explore is for reference. You make the final decision what to follow and what not to follow.
