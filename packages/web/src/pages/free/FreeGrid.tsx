@@ -38,7 +38,7 @@ import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
-import { ToolWorkspace } from "./ToolWorkspace";
+import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import {
   autoPlaceApp,
   autoPlaceProjects,
@@ -206,7 +206,11 @@ export function FreeGrid() {
       if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
         return;
       }
-      placeWidgetsIfSessionActive(targetSessionId, initialWidgets);
+      // A narrow workspace shows one pane at a time, so an expanded panel
+      // would hide the chat this navigation opened.
+      placeWidgetsIfSessionActive(targetSessionId, initialWidgets, {
+        chatFirst: window.innerWidth < COMPACT_WIDTH,
+      });
     };
     if (urlSessionId) {
       const targetSessionId = urlSessionId;

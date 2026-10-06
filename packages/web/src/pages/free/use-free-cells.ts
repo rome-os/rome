@@ -349,9 +349,15 @@ export function placeWidgets(widgets: readonly WidgetSeed[]): void {
   if (changed) persist(current);
 }
 
+/**
+ * Place a navigation's widget handoff and make the last one the active tab.
+ * `chatFirst` keeps the panel collapsed with that tab marked unread, for
+ * layouts that show one pane at a time where expanding would hide the chat.
+ */
 export function placeWidgetsIfSessionActive(
   sessionId: string | null,
   widgets: readonly WidgetSeed[],
+  { chatFirst = false }: { chatFirst?: boolean } = {},
 ): boolean {
   if (activeSessionId !== sessionId) return false;
   placeWidgets(widgets);
@@ -361,7 +367,17 @@ export function placeWidgetsIfSessionActive(
     snapshot.find(
       (p) => p.type === last.type && (last.type !== "app" || p.targetId === last.appId),
     );
-  if (placed) selectTool(placed.id);
+  if (!placed) return true;
+  if (chatFirst) {
+    saveToolView({
+      activeId: placed.id,
+      collapsed: true,
+      unreadIds: [...toolView.unreadIds.filter((x) => x !== placed.id), placed.id],
+    });
+    notify();
+  } else {
+    selectTool(placed.id);
+  }
   return true;
 }
 
