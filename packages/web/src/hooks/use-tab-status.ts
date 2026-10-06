@@ -6,19 +6,27 @@ import { useEffect, useRef, useState } from "react";
  *
  * - `working`: the agent is replying.
  * - `needs-you`: the agent is parked on a card waiting for an answer.
+ * - `failed`: the last turn ended with an error.
  * - `done`: a reply ended while the guardian was away from the tab; clears when
  *   they come back.
  */
-export type TabStatus = "idle" | "working" | "needs-you" | "done";
+export type TabStatus = "idle" | "working" | "failed" | "needs-you" | "done";
 
 // When several chats share the tab (the main pane plus pinned side chats), the
 // one that most needs the guardian wins.
-const PRIORITY: Record<TabStatus, number> = { idle: 0, done: 1, working: 2, "needs-you": 3 };
+const PRIORITY: Record<TabStatus, number> = {
+  idle: 0,
+  done: 1,
+  working: 2,
+  failed: 3,
+  "needs-you": 4,
+};
 
 // Raw colors rather than theme tokens: the favicon sits in the browser's tab
 // strip, outside every Rome theme.
 const BADGE_COLORS: Record<Exclude<TabStatus, "idle">, string> = {
   working: "#2f6fdb",
+  failed: "#d92d20",
   "needs-you": "#e08a00",
   done: "#1f9d55",
 };
@@ -32,10 +40,12 @@ export function topTabStatus(statuses: Iterable<TabStatus>): TabStatus {
 export function deriveTabStatus(state: {
   streaming: boolean;
   awaitingGuardian: boolean;
+  lastTurnFailed: boolean;
   finishedUnseen: boolean;
 }): TabStatus {
   return topTabStatus([
     state.awaitingGuardian ? "needs-you" : "idle",
+    state.lastTurnFailed ? "failed" : "idle",
     state.streaming ? "working" : "idle",
     state.finishedUnseen ? "done" : "idle",
   ]);
@@ -59,8 +69,8 @@ function iconLink(): HTMLLinkElement | null {
 }
 
 // Glyph geometry in icon.svg's 52-unit grid, bottom-right corner: an open ring
-// (the sidebar's spinner, held still), an exclamation mark, a check mark. Shape
-// tells the states apart without color.
+// (the sidebar's spinner, held still), an exclamation mark, a cross, a check
+// mark. Shape tells the states apart without color.
 const GRID = 52;
 
 function traceGlyph(
@@ -95,6 +105,13 @@ function traceGlyph(
     ctx.beginPath();
     ctx.arc(45, 48, gap ? 6.2 : 2.9, 0, Math.PI * 2);
     ctx.fill();
+  } else if (status === "failed") {
+    ctx.beginPath();
+    ctx.moveTo(34, 34);
+    ctx.lineTo(48, 48);
+    ctx.moveTo(48, 34);
+    ctx.lineTo(34, 48);
+    ctx.stroke();
   } else {
     ctx.beginPath();
     ctx.moveTo(30, 40);
@@ -248,8 +265,9 @@ export function useFinishedUnseen(turnEnds: number): boolean {
 export function useChatTabStatus(
   streaming: boolean,
   awaitingGuardian: boolean,
+  lastTurnFailed: boolean,
   turnEnds: number,
 ): void {
   const finishedUnseen = useFinishedUnseen(turnEnds);
-  useTabStatus(deriveTabStatus({ streaming, awaitingGuardian, finishedUnseen }));
+  useTabStatus(deriveTabStatus({ streaming, awaitingGuardian, lastTurnFailed, finishedUnseen }));
 }

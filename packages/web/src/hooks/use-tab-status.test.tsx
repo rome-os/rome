@@ -12,26 +12,48 @@ import {
 describe("deriveTabStatus", () => {
   it("puts a waiting card ahead of a running reply", () => {
     expect(
-      deriveTabStatus({ streaming: true, awaitingGuardian: true, finishedUnseen: false }),
+      deriveTabStatus({
+        streaming: true,
+        awaitingGuardian: true,
+        lastTurnFailed: false,
+        finishedUnseen: false,
+      }),
     ).toBe("needs-you");
+  });
+
+  it("shows a failed turn over its unseen finish, and a waiting card over both", () => {
+    const failed = { streaming: false, lastTurnFailed: true, finishedUnseen: true };
+    expect(deriveTabStatus({ ...failed, awaitingGuardian: false })).toBe("failed");
+    expect(deriveTabStatus({ ...failed, awaitingGuardian: true })).toBe("needs-you");
   });
 
   it("shows a running reply over an earlier unseen finish", () => {
     expect(
-      deriveTabStatus({ streaming: true, awaitingGuardian: false, finishedUnseen: true }),
+      deriveTabStatus({
+        streaming: true,
+        awaitingGuardian: false,
+        lastTurnFailed: false,
+        finishedUnseen: true,
+      }),
     ).toBe("working");
   });
 
   it("is idle when nothing is pending", () => {
     expect(
-      deriveTabStatus({ streaming: false, awaitingGuardian: false, finishedUnseen: false }),
+      deriveTabStatus({
+        streaming: false,
+        awaitingGuardian: false,
+        lastTurnFailed: false,
+        finishedUnseen: false,
+      }),
     ).toBe("idle");
   });
 });
 
 describe("topTabStatus", () => {
   it("lets the chat that most needs the guardian win", () => {
-    expect(topTabStatus(["done", "needs-you", "working"])).toBe("needs-you");
+    expect(topTabStatus(["done", "needs-you", "failed", "working"])).toBe("needs-you");
+    expect(topTabStatus(["done", "failed", "working"])).toBe("failed");
     expect(topTabStatus(["idle", "done"])).toBe("done");
     expect(topTabStatus([])).toBe("idle");
   });

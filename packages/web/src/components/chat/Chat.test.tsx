@@ -810,7 +810,7 @@ describe("Chat tab status", () => {
     renderChat(<Chat sessionId="session-1" />);
 
     await waitFor(() =>
-      expect(mockUseChatTabStatus).toHaveBeenLastCalledWith(false, true, expect.any(Number)),
+      expect(mockUseChatTabStatus).toHaveBeenLastCalledWith(false, true, false, expect.any(Number)),
     );
   });
 });

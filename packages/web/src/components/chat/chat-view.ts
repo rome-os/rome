@@ -317,6 +317,21 @@ export function isAwaitingGuardian(
   return false;
 }
 
+// Whether the floor session's latest finished turn ended with an error: the
+// same turn_end status the sidebar's failed mark reads.
+export function isLastTurnFailed(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+): boolean {
+  const { displayMessages, floorSessionId } = view;
+  for (let i = displayMessages.length - 1; i >= 0; i--) {
+    const msg = displayMessages[i];
+    if (msg.sessionId === floorSessionId && msg.role === "trace" && msg.traceSummary) {
+      return msg.traceSummary.turnStatus === "error";
+    }
+  }
+  return false;
+}
+
 // Render rows: group the flat transcript into speaker blocks. Pure data — the
 // view layer turns rows into JSX. Depends on runningTurnId/isStreaming, but
 // those only change at turn boundaries (not per token), so a memo on these

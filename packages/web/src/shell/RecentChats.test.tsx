@@ -204,6 +204,13 @@ describe("RecentChats", () => {
     expect(mark("Failed chat")?.getAttribute("aria-label")).toBe("Stopped with an error");
     expect(mark("Done chat")?.getAttribute("aria-label")).toBe("Done · new replies");
     expect(mark("Waiting chat")?.getAttribute("aria-label")).toBe("Waiting for you");
+    // An error is a red cross; only "waiting" keeps the orange "!".
+    expect(mark("Failed chat")?.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-destructive",
+    );
+    expect(mark("Waiting chat")?.querySelector("svg")?.getAttribute("class")).toContain(
+      "text-warning",
+    );
     expect(mark("Read chat")).toBeNull();
     expect(mark("Open chat")).toBeNull();
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");

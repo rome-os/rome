@@ -5,6 +5,7 @@ import {
   buildRows,
   interactionResultKey,
   isAwaitingGuardian,
+  isLastTurnFailed,
   type AgentIdentity,
 } from "./chat-view";
 
@@ -258,6 +259,22 @@ describe("buildRows", () => {
       expect(agentRows[0].kind === "agent" && agentRows[0].messages).toHaveLength(2);
       expect(agentRows[0].kind === "agent" && agentRows[0].trace).toBe(trace); // trace as subtitle
     }
+  });
+});
+
+describe("isLastTurnFailed", () => {
+  const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
+    mk(sessionId, "trace", turnId, [], {
+      traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {}, turnStatus },
+    });
+  const failed = (main: ChatMessage[]) =>
+    isLastTurnFailed(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY));
+
+  it("reads the floor's latest turn end", () => {
+    expect(failed([trace(MAIN, "t1", "error")])).toBe(true);
+    expect(failed([trace(MAIN, "t1", "error"), trace(MAIN, "t2", "completed")])).toBe(false);
+    expect(failed([trace(MAIN, "t1", "completed"), trace(MAIN, "t2", "error")])).toBe(true);
+    expect(failed([])).toBe(false);
   });
 });
 
