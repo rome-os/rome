@@ -190,12 +190,14 @@ export class UsageReporter {
       return "delivered";
     }
     await response.body?.cancel().catch(() => {});
-    // Signed out or revoked, rate limited, timed out, or a server fault: the
-    // events stay queued. Any other client error means this batch can never be
-    // accepted, so it is dropped rather than retried forever.
+    // Signed out or revoked, a Rome Cloud without the route yet, rate limited,
+    // timed out, or a server fault: the events stay queued. Any other client
+    // error means this batch can never be accepted, so it is dropped rather
+    // than retried forever.
     if (
       response.status === 401 ||
       response.status === 403 ||
+      response.status === 404 ||
       response.status === 408 ||
       response.status === 429 ||
       response.status >= 500

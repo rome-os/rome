@@ -196,10 +196,10 @@ describe("UsageReporter", () => {
     ]);
   });
 
-  it("retries after an outage or rate limit and drops a batch Rome Cloud refuses", async () => {
+  it("retries after an outage, a rate limit, or a missing route, and drops a refused batch", async () => {
     const r = reporter();
     await outbox.enqueue(turn("turn-1"));
-    for (const status of [503, 429, 401]) {
+    for (const status of [503, 429, 404, 401]) {
       respond = () => new Response("", { status });
       await r.tick();
       expect(await outbox.peek(10)).toHaveLength(1);
