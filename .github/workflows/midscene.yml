@@ -5,21 +5,8 @@ name: E2E Testing by Midscene
 # or personal data is involved. Model credentials come from repository secrets.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/midscene.yml"
-      - "tests/midscene/**"
-      - "docs/midscene-e2e-cases.md"
-      - "packages/web/**"
-      # Workspace dependencies rebuilt by `pnpm --filter rome-web^... build`
-      # (build:kit) before dev:mock:e2e serves the UI; changes there can alter
-      # every flow under test.
-      - "packages/api-types/**"
-      - "packages/app-runtime-sdk/**"
-      - "packages/ui/**"
-      - "packages/web-content/**"
-      - "pnpm-lock.yaml"
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC / 14:00 Beijing daily
   pull_request:
     paths:
       - ".github/workflows/midscene.yml"
@@ -60,7 +47,7 @@ concurrency:
 jobs:
   harness-validation:
     name: Midscene harness validation (no secrets)
-    # Runs on every PR and on main: validates the standalone test package
+    # Runs on path-filtered PRs, nightly, and manual dispatch: validates the package
     # without model secrets, a browser download, the Rome workspace install,
     # or the mock server. Loading the config and collecting YAML cases never
     # calls chromium.launch or the model, so contributor-controlled PR code

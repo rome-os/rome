@@ -120,9 +120,26 @@ HEADLESS=false npm test
   so report links and images work from the Actions Summary. If the merge is
   incomplete, it still publishes the available shard reports without a broken
   combined-report link.
-- Pull requests run secret-free harness and mock-browser boundary jobs. The
-  model-backed shard matrix runs on the upstream `main` branch or by manual
-  dispatch in a fork using that fork's model secrets.
+
+## GitHub Actions
+
+The independent `midscene.yml` workflow runs the full model-backed suite
+nightly against the latest upstream `main` commit. Its daily schedule is
+`0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
+It does not depend on the ordinary CI or Nightly workflow, and pushes do not
+trigger it. The six visual shards run serially with `max-parallel: 1`.
+
+Path-filtered pull requests run only the secret-free harness and mock-browser
+boundary checks. They never receive billable model credentials or run the
+visual shard matrix. See the [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
+for the path set and trust gates.
+
+Manual `workflow_dispatch` runs the full suite on upstream `main`.
+A fork owner may manually dispatch a fork branch using that fork's model
+secrets. Set the optional `report_source_run_id` input to an existing run ID
+to rebuild its reports from shard artifacts without new model calls.
+Report publishing still requires the repository to match
+`MIDSCENE_PUBLISH_REPO`.
 
 ## Authoring Conventions
 

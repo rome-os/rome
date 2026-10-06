@@ -128,17 +128,24 @@ The workflow file is the source of truth for step-level details (action pins,
 timeouts, cache flags). This section records the design decisions and the
 reasons behind them.
 
-- **Triggers**: pushes to `main` on a scoped path set (the workflow itself,
-  `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md), all of `packages/web/**`, the workspace packages
-  rebuilt by `build:kit` — `packages/ui`, `packages/web-content`,
-  `packages/api-types`, `packages/app-runtime-sdk` — and `pnpm-lock.yaml`),
-  the same paths on `pull_request`, plus manual `workflow_dispatch`. A PR
-  runs two secret-free jobs. `harness-validation` installs the package,
-  type-checks it, collects YAML cases, checks the catalog, and tests report
-  scripts without starting a browser or model. `mock-boundary-validation`
-  starts the mock server and checks MSW, browser HTTP, and WebSocket blocking
-  without model credentials. The model-backed `midscene` matrix runs on the upstream
-  `main` branch or by manual dispatch in a fork using that fork's secrets.
+- **Triggers**: the independent Midscene workflow runs the full model-backed
+  suite nightly against the latest upstream `main` commit. Its daily schedule
+  is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
+  It does not depend on the ordinary CI or Nightly workflow.
+  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
+  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
+  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
+  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
+  A matching PR runs two secret-free jobs. `harness-validation` installs the
+  package, type-checks it, collects YAML cases, checks the catalog, and tests
+  report scripts without starting a browser or model.
+  `mock-boundary-validation` starts the mock server and checks MSW, browser
+  HTTP, and WebSocket blocking without model credentials.
+  Manual `workflow_dispatch` also runs the full suite on upstream `main`.
+  A fork owner may manually dispatch a fork branch using that fork's secrets.
+  Set `report_source_run_id` to rebuild reports from an existing run's shard
+  artifacts without model calls. Report publishing requires the repository to
+  match `MIDSCENE_PUBLISH_REPO`.
   The matrix does not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
   environment in the workflow does **not** create its reviewer gate — an
