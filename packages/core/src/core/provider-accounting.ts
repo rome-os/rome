@@ -30,6 +30,7 @@ const ANTHROPIC_5_MINUTE_CACHE_WRITE_MULTIPLIER = 1.25;
 const ANTHROPIC_1_HOUR_CACHE_WRITE_MULTIPLIER = 2;
 const ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1;
 const OPENAI_CACHE_READ_MULTIPLIER = 0.1;
+const GPT_6_1_SOL_CACHE_READ_MULTIPLIER = 0.05;
 const OPENAI_CACHE_WRITE_MULTIPLIER = 1.25;
 const OPENAI_LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
 const OPENAI_LONG_CONTEXT_INPUT_MULTIPLIER = 2;
@@ -76,11 +77,13 @@ function getAnthropicCacheWriteMultiplier(rawUsage?: Record<string, unknown>): n
 // OpenAI's Codex-era rate card: cache reads at 0.1x and cache writes at
 // 1.25x the input rate, with the whole request billed at long-context
 // multipliers once the prompt passes 272K input tokens. GPT-5.6 and GPT-6
-// publish the same rules, so one helper serves both generations.
+// publish the same rules, so one helper serves both generations. GPT-6.1 Sol
+// halves the cache-read rate to 0.05x, so the multiplier is a parameter.
 function openAiLongContextRates(
   inputUsdPerMillion: number,
   outputUsdPerMillion: number,
   rawUsage?: Record<string, unknown>,
+  cacheReadMultiplier = OPENAI_CACHE_READ_MULTIPLIER,
 ): TokenRates {
   const rawInputTokens = rawUsage?.input_tokens;
   const isLongContext =
@@ -91,7 +94,7 @@ function openAiLongContextRates(
   return {
     inputUsdPerMillion: inputUsdPerMillion * inputMultiplier,
     outputUsdPerMillion: outputUsdPerMillion * outputMultiplier,
-    cacheReadUsdPerMillion: inputUsdPerMillion * OPENAI_CACHE_READ_MULTIPLIER * inputMultiplier,
+    cacheReadUsdPerMillion: inputUsdPerMillion * cacheReadMultiplier * inputMultiplier,
     cacheWriteUsdPerMillion: inputUsdPerMillion * OPENAI_CACHE_WRITE_MULTIPLIER * inputMultiplier,
   };
 }
@@ -183,6 +186,12 @@ const PRICING_RULES: PricingRule[] = [
     provider: "openai",
     matchesModel: (model) => matchesModelAlias(model, "gpt-6-astra"),
     resolveRates: (rawUsage) => openAiLongContextRates(10, 50, rawUsage),
+  },
+  {
+    provider: "openai",
+    matchesModel: (model) => matchesModelAlias(model, "gpt-6.1-sol"),
+    resolveRates: (rawUsage) =>
+      openAiLongContextRates(2, 10, rawUsage, GPT_6_1_SOL_CACHE_READ_MULTIPLIER),
   },
   {
     provider: "openai",

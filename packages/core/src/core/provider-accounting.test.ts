@@ -218,6 +218,22 @@ describe("provider-accounting", () => {
     expect(calculateImpliedCostUsd("openai", "gpt-6-luna", usage, rawUsage)).toBeCloseTo(1.22);
   });
 
+  it("prices GPT-6.1 Sol with its halved cache-read rate", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol:high", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol-2026-09-29", usage)).toBeCloseTo(14.6);
+    expect(
+      calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage, { input_tokens: 272_001 }),
+    ).toBeCloseTo(24.2);
+  });
+
   it("applies GPT-5.6 long-context input and output multipliers", () => {
     const impliedCostUsd = calculateImpliedCostUsd(
       "openai",
