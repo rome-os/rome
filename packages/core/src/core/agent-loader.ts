@@ -13,6 +13,9 @@ import {
   resolveArtifactId,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("agent-loader");
 
 export class AgentLoader {
   private agents: Map<string, AgentConfig> = new Map();
@@ -197,8 +200,17 @@ export class AgentLoader {
           const message =
             `Agent "${config.name}" references unknown subagent "${subagent}". ` +
             `Available agents: ${Array.from(nameSet).join(", ")}`;
+          // A core agent's subagents come from apps, which leave the catalog
+          // while they reinstall and stay out while disabled. Boot already
+          // checks that every referenced app ships, so a gap here is temporary
+          // or guardian-chosen: the agent loads without that subagent instead
+          // of failing the whole reload.
           if (metadata.ownerType !== "app") {
-            throw new Error(message);
+            log.warn("core agent loaded without unknown subagent", {
+              agent: config.name,
+              subagent,
+            });
+            continue;
           }
 
           registryLoadFailures.push({
