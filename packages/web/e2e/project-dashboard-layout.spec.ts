@@ -152,3 +152,38 @@ test("a wide dashboard shows every provider column", async ({ context, page }) =
   ]);
   expect(await tableOverflow(table)).toBeLessThanOrEqual(0);
 });
+
+test("a dashboard just wide enough for every column keeps long figures inside the panel", async ({
+  context,
+  page,
+}) => {
+  // Seven-character token figures such as 987.65M overflowed this boundary before
+  // fmtTokens dropped to one decimal.
+  const longFigures = (provider: string, costUsd: number): ProjectDashboardProviderUsage => ({
+    cacheReadTokens: 987_650_000,
+    cacheWriteTokens: 0,
+    costUsd,
+    inputTokens: 173_450_000,
+    outputTokens: 123_450_000,
+    provider,
+  });
+  await mockDashboard(context, [
+    longFigures("anthropic", 9_876.54),
+    longFigures("openai", 5_432.1),
+    longFigures("google", 1_234.56),
+  ]);
+  await page.setViewportSize({ width: 700, height: 900 });
+  await page.goto("/projects");
+  await page.getByRole("radio", { name: "Overview" }).click();
+  const dashboard = page.locator(".\\@container\\/project-dashboard");
+  // The breakpoint measures the dashboard, so size the viewport until the dashboard is
+  // the narrowest width that still shows the token split.
+  const chrome = 700 - (await dashboard.evaluate((element) => element.clientWidth));
+  await page.setViewportSize({ width: 641 + chrome, height: 900 });
+  expect(await dashboard.evaluate((element) => element.clientWidth)).toBe(641);
+
+  const table = page.getByRole("table", { name: /^Usage by provider/ });
+  await expect(table.getByRole("columnheader", { name: "Cached" })).toBeVisible();
+  await expect(table.getByRole("cell", { name: "987.7M" }).first()).toBeVisible();
+  expect(await tableOverflow(table)).toBeLessThanOrEqual(0);
+});

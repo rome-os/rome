@@ -48,9 +48,14 @@ const sectionSubtitleClassName = "mt-1 text-aux whitespace-nowrap text-subtle-fo
 const panelClassName = "flex h-[280px] flex-col rounded-12 border border-border bg-surface p-4";
 const CHAT_PAGE_SIZE = 20;
 
+// One decimal keeps every token figure at six characters or fewer, so the provider
+// table's five numeric columns fit beside the share bar on a 641px dashboard.
+// Rounding the integer count rounds halves up: toFixed(1) on 987.65 gives 987.6,
+// because the double sits just below the half. Each tier starts where the one
+// below would round to 1000, so 999,960,000 reads 1B rather than 1000M.
 const fmtTokens = (n: number): string => {
-  if (n >= 1e9) return (n / 1e9).toFixed(2).replace(/\.?0+$/, "") + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
+  if (n >= 999_950_000) return `${Math.round(n / 1e8) / 10}B`;
+  if (n >= 999_500) return `${Math.round(n / 1e5) / 10}M`;
   if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
   return String(n);
 };
