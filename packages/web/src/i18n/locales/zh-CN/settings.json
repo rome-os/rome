@@ -814,11 +814,6 @@
     "restartTimeoutBody": "Rome 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。"
   },
-  "sentinel": {
-    "title": "哨兵设置",
-    "intervalLabel": "审阅间隔（分钟）",
-    "intervalHelp": "提醒守护者审阅哨兵日志条目的频率。"
-  },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",
     "console": "控制台",

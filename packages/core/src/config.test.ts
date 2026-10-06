@@ -13,7 +13,6 @@ const CONFIG_ENV_KEYS = [
   "SQLITE_PATH",
   "SQLITE_ENCRYPTION_KEY",
   "POSTGRES_CONNECTION_STRING",
-  "SENTINEL_REVIEW_INTERVAL_MINUTES",
   "ROME_ACTION_MAX_WORKERS",
   "ROME_HOST_EXECUTION_SOCKET",
   "ROME_HOST_EXECUTION_ENABLED",
@@ -139,7 +138,6 @@ describe("loadConfig()", () => {
 
     expect(config.anthropicApiKey).toBe("sk-ant-test-key");
     expect(config.database.type).toBe("sqlite");
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
     expect(config.webServer).toEqual({ port: 3000, host: "localhost" });
   });
 
@@ -151,11 +149,6 @@ describe("loadConfig()", () => {
   it("defaults DATABASE_TYPE to 'sqlite'", () => {
     const config = loadConfig();
     expect(config.database.type).toBe("sqlite");
-  });
-
-  it("defaults sentinel review interval to 120 minutes", () => {
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
   });
 
   it("defaults SQLITE_PATH when DATABASE_TYPE=sqlite", () => {
@@ -213,13 +206,6 @@ describe("loadConfig()", () => {
     rs.stubEnv("RELAY_DRAIN_URL", "wss://relay.example/c/mb1");
 
     expect(() => loadConfig()).toThrow(/Invalid configuration/);
-  });
-
-  it("overrides sentinel interval via SENTINEL_REVIEW_INTERVAL_MINUTES", () => {
-    rs.stubEnv("SENTINEL_REVIEW_INTERVAL_MINUTES", "60");
-
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(60);
   });
 
   it("defaults and overrides the action-worker process cap", () => {

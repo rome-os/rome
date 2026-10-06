@@ -32,9 +32,6 @@ const configSchema = z.object({
   // closed to local auth) plus any `FEATURE_GATE_*` env override.
   statsigServerSecretKey: z.string().optional(),
 
-  // Sentinel
-  sentinelReviewIntervalMinutes: z.coerce.number().int().positive().default(120),
-
   // LinkedIn inbox poll cadence. Every tick draws a fresh uniform delay in
   // [min, max] so the sync traffic never looks like a metronome to LinkedIn.
   linkedinPollMinMinutes: z.coerce.number().int().positive().default(15),
@@ -146,9 +143,6 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
 
   // Scalars
-  if (env.SENTINEL_REVIEW_INTERVAL_MINUTES) {
-    raw.sentinelReviewIntervalMinutes = env.SENTINEL_REVIEW_INTERVAL_MINUTES;
-  }
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
   }

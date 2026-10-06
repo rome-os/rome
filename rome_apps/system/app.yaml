@@ -38,7 +38,6 @@ actions:
   - actions/send-message
   - actions/send-notification
   - actions/send-user-message
-  - actions/sentinel-review
   - actions/show-app
   - actions/summon
   - actions/system-upgrade

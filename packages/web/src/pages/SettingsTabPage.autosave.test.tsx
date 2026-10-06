@@ -32,10 +32,7 @@ function ok(json: unknown): Response {
 
 function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
   const calls: FetchCall[] = [];
-  const settings = {
-    sentinelReviewIntervalMinutes: 60,
-    ...initialSettings,
-  };
+  const settings = { ...initialSettings };
 
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,

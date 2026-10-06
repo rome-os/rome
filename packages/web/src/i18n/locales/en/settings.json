@@ -814,11 +814,6 @@
     "restartTimeoutBody": "Rome hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud."
   },
-  "sentinel": {
-    "title": "Sentinel Settings",
-    "intervalLabel": "Review interval (minutes)",
-    "intervalHelp": "How often the guardian is reminded to review sentinel log entries."
-  },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",
     "console": "Console",

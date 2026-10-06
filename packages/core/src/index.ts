@@ -1369,9 +1369,7 @@ async function main() {
   });
 
   // Drains the deprecated events table into routines (one-shot, idempotent).
-  // Runs before the engine starts so migrated routines get activated, and
-  // before the sentinel_review bootstrap so a migrated sentinel routine
-  // suppresses a duplicate.
+  // Runs before the engine starts so migrated routines get activated.
   try {
     await migrateEventsToRoutines({ db, routinesRepo, settingsRepo });
   } catch (err) {
@@ -1385,44 +1383,6 @@ async function main() {
 
   favorDispatchRunner.start();
 
-  const intervalMinutes = config.sentinelReviewIntervalMinutes;
-  // Match across all routines, not just enabled ones: a disabled sentinel_review
-  // (e.g. paused by an operator) must not spawn a duplicate on the next boot.
-  const existingRoutines = await routinesRepo.findAll();
-  const hasSentinelReview = existingRoutines.some((r) => r.actionName === "sentinel_review");
-
-  if (!hasSentinelReview) {
-    try {
-      const result = await actionEngine.run(
-        "create_routine",
-        {
-          name: "sentinel_review",
-          trigger: {
-            type: "schedule",
-            tzid: "UTC",
-            localTime: "00:00",
-            rrule:
-              intervalMinutes < 60
-                ? `FREQ=MINUTELY;INTERVAL=${intervalMinutes}`
-                : `FREQ=HOURLY;INTERVAL=${Math.round(intervalMinutes / 60)}`,
-          },
-          actionName: "sentinel_review",
-          args: {},
-        },
-        { initiator: "startup:system-events" },
-      );
-      if (result.status === "error") {
-        throw new Error(result.error);
-      }
-      if (result.status === "pending_approval") {
-        throw new Error('Action "create_routine" unexpectedly requested approval');
-      }
-      log.info("sentinel review scheduled", { intervalMinutes });
-    } catch (err) {
-      log.warn("failed to schedule sentinel_review", { error: err });
-    }
-  }
-
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
   // placement. The trigger is `floating`: 3am means 3am in the
@@ -1431,6 +1391,7 @@ async function main() {
   // the host zone at first boot. The seed `tzid` is the zone at creation; the
   // scheduler ignores it for floating and uses the live guardian zone.
   // Idempotent: a disabled routine still suppresses a duplicate on the next boot.
+  const existingRoutines = await routinesRepo.findAll();
   const hasSystemUpgrade = existingRoutines.some((r) => r.actionName === "system_upgrade");
   if (!hasSystemUpgrade) {
     const tzid = await resolveGuardianTimezone(settingsRepo);
@@ -1508,7 +1469,6 @@ async function main() {
     appActionsLoaded: appActionReload.loaded.length > 0 ? appActionReload.loaded : ["none"],
     appActionFailures: appActionReload.failed,
     routines: allRoutines.length,
-    sentinelReviewIntervalMinutes: config.sentinelReviewIntervalMinutes,
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
   });
 
