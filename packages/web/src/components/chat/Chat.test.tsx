@@ -507,7 +507,19 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
-  it("follows a turn sent right after Stop releases a dead stream", async () => {
+  it.each([
+    ["while the stream hangs", false],
+    ["during the retry backoff after a drop", true],
+  ])("follows a turn sent right after Stop releases a dead stream %s", async (_label, drop) => {
+    const dropping: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    if (drop) {
+      rs.mocked(openTurnStream).mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(new ReadableStream<Uint8Array>({ start: (c) => void dropping.push(c) })),
+        ),
+      );
+    }
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     rs.mocked(interruptTurn).mockResolvedValue(new Response(null, { status: 404 }));
     rs.mocked(postSessionTurn)
@@ -519,6 +531,12 @@ describe("Chat turn stream lifecycle", () => {
 
       fireEvent.click(screen.getByTestId("send-button"));
       await waitFor(() => expect(composer()).toBe("true"));
+      if (drop) {
+        await act(async () => {
+          dropping[0]!.error(new TypeError("network connection was lost"));
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        });
+      }
       fireEvent.click(screen.getByTestId("stop-button"));
       await waitFor(() => expect(composer()).toBe("false"));
 
@@ -531,6 +549,7 @@ describe("Chat turn stream lifecycle", () => {
       expect(composer()).toBe("true");
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
     }
   });
 

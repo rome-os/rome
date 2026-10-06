@@ -1011,8 +1011,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         isMountedRef.current && streamingSessionsRef.current.get(sessionId)?.turnId === turnId;
       let delayMs = TURN_RESUME_BASE_DELAY_MS;
       let shownError: string | null = null;
+      let controller: AbortController;
       for (;;) {
-        const controller = createTurnStreamController(turnId);
+        controller = createTurnStreamController(turnId);
         try {
           const res = await openTurnStream(turnId, controller.signal);
           if (res.status === 404) break;
@@ -1032,17 +1033,30 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
         } catch {
           // Network blip or aborted reader: retry below.
-        } finally {
-          releaseTurnStreamController(turnId, controller);
         }
-        // Only Stop's force-release or unmount aborts our controller. Either
-        // already settled the turn, so leave now; waiting out the backoff
-        // would hold the send bookkeeping and swallow an immediate new send.
-        if (controller.signal.aborted) return;
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        // Hold the controller through the backoff so Stop's force-release or
+        // unmount can still abort this follower. Both already settled the
+        // turn, so an abort ends the follower at once; waiting out the
+        // backoff would hold the send bookkeeping and swallow a new send.
+        const { signal } = controller;
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve();
+          const timer = setTimeout(resolve, delayMs);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        releaseTurnStreamController(turnId, controller);
+        if (signal.aborted) return;
         delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
         if (!ownsEntry()) return;
       }
+      releaseTurnStreamController(turnId, controller);
       if (!isMountedRef.current) return;
       await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
       endSessionStream(sessionId, turnId);
