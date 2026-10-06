@@ -796,13 +796,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // we upsert by id and replace the summary. Insertion order in segArr
       // matches the server's segment ordinals because the server emits each
       // segment's first upsert in ordinal order.
-      // On a resumed stream, start from the trace already on screen; the
-      // server's replay upserts the same segment ids, so nothing regresses.
-      const retained = streamingSessionsRef.current.get(sessionId);
-      const retainedSnapshot = retained?.turnId === turnId ? retained.snapshot : null;
-      const segArr: TraceSegment[] = [...(retainedSnapshot?.segments ?? [])];
-      const segIdx = new Map(segArr.map((segment, index) => [segment.id, index]));
-      let summary: TraceSnapshot["summary"] = retainedSnapshot?.summary ?? {
+      const segArr: TraceSegment[] = [];
+      const segIdx = new Map<string, number>();
+      let summary: TraceSnapshot["summary"] = {
         distinctApps: [],
         totalSteps: 0,
         invocationCounts: {},
@@ -989,13 +985,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
       return shouldStop;
     },
-    [
-      t,
-      updateSessionSnapshot,
-      updateSessionAssistantText,
-      isReadVisibleSession,
-      streamingSessionsRef,
-    ],
+    [t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
   );
 
   // Follow one turn to its end. A dropped SSE connection (mobile background,
@@ -1023,8 +1013,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
               setStreamError((current) => (current === cleared ? null : current));
               shownError = null;
             }
+            const openedAt = Date.now();
             if (await consumeStream(res, sessionId, turnId)) break;
-            delayMs = TURN_RESUME_BASE_DELAY_MS;
+            // Retry fast after a connection that held; keep backing off when
+            // streams keep closing right away.
+            if (Date.now() - openedAt >= TURN_RESUME_MAX_DELAY_MS) {
+              delayMs = TURN_RESUME_BASE_DELAY_MS;
+            }
           } else if (sessionId === floorSessionIdRef.current) {
             // The composer banner belongs to the floor; a background turn
             // retries quietly.

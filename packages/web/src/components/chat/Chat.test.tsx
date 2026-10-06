@@ -507,6 +507,30 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
+  it("keeps backing off when resumed streams keep closing right away", async () => {
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    // HTTP 200 that ends at EOF without a terminal event, every time.
+    rs.mocked(openTurnStream).mockImplementation(() =>
+      Promise.resolve(new Response(new ReadableStream({ start: (c) => c.close() }))),
+    );
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+      // Retries at +1 s and +3 s (1 s, then 2 s), not every second.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3_500));
+      });
+      expect(openTurnStream).toHaveBeenCalledTimes(3);
+      expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("true");
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
   it.each([
     ["while the stream hangs", false],
     ["during the retry backoff after a drop", true],
