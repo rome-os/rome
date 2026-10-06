@@ -56,19 +56,20 @@ interface ChatSession {
   pinnedAt: string | null;
 }
 
-/** What a chat row's mark says; the open chat shows none, since its pane does. */
+/** What a chat row's mark says. Running and failed describe the chat, so they
+ *  show even while it is open; done means unseen replies, so the open chat
+ *  never shows it. */
 export type ChatRowStatus = "running" | "failed" | "done";
 
 export function chatRowStatus(
   session: Pick<ChatSession, "running" | "lastTurnFailed" | "unread">,
   isActive: boolean,
 ): ChatRowStatus | null {
-  if (isActive) return null;
   // The list hides lastTurnFailed while a retry runs, and a live start
   // clears it, so a failure never outranks a running retry.
   if (session.lastTurnFailed) return "failed";
   if (session.running) return "running";
-  if (session.unread) return "done";
+  if (session.unread && !isActive) return "done";
   return null;
 }
 

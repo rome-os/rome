@@ -162,7 +162,7 @@ describe("RecentChats", () => {
     expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
   });
 
-  it("marks running, failed and finished chats, and leaves the open chat bare", async () => {
+  it("marks running, failed and finished chats, and drops the open chat's check", async () => {
     const base = {
       createdAt: "2026-07-01T00:00:00.000Z",
       activityAt: "2026-07-09T10:00:00.000Z",
@@ -180,7 +180,6 @@ describe("RecentChats", () => {
         id: "open-chat",
         name: "Open chat",
         unread: true,
-        running: true,
         projectName: "beta",
         projectPath: "beta",
       },
@@ -199,6 +198,29 @@ describe("RecentChats", () => {
     const doneRow = screen.getByText("Done chat").closest("[data-chat-row]");
     expect(doneRow?.className).toContain("text-ui");
     expect(doneRow?.className).not.toContain("font-medium");
+  });
+
+  it.each([
+    ["running", { running: true }, "Replying now"],
+    ["failed", { lastTurnFailed: true }, "Stopped with an error"],
+  ])("keeps the %s mark on the open chat", async (_, state, label) => {
+    mockSessions([
+      {
+        id: "open-chat",
+        name: "Open chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+        ...state,
+      },
+    ]);
+
+    renderRecentChats("/chat/open-chat");
+
+    expect(await screen.findByRole("img", { name: label })).toBeTruthy();
   });
 
   describe("status stream", () => {
