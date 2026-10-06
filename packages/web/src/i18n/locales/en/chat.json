@@ -228,6 +228,7 @@
     "resetZoom": "Reset",
     "zoomLevel": "Zoom",
     "previewImage": "Preview",
+    "playVideo": "Play",
     "closeImagePreview": "Close",
     "filePill": "#File {{index}}",
     "uploadProgressFor": "Upload progress for {{name}}",

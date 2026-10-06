@@ -4,9 +4,16 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { PendingUploadsList } from "./PendingUploadsList";
+import { captureVideoPoster } from "./video-poster";
+
+// jsdom cannot decode video, so the capture stands in. Its own behavior lives
+// in video-poster.test.ts.
+rs.mock("./video-poster", () => ({ captureVideoPoster: rs.fn() }));
+const capture = rs.mocked(captureVideoPoster);
 
 const image = { id: "image", file: new File(["image"], "shot.png", { type: "image/png" }) };
 const text = { id: "text", file: new File(["text"], "notes.txt", { type: "text/plain" }) };
+const video = { id: "video", file: new File(["video"], "demo.mov", { type: "video/quicktime" }) };
 const createUrl = rs.fn();
 const revokeUrl = rs.fn();
 
@@ -15,6 +22,9 @@ beforeEach(async () => {
   let id = 0;
   createUrl.mockReset().mockImplementation(() => `blob:preview-${++id}`);
   revokeUrl.mockReset();
+  capture
+    .mockReset()
+    .mockResolvedValue({ blob: new Blob(["frame"], { type: "image/jpeg" }), duration: 3725 });
   rs.stubGlobal(
     "URL",
     class extends URL {
@@ -156,5 +166,59 @@ describe("pending attachment previews", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(container.querySelector("[data-pending-doc-page]")).toBeNull();
     expect(screen.getByText("ts")).toBeTruthy();
+  });
+
+  it("shows a video's poster, length and send-order number", async () => {
+    render(<PendingUploadsList uploads={[text, video]} onRemove={rs.fn()} disabled={false} />);
+    const poster = await screen.findByAltText("demo.mov");
+    expect(capture).toHaveBeenCalledWith("blob:preview-1", expect.any(AbortSignal));
+    expect(poster.getAttribute("src")).toBe("blob:preview-2");
+    const card = cards()[1];
+    expect(within(card).getByText("1:02:05")).toBeTruthy();
+    expect(within(card).getByText("2")).toBeTruthy();
+    expect(card.getAttribute("title")).toBe("#File 2 · demo.mov");
+    expect(within(card).getByRole("button", { name: "Remove demo.mov" })).toBeTruthy();
+  });
+
+  it("stands in a file card while the poster is captured and for an undecodable video", async () => {
+    let fail: (error: Error) => void = () => {};
+    capture.mockReturnValue(new Promise((_, reject) => (fail = reject)));
+    const mkv = { id: "mkv", file: new File(["video"], "talk.mkv", { type: "" }) };
+    render(<PendingUploadsList uploads={[mkv]} onRemove={rs.fn()} disabled={false} />);
+    expect(screen.getByText("mkv")).toBeTruthy();
+    expect(screen.getByText("talk.mkv")).toBeTruthy();
+    fail(new Error("The browser cannot decode this video."));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove talk.mkv" })).toBeTruthy();
+  });
+
+  it("omits the length when the video does not state one", async () => {
+    capture.mockResolvedValue({ blob: new Blob(["frame"]), duration: null });
+    render(<PendingUploadsList uploads={[video]} onRemove={rs.fn()} disabled={false} />);
+    await screen.findByAltText("demo.mov");
+    expect(screen.queryByText(/\d:\d\d/)).toBeNull();
+  });
+
+  it("releases the file and poster URLs of a video, and abandons a capture in flight", async () => {
+    const props = { onRemove: rs.fn(), disabled: false };
+    const view = render(
+      <StrictMode>
+        <PendingUploadsList {...props} uploads={[video]} />
+      </StrictMode>,
+    );
+    await screen.findByAltText("demo.mov");
+    const signals = capture.mock.calls.map(([, signal]) => signal);
+    expect(signals.some((signal) => signal.aborted)).toBe(true);
+    view.rerender(
+      <StrictMode>
+        <PendingUploadsList {...props} uploads={[]} />
+      </StrictMode>,
+    );
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(revokeUrl.mock.calls.map(([url]) => url).sort()).toEqual(
+      createUrl.mock.results.map(({ value }) => value).sort(),
+    );
   });
 });

@@ -4,14 +4,16 @@ import {
   useEffect,
   useRef,
   useState,
-  type HTMLAttributes,
+  type ImgHTMLAttributes,
+  type ReactElement,
 } from "react";
 import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ControlledProps } from "react-medium-image-zoom";
 import { IconButton } from "@/components/ui/icon-button";
 
-type PreviewContentProps = Parameters<NonNullable<ControlledProps["ZoomContent"]>>[0];
+export type PreviewContentProps = Parameters<NonNullable<ControlledProps["ZoomContent"]>>[0];
+type ModalImage = ReactElement<ImgHTMLAttributes<HTMLImageElement>>;
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
@@ -48,14 +50,7 @@ export function ImagePreviewContent({ img, modalState, onUnzoom }: PreviewConten
   }, [modalState]);
 
   const active = modalState === "LOADED";
-  const image = isValidElement<HTMLAttributes<HTMLImageElement>>(img) ? img : null;
-  const width = Number(image?.props.style?.width) || 1;
-  const height = Number(image?.props.style?.height) || 1;
-  const side = Math.min(width, height);
-  const insetX = ((width - side) / width) * 50;
-  const insetY = ((height - side) / height) * 50;
-  // Match PendingImagePreview's centered square crop and 8px radius at 96px.
-  const thumbnailClip = `inset(${insetY}% ${insetX}% round ${(side / width) * (100 / 12)}% / ${(side / height) * (100 / 12)}%)`;
+  const image = modalImage(img);
   return (
     <div
       ref={viewport}
@@ -137,17 +132,7 @@ export function ImagePreviewContent({ img, modalState, onUnzoom }: PreviewConten
         }}
         onDragStart={(event) => event.preventDefault()}
       >
-        {image &&
-          cloneElement(image, {
-            style: {
-              ...image.props.style,
-              clipPath:
-                modalState === "LOADING" || active ? "inset(0% 0% round 0% / 0%)" : thumbnailClip,
-            },
-            onTransitionEnd: (event) => {
-              if (event.propertyName === "transform") image.props.onTransitionEnd?.(event);
-            },
-          })}
+        {image && clipToThumbnail(image, modalState)}
       </div>
       <IconButton
         data-preview-controls
@@ -188,4 +173,36 @@ export function ImagePreviewContent({ img, modalState, onUnzoom }: PreviewConten
       </div>
     </div>
   );
+}
+
+export function modalImage(img: PreviewContentProps["img"]): ModalImage | null {
+  return isValidElement<ImgHTMLAttributes<HTMLImageElement>>(img) ? img : null;
+}
+
+/**
+ * The viewer's image, cropped to its card's centered square with the card's
+ * 8px radius at 96px whenever it is not fully open, so it leaves and returns
+ * as the thumbnail the guardian clicked rather than as the full frame.
+ */
+export function clipToThumbnail(image: ModalImage, modalState: PreviewContentProps["modalState"]) {
+  const width = Number(image.props.style?.width) || 1;
+  const height = Number(image.props.style?.height) || 1;
+  const side = Math.min(width, height);
+  const insetX = ((width - side) / width) * 50;
+  const insetY = ((height - side) / height) * 50;
+  const thumbnailClip = `inset(${insetY}% ${insetX}% round ${(side / width) * (100 / 12)}% / ${(side / height) * (100 / 12)}%)`;
+  return cloneElement(image, {
+    style: {
+      ...image.props.style,
+      clipPath:
+        modalState === "LOADING" || modalState === "LOADED"
+          ? "inset(0% 0% round 0% / 0%)"
+          : thumbnailClip,
+    },
+    onTransitionEnd: (event) => {
+      // The clip transitions too, and only the transform's end tells the
+      // viewer the move is over.
+      if (event.propertyName === "transform") image.props.onTransitionEnd?.(event);
+    },
+  });
 }

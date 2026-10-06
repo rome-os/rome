@@ -228,6 +228,7 @@
     "resetZoom": "重置",
     "zoomLevel": "缩放",
     "previewImage": "预览",
+    "playVideo": "播放",
     "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",

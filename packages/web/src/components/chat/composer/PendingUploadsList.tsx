@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   File as FileGlyph,
   FileArchive,
@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  Play,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -19,7 +20,9 @@ import { useTranslation } from "react-i18next";
 import type { PendingUpload } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { UploadRing } from "./ComposerChip";
-import { ImagePreviewContent } from "./ImagePreviewContent";
+import { ImagePreviewContent, type PreviewContentProps } from "./ImagePreviewContent";
+import { VideoPreviewContent } from "./VideoPreviewContent";
+import { captureVideoPoster } from "./video-poster";
 
 export interface PendingUploadsListProps {
   uploads: PendingUpload[];
@@ -311,10 +314,118 @@ function PendingImagePreview(props: CardProps) {
   );
 }
 
+interface VideoPreview {
+  file: File;
+  /** The file itself, which the viewer plays. */
+  src: string;
+  poster: string;
+  duration: number | null;
+}
+
+/**
+ * The file's playable URL and its poster, or undefined until the poster is
+ * captured, which never happens for a video the browser cannot decode.
+ */
+function useVideoPreview(file: File): VideoPreview | undefined {
+  const [preview, setPreview] = useState<VideoPreview>();
+
+  useEffect(() => {
+    const src = URL.createObjectURL(file);
+    const controller = new AbortController();
+    let poster: string | undefined;
+    captureVideoPoster(src, controller.signal).then(
+      (frame) => {
+        if (controller.signal.aborted) return;
+        poster = URL.createObjectURL(frame.blob);
+        setPreview({ file, src, poster, duration: frame.duration });
+      },
+      () => {},
+    );
+    return () => {
+      controller.abort();
+      URL.revokeObjectURL(src);
+      if (poster) URL.revokeObjectURL(poster);
+    };
+  }, [file]);
+
+  return preview?.file === file ? preview : undefined;
+}
+
+/** 42 → "0:42", 3725 → "1:02:05". */
+function formatDuration(seconds: number): string {
+  // A clip under half a second still has a length worth showing.
+  const total = Math.max(1, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = String(total % 60).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}` : `${minutes}:${rest}`;
+}
+
+function PendingVideoPreview(props: CardProps) {
+  const { file } = props;
+  const { t } = useTranslation("chat");
+  const preview = useVideoPreview(file);
+  const [failed, setFailed] = useState(false);
+  const src = preview?.src;
+  const ZoomContent = useMemo(
+    () =>
+      src
+        ? (content: PreviewContentProps) => <VideoPreviewContent {...content} src={src} />
+        : undefined,
+    [src],
+  );
+
+  // Until the poster lands, and for a video the browser cannot decode, the
+  // file card stands in. Its glyph already says video, so the swap to the
+  // frame reads as the preview arriving rather than the card changing kind.
+  if (!preview || failed) return <PendingDocumentPreview {...props} />;
+
+  return (
+    <PendingCard {...props}>
+      <div className="pending-image-card size-24">
+        <Zoom
+          a11yNameButtonZoom={t("composer.playVideo")}
+          a11yNameButtonUnzoom={t("composer.closeImagePreview")}
+          classDialog="pending-image-preview"
+          IconZoom={NoGlyph}
+          IconUnzoom={X}
+          ZoomContent={ZoomContent}
+          canSwipeToUnzoom={false}
+          zoomMargin={64}
+        >
+          <img
+            src={preview.poster}
+            alt={file.name}
+            className="visible size-24 rounded-8 border border-border bg-surface-muted object-cover"
+            onError={() => setFailed(true)}
+          />
+        </Zoom>
+      </div>
+      <span
+        data-pending-card-overlay
+        aria-hidden
+        className="pointer-events-none absolute inset-0 m-auto flex size-8 items-center justify-center rounded-full border border-border bg-surface text-foreground"
+      >
+        <Play className="size-3.5 translate-x-px fill-current" strokeWidth={2.5} />
+      </span>
+      {preview.duration ? (
+        <span
+          data-pending-card-overlay
+          aria-hidden
+          className="pointer-events-none absolute bottom-1 right-1 flex h-5 items-center rounded-full border border-border bg-surface px-1.5 text-badge text-foreground tabular-nums"
+        >
+          {formatDuration(preview.duration)}
+        </span>
+      ) : null}
+    </PendingCard>
+  );
+}
+
 /**
  * Pending attachments as one row of 96px cards. An image shows its pixels and
- * opens a full-size viewer. Any other file shows a scaled render of its first
- * lines when it is text, or its kind's glyph when it is not.
+ * opens a full-size viewer. A video shows a frame with its length and plays in
+ * the same viewer. Any other file shows a scaled render of its first lines when
+ * it is text, or its kind's glyph when it is not.
  *
  * Each card carries its send-order number because the turn lists attachments
  * to the agent as "File N", so the guardian can point at "file 2" in the draft.
@@ -345,11 +456,12 @@ export function PendingUploadsList({
             onRemove: disabled || uploading ? undefined : () => onRemove(upload.id),
             progress: uploading ? (perFile ? perFile[index] : null) : undefined,
           };
-          return upload.file.type.startsWith("image/") ? (
-            <PendingImagePreview key={upload.id} {...props} />
-          ) : (
-            <PendingDocumentPreview key={upload.id} {...props} />
-          );
+          if (upload.file.type.startsWith("image/")) {
+            return <PendingImagePreview key={upload.id} {...props} />;
+          }
+          if (fileKind(upload.file) === "video")
+            return <PendingVideoPreview key={upload.id} {...props} />;
+          return <PendingDocumentPreview key={upload.id} {...props} />;
         })}
       </ul>
     </div>
