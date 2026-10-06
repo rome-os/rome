@@ -86,8 +86,8 @@ function withLiveRunning<
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
-// Same shapes as the browser tab badge: an open ring (spinning here), a solid
-// "!" badge, a cross and a check mark.
+// Same shapes as the browser tab badge: an open ring (spinning here), an
+// exclamation mark, a cross and a check mark.
 function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   if (status === "running") {
     return (
@@ -129,19 +129,16 @@ function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   if (status === "waiting") {
     return (
       <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-warning" aria-hidden>
-        <circle cx="8" cy="8" r="6.5" fill="currentColor" />
-        <g className="text-(--warning-foreground)">
-          <line
-            x1="8"
-            y1="4.2"
-            x2="8"
-            y2="7.9"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-          />
-          <circle cx="8" cy="11.3" r="1.05" fill="currentColor" />
-        </g>
+        <line
+          x1="8"
+          y1="3"
+          x2="8"
+          y2="7.75"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+        <circle cx="8" cy="12.5" r="1.55" fill="currentColor" />
       </svg>
     );
   }
