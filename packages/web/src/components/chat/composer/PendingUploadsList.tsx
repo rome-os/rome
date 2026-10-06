@@ -412,7 +412,7 @@ function PendingVideoPreview(props: CardProps) {
         <span
           data-pending-card-overlay
           aria-hidden
-          className="pointer-events-none absolute bottom-1 right-1 flex h-5 items-center rounded-full border border-border bg-surface px-1.5 text-badge text-foreground tabular-nums"
+          className="pointer-events-none absolute bottom-1 right-1 flex h-5 items-center rounded-full border border-border bg-surface px-2 text-badge text-foreground tabular-nums"
         >
           {formatDuration(preview.duration)}
         </span>
