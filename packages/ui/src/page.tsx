@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -153,7 +154,9 @@ function useTopBarClaim(): TopBarHosts | null {
   const id = useId();
   const claim = registry?.claim;
   const release = registry?.release;
-  useEffect(() => {
+  // A layout effect, so on a phone the parts reach the bar before the first
+  // paint instead of flashing in the page for a frame.
+  useLayoutEffect(() => {
     if (!claim || !release) return;
     claim(id);
     return () => release(id);
