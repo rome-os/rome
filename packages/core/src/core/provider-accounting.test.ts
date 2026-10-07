@@ -53,7 +53,7 @@ describe("provider-accounting", () => {
     expect(impliedCostUsd).toBeCloseTo(22.05);
   });
 
-  it("prices Anthropic Sonnet 5.5 at $2/$10 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {
+  it("prices Anthropic Sonnet 5.5 at $2/$10 with cache reads at $0.10 and 5-minute writes at 1.25x", () => {
     const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-sonnet-5-5", {
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,
@@ -61,7 +61,7 @@ describe("provider-accounting", () => {
       cacheWriteTokens: 1_000_000,
     });
 
-    expect(impliedCostUsd).toBeCloseTo(14.7);
+    expect(impliedCostUsd).toBeCloseTo(14.6);
   });
 
   it("prices Anthropic Haiku 5.5 at its base tier of $0.10/$0.50 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {

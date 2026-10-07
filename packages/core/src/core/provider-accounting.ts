@@ -121,11 +121,12 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "anthropic",
+    // Sonnet 5.5 halved cache reads on 2026-10-07 to 0.05x the input rate.
     matchesModel: (model) => hasPrefix(model, "claude-sonnet-5-5"),
     resolveRates: (rawUsage) => ({
       inputUsdPerMillion: 2,
       outputUsdPerMillion: 10,
-      cacheReadUsdPerMillion: 0.2,
+      cacheReadUsdPerMillion: 0.1,
       cacheWriteUsdPerMillion: 2 * getAnthropicCacheWriteMultiplier(rawUsage),
     }),
   },
