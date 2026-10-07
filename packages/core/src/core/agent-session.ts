@@ -526,8 +526,12 @@ export function createAgentSessionManager(
               // is one idle TTL plus up to one sweep interval.
               continue;
             }
-            void session.close("idle").catch(() => {
-              // best-effort sweeper
+            // Best-effort: a failed close leaves the session for the next sweep.
+            void session.close("idle").catch((error: unknown) => {
+              log.warn("idle session close failed", {
+                sessionId: session.sessionId,
+                error: String(error),
+              });
             });
           }
         },
