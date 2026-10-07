@@ -1,7 +1,7 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, rm, symlink } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { zstdDecompressSync } from "node:zlib";
@@ -9,7 +9,6 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { DESKTOP_SCRIPT, type DesktopSlot, desktopSlot, startDesktopArgs } from "../desktops.js";
 import { createLogger } from "../logger.js";
-import { checkStoreKeys, deriveStoreKeys, WechatStoreKeysError } from "./wechat-user-store-keys.js";
 
 const log = createLogger("wechat-user");
 
@@ -322,7 +321,7 @@ export function isWechatUserSessionRejected(error: unknown): boolean {
   return error instanceof WechatUserSessionRejected;
 }
 
-export function wechatRuntimeDir(): string {
+function wechatRuntimeDir(): string {
   return join("/run/user", String(process.getuid?.() ?? 0));
 }
 
@@ -618,17 +617,7 @@ export class WechatUserRuntime {
         ? sharedDisplay()
         : this.startDisplay;
     const account = installed ? await this.accountDir() : null;
-    let keysReady = false;
-    if (account !== null) {
-      if (await exists(this.keysFile)) {
-        try {
-          await checkStoreKeys({ accountDir: account, keysFile: this.keysFile });
-          keysReady = true;
-        } catch (error) {
-          if (!(error instanceof WechatStoreKeysError)) throw error;
-        }
-      }
-    }
+    const keysReady = account !== null && (await this.missingKeys(account)) === null;
 
     let state: WechatUserState;
     if (!installed) state = "absent";
@@ -906,34 +895,69 @@ export class WechatUserRuntime {
   }
 
   /**
-   * Turn the captured store passphrase into per-database keys the bridge reads.
-   * Throws {@link WechatUserStorePending} while the client is still creating a
-   * required database, so the caller retries with the same passphrase, and
-   * {@link WechatUserSessionRejected} when only a fresh capture can help.
+   * Capture the store keys with the bridge's `init`. It relaunches the client
+   * under gdb on `display`, waits for a login to unlock the store, and writes
+   * the keys file reads use. Throws {@link WechatUserStorePending} when the
+   * client had not created every message database yet: the bridge keeps no
+   * passphrase, so only another capture can key the rest.
    */
-  async deriveKeys(passphrase: string, signal?: AbortSignal): Promise<void> {
+  async captureKeys(display: string, signal?: AbortSignal): Promise<void> {
+    let captured = false;
     try {
-      await deriveStoreKeys(
-        passphrase,
-        { accountDir: await this.accountDir(), keysFile: this.keysFile },
-        signal,
+      const data = initResultSchema.parse(
+        await this.bridge(["init", "--wait", String(CAPTURE_WAIT_SECONDS)], {
+          env: this.clientEnv(display),
+          timeoutMs: (CAPTURE_WAIT_SECONDS + CAPTURE_GRACE_SECONDS) * 1000,
+          ...(signal ? { signal } : {}),
+        }),
       );
-    } catch (error) {
-      throw asSessionFault(error);
+      captured = true;
+      this.keysCheckedAt = 0;
+      if (data.state === "pending") {
+        throw new WechatUserStorePending(
+          `WeChat had not finished creating ${data.missing.join(", ")} when it signed in.`,
+        );
+      }
+    } finally {
+      // Killing the bridge early leaves its gdb holding the client, which then
+      // never exits. Nothing else in this container runs gdb.
+      if (!captured) await this.run("pkill", ["-x", "gdb"]).catch(() => {});
     }
   }
 
   /**
-   * Refuse reads until every required database has a key that opens it. The
-   * bridge skips a shard it holds no key for, so without this a missing shard
-   * reads as a chat with less history rather than as a locked store.
+   * The required databases the stored keys do not cover, or null when they
+   * cover them all. The bridge skips a shard it holds no key for, so without
+   * this a shard created after the capture reads as a chat with less history
+   * rather than as a locked store.
    */
+  private async missingKeys(accountDir: string): Promise<string[] | null> {
+    const dbDir = join(accountDir, "db_storage");
+    let stored: z.infer<typeof storedKeysSchema>;
+    try {
+      stored = storedKeysSchema.parse(JSON.parse(await readFile(this.keysFile, "utf8")));
+    } catch {
+      return ["the keys file"];
+    }
+    if (stored.dbDir !== dbDir) return ["this account's keys"];
+    const shards = (await readdir(join(dbDir, "message")).catch(() => [] as string[])).filter(
+      (name) => /^message_\d+\.db$/.test(name),
+    );
+    const required = ["session/session.db", ...shards.map((name) => `message/${name}`)];
+    const missing = required.filter((rel) => !(rel in stored.keys));
+    return missing.length > 0 ? missing : null;
+  }
+
+  /** Refuse reads while the stored keys miss a required database. */
   private async checkKeys(): Promise<void> {
     if (Date.now() - this.keysCheckedAt < KEYS_CHECK_TTL_MS) return;
-    try {
-      await checkStoreKeys({ accountDir: await this.accountDir(), keysFile: this.keysFile });
-    } catch (error) {
-      throw asSessionFault(error);
+    const account = await this.accountDir();
+    if (!account) throw new WechatUserSessionRejected("The WeChat account is signed out.");
+    const missing = await this.missingKeys(account);
+    if (missing) {
+      throw new WechatUserSessionRejected(
+        `The WeChat message store is locked: no key for ${missing.join(", ")}.`,
+      );
     }
     this.keysCheckedAt = Date.now();
   }
@@ -959,15 +983,19 @@ export class WechatUserRuntime {
 
   private async runBridge(args: string[], signal?: AbortSignal): Promise<unknown> {
     await this.checkKeys();
+    return this.bridge(args, { timeoutMs: 5 * 60_000, ...(signal ? { signal } : {}) });
+  }
+
+  private async bridge(args: string[], opts: RunOptions): Promise<unknown> {
     const result = await this.run(process.execPath, [bridgeEntry(), "-f", "json", ...args], {
+      ...opts,
       env: {
+        ...opts.env,
         HOME: this.home,
         WECHAT_CLI_HOME: this.bridgeHome,
         WECHAT_DATA_ROOT: join(this.home, "xwechat_files"),
         WECHAT_APP_BINARY: join(this.canonicalPrefix, "wechat"),
       },
-      timeoutMs: 5 * 60_000,
-      ...(signal ? { signal } : {}),
     }).catch((error: unknown) => {
       if ((error as { code?: unknown }).code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
         throw new WechatBridgeError(OUTPUT_TOO_LARGE, "the answer exceeded the output limit");
@@ -999,16 +1027,30 @@ export class WechatUserRuntime {
 /** How long a successful key check covers later reads. */
 const KEYS_CHECK_TTL_MS = 30_000;
 
+/** The capture launches the client and waits for the guardian to scan and for
+ *  the login to unlock the store, so it needs room. */
+const CAPTURE_WAIT_SECONDS = 540;
+
+/** How much longer Rome waits before killing the capture, so the bridge's own
+ *  timeout fires first and reports why. */
+const CAPTURE_GRACE_SECONDS = 30;
+
+/** What `wechat-cli init` answers. `pending` lists the required databases the
+ *  login had not created yet, so no key covers them. */
+const initResultSchema = z.object({
+  state: z.enum(["ready", "pending"]),
+  missing: z.array(z.string()),
+});
+
+/** The part of the bridge's keys file Rome checks before reads. */
+const storedKeysSchema = z.object({
+  dbDir: z.string(),
+  keys: z.record(z.string(), z.unknown()),
+});
+
 /** The code the reader gives an answer too large to capture, so paged reads
  *  can retry with smaller pages. */
 const OUTPUT_TOO_LARGE = "OUTPUT_TOO_LARGE";
-
-function asSessionFault(error: unknown): unknown {
-  if (!(error instanceof WechatStoreKeysError)) return error;
-  return error.kind === "pending"
-    ? new WechatUserStorePending(error.message)
-    : new WechatUserSessionRejected(error.message);
-}
 
 /** A `wechat-cli` failure the reader does not map onto a session fault. */
 class WechatBridgeError extends WechatUserRuntimeError {

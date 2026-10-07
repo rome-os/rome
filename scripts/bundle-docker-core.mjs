@@ -11,30 +11,17 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // etc.). Keep in sync with getAppTemplateDir() in paths.ts and
 // getMemoryTemplateDir() in profile-memory.ts.
 //
-// The WeChat scripts are read at runtime relative to `import.meta.url`, which is
-// src/channels/ under tsx and dist/ in the image, so a compiled runtime finds
-// them only if they are copied to the paths below: helperPath() in
-// channels/wechat-user.ts reads the reader helper, the send driver reads that
-// helper as its sibling, and stageCaptureDriver() in
-// channels/wechat-user-keys.ts reads the launch driver and the key tool.
+// The WeChat send driver is read at runtime relative to `import.meta.url`, which
+// is src/channels/ under tsx and dist/ in the image, so a compiled runtime finds
+// it only if it is copied to the path below.
 export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
   ["packages/app-template/workflow", "dist/app-template-workflow", "app template"],
   ["packages/core/memory.example", "dist/memory.example", "memory template"],
   [
-    "packages/core/src/channels/wechat-user-launch-driver.py",
-    "dist/wechat-user-launch-driver.py",
-    "WeChat launch driver",
-  ],
-  [
     "packages/core/src/channels/wechat-user-send-driver.py",
     "dist/wechat-user-send-driver.py",
     "WeChat send driver",
-  ],
-  [
-    "packages/core/src/channels/vendor/wcdb_key_tool.py",
-    "dist/vendor/wcdb_key_tool.py",
-    "WeChat key tool",
   ],
 ];
 const esbuildModuleCandidates = [

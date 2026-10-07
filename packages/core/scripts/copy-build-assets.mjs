@@ -2,8 +2,8 @@
 //
 // tsc emits only compiled TypeScript, but a few modules ship real files next to
 // themselves and resolve them at runtime through import.meta.url — the WeChat
-// launch and send drivers and the vendored key tool. In `source` mode they are
-// read straight from src/; in `compiled` mode src/ is deleted, so they must
+// send driver. In `source` mode they are read straight from src/; in
+// `compiled` mode src/ is deleted, so they must
 // exist in dist/ at the same relative path. Keep this list in sync with any new
 // sibling asset a module loads at runtime.
 
@@ -13,11 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const ASSETS = [
-  "channels/wechat-user-launch-driver.py",
-  "channels/wechat-user-send-driver.py",
-  "channels/vendor/wcdb_key_tool.py",
-];
+const ASSETS = ["channels/wechat-user-send-driver.py"];
 
 for (const rel of ASSETS) {
   const from = join(pkgRoot, "src", rel);
