@@ -6,6 +6,8 @@ import { seedBaseline } from "../../test/seeds.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../routines/guardian-timezone.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 
@@ -126,22 +128,37 @@ describe("Settings API", () => {
     expect(JSON.stringify(body)).not.toContain("ep-model");
   });
 
-  // A guardianTimezone change must re-target floating routines.
   it("rejects publicAccess, which only PUT /public-access can apply", async () => {
     const setConfig = rs.spyOn(deps.publicAccessState, "setConfig");
 
     const res = await putSettings(app, {
-      publicAccess: { allowedApps: ["notes"] },
+      [PUBLIC_ACCESS_SETTING_KEY]: { allowedApps: ["notes"] },
       theme: "dark",
     });
 
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("/api/public-access");
-    expect(await deps.settingsRepo.get("publicAccess")).toBeNull();
+    expect(await deps.settingsRepo.get(PUBLIC_ACCESS_SETTING_KEY)).toBeNull();
     expect(await deps.settingsRepo.get("theme")).toBeNull();
     expect(setConfig).not.toHaveBeenCalled();
   });
 
+  it("rejects dashboardAccess, which only PUT /dashboard-access can apply", async () => {
+    const setConfig = rs.spyOn(deps.dashboardAccessState, "setConfig");
+
+    const res = await putSettings(app, {
+      [DASHBOARD_ACCESS_SETTING_KEY]: { cloudEmailAccess: ["a@example.com"] },
+      theme: "dark",
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("/api/dashboard-access");
+    expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toBeNull();
+    expect(await deps.settingsRepo.get("theme")).toBeNull();
+    expect(setConfig).not.toHaveBeenCalled();
+  });
+
+  // A guardianTimezone change must re-target floating routines.
   describe("guardianTimezone change re-activates floating routines", () => {
     it("re-activates when the timezone value actually changes", async () => {
       const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();

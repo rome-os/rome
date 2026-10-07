@@ -11,8 +11,16 @@ import {
 } from "../../routines/guardian-timezone.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
+import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
 
-const PUBLIC_ACCESS_SETTING_KEY = "publicAccess";
+// Keys enforced from an in-memory snapshot that only their dedicated route
+// refreshes. Persisting one here would leave the stored and enforced policies
+// disagreeing until restart.
+const DEDICATED_ROUTE_KEYS: Record<string, string> = {
+  [PUBLIC_ACCESS_SETTING_KEY]: "/api/public-access",
+  [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
+};
 
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
@@ -41,14 +49,10 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);
 
-    // publicAccess is enforced from an in-memory snapshot and the proxy
-    // config, which only PUT /public-access refreshes. Persisting it here
-    // would leave the stored and enforced policies disagreeing until restart.
-    if (PUBLIC_ACCESS_SETTING_KEY in body) {
-      return c.json(
-        { error: "publicAccess is managed by PUT /api/public-access, not /api/settings." },
-        400,
-      );
+    for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
+      if (key in body) {
+        return c.json({ error: `${key} is managed by PUT ${route}, not /api/settings.` }, 400);
+      }
     }
 
     // guardianTimezone is scheduler input: route it through the shared
