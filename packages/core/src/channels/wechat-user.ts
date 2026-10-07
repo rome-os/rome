@@ -292,6 +292,8 @@ const bridgeMessageSchema = z.object({
 });
 type BridgeMessage = z.infer<typeof bridgeMessageSchema>;
 
+const bridgeCountSchema = z.object({ count: z.number().int().nonnegative() });
+
 const bridgePageSchema = z.object({
   messages: z.array(bridgeMessageSchema),
   cursor: z.string().nullable(),
@@ -1123,9 +1125,8 @@ const RECENT_CONVERSATIONS = 20;
  *  is reused before the session list is read again. */
 const NAMES_TTL_MS = 60_000;
 
-/** The first page size for counting and for reading a whole second. A page
- *  whose answer overflows the output limit is retried at half the size. */
-const COUNT_PAGE = 1_000;
+/** The first page size for reading a whole second. A page whose answer
+ *  overflows the output limit is retried at half the size. */
 const TIES_PAGE = 200;
 
 /** A rich message's body is its whole serialized envelope, which is CDN keys
@@ -1207,12 +1208,13 @@ export class WechatUserReader {
   constructor(private readonly runtime: WechatUserRuntime) {}
 
   /**
-   * Every chat, most recently active first. The bridge orders by the client's
+   * Every chat, most recently active first, including chats hidden in the
+   * client's list, which still hold history. The bridge orders by the client's
    * sort key, which puts pinned chats first however old, so the whole list is
    * read and ordered by last message before any limit applies.
    */
   private async sessions(signal?: AbortSignal): Promise<BridgeSession[]> {
-    const data = await this.runtime.bridgeCommand(["sessions"], signal);
+    const data = await this.runtime.bridgeCommand(["sessions", "--include-hidden"], signal);
     const lastAt = (session: BridgeSession) =>
       session.lastMessage?.createdAt ? Date.parse(session.lastMessage.createdAt) : 0;
     return z
@@ -1421,13 +1423,14 @@ export class WechatUserReader {
       .slice(-input.limit);
   }
 
-  /** Total messages in a chat, counted a page at a time so a long chat never
-   *  arrives as one oversized answer. */
+  /** Total messages in a chat. The bridge counts rows without reading them. */
   async count(conversationId: string, signal?: AbortSignal): Promise<number> {
-    let total = 0;
-    for await (const page of this.pages(conversationId, {}, COUNT_PAGE, signal)) {
-      total += page.messages.length;
+    try {
+      const data = await this.runtime.bridgeCommand(["count", conversationId], signal);
+      return bridgeCountSchema.parse(data).count;
+    } catch (error) {
+      if (error instanceof WechatBridgeError && error.code === "SESSION_NOT_FOUND") return 0;
+      throw error;
     }
-    return total;
   }
 }

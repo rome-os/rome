@@ -1022,7 +1022,7 @@ describe("WechatUserReader", () => {
   it("lists chats from the session list, without folded entries or empty chats", async () => {
     const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ limit: 20 });
-    expect(calls).toEqual([["sessions"]]);
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
     expect(conversations).toEqual([
       {
         id: "45357963768@chatroom",
@@ -1131,7 +1131,7 @@ describe("WechatUserReader", () => {
   it("filters chats by name or id", async () => {
     const { reader, calls } = await readerWith(() => envelope(SESSIONS));
     const conversations = await reader.conversations({ query: "friend", limit: 5 });
-    expect(calls).toEqual([["sessions"]]);
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
     expect(conversations.map((c) => c.id)).toEqual(["wxid_friend"]);
   });
 
@@ -1254,7 +1254,7 @@ describe("WechatUserReader", () => {
       });
     });
     const messages = await reader.messages({ limit: 1 });
-    expect(calls).toContainEqual(["sessions"]);
+    expect(calls).toContainEqual(["sessions", "--include-hidden"]);
     expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[1])).toEqual([
       "45357963768@chatroom",
       "wxid_friend",
@@ -1264,13 +1264,25 @@ describe("WechatUserReader", () => {
     expect(messages[0]).toMatchObject({ conversationId: "45357963768@chatroom", isGroup: true });
   });
 
-  it("counts a chat a page at a time, in smaller pages when a page overflows", async () => {
-    const history = Array.from({ length: 2_500 }, (_, i) =>
+  it("reads in smaller pages when a page overflows the output limit", async () => {
+    const history = Array.from({ length: 400 }, (_, i) =>
       message(i, new Date(Date.parse("2026-10-01T00:00:00Z") + i * 1000).toISOString()),
     );
-    const { reader, calls } = await readerWith(queryOver(history, 300));
-    expect(await reader.count("wxid_friend")).toBe(2_500);
-    expect(calls.map((argv) => argv[3])).toContain("250");
+    const { reader, calls } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : queryOver(history, 200)(argv),
+    );
+    const messages = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    expect(messages).toHaveLength(300);
+    expect(messages[0]!.text).toBe("line 100");
+    expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[3])).toContain("150");
+  });
+
+  it("counts a chat with the bridge's count, without reading messages", async () => {
+    const { reader, calls } = await readerWith(() =>
+      envelope({ session: "wxid_friend", count: 100_000 }),
+    );
+    expect(await reader.count("wxid_friend")).toBe(100_000);
+    expect(calls).toEqual([["count", "wxid_friend"]]);
   });
 
   it("refuses to read a store with a shard no stored key covers", async () => {
