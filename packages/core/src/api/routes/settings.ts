@@ -12,6 +12,8 @@ import {
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 
+const PUBLIC_ACCESS_SETTING_KEY = "publicAccess";
+
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
   if (ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING in redacted) {
@@ -38,6 +40,16 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     const body = await c.req
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);
+
+    // publicAccess is enforced from an in-memory snapshot and the proxy
+    // config, which only PUT /public-access refreshes. Persisting it here
+    // would leave the stored and enforced policies disagreeing until restart.
+    if (PUBLIC_ACCESS_SETTING_KEY in body) {
+      return c.json(
+        { error: "publicAccess is managed by PUT /api/public-access, not /api/settings." },
+        400,
+      );
+    }
 
     // guardianTimezone is scheduler input: route it through the shared
     // write helper (validate + persist/clear + reschedule floating routines) so

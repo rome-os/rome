@@ -127,6 +127,21 @@ describe("Settings API", () => {
   });
 
   // A guardianTimezone change must re-target floating routines.
+  it("rejects publicAccess, which only PUT /public-access can apply", async () => {
+    const setConfig = rs.spyOn(deps.publicAccessState, "setConfig");
+
+    const res = await putSettings(app, {
+      publicAccess: { allowedApps: ["notes"] },
+      theme: "dark",
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain("/api/public-access");
+    expect(await deps.settingsRepo.get("publicAccess")).toBeNull();
+    expect(await deps.settingsRepo.get("theme")).toBeNull();
+    expect(setConfig).not.toHaveBeenCalled();
+  });
+
   describe("guardianTimezone change re-activates floating routines", () => {
     it("re-activates when the timezone value actually changes", async () => {
       const spy = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
