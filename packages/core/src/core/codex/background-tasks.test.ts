@@ -182,4 +182,74 @@ describe("CodexBackgroundTaskTracker", () => {
       [],
     );
   });
+
+  it("follows a finished sub-agent that a follow-up restarts, through the child's own turns", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    const events = run(tracker, [
+      [Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } }],
+      subAgent("started", "child", "turn-1"),
+      subAgent("completed", "child", "turn-1"),
+      subAgent("interacted", "child", "turn-1"),
+      turnCompleted("turn-1"),
+    ]);
+    expect(events).toEqual([]);
+    const child = (method: string, turn: Record<string, unknown>) =>
+      tracker.observeChildThread(method, { threadId: "child", turn }).map(view);
+    expect(child(Notify.turnStarted, { id: "c-2" })).toEqual(["tasks [child:agent]"]);
+    expect(child(Notify.turnCompleted, { id: "c-2", status: "failed" })).toEqual([
+      "ended child failed",
+      "tasks []",
+    ]);
+  });
+
+  it("does not count a message to an idle sub-agent as running work", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    expect(
+      run(tracker, [
+        subAgent("started", "child", "turn-1"),
+        subAgent("completed", "child", "turn-1"),
+        turnCompleted("turn-1"),
+        [Notify.turnStarted, { threadId: "t", turn: { id: "turn-2" } }],
+        subAgent("interacted", "child", "turn-2"),
+        turnCompleted("turn-2"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("promotes a sub-agent restarted inside a turn when that turn ends", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    run(tracker, [
+      subAgent("started", "child", "turn-1"),
+      subAgent("completed", "child", "turn-1"),
+    ]);
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-2" } });
+    expect(
+      tracker.observeChildThread(Notify.turnStarted, { threadId: "child", turn: { id: "c" } }),
+    ).toEqual([]);
+    expect(run(tracker, [turnCompleted("turn-2")])).toEqual(["tasks [child:agent]"]);
+  });
+
+  it("ignores other threads' turns", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    expect(
+      tracker.observeChildThread(Notify.turnStarted, { threadId: "stranger", turn: { id: "x" } }),
+    ).toEqual([]);
+  });
+
+  it("leaves out the work of an ignored turn, including its late ends", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    tracker.ignoreTurn("fork");
+    expect(
+      run(tracker, [
+        [Notify.turnStarted, { threadId: "t", turn: { id: "fork" } }],
+        shellStarted("s1", "fork"),
+        subAgent("started", "child", "fork"),
+        turnCompleted("fork"),
+        shellCompleted("s1", "fork", 0),
+      ]),
+    ).toEqual([]);
+    expect(
+      tracker.observeChildThread(Notify.turnStarted, { threadId: "child", turn: { id: "c" } }),
+    ).toEqual([]);
+  });
 });

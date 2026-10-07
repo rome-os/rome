@@ -2,15 +2,17 @@ import { createLogger } from "../../logger.js";
 import type {
   ModelBackgroundTask,
   ModelBackgroundTaskEnd,
+  ModelBackgroundTaskEndStatus,
   ModelBackgroundTaskEvent,
   ModelBackgroundTaskKind,
 } from "../agent-runner.js";
 import {
   Notify,
+  type GenericThreadItem,
   type ItemCompletedNotification,
   type ItemStartedNotification,
-  type GenericThreadItem,
   type TurnCompletedNotification,
+  type TurnStartedNotification,
 } from "./app-server-protocol.js";
 
 const log = createLogger("codex-background-tasks");
@@ -27,36 +29,55 @@ interface OpenWork {
 // - A shell is a `commandExecution` item. One still in progress when its turn
 //   completes keeps running in the background; its late `item/completed`,
 //   tagged with the finished turn's id, is its end.
-// - A sub-agent is a pair of `subAgentActivity` items on the parent thread,
-//   kind `started` and later `completed` (or `interrupted`), keyed by the
-//   child's `agentThreadId`.
+// - A sub-agent is keyed by its child thread. A `started` `subAgentActivity`
+//   item on this thread spawns it and starts its first turn. `followup_task`
+//   starts another turn on a child that already finished, but its
+//   `interacted` item is the same one `send_message` sends without starting a
+//   turn, so the child's own `turn/started` and `turn/completed` decide. A
+//   `completed` or `interrupted` activity item also ends it.
 // Work becomes a background task when the turn that started it completes
 // with it still running. Codex starts no turn for a finished task, so an end
 // reaches the model only if it checks on the task in a later turn.
 export class CodexBackgroundTaskTracker {
   private readonly open = new Map<string, OpenWork>();
+  private readonly children = new Map<string, string>();
+  private readonly ignoredTurns = new Set<string>();
+  private turnId: string | null = null;
   private tasks: readonly ModelBackgroundTask[] = [];
 
   get current(): readonly ModelBackgroundTask[] {
     return this.tasks;
   }
 
+  /**
+   * Leaves out the work of `turnId`, a turn this thread runs for another
+   * session such as a borrowed exact fork. Call it before that turn's
+   * `turn/started` is observed.
+   */
+  ignoreTurn(turnId: string): void {
+    this.ignoredTurns.add(turnId);
+  }
+
   /** The events one app-server notification for this thread produces. */
   observe(method: string, params: unknown): ModelBackgroundTaskEvent[] {
     switch (method) {
+      case Notify.turnStarted: {
+        this.turnId = (params as TurnStartedNotification).turn?.id ?? null;
+        return [];
+      }
       case Notify.itemStarted: {
         const p = params as ItemStartedNotification;
+        if (this.ignoredTurns.has(p.turnId)) return [];
         // Tool-ish items carry their fields untyped.
         const item = p.item as GenericThreadItem;
-        if (item.type === "subAgentActivity" && item.kind === "started") {
-          return this.onSubAgentActivity(item, p.turnId);
-        }
+        if (item.type === "subAgentActivity") return this.onSubAgentActivity(item, p.turnId);
         const work = shellWork(item, p.turnId);
         if (work && item.status === "inProgress") this.open.set(item.id, work);
         return [];
       }
       case Notify.itemCompleted: {
         const p = params as ItemCompletedNotification;
+        if (this.ignoredTurns.has(p.turnId)) return [];
         const item = p.item as GenericThreadItem;
         if (item.type === "commandExecution") return this.endShell(item);
         if (item.type === "subAgentActivity") return this.onSubAgentActivity(item, p.turnId);
@@ -64,16 +85,40 @@ export class CodexBackgroundTaskTracker {
       }
       case Notify.turnCompleted: {
         const turnId = (params as TurnCompletedNotification).turn?.id;
-        return turnId ? this.promote(turnId) : [];
+        if (turnId === this.turnId) this.turnId = null;
+        if (!turnId || this.ignoredTurns.has(turnId)) return [];
+        return this.promote(turnId);
       }
       default:
         return [];
     }
   }
 
+  /**
+   * The events one notification for another thread produces: only a turn
+   * starting or ending on one of this thread's sub-agents counts.
+   */
+  observeChildThread(method: string, params: unknown): ModelBackgroundTaskEvent[] {
+    const childId = (params as { threadId?: unknown } | undefined)?.threadId;
+    if (typeof childId !== "string") return [];
+    const description = this.children.get(childId);
+    if (description === undefined) return [];
+    if (method === Notify.turnStarted) return this.childRunning(childId, description);
+    if (method === Notify.turnCompleted) {
+      const status = (params as TurnCompletedNotification).turn?.status;
+      return this.end(childId, {
+        id: childId,
+        status: childTurnEndStatus(status),
+        raw: `turn:${String(status)}`,
+      });
+    }
+    return [];
+  }
+
   /** The app-server exited; every running task died with it. */
   lost(): ModelBackgroundTaskEvent[] {
     this.open.clear();
+    this.turnId = null;
     if (this.tasks.length === 0) return [];
     const events: ModelBackgroundTaskEvent[] = this.tasks.map((task) => ({
       type: "background_task_end",
@@ -90,12 +135,10 @@ export class CodexBackgroundTaskTracker {
     const kind = item.kind;
     if (kind === "started") {
       const agentPath = typeof item.agentPath === "string" ? item.agentPath : agentThreadId;
-      this.open.set(agentThreadId, {
-        kind: "agent",
-        description: agentPath,
-        raw: "subAgentActivity",
-        turnId,
-      });
+      this.children.set(agentThreadId, agentPath);
+      if (!this.open.has(agentThreadId) && !this.isTask(agentThreadId)) {
+        this.open.set(agentThreadId, agentWork(agentPath, turnId));
+      }
       return [];
     }
     if (kind === "completed" || kind === "interrupted") {
@@ -106,6 +149,21 @@ export class CodexBackgroundTaskTracker {
       });
     }
     return [];
+  }
+
+  // A sub-agent's turn started. Inside one of this thread's turns it is open
+  // work like a spawn; between turns nothing will promote it, so it is a
+  // background task at once.
+  private childRunning(childId: string, description: string): ModelBackgroundTaskEvent[] {
+    if (this.open.has(childId) || this.isTask(childId)) return [];
+    if (this.turnId !== null) {
+      if (!this.ignoredTurns.has(this.turnId)) {
+        this.open.set(childId, agentWork(description, this.turnId));
+      }
+      return [];
+    }
+    this.tasks = [...this.tasks, toTask(childId, agentWork(description, ""), Date.now())];
+    return [{ type: "background_tasks", tasks: this.tasks }];
   }
 
   private endShell(item: GenericThreadItem): ModelBackgroundTaskEvent[] {
@@ -125,7 +183,7 @@ export class CodexBackgroundTaskTracker {
   // inside its own turn was never a background task, so it reports nothing.
   private end(id: string, end: ModelBackgroundTaskEnd): ModelBackgroundTaskEvent[] {
     this.open.delete(id);
-    if (!this.tasks.some((task) => task.id === id)) return [];
+    if (!this.isTask(id)) return [];
     this.tasks = this.tasks.filter((task) => task.id !== id);
     log.info("background task ended", { taskId: id, status: end.status, raw: end.raw });
     return [
@@ -134,24 +192,36 @@ export class CodexBackgroundTaskTracker {
     ];
   }
 
+  private isTask(id: string): boolean {
+    return this.tasks.some((task) => task.id === id);
+  }
+
   private promote(turnId: string): ModelBackgroundTaskEvent[] {
     const now = Date.now();
     const promoted: ModelBackgroundTask[] = [];
     for (const [id, work] of this.open) {
       if (work.turnId !== turnId) continue;
       this.open.delete(id);
-      promoted.push({
-        id,
-        kind: work.kind,
-        description: work.description,
-        seenAt: now,
-        raw: work.raw,
-      });
+      promoted.push(toTask(id, work, now));
     }
     if (promoted.length === 0) return [];
     this.tasks = [...this.tasks, ...promoted];
     return [{ type: "background_tasks", tasks: this.tasks }];
   }
+}
+
+function toTask(id: string, work: OpenWork, seenAt: number): ModelBackgroundTask {
+  return { id, kind: work.kind, description: work.description, seenAt, raw: work.raw };
+}
+
+function agentWork(description: string, turnId: string): OpenWork {
+  return { kind: "agent", description, raw: "subAgentActivity", turnId };
+}
+
+function childTurnEndStatus(status: unknown): ModelBackgroundTaskEndStatus {
+  if (status === "completed") return "completed";
+  if (status === "interrupted") return "interrupted";
+  return "failed";
 }
 
 function shellWork(item: GenericThreadItem, turnId: string): OpenWork | undefined {
