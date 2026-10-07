@@ -33,6 +33,7 @@ import {
   evaluateBorrowedExactFork,
 } from "./codex/borrowed-exact-fork.js";
 import { AgentMessageSink, SerialTurnCoordinator, TurnDispatcher } from "./codex/session.js";
+import { CodexBackgroundTaskTracker } from "./codex/background-tasks.js";
 import {
   createGeneratedImageTracker,
   createImageTraceSessionState,
@@ -513,6 +514,9 @@ export class CodexAppServerProvider implements ModelProvider {
     }
 
     const sink = new AgentMessageSink();
+    // Background work outlives the turn that started it, so it is tracked
+    // from every notification, ahead of the active-turn guards below.
+    const backgroundTasks = new CodexBackgroundTaskTracker();
     // Image-generation trace. The app-server delivers it as `imageGeneration`
     // thread items (inline `result` + `savedPath`); a filesystem tracker over
     // ~/.codex/generated_images backstops any image codex writes without an
@@ -687,6 +691,7 @@ export class CodexAppServerProvider implements ModelProvider {
     };
 
     const onNotification = (method: string, params2: unknown): void => {
+      for (const event of backgroundTasks.observe(method, params2)) sink.push(event);
       switch (method) {
         case Notify.turnStarted: {
           const p = params2 as TurnStartedNotification;
@@ -890,6 +895,7 @@ export class CodexAppServerProvider implements ModelProvider {
       onDynamicToolCall,
       onExit: () => {
         if (closed) return;
+        for (const event of backgroundTasks.lost()) sink.push(event);
         const turn = activeTurn;
         if (!turn) return;
         // Exit after turn/start was acknowledged means turn/completed will

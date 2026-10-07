@@ -280,6 +280,69 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("reports a shell outliving its turn, then its late end and the exit that loses the rest", async () => {
+    const shell = (id: string, status: string, exitCode: number | null = null) => ({
+      type: "commandExecution",
+      id,
+      command: `sleep ${id}`,
+      status,
+      source: "unifiedExecStartup",
+      aggregatedOutput: "",
+      exitCode,
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-bg" } };
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-bg", turn: { id: "t-1" } });
+        for (const id of ["s1", "s2"]) {
+          n("item/started", {
+            item: shell(id, "inProgress"),
+            threadId: "thr-bg",
+            turnId: "t-1",
+            startedAtMs: 0,
+          });
+        }
+        n("turn/completed", { threadId: "thr-bg", turn: { id: "t-1", status: "completed" } });
+        return { turn: { id: "t-1" } };
+      }
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const event of session.events) {
+        if (event.type === "background_tasks") {
+          seen.push(`tasks [${event.tasks.map((task) => task.id)}]`);
+          if (event.tasks.length === 0) return;
+        } else if (event.type === "background_task_end") {
+          seen.push(`ended ${event.end.id} ${event.end.status}`);
+        } else if (event.type === "model_turn_end") {
+          seen.push("turn end");
+          // Both arrive with no turn running.
+          captured.onNotification?.("item/completed", {
+            item: shell("s1", "completed", 0),
+            threadId: "thr-bg",
+            turnId: "t-1",
+            completedAtMs: 0,
+          });
+          captured.onExit?.(137);
+        }
+      }
+    })();
+    await session.sendUserInput({ text: "run in background", inputId: "a" });
+    await reading;
+    expect(seen).toEqual([
+      "tasks [s1,s2]",
+      "turn end",
+      "ended s1 completed",
+      "tasks [s2]",
+      "ended s2 lost",
+      "tasks []",
+    ]);
+    await session.close();
+  });
+
   it("releases a buffered steer when startup ends without confirming the first input", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };

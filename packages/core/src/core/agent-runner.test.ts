@@ -45,7 +45,6 @@ rs.mock("../paths.js", () => ({
 import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
-  ModelBackgroundTaskListener,
   ModelProvider,
   ModelSessionEvent,
   ModelSession,
@@ -869,30 +868,44 @@ describe("AgentRunner", () => {
     });
 
     it("follows the model session's background tasks between turns", async () => {
-      const provider = new MockModelProvider([[{ type: "result", content: "Started" }]]);
-      let listener: ModelBackgroundTaskListener | undefined;
-      const baseOpen = provider.openSession.bind(provider);
-      provider.openSession = async (params: ModelSessionParams) => ({
-        ...(await baseOpen(params)),
-        onBackgroundTasks: (next: ModelBackgroundTaskListener) => {
-          listener = next;
-          return () => {
-            listener = undefined;
-          };
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK background tasks",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
         },
-      });
+      };
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
       const key = { agentName: "test-main", channelThreadKey: "webchat:background-tasks" };
       try {
-        await collectMessages(new AgentRunner(manager).run({ ...key, prompt: "Start a task" }));
-        const session = manager.peek(key);
-        expect(session?.backgroundTasks).toEqual([]);
-        const task = { id: "b1", type: "local_bash", description: "sleep 900", seenAt: 1 };
-        listener?.onChange?.([task]);
-        expect(session?.backgroundTasks).toEqual([task]);
+        const session = await manager.acquire(key);
+        const published: string[] = [];
+        session.subscribe((message) => published.push(message.type));
+        const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
+        await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+        runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+        runtime.emit({ type: "result", content: "Started" });
+        runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+        await turn;
+        expect(session.backgroundTasks).toEqual([]);
+
+        const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
+        runtime.emit({ type: "background_tasks", tasks: [task] });
+        runtime.emit({ type: "background_task_end", end: { id: "b0", status: "lost" } });
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([task]));
+        // Task events are the session's own; no turn or subscriber sees them.
+        expect(published).not.toContain("background_tasks");
+        expect(published).not.toContain("background_task_end");
+
+        // The provider process ended, and its tasks with it.
+        runtime.end();
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([]));
       } finally {
         await manager.shutdown();
       }

@@ -43,6 +43,7 @@ import type {
 import {
   CODE_BACKED_FALLBACK,
   createNullModelSession,
+  isModelBackgroundTaskEvent,
   isModelTurnEvent,
   type CodeBackedTurn,
 } from "./agent-runner.js";
@@ -50,6 +51,7 @@ import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelBackgroundTask,
+  ModelBackgroundTaskEvent,
   ModelSession,
   ModelTurnEvent,
   ModelSessionForkOpenParams,
@@ -2024,7 +2026,6 @@ class AgentSessionImpl implements AgentSession {
   private modelEventsLoop: Promise<void> | null = null;
   private modelSessionAvailable = true;
   private _backgroundTasks: readonly ModelBackgroundTask[] = [];
-  private unfollowBackgroundTasks: () => void = () => {};
   private replacingModelSession: ModelSession | null = null;
   private toolCount: number;
   private subagentToolNames: Set<string>;
@@ -2160,7 +2161,8 @@ class AgentSessionImpl implements AgentSession {
 
   startModelSessionEvents(): void {
     const session = this.modelSession;
-    this.followBackgroundTasks(session);
+    // A new model session is a new provider process: its task set starts empty.
+    this._backgroundTasks = [];
     this.modelEventsLoop = this.runEventsLoop(session);
   }
 
@@ -2169,20 +2171,20 @@ class AgentSessionImpl implements AgentSession {
     return this._backgroundTasks;
   }
 
-  // A new model session is a new provider process: its task set starts empty.
-  private followBackgroundTasks(session: ModelSession): void {
-    this.unfollowBackgroundTasks();
-    this._backgroundTasks = [];
-    this.unfollowBackgroundTasks =
-      session.onBackgroundTasks?.({
-        onChange: (tasks) => {
-          this._backgroundTasks = tasks;
-          log.info("background tasks changed", {
-            sessionId: this.sessionId,
-            taskIds: tasks.map((task) => task.id),
-          });
-        },
-      }) ?? (() => {});
+  private consumeBackgroundTaskEvent(event: ModelBackgroundTaskEvent): void {
+    if (event.type === "background_task_end") {
+      log.info("background task ended", {
+        sessionId: this.sessionId,
+        taskId: event.end.id,
+        status: event.end.status,
+      });
+      return;
+    }
+    this._backgroundTasks = event.tasks;
+    log.info("background tasks changed", {
+      sessionId: this.sessionId,
+      taskIds: event.tasks.map((task) => task.id),
+    });
   }
 
   private async ensureModelSessionForTurn(): Promise<void> {
@@ -2244,6 +2246,10 @@ class AgentSessionImpl implements AgentSession {
       for await (const msg of session.events) {
         if (isModelTurnEvent(msg)) {
           await this.consumeModelTurnEvent(session, msg);
+          continue;
+        }
+        if (isModelBackgroundTaskEvent(msg)) {
+          this.consumeBackgroundTaskEvent(msg);
           continue;
         }
         const activeTurn = this.activeSdkTurnId
@@ -2399,6 +2405,8 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
+      // The stream ended with the provider process, and its tasks with it.
+      this._backgroundTasks = [];
       const waiting = new Set(this.waitingCallers.values());
       // A provider stream ending while callers are still bound has no
       // trustworthy result correlation, even if a lightweight test/provider
@@ -3262,7 +3270,7 @@ class AgentSessionImpl implements AgentSession {
         void (async () => {
           try {
             for await (const msg of providerEvents) {
-              if (isModelTurnEvent(msg)) continue;
+              if (isModelTurnEvent(msg) || isModelBackgroundTaskEvent(msg)) continue;
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
               if (projected.some(isTerminalEvent)) break;
