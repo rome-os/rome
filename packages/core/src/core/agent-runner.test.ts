@@ -997,6 +997,54 @@ describe("AgentRunner", () => {
         }
       });
 
+      it("close at the cap even while SDK result turns keep arriving", async () => {
+        rs.useFakeTimers();
+        let runtime!: ReturnType<typeof createSdkEventSession>;
+        let tasks!: ModelBackgroundTaskListener;
+        const provider: ModelProvider = {
+          id: "anthropic",
+          displayName: "SDK background results",
+          builtinTools: new Set<string>(),
+          async openSession(params) {
+            runtime = createSdkEventSession(params);
+            return {
+              ...runtime.session,
+              onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
+                tasks = listener;
+                return () => {};
+              },
+            };
+          },
+        };
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [provider] })),
+          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
+        );
+        const key = { agentName: "test-main", channelThreadKey: "webchat:tasks-sdk-results" };
+        try {
+          const session = await manager.acquire(key);
+          const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
+          await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+          runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+          runtime.emit({ type: "result", content: "Started" });
+          runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+          await turn;
+          tasks.onChange?.([task]);
+          // A short task finishes every 50 ms, inside the idle TTL, while
+          // the long one keeps running.
+          for (let i = 0; i < 30; i++) {
+            runtime.emit({ type: "model_turn_start", turnId: `result-${i}`, answers: [] });
+            runtime.emit({ type: "result", content: `short ${i} done` });
+            runtime.emit({ type: "model_turn_end", turnId: `result-${i}`, answers: [] });
+            await rs.advanceTimersByTimeAsync(50);
+            if (i === 16) expect(manager.peek(key)).toBeDefined();
+          }
+          expect(manager.peek(key)).toBeUndefined();
+        } finally {
+          await manager.shutdown();
+        }
+      });
+
       it("close the idle TTL after their last task ends", async () => {
         const { manager, open } = setUp();
         try {

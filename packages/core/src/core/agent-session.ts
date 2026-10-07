@@ -509,24 +509,25 @@ export function createAgentSessionManager(
         () => {
           const now = Date.now();
           for (const session of [...sessions.values()]) {
-            if (!session.isQuiescentForRotation || session.lastActiveAt >= now - idleTtlMs)
-              continue;
+            if (!session.isQuiescentForRotation) continue;
             const webchat = isWebchatThreadKey(session.key.channelThreadKey);
             const tasks = webchat ? session.backgroundTasks : [];
             if (tasks.length > 0) {
               // A webchat session's background tasks die with it: keep it
               // until they finish, or until the cap since its last caller
-              // turn. A turn the SDK starts for a task's result doesn't renew
-              // the cap, or a stream of short tasks would keep it forever.
+              // turn. Checked before the idle TTL, since turns the SDK starts
+              // for task results renew lastActiveAt but must not renew the
+              // cap, or a stream of short tasks would keep it forever.
               if (session.lastCallerActiveAt >= now - backgroundTaskTtlMs) continue;
               log.warn("closing idle webchat session with background tasks still running", {
                 sessionId: session.sessionId,
                 taskIds: tasks.map((task) => task.id),
               });
-            } else if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) {
+            } else {
+              if (session.lastActiveAt >= now - idleTtlMs) continue;
               // Its last task just ended: give the SDK time to act on it. That
               // is one idle TTL plus up to one sweep interval.
-              continue;
+              if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) continue;
             }
             // Best-effort: a failed close leaves the session for the next sweep.
             void session.close("idle").catch((error: unknown) => {
