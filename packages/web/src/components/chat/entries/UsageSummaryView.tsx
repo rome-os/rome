@@ -175,7 +175,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
       ) : null}
 
       {context ? (
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border pt-3">
           <span className="text-aux text-muted-foreground">
             {t(
               accounting.includedSubagentCount
@@ -183,7 +183,9 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
                 : "usage.labels.context",
             )}
           </span>
-          <span className="flex items-center gap-2">
+          {/* The count never breaks mid-number, so on a narrow card the ring
+              and count wrap below the label instead. */}
+          <span className="ml-auto flex items-center gap-2">
             {contextPercent !== null ? (
               <Tooltip>
                 <TooltipTrigger asChild>
