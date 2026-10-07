@@ -400,7 +400,7 @@ export class PromptBuilder {
       "",
       "Whenever a clarifying question blocks you — one you'd otherwise write out and wait for a reply on — you MUST ask via the `ask_question` tool, never in your text reply; listing such questions in prose (even a numbered list or inline options) is not allowed.",
       "",
-      "This applies most often when a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know: invoke `ask_question` first to collect those answers as an interactive card, then continue once the guardian replies — do not guess a generic result. Ask only the few questions that actually change what you do next, and prefer single-choice questions with concrete options when the likely answers are enumerable.",
+      "This applies most often when a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know: invoke `ask_question` first to collect those answers as an interactive card, then continue once the guardian replies — do not guess a generic result. Ask only the few questions that actually change what you do next, and prefer single-choice questions with concrete options when the likely answers are enumerable. When memory or earlier work already gives a clear default, use it and state the assumption instead of asking.",
     ].join("\n");
   }
 
