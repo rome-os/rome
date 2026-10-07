@@ -32,18 +32,24 @@ export interface AppStartedHookLoadFailure {
 export interface AppStartedDispatcher {
   /**
    * Loads the `app-started` hook for every app start this dispatcher has not
-   * seen, and calls it once the dispatcher is open. An app start is one
-   * installed bundle of one enabled app, so a re-install of the same bundle
-   * does not call the hook again, while an upgrade or a disable followed by an
-   * enable does. Returns the load failures of every current app start, not
-   * only the ones this call loaded. Never throws for a hook. Overlapping
-   * calls run one at a time.
+   * seen, and queues it for `flush`. An app start is one installed bundle of
+   * one enabled app, so a re-install of the same bundle does not call the hook
+   * again, while an upgrade or a disable followed by an enable does. A queued
+   * hook is dropped if its app stops before the flush. Returns the load
+   * failures of every current app start, not only the ones this call loaded.
+   * Never throws for a hook. Overlapping calls run one at a time.
    */
   reconcile(catalog: AppCatalog): Promise<AppStartedHookLoadFailure[]>;
   /**
-   * Opens the dispatcher and calls every hook `reconcile` loaded while it was
-   * closed. Call once, after boot has made actions, routines, and agents
-   * available. Later calls do nothing.
+   * Calls every queued hook without waiting for it, once the dispatcher is
+   * open. Call it after the runtime has absorbed the catalog change that
+   * `reconcile` saw, including the action worker recycle, so a hook never
+   * reaches a worker that predates its app. Before `open` it does nothing.
+   */
+  flush(): void;
+  /**
+   * Opens the dispatcher and flushes. Call once, after boot has made actions,
+   * routines, and agents available. Later calls do nothing.
    */
   open(): void;
 }
@@ -82,17 +88,22 @@ export function createAppStartedDispatcher(
     failures.delete(appId);
   };
 
+  const flush = (): void => {
+    if (!opened) return;
+    const queued = [...pending.values()].flat();
+    pending.clear();
+    for (const entry of queued) dispatch(entry, hookRecursion);
+  };
+
   return {
     reconcile(catalog) {
       return reconcileMutex.runExclusive(() => reconcileStarts(catalog));
     },
-
+    flush,
     open() {
       if (opened) return;
       opened = true;
-      const queued = [...pending.values()].flat();
-      pending.clear();
-      for (const entry of queued) dispatch(entry, hookRecursion);
+      flush();
     },
   };
 
@@ -144,11 +155,7 @@ export function createAppStartedDispatcher(
       }
 
       if (appFailures.length > 0) failures.set(appId, appFailures);
-      if (opened) {
-        for (const entry of loaded) dispatch(entry, hookRecursion);
-      } else if (loaded.length > 0) {
-        pending.set(appId, loaded);
-      }
+      if (loaded.length > 0) pending.set(appId, loaded);
     }
 
     return [...failures.values()].flat();

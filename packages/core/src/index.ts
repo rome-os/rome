@@ -1011,6 +1011,11 @@ async function main() {
     load: () => appStartedDispatcher.reconcile(appCatalog),
     failureSource: (failure) => `app-started:${failure.path}`,
   });
+  // After every subscriber, wherever it registers: a hook that runs an action
+  // must reach a worker forked after `actionWorkerWarmPoolInvalidator`.
+  appCatalog.onSettled(function appStartedFlush() {
+    appStartedDispatcher.flush();
+  });
 
   const messageHandlerRegistered = actionRegistry.has("message_handler");
   if (!messageHandlerRegistered) {

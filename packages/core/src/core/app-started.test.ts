@@ -26,6 +26,8 @@ type AppStartedGlobal = typeof globalThis & {
   __appStartedRelease?: () => void;
   __appStartedRestart?: () => Promise<void>;
   __appStartedRestarted?: boolean;
+  __appStartedLaterDone?: boolean;
+  __appStartedSawLater?: boolean;
 };
 
 const testGlobal = globalThis as AppStartedGlobal;
@@ -77,10 +79,38 @@ describe("AppStartedDispatcher", () => {
     dispatcher.open();
 
     catalog.set([app("app.late", [await hookDir("late")])]);
-    await dispatcher.reconcile(catalog);
+    await settle(dispatcher, catalog);
     await flush();
 
     expect(calledAppIds()).toEqual(["app.late"]);
+  });
+
+  it("queues a hook until flush", async () => {
+    const catalog = fakeCatalog([]);
+    const dispatcher = createDispatcher(catalog);
+    dispatcher.open();
+
+    catalog.set([app("app.queued", [await hookDir("queued")])]);
+    await dispatcher.reconcile(catalog);
+    await flush();
+    expect(calls()).toEqual([]);
+
+    dispatcher.flush();
+    await flush();
+    expect(calledAppIds()).toEqual(["app.queued"]);
+  });
+
+  it("drops a queued hook whose app stops before the flush", async () => {
+    const catalog = fakeCatalog([app("app.brief", [await hookDir("brief")])]);
+    const dispatcher = createDispatcher(catalog);
+    dispatcher.open();
+    await dispatcher.reconcile(catalog);
+
+    catalog.set([]);
+    await settle(dispatcher, catalog);
+    await flush();
+
+    expect(calls()).toEqual([]);
   });
 
   it("does not call again for the same bundle", async () => {
@@ -91,7 +121,7 @@ describe("AppStartedDispatcher", () => {
     await flush();
 
     catalog.set([app("app.same", [await hookDir("same-reinstall")])]);
-    await dispatcher.reconcile(catalog);
+    await settle(dispatcher, catalog);
     await flush();
 
     expect(calledAppIds()).toEqual(["app.same"]);
@@ -105,7 +135,7 @@ describe("AppStartedDispatcher", () => {
     await flush();
 
     catalog.set([app("app.up", [await hookDir("up-v2")], { hash: "2", version: "2.0.0" })]);
-    await dispatcher.reconcile(catalog);
+    await settle(dispatcher, catalog);
     await flush();
 
     expect(calls().map((call) => call.event.appVersion)).toEqual(["1.0.0", "2.0.0"]);
@@ -120,9 +150,9 @@ describe("AppStartedDispatcher", () => {
     await flush();
 
     catalog.set([]);
-    await dispatcher.reconcile(catalog);
+    await settle(dispatcher, catalog);
     catalog.set([app("app.toggle", [dir])]);
-    await dispatcher.reconcile(catalog);
+    await settle(dispatcher, catalog);
     await flush();
 
     expect(calledAppIds()).toEqual(["app.toggle", "app.toggle"]);
@@ -279,12 +309,7 @@ describe("AppStartedDispatcher through the app manager", () => {
   it("starts once per bundle across install, re-install, upgrade, and re-enable", async () => {
     const harness = await createTestApps();
     try {
-      const dispatcher = createDispatcher(harness.catalog);
-      // Mirrors the boot wiring: every catalog event reconciles.
-      harness.catalog.subscribe(async function appStartedSubscriber() {
-        await dispatcher.reconcile(harness.catalog);
-      });
-      dispatcher.open();
+      wireLikeBoot(harness.catalog, createDispatcher(harness.catalog));
       const v1 = await packHookApp(harness.profileRoot, "v1", "0.0.1");
       const v2 = await packHookApp(harness.profileRoot, "v2", "0.0.2");
 
@@ -310,14 +335,40 @@ describe("AppStartedDispatcher through the app manager", () => {
       await harness.cleanup();
     }
   });
+  it("calls the hook only after every catalog subscriber has handled the event", async () => {
+    const harness = await createTestApps();
+    try {
+      wireLikeBoot(harness.catalog, createDispatcher(harness.catalog));
+      // Registered after the dispatcher, like `actionWorkerWarmPoolInvalidator`,
+      // and slow, like a worker recycle.
+      harness.catalog.subscribe(async function laterSubscriber(event) {
+        if (event.current?.state !== "installed") return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        testGlobal.__appStartedLaterDone = true;
+      });
+      const app = await packHookApp(
+        harness.profileRoot,
+        "ordered",
+        "0.0.1",
+        "globalThis.__appStartedSawLater = globalThis.__appStartedLaterDone === true;",
+      );
+
+      await harness.appManager.install({ source: { mode: "bundle", path: app } });
+      await flush();
+
+      expect(calls()).toHaveLength(1);
+      expect(testGlobal.__appStartedSawLater).toBe(true);
+    } finally {
+      delete testGlobal.__appStartedLaterDone;
+      delete testGlobal.__appStartedSawLater;
+      await harness.cleanup();
+    }
+  });
+
   it("stops a hook that restarts its own app at the recursion guard", async () => {
     const harness = await createTestApps();
     try {
-      const dispatcher = createDispatcher(harness.catalog);
-      harness.catalog.subscribe(async function appStartedSubscriber() {
-        await dispatcher.reconcile(harness.catalog);
-      });
-      dispatcher.open();
+      wireLikeBoot(harness.catalog, createDispatcher(harness.catalog));
       testGlobal.__appStartedRestart = async () => {
         await harness.appManager.setEnabled("starter", false);
         await harness.appManager.setEnabled("starter", true);
@@ -379,6 +430,26 @@ hooks:
     "utf-8",
   );
   return (await packArtifact(workspace, `${workspace}.packed`)).outDir;
+}
+
+// Production order: the dispatcher's catalog subscriber reconciles, then the
+// catalog's settled listener flushes.
+async function settle(
+  dispatcher: ReturnType<typeof createDispatcher>,
+  catalog: AppCatalog,
+): Promise<void> {
+  await dispatcher.reconcile(catalog);
+  dispatcher.flush();
+}
+
+function wireLikeBoot(catalog: AppCatalog, dispatcher: ReturnType<typeof createDispatcher>): void {
+  catalog.subscribe(async function appStartedSubscriber() {
+    await dispatcher.reconcile(catalog);
+  });
+  catalog.onSettled(function appStartedFlush() {
+    dispatcher.flush();
+  });
+  dispatcher.open();
 }
 
 function calls(): StartedCall[] {
