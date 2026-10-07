@@ -278,56 +278,104 @@ const PNPM_OUTPUT_BUFFER_CHARS = 16 * 1024;
 const PNPM_OUTPUT_TAIL_LINES = 30;
 const PNPM_OUTPUT_TAIL_CHARS = 4000;
 
+// After pnpm exits, how long to wait for its piped output to drain. A
+// descendant (a lifecycle script's background process) can inherit the pipes
+// and keep them open indefinitely, so completion never waits on them.
+const PNPM_OUTPUT_DRAIN_MS = 250;
+
 /**
  * Run pnpm in `cwd`. Output still streams to this process's stdout and stderr.
  * On a non-zero exit or a timeout, the rejection's message ends with the tail
  * of pnpm's combined output, since pnpm prints its `ERR_PNPM_*` diagnostics to
  * stdout and the exit code alone does not say why.
+ *
+ * Settles on pnpm's own `exit`, not on `close`: `close` also waits for every
+ * descendant holding the output pipes, which would defeat the timeout and keep
+ * the app-lifecycle mutex held.
  */
-export function runPnpm(args: string[], options: { cwd: string }): Promise<void> {
+export function runPnpm(
+  args: string[],
+  options: { cwd: string; timeoutMs?: number },
+): Promise<void> {
+  const timeoutMs = options.timeoutMs ?? PNPM_TIMEOUT_MS;
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PNPM_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const child = spawn("pnpm", args, {
       cwd: options.cwd,
       stdio: ["inherit", "pipe", "pipe"],
       signal: controller.signal,
     });
     let output = "";
-    const capture = (sink: NodeJS.WriteStream) => (chunk: Buffer) => {
+    const streams = [child.stdout, child.stderr].filter(
+      (stream): stream is NonNullable<typeof stream> => stream !== null,
+    );
+    const capture = (sink: NodeJS.WriteStream) => (chunk: string) => {
       sink.write(chunk);
-      output = (output + chunk.toString("utf-8")).slice(-PNPM_OUTPUT_BUFFER_CHARS);
+      output = (output + chunk).slice(-PNPM_OUTPUT_BUFFER_CHARS);
     };
-    child.stdout?.on("data", capture(process.stdout));
-    child.stderr?.on("data", capture(process.stderr));
-    // `close` waits for the piped streams to drain, so `output` is complete.
-    child.once("close", (code) => {
+    // setEncoding decodes across chunk boundaries, so multi-byte characters
+    // split between two chunks survive.
+    child.stdout?.setEncoding("utf8").on("data", capture(process.stdout));
+    child.stderr?.setEncoding("utf8").on("data", capture(process.stderr));
+
+    let settled = false;
+    const settle = (finish: () => void) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      finish();
+    };
+
+    child.once("exit", (code) => {
+      // Decide the outcome at exit time, so an abort that fires while the
+      // output drains cannot turn a clean exit into a timeout.
+      const timedOut = controller.signal.aborted;
       const command = `pnpm ${args.join(" ")}`;
-      if (controller.signal.aborted) {
-        rejectPromise(
-          new Error(
-            `Command timed out after ${PNPM_TIMEOUT_MS}ms: ${command} (cwd: ${options.cwd})` +
-              formatOutputTail(output),
-          ),
-        );
+      const finish = () =>
+        settle(() => {
+          for (const stream of streams) stream.destroy();
+          if (timedOut) {
+            rejectPromise(
+              new Error(
+                `Command timed out after ${timeoutMs}ms: ${command} (cwd: ${options.cwd})` +
+                  formatOutputTail(output),
+              ),
+            );
+            return;
+          }
+          if (code === 0) {
+            resolvePromise();
+            return;
+          }
+          rejectPromise(
+            new Error(
+              `Command failed: ${command} (cwd: ${options.cwd}, exit ${code ?? "null"})` +
+                formatOutputTail(output),
+            ),
+          );
+        });
+      const drainTimer = setTimeout(finish, PNPM_OUTPUT_DRAIN_MS);
+      let open = streams.filter((stream) => !stream.readableEnded).length;
+      if (open === 0) {
+        clearTimeout(drainTimer);
+        finish();
         return;
       }
-      if (code === 0) {
-        resolvePromise();
-        return;
+      for (const stream of streams) {
+        if (stream.readableEnded) continue;
+        stream.once("end", () => {
+          open -= 1;
+          if (open === 0) {
+            clearTimeout(drainTimer);
+            finish();
+          }
+        });
       }
-      rejectPromise(
-        new Error(
-          `Command failed: ${command} (cwd: ${options.cwd}, exit ${code ?? "null"})` +
-            formatOutputTail(output),
-        ),
-      );
     });
     child.once("error", (err) => {
-      clearTimeout(timer);
       if (controller.signal.aborted) return;
-      rejectPromise(err);
+      settle(() => rejectPromise(err));
     });
   });
 }

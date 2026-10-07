@@ -766,6 +766,32 @@ describe("runPnpm", () => {
     expect(tail?.at(-1)).toBe("line 199");
   });
 
+  it("times out even when a descendant keeps the output pipes open", async () => {
+    // The background sleep inherits stdout/stderr and outlives pnpm, so its
+    // pipes stay open long after pnpm itself is killed.
+    fakePnpm("echo starting\nsleep 5 &\nwait");
+    const startedAt = Date.now();
+    const err = await runPnpm(["install"], { cwd, timeoutMs: 200 }).catch((e: unknown) => e);
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    const message = (err as Error).message;
+    expect(message).toContain(`Command timed out after 200ms: pnpm install (cwd: ${cwd})`);
+    expect(message).toContain("starting");
+  });
+
+  it("settles on exit when a descendant keeps the output pipes open", async () => {
+    fakePnpm("echo done\nsleep 5 &\nexit 0");
+    const startedAt = Date.now();
+    await expect(runPnpm(["install"], { cwd })).resolves.toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  });
+
+  it("keeps multi-byte characters intact in the tail", async () => {
+    fakePnpm(`printf '\\342\\234'\nsleep 0.1\nprintf '\\225 failed\\n'\nexit 1`);
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toContain("\u2715 failed");
+  });
+
   it("leaves the message unchanged when pnpm printed nothing", async () => {
     fakePnpm("exit 2");
     const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
