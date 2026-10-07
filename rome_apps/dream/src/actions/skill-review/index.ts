@@ -9,14 +9,21 @@ import {
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
+import {
+  ensureUserSkillsCarrier,
+  isInside,
+  registerCarrierSkills,
+  userSkillsCarrierDir,
+} from "../../lib/user-skills-carrier.js";
 
 const log = createAppLogger("skill_review");
 
 export function createAction(
   config: ActionConfig,
-  deps: AppActionRuntimeDeps<{ agentRunner: AgentRunnerInterface }>,
+  deps: AppActionRuntimeDeps<{ agentRunner: AgentRunnerInterface; carrierDir?: string }>,
 ): Action {
   const { agentRunner, appContext } = deps;
+  const carrierDir = deps.carrierDir ?? userSkillsCarrierDir();
 
   return {
     config,
@@ -72,11 +79,14 @@ export function createAction(
       // conversation history via get_webchat_conversations.
       const stopHeartbeat = keepRunAlive(runs, runId);
       try {
+        await ensureUserSkillsCarrier(carrierDir);
         for await (const msg of agentRunner.run({
           agentName: "skill-review",
+          workingDir: carrierDir,
           prompt:
             `Review webchat session ${sessionId} and decide whether to save a skill. ` +
-            `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation.`,
+            `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation. ` +
+            `Your working directory is the user-skills carrier (${carrierDir}); save skills as skills/<name>/SKILL.md there.`,
         })) {
           recorder.observe(msg);
         }
@@ -90,13 +100,35 @@ export function createAction(
         stopHeartbeat();
       }
 
-      runs.finish(runId, recorder.outcome());
       if (recorder.error !== null) {
+        runs.finish(runId, recorder.outcome());
         log.error("skill-review agent failed", { error: recorder.error });
         return { status: "error", error: `Skill-review agent failed: ${recorder.error}` };
       }
+
+      // A saved SKILL.md is not a skill until the carrier listing it is
+      // installed; register and install it here so the save is never silent.
+      const touchedCarrier = recorder.changedPaths.some((path) => isInside(carrierDir, path));
+      let installed: string[] | undefined;
+      if (touchedCarrier) {
+        try {
+          installed = await registerCarrierSkills(carrierDir);
+          const res = await appContext.runAction("app_management", {
+            op: "install",
+            source: { mode: "source", path: carrierDir },
+          });
+          if (res.status === "error") throw new Error(res.error);
+        } catch (err) {
+          const error = `Skill saved but user-skills install failed: ${err instanceof Error ? err.message : String(err)}`;
+          runs.finish(runId, { status: "failed", error });
+          log.error("user-skills install failed", { error });
+          return { status: "error", error };
+        }
+      }
+
+      runs.finish(runId, recorder.outcome());
       const result = recorder.summary;
-      return { status: "ok", data: { runId, result } };
+      return { status: "ok", data: { runId, result, ...(installed ? { installed } : {}) } };
     },
   };
 }
