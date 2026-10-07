@@ -54,8 +54,8 @@ describe("AppStartedDispatcher", () => {
     await flush();
     expect(calls()).toEqual([]);
 
-    dispatcher.open();
-    dispatcher.open();
+    dispatcher.open(catalog);
+    dispatcher.open(catalog);
     await flush();
 
     expect(calls()).toEqual([
@@ -76,7 +76,7 @@ describe("AppStartedDispatcher", () => {
     const catalog = fakeCatalog([]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
 
     catalog.set([app("app.late", [await hookDir("late")])]);
     await settle(dispatcher, catalog);
@@ -88,14 +88,14 @@ describe("AppStartedDispatcher", () => {
   it("queues a hook until flush", async () => {
     const catalog = fakeCatalog([]);
     const dispatcher = createDispatcher(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
 
     catalog.set([app("app.queued", [await hookDir("queued")])]);
     await dispatcher.reconcile(catalog);
     await flush();
     expect(calls()).toEqual([]);
 
-    dispatcher.flush();
+    dispatcher.flush(catalog);
     await flush();
     expect(calledAppIds()).toEqual(["app.queued"]);
   });
@@ -103,7 +103,7 @@ describe("AppStartedDispatcher", () => {
   it("drops a queued hook whose app stops before the flush", async () => {
     const catalog = fakeCatalog([app("app.brief", [await hookDir("brief")])]);
     const dispatcher = createDispatcher(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await dispatcher.reconcile(catalog);
 
     catalog.set([]);
@@ -113,11 +113,30 @@ describe("AppStartedDispatcher", () => {
     expect(calls()).toEqual([]);
   });
 
+  it("keeps a queued start while its app is mid-install at open", async () => {
+    const dir = await hookDir("reinstalling");
+    const catalog = fakeCatalog([app("app.reinstalling", [dir])]);
+    const dispatcher = createDispatcher(catalog);
+    await dispatcher.reconcile(catalog);
+
+    // An identical re-install began before open: the app shows `installing`.
+    catalog.set([{ ...app("app.reinstalling", [dir]), state: "installing" }]);
+    await dispatcher.reconcile(catalog);
+    dispatcher.open(catalog);
+    await flush();
+    expect(calls()).toEqual([]);
+
+    catalog.set([app("app.reinstalling", [dir])]);
+    await settle(dispatcher, catalog);
+    await flush();
+    expect(calledAppIds()).toEqual(["app.reinstalling"]);
+  });
+
   it("does not call again for the same bundle", async () => {
     const catalog = fakeCatalog([app("app.same", [await hookDir("same")])]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     catalog.set([app("app.same", [await hookDir("same-reinstall")])]);
@@ -131,7 +150,7 @@ describe("AppStartedDispatcher", () => {
     const catalog = fakeCatalog([app("app.up", [await hookDir("up-v1")])]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     catalog.set([app("app.up", [await hookDir("up-v2")], { hash: "2", version: "2.0.0" })]);
@@ -146,7 +165,7 @@ describe("AppStartedDispatcher", () => {
     const catalog = fakeCatalog([app("app.toggle", [dir])]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     catalog.set([]);
@@ -165,7 +184,7 @@ describe("AppStartedDispatcher", () => {
 
     catalog.set([]);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(calls()).toEqual([]);
@@ -177,7 +196,7 @@ describe("AppStartedDispatcher", () => {
     const dispatcher = createDispatcher(catalog);
 
     expect(await dispatcher.reconcile(catalog)).toEqual([]);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(calls()).toEqual([]);
@@ -210,7 +229,7 @@ describe("AppStartedDispatcher", () => {
     const dispatcher = createDispatcher(catalog);
 
     expect(await dispatcher.reconcile(catalog)).toEqual([]);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(calledAppIds()).toEqual(["app.healthy"]);
@@ -237,7 +256,7 @@ describe("AppStartedDispatcher", () => {
     ]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(testGlobal.__appStartedRelease).toBeTypeOf("function");
@@ -262,7 +281,7 @@ describe("AppStartedDispatcher", () => {
     ]);
     const dispatcher = createDispatcher(catalog);
     await dispatcher.reconcile(catalog);
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(testGlobal.__appStartedContexts).toEqual([
@@ -294,7 +313,7 @@ describe("AppStartedDispatcher", () => {
     };
 
     await runWithHookInvocationContext(cause, () => dispatcher.reconcile(catalog));
-    dispatcher.open();
+    dispatcher.open(catalog);
     await flush();
 
     expect(testGlobal.__appStartedContexts).toEqual([
@@ -398,6 +417,61 @@ describe("AppStartedDispatcher through the app manager", () => {
     }
   });
 
+  it("opens only after a catalog event in progress has settled", async () => {
+    const harness = await createTestApps();
+    try {
+      const dispatcher = createDispatcher(harness.catalog);
+      harness.catalog.subscribe(async function appStartedSubscriber() {
+        await dispatcher.reconcile(harness.catalog);
+      });
+      harness.catalog.onSettled(function appStartedFlush() {
+        dispatcher.flush(harness.catalog);
+      });
+      const queued = await packHookApp(
+        harness.profileRoot,
+        "queued",
+        "0.0.1",
+        "globalThis.__appStartedSawLater = globalThis.__appStartedLaterDone === true;",
+      );
+      await harness.appManager.install({ source: { mode: "bundle", path: queued } });
+
+      // A request served before boot finishes: its event is mid-fan-out when
+      // boot opens the dispatcher.
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let reached!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      harness.catalog.subscribe(async function blockedSubscriber(event) {
+        if (event.appId !== "other" || event.current?.state !== "installed") return;
+        reached();
+        await released;
+        testGlobal.__appStartedLaterDone = true;
+      });
+      const other = await packHookApp(harness.profileRoot, "other", "0.0.1", "", "other");
+      const install = harness.appManager.install({ source: { mode: "bundle", path: other } });
+      await blocked;
+
+      const opening = harness.catalog.whenIdle(() => dispatcher.open(harness.catalog));
+      await flush();
+      expect(calls()).toEqual([]);
+
+      release();
+      await Promise.all([install, opening]);
+      await flush();
+
+      expect(calledAppIds().sort()).toEqual(["other", "starter"]);
+      expect(testGlobal.__appStartedSawLater).toBe(true);
+    } finally {
+      delete testGlobal.__appStartedLaterDone;
+      delete testGlobal.__appStartedSawLater;
+      await harness.cleanup();
+    }
+  });
+
   it("stops a hook that restarts its own app at the recursion guard", async () => {
     const harness = await createTestApps();
     try {
@@ -431,13 +505,14 @@ async function packHookApp(
   name: string,
   version: string,
   afterRecord = "",
+  appId = "starter",
 ): Promise<string> {
   const workspace = join(root, `workspace-${name}`);
   await mkdir(join(workspace, "hooks", "app-started"), { recursive: true });
   await writeFile(
     join(workspace, "app.yaml"),
     `formatVersion: 1
-id: starter
+id: ${appId}
 version: ${version}
 description: app-started fixture
 agents: []
@@ -472,7 +547,7 @@ async function settle(
   catalog: AppCatalog,
 ): Promise<void> {
   await dispatcher.reconcile(catalog);
-  dispatcher.flush();
+  dispatcher.flush(catalog);
 }
 
 function wireLikeBoot(catalog: AppCatalog, dispatcher: ReturnType<typeof createDispatcher>): void {
@@ -480,9 +555,9 @@ function wireLikeBoot(catalog: AppCatalog, dispatcher: ReturnType<typeof createD
     await dispatcher.reconcile(catalog);
   });
   catalog.onSettled(function appStartedFlush() {
-    dispatcher.flush();
+    dispatcher.flush(catalog);
   });
-  dispatcher.open();
+  dispatcher.open(catalog);
 }
 
 function calls(): StartedCall[] {
@@ -530,7 +605,7 @@ function fakeCatalog(initial: ResolvedApp[]): FakeCatalog {
       return apps.find((candidate) => candidate.appId === appId) ?? null;
     },
     listResolved() {
-      return apps;
+      return apps.filter((candidate) => candidate.state === "installed" && candidate.enabled);
     },
   } as unknown as FakeCatalog;
 }

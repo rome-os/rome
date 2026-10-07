@@ -1014,7 +1014,7 @@ async function main() {
   // After every subscriber, wherever it registers: a hook that runs an action
   // must reach a worker forked after `actionWorkerWarmPoolInvalidator`.
   appCatalog.onSettled(function appStartedFlush() {
-    appStartedDispatcher.flush();
+    appStartedDispatcher.flush(appCatalog);
   });
 
   const messageHandlerRegistered = actionRegistry.has("message_handler");
@@ -1534,8 +1534,9 @@ async function main() {
       `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
   );
   // Every boot step above is done, so app-started hooks can rely on actions,
-  // routines, and agents.
-  appStartedDispatcher.open();
+  // routines, and agents. The API already serves requests, so an install may
+  // be mid-refresh: open between refreshes, never inside one.
+  await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
 
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],

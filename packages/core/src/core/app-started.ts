@@ -4,7 +4,7 @@ import type { AppStartedEvent, AppStartedHook } from "@rome-os/app-runtime";
 import { Mutex } from "async-mutex";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
-import type { AppId, ArtifactRef, ResolvedApp } from "../apps/state.js";
+import type { AppId, AppView, ArtifactRef, ResolvedApp } from "../apps/state.js";
 import { createLogger } from "../logger.js";
 import { wrapHookSpan } from "../telemetry.js";
 import { loadAppHook } from "./hook-loader.js";
@@ -43,17 +43,20 @@ export interface AppStartedDispatcher {
    */
   reconcile(catalog: AppCatalog): Promise<AppStartedHookLoadFailure[]>;
   /**
-   * Calls every queued hook without waiting for it, once the dispatcher is
-   * open. Call it after the runtime has absorbed the catalog change that
-   * `reconcile` saw, including the action worker recycle, so a hook never
-   * reaches a worker that predates its app. Before `open` it does nothing.
+   * Calls, without waiting, every queued hook whose app is still resolved on
+   * the bundle it was queued for. A hook whose app is mid-install stays
+   * queued for a later flush. Call it only while no catalog event is being
+   * handled: from a settled listener, or inside `AppCatalog.whenIdle`. A hook
+   * then never reaches an action worker that predates its app. Before `open`
+   * it does nothing.
    */
-  flush(): void;
+  flush(catalog: AppCatalog): void;
   /**
-   * Opens the dispatcher and flushes. Call once, after boot has made actions,
-   * routines, and agents available. Later calls do nothing.
+   * Opens the dispatcher and flushes, under the same rule as `flush`. Call
+   * once, after boot has made actions, routines, and agents available. Later
+   * calls do nothing.
    */
-  open(): void;
+  open(catalog: AppCatalog): void;
 }
 
 export interface AppStartedDispatcherOptions {
@@ -93,11 +96,14 @@ export function createAppStartedDispatcher(
     failures.delete(appId);
   };
 
-  const flush = (): void => {
+  const flush = (catalog: AppCatalog): void => {
     if (!opened) return;
-    const queued = [...pending.values()].flat();
-    pending.clear();
-    for (const entry of queued) dispatch(entry, hookRecursion);
+    for (const [appId, entries] of pending) {
+      const app = catalog.get(appId);
+      if (!isRunnable(app) || startKey(app) !== seen.get(appId)) continue;
+      pending.delete(appId);
+      for (const entry of entries) dispatch(entry, hookRecursion);
+    }
   };
 
   return {
@@ -105,10 +111,10 @@ export function createAppStartedDispatcher(
       return reconcileMutex.runExclusive(() => reconcileStarts(catalog));
     },
     flush,
-    open() {
+    open(catalog) {
       if (opened) return;
       opened = true;
-      flush();
+      flush(catalog);
     },
   };
 
@@ -179,6 +185,10 @@ function activeAppsWithHook(
     if (artifacts.length > 0) active.set(app.appId, { app, artifacts });
   }
   return active;
+}
+
+function isRunnable(app: AppView | ResolvedApp | null): app is ResolvedApp {
+  return app !== null && "manifest" in app && app.state === "installed" && app.enabled;
 }
 
 // The installed hash names the bundle's content, so it changes on an upgrade

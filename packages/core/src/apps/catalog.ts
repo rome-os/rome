@@ -130,6 +130,15 @@ export class AppCatalog {
   }
 
   /**
+   * Runs `fn` between refreshes: after any refresh in progress has finished,
+   * settled listeners included, and before the next one starts. `fn` must not
+   * await a refresh.
+   */
+  whenIdle<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.refreshMutex.runExclusive(fn);
+  }
+
+  /**
    * Re-read entry + in-flight overlay, optionally resolve manifest, fire event.
    * Refresh calls are serialized in invocation order.
    */

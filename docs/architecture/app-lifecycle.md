@@ -58,7 +58,8 @@ An [app start](../concepts/apps.md#hooks) calls the app's `app-started` hook. Th
 
 - The dispatcher subscribes after the action loader and the other hook loaders, so an app's actions are registered before its app-started hook loads. Its subscriber only loads and queues hooks.
 - A settled listener calls the queued hooks, so a hook runs after every subscriber has handled the event that started its app. In particular, the warm action workers have been recycled, and an action the hook runs reaches a worker that knows the new bundle.
-- Boot loads app-started hooks with the other hook kinds and calls none until boot finishes.
+- Boot loads app-started hooks with the other hook kinds and calls none until boot finishes. The API already serves requests by then, so boot opens the dispatcher between catalog refreshes, never during one.
+- A flush calls a queued hook only while its app is resolved on the bundle the hook was queued for. A start whose app is mid-install stays queued for the flush that follows the install.
 - The installed content hash identifies an app start. An app that leaves the resolved set by a disable, an uninstall, a failed install, or a broken resolve is forgotten, so its next resolve is a new start.
 - An install in progress keeps the app's start. The `installing` overlay drops the app from the resolved set until the install finishes, and a re-install of identical content is not a new start.
 - An app-keys change reloads the other hook kinds but not app-started hooks.
