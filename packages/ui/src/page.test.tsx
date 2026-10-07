@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import {
@@ -11,6 +12,8 @@ import {
   PageNav,
   PageNavLink,
   PageTitle,
+  PageTopBarOutlet,
+  PageTopBarProvider,
   Section,
   SectionActions,
   SectionDescription,
@@ -178,5 +181,87 @@ describe("PageNav", () => {
       expect.arrayContaining(["flex", "overflow-x-auto", "border-b"]),
     );
     expect([...(list?.classList ?? [])]).not.toContain("flex-wrap");
+  });
+});
+
+function InShell({ children }: { children?: ReactNode }) {
+  return (
+    <PageTopBarProvider>
+      <div data-testid="bar">
+        <PageTopBarOutlet fallback={<span>Rome</span>} />
+      </div>
+      {children}
+    </PageTopBarProvider>
+  );
+}
+
+describe("PageTopBar", () => {
+  it("shows the fallback while no header holds the bar", () => {
+    render(<InShell />);
+
+    expect(screen.getByTestId("bar").textContent).toBe("Rome");
+  });
+
+  it("moves the back link and a lone action into the bar, and keeps the h1 in the page", () => {
+    render(
+      <InShell>
+        <ExamplePage />
+      </InShell>,
+    );
+
+    const bar = screen.getByTestId("bar");
+    expect(bar.textContent).not.toContain("Rome");
+    expect(bar.textContent).toContain("Apps");
+    expect(bar.querySelector("button")?.textContent).toBe("New routine");
+
+    const page = screen.getByTestId("page");
+    const nav = page.querySelector('[data-slot="page-header-nav"]');
+    const actions = page.querySelector('[data-slot="page-actions"]');
+    expect([...(nav?.classList ?? [])]).toContain("max-md:hidden");
+    expect([...(actions?.classList ?? [])]).toContain("max-md:hidden");
+
+    // The bar repeats the title for the eye only, so a reader still meets one h1.
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    const title = bar.querySelector('[data-slot="page-top-bar-title"]');
+    expect(title?.textContent).toBe("Routines");
+    expect(title?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps two or more actions in the page, since the bar holds one", () => {
+    render(
+      <InShell>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle>Apps</PageTitle>
+          </PageHeading>
+          <PageActions>
+            <button type="button">Import</button>
+            <button type="button">Install</button>
+          </PageActions>
+        </PageHeader>
+      </InShell>,
+    );
+
+    expect(screen.getByTestId("bar").querySelector("button")).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("gives the bar back to the fallback when the header unmounts", () => {
+    const { rerender } = render(
+      <InShell>
+        <ExamplePage />
+      </InShell>,
+    );
+    rerender(<InShell />);
+
+    expect(screen.getByTestId("bar").textContent).toBe("Rome");
+  });
+
+  it("renders every part in the page alone outside a provider", () => {
+    render(<ExamplePage />);
+
+    const nav = screen.getByTestId("page").querySelector('[data-slot="page-header-nav"]');
+    expect([...(nav?.classList ?? [])]).not.toContain("max-md:hidden");
+    expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
   });
 });

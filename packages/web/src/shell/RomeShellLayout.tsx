@@ -3,6 +3,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { PageTopBarOutlet, PageTopBarProvider } from "@rome-os/ui/page";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
@@ -276,51 +277,62 @@ export function RomeShellLayout() {
             edge. Publish that left offset so a `fixed` child like the trace
             drawer can align to the chat column. The public share tree has no
             shell, so its drawer falls back to 0px. */}
-        <main
-          ref={pageRef}
-          className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
-            sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
-          }`}
-          style={
-            {
-              "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
-            } as CSSProperties
-          }
-        >
-          <div data-app-titlebar="strip" aria-hidden />
-          {!hideSidebar ? (
-            <header
-              data-app-titlebar="header"
-              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
-            >
-              <IconButton
-                size="md"
-                label={t("nav.openSidebar")}
-                icon={<HamburgerMenuIcon aria-hidden />}
-                onClick={() => setSidebarOpen(true)}
-              />
-              {/* The chat page fills this with the session's identity + app
-                  tabs + actions, mirroring the desktop chat navbar. Other routes
-                  leave it empty, so the Rome wordmark fallback shows. */}
-              <SlotOutlet
-                name="mobileHeader"
-                className="flex min-w-0 flex-1 items-center gap-2"
-                fallback={
-                  <Link to="/" className="flex items-center gap-2 min-h-[var(--control-min-h)]">
-                    <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
-                    <span className="text-ui text-foreground">{t("appName")}</span>
-                  </Link>
-                }
-              />
-            </header>
-          ) : null}
-          {/* Height floor, not just flow: routed pages are lazy() behind a
+        <PageTopBarProvider>
+          <main
+            ref={pageRef}
+            className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
+              sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
+            }`}
+            style={
+              {
+                "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
+              } as CSSProperties
+            }
+          >
+            <div data-app-titlebar="strip" aria-hidden />
+            {!hideSidebar ? (
+              <header
+                data-app-titlebar="header"
+                className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
+              >
+                <IconButton
+                  size="md"
+                  label={t("nav.openSidebar")}
+                  icon={<HamburgerMenuIcon aria-hidden />}
+                  onClick={() => setSidebarOpen(true)}
+                />
+                {/* The chat page fills this with the session's identity + app
+                  tabs + actions, mirroring the desktop chat navbar. A page
+                  built on `Page` fills it from its `PageHeader`, and a route
+                  with neither shows the Rome wordmark. */}
+                <SlotOutlet
+                  name="mobileHeader"
+                  className="flex min-w-0 flex-1 items-center gap-2"
+                  fallback={
+                    <PageTopBarOutlet
+                      className="flex-1"
+                      fallback={
+                        <Link
+                          to="/"
+                          className="flex items-center gap-2 min-h-[var(--control-min-h)]"
+                        >
+                          <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
+                          <span className="text-ui text-foreground">{t("appName")}</span>
+                        </Link>
+                      }
+                    />
+                  }
+                />
+              </header>
+            ) : null}
+            {/* Height floor, not just flow: routed pages are lazy() behind a
               null Suspense fallback, so without it main collapses to zero for
               the frame between navigating and the chunk arriving. */}
-          <div className="flex min-h-0 flex-1 flex-col">
-            <Outlet />
-          </div>
-        </main>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <Outlet />
+            </div>
+          </main>
+        </PageTopBarProvider>
       </div>
     </div>
   );

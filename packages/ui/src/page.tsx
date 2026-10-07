@@ -1,4 +1,16 @@
-import type { ComponentProps } from "react";
+import {
+  Children,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
 
@@ -16,6 +28,129 @@ import { cn } from "./cn.js";
  * nothing. A page that needs a reading measure constrains itself below the
  * header through `Measure`, so the `h1` sits at the same spot on every route.
  */
+
+type TopBarRegion = "nav" | "title" | "action";
+type TopBarHosts = Record<TopBarRegion, HTMLElement | null>;
+
+interface TopBarRegistry {
+  hosts: TopBarHosts;
+  /** The claim ids of mounted headers, oldest first. The newest one fills the bar. */
+  claims: string[];
+  setHost: (region: TopBarRegion, el: HTMLElement | null) => void;
+  claim: (id: string) => void;
+  release: (id: string) => void;
+}
+
+const TopBarContext = createContext<TopBarRegistry | null>(null);
+
+/** The bar's hosts, handed only to the parts of the header that owns the bar. */
+const HeaderTopBarContext = createContext<TopBarHosts | null>(null);
+
+const NO_HOSTS: TopBarHosts = { nav: null, title: null, action: null };
+
+/**
+ * Lets a `PageHeader` below it fill a `PageTopBarOutlet` the shell renders
+ * elsewhere, the way a phone app's navigation bar names the screen under it.
+ * Without a provider, or while no outlet is mounted, every part renders only in
+ * the page, as it would anywhere else.
+ */
+export function PageTopBarProvider({ children }: { children: ReactNode }) {
+  const [hosts, setHosts] = useState<TopBarHosts>(NO_HOSTS);
+  const [claims, setClaims] = useState<string[]>([]);
+  const mutators = useMemo(
+    () => ({
+      setHost: (region: TopBarRegion, el: HTMLElement | null) =>
+        setHosts((prev) => (prev[region] === el ? prev : { ...prev, [region]: el })),
+      claim: (id: string) => setClaims((prev) => [...prev, id]),
+      release: (id: string) => setClaims((prev) => prev.filter((claimed) => claimed !== id)),
+    }),
+    [],
+  );
+  const value = useMemo(() => ({ hosts, claims, ...mutators }), [hosts, claims, mutators]);
+  return <TopBarContext.Provider value={value}>{children}</TopBarContext.Provider>;
+}
+
+/**
+ * The phone top bar's content row: the back link, the title, and one action, in
+ * that order. Shows `fallback` while no `PageHeader` holds the bar.
+ *
+ * The outlet carries no breakpoint. The shell decides where the bar shows, and
+ * the parts hide their in-page copy below `md`, the width the shell's bar
+ * shows at.
+ */
+export function PageTopBarOutlet({
+  className,
+  fallback,
+}: {
+  className?: string;
+  fallback?: ReactNode;
+}) {
+  const registry = useContext(TopBarContext);
+  const setNav = useCallback(
+    (el: HTMLElement | null) => registry?.setHost("nav", el),
+    [registry?.setHost],
+  );
+  const setTitle = useCallback(
+    (el: HTMLElement | null) => registry?.setHost("title", el),
+    [registry?.setHost],
+  );
+  const setAction = useCallback(
+    (el: HTMLElement | null) => registry?.setHost("action", el),
+    [registry?.setHost],
+  );
+  const held = (registry?.claims.length ?? 0) > 0;
+  return (
+    <div data-slot="page-top-bar" className={cn("flex min-w-0 items-center gap-2", className)}>
+      {held ? null : fallback}
+      <div ref={setNav} className="flex shrink-0 items-center empty:hidden" />
+      <div
+        ref={setTitle}
+        className={cn(
+          "min-w-0 flex-1 truncate text-ui font-medium text-foreground",
+          !held && "hidden",
+        )}
+      />
+      <div ref={setAction} className="flex shrink-0 items-center empty:hidden" />
+    </div>
+  );
+}
+
+/** Claims the bar for one header and returns its hosts while that header is the newest. */
+function useTopBarClaim(): TopBarHosts | null {
+  const registry = useContext(TopBarContext);
+  const id = useId();
+  const claim = registry?.claim;
+  const release = registry?.release;
+  useEffect(() => {
+    if (!claim || !release) return;
+    claim(id);
+    return () => release(id);
+  }, [id, claim, release]);
+  if (!registry || registry.claims.at(-1) !== id) return null;
+  return registry.hosts;
+}
+
+/** Whether the element has scrolled up under the bar, or past the top of the screen. */
+function useScrolledUnder(target: HTMLElement | null, bar: HTMLElement | null): boolean {
+  const [under, setUnder] = useState(false);
+  useEffect(() => {
+    if (!target || !bar || typeof IntersectionObserver === "undefined") {
+      setUnder(false);
+      return;
+    }
+    // The observer's root is the viewport, so the bar's bottom edge is where
+    // the element stops reading as visible. The bar is sticky, so that edge
+    // holds while the page scrolls.
+    const top = Math.round(bar.getBoundingClientRect().bottom);
+    const observer = new IntersectionObserver(
+      ([entry]) => setUnder(!entry.isIntersecting && entry.boundingClientRect.top < top),
+      { rootMargin: `-${top}px 0px 0px 0px` },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [target, bar]);
+  return under;
+}
 
 /**
  * The skeleton of a routed page: the regions a page stacks, top to bottom, at
@@ -59,23 +194,41 @@ export function PageHeader({
   className,
   ...props
 }: ComponentProps<"header"> & { align?: "start" | "end" }) {
+  const hosts = useTopBarClaim();
   return (
-    <header
-      data-slot="page-header"
-      data-align={align}
-      className={cn(
-        "flex flex-wrap justify-between gap-x-4 gap-y-2",
-        align === "end" ? "items-end" : "items-start",
-        className,
-      )}
-      {...props}
-    />
+    <HeaderTopBarContext.Provider value={hosts}>
+      <header
+        data-slot="page-header"
+        data-align={align}
+        className={cn(
+          "flex flex-wrap justify-between gap-x-4 gap-y-2",
+          align === "end" ? "items-end" : "items-start",
+          className,
+        )}
+        {...props}
+      />
+    </HeaderTopBarContext.Provider>
   );
 }
 
-/** Breadcrumb or back link above the title. */
-export function PageHeaderNav({ className, ...props }: ComponentProps<"div">) {
-  return <div data-slot="page-header-nav" className={cn("basis-full", className)} {...props} />;
+/**
+ * Breadcrumb or back link above the title. Inside the shell, below `md` it moves
+ * into the phone top bar, so hold it to one link that fits there.
+ */
+export function PageHeaderNav({ className, children, ...props }: ComponentProps<"div">) {
+  const host = useContext(HeaderTopBarContext)?.nav ?? null;
+  return (
+    <>
+      <div
+        data-slot="page-header-nav"
+        className={cn("basis-full", host && "max-md:hidden", className)}
+        {...props}
+      >
+        {children}
+      </div>
+      {host ? createPortal(children, host) : null}
+    </>
+  );
 }
 
 /** Groups the title with its description so the actions stay opposite both. */
@@ -89,17 +242,47 @@ export function PageHeading({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** The one `h1` a page carries. */
-export function PageTitle({ className, ...props }: ComponentProps<"h1">) {
+/**
+ * The one `h1` a page carries. Inside the shell, the phone top bar repeats it
+ * once the `h1` has scrolled up under the bar. The page keeps the large title at
+ * rest, so the bar never shows the same words twice on one screen.
+ */
+export function PageTitle({ className, children, ...props }: ComponentProps<"h1">) {
+  const host = useContext(HeaderTopBarContext)?.title ?? null;
+  const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
+  const under = useScrolledUnder(heading, host);
   return (
-    <h1
-      data-slot="page-title"
-      className={cn(
-        "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
-        className,
-      )}
-      {...props}
-    />
+    <>
+      <h1
+        ref={setHeading}
+        data-slot="page-title"
+        className={cn(
+          "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </h1>
+      {host
+        ? createPortal(
+            // The `h1` stays the page's heading, so the bar's copy is hidden
+            // from assistive technology.
+            <span
+              aria-hidden
+              data-slot="page-top-bar-title"
+              data-shown={under || undefined}
+              className={cn(
+                "block truncate transition-opacity duration-150 motion-reduce:transition-none",
+                under ? "opacity-100" : "opacity-0",
+              )}
+            >
+              {children}
+            </span>,
+            host,
+          )
+        : null}
+    </>
   );
 }
 
@@ -113,14 +296,30 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
   );
 }
 
-/** Page-level controls, opposite the heading. */
-export function PageActions({ className, ...props }: ComponentProps<"div">) {
+/**
+ * Page-level controls, opposite the heading. Inside the shell, a lone control
+ * moves into the phone top bar below `md`. Two or more stay in the page, since
+ * the bar holds one.
+ */
+export function PageActions({ className, children, ...props }: ComponentProps<"div">) {
+  const host = useContext(HeaderTopBarContext)?.action ?? null;
+  const lone = Children.toArray(children).length === 1;
+  const moved = host !== null && lone;
   return (
-    <div
-      data-slot="page-actions"
-      className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
-      {...props}
-    />
+    <>
+      <div
+        data-slot="page-actions"
+        className={cn(
+          "flex shrink-0 flex-wrap items-center gap-2",
+          moved && "max-md:hidden",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </div>
+      {moved ? createPortal(children, host) : null}
+    </>
   );
 }
 
