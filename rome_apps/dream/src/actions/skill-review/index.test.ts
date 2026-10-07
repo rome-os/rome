@@ -317,6 +317,68 @@ describe("skill_review", () => {
     expect(listedAtInstall.at(-1)).toContain("skills/beta");
   });
 
+  it("rolls back a failed agent's writes so an identical retry installs", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("half-done");
+
+    const failed = await createAction(
+      actionConfig,
+      makeDeps([...skill.events.slice(0, 2), { type: "error", error: "boom" }], [], skill.place),
+    ).execute({});
+    expect(failed.status).toBe("error");
+    expect(existsSync(join(carrierDir, "skills", "half-done"))).toBe(false);
+    expect(installCalls).toEqual([]);
+
+    const retry = await createAction(actionConfig, makeDeps(skill.events, [], skill.place)).execute(
+      {},
+    );
+    expect(retry).toMatchObject({ status: "ok", data: { installed: ["skills/half-done"] } });
+  });
+
+  it("does not install what a stopped review left behind", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("stopped");
+
+    await createAction(
+      actionConfig,
+      makeDeps(
+        [...skill.events, { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 }],
+        [],
+        skill.place,
+      ),
+    ).execute({});
+
+    expect(installCalls).toEqual([]);
+    expect(existsSync(join(carrierDir, "skills", "stopped"))).toBe(false);
+  });
+
+  it("a failed install never rolls back an overlapping review's skill", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const good = writeSkill("alpha");
+    const bad = writeSkill("beta");
+    const deps = (skill: typeof good, ok: boolean) => {
+      const d = makeDeps(skill.events, [], skill.place);
+      d.appContext.runAction = (async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return ok ? { status: "ok", data: {} } : { status: "error", error: "BUILD_FAILED" };
+      }) as never;
+      return d;
+    };
+
+    const [a, b] = await Promise.all([
+      createAction(actionConfig, deps(bad, false)).execute({}),
+      createAction(actionConfig, deps(good, true)).execute({}),
+    ]);
+
+    expect(a.status).toBe("error");
+    expect(b).toMatchObject({ status: "ok", data: { installed: ["skills/alpha"] } });
+    expect(existsSync(join(carrierDir, "skills", "alpha", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(carrierDir, "skills", "beta"))).toBe(false);
+    const yaml = readFileSync(join(carrierDir, "app.yaml"), "utf8");
+    expect(yaml).toContain("skills/alpha");
+    expect(yaml).not.toContain("skills/beta");
+  });
+
   it("does not install for writes outside the carrier", async () => {
     seedSession("web", "webchat", 1700000000);
     const outside = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";
