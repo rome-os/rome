@@ -617,9 +617,12 @@ export class AnthropicProvider implements ModelProvider {
     let activeTurnLastAssistantMessageId: string | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
 
+    // Middleware-only replies still use the shared ModelSession turn stream;
+    // they never need to manufacture a provider request.
+    const localTurnEvents = new AsyncMessageQueue<ModelSessionEvent>();
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
-    const events: AsyncIterable<ModelSessionEvent> = (async function* () {
+    const providerEvents: AsyncIterable<ModelSessionEvent> = (async function* () {
       // In-turn narration vs. closing answer. The agent SDK never sets
       // `stop_reason` on its streamed assistant messages (always null) and splits
       // a single API message into one `assistant` message per content block, so
@@ -978,9 +981,11 @@ export class AnthropicProvider implements ModelProvider {
               : undefined,
         );
       } finally {
+        localTurnEvents.end();
         closed = true;
       }
     })();
+    const events = mergeModelSessionEvents(providerEvents, localTurnEvents.iter());
 
     const session: ModelSession = {
       providerId,
@@ -1057,6 +1062,15 @@ export class AnthropicProvider implements ModelProvider {
         });
         return "accepted";
       },
+      async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
+        if (closed) throw new Error("ModelSession is closed");
+        const turnId = randomUUID();
+        const answers = input.inputId ? [input.inputId] : [];
+        localTurnEvents.push({ type: "model_turn_start", turnId, answers });
+        localTurnEvents.push({ type: "model_turn_answers", turnId, added: [] });
+        for (const message of messages) localTurnEvents.push(message);
+        localTurnEvents.push({ type: "model_turn_end", turnId, answers });
+      },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
         if (closed) {
           throw new Error("Cannot fork a closed ModelSession");
@@ -1117,6 +1131,7 @@ export class AnthropicProvider implements ModelProvider {
         } catch {
           // ignore
         }
+        localTurnEvents.end();
         closed = true;
       },
     };
@@ -1172,6 +1187,40 @@ class AsyncMessageQueue<T> {
         return { next };
       },
     };
+  }
+}
+
+async function* mergeModelSessionEvents(
+  provider: AsyncIterable<ModelSessionEvent>,
+  local: AsyncIterable<ModelSessionEvent>,
+): AsyncGenerator<ModelSessionEvent> {
+  const providerIterator = provider[Symbol.asyncIterator]();
+  const localIterator = local[Symbol.asyncIterator]();
+  let providerNext:
+    | Promise<{ source: "provider"; result: IteratorResult<ModelSessionEvent> }>
+    | undefined = providerIterator.next().then((result) => ({ source: "provider", result }));
+  let localNext:
+    | Promise<{ source: "local"; result: IteratorResult<ModelSessionEvent> }>
+    | undefined = localIterator.next().then((result) => ({ source: "local", result }));
+  while (providerNext || localNext) {
+    const next = await Promise.race(
+      [providerNext, localNext].filter(Boolean) as Promise<{
+        source: "provider" | "local";
+        result: IteratorResult<ModelSessionEvent>;
+      }>[],
+    );
+    if (next.source === "provider") {
+      if (next.result.done) providerNext = undefined;
+      else {
+        yield next.result.value;
+        providerNext = providerIterator.next().then((result) => ({ source: "provider", result }));
+      }
+    } else if (next.result.done) {
+      localNext = undefined;
+    } else {
+      yield next.result.value;
+      localNext = localIterator.next().then((result) => ({ source: "local", result }));
+    }
   }
 }
 

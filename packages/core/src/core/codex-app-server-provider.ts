@@ -565,6 +565,15 @@ export class CodexAppServerProvider implements ModelProvider {
         return appliedReasoningEffort;
       },
     } as ModelSession;
+    session.completeTurn = async (input, messages) => {
+      if (closed || closing) throw new Error("ModelSession is closed");
+      const turnId = randomUUID();
+      const answers = input.inputId ? [input.inputId] : [];
+      sink.push({ type: "model_turn_start", turnId, answers });
+      sink.push({ type: "model_turn_answers", turnId, added: [] });
+      for (const message of messages) sink.push(message);
+      sink.push({ type: "model_turn_end", turnId, answers });
+    };
 
     const onItem = (item: ThreadItem, lifecycle: "started" | "completed"): void => {
       const turnSink = activeTurn?.sink ?? sink;
