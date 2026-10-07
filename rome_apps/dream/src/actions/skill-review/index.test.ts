@@ -417,6 +417,27 @@ describe("skill_review", () => {
     expect(yaml).not.toContain("skills/beta");
   });
 
+  it("refuses to overwrite a skill changed in the carrier during the review", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const path = join(carrierDir, "skills", "shared", "SKILL.md");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "---\nname: shared\n---\nv1\n");
+    const skill = writeSkill("shared", "---\nname: shared\n---\nreview edit\n");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], (workingDir) => {
+        skill.place(workingDir);
+        writeFileSync(path, "---\nname: shared\n---\nguardian edit\n");
+      }),
+    ).execute({});
+
+    expect(result.status).toBe("error");
+    if (result.status === "error") expect(result.error).toContain("shared");
+    expect(readFileSync(path, "utf8")).toContain("guardian edit");
+    expect(installCalls).toEqual([]);
+  });
+
   it("does not install for writes outside the carrier", async () => {
     seedSession("web", "webchat", 1700000000);
     const outside = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";

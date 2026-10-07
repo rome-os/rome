@@ -82,6 +82,7 @@ export function createAction(
           installed = await withCarrierLock(carrierDir, async () => {
             const paths = await publishCarrierSkills(
               carrierDir,
+              before,
               new Map(changed.map((name) => [name, after.get(name) as Buffer])),
               async () => {
                 const res = await appContext.runAction("app_management", {

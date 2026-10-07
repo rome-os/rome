@@ -184,12 +184,22 @@ export async function restoreCarrier(
  */
 export async function publishCarrierSkills(
   dir: string,
+  base: Map<string, Buffer>,
   skills: Map<string, Buffer>,
   install: () => Promise<void>,
 ): Promise<string[]> {
   const names = [...skills.keys()].sort();
   const appYaml = await readFile(join(dir, "app.yaml"), "utf8");
   const previous = await snapshotCarrierSkills(dir);
+  // Someone else (another review, import-skill, the guardian) changed one of
+  // these skills since it was staged; don't overwrite their version.
+  const conflicts = names.filter((name) => {
+    const [now, staged] = [previous.get(name), base.get(name)];
+    return now && staged ? !now.equals(staged) : now !== staged;
+  });
+  if (conflicts.length > 0) {
+    throw new Error(`changed in the carrier during the review: ${conflicts.join(", ")}`);
+  }
   try {
     for (const name of names) {
       await mkdir(join(dir, "skills", name), { recursive: true });
