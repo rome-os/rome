@@ -20,6 +20,7 @@ system action → Core client → local socket → host helper → privileged pr
 - The host installer controls the executable, configuration, and socket access. Agent arguments cannot choose a transport or executable path.
 - The Core client gets execution identity from runtime context. Agent arguments cannot supply an actor, an approval decision, or an execution identity.
 - The helper validates every request independently. Core validation is not the host authorization boundary.
+- The host job actions are explicit. Only the main agent holds them, by exact reference, so wildcard agents such as triage or exploration agents cannot reach the host.
 - Socket access delegates host authority to the trusted runtime. Action visibility and Rome approvals do not isolate other code in the same container.
 - A Linux VM and the computer running that VM are different hosts. The helper never silently changes the execution target.
 - Job acceptance is durable before process creation. A reused identity cannot start another process, including after helper recovery.
