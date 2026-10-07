@@ -80,8 +80,8 @@ describe("send_feedback", () => {
     const { action: a, send } = action({ kind: "unreachable" });
     const result = await a.execute(input);
     expect(result.status).toBe("error");
-    expect(result.error).toBe("feedback_outcome_unknown");
-    expect((result.data as { message: string }).message).toContain("Do not retry");
+    expect(result.error).toContain("feedback_outcome_unknown");
+    expect(result.error).toContain("Do not retry");
     expect(send).toHaveBeenCalledTimes(1);
   });
   it("validates capability shape at load time", () => {

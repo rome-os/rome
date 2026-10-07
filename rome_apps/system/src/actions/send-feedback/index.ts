@@ -72,10 +72,7 @@ export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbac
         case "unreachable":
           return {
             status: "error",
-            error: "feedback_outcome_unknown",
-            data: {
-              message: "The outcome is unknown: the report may have been filed. Do not retry.",
-            },
+            error: "feedback_outcome_unknown: The report may have been filed. Do not retry.",
           };
         case "no_token":
         case "unconfigured":
@@ -88,8 +85,7 @@ export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbac
           void exhaustive;
           return {
             status: "error",
-            error: "feedback_outcome_unknown",
-            data: { message: "The outcome is unknown. Do not retry." },
+            error: "feedback_outcome_unknown: Do not retry.",
           };
         }
       }
