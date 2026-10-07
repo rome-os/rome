@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@rstest/core";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ModelBackgroundTask, ModelBackgroundTaskEnd } from "./agent-runner.js";
-import { BackgroundTaskTracker } from "./background-tasks.js";
+import type { ModelBackgroundTaskEvent } from "./agent-runner.js";
+import { BackgroundTaskTracker, claudeTaskEndStatus, claudeTaskKind } from "./background-tasks.js";
 
-function level(...tasks: { id: string; ambient?: boolean }[]): SDKMessage {
+function level(...tasks: { id: string; type?: string; ambient?: boolean }[]): SDKMessage {
   return {
     type: "system",
     subtype: "background_tasks_changed",
     tasks: tasks.map((task) => ({
       task_id: task.id,
-      task_type: "local_bash",
+      task_type: task.type ?? "local_bash",
       description: `task ${task.id}`,
       ...(task.ambient ? { ambient: true } : {}),
     })),
@@ -28,113 +28,124 @@ function ended(id: string, extra: Record<string, unknown> = {}): SDKMessage {
   } as unknown as SDKMessage;
 }
 
-function follow(tracker: BackgroundTaskTracker) {
-  const changes: (readonly ModelBackgroundTask[])[] = [];
-  const ends: ModelBackgroundTaskEnd[] = [];
-  tracker.subscribe({ onChange: (tasks) => changes.push(tasks), onEnd: (end) => ends.push(end) });
-  return { changes, ends, ids: () => changes.map((tasks) => tasks.map((task) => task.id)) };
+function ids(events: ModelBackgroundTaskEvent[]): string[][] {
+  return events.flatMap((event) =>
+    event.type === "background_tasks" ? [event.tasks.map((task) => task.id)] : [],
+  );
 }
 
 describe("BackgroundTaskTracker", () => {
   it("replaces the set on each level signal and leaves out ambient tasks", () => {
     const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
-    tracker.observe(level({ id: "a" }, { id: "w", ambient: true }));
-    tracker.observe(level({ id: "a" }, { id: "b" }));
-    tracker.observe(level({ id: "b" }));
-    expect(seen.ids()).toEqual([["a"], ["a", "b"], ["b"]]);
+    const events = [
+      level({ id: "a" }, { id: "w", ambient: true }),
+      level({ id: "a" }, { id: "b" }),
+      level({ id: "b" }),
+    ].flatMap((message) => tracker.observe(message));
+    expect(ids(events)).toEqual([["a"], ["a", "b"], ["b"]]);
     expect(tracker.current).toEqual([
-      { id: "b", type: "local_bash", description: "task b", seenAt: expect.any(Number) },
+      {
+        id: "b",
+        kind: "shell",
+        description: "task b",
+        seenAt: expect.any(Number),
+        raw: "local_bash",
+      },
     ]);
   });
 
   it("keeps when a task was first seen, and reports no change for the same set", () => {
     const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
-    tracker.observe(level({ id: "a" }));
+    const first = tracker.observe(level({ id: "a" }));
     const firstSeen = tracker.current[0]?.seenAt;
-    tracker.observe(level({ id: "a" }, { id: "w", ambient: true }));
-    tracker.observe(level({ id: "a" }, { id: "b" }));
-    expect(seen.ids()).toEqual([["a"], ["a", "b"]]);
+    const rest = [
+      level({ id: "a" }, { id: "w", ambient: true }),
+      level({ id: "a" }, { id: "b" }),
+    ].flatMap((message) => tracker.observe(message));
+    expect(ids([...first, ...rest])).toEqual([["a"], ["a", "b"]]);
     expect(tracker.current[0]?.seenAt).toBe(firstSeen);
   });
 
   it("reports no change for the same set in a different order", () => {
     const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
     tracker.observe(level({ id: "a" }, { id: "b" }));
-    tracker.observe(level({ id: "b" }, { id: "a" }));
-    expect(seen.ids()).toEqual([["a", "b"]]);
+    expect(tracker.observe(level({ id: "b" }, { id: "a" }))).toEqual([]);
   });
 
   it("reports a change of description or type for the same tasks", () => {
     const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
     tracker.observe(level({ id: "a" }));
     const renamed = level({ id: "a" }) as unknown as {
       tasks: { description: string; task_type: string }[];
     };
     renamed.tasks[0]!.description = "renamed";
-    tracker.observe(renamed as unknown as SDKMessage);
+    const afterRename = tracker.observe(renamed as unknown as SDKMessage);
     renamed.tasks[0]!.task_type = "local_agent";
-    tracker.observe(renamed as unknown as SDKMessage);
-    expect(seen.changes.map((tasks) => [tasks[0]?.description, tasks[0]?.type])).toEqual([
-      ["task a", "local_bash"],
-      ["renamed", "local_bash"],
-      ["renamed", "local_agent"],
+    const afterRetype = tracker.observe(renamed as unknown as SDKMessage);
+    expect(
+      [...afterRename, ...afterRetype].map((event) =>
+        event.type === "background_tasks"
+          ? [event.tasks[0]?.description, event.tasks[0]?.kind]
+          : [],
+      ),
+    ).toEqual([
+      ["renamed", "shell"],
+      ["renamed", "agent"],
     ]);
   });
 
-  it("reports each end, including a worker restart, but not an ambient one", () => {
+  it("reports each end in Rome's words, but not an ambient one", () => {
     const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
-    tracker.observe(ended("a"));
-    tracker.observe(ended("b", { status: "stopped", reason: "worker_restart" }));
-    tracker.observe(ended("w", { ambient: true }));
-    expect(seen.ends).toEqual([
-      { id: "a", status: "completed", summary: "done a" },
-      { id: "b", status: "stopped", reason: "worker_restart", summary: "done b" },
-    ]);
-  });
-
-  it("empties the set on reset", () => {
-    const tracker = new BackgroundTaskTracker();
-    const seen = follow(tracker);
-    tracker.reset();
-    tracker.observe(level({ id: "a" }));
-    tracker.reset();
-    expect(seen.ids()).toEqual([["a"], []]);
-  });
-
-  it("ignores other messages, and keeps notifying past a failing listener", () => {
-    const tracker = new BackgroundTaskTracker();
-    tracker.subscribe({
-      onChange: () => {
-        throw new Error("boom");
+    const events = [
+      ended("a"),
+      ended("f", { status: "failed" }),
+      ended("s", { status: "stopped" }),
+      ended("b", { status: "stopped", reason: "worker_restart" }),
+      ended("w", { ambient: true }),
+    ].flatMap((message) => tracker.observe(message));
+    expect(events).toEqual([
+      {
+        type: "background_task_end",
+        end: { id: "a", status: "completed", summary: "done a", raw: "completed" },
       },
-    });
-    const seen = follow(tracker);
-    tracker.observe({ type: "assistant" } as unknown as SDKMessage);
-    tracker.observe(level({ id: "a" }));
-    expect(seen.ids()).toEqual([["a"]]);
+      {
+        type: "background_task_end",
+        end: { id: "f", status: "failed", summary: "done f", raw: "failed" },
+      },
+      {
+        type: "background_task_end",
+        end: { id: "s", status: "interrupted", summary: "done s", raw: "stopped" },
+      },
+      {
+        type: "background_task_end",
+        end: { id: "b", status: "lost", summary: "done b", raw: "stopped:worker_restart" },
+      },
+    ]);
   });
 
-  it("replays a non-empty current set to a new subscriber", () => {
+  it("ignores other messages", () => {
     const tracker = new BackgroundTaskTracker();
-    const early = follow(tracker);
-    tracker.observe(level({ id: "a" }));
-    const late = follow(tracker);
-    tracker.observe(level({ id: "a" }, { id: "b" }));
-    expect(early.ids()).toEqual([["a"], ["a", "b"]]);
-    expect(late.ids()).toEqual([["a"], ["a", "b"]]);
+    expect(tracker.observe({ type: "assistant" } as unknown as SDKMessage)).toEqual([]);
+    expect(tracker.observe({ type: "system", subtype: "init" } as unknown as SDKMessage)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("Claude task mapping", () => {
+  it("maps task types to kinds", () => {
+    expect(claudeTaskKind("local_bash")).toBe("shell");
+    expect(claudeTaskKind("local_agent")).toBe("agent");
+    expect(claudeTaskKind("remote_agent")).toBe("agent");
+    expect(claudeTaskKind("in_process_teammate")).toBe("agent");
+    expect(claudeTaskKind("local_workflow")).toBe("other");
+    expect(claudeTaskKind("mcp_task")).toBe("other");
   });
 
-  it("stops notifying after unsubscribe", () => {
-    const tracker = new BackgroundTaskTracker();
-    const changes: unknown[] = [];
-    const unsubscribe = tracker.subscribe({ onChange: (tasks) => changes.push(tasks) });
-    unsubscribe();
-    tracker.observe(level({ id: "a" }));
-    expect(changes).toEqual([]);
+  it("maps end statuses, with a worker restart as lost", () => {
+    expect(claudeTaskEndStatus("completed", undefined)).toBe("completed");
+    expect(claudeTaskEndStatus("failed", undefined)).toBe("failed");
+    expect(claudeTaskEndStatus("stopped", undefined)).toBe("interrupted");
+    expect(claudeTaskEndStatus("stopped", "worker_restart")).toBe("lost");
   });
 });

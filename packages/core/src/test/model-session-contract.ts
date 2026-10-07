@@ -54,6 +54,10 @@ export function expectModelSessionTurnContract(
         expect(current?.terminal).toBe(false);
         current!.terminal = true;
         break;
+      case "background_tasks":
+      case "background_task_end":
+        // Background tasks belong to no turn and may arrive between turns.
+        break;
       default:
         expect(current).toBeDefined();
     }

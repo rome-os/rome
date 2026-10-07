@@ -45,7 +45,7 @@ rs.mock("../paths.js", () => ({
 import { PromptBuilder } from "./prompt-builder.js";
 import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
 import type {
-  ModelBackgroundTaskListener,
+  ModelBackgroundTask,
   ModelProvider,
   ModelSessionEvent,
   ModelSession,
@@ -869,63 +869,107 @@ describe("AgentRunner", () => {
     });
 
     it("follows the model session's background tasks between turns", async () => {
-      const provider = new MockModelProvider([[{ type: "result", content: "Started" }]]);
-      let listener: ModelBackgroundTaskListener | undefined;
-      const baseOpen = provider.openSession.bind(provider);
-      provider.openSession = async (params: ModelSessionParams) => ({
-        ...(await baseOpen(params)),
-        onBackgroundTasks: (next: ModelBackgroundTaskListener) => {
-          listener = next;
-          return () => {
-            listener = undefined;
-          };
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK background tasks",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
         },
-      });
+      };
       const manager = createAgentSessionManager(
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
       const key = { agentName: "test-main", channelThreadKey: "webchat:background-tasks" };
       try {
-        await collectMessages(new AgentRunner(manager).run({ ...key, prompt: "Start a task" }));
-        const session = manager.peek(key);
-        expect(session?.backgroundTasks).toEqual([]);
-        const task = { id: "b1", type: "local_bash", description: "sleep 900", seenAt: 1 };
-        listener?.onChange?.([task]);
-        expect(session?.backgroundTasks).toEqual([task]);
+        const session = await manager.acquire(key);
+        const published: string[] = [];
+        session.subscribe((message) => published.push(message.type));
+        const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
+        await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+        runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+        runtime.emit({ type: "result", content: "Started" });
+        runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+        await turn;
+        expect(session.backgroundTasks).toEqual([]);
+
+        const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
+        runtime.emit({ type: "background_tasks", tasks: [task] });
+        runtime.emit({ type: "background_task_end", end: { id: "b0", status: "lost" } });
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([task]));
+        // Task events are the session's own; no turn or subscriber sees them.
+        expect(published).not.toContain("background_tasks");
+        expect(published).not.toContain("background_task_end");
+
+        // The provider process ended, and its tasks with it.
+        runtime.end();
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([]));
       } finally {
         await manager.shutdown();
       }
     });
 
     describe("idle webchat sessions with background tasks", () => {
-      const task = { id: "b1", type: "local_bash", description: "sleep 900", seenAt: 1 };
+      const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
 
-      // Two turns' worth of results; each opened session's task listener is
-      // kept by channel key.
+      // Each opened session runs one caller turn; `tasks` reports its task
+      // set and `resultTurn` a turn the provider starts on its own, as Claude
+      // does for a finished task's result. Forks answer with a recap.
       function setUp() {
         rs.useFakeTimers();
-        const provider = new MockModelProvider([
-          [{ type: "result", content: "Started" }],
-          [{ type: "result", content: "Started" }],
-        ]);
-        const listeners: ModelBackgroundTaskListener[] = [];
-        const baseOpen = provider.openSession.bind(provider);
-        provider.openSession = async (params: ModelSessionParams) => ({
-          ...(await baseOpen(params)),
-          onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
-            listeners.push(listener);
-            return () => {};
+        let runtime!: ReturnType<typeof createSdkEventSession>;
+        const provider: ModelProvider = {
+          id: "anthropic",
+          displayName: "Background tasks",
+          builtinTools: new Set<string>(),
+          async openSession(params) {
+            runtime = createSdkEventSession(params);
+            return {
+              ...runtime.session,
+              fork: async (forkParams: ModelSessionForkParams) => ({
+                providerId: "anthropic" as const,
+                sessionId: forkParams.sessionId,
+                sourceSessionId: params.sessionId,
+                mode: "ephemeral" as const,
+                open: async () =>
+                  forkSessionStub({
+                    providerId: "anthropic",
+                    events: (async function* (): AsyncIterable<AgentMessage> {
+                      yield { type: "result", content: "Recap" };
+                    })(),
+                  }),
+              }),
+            };
           },
-        });
+        };
         const manager = createAgentSessionManager(
           managerDeps(createTestModelResolver({ providers: [provider] })),
           { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
         );
         const open = async (channelThreadKey: string) => {
           const key = { agentName: "test-main", channelThreadKey };
-          await collectMessages(new AgentRunner(manager).run({ ...key, prompt: "Start a task" }));
-          return { key, tasks: listeners.at(-1)! };
+          const session = await manager.acquire(key);
+          const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
+          await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+          const model = runtime;
+          model.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+          model.emit({ type: "result", content: "Started" });
+          model.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+          await turn;
+          return {
+            key,
+            session,
+            tasks: (tasks: readonly ModelBackgroundTask[]) =>
+              model.emit({ type: "background_tasks", tasks }),
+            resultTurn: (turnId: string) => {
+              model.emit({ type: "model_turn_start", turnId, answers: [] });
+              model.emit({ type: "result", content: `${turnId} done` });
+              model.emit({ type: "model_turn_end", turnId, answers: [] });
+            },
+          };
         };
         return { manager, open };
       }
@@ -938,7 +982,7 @@ describe("AgentRunner", () => {
         const { manager, open } = setUp();
         try {
           const { key, tasks } = await open("webchat:tasks-cap");
-          tasks.onChange?.([task]);
+          tasks([task]);
           await rs.advanceTimersByTimeAsync(800);
           expect(manager.peek(key)?.backgroundTasks).toEqual([task]);
           await rs.advanceTimersByTimeAsync(400);
@@ -948,46 +992,16 @@ describe("AgentRunner", () => {
         }
       });
 
-      it("count the cap from the last caller turn, not an SDK-started result turn", async () => {
-        rs.useFakeTimers();
-        let runtime!: ReturnType<typeof createSdkEventSession>;
-        let tasks!: ModelBackgroundTaskListener;
-        const provider: ModelProvider = {
-          id: "anthropic",
-          displayName: "SDK background results",
-          builtinTools: new Set<string>(),
-          async openSession(params) {
-            runtime = createSdkEventSession(params);
-            return {
-              ...runtime.session,
-              onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
-                tasks = listener;
-                return () => {};
-              },
-            };
-          },
-        };
-        const manager = createAgentSessionManager(
-          managerDeps(createTestModelResolver({ providers: [provider] })),
-          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
-        );
-        const key = { agentName: "test-main", channelThreadKey: "webchat:tasks-sdk-result" };
+      it("count the cap from the last caller turn, not a turn the provider starts", async () => {
+        const { manager, open } = setUp();
         try {
-          const session = await manager.acquire(key);
-          const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
-          await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
-          runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
-          runtime.emit({ type: "result", content: "Started" });
-          runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
-          await turn;
+          const { key, tasks, resultTurn } = await open("webchat:tasks-result-turn");
           const other = { ...task, id: "b2" };
-          tasks.onChange?.([task, other]);
+          tasks([task, other]);
           await rs.advanceTimersByTimeAsync(600);
-          // One task finishes and the SDK runs a turn for its result.
-          tasks.onChange?.([other]);
-          runtime.emit({ type: "model_turn_start", turnId: "background", answers: [] });
-          runtime.emit({ type: "result", content: "b1 done" });
-          runtime.emit({ type: "model_turn_end", turnId: "background", answers: [] });
+          // One task finishes and the provider runs a turn for its result.
+          tasks([other]);
+          resultTurn("background");
           await rs.advanceTimersByTimeAsync(300);
           expect(manager.peek(key)).toBeDefined();
           await rs.advanceTimersByTimeAsync(300);
@@ -998,38 +1012,14 @@ describe("AgentRunner", () => {
       });
 
       it("count the cap from the last caller turn, not a fork such as a recap", async () => {
-        rs.useFakeTimers();
-        let tasks!: ModelBackgroundTaskListener;
-        const provider = withForkSupport(
-          new MockModelProvider([[{ type: "result", content: "Started" }]]),
-          () =>
-            forkSessionStub({
-              events: (async function* (): AsyncIterable<AgentMessage> {
-                yield { type: "result", content: "Recap" };
-              })(),
-            }),
-        );
-        const forkingOpen = provider.openSession.bind(provider);
-        provider.openSession = async (params: ModelSessionParams) => ({
-          ...(await forkingOpen(params)),
-          onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
-            tasks = listener;
-            return () => {};
-          },
-        });
-        const manager = createAgentSessionManager(
-          managerDeps(createTestModelResolver({ providers: [provider] })),
-          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
-        );
-        const key = { agentName: "test-main", channelThreadKey: "webchat:tasks-fork" };
+        const { manager, open } = setUp();
         const runner = new AgentRunner(manager);
         try {
-          const first = await collectMessages(runner.run({ ...key, prompt: "Start a task" }));
-          const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
-          tasks.onChange?.([task]);
+          const { key, session, tasks } = await open("webchat:tasks-fork");
+          tasks([task]);
           await rs.advanceTimersByTimeAsync(600);
           await collectMessages(
-            runner.runForked({ ...key, sourceSessionId: start.sessionId, prompt: "Recap" }),
+            runner.runForked({ ...key, sourceSessionId: session.sessionId, prompt: "Recap" }),
           );
           await rs.advanceTimersByTimeAsync(300);
           expect(manager.peek(key)).toBeDefined();
@@ -1040,45 +1030,15 @@ describe("AgentRunner", () => {
         }
       });
 
-      it("close at the cap even while SDK result turns keep arriving", async () => {
-        rs.useFakeTimers();
-        let runtime!: ReturnType<typeof createSdkEventSession>;
-        let tasks!: ModelBackgroundTaskListener;
-        const provider: ModelProvider = {
-          id: "anthropic",
-          displayName: "SDK background results",
-          builtinTools: new Set<string>(),
-          async openSession(params) {
-            runtime = createSdkEventSession(params);
-            return {
-              ...runtime.session,
-              onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
-                tasks = listener;
-                return () => {};
-              },
-            };
-          },
-        };
-        const manager = createAgentSessionManager(
-          managerDeps(createTestModelResolver({ providers: [provider] })),
-          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
-        );
-        const key = { agentName: "test-main", channelThreadKey: "webchat:tasks-sdk-results" };
+      it("close at the cap even while result turns keep arriving", async () => {
+        const { manager, open } = setUp();
         try {
-          const session = await manager.acquire(key);
-          const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
-          await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
-          runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
-          runtime.emit({ type: "result", content: "Started" });
-          runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
-          await turn;
-          tasks.onChange?.([task]);
+          const { key, tasks, resultTurn } = await open("webchat:tasks-result-turns");
+          tasks([task]);
           // A short task finishes every 50 ms, inside the idle TTL, while
           // the long one keeps running.
           for (let i = 0; i < 30; i++) {
-            runtime.emit({ type: "model_turn_start", turnId: `result-${i}`, answers: [] });
-            runtime.emit({ type: "result", content: `short ${i} done` });
-            runtime.emit({ type: "model_turn_end", turnId: `result-${i}`, answers: [] });
+            resultTurn(`result-${i}`);
             await rs.advanceTimersByTimeAsync(50);
             if (i === 16) expect(manager.peek(key)).toBeDefined();
           }
@@ -1092,9 +1052,9 @@ describe("AgentRunner", () => {
         const { manager, open } = setUp();
         try {
           const { key, tasks } = await open("webchat:tasks-end");
-          tasks.onChange?.([task]);
+          tasks([task]);
           await rs.advanceTimersByTimeAsync(500);
-          tasks.onChange?.([]);
+          tasks([]);
           // Without the grace the t=600 sweep would close it.
           await rs.advanceTimersByTimeAsync(150);
           expect(manager.peek(key)).toBeDefined();
@@ -1109,7 +1069,7 @@ describe("AgentRunner", () => {
         const { manager, open } = setUp();
         try {
           const { key, tasks } = await open("discord:tasks");
-          tasks.onChange?.([task]);
+          tasks([task]);
           await rs.advanceTimersByTimeAsync(300);
           expect(manager.peek(key)).toBeUndefined();
         } finally {

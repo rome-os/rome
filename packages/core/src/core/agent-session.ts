@@ -43,6 +43,7 @@ import type {
 import {
   CODE_BACKED_FALLBACK,
   createNullModelSession,
+  isModelBackgroundTaskEvent,
   isModelTurnEvent,
   type CodeBackedTurn,
 } from "./agent-runner.js";
@@ -50,6 +51,7 @@ import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelBackgroundTask,
+  ModelBackgroundTaskEvent,
   ModelSession,
   ModelTurnEvent,
   ModelSessionForkOpenParams,
@@ -515,9 +517,10 @@ export function createAgentSessionManager(
             if (tasks.length > 0) {
               // A webchat session's background tasks die with it: keep it
               // until they finish, or until the cap since its last caller
-              // turn. Checked before the idle TTL, since turns the SDK starts
-              // for task results renew lastActiveAt but must not renew the
-              // cap, or a stream of short tasks would keep it forever.
+              // turn. Checked before the idle TTL, since turns a provider
+              // starts for task results (Claude does) renew lastActiveAt but
+              // must not renew the cap, or a stream of short tasks would keep
+              // it forever.
               if (session.lastCallerActiveAt >= now - backgroundTaskTtlMs) continue;
               log.warn("closing idle webchat session with background tasks still running", {
                 sessionId: session.sessionId,
@@ -525,8 +528,9 @@ export function createAgentSessionManager(
               });
             } else {
               if (session.lastActiveAt >= now - idleTtlMs) continue;
-              // Its last task just ended: give the SDK time to act on it. That
-              // is one idle TTL plus up to one sweep interval.
+              // Its last task just ended: give a provider that runs a turn for
+              // the result time to start it. That is one idle TTL plus up to
+              // one sweep interval.
               if (webchat && session.backgroundTasksChangedAt >= now - idleTtlMs) continue;
             }
             // Best-effort: a failed close leaves the session for the next sweep.
@@ -2069,7 +2073,6 @@ class AgentSessionImpl implements AgentSession {
   private modelSessionAvailable = true;
   private _backgroundTasks: readonly ModelBackgroundTask[] = [];
   private _backgroundTasksChangedAt = 0;
-  private unfollowBackgroundTasks: () => void = () => {};
   private replacingModelSession: ModelSession | null = null;
   private toolCount: number;
   private subagentToolNames: Set<string>;
@@ -2205,7 +2208,8 @@ class AgentSessionImpl implements AgentSession {
 
   startModelSessionEvents(): void {
     const session = this.modelSession;
-    this.followBackgroundTasks(session);
+    // A new model session is a new provider process: its task set starts empty.
+    this._backgroundTasks = [];
     this.modelEventsLoop = this.runEventsLoop(session);
   }
 
@@ -2219,21 +2223,21 @@ class AgentSessionImpl implements AgentSession {
     return this._backgroundTasksChangedAt;
   }
 
-  // A new model session is a new provider process: its task set starts empty.
-  private followBackgroundTasks(session: ModelSession): void {
-    this.unfollowBackgroundTasks();
-    this._backgroundTasks = [];
-    this.unfollowBackgroundTasks =
-      session.onBackgroundTasks?.({
-        onChange: (tasks) => {
-          this._backgroundTasks = tasks;
-          this._backgroundTasksChangedAt = Date.now();
-          log.info("background tasks changed", {
-            sessionId: this.sessionId,
-            taskIds: tasks.map((task) => task.id),
-          });
-        },
-      }) ?? (() => {});
+  private consumeBackgroundTaskEvent(event: ModelBackgroundTaskEvent): void {
+    if (event.type === "background_task_end") {
+      log.info("background task ended", {
+        sessionId: this.sessionId,
+        taskId: event.end.id,
+        status: event.end.status,
+      });
+      return;
+    }
+    this._backgroundTasks = event.tasks;
+    this._backgroundTasksChangedAt = Date.now();
+    log.info("background tasks changed", {
+      sessionId: this.sessionId,
+      taskIds: event.tasks.map((task) => task.id),
+    });
   }
 
   private async ensureModelSessionForTurn(): Promise<void> {
@@ -2295,6 +2299,10 @@ class AgentSessionImpl implements AgentSession {
       for await (const msg of session.events) {
         if (isModelTurnEvent(msg)) {
           await this.consumeModelTurnEvent(session, msg);
+          continue;
+        }
+        if (isModelBackgroundTaskEvent(msg)) {
+          this.consumeBackgroundTaskEvent(msg);
           continue;
         }
         const activeTurn = this.activeSdkTurnId
@@ -2450,6 +2458,8 @@ class AgentSessionImpl implements AgentSession {
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
+      // The stream ended with the provider process, and its tasks with it.
+      this._backgroundTasks = [];
       const waiting = new Set(this.waitingCallers.values());
       // A provider stream ending while callers are still bound has no
       // trustworthy result correlation, even if a lightweight test/provider
@@ -3314,7 +3324,7 @@ class AgentSessionImpl implements AgentSession {
         void (async () => {
           try {
             for await (const msg of providerEvents) {
-              if (isModelTurnEvent(msg)) continue;
+              if (isModelTurnEvent(msg) || isModelBackgroundTaskEvent(msg)) continue;
               const projected = await forkOpen.projectProviderMessage(msg);
               for (const event of projected) outbound.push(event);
               if (projected.some(isTerminalEvent)) break;
