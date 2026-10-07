@@ -343,6 +343,122 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("leaves a borrowed exact fork's background shell out of the source session", async () => {
+    const shell = (id: string, status: string) => ({
+      type: "commandExecution",
+      id,
+      command: `sleep ${id}`,
+      status,
+      source: "unifiedExecStartup",
+    });
+    let turns = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "source-thread" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        const turnId = ++turns === 1 ? "fork-turn" : "source-turn";
+        const shellId = turns === 1 ? "fork-shell" : "source-shell";
+        n("turn/started", { threadId: "source-thread", turn: { id: turnId } });
+        n("item/started", {
+          item: shell(shellId, "inProgress"),
+          threadId: "source-thread",
+          turnId,
+          startedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: "source-thread",
+          turn: { id: turnId, status: "completed" },
+        });
+        return { turn: { id: turnId } };
+      }
+      return {};
+    });
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({ sessionId: "source-session", isNewSession: true }),
+    );
+    const fork = await source.fork({
+      sessionId: "fork-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    const forkSession = await fork.open(buildForkOpenParams());
+    const forkCollected = collectUntilTerminal(forkSession);
+    await forkSession.sendUserInput({ text: "feedback" });
+    await forkCollected;
+    await forkSession.close();
+    // The fork's shell ending after the revert is not the source's either.
+    captured.onNotification?.("item/completed", {
+      item: { ...shell("fork-shell", "completed"), exitCode: 0 },
+      threadId: "source-thread",
+      turnId: "fork-turn",
+      completedAtMs: 0,
+    });
+
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const event of source.events) {
+        if (event.type === "background_tasks") {
+          seen.push(`tasks [${event.tasks.map((task) => task.id)}]`);
+          return;
+        }
+        if (event.type === "background_task_end") seen.push(`ended ${event.end.id}`);
+      }
+    })();
+    await source.sendUserInput({ text: "own turn", inputId: "a" });
+    await reading;
+    expect(seen).toEqual(["tasks [source-shell]"]);
+    await source.close();
+  });
+
+  it("follows a finished sub-agent that a follow-up restarts between turns", async () => {
+    const activity = (kind: string, id: string) => ({
+      item: { type: "subAgentActivity", id, kind, agentThreadId: "child", agentPath: "/root/w" },
+      threadId: "thr-agents",
+      turnId: "t-1",
+      completedAtMs: 0,
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-agents" } };
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-agents", turn: { id: "t-1" } });
+        n("item/completed", activity("started", "call-spawn"));
+        n("turn/started", { threadId: "child", turn: { id: "c-1" } });
+        n("turn/completed", { threadId: "child", turn: { id: "c-1", status: "completed" } });
+        n("item/completed", activity("completed", "subagent-completed-c-1"));
+        n("item/completed", activity("interacted", "call-followup"));
+        n("turn/started", { threadId: "child", turn: { id: "c-2" } });
+        n("turn/completed", { threadId: "thr-agents", turn: { id: "t-1", status: "completed" } });
+        return { turn: { id: "t-1" } };
+      }
+      return {};
+    });
+    const session = await new CodexAppServerProvider().openSession(buildParams());
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const event of session.events) {
+        if (event.type === "background_tasks") {
+          seen.push(`tasks [${event.tasks.map((task) => task.id)}]`);
+          if (event.tasks.length === 0) return;
+        } else if (event.type === "background_task_end") {
+          seen.push(`ended ${event.end.id} ${event.end.status}`);
+        } else if (event.type === "model_turn_end") {
+          captured.onNotification?.("turn/completed", {
+            threadId: "child",
+            turn: { id: "c-2", status: "completed" },
+          });
+        }
+      }
+    })();
+    await session.sendUserInput({ text: "delegate", inputId: "a" });
+    await reading;
+    expect(seen).toEqual(["tasks [child]", "ended child completed", "tasks []"]);
+    await session.close();
+  });
+
   it("releases a buffered steer when startup ends without confirming the first input", async () => {
     requestMock.mockImplementation(async (method: string) => {
       if (method === "thread/start") return { thread: { id: "thr-1" } };
