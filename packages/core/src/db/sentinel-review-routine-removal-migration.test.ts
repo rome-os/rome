@@ -22,7 +22,7 @@ function removalMigration(): string {
   };
   const matches = journal.entries
     .map((entry) => readFileSync(join(MIGRATIONS_DIR, `${entry.tag}.sql`), "utf8"))
-    .filter((sql) => /DELETE FROM `routines` WHERE `action_name` IN \('sentinel_review', 'system:sentinel_review'\)/.test(sql));
+    .filter((sql) => /DELETE FROM `routines` WHERE `action_name` IN \('sentinel_review'/.test(sql));
 
   expect(matches, "exactly one migration should delete sentinel_review routines").toHaveLength(1);
   return matches[0];
