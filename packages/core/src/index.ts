@@ -108,6 +108,7 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
+import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn } from "./core/chat-stop.js";
@@ -584,6 +585,9 @@ async function main() {
   const turnMiddlewareChain = createTurnMiddlewareChain({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
+  const appStartedDispatcher = createAppStartedDispatcher({
+    appRuntimeServices: lifecycleAppRuntimeServices,
+  });
 
   // Retries failed actions once after 30s.
   const routineEngine = new RoutineEngine(
@@ -996,6 +1000,16 @@ async function main() {
     warnMessage: "some turn-middleware hooks failed to initialize",
     load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
     failureSource: (failure) => `turn-middleware:${failure.path}`,
+  });
+
+  // Loads now so load failures join this boot's runtime status. Calls wait
+  // for `appStartedDispatcher.open()` below. An app-keys change does not
+  // reload it: the hook runs once per app start, not once per environment.
+  await registerCatalogHookLoad({
+    sourcePrefix: "app-started",
+    warnMessage: "some app-started hooks failed to initialize",
+    load: () => appStartedDispatcher.reconcile(appCatalog),
+    failureSource: (failure) => `app-started:${failure.path}`,
   });
 
   const messageHandlerRegistered = actionRegistry.has("message_handler");
@@ -1514,6 +1528,10 @@ async function main() {
     ([name, record]) =>
       `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
   );
+  // Every boot step above is done, so app-started hooks can rely on actions,
+  // routines, and agents.
+  appStartedDispatcher.open();
+
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],

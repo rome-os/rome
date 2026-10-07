@@ -1217,12 +1217,47 @@ Hook directory layout:
 
 ```
 src/hooks/<name>/
-├── hook.yaml      # Declares the hook type and trigger conditions
 └── index.ts       # Implementation: export function createHook(deps): Hook
 ```
 
-The exact shape varies by hook type. See the community sample repo for an
-inbox-style channel hook.
+The directory name is the hook type, and `app.yaml` lists the directory
+under `hooks:`. The hook types are `channel-message`, `agent-turn-started`,
+`agent-turn-finished`, `turn-middleware`, and `app-started`. Each type's
+`createHook` deps and hook interface are exported from
+`@rome-os/app-runtime`. See the community sample repo for an inbox-style
+channel hook.
+
+### Setting up on start: `app-started`
+
+Use an `app-started` hook for state the app must always have, such as a
+routine that has to exist for the app to work. Rome calls `onAppStarted` at
+boot for every enabled app and after each install, upgrade, or re-enable,
+once boot has finished. Nothing waits for it, and a throw is logged, not
+retried. Every boot calls it again, so check before you create:
+
+```ts
+// src/hooks/app-started/index.ts
+import type { AppStartedHook, AppStartedHookDeps } from "@rome-os/app-runtime";
+
+export function createHook(deps: AppStartedHookDeps): AppStartedHook {
+  return {
+    async onAppStarted() {
+      const routines = await deps.appContext.listRoutines();
+      if (routines.some((routine) => routine.name === "nightly-sync")) return;
+      const result = await deps.appContext.runAction("system:create_routine", {
+        name: "nightly-sync",
+        trigger: { type: "schedule", tzid: "UTC", localTime: "02:00", rrule: "FREQ=DAILY" },
+        actionName: "my-app:sync",
+        args: {},
+      });
+      if (result.status === "error") throw new Error(result.error);
+    },
+  };
+}
+```
+
+A routine the user asks for belongs to the action or API that handles the
+request, not to this hook.
 
 ---
 

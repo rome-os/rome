@@ -1,6 +1,6 @@
 name: dream
 type: custom
-description: Runs the dream agent to analyze recent conversations and update persistent memory. Auto-schedules itself as a daily recurring task on first run.
+description: Runs the dream agent to analyze recent conversations and update persistent memory. The daily-dream routine runs it every day at 03:00 in the guardian's timezone.
 entry: ./index.ts
 complexity: complex
 speed: slow

@@ -5,67 +5,14 @@ import {
   type ActionResult,
   type AgentRunnerInterface,
   type AppActionRuntimeDeps,
-  type Routine,
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 
 const log = createAppLogger("dream");
 
-const DREAM_EVENT_NAME = "daily-dream";
-const DEFAULT_REVIEW_TIME = "03:00";
-const DEFAULT_REVIEW_TZ = "UTC";
-const DAILY_RRULE = "FREQ=DAILY";
-
 export interface DreamDeps {
   agentRunner: AgentRunnerInterface;
-}
-
-async function ensureDailySchedule(
-  runAction: (name: string, args: Record<string, unknown>) => Promise<ActionResult>,
-  listRoutines: () => Promise<Routine[]>,
-): Promise<void> {
-  const existing = await listRoutines();
-  // Dedup on the routine name alone. Matching on actionName too would let any
-  // unrelated routine that happens to run `dream` suppress this required daily
-  // self-register.
-  const alreadyScheduled = existing.some((r) => r.name === DREAM_EVENT_NAME);
-
-  if (alreadyScheduled) {
-    return;
-  }
-
-  log.info("no daily dream routine found, registering one now");
-
-  // create_routine reports caller-fixable problems via { status: "error" },
-  // not a throw — surface that so a failed registration isn't mistaken for a
-  // scheduled routine.
-  // This required daily self-review is auto-attributed to dream by the runtime
-  // (create_routine reads the calling app), so it isn't the user's to delete —
-  // dream re-registers it if missing.
-  const result = await runAction("create_routine", {
-    name: DREAM_EVENT_NAME,
-    trigger: {
-      type: "schedule",
-      tzid: DEFAULT_REVIEW_TZ,
-      // Floating: the nightly review runs at the guardian's local 03:00 and
-      // follows them if they move.
-      tzMode: "floating",
-      localTime: DEFAULT_REVIEW_TIME,
-      rrule: DAILY_RRULE,
-    },
-    actionName: "dream",
-    args: {},
-  });
-  if (result.status === "error") {
-    throw new Error(`create_routine failed: ${result.error}`);
-  }
-
-  log.info("daily dream event registered", {
-    time: DEFAULT_REVIEW_TIME,
-    tz: DEFAULT_REVIEW_TZ,
-    rrule: DAILY_RRULE,
-  });
 }
 
 export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<DreamDeps>): Action {
@@ -112,18 +59,6 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       const recorder = new RunRecorder(runs, runId);
 
       log.info("dream started", { windowHours, runId });
-
-      // Make sure daily schedule is registered on first run
-      try {
-        await ensureDailySchedule(
-          appContext.runAction.bind(appContext),
-          appContext.listRoutines.bind(appContext),
-        );
-      } catch (err) {
-        log.warn("failed to auto-register daily schedule (non-fatal)", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
 
       const now = new Date();
       const prompt = [

@@ -49,6 +49,18 @@ caller ──install / uninstall / enable──► manager ──uses──► i
 - The catalog is the only read surface. Subscribers fire in registration order, sequentially, and must be idempotent: boot replays one event per app, and a re-install fires a second event for the same bundle.
 - Subscriber order is load-bearing: agents load before the actions that reference them, and actions register before the hooks that depend on them.
 
+## App start
+
+An [app start](../concepts/apps.md#hooks) calls the app's `app-started` hook. The app-started dispatcher subscribes to the catalog and decides which app starts are new.
+
+### Invariants
+
+- The dispatcher subscribes after the action loader and the other hook loaders, so an app's actions are registered before its app-started hook loads.
+- Boot loads app-started hooks with the other hook kinds and calls none until boot finishes. A hook whose app starts later runs when the catalog event for that app reaches the dispatcher.
+- The installed content hash identifies an app start. An app that leaves the resolved set by a disable, an uninstall, or a broken resolve is forgotten, so its next resolve is a new start.
+- An app-keys change reloads the other hook kinds but not app-started hooks.
+- A hook call carries the [hook invocation chain](../adrs/hook-recursion-chain-crosses-queue-boundaries.md) of the work that caused the app start. A boot call starts a new chain.
+
 ## Crash model
 
 ### Invariants

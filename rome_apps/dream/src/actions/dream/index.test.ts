@@ -101,7 +101,7 @@ describe("dream", () => {
     expect(data.windowHours).toBe(12);
   });
 
-  it("registers daily schedule when none exists", async () => {
+  it("leaves routines to the app-started hook", async () => {
     const runAction = rs.fn().mockResolvedValue({ status: "ok" });
     const listRoutines = rs.fn().mockResolvedValue([]);
     const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
@@ -109,65 +109,10 @@ describe("dream", () => {
     const action = createAction(actionConfig, deps);
     await action.execute({});
 
-    expect(listRoutines).toHaveBeenCalled();
-    expect(runAction).toHaveBeenCalledWith(
-      "create_routine",
-      expect.objectContaining({
-        actionName: "dream",
-        trigger: expect.objectContaining({ type: "schedule", rrule: "FREQ=DAILY" }),
-      }),
-    );
-  });
-
-  it("still registers the daily routine when an unrelated dream routine exists", async () => {
-    const runAction = rs.fn().mockResolvedValue({ status: "ok" });
-    // A different routine that happens to run the `dream` action must not
-    // suppress the required daily self-register (dedup is on name, not action).
-    const listRoutines = rs.fn().mockResolvedValue([{ actionName: "dream", name: "weekly-dream" }]);
-    const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
-
-    const action = createAction(actionConfig, deps);
-    await action.execute({});
-
-    expect(runAction).toHaveBeenCalledWith("create_routine", expect.anything());
-  });
-
-  it("skips scheduling when dream event already exists", async () => {
-    const runAction = rs.fn().mockResolvedValue({ status: "ok" });
-    const listRoutines = rs.fn().mockResolvedValue([{ actionName: "dream", name: "daily-dream" }]);
-    const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
-
-    const action = createAction(actionConfig, deps);
-    await action.execute({});
-
+    expect(listRoutines).not.toHaveBeenCalled();
     expect(runAction).not.toHaveBeenCalled();
   });
 
-  it("continues even if schedule registration fails", async () => {
-    const runAction = rs.fn().mockRejectedValue(new Error("schedule failed"));
-    const listRoutines = rs.fn().mockResolvedValue([]);
-    const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({});
-
-    expect(result.status).toBe("ok");
-  });
-
-  it("continues when create_routine reports a soft failure", async () => {
-    // create_routine returns { status: "error" } rather than throwing; the dream
-    // run must still complete (registration failure is non-fatal) and must not
-    // treat the soft failure as a scheduled routine.
-    const runAction = rs.fn().mockResolvedValue({ status: "error", error: "bad trigger" });
-    const listRoutines = rs.fn().mockResolvedValue([]);
-    const deps = makeDeps([{ type: "result", content: "done" }], { runAction, listRoutines });
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({});
-
-    expect(result.status).toBe("ok");
-    expect(runAction).toHaveBeenCalledWith("create_routine", expect.anything());
-  });
   it("records the run and the files its agent changed", async () => {
     const deps = makeDeps([
       {

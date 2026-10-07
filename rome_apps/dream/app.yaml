@@ -28,3 +28,6 @@ actions:
   - actions/skill-review
   - actions/get-webchat-conversations
   - actions/get-action-logs
+
+hooks:
+  - hooks/app-started

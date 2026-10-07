@@ -655,6 +655,43 @@ export interface AgentLifecycleHookDeps {
   agentRunner?: AgentRunnerInterface;
 }
 
+// App-started hook. Contract: docs/concepts/apps.md#hooks.
+
+export type AppStartedEventVersion = 1;
+
+/** One app start: an installed bundle of an enabled app becoming active in
+ *  the running daemon. */
+export interface AppStartedEvent {
+  type: "app-started";
+  version: AppStartedEventVersion;
+  appId: string;
+  /** The manifest `version` of the bundle that started. */
+  appVersion: string;
+}
+
+/**
+ * Declared as `hooks/app-started`. Rome calls `onAppStarted` once per app
+ * start: at boot for every enabled app, and after an install, upgrade, or
+ * re-enable. A re-install of identical content is not a new start. The call
+ * comes after boot finishes, so actions, routines, and agents are available.
+ * Neither boot nor the install waits for it. Rome logs a throw and does not
+ * retry until the next app start.
+ *
+ * Every boot is a new start, so Rome calls the hook again for state it
+ * already set up. Make it idempotent: check that the state exists before
+ * creating it.
+ */
+export interface AppStartedHook {
+  onAppStarted(event: AppStartedEvent): Promise<void> | void;
+}
+
+export interface AppStartedHookDeps {
+  appId: string;
+  logger: AppLogger;
+  appContext: RomeAppContext;
+  agentRunner?: AgentRunnerInterface;
+}
+
 // Awaited onion middleware around an agent turn. Agent model: docs/concepts/agents.md.
 
 /** Identifies the wrapped turn; middleware matching uses only `agentName`. */
