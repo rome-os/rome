@@ -64,6 +64,17 @@ describe("provider-accounting", () => {
     expect(impliedCostUsd).toBeCloseTo(14.7);
   });
 
+  it("prices Anthropic Haiku 5.5 at its base tier of $0.10/$0.50 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-haiku-5-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    });
+
+    expect(impliedCostUsd).toBeCloseTo(0.735);
+  });
+
   it("matches model aliases with dated suffixes", () => {
     const accounting = buildAgentAccounting({
       provider: "anthropic",

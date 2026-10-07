@@ -145,6 +145,19 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "anthropic",
+    // Haiku 5.5 bills 5x these rates when a single request's prompt exceeds
+    // 100K tokens. Run usage sums every request, so the per-request prompt
+    // size is unknown here and this rule prices the run at the base tier.
+    matchesModel: (model) => hasPrefix(model, "claude-haiku-5-5"),
+    resolveRates: (rawUsage) => ({
+      inputUsdPerMillion: 0.1,
+      outputUsdPerMillion: 0.5,
+      cacheReadUsdPerMillion: 0.01,
+      cacheWriteUsdPerMillion: 0.1 * getAnthropicCacheWriteMultiplier(rawUsage),
+    }),
+  },
+  {
+    provider: "anthropic",
     matchesModel: (model) => hasPrefix(model, "claude-haiku-4-5"),
     resolveRates: (rawUsage) => ({
       inputUsdPerMillion: 1,

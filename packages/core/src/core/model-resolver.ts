@@ -113,13 +113,13 @@ export interface CreateModelResolverOptions {
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
-  small: "claude-haiku-4-5-20251001",
+  small: "claude-haiku-5-5",
 };
 
 const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
-  small: "claude-haiku-4-5-20251001",
+  small: "claude-haiku-5-5",
 };
 
 const FABLE_MODEL = "claude-fable-5-1[1m]";
