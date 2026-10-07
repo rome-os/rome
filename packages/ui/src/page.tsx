@@ -5,7 +5,6 @@ import {
   useContext,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -196,65 +195,6 @@ function useScrolledUnder(target: HTMLElement | null, edge: HTMLElement | null):
 }
 
 /**
- * Renders `element` once into a node it owns, and attaches that node to `host`
- * when given and to an inline placeholder otherwise. The portal target never
- * changes, so moving between the page and the bar keeps the subtree's state.
- * Focus inside the subtree is restored after a move, since a browser blurs a
- * node it reparents or stops rendering.
- *
- * The placeholder and the owned node both render as `display: contents`, so
- * `element` lays out as if it sat where the placeholder does.
- */
-function useRelocated(element: ReactNode, host: HTMLElement | null) {
-  // Without a provider the part has nowhere to move, so it renders inline as
-  // plain markup, which also keeps it renderable on a server.
-  const relocatable = useContext(TopBarContext) !== null && typeof document !== "undefined";
-  const [owned] = useState(() => {
-    if (!relocatable) return null;
-    const el = document.createElement("div");
-    el.style.display = "contents";
-    // The last control focused inside the node. A browser drops focus from a
-    // control that stops rendering, as the bar's does when the viewport
-    // crosses `md`, and that blur names no next target. A blur that names one
-    // is the user moving on, so it clears the record.
-    const record: { last: HTMLElement | null } = { last: null };
-    el.addEventListener("focusin", (event) => {
-      record.last = event.target instanceof HTMLElement ? event.target : null;
-    });
-    el.addEventListener("focusout", (event) => {
-      if (event.relatedTarget !== null) record.last = null;
-    });
-    return { node: el, focus: record };
-  });
-  const node = owned?.node ?? null;
-  const focus = owned?.focus ?? null;
-  // A ref callback rather than an effect, so the node is in the document
-  // before the subtree's own layout effects measure it.
-  const placeholder = useCallback(
-    (inline: HTMLElement | null) => {
-      // A null call is the placeholder detaching. The unmount cleanup below
-      // owns removal, so placing the node here would re-attach it to the bar.
-      if (!inline || !node || !focus) return;
-      const target = host ?? inline;
-      if (node.parentNode === target) return;
-      target.appendChild(node);
-      const last = focus.last;
-      const lost = document.activeElement === null || document.activeElement === document.body;
-      if (last && lost && node.contains(last)) last.focus({ preventScroll: true });
-    },
-    [host, node, focus],
-  );
-  useLayoutEffect(() => () => node?.remove(), [node]);
-  if (!node) return element;
-  return (
-    <>
-      <div ref={placeholder} style={{ display: "contents" }} />
-      {createPortal(element, node)}
-    </>
-  );
-}
-
-/**
  * The skeleton of a routed page: the regions a page stacks, top to bottom, at
  * the padding and the 24px rhythm no page restates. A header, then whatever
  * body the page's task calls for — a `ListCollection`, a set of `FormRows`, a
@@ -319,10 +259,10 @@ export function PageHeader({
  */
 export function PageHeaderNav({ className, ...props }: ComponentProps<"div">) {
   const host = useContext(HeaderTopBarContext)?.nav ?? null;
-  return useRelocated(
-    <div data-slot="page-header-nav" className={cn(!host && "basis-full", className)} {...props} />,
-    host,
+  const nav = (
+    <div data-slot="page-header-nav" className={cn(!host && "basis-full", className)} {...props} />
   );
+  return host ? createPortal(nav, host) : nav;
 }
 
 /** Groups the title with its description so the actions stay opposite both. */
@@ -416,14 +356,14 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
 export function PageActions({ className, ...props }: ComponentProps<"div">) {
   const barHost = useContext(HeaderTopBarContext)?.action ?? null;
   const host = Children.toArray(props.children).length === 1 ? barHost : null;
-  return useRelocated(
+  const actions = (
     <div
       data-slot="page-actions"
       className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
       {...props}
-    />,
-    host,
+    />
   );
+  return host ? createPortal(actions, host) : actions;
 }
 
 export interface PageNavProps extends ComponentProps<"nav"> {

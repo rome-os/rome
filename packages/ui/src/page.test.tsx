@@ -1,4 +1,4 @@
-import { createRef, type ReactNode, useEffect, useState } from "react";
+import { createRef, type ReactNode } from "react";
 import { renderToString } from "react-dom/server";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -225,23 +225,9 @@ function bottomAt(el: Element, bottom: () => number) {
   );
 }
 
-let mounts = 0;
-function CountingAction() {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    mounts += 1;
-  }, []);
-  return (
-    <button type="button" onClick={() => setCount(count + 1)}>
-      Clicked {count}
-    </button>
-  );
-}
-
 describe("PageTopBar", () => {
   afterEach(() => {
     rs.restoreAllMocks();
-    mounts = 0;
   });
 
   it("shows the fallback while no header holds the bar", () => {
@@ -294,7 +280,7 @@ describe("PageTopBar", () => {
     );
   });
 
-  it("mounts a stateful action once, and moves it when the viewport crosses md", () => {
+  it("moves a lone action between the page and the bar when the viewport crosses md", () => {
     const viewport = mockViewport(false);
     render(
       <InShell>
@@ -303,29 +289,21 @@ describe("PageTopBar", () => {
             <PageTitle>Keys</PageTitle>
           </PageHeading>
           <PageActions>
-            <CountingAction />
+            <button type="button">New key</button>
           </PageActions>
         </PageHeader>
       </InShell>,
     );
 
-    expect(mounts).toBe(1);
-    screen.getByRole("button").focus();
-    fireEvent.click(screen.getByRole("button"));
-    expect(screen.getByRole("button").textContent).toBe("Clicked 1");
+    expect(screen.getByTestId("bar").querySelector("button")).toBeNull();
 
     viewport.resize(true);
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByTestId("bar").querySelector("button")).not.toBeNull();
-    expect(screen.getByRole("button").textContent).toBe("Clicked 1");
-    expect(document.activeElement).toBe(screen.getByRole("button"));
-    fireEvent.click(screen.getByRole("button"));
 
     viewport.resize(false);
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByTestId("bar").querySelector("button")).toBeNull();
-    expect(screen.getByRole("button").textContent).toBe("Clicked 2");
-    expect(mounts).toBe(1);
   });
 
   it("keeps two or more actions in the page, since the bar holds one", () => {
