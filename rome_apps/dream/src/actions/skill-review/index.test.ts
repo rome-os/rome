@@ -1,4 +1,6 @@
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -22,8 +24,14 @@ const actionConfig = {
 } as const;
 
 let testDb: TestDb;
+let carrierDir: string;
+let installCalls: Array<Record<string, unknown>>;
+let installResult: { status: "ok"; data: unknown } | { status: "error"; error: string };
 
 beforeEach(() => {
+  carrierDir = join(mkdtempSync(join(tmpdir(), "skill-review-")), "user-skills");
+  installCalls = [];
+  installResult = { status: "ok", data: {} };
   testDb = createTestDb();
   migrate(testDb.db as never, {
     migrationsFolder: MIGRATIONS_DIR,
@@ -33,6 +41,7 @@ beforeEach(() => {
 
 afterEach(() => {
   testDb.close();
+  rmSync(dirname(carrierDir), { recursive: true, force: true });
 });
 
 const appDb = () => ({
@@ -50,19 +59,52 @@ function seedSession(id: string, type: string, createdAt: number, name = id): vo
 
 function makeDeps(
   agentMessages: Array<Record<string, unknown>>,
-  runCalls: Array<{ prompt: string }> = [],
-): AppActionRuntimeDeps<{ agentRunner: AgentRunner }> {
+  runCalls: Array<{ prompt: string; workingDir?: string }> = [],
+  beforeEvents: (workingDir: string) => void = () => {},
+): AppActionRuntimeDeps<{ agentRunner: AgentRunner; carrierDir: string }> {
   return {
+    carrierDir,
     agentRunner: {
-      async *run(params: { prompt: string }) {
+      async *run(params: { prompt: string; workingDir?: string }) {
         runCalls.push(params);
+        beforeEvents(params.workingDir as string);
         for (const msg of agentMessages) {
           yield msg;
         }
       },
     } as unknown as AgentRunner,
-    appContext: { db: appDb() },
-  } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner }>;
+    appContext: {
+      db: appDb(),
+      async runAction(name: string, args: Record<string, unknown>) {
+        installCalls.push({ name, ...args });
+        return installResult;
+      },
+    },
+  } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner; carrierDir: string }>;
+}
+
+/** Agent events for a successful Write, after placing the file in the agent's working dir. */
+function writeSkill(
+  name: string,
+  content = `---\nname: ${name}\ndescription: ${name}\n---\n`,
+): { events: Array<Record<string, unknown>>; place: (workingDir: string) => void } {
+  return {
+    place: (workingDir) => {
+      const path = join(workingDir, "skills", name, "SKILL.md");
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, content);
+    },
+    events: [
+      {
+        type: "tool_use",
+        id: "t1",
+        tool: "Write",
+        input: { file_path: `skills/${name}/SKILL.md`, content },
+      },
+      { type: "tool_result", toolUseId: "t1", tool: "Write", output: "ok" },
+      { type: "result", content: `Saved ${name}.` },
+    ],
+  };
 }
 
 describe("skill_review", () => {
@@ -165,28 +207,250 @@ describe("skill_review", () => {
     expect(runCalls[0].prompt).toContain("newest-web");
   });
 
-  it("records the skill the agent saved", async () => {
+  it("runs the agent on a staging copy of a scaffolded carrier", async () => {
     seedSession("web", "webchat", 1700000000);
-    const skillPath = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";
-    const deps = makeDeps([
-      {
-        type: "tool_use",
-        id: "t1",
-        tool: "Write",
-        input: { file_path: skillPath, content: "# Deploy" },
-      },
-      { type: "tool_result", toolUseId: "t1", tool: "Write", output: "ok" },
-      { type: "result", content: "Saved the deploy skill." },
+    mkdirSync(join(carrierDir, "skills", "existing"), { recursive: true });
+    writeFileSync(join(carrierDir, "skills", "existing", "SKILL.md"), "---\nname: existing\n---\n");
+    const runCalls: Array<{ prompt: string; workingDir?: string }> = [];
+    let staged = "";
+
+    await createAction(
+      actionConfig,
+      makeDeps([{ type: "result", content: "Nothing to update." }], runCalls, (workingDir) => {
+        staged = readFileSync(join(workingDir, "skills", "existing", "SKILL.md"), "utf8");
+      }),
+    ).execute({});
+
+    const workingDir = runCalls[0].workingDir as string;
+    expect(workingDir).not.toBe(carrierDir);
+    expect(runCalls[0].prompt).toContain(workingDir);
+    expect(staged).toContain("name: existing");
+    expect(existsSync(workingDir)).toBe(false);
+    expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain("id: user-skills");
+    expect(installCalls).toEqual([]);
+  });
+
+  it("leaves a skill imported into the carrier mid-review alone when its install fails", async () => {
+    seedSession("web", "webchat", 1700000000);
+    installResult = { status: "error", error: "BUILD_FAILED" };
+    const skill = writeSkill("reviewed");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], (workingDir) => {
+        skill.place(workingDir);
+        // import-skill writes straight into the carrier while the review runs.
+        mkdirSync(join(carrierDir, "skills", "imported"), { recursive: true });
+        writeFileSync(
+          join(carrierDir, "skills", "imported", "SKILL.md"),
+          "---\nname: imported\n---\n",
+        );
+      }),
+    ).execute({});
+
+    expect(result.status).toBe("error");
+    expect(existsSync(join(carrierDir, "skills", "imported", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(carrierDir, "skills", "reviewed"))).toBe(false);
+  });
+
+  it("registers and installs a skill saved in the carrier", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("deploy-preview");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], skill.place),
+    ).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
+    expect(result.data).toMatchObject({ installed: ["skills/deploy-preview"] });
+    expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain(
+      "skills:\n  - skills/deploy-preview\n",
+    );
+    expect(installCalls).toEqual([
+      { name: "app_management", op: "install", source: { mode: "source", path: carrierDir } },
     ]);
-
-    const result = await createAction(actionConfig, deps).execute({});
-
-    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const { runId } = result.data as { runId: string };
     const runs = createRunsRepository(appDb());
     expect(runs.byId(runId)).toMatchObject({ kind: "skill_review", status: "completed" });
-    expect(runs.changes(runId)).toEqual([
-      { op: "write", path: skillPath, content: "# Deploy", previous: null, truncated: false },
+    expect(runs.changes(runId)).toHaveLength(1);
+  });
+
+  it("fails the run and rolls the carrier back when the install fails", async () => {
+    seedSession("web", "webchat", 1700000000);
+    installResult = { status: "error", error: "BUILD_FAILED" };
+    const skill = writeSkill("deploy-preview");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], skill.place),
+    ).execute({});
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toContain("BUILD_FAILED");
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({ status: "failed" });
+    expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).not.toContain("deploy-preview");
+    expect(existsSync(join(carrierDir, "skills", "deploy-preview"))).toBe(false);
+
+    // The same skill written again is a fresh change, so it is retried.
+    installResult = { status: "ok", data: {} };
+    const retry = await createAction(actionConfig, makeDeps(skill.events, [], skill.place)).execute(
+      {},
+    );
+    expect(retry).toMatchObject({ status: "ok", data: { installed: ["skills/deploy-preview"] } });
+  });
+
+  it("installs a skill written through a Codex-shaped edit event", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("codex-skill");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(
+        [
+          {
+            type: "tool_use",
+            id: "c1",
+            tool: "Edit",
+            input: { type: "fileChange", id: "c1", changes: [{ kind: "add" }] },
+          },
+          { type: "tool_result", toolUseId: "c1", tool: "Edit", output: "ok" },
+          { type: "result", content: "Saved." },
+        ],
+        [],
+        skill.place,
+      ),
+    ).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
+    expect(result.data).toMatchObject({ installed: ["skills/codex-skill"] });
+    expect(installCalls).toHaveLength(1);
+  });
+
+  it("keeps both skills when two reviews overlap", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const a = writeSkill("alpha");
+    const b = writeSkill("beta");
+    const listedAtInstall: string[] = [];
+    const deps = (skill: typeof a) => {
+      const d = makeDeps(skill.events, [], skill.place);
+      d.appContext.runAction = (async () => {
+        listedAtInstall.push(readFileSync(join(carrierDir, "app.yaml"), "utf8"));
+        await new Promise((r) => setTimeout(r, 20));
+        return { status: "ok", data: {} };
+      }) as never;
+      return d;
+    };
+
+    await Promise.all([
+      createAction(actionConfig, deps(a)).execute({}),
+      createAction(actionConfig, deps(b)).execute({}),
     ]);
+
+    const yaml = readFileSync(join(carrierDir, "app.yaml"), "utf8");
+    expect(yaml).toContain("skills/alpha");
+    expect(yaml).toContain("skills/beta");
+    expect(listedAtInstall.at(-1)).toContain("skills/alpha");
+    expect(listedAtInstall.at(-1)).toContain("skills/beta");
+  });
+
+  it("rolls back a failed agent's writes so an identical retry installs", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("half-done");
+
+    const failed = await createAction(
+      actionConfig,
+      makeDeps([...skill.events.slice(0, 2), { type: "error", error: "boom" }], [], skill.place),
+    ).execute({});
+    expect(failed.status).toBe("error");
+    expect(existsSync(join(carrierDir, "skills", "half-done"))).toBe(false);
+    expect(installCalls).toEqual([]);
+
+    const retry = await createAction(actionConfig, makeDeps(skill.events, [], skill.place)).execute(
+      {},
+    );
+    expect(retry).toMatchObject({ status: "ok", data: { installed: ["skills/half-done"] } });
+  });
+
+  it("does not install what a stopped review left behind", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("stopped");
+
+    await createAction(
+      actionConfig,
+      makeDeps(
+        [...skill.events, { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 }],
+        [],
+        skill.place,
+      ),
+    ).execute({});
+
+    expect(installCalls).toEqual([]);
+    expect(existsSync(join(carrierDir, "skills", "stopped"))).toBe(false);
+  });
+
+  it("a failed install never rolls back an overlapping review's skill", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const good = writeSkill("alpha");
+    const bad = writeSkill("beta");
+    const deps = (skill: typeof good, ok: boolean) => {
+      const d = makeDeps(skill.events, [], skill.place);
+      d.appContext.runAction = (async () => {
+        await new Promise((r) => setTimeout(r, 10));
+        return ok ? { status: "ok", data: {} } : { status: "error", error: "BUILD_FAILED" };
+      }) as never;
+      return d;
+    };
+
+    const [a, b] = await Promise.all([
+      createAction(actionConfig, deps(bad, false)).execute({}),
+      createAction(actionConfig, deps(good, true)).execute({}),
+    ]);
+
+    expect(a.status).toBe("error");
+    expect(b).toMatchObject({ status: "ok", data: { installed: ["skills/alpha"] } });
+    expect(existsSync(join(carrierDir, "skills", "alpha", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(carrierDir, "skills", "beta"))).toBe(false);
+    const yaml = readFileSync(join(carrierDir, "app.yaml"), "utf8");
+    expect(yaml).toContain("skills/alpha");
+    expect(yaml).not.toContain("skills/beta");
+  });
+
+  it("refuses to overwrite a skill changed in the carrier during the review", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const path = join(carrierDir, "skills", "shared", "SKILL.md");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "---\nname: shared\n---\nv1\n");
+    const skill = writeSkill("shared", "---\nname: shared\n---\nreview edit\n");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], (workingDir) => {
+        skill.place(workingDir);
+        writeFileSync(path, "---\nname: shared\n---\nguardian edit\n");
+      }),
+    ).execute({});
+
+    expect(result.status).toBe("error");
+    if (result.status === "error") expect(result.error).toContain("shared");
+    expect(readFileSync(path, "utf8")).toContain("guardian edit");
+    expect(installCalls).toEqual([]);
+  });
+
+  it("does not install for writes outside the carrier", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const outside = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";
+
+    await createAction(
+      actionConfig,
+      makeDeps([
+        { type: "tool_use", id: "t1", tool: "Write", input: { file_path: outside, content: "x" } },
+        { type: "tool_result", toolUseId: "t1", tool: "Write", output: "ok" },
+        { type: "result", content: "done" },
+      ]),
+    ).execute({});
+
+    expect(installCalls).toEqual([]);
   });
 });

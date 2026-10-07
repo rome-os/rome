@@ -135,7 +135,7 @@ function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
   if (tier === "large") return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
   if (tier === "small") return state.lunaAccess ? "gpt-6-luna" : "gpt-5.6-terra";
-  return "gpt-5.6-terra";
+  return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
 }
 
 function claudeModel(tier: ModelTier, enableFable: boolean): string {

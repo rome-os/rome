@@ -170,11 +170,25 @@ media:
   - type: image
     path: assets/dashboard.png
     alt: Morning Brief dashboard
+  - type: video
+    path: assets/demo.mp4
+    poster: assets/demo-poster.png
+    alt: Morning Brief demo
 noindex: false
 ```
 
 Store asset paths are relative to `.rome_store/`, so the example above expects
-files under `.rome_store/assets/`.
+files under `.rome_store/assets/`. Rome Cloud's
+[submission rules](https://romeos.cc/docs/building-apps/app-store-submission)
+set these limits:
+
+- The packed `.rome_store` directory must stay under 30 MB, or Rome Cloud
+  rejects the whole publish. Plan for one short demo video, not several.
+- `media` holds up to 8 entries. Images may be PNG, JPEG, or WebP up to 2 MB.
+  Videos may be MP4, WebM, or MOV up to 25 MB, and a video's optional `poster`
+  must point at an image.
+- A single asset over its limit or in another format still publishes, but the
+  store page leaves it out.
 
 ### `action.yaml`
 
@@ -564,6 +578,9 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   public app any surviving header is attacker-controlled. In the web UI,
   `useCaller()` / `getCaller()` from `@rome-os/app-web-sdk` return the same
   identity for UI gating only; enforcement belongs in the API handler.
+  For per-visitor private data, quotas, or favor charges
+  (`favorRequirement` + `ctx.favors.requestAction`), follow
+  [`PAID_APPS.md`](./PAID_APPS.md).
 - `RomeAppContext` — handler-injected context; common fields: `ctx.app.id`,
   `ctx.app.version`, `ctx.log`, `ctx.runAction`, `ctx.db`,
   `ctx.repositories`.

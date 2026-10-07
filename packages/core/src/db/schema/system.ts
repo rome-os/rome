@@ -53,8 +53,8 @@ export const sessions = sqliteTable("sessions", {
    *  rows and sessions that never completed a turn. Nothing reads it yet. */
   model: text("model"),
   /** The reasoning effort the session's last successful model turn ran with,
-   *  as the provider reported it in its own terms (Claude `max`, Codex
-   *  `xhigh`). Display only: it never seeds the next turn's effort. Null for
+   *  as the provider reported it in its own terms (for example `xhigh`).
+   *  Display only: it never seeds the next turn's effort. Null for
    *  legacy rows and sessions that never completed a model turn. */
   reasoningEffort: text("reasoning_effort"),
   /** The cwd the session's provider ran in, so an explicit resume reopens the
