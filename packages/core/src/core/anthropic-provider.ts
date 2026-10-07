@@ -1262,6 +1262,7 @@ class ModelSessionEventTurnQueue {
     {
       iterator: AsyncIterator<ModelSessionEvent>;
       ready?: IteratorResult<ModelSessionEvent>;
+      error?: unknown;
       done: boolean;
       waiting?: () => void;
     }
@@ -1282,7 +1283,7 @@ class ModelSessionEventTurnQueue {
     while (true) {
       while (this.readySources.length > 0) {
         const source = this.readySources.shift()!;
-        if (this.sources[source].ready) return source;
+        if (this.sources[source].ready || this.sources[source].error !== undefined) return source;
       }
       if (Object.values(this.sources).every((source) => source.done)) return undefined;
       await new Promise<void>((resolve) => {
@@ -1293,11 +1294,16 @@ class ModelSessionEventTurnQueue {
 
   async next(sourceName: ModelSessionEventSource): Promise<IteratorResult<ModelSessionEvent>> {
     const source = this.sources[sourceName];
-    while (!source.ready) {
+    while (!source.ready && source.error === undefined) {
       if (source.done) return { value: undefined as never, done: true };
       await new Promise<void>((resolve) => {
         source.waiting = resolve;
       });
+    }
+    if (source.error !== undefined) {
+      const error = source.error;
+      source.error = undefined;
+      throw error;
     }
     const next = source.ready;
     source.ready = undefined;
@@ -1308,15 +1314,27 @@ class ModelSessionEventTurnQueue {
 
   private pull(sourceName: ModelSessionEventSource): void {
     const source = this.sources[sourceName];
-    void source.iterator.next().then((next) => {
-      source.ready = next;
-      if (next.done) source.done = true;
-      this.readySources.push(sourceName);
-      source.waiting?.();
-      source.waiting = undefined;
-      this.waitingForSource?.();
-      this.waitingForSource = undefined;
-    });
+    void source.iterator.next().then(
+      (next) => {
+        source.ready = next;
+        if (next.done) source.done = true;
+        this.signal(sourceName);
+      },
+      (error: unknown) => {
+        source.error = error;
+        source.done = true;
+        this.signal(sourceName);
+      },
+    );
+  }
+
+  private signal(sourceName: ModelSessionEventSource): void {
+    const source = this.sources[sourceName];
+    this.readySources.push(sourceName);
+    source.waiting?.();
+    source.waiting = undefined;
+    this.waitingForSource?.();
+    this.waitingForSource = undefined;
   }
 }
 
