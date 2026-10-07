@@ -59,6 +59,14 @@ describe("BackgroundTaskTracker", () => {
     expect(tracker.current[0]?.seenAt).toBe(firstSeen);
   });
 
+  it("reports no change for the same set in a different order", () => {
+    const tracker = new BackgroundTaskTracker();
+    const seen = follow(tracker);
+    tracker.observe(level({ id: "a" }, { id: "b" }));
+    tracker.observe(level({ id: "b" }, { id: "a" }));
+    expect(seen.ids()).toEqual([["a", "b"]]);
+  });
+
   it("reports a change of description or type for the same tasks", () => {
     const tracker = new BackgroundTaskTracker();
     const seen = follow(tracker);

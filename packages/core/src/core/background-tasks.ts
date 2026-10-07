@@ -66,15 +66,13 @@ export class BackgroundTaskTracker {
   }
 
   private replace(tasks: readonly ModelBackgroundTask[]): void {
+    // Compared by id: the SDK doesn't promise a stable task order.
+    const prior = new Map(this.tasks.map((task) => [task.id, task]));
     const same =
       tasks.length === this.tasks.length &&
-      tasks.every((task, i) => {
-        const prior = this.tasks[i];
-        return (
-          task.id === prior?.id &&
-          task.type === prior.type &&
-          task.description === prior.description
-        );
+      tasks.every((task) => {
+        const before = prior.get(task.id);
+        return task.type === before?.type && task.description === before.description;
       });
     if (same) return;
     this.tasks = tasks;
