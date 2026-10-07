@@ -4,6 +4,7 @@ import {
   BackendTurnRunnerProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
+  FeedbackServiceProxy,
 } from "./service-proxies.js";
 import {
   runWithHookInvocationContext,
@@ -338,5 +339,48 @@ describe("AppManagerProxy", () => {
 
     expect(appManager.setEnabled).toHaveBeenCalledWith("looper", true);
     expect(seen).toEqual(chain);
+  });
+});
+
+describe("FeedbackServiceProxy", () => {
+  const originalSend = process.send;
+  const input = {
+    category: "bug" as const,
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent" as const, agentName: "main" },
+  };
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+  it("forwards runtime provenance and returns only the classified outcome", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      expect(method).toBe("feedback.send");
+      expect(params).toEqual(input);
+      return { kind: "ok" };
+    });
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "ok" });
+  });
+  it.each([
+    new WorkerRpcTimeoutError("feedback.send", 30_000),
+    new WorkerRpcDisconnectError(),
+    new WorkerRpcSendError("feedback.send", new Error("EPIPE")),
+  ])("classifies transport uncertainty without retry: %s", async (err) => {
+    process.send = undefined;
+    const dispatch = rs.fn(async () => {
+      throw err;
+    });
+    setWorkerRpcInProcessDispatcher(dispatch);
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "unreachable" });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+  it("does not hide a genuine handler bug", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => {
+      throw new Error("bug");
+    });
+    await expect(new FeedbackServiceProxy().send(input)).rejects.toThrow("bug");
   });
 });

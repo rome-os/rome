@@ -36,6 +36,7 @@ actions:
   - actions/request-approval-demo
   - actions/resume-session
   - actions/send-message
+  - actions/send-feedback
   - actions/send-notification
   - actions/send-user-message
   - actions/sentinel-review

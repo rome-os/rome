@@ -791,6 +791,14 @@
       "lastSeen": "上次在线",
       "notReported": "未提供",
       "installExtension": "安装 OpenCLI 扩展"
+    },
+    "feedback": {
+      "title": "反馈",
+      "agentReports": {
+        "title": "智能体平台问题报告",
+        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "toggleLabel": "允许智能体发送报告"
+      }
     }
   },
   "system": {

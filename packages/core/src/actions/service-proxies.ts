@@ -22,6 +22,7 @@ import {
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
+import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -335,5 +336,25 @@ export class EmailInboundControlProxy implements EmailInboundControl {
       rawBody,
       signature,
     });
+  }
+}
+
+/** Feedback leaves the instance only in main; an IPC failure can follow a send. */
+export class FeedbackServiceProxy implements FeedbackService {
+  async send(input: AgentFeedback): Promise<FeedbackOutcome> {
+    try {
+      return await getWorkerRpc().call<FeedbackOutcome>("feedback.send", input, {
+        timeoutMs: 30_000,
+      });
+    } catch (err) {
+      if (
+        err instanceof WorkerRpcTimeoutError ||
+        err instanceof WorkerRpcDisconnectError ||
+        err instanceof WorkerRpcSendError
+      ) {
+        return { kind: "unreachable" };
+      }
+      throw err;
+    }
   }
 }

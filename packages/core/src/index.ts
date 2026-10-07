@@ -14,6 +14,8 @@ import {
   seedInstanceTokenFromEnv,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
+import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
 import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
@@ -810,6 +812,15 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance.
   const notifyClient = new NotifyClient();
+  // Learn whether this boot's release version differs from the last completed
+  // boot's — the dashboard reads the result via /api/build-info. The stored
+  // version is committed after "Rome started" below.
+  const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
+  const feedbackClient = new FeedbackClient({
+    diagnostics: () =>
+      assembleDiagnosticBundle({ settingsRepo, channelsService, appCatalog, bootVersionReport }),
+    agentReportsEnabled: async () => (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
+  });
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
@@ -861,6 +872,7 @@ async function main() {
     backendTurnRunner,
     // Real push sender in main; the worker gets a NotifyServiceProxy.
     notify: notifyClient,
+    feedback: feedbackClient,
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its availability reads
     // the same AiToolState the model resolver gates on.
@@ -1252,6 +1264,7 @@ async function main() {
     },
     backendTurnRunner,
     notify: notifyClient,
+    feedback: feedbackClient,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1310,10 +1323,6 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  // Learn whether this boot's release version differs from the last completed
-  // boot's — the dashboard reads the result via /api/build-info. The stored
-  // version is committed after "Rome started" below.
-  const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
   computerUse.start();
 
   // Wire the process-global feature-flag backend (Statsig) when a server secret
@@ -1353,6 +1362,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      feedback: feedbackClient,
       provisionNodeCaller,
       nodeDevices,
       talkRouter,

@@ -158,3 +158,42 @@ describe("SettingsPage failures", () => {
     expect(rs.mocked(toast.success)).toHaveBeenCalledWith("Settings saved");
   });
 });
+
+describe("Agent feedback setting", () => {
+  it.each([
+    undefined,
+    false,
+    true,
+  ])("loads %s (unset defaults ON) and persists the toggle", async (stored) => {
+    const patches: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      if (String(input) === "/api/settings") {
+        if (init?.method === "PUT") {
+          const patch = JSON.parse(init.body as string);
+          patches.push(patch);
+          return response(true, 200, { ok: true });
+        }
+        return response(
+          true,
+          200,
+          stored === undefined ? {} : { "feedback.agentReportsEnabled": stored },
+        );
+      }
+      return defaultResponse(String(input));
+    }) as typeof fetch);
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: "Allow agent reports" });
+    expect(toggle.getAttribute("aria-checked")).toBe(String(stored ?? true));
+    await userEvent.click(toggle);
+    await waitFor(() =>
+      expect(patches).toEqual([{ "feedback.agentReportsEnabled": !(stored ?? true) }]),
+    );
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe(String(!(stored ?? true))),
+    );
+    expect(screen.getByText(/same instance diagnostics as the Feedback dialog/)).toBeTruthy();
+  });
+});

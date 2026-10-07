@@ -90,6 +90,8 @@ import {
 import { createAppStoreService } from "../apps/store-service.js";
 import type { CatalogEvent } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
+import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/types.js";
 import { Hono } from "hono";
@@ -632,10 +634,11 @@ export async function buildTestDeps(
   await dashboardAccessState.load(db);
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
+  const channelsService = createChannelsService({ channels: () => channels, router: talkRouter });
 
   return {
     talkRouter,
-    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
+    channelsService,
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
@@ -710,6 +713,17 @@ export async function buildTestDeps(
       }),
     },
     favorService: unavailableFavorService,
+    feedback: new FeedbackClient({
+      diagnostics: () =>
+        assembleDiagnosticBundle({
+          settingsRepo,
+          channelsService,
+          appCatalog,
+          bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },
+        }),
+      agentReportsEnabled: async () =>
+        (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
+    }),
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.
     bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },

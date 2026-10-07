@@ -791,6 +791,14 @@
       "lastSeen": "Last seen",
       "notReported": "Not reported",
       "installExtension": "Install OpenCLI extension"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "agentReports": {
+        "title": "Agent platform reports",
+        "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
+        "toggleLabel": "Allow agent reports"
+      }
     }
   },
   "system": {

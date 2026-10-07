@@ -78,6 +78,7 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
+    feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
     connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
   } = {},
@@ -110,6 +111,7 @@ function makeServer(
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
+    feedback: overrides.feedback ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
   } as unknown as WorkerRpcServices;
@@ -920,5 +922,35 @@ describe("notify.send dispatch", () => {
       release();
       kill.mockRestore();
     }
+  });
+});
+
+describe("feedback.send dispatch", () => {
+  const input = {
+    category: "bug",
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent", agentName: "main" },
+  };
+  it("forwards validated fields and runtime provenance", async () => {
+    const send = rs.fn(async () => ({ kind: "ok" }));
+    const { server } = makeServer({ feedback: { send } });
+    expect(await server.dispatchInProcess("feedback.send", input)).toEqual({ kind: "ok" });
+    expect(send).toHaveBeenCalledWith(input);
+  });
+  it.each([
+    { ...input, token: "spoof" },
+    { ...input, reporter: { kind: "guardian" } },
+    { ...input, reporter: { kind: "agent", extra: true } },
+    { ...input, details: "x".repeat(4000) },
+    { ...input, summary: "two\nlines" },
+    { ...input, category: "invalid" },
+  ])("rejects invalid RPC parameters without sending: %j", async (params) => {
+    const send = rs.fn();
+    const { server } = makeServer({ feedback: { send } });
+    await expect(server.dispatchInProcess("feedback.send", params)).rejects.toThrow(
+      "invalid params",
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 });

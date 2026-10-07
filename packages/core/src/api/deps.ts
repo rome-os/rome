@@ -25,6 +25,7 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
@@ -128,6 +129,7 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  feedback: FeedbackRelay;
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;

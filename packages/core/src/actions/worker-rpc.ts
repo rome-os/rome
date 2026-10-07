@@ -25,6 +25,7 @@ import { toRoutine } from "../db/repositories/routines.js";
 import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
+import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -237,6 +238,7 @@ export interface WorkerRpcServices {
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
+  feedback: FeedbackService;
 }
 
 export class WorkerRpcServer {
@@ -353,6 +355,10 @@ export class WorkerRpcServer {
         return await this.services.systemUpgrade.checkAndOffer();
       case "session.continue":
         return await this.handleSessionContinue(params);
+      case "feedback.send":
+        return await this.services.feedback.send(
+          parseParams("feedback.send", feedbackSendSchema, params),
+        );
       case "notify.send": {
         // The sender reads token/origin from main-process state; the only wire
         // param is the optional body. Preserve the no-body call shape

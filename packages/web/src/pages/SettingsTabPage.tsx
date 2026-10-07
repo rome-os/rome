@@ -130,6 +130,7 @@ import {
 // ── Types ──────────────────────────────────────────────
 
 interface SettingsData {
+  "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
@@ -1029,6 +1030,21 @@ function AdvancedSection({
         {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
+        <Section>
+          <SectionHeader>
+            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+          </SectionHeader>
+          <FormRows>
+            <SettingsToggleRow
+              title={t("advanced.feedback.agentReports.title")}
+              description={t("advanced.feedback.agentReports.description")}
+              label={t("advanced.feedback.agentReports.toggleLabel")}
+              checked={settings["feedback.agentReportsEnabled"] ?? true}
+              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+              disabled={saving}
+            />
+          </FormRows>
+        </Section>
         <ComputerUseSection />
         <PresentationModeSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
