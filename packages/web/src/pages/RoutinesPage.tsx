@@ -959,6 +959,8 @@ function RunNowButton({
     }
   };
 
+  // Hidden on phones so the routine name keeps the row's width. The "⋯" menu
+  // still offers Run now there. StopButton stays inline: the menu has no Stop.
   return (
     <Button
       variant="outline"
@@ -968,7 +970,7 @@ function RunNowButton({
       aria-label={
         inFlight ? t("run.loadingLabel", { name: label }) : t("run.ariaLabel", { name: label })
       }
-      className="gap-2 text-muted-foreground"
+      className="gap-2 text-muted-foreground max-sm:hidden"
     >
       {inFlight ? (
         <Spinner size="sm" label={t("run.loadingLabel", { name: label })} />
