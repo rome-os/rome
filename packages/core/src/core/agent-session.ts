@@ -1787,6 +1787,8 @@ interface TurnSink {
    * would hand a queued turn the id of the turn ahead of it.
    */
   providerTurnIdAtStart?: string;
+  /** Payer selected while resolving this turn's model. */
+  resolvedFunding?: UsageFunding;
   /** Payer of the provider session that executes this turn. */
   funding?: UsageFunding;
   usageRecorded: boolean;
@@ -3289,6 +3291,7 @@ class AgentSessionImpl implements AgentSession {
       span.end();
       return;
     }
+    sink.resolvedFunding = this.modelSession.funding;
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -3436,7 +3439,11 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            sink.funding = this.modelSession.funding;
+            const funding = this.modelSession.funding;
+            if (sink.resolvedFunding !== funding) {
+              throw new Error("Model payer changed while preparing this turn; please retry.");
+            }
+            sink.funding = funding;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

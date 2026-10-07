@@ -19,6 +19,8 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
+import { createRomeCreditsPayer } from "./rome-credits-payer.js";
+import type { AIToolStateValue } from "./ai-tool-state.js";
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -41,6 +43,8 @@ describe("AgentSession turn usage", () => {
   let forkable: boolean;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
+  let state: AIToolStateValue;
+  let providerCalls: number;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -64,12 +68,20 @@ describe("AgentSession turn usage", () => {
     forkable = false;
     funding = "byok";
     beforeModelDispatch = undefined;
+    providerCalls = 0;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
-        const session = createSessionFromRun("openai", () => nextRun(), params);
+        const session = createSessionFromRun(
+          "openai",
+          () => {
+            providerCalls++;
+            return nextRun();
+          },
+          params,
+        );
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
         Object.defineProperty(session, "funding", { get: () => funding });
         if (forkable) {
@@ -85,7 +97,7 @@ describe("AgentSession turn usage", () => {
         return session;
       },
     };
-    const state = {
+    state = {
       codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
       claude: { loggedIn: false, quotaExhausted: false },
     };
@@ -245,7 +257,7 @@ describe("AgentSession turn usage", () => {
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
   });
 
-  it("records funding from the payer that dispatches after turn preparation", async () => {
+  it("fails closed when the Codex payer changes during turn preparation", async () => {
     let releasePreparation!: () => void;
     const preparationGate = new Promise<void>((resolve) => {
       releasePreparation = resolve;
@@ -261,16 +273,35 @@ describe("AgentSession turn usage", () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
+    const payer = createRomeCreditsPayer({
+      aiToolState: { get: () => state },
+      appServerManager: {
+        setDefaultProvider: (provider) => {
+          funding = provider === "rome_credits" ? "rome_credits" : "subscription";
+        },
+        restart: () => {},
+      },
+      getInstanceToken: () => "romeinst_123",
+    });
 
     const session = await manager.acquire(key);
     const turn = session.sendTurn({ prompt: "prepare, then send" });
     await preparationStartedPromise;
-    funding = "rome_credits";
+    state.codex.loggedIn = false;
+    payer.sync();
     releasePreparation();
-    await drain(turn.events);
+    const events: AgentEvent[] = [];
+    for await (const event of turn.events) events.push(event);
 
     expect(recorded).toHaveLength(1);
-    expect(recorded[0]?.funding).toBe("rome_credits");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Model payer changed while preparing this turn; please retry.",
+      }),
+    );
+    expect(recorded[0]?.funding).toBeUndefined();
+    expect(providerCalls).toBe(0);
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
