@@ -13,9 +13,11 @@ import { z } from "zod";
 import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
+  AgentMessagingError,
   createRomeCloudAgentsClient,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
+import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
   AuthScheme,
@@ -24,6 +26,7 @@ import type {
   InboundMessage,
   ProfileDisplay,
   ProfileRecord,
+  StreamFault,
   Talker,
 } from "../types.js";
 
@@ -72,6 +75,13 @@ function outgoingText(message: OutgoingMessage): string {
   return (message.parts ?? [])
     .flatMap((part) => (part.type === "text" ? [part.content] : []))
     .join("\n\n");
+}
+
+/** Whether Cloud refused the instance token itself, which no retry fixes: the
+ *  token is unknown or revoked, or this Rome is no longer linked. */
+function isRejectedToken(err: unknown): boolean {
+  if (!(err instanceof AgentMessagingError)) return false;
+  return err.status === 401 || err.status === 403 || err.code === "no_token";
 }
 
 export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
@@ -125,7 +135,11 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       cancelWait = done;
     });
 
-  async function loop(current: number, deliver: (msg: InboundMessage) => void) {
+  async function loop(
+    current: number,
+    deliver: (msg: InboundMessage) => void,
+    fault: (err: StreamFault) => void,
+  ) {
     let failures = 0;
     while (current === generation) {
       let delay = POLL_INTERVAL_MS;
@@ -139,6 +153,11 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         failures = 0;
         if (messages.length >= POLL_PAGE_SIZE) delay = 0;
       } catch (err) {
+        if (current !== generation) return;
+        if (isRejectedToken(err)) {
+          fault(new CredentialRejected({ grant: "cloud", cause: err }));
+          return;
+        }
         failures++;
         delay = Math.min(POLL_INTERVAL_MS * 2 ** failures, MAX_BACKOFF_MS);
         log.warn("Agent message poll failed", {
@@ -151,15 +170,20 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   }
 
   return {
-    start(deliver) {
+    start(deliver, fault) {
       const current = ++generation;
-      void loop(current, deliver);
+      void loop(current, deliver, fault);
     },
     stop() {
       generation++;
       cancelWait?.();
     },
     async send(conversationId, msg) {
+      // Cloud carries text and data only. Refusing here keeps a partial send
+      // from being reported, and recorded, as if the files went too.
+      if (msg.attachments?.length) {
+        throw new Error("Agent messages carry text only; send the files another way.");
+      }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");
       const sent = await client.send({

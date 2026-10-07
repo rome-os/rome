@@ -87,6 +87,7 @@ describe("channelList", () => {
     admit = async (_id: string, _service: string, inbound: InboundMessage) =>
       inbound.senderId === "guardian",
     routerOptions?: { admissionTimeoutMs?: number },
+    connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
@@ -109,6 +110,7 @@ describe("channelList", () => {
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
       connections: { registry, router },
+      ...(connectionAccounts ? { connectionAccounts } : {}),
     });
     return { registry, channels, subscribed };
   }
@@ -137,6 +139,19 @@ describe("channelList", () => {
     expect(linkedin?.send).not.toBeNull();
     expect(linkedin?.inbound).toBeNull();
     expect(telegram).toMatchObject({ accounts: null, messages: null });
+  });
+
+  it("gives a Connection-backed channel the address book named for its service", () => {
+    const book: Accounts = { ...noAccounts };
+    const { channels } = setup(
+      [talkService("agents").descriptor, talkService("telegram").descriptor],
+      undefined,
+      undefined,
+      { agents: book },
+    );
+    const named = (name: string) => channels.find((channel) => channel.name === name);
+    expect(named("agents")?.accounts).toBe(book);
+    expect(named("telegram")?.accounts).toBeNull();
   });
 
   it("rejects a send nothing backs, and sends through the Connection once one does", async () => {

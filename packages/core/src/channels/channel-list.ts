@@ -48,6 +48,9 @@ export function channelList(deps: {
    *  `messages`. Every registered service with a Talk contributes a channel;
    *  absent, no channel has those ports. */
   connections?: ConnectionPortsDeps;
+  /** Address books for channels a Connection backs, by service. A service
+   *  absent here has no address book. */
+  connectionAccounts?: Record<string, Accounts>;
 }): Channels {
   const reads: Array<Pick<Channel, "name" | "accounts" | "messages">> = [
     { name: "whatsapp", accounts: deps.whatsAppAccounts, messages: whatsAppMessages(deps.db) },
@@ -77,7 +80,7 @@ export function channelList(deps: {
   for (const [name, backed] of ports) {
     if (reads.some((read) => read.name === name)) continue;
     if (!backed.send && !backed.inbound && !backed.messages) continue;
-    channels.push({ name, accounts: null, ...backed });
+    channels.push({ name, accounts: deps.connectionAccounts?.[name] ?? null, ...backed });
   }
   return channels;
 }

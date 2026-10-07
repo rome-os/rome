@@ -17,6 +17,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
@@ -66,6 +67,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
+import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService } from "./channels/channels-service.js";
@@ -185,6 +187,7 @@ import {
 } from "./apps/artifact-id.js";
 import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
+import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import {
   ConversationSettingsRepository,
@@ -1069,6 +1072,13 @@ async function main() {
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
+    connectionAccounts: {
+      [AGENTS_SERVICE]: agentsAccounts({
+        client: createRomeCloudAgentsClient(),
+        isConnected: () =>
+          connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
+      }),
+    },
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });

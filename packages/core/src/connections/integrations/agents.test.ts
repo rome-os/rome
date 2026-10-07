@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConversationId } from "@rome-os/app-runtime";
-import type { AgentMessageEnvelope, AgentMessagingClient } from "../../lib/rome-cloud-agents.js";
-import type { InboundMessage } from "../types.js";
+import {
+  type AgentMessageEnvelope,
+  type AgentMessagingClient,
+  AgentMessagingError,
+} from "../../lib/rome-cloud-agents.js";
+import { CredentialRejected } from "../errors.js";
+import type { InboundMessage, StreamFault } from "../types.js";
 import {
   createAgentsTalker,
   makeAgentsSetup,
@@ -107,6 +112,43 @@ describe("agents channel", () => {
     await rs.advanceTimersByTimeAsync(20_000);
     await until(() => delivered.length === 1, true);
     await talker.stop();
+  });
+
+  it.each([
+    ["an unknown or revoked token", new AgentMessagingError("unauthorized", 401)],
+    ["a forbidden token", new AgentMessagingError("forbidden", 403)],
+    ["a Rome no longer linked", new AgentMessagingError("not linked", undefined, "no_token")],
+  ])("reports %s as a rejected credential and stops polling", async (_case, error) => {
+    const client = fakeClient([]);
+    let calls = 0;
+    client.poll = async () => {
+      calls++;
+      throw error;
+    };
+    const talker = createAgentsTalker(client);
+    const faults: StreamFault[] = [];
+    talker.start(
+      () => {},
+      (fault) => faults.push(fault),
+    );
+    await until(() => faults.length > 0);
+    expect(faults[0]).toBeInstanceOf(CredentialRejected);
+    expect((faults[0] as CredentialRejected).grant).toBe("cloud");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(calls).toBe(1);
+    await talker.stop();
+  });
+
+  it("refuses attachments rather than sending only the text", async () => {
+    const client = fakeClient([]);
+    const talker = createAgentsTalker(client);
+    await expect(
+      talker.send("atlas" as ConversationId, {
+        text: "Here is the invoice",
+        attachments: [{ type: "document", source: "/tmp/invoice.pdf" }],
+      }),
+    ).rejects.toThrow(/text only/);
+    expect(client.sent).toEqual([]);
   });
 
   it("sends to the endpoint named by the conversation and threads replies", async () => {
