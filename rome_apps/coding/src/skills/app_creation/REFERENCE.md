@@ -178,9 +178,17 @@ noindex: false
 ```
 
 Store asset paths are relative to `.rome_store/`, so the example above expects
-files under `.rome_store/assets/`. `media` holds up to 8 entries. Images may be
-PNG, JPEG, or WebP up to 2 MB, and videos may be MP4, WebM, or MOV up to 25 MB.
-A video's optional `poster` must point at an image.
+files under `.rome_store/assets/`. Rome Cloud's
+[submission rules](https://romeos.cc/docs/building-apps/app-store-submission)
+set these limits:
+
+- The packed `.rome_store` directory must stay under 30 MB, or Rome Cloud
+  rejects the whole publish. Plan for one short demo video, not several.
+- `media` holds up to 8 entries. Images may be PNG, JPEG, or WebP up to 2 MB.
+  Videos may be MP4, WebM, or MOV up to 25 MB, and a video's optional `poster`
+  must point at an image.
+- A single asset over its limit or in another format still publishes, but the
+  store page leaves it out.
 
 ### `action.yaml`
 
