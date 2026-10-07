@@ -75,7 +75,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
 
   return (
     <div
-      className="my-3 rounded-12 border border-border bg-surface-muted px-4 py-3 text-foreground"
+      className="@container my-3 rounded-12 border border-border bg-surface-muted px-4 py-3 text-foreground"
       aria-busy={options?.loading || undefined}
     >
       <div className="flex items-center justify-between gap-4">
@@ -117,7 +117,9 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
             {formatTraceNumber(aggregateTokens)}
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-5 gap-y-2">
+        {/* Two label-and-count pairs need about 18rem side by side, more than
+            a phone-width trace drawer leaves, so narrow cards stack them. */}
+        <div className="mt-2 grid grid-cols-1 gap-x-5 gap-y-2 @min-[18rem]:grid-cols-2">
           <UsageStat label={t("usage.labels.cacheRead")} value={accounting.usage.cacheReadTokens} />
           <UsageStat
             label={t("usage.labels.cacheWrite")}
@@ -227,7 +229,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            <span className="font-mono text-aux text-foreground tabular-nums">
+            <span className="whitespace-nowrap font-mono text-aux text-foreground tabular-nums">
               {context.windowTokens
                 ? `${formatTraceNumber(context.usedTokens)} / ${formatTraceNumber(context.windowTokens)}`
                 : formatTraceNumber(context.usedTokens)}

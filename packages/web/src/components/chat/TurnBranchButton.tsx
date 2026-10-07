@@ -3,6 +3,7 @@ import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import { useTranslation } from "react-i18next";
 import { turnApiPath } from "@/components/agent-trace/turn-api";
 import { BranchingChatBubbleIcon } from "@/components/chat/BranchingChatBubbleIcon";
+import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -16,6 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { placeChatWidget } from "@/pages/free/use-free-cells";
 import { emitSessionsChanged } from "@/lib/session-events";
+import { cn } from "@/lib/utils";
 
 const SUGGESTION_KEYS = [
   "message.branch.suggestions.mermaid",
@@ -89,7 +91,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           />
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-80">
+      <PopoverContent
+        align="start"
+        collisionPadding={CHAT_POPOVER_FIT.collisionPadding}
+        className={cn("w-80", CHAT_POPOVER_FIT.className)}
+      >
         <PopoverHeader>
           <PopoverTitle>{t("message.branch.title")}</PopoverTitle>
           <PopoverDescription>{t("message.branch.description")}</PopoverDescription>
