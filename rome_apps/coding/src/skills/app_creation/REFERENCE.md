@@ -170,11 +170,17 @@ media:
   - type: image
     path: assets/dashboard.png
     alt: Morning Brief dashboard
+  - type: video
+    path: assets/demo.mp4
+    poster: assets/demo-poster.png
+    alt: Morning Brief demo
 noindex: false
 ```
 
 Store asset paths are relative to `.rome_store/`, so the example above expects
-files under `.rome_store/assets/`.
+files under `.rome_store/assets/`. `media` holds up to 8 entries. Images may be
+PNG, JPEG, or WebP up to 2 MB, and videos may be MP4, WebM, or MOV up to 25 MB.
+A video's optional `poster` must point at an image.
 
 ### `action.yaml`
 

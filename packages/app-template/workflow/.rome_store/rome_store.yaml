@@ -10,12 +10,18 @@ keywords:
   - automation
   - productivity
 # Optional store-only media. Paths are relative to this .rome_store directory
-# and are uploaded separately from the installable app bundle.
+# and are uploaded separately from the installable app bundle. The store page
+# shows up to 8 media entries: PNG, JPEG, or WebP images up to 2 MB, and MP4,
+# WebM, or MOV videos up to 25 MB. A video's optional poster must be an image.
 # image: assets/store-og.png
 # image_alt: __APP_NAME__ preview
 # media:
 #   - type: image
 #     path: assets/screenshot.png
 #     alt: __APP_NAME__ main screen
+#   - type: video
+#     path: assets/demo.mp4
+#     poster: assets/demo-poster.png
+#     alt: __APP_NAME__ demo
 preview: off
 noindex: false
