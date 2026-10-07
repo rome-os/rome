@@ -383,8 +383,9 @@ export class PromptBuilder {
    * recommendation; before long-running work, state a short plan (without
    * waiting for approval) so a wrong direction is caught early; and when asking,
    * use the built-in `ask_question` tool (an interactive card) instead of prose.
-   * Reinforces the tool's own description from the system prompt. Lives here (rather than in a single agent's systemPromptPrefix) so
-   * every @-mentionable core agent gets the same behavior.
+   * Reinforces the tool's own description from the system prompt. Lives here
+   * (rather than in a single agent's systemPromptPrefix) so every
+   * @-mentionable core agent gets the same behavior.
    *
    * Gated on the agent holding the `*` action grant — the conversational agents
    * (main, assistant, planning, coding, explore) that actually talk to the
@@ -402,7 +403,7 @@ export class PromptBuilder {
       "",
       "Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.",
       "",
-      "Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler.",
+      "Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.",
       "",
       "When you do need to ask, use the `ask_question` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.",
     ].join("\n");

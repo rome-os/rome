@@ -232,11 +232,18 @@ describe("PromptBuilder", () => {
 
   it("asks guardian-facing agents to state a short plan before long-running work", () => {
     const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
-    const section = prompt.split("# Asking The Guardian For Input\n\n")[1];
+    // Cut at the next top-level heading so the checks stay inside this section.
+    const section = prompt.split("# Asking The Guardian For Input\n\n")[1]?.split("\n# ")[0] ?? "";
+    const planIndex = section.indexOf("Before you start a long-running task");
 
-    expect(section).toContain("Before you start a long-running task");
+    expect(planIndex).toBeGreaterThan(-1);
     expect(section).toContain("state your plan, then start without waiting for approval");
     expect(section).toContain("ASD-STE100 Simplified Technical English");
+    expect(section).toContain(
+      "If you already show the plan as a todo list, do not repeat it in prose.",
+    );
+    // The plan paragraph sits before the "use the ask_question tool" rule.
+    expect(planIndex).toBeLessThan(section.indexOf("When you do need to ask"));
 
     const withoutAskTool = new PromptBuilder().build(mainConfig, corePromptOptions);
     expect(withoutAskTool).not.toContain("Before you start a long-running task");
