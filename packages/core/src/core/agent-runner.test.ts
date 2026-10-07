@@ -3489,6 +3489,57 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("drops a replaced backend's background tasks even when its replacement fails to open", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      let opens = 0;
+      const provider: ModelProvider = {
+        id: "openai",
+        displayName: "Codex",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          if (++opens > 1) throw new Error("replacement failed to open");
+          runtime = createSdkEventSession(params);
+          return { ...runtime.session, providerId: "openai" };
+        },
+      };
+      const modelResolver = createModelResolver({
+        providers: [provider],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+        keepAliveAcrossTurns: true,
+      });
+      try {
+        const session = await manager.acquire({
+          agentName: "test-main",
+          channelThreadKey: "webchat:tasks-failed-replacement",
+        });
+        const a = collectMessages(session.sendTurn({ inputId: "A", prompt: "first" }).events);
+        await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+        runtime.emit({ type: "model_turn_start", turnId: "sdk-A", answers: ["A"] });
+        // An error keeps the session unpinned, so the next turn re-resolves.
+        runtime.emit({ type: "error", error: "first backend failed" });
+        runtime.emit({ type: "model_turn_end", turnId: "sdk-A", answers: ["A"] });
+        await a;
+        const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
+        runtime.emit({ type: "background_tasks", tasks: [task] });
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([task]));
+
+        state.codex.solAccess = false;
+        await collectMessages(session.sendTurn({ inputId: "B", prompt: "second" }).events).catch(
+          () => {},
+        );
+        await rs.waitFor(() => expect(opens).toBe(2));
+        expect(session.backgroundTasks).toEqual([]);
+      } finally {
+        await manager.shutdown();
+      }
+    });
+
     it("owns an early background submission before its first visible block", async () => {
       let runtime!: ReturnType<typeof createSdkEventSession>;
       let submitOutput: ((input: unknown) => Promise<unknown>) | undefined;

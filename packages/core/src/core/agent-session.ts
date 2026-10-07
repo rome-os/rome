@@ -2220,6 +2220,8 @@ class AgentSessionImpl implements AgentSession {
     try {
       await previous.close();
       await this.modelEventsLoop;
+      // Its tasks ended with it, even if no replacement opens.
+      this._backgroundTasks = [];
       const next = await this.openModelSession(
         resolution,
         sameProvider ? previous.providerId : undefined,
