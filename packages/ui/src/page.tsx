@@ -5,10 +5,12 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type Ref,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -195,6 +197,32 @@ function useScrolledUnder(target: HTMLElement | null, edge: HTMLElement | null):
 }
 
 /**
+ * Renders `children` once into a node it owns, then attaches that node to
+ * `host` when given and to the inline element otherwise. The portal target
+ * never changes, so moving between the page and the bar keeps the subtree's
+ * state and focus instead of remounting it.
+ */
+function useRelocated(children: ReactNode, host: HTMLElement | null) {
+  const [node] = useState(() => {
+    const el = document.createElement("div");
+    el.style.display = "contents";
+    return el;
+  });
+  const [inline, setInline] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const target = host ?? inline;
+    if (target && node.parentNode !== target) target.appendChild(node);
+  }, [host, inline, node]);
+  useLayoutEffect(() => () => node.remove(), [node]);
+  return { setInline, portal: createPortal(children, node) };
+}
+
+function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
+  if (typeof ref === "function") ref(value);
+  else if (ref) ref.current = value;
+}
+
+/**
  * The skeleton of a routed page: the regions a page stacks, top to bottom, at
  * the padding and the 24px rhythm no page restates. A header, then whatever
  * body the page's task calls for — a `ListCollection`, a set of `FormRows`, a
@@ -259,11 +287,17 @@ export function PageHeader({
  */
 export function PageHeaderNav({ className, children, ...props }: ComponentProps<"div">) {
   const host = useContext(HeaderTopBarContext)?.nav ?? null;
-  if (host) return createPortal(children, host);
+  const { setInline, portal } = useRelocated(children, host);
   return (
-    <div data-slot="page-header-nav" className={cn("basis-full", className)} {...props}>
-      {children}
-    </div>
+    <>
+      <div
+        ref={setInline}
+        data-slot="page-header-nav"
+        className={cn("basis-full", className, host && "hidden")}
+        {...props}
+      />
+      {portal}
+    </>
   );
 }
 
@@ -283,15 +317,22 @@ export function PageHeading({ className, ...props }: ComponentProps<"div">) {
  * once the `h1` has scrolled up under the bar. The page keeps the large title at
  * rest, so the bar never shows the same words twice on one screen.
  */
-export function PageTitle({ className, children, ...props }: ComponentProps<"h1">) {
+export function PageTitle({ className, children, ref, ...props }: ComponentProps<"h1">) {
   const hosts = useContext(HeaderTopBarContext);
   const host = hosts?.title ?? null;
   const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
+  const setRefs = useCallback(
+    (el: HTMLHeadingElement | null) => {
+      setHeading(el);
+      assignRef(ref, el);
+    },
+    [ref],
+  );
   const under = useScrolledUnder(host ? heading : null, hosts?.edge ?? null);
   return (
     <>
       <h1
-        ref={setHeading}
+        ref={setRefs}
         data-slot="page-title"
         className={cn(
           "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
@@ -339,16 +380,19 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
  * since the bar holds one.
  */
 export function PageActions({ className, children, ...props }: ComponentProps<"div">) {
-  const host = useContext(HeaderTopBarContext)?.action ?? null;
-  if (host && Children.toArray(children).length === 1) return createPortal(children, host);
+  const barHost = useContext(HeaderTopBarContext)?.action ?? null;
+  const host = Children.toArray(children).length === 1 ? barHost : null;
+  const { setInline, portal } = useRelocated(children, host);
   return (
-    <div
-      data-slot="page-actions"
-      className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
-      {...props}
-    >
-      {children}
-    </div>
+    <>
+      <div
+        ref={setInline}
+        data-slot="page-actions"
+        className={cn("flex shrink-0 flex-wrap items-center gap-2", className, host && "hidden")}
+        {...props}
+      />
+      {portal}
+    </>
   );
 }
 

@@ -1,5 +1,5 @@
-import { type ReactNode, useEffect, useState } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { createRef, type ReactNode, useEffect, useState } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   Measure,
@@ -264,8 +264,11 @@ describe("PageTopBar", () => {
     expect(bar.querySelector("button")?.textContent).toBe("New routine");
 
     const page = screen.getByTestId("page");
-    expect(page.querySelector('[data-slot="page-header-nav"]')).toBeNull();
-    expect(page.querySelector('[data-slot="page-actions"]')).toBeNull();
+    for (const slot of ["page-header-nav", "page-actions"]) {
+      const inline = page.querySelector(`[data-slot="${slot}"]`);
+      expect(inline?.textContent).toBe("");
+      expect([...(inline?.classList ?? [])]).toContain("hidden");
+    }
     expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
 
     // The bar repeats the title for the eye only, so a reader still meets one h1.
@@ -309,15 +312,20 @@ describe("PageTopBar", () => {
     );
 
     expect(mounts).toBe(1);
-    expect(screen.getAllByRole("button")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByRole("button").textContent).toBe("Clicked 1");
 
     viewport.resize(true);
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByTestId("bar").querySelector("button")).not.toBeNull();
+    expect(screen.getByRole("button").textContent).toBe("Clicked 1");
+    fireEvent.click(screen.getByRole("button"));
 
     viewport.resize(false);
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByTestId("bar").querySelector("button")).toBeNull();
+    expect(screen.getByRole("button").textContent).toBe("Clicked 2");
+    expect(mounts).toBe(1);
   });
 
   it("keeps two or more actions in the page, since the bar holds one", () => {
@@ -381,6 +389,37 @@ describe("PageTopBar", () => {
       window.dispatchEvent(new Event("resize"));
     });
     expect(title()?.hasAttribute("data-shown")).toBe(true);
+  });
+
+  it("hands the caller's ref the h1 and still shows the bar's title on scroll", () => {
+    mockViewport(true);
+    let headingBottom = 120;
+    rs.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+    rs.spyOn(HTMLHeadingElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ bottom: headingBottom }) as DOMRect,
+    );
+    const ref = createRef<HTMLHeadingElement>();
+    render(
+      <InShell>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle ref={ref}>Keys</PageTitle>
+          </PageHeading>
+        </PageHeader>
+      </InShell>,
+    );
+    bottomAt(screen.getByTestId("bar"), () => 56);
+
+    expect(ref.current).toBe(screen.getByRole("heading", { level: 1 }));
+    headingBottom = 40;
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    const title = screen.getByTestId("bar").querySelector('[data-slot="page-top-bar-title"]');
+    expect(title?.hasAttribute("data-shown")).toBe(true);
   });
 
   it("gives the bar back to the fallback when the header unmounts", () => {
