@@ -57,7 +57,7 @@ A PR that changes what the dashboard or an app shows attaches screenshots of the
 | Phone | 390×844 | On |
 | Desktop | 1280×900 | Off |
 
-Add a third at 320×800 when the view holds a table, a toolbar, or a row of buttons, since those overflow first. Take them in your browser's device mode under `pnpm start:web:mock`. A phone screenshot shows the phone layout was designed rather than left to shrink: no sideways scroll, nothing cut off at the edge, and every action reachable without hover.
+Add a third at 320×800 when the view holds a table, a toolbar, or a row of buttons, since those overflow first. Take them in your browser's device mode. For a dashboard view, `pnpm start:web:mock` is enough. For an app, use `pnpm dev:all` with the changed app rebuilt and loaded, since mock mode serves apps from committed bundles under `packages/web/mock/public/recorded-apps` and would show the old UI. A phone screenshot shows the phone layout was designed rather than left to shrink: no sideways scroll, nothing cut off at the edge, and every action reachable without hover.
 
 ### Not in this PR
 
