@@ -106,6 +106,7 @@ function makeServer(
     appStore,
     hasAgent: () => false,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
+    isExplicitAction: rs.fn(() => false),
     hasAction: () => false,
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
@@ -450,7 +451,7 @@ describe("WorkerRpcServer param validation", () => {
     const response = await rpc(fake, "actions.has", { actionName: "send_message" });
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ hasAction: true });
+    expect(response.result).toEqual({ hasAction: true, explicit: false });
     expect(hasRegisteredAction).toHaveBeenCalledWith("send_message");
   });
 

@@ -101,6 +101,10 @@ export class ActionRegistryImpl implements ActionRegistry {
     return this.actions.has(this.resolveName(name));
   }
 
+  isExplicit(name: string): boolean {
+    return this.get(name)?.config.visibility === "explicit";
+  }
+
   getCanonicalName(name: string): string | undefined {
     return this.get(name)?.config.name;
   }

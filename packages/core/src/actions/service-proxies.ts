@@ -103,6 +103,11 @@ export class ActionRegistryProxy {
     const result = await getWorkerRpc().call<{ hasAction: boolean }>("actions.has", { actionName });
     return result.hasAction;
   }
+
+  async isExplicit(actionName: string): Promise<boolean> {
+    const result = await getWorkerRpc().call<{ explicit: boolean }>("actions.has", { actionName });
+    return result.explicit;
+  }
 }
 
 /**

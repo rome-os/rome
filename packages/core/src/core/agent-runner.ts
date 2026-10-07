@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
 import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
-import type { ActionConfig } from "../actions/types.js";
+import type { ActionConfig, ActionRegistry } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams } from "./types.js";
@@ -474,6 +474,7 @@ export class AgentRunner {
     private agentLoader?: AgentLoader,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
+    private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
   ) {}
 
   /**
@@ -486,6 +487,25 @@ export class AgentRunner {
   hasAgent(name: string): boolean {
     if (!this.agentLoader) return true;
     return this.agentLoader.has(name);
+  }
+
+  /**
+   * Returns true when the named agent may call the named action, through the
+   * same `getForAgent` resolution the agent session uses for its tool catalog
+   * and execution gate. Unknown agent or action → false.
+   */
+  hasAction(agentName: string, actionName: string): boolean {
+    if (!this.agentLoader || !this.actionRegistry) return false;
+    let actions: string[];
+    try {
+      actions = this.agentLoader.getRecord(agentName).config.actions ?? [];
+    } catch {
+      return false;
+    }
+    const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
+    return this.actionRegistry
+      .getForAgent(actions)
+      .some((action) => action.config.name === canonical);
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {

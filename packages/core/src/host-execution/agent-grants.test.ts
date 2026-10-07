@@ -24,7 +24,7 @@ async function agentManifests(): Promise<Array<{ id: string; actions: string[] }
   const agents = [];
   for (const [owner, dir] of dirs) {
     const files = await readdir(dir).catch(() => []);
-    for (const file of files.filter((name) => name.endsWith(".yaml"))) {
+    for (const file of files.filter((name) => /\.ya?ml$/.test(name))) {
       const config = parseYaml(await readFile(join(dir, file), "utf-8"));
       agents.push({
         id: owner ? `${owner}:${config.name}` : config.name,
@@ -57,13 +57,16 @@ describe("host root action grants", () => {
       );
     }
 
-    const holders = (await agentManifests())
+    const agents = await agentManifests();
+    const holders = agents
       .filter((agent) => registry.getForAgent(agent.actions).length > 0)
       .map((agent) => agent.id);
     expect(holders).toEqual(["main"]);
+    // The untrusted-input triage agent holds nothing it could be steered into.
+    expect(agents.find((agent) => agent.id === "inbox:sentinel")?.actions).toEqual([]);
     expect(
       registry
-        .getForAgent((await agentManifests()).find((agent) => agent.id === "main")!.actions)
+        .getForAgent(agents.find((agent) => agent.id === "main")!.actions)
         .map((action) => action.config.name)
         .sort(),
     ).toEqual(["system:execute_root_script", "system:manage_root_script"]);
