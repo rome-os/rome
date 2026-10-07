@@ -343,6 +343,87 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("replays acquisition output before delivering an already-queued live message", async () => {
+    let releaseSecondOutput!: () => void;
+    const secondOutputReady = new Promise<void>((resolve) => {
+      releaseSecondOutput = resolve;
+    });
+    let secondTurnOpen!: () => void;
+    const secondTurnOpened = new Promise<void>((resolve) => {
+      secondTurnOpen = resolve;
+    });
+    const modelSession: ModelSession = {
+      providerId: "mock",
+      model: "mock-model",
+      events: (async function* (): AsyncGenerator<ModelSessionEvent> {
+        yield { type: "model_turn_start", turnId: "first", answers: [] };
+        yield { type: "model_turn_answers", turnId: "first", added: [] };
+        yield { type: "text", content: "A", turnPhase: "final" };
+        yield { type: "result", content: "A" };
+        yield { type: "model_turn_end", turnId: "first", answers: [] };
+        yield { type: "model_turn_start", turnId: "second", answers: [] };
+        yield { type: "model_turn_answers", turnId: "second", added: [] };
+        secondTurnOpen();
+        await secondOutputReady;
+        yield { type: "text", content: "B", turnPhase: "final" };
+        yield { type: "result", content: "B" };
+        yield { type: "model_turn_end", turnId: "second", answers: [] };
+      })(),
+      async sendUserInput() {},
+      async fork() {
+        throw new Error("unsupported in replay fixture");
+      },
+      async interrupt() {},
+      async close() {},
+    };
+    const provider: ModelProvider = {
+      id: "mock",
+      displayName: "Mock",
+      builtinTools: new Set(),
+      openSession: async () => modelSession,
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-main",
+      channelThreadKey: "webchat:replay-live-order",
+    });
+    let firstCompleted!: () => void;
+    const sawFirstCompletion = new Promise<void>((resolve) => {
+      firstCompleted = resolve;
+    });
+    session.subscribe((message) => {
+      if (message.type === "result" && message.content === "A") firstCompleted();
+    });
+    await sawFirstCompletion;
+    await secondTurnOpened;
+
+    const replayed: string[] = [];
+    const queuedMicrotasks: Array<() => void> = [];
+    const queueMicrotask = globalThis.queueMicrotask;
+    globalThis.queueMicrotask = (callback) => queuedMicrotasks.push(callback);
+    try {
+      session.subscribe(
+        (message) => {
+          if (message.type === "text") replayed.push(message.content);
+        },
+        { replayModelTurns: true },
+      );
+      // The second turn's output arrives while replay is queued but has not
+      // drained. It belongs in the replay journal, never in a live delivery.
+      releaseSecondOutput();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(replayed).toEqual([]);
+      for (const callback of queuedMicrotasks) callback();
+      await rs.waitFor(() => expect(replayed).toEqual(["A", "B"]));
+    } finally {
+      globalThis.queueMicrotask = queueMicrotask;
+    }
+    await manager.shutdown();
+  });
+
   it("routes a middleware reply through a model turn and marks its input answered", async () => {
     const turnMiddleware = createTurnMiddlewareChain();
     rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {

@@ -954,6 +954,102 @@ describe("AnthropicProvider", () => {
       expect(seen.filter((line) => line.startsWith("consumed"))).toEqual([]);
       await session.close();
     });
+
+    it("delivers a local completion as one atomic model turn beside provider output", async () => {
+      let releaseProvider!: () => void;
+      const providerReady = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      scripted(async function* () {
+        await providerReady;
+        yield say("provider", undefined);
+        yield result("provider", [], "task-notification");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events: ModelSessionEvent[] = [];
+      let localStarted!: () => void;
+      const sawLocalStart = new Promise<void>((resolve) => {
+        localStarted = resolve;
+      });
+      const drain = (async () => {
+        let ended = 0;
+        for await (const event of session.events) {
+          events.push(event);
+          if (event.type === "model_turn_start" && event.answers.includes(a)) localStarted();
+          if (event.type === "model_turn_end" && ++ended === 2) return;
+        }
+      })();
+
+      await session.completeTurn!({ inputId: a, text: "local" }, [
+        { type: "text", content: "local", turnPhase: "final" },
+        { type: "result", content: "local" },
+      ]);
+      await sawLocalStart;
+      // The provider frame becomes ready while the merger is paused at the
+      // local start. It must wait for that local turn's end.
+      releaseProvider();
+      await drain;
+
+      const order = events.map((event) => {
+        if (event.type === "model_turn_start") return `start:${event.answers.join(",")}`;
+        if (event.type === "model_turn_end") return `end:${event.answers.join(",")}`;
+        if (event.type === "text" || event.type === "result")
+          return `${event.type}:${event.content}`;
+        return event.type;
+      });
+      expect(order).toEqual([
+        `start:${a}`,
+        "model_turn_answers",
+        "text:local",
+        "result:local",
+        `end:${a}`,
+        "start:",
+        "model_turn_answers",
+        "text:provider",
+        "result:provider",
+        "end:",
+      ]);
+      await session.close();
+    });
+
+    it("rejects a local completion waiting behind a provider turn when the stream closes", async () => {
+      let releaseProvider!: () => void;
+      const providerReady = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      scripted(async function* () {
+        yield say("unfinished");
+        await providerReady;
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      let providerTurnStarted!: () => void;
+      const sawProviderTurn = new Promise<void>((resolve) => {
+        providerTurnStarted = resolve;
+      });
+      const drain = (async () => {
+        for await (const event of session.events) {
+          if (event.type === "model_turn_start") providerTurnStarted();
+        }
+      })();
+      await sawProviderTurn;
+
+      const completion = session.completeTurn!({ inputId: a, text: "local" }, [
+        { type: "result", content: "local" },
+      ]);
+      releaseProvider();
+      const outcome = await Promise.race([
+        completion.then(
+          () => "fulfilled",
+          () => "rejected",
+        ),
+        new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 50)),
+      ]);
+
+      expect(outcome).toBe("rejected");
+      await drain;
+      expect(session.isClosed).toBe(true);
+      await session.close();
+    });
   });
 
   beforeEach(() => {
