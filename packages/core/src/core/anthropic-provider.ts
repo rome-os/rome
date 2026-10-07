@@ -1305,7 +1305,7 @@ class ModelSessionEventTurnQueue {
       source.error = undefined;
       throw error;
     }
-    const next = source.ready;
+    const next = source.ready!;
     source.ready = undefined;
     if (next.done) source.done = true;
     else this.pull(sourceName);
