@@ -515,8 +515,10 @@ export function createAgentSessionManager(
             const tasks = webchat ? session.backgroundTasks : [];
             if (tasks.length > 0) {
               // A webchat session's background tasks die with it: keep it
-              // until they finish, or until the cap since its last activity.
-              if (session.lastActiveAt >= now - backgroundTaskTtlMs) continue;
+              // until they finish, or until the cap since its last caller
+              // turn. A turn the SDK starts for a task's result doesn't renew
+              // the cap, or a stream of short tasks would keep it forever.
+              if (session.lastCallerActiveAt >= now - backgroundTaskTtlMs) continue;
               log.warn("closing idle webchat session with background tasks still running", {
                 sessionId: session.sessionId,
                 taskIds: tasks.map((task) => task.id),
@@ -2007,6 +2009,8 @@ class AgentSessionImpl implements AgentSession {
   readonly romeSessionId?: string;
   status: AgentSessionStatus = "idle";
   lastActiveAt = Date.now();
+  /** Like lastActiveAt, but not renewed by turns the SDK starts by itself. */
+  lastCallerActiveAt = Date.now();
   private activeForkedTurnCount = 0;
   // Forks run in this session's working dir; actions they call carry the fork's id.
   private activeForkSessionIds = new Set<string>();
@@ -3052,6 +3056,7 @@ class AgentSessionImpl implements AgentSession {
       if (waiting === sink) this.waitingCallers.delete(inputId);
     }
     this.lastActiveAt = Date.now();
+    if (!sink.detached) this.lastCallerActiveAt = this.lastActiveAt;
     this.inputs.finish(sink.turnId);
     if (this.waitingCallers.size === 0 && this.activeSdkTurnId === undefined) {
       this.status = "idle";
@@ -3198,6 +3203,7 @@ class AgentSessionImpl implements AgentSession {
     }
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
+    this.lastCallerActiveAt = this.lastActiveAt;
     const mode: ForkRunMode = input.mode ?? "isolated";
     // Forked turns bracket their stream like regular turns; the ids are
     // minted here because no sendTurn is involved. No per-turn session_init
@@ -3423,6 +3429,7 @@ class AgentSessionImpl implements AgentSession {
       this.activeForkedTurnCount = Math.max(0, this.activeForkedTurnCount - 1);
       this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
+      this.lastCallerActiveAt = this.lastActiveAt;
       this.emitStatus();
       try {
         await this.deps.sessionManager.touchSession(this.sessionId);
