@@ -2933,6 +2933,11 @@ class AgentSessionImpl implements AgentSession {
 
   private publishToSink(sink: TurnSink, msg: StreamAgentMessage): void {
     if (sink.done) return;
+    if (this.replayingModelTurns && this.replayedModelTurnIds.includes(sink.turnId)) {
+      const messages = this.replayedModelTurnMessages.get(sink.turnId) ?? [];
+      messages.push(msg);
+      this.replayedModelTurnMessages.set(sink.turnId, messages);
+    }
     if (sink.detached) {
       // SDK-started turns are broadcast to session subscribers; their own
       // stream is introduced by the webchat migration in PR 3.

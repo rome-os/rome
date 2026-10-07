@@ -565,16 +565,6 @@ export class CodexAppServerProvider implements ModelProvider {
         return appliedReasoningEffort;
       },
     } as ModelSession;
-    session.completeTurn = async (input, messages) => {
-      if (closed || closing) throw new Error("ModelSession is closed");
-      const turnId = randomUUID();
-      const answers = input.inputId ? [input.inputId] : [];
-      sink.push({ type: "model_turn_start", turnId, answers });
-      sink.push({ type: "model_turn_answers", turnId, added: [] });
-      for (const message of messages) sink.push(message);
-      sink.push({ type: "model_turn_end", turnId, answers });
-    };
-
     const onItem = (item: ThreadItem, lifecycle: "started" | "completed"): void => {
       const turnSink = activeTurn?.sink ?? sink;
       if (item.type === "userMessage" && lifecycle === "completed") {
@@ -1125,6 +1115,28 @@ export class CodexAppServerProvider implements ModelProvider {
         }
       },
     });
+
+    let localCompletionTail = Promise.resolve();
+    session.completeTurn = async (input, messages) => {
+      if (closed || closing) throw new Error("ModelSession is closed");
+      const previous = localCompletionTail;
+      let release!: () => void;
+      localCompletionTail = new Promise<void>((resolve) => (release = resolve));
+      await previous;
+      try {
+        // The dispatcher owns native SDK turn boundaries; append only after
+        // its active turn has completed so a local turn cannot split it.
+        await dispatcher.waitForIdle();
+        const turnId = randomUUID();
+        const answers = input.inputId ? [input.inputId] : [];
+        sink.push({ type: "model_turn_start", turnId, answers });
+        sink.push({ type: "model_turn_answers", turnId, added: [] });
+        for (const message of messages) sink.push(message);
+        sink.push({ type: "model_turn_end", turnId, answers });
+      } finally {
+        release();
+      }
+    };
 
     session.sendUserInput = async (input: ModelUserInput) => {
       if (closed || closing) throw new Error("ModelSession is closed");

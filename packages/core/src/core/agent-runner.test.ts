@@ -315,6 +315,34 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("replays a completed model turn to a bridge attached after acquisition", async () => {
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-code-backed",
+      channelThreadKey: "webchat:replay-acquired-turn",
+    });
+    const handle = session.sendTurn({ inputId: "replayed", prompt: "hello" });
+    await collectMessages(handle.events);
+
+    const starts: string[] = [];
+    const messages: AgentMessage[] = [];
+    session.subscribe((message) => messages.push(message), { replayModelTurns: true });
+    session.onModelTurnStart!((turnId) => starts.push(turnId), { replayModelTurns: true });
+    await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+
+    expect(starts).toHaveLength(1);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "result" }),
+        expect.objectContaining({ type: "turn_end", status: "completed" }),
+      ]),
+    );
+    await manager.shutdown();
+  });
+
   it("routes a middleware reply through a model turn and marks its input answered", async () => {
     const turnMiddleware = createTurnMiddlewareChain();
     rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {

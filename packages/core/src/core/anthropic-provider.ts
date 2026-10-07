@@ -620,6 +620,15 @@ export class AnthropicProvider implements ModelProvider {
     // Middleware-only replies still use the shared ModelSession turn stream;
     // they never need to manufacture a provider request.
     const localTurnEvents = new AsyncMessageQueue<ModelSessionEvent>();
+    let resolveProviderBoundary: (() => void) | undefined;
+    let localCompletionTail = Promise.resolve();
+    const waitForProviderBoundary = async (): Promise<void> => {
+      while (projection.isOpen) {
+        await new Promise<void>((resolve) => {
+          resolveProviderBoundary = resolve;
+        });
+      }
+    };
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
     const providerEvents: AsyncIterable<ModelSessionEvent> = (async function* () {
@@ -945,6 +954,10 @@ export class AnthropicProvider implements ModelProvider {
             }
             yield* projection.end(message, settles);
           }
+          if (!projection.isOpen) {
+            resolveProviderBoundary?.();
+            resolveProviderBoundary = undefined;
+          }
         }
         // A Query that ends without its result has lost the SDK's turn
         // correlation. Do not invent one: the session layer fails any caller
@@ -1064,12 +1077,23 @@ export class AnthropicProvider implements ModelProvider {
       },
       async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
         if (closed) throw new Error("ModelSession is closed");
-        const turnId = randomUUID();
-        const answers = input.inputId ? [input.inputId] : [];
-        localTurnEvents.push({ type: "model_turn_start", turnId, answers });
-        localTurnEvents.push({ type: "model_turn_answers", turnId, added: [] });
-        for (const message of messages) localTurnEvents.push(message);
-        localTurnEvents.push({ type: "model_turn_end", turnId, answers });
+        const previous = localCompletionTail;
+        let release!: () => void;
+        localCompletionTail = new Promise<void>((resolve) => (release = resolve));
+        await previous;
+        try {
+          // Do not splice a middleware turn inside an SDK turn: the session
+          // projection has exactly one active model-turn owner at a time.
+          await waitForProviderBoundary();
+          const turnId = randomUUID();
+          const answers = input.inputId ? [input.inputId] : [];
+          localTurnEvents.push({ type: "model_turn_start", turnId, answers });
+          localTurnEvents.push({ type: "model_turn_answers", turnId, added: [] });
+          for (const message of messages) localTurnEvents.push(message);
+          localTurnEvents.push({ type: "model_turn_end", turnId, answers });
+        } finally {
+          release();
+        }
       },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
         if (closed) {
