@@ -10,12 +10,14 @@ import { wrapHookSpan } from "../telemetry.js";
 import { loadAppHook } from "./hook-loader.js";
 import {
   evaluateHookInvocation,
-  getCurrentOrCreateHookInvocationContext,
+  createRootHookInvocationContext,
+  getCurrentHookInvocationContext,
   hookTelemetryAttrs,
   recordHookSkip,
   resolveHookRecursionConfig,
   runWithHookInvocationContext,
   type HookIdentity,
+  type HookInvocationContext,
   type HookRecursionConfig,
 } from "./hook-recursion.js";
 
@@ -64,6 +66,9 @@ interface LoadedAppStartedHook {
   artifactPath: string;
   hook: AppStartedHook;
   event: AppStartedEvent;
+  /** The hook chain of the work that caused the start, read when it was
+   *  reconciled. A start queued before `open` is dispatched outside it. */
+  cause: HookInvocationContext | undefined;
 }
 
 export function createAppStartedDispatcher(
@@ -144,6 +149,7 @@ export function createAppStartedDispatcher(
               appId,
               appVersion: app.manifest.version,
             },
+            cause: getCurrentHookInvocationContext(),
           });
         } catch (err) {
           appFailures.push({
@@ -201,7 +207,7 @@ function dispatch(loaded: LoadedAppStartedHook, hookRecursion: HookRecursionConf
   // An install requested from inside a hook chain carries that chain here, so
   // the hook's own work counts against the same budget.
   const decision = evaluateHookInvocation(
-    getCurrentOrCreateHookInvocationContext(),
+    loaded.cause ?? createRootHookInvocationContext(),
     identity,
     hookRecursion,
   );

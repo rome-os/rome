@@ -11,7 +11,7 @@ import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
 import { createTestApps } from "../apps/test-helpers.js";
 import { createAppStartedDispatcher } from "./app-started.js";
 import type { HookInvocationContext } from "./hook-recursion.js";
-import { getCurrentHookInvocationContext } from "./hook-recursion.js";
+import { getCurrentHookInvocationContext, runWithHookInvocationContext } from "./hook-recursion.js";
 
 interface StartedCall {
   appId: string;
@@ -270,6 +270,39 @@ describe("AppStartedDispatcher", () => {
         depth: 1,
         chain: [{ hookType: "app", appId: "app.chain", hookName: "app-started" }],
       }),
+    ]);
+  });
+
+  it("dispatches a start queued before open under the chain that caused it", async () => {
+    testGlobal.__appStartedCaptureContext = () => {
+      testGlobal.__appStartedContexts ??= [];
+      testGlobal.__appStartedContexts.push(getCurrentHookInvocationContext());
+    };
+    const catalog = fakeCatalog([
+      app("app.caused", [
+        await hookDir(
+          "caused",
+          "return { onAppStarted() { globalThis.__appStartedCaptureContext(); } };",
+        ),
+      ]),
+    ]);
+    const dispatcher = createDispatcher(catalog);
+    const cause: HookInvocationContext = {
+      rootInvocationId: "root-cause",
+      depth: 1,
+      chain: [{ hookType: "lifecycle", appId: "app.other", hookName: "agent-turn-finished" }],
+    };
+
+    await runWithHookInvocationContext(cause, () => dispatcher.reconcile(catalog));
+    dispatcher.open();
+    await flush();
+
+    expect(testGlobal.__appStartedContexts).toEqual([
+      {
+        rootInvocationId: "root-cause",
+        depth: 2,
+        chain: [...cause.chain, { hookType: "app", appId: "app.caused", hookName: "app-started" }],
+      },
     ]);
   });
 
