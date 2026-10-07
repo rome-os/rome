@@ -2010,7 +2010,11 @@ class AgentSessionImpl implements AgentSession {
   readonly romeSessionId?: string;
   status: AgentSessionStatus = "idle";
   lastActiveAt = Date.now();
-  /** Like lastActiveAt, but not renewed by turns the SDK starts by itself. */
+  /**
+   * Like lastActiveAt, but renewed only by caller turns: not by turns the SDK
+   * starts by itself, nor by forks, which Rome also starts on its own (recaps,
+   * titles) after an SDK turn.
+   */
   lastCallerActiveAt = Date.now();
   private activeForkedTurnCount = 0;
   // Forks run in this session's working dir; actions they call carry the fork's id.
@@ -3204,7 +3208,6 @@ class AgentSessionImpl implements AgentSession {
     }
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
-    this.lastCallerActiveAt = this.lastActiveAt;
     const mode: ForkRunMode = input.mode ?? "isolated";
     // Forked turns bracket their stream like regular turns; the ids are
     // minted here because no sendTurn is involved. No per-turn session_init
@@ -3430,7 +3433,6 @@ class AgentSessionImpl implements AgentSession {
       this.activeForkedTurnCount = Math.max(0, this.activeForkedTurnCount - 1);
       this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
-      this.lastCallerActiveAt = this.lastActiveAt;
       this.emitStatus();
       try {
         await this.deps.sessionManager.touchSession(this.sessionId);

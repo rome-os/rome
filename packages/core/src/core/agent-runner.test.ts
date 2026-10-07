@@ -997,6 +997,49 @@ describe("AgentRunner", () => {
         }
       });
 
+      it("count the cap from the last caller turn, not a fork such as a recap", async () => {
+        rs.useFakeTimers();
+        let tasks!: ModelBackgroundTaskListener;
+        const provider = withForkSupport(
+          new MockModelProvider([[{ type: "result", content: "Started" }]]),
+          () =>
+            forkSessionStub({
+              events: (async function* (): AsyncIterable<AgentMessage> {
+                yield { type: "result", content: "Recap" };
+              })(),
+            }),
+        );
+        const forkingOpen = provider.openSession.bind(provider);
+        provider.openSession = async (params: ModelSessionParams) => ({
+          ...(await forkingOpen(params)),
+          onBackgroundTasks: (listener: ModelBackgroundTaskListener) => {
+            tasks = listener;
+            return () => {};
+          },
+        });
+        const manager = createAgentSessionManager(
+          managerDeps(createTestModelResolver({ providers: [provider] })),
+          { keepAliveAcrossTurns: true, idleTtlMs: 100, backgroundTaskTtlMs: 1_000 },
+        );
+        const key = { agentName: "test-main", channelThreadKey: "webchat:tasks-fork" };
+        const runner = new AgentRunner(manager);
+        try {
+          const first = await collectMessages(runner.run({ ...key, prompt: "Start a task" }));
+          const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
+          tasks.onChange?.([task]);
+          await rs.advanceTimersByTimeAsync(600);
+          await collectMessages(
+            runner.runForked({ ...key, sourceSessionId: start.sessionId, prompt: "Recap" }),
+          );
+          await rs.advanceTimersByTimeAsync(300);
+          expect(manager.peek(key)).toBeDefined();
+          await rs.advanceTimersByTimeAsync(300);
+          expect(manager.peek(key)).toBeUndefined();
+        } finally {
+          await manager.shutdown();
+        }
+      });
+
       it("close at the cap even while SDK result turns keep arriving", async () => {
         rs.useFakeTimers();
         let runtime!: ReturnType<typeof createSdkEventSession>;
