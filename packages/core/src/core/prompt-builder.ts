@@ -378,9 +378,10 @@ export class PromptBuilder {
   }
 
   /**
-   * Behavioral directive steering general-purpose agents toward the built-in
-   * `ask_question` tool (an interactive card) instead of asking clarifying
-   * questions in prose. Reinforces the tool's own description from the system
+   * Behavioral directive for clarifying questions: ask only when the answer
+   * would change the direction of the work, otherwise proceed on the agent's
+   * recommendation; and when asking, use the built-in `ask_question` tool (an
+   * interactive card) instead of prose. Reinforces the tool's own description from the system
    * prompt. Lives here (rather than in a single agent's systemPromptPrefix) so
    * every @-mentionable core agent gets the same behavior.
    *
@@ -398,9 +399,9 @@ export class PromptBuilder {
     return [
       "# Asking The Guardian For Input",
       "",
-      "Whenever a clarifying question blocks you — one you'd otherwise write out and wait for a reply on — you MUST ask via the `ask_question` tool, never in your text reply; listing such questions in prose (even a numbered list or inline options) is not allowed.",
+      "Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.",
       "",
-      "This applies most often when a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know: invoke `ask_question` first to collect those answers as an interactive card, then continue once the guardian replies — do not guess a generic result. Ask only the few questions that actually change what you do next, and prefer single-choice questions with concrete options when the likely answers are enumerable. When memory or earlier work already gives a clear default, use it and state the assumption instead of asking.",
+      "When you do need to ask, use the `ask_question` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.",
     ].join("\n");
   }
 
