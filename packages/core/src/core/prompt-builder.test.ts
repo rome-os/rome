@@ -120,6 +120,7 @@ describe("PromptBuilder", () => {
       "# Alpha\n\nAlpha project first paragraph.\n\nDetails stay available on demand.",
     );
     writeFileSync(join(projectMemoryDir, "SUMMARY.md"), "Legacy summary should not load.");
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 
@@ -166,6 +167,7 @@ describe("PromptBuilder", () => {
     mkdirSync(projectMemoryDir, { recursive: true });
     const filePath = join(projectMemoryDir, "PROJECT.md");
     writeFileSync(filePath, content);
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const prompt = new PromptBuilder().build(mainConfig, corePromptOptions);
     const projectSection = prompt.split("# Projects\n\n")[1];
@@ -175,6 +177,28 @@ describe("PromptBuilder", () => {
     );
     expect(Array.from(expected).length).toBeLessThanOrEqual(PROJECT_SUMMARY_CHAR_LIMIT);
     expect(readFileSync(filePath, "utf8")).toBe(content);
+  });
+
+  it("points each project at a directory that exists, or at none", () => {
+    for (const name of ["alpha", "beta", "gamma"]) {
+      const dir = join(mockPaths.profileMemoryDir, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "PROJECT.md"), `${name} introduction.`);
+    }
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
+    mkdirSync(join(mockPaths.customAppAuthoringRoot, "beta"), { recursive: true });
+
+    const projectSection = new PromptBuilder()
+      .build(mainConfig, corePromptOptions)
+      .split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      [
+        `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): alpha introduction.`,
+        `- \`beta\` (\`${join(mockPaths.customAppAuthoringRoot, "beta")}\`): beta introduction.`,
+        "- `gamma`: gamma introduction.",
+      ].join("\n"),
+    );
   });
 
   it("refreshes project introductions without injecting detailed notes", () => {

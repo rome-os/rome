@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { AgentConfig } from "../types.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -522,8 +522,11 @@ export class PromptBuilder {
         continue;
       }
 
+      const location = this.resolveProjectLocation(projectName);
       projectLines.push(
-        `- \`${projectName}\` (\`${getWebchatProjectPath(projectName)}\`): ${summary}`,
+        location
+          ? `- \`${projectName}\` (\`${location}\`): ${summary}`
+          : `- \`${projectName}\`: ${summary}`,
       );
     }
 
@@ -532,6 +535,28 @@ export class PromptBuilder {
     }
 
     return ["# Projects", "", ...projectLines].join("\n");
+  }
+
+  /**
+   * Where a memory project's files live on disk. `memory/projects/<name>` only
+   * mirrors `projects/<name>` best-effort (see memory/projects/README.md), and
+   * app projects keep their source under the custom app authoring root, so
+   * point at whichever directory actually exists — and show no path rather
+   * than a made-up one.
+   */
+  private resolveProjectLocation(projectName: string): string | null {
+    const candidates = [
+      getWebchatProjectPath(projectName),
+      join(this.customAppAuthoringRoot, projectName),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (statSync(candidate).isDirectory()) return candidate;
+      } catch {
+        // Missing or unreadable — try the next candidate.
+      }
+    }
+    return null;
   }
 
   private readFirstParagraph(filePath: string): string | null {
