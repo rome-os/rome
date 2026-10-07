@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, max, sql } from "drizzle-orm";
 import type { AppDbContext, DrizzleDb } from "@rome-os/app-runtime";
 import type { FileChange } from "../../lib/changes.js";
+import { STALE_RUN_MS } from "../../lib/run-view.js";
 import { createAppDbSchema } from "../schema.js";
 
 export type RunKind = "dream" | "skill_review";
@@ -51,6 +52,29 @@ export class RunsRepository {
       })
       .run();
     return id;
+  }
+
+  /**
+   * Starts a dream unless one is already running, as one statement so two
+   * entry points (the page and the nightly routine) cannot both win. A run
+   * left `running` past the stale window does not block.
+   */
+  reserveDream(windowHours: number): { id: string; reserved: boolean } {
+    const { runs } = this.tables;
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const result = this.db.run(sql`
+      INSERT INTO ${runs} (id, kind, status, window_hours, started_at)
+      SELECT ${id}, 'dream', 'running', ${windowHours}, ${now}
+      WHERE NOT EXISTS (
+        SELECT 1 FROM ${runs}
+        WHERE kind = 'dream' AND status = 'running' AND started_at > ${now - STALE_RUN_MS}
+      )
+    `) as { changes: number };
+    if (result.changes > 0) return { id, reserved: true };
+    const running = this.latestRunning("dream");
+    if (!running) throw new Error("dream reservation lost without a running dream");
+    return { id: running.id, reserved: false };
   }
 
   finish(

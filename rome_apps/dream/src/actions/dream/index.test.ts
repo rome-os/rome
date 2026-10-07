@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
@@ -221,6 +222,37 @@ describe("dream", () => {
     expect((result.data as { runId: string }).runId).toBe(runId);
     expect(runs.listRecent({ limit: 10 })).toHaveLength(1);
     expect(runs.byId(runId)?.status).toBe("completed");
+  });
+
+  it("skips a scheduled dream while another dream is running", async () => {
+    const runs = createRunsRepository(appDb());
+    const manual = runs.start({ kind: "dream", windowHours: 24 });
+    const run = rs.fn();
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect(result.data).toMatchObject({ runId: manual, skipped: true });
+    expect(run).not.toHaveBeenCalled();
+    expect(runs.listRecent({ limit: 10 })).toHaveLength(1);
+  });
+
+  it("does not let a stale running dream block the next one", async () => {
+    const runs = createRunsRepository(appDb());
+    const stale = runs.start({ kind: "dream", windowHours: 24 });
+    testDb.db.run(
+      sql`UPDATE dream__runs SET started_at = ${Date.now() - 2 * 60 * 60 * 1000} WHERE id = ${stale}`,
+    );
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps([{ type: "result", content: "done" }]),
+    ).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect((result.data as { runId: string }).runId).not.toBe(stale);
   });
 
   it("marks the run interrupted when the agent turn is stopped", async () => {

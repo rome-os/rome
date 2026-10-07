@@ -99,12 +99,18 @@ export interface ClassifiedPath {
 const MEMORY_RE = /^(?:.*?\/)?memory\/(.+)$/;
 const JOURNAL_RE = /^journal\/\d{4}\/\d{2}\/\d{2}\.md$/;
 const SKILL_RE = /(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i;
-const APP_RE = /(?:^|\/)rome_apps\/([^/]+)\//;
+/** Where a skill's app lives: the repo seed, an installed artifact, or a
+ *  custom app's source under the profile's projects. First match wins. */
+const APP_RES = [
+  /(?:^|\/)rome_apps\/([^/]+)\//,
+  /(?:^|\/)apps\/installed\/([^/]+)\//,
+  /(?:^|\/)projects\/apps\/([^/]+)\//,
+];
 
 export function classifyPath(path: string): ClassifiedPath {
   const skill = SKILL_RE.exec(path);
   if (skill) {
-    const app = APP_RE.exec(path);
+    const app = APP_RES.map((re) => re.exec(path)).find(Boolean);
     return {
       area: "skill",
       label: shortPath(path),

@@ -1,6 +1,6 @@
 import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import { createRunsRepository, type RunKind } from "../db/repositories/runs.js";
-import { STALE_RUN_MS, toDetail, toListItem, type DreamSchedule } from "../lib/run-view.js";
+import { toDetail, toListItem, type DreamSchedule } from "../lib/run-view.js";
 
 /** Name `dream` registers its daily routine under. */
 const DREAM_ROUTINE_NAME = "daily-dream";
@@ -45,11 +45,11 @@ class DreamApiHandler implements RomeAppApiHandler {
       if (request.caller.kind !== "guardian") {
         return json({ error: "forbidden" }, { status: 403 });
       }
-      const running = runs.latestRunning("dream");
-      if (running && now - running.startedAt.getTime() <= STALE_RUN_MS) {
-        return json({ error: "already_running", runId: running.id }, { status: 409 });
+      const reservation = runs.reserveDream(24);
+      if (!reservation.reserved) {
+        return json({ error: "already_running", runId: reservation.id }, { status: 409 });
       }
-      const runId = runs.start({ kind: "dream", windowHours: 24 });
+      const runId = reservation.id;
       try {
         await this.ctx.runAction("dream:dream", { runId }, { detached: true });
       } catch (err) {

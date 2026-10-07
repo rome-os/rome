@@ -91,7 +91,7 @@ export function RunListSkeleton() {
       {[0, 1, 2, 3].map((i) => (
         <div key={i} className="flex items-center gap-3">
           <Skeleton className="size-8 rounded-8" />
-          <div className="flex flex-1 flex-col gap-1.5">
+          <div className="flex flex-1 flex-col gap-2">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-3 w-40" />
           </div>

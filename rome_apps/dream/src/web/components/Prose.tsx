@@ -46,7 +46,7 @@ const components: Components = {
   code: ({ node: _node, className, ...props }) => (
     <code
       className={cn(
-        "rounded-4 bg-surface-muted px-1 py-0.5 font-mono text-aux text-foreground",
+        "rounded-4 bg-surface-muted px-1 font-mono text-aux text-foreground",
         className,
       )}
       {...props}
@@ -64,10 +64,10 @@ const components: Components = {
     </div>
   ),
   th: ({ node: _node, ...props }) => (
-    <th className="border-b border-border px-2 py-1.5 font-medium text-foreground" {...props} />
+    <th className="border-b border-border px-2 py-2 font-medium text-foreground" {...props} />
   ),
   td: ({ node: _node, ...props }) => (
-    <td className="border-b border-border-subtle px-2 py-1.5 align-top" {...props} />
+    <td className="border-b border-border-subtle px-2 py-2 align-top" {...props} />
   ),
 };
 

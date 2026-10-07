@@ -85,11 +85,11 @@ function RunDetailView({ run }: { run: Run }) {
     <article className="flex min-w-0 flex-col gap-6" aria-labelledby={`run-${run.id}`}>
       <header className="flex items-start gap-3">
         <RunIcon run={run} size="lg" />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h2 id={`run-${run.id}`} className="text-section text-foreground">
             {KIND_LABEL[run.kind]}
           </h2>
-          <p className="flex flex-wrap items-center gap-x-1.5 text-ui text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-x-2 text-ui text-muted-foreground">
             <Timestamp value={run.startedAt} format="datetime" />
             {duration ? <Meta>{duration}</Meta> : null}
             {run.kind === "dream" && run.windowHours ? (
@@ -226,7 +226,7 @@ function NoResult({ children }: { children: ReactNode }) {
 }
 
 function DreamResults({ run }: { run: Run }) {
-  const journal = run.files.find((f) => f.area === "journal");
+  const journals = run.files.filter((f) => f.area === "journal");
   const memory = run.files.filter((f) => f.area === "memory");
   const other = run.files.filter((f) => f.area === "skill" || f.area === "other");
 
@@ -236,7 +236,9 @@ function DreamResults({ run }: { run: Run }) {
 
   return (
     <>
-      {journal ? <JournalSection file={journal} /> : null}
+      {journals.map((file) => (
+        <JournalSection key={file.path} file={file} named={journals.length > 1} />
+      ))}
       {memory.length > 0 ? (
         <ResultSection title="Memory updates" count={filesCount(memory.length)}>
           {memory.map((file) => (
@@ -263,14 +265,16 @@ function lastWriteIndex(file: ChangedFile): number {
 }
 
 /** The journal entry, rendered as the guardian would read it in Memory. */
-function JournalSection({ file }: { file: ChangedFile }) {
+function JournalSection({ file, named }: { file: ChangedFile; named: boolean }) {
   const lastWrite = lastWriteIndex(file);
   const entry = lastWrite >= 0 ? file.changes[lastWrite] : undefined;
   const laterEdits = file.changes.slice(lastWrite + 1);
   return (
     <ResultSection
-      title="Journal"
-      action={file.memoryFile ? <OpenInMemoryButton file={file.memoryFile} /> : null}
+      // An entry that was only edited shows as a file card, which carries the
+      // file's name and Open link itself.
+      title={entry && named ? file.label : "Journal"}
+      action={entry && file.memoryFile ? <OpenInMemoryButton file={file.memoryFile} /> : null}
     >
       {entry ? (
         <div className="rounded-12 border border-border bg-surface px-5 py-4">
@@ -295,7 +299,7 @@ function SkillReviewResults({ run }: { run: Run }) {
             <SkillCard key={file.path} file={file} />
           ))}
         </ResultSection>
-      ) : run.status === "completed" ? (
+      ) : run.status === "completed" && run.files.length === 0 ? (
         <NoResult>
           {run.summary?.trim() === NOTHING_TO_UPDATE
             ? "Nothing in this conversation was worth saving as a skill."
@@ -314,7 +318,8 @@ function SkillReviewResults({ run }: { run: Run }) {
 }
 
 function SkillCard({ file }: { file: ChangedFile }) {
-  const created = file.changes.some((c) => c.op === "write");
+  // A write may replace an existing SKILL.md, so it reads as saved, not new.
+  const saved = file.changes.some((c) => c.op === "write");
   const lastWrite = file.changes[lastWriteIndex(file)];
   const written = lastWrite ? splitFrontmatter(lastWrite.content) : null;
   return (
@@ -330,9 +335,7 @@ function SkillCard({ file }: { file: ChangedFile }) {
           ) : null}
         </>
       }
-      meta={
-        <Badge variant={created ? "success" : "info"}>{created ? "New skill" : "Updated"}</Badge>
-      }
+      meta={<Badge variant={saved ? "success" : "info"}>{saved ? "Saved" : "Updated"}</Badge>}
     >
       {written?.description ? (
         <p className="border-b border-border-subtle px-3 py-2 text-ui text-muted-foreground">

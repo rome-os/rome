@@ -93,10 +93,22 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const runs = createRunsRepository(appContext.db);
       const requestedRun = typeof args.runId === "string" ? runs.byId(args.runId) : undefined;
-      const runId =
-        requestedRun?.kind === "dream" && requestedRun.status === "running"
-          ? requestedRun.id
-          : runs.start({ kind: "dream", windowHours });
+      let runId: string;
+      if (requestedRun?.kind === "dream" && requestedRun.status === "running") {
+        runId = requestedRun.id;
+      } else {
+        const reservation = runs.reserveDream(windowHours);
+        if (!reservation.reserved) {
+          // Two agents editing the same memory and journal would overwrite
+          // each other, so a dream that overlaps another one stands down.
+          log.info("dream skipped, another dream is running", { runId: reservation.id });
+          return {
+            status: "ok",
+            data: { runId: reservation.id, windowHours, skipped: true, summary: "" },
+          };
+        }
+        runId = reservation.id;
+      }
       const recorder = new RunRecorder(runs, runId);
 
       log.info("dream started", { windowHours, runId });

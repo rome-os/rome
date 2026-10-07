@@ -88,6 +88,15 @@ describe("classifyPath", () => {
     });
   });
 
+  it("finds the owning app of an installed or custom-source skill", () => {
+    expect(
+      classifyPath("/p/apps/installed/coding/4f6a/dist/skills/deploy/SKILL.md").skillAppId,
+    ).toBe("coding");
+    expect(classifyPath("/p/projects/apps/my-notes/src/skills/tidy/SKILL.md").skillAppId).toBe(
+      "my-notes",
+    );
+  });
+
   it("shortens anything else to its last segments", () => {
     expect(classifyPath("/repo/rome_apps/coding/app.yaml")).toMatchObject({
       area: "other",

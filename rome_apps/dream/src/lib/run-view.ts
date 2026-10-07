@@ -74,7 +74,7 @@ function summarizeOutcome(changes: Array<Pick<FileChange, "op" | "path">>): RunO
         break;
       case "skill": {
         const name = file.skillName ?? path;
-        // A skill written at any point in the run was created by it.
+        // A full write wins over edits, so the row says the skill was saved.
         if (skills.get(name) !== "write") skills.set(name, op);
         break;
       }

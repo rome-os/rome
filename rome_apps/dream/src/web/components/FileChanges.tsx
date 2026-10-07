@@ -19,7 +19,7 @@ function DiffBlock({ previous, content }: { previous: string; content: string })
     <div className="overflow-x-auto py-2 font-mono text-aux">
       {rows.map((row, i) =>
         row.type === "skip" ? (
-          <div key={i} className="px-3 py-0.5 text-subtle-foreground">
+          <div key={i} className="px-3 py-1 text-subtle-foreground">
             ⋯ {row.count} unchanged {row.count === 1 ? "line" : "lines"}
           </div>
         ) : (
@@ -108,11 +108,11 @@ export function FilePanel({
 }) {
   return (
     <div className="overflow-hidden rounded-12 border border-border bg-surface">
-      <div className="flex min-h-11 items-center gap-2 border-b border-border-subtle py-1.5 pr-1.5 pl-3">
+      <div className="flex min-h-11 items-center gap-2 border-b border-border-subtle py-1 pr-2 pl-3">
         <span className="flex shrink-0 text-muted-foreground [&_svg]:size-4">
           {icon ?? <FileText />}
         </span>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">{title}</div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">{title}</div>
         {meta}
         {action}
       </div>

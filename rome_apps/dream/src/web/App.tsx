@@ -134,7 +134,7 @@ function DreamPage() {
         <PageHeading>
           <PageTitle>Dream</PageTitle>
           {lastDream || scheduleQuery.data?.nextRunAt ? (
-            <PageDescription className="flex flex-wrap gap-x-1.5">
+            <PageDescription className="flex flex-wrap gap-x-2">
               {lastDream ? (
                 <span>
                   Last dream <Timestamp value={lastDream.startedAt} />

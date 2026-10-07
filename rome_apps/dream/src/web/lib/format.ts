@@ -1,4 +1,4 @@
-import type { RunListItem } from "./api";
+import type { RunListItem } from "../../lib/run-view";
 
 export const KIND_LABEL: Record<RunListItem["kind"], string> = {
   dream: "Dream",
@@ -24,8 +24,10 @@ export function outcomeLine(run: RunListItem): string {
 
   const { journal, memoryFiles, skills, otherFiles } = run.outcome;
   if (run.kind === "skill_review") {
-    if (skills.length === 0) return "No changes";
-    return skills.map((s) => `${s.op === "write" ? "Saved" : "Updated"} ${s.name}`).join(", ");
+    if (skills.length > 0) {
+      return skills.map((s) => `${s.op === "write" ? "Saved" : "Updated"} ${s.name}`).join(", ");
+    }
+    return otherFiles > 0 ? plural(otherFiles, "other file", "other files") : "No changes";
   }
 
   const parts: string[] = [];
