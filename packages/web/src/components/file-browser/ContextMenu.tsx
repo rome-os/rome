@@ -42,6 +42,8 @@ export interface ContextMenuActions {
   canStartChatFromFolder: boolean;
   onCreatePath: (type: "file" | "folder", parentPath: string) => void;
   onCopyPath: (text: string) => void;
+  /** The node's kind, or null when the path is not in the loaded tree. */
+  getPathKind: (path: string) => TreeNode["type"] | null;
   onDownloadPaths: (paths: string[]) => void;
   onUploadForFolder: (path: string) => void;
   onUploadFolderForFolder: (path: string) => void;
@@ -53,6 +55,7 @@ export interface ContextMenuActions {
   labelNewFile: string;
   labelNewFolder: string;
   labelCopyPath: string;
+  labelCopyPaths: string;
   labelDownload: string;
   labelUploadFiles: string;
   labelUploadFolder: string;
@@ -77,6 +80,19 @@ export type FileActionMenuEntry =
       destructive?: boolean;
       onSelect: () => void;
     };
+
+/**
+ * The text "Copy path" writes for one node: the root label for the logical
+ * root, a trailing slash for a directory, and the bare path for a file.
+ */
+export function formatCopyPath(
+  path: string,
+  kind: TreeNode["type"] | null,
+  actions: Pick<ContextMenuActions, "logicalRootPath" | "rootLabel">,
+): string {
+  if (path === actions.logicalRootPath) return actions.rootLabel;
+  return kind === "directory" ? `${path}/` : path;
+}
 
 export function getFileActionMenuEntries({
   kind,
@@ -120,16 +136,24 @@ export function getFileActionMenuEntries({
       onSelect: () => actions.onCreatePath("folder", path),
     });
   }
-  if (isSingle) {
-    entries.push({
-      type: "action",
-      key: "copy-path",
-      label: actions.labelCopyPath,
-      icon: Copy,
-      onSelect: () =>
-        actions.onCopyPath(isRoot ? actions.rootLabel : isDirectory ? `${path}/` : path),
-    });
-  }
+  entries.push({
+    type: "action",
+    key: "copy-path",
+    label: isSingle ? actions.labelCopyPath : actions.labelCopyPaths,
+    icon: Copy,
+    onSelect: () =>
+      actions.onCopyPath(
+        paths
+          .map((candidate) =>
+            formatCopyPath(
+              candidate,
+              candidate === path ? kind : actions.getPathKind(candidate),
+              actions,
+            ),
+          )
+          .join("\n"),
+      ),
+  });
   entries.push({
     type: "action",
     key: "download",
