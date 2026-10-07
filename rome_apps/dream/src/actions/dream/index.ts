@@ -129,6 +129,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
       let resultContent = "";
       let turnCount = 0;
+      let interrupted = false;
 
       try {
         for await (const msg of agentRunner.run({
@@ -144,6 +145,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             return { status: "error", error: `Dream agent failed: ${msg.error}` };
           } else if (msg.type === "text") {
             turnCount++;
+          } else if (msg.type === "turn_end") {
+            // A stopped turn still emits a (partial) `result` first.
+            interrupted = msg.status === "interrupted";
           }
         }
       } catch (err) {
@@ -154,7 +158,10 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         throw err;
       }
 
-      runs.finish(runId, { status: "completed", summary: resultContent });
+      runs.finish(runId, {
+        status: interrupted ? "interrupted" : "completed",
+        summary: resultContent,
+      });
       log.info("dream completed", { turnCount, resultLength: resultContent.length, runId });
 
       return {

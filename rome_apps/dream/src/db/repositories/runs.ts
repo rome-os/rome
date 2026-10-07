@@ -4,7 +4,7 @@ import type { FileChange } from "../../lib/changes.js";
 import { createAppDbSchema } from "../schema.js";
 
 export type RunKind = "dream" | "skill_review";
-export type RunStatus = "running" | "completed" | "failed";
+export type RunStatus = "running" | "completed" | "interrupted" | "failed";
 
 export interface Run {
   id: string;
@@ -55,13 +55,15 @@ export class RunsRepository {
 
   finish(
     id: string,
-    outcome: { status: "completed"; summary: string } | { status: "failed"; error: string },
+    outcome:
+      | { status: "completed" | "interrupted"; summary: string }
+      | { status: "failed"; error: string },
   ): void {
     this.db
       .update(this.tables.runs)
       .set({
         status: outcome.status,
-        summary: outcome.status === "completed" ? outcome.summary : null,
+        summary: outcome.status === "failed" ? null : outcome.summary,
         error: outcome.status === "failed" ? outcome.error : null,
         finishedAt: new Date(),
       })

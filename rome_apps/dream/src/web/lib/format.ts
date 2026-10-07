@@ -24,7 +24,7 @@ export function outcomeLine(run: RunListItem): string {
 
   const { journal, memoryFiles, skills, otherFiles } = run.outcome;
   if (run.kind === "skill_review") {
-    if (skills.length === 0) return "Nothing to save";
+    if (skills.length === 0) return "No changes";
     return skills.map((s) => `${s.op === "write" ? "Saved" : "Updated"} ${s.name}`).join(", ");
   }
 

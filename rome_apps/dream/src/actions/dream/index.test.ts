@@ -223,6 +223,18 @@ describe("dream", () => {
     expect(runs.byId(runId)?.status).toBe("completed");
   });
 
+  it("marks the run interrupted when the agent turn is stopped", async () => {
+    const deps = makeDeps([
+      { type: "result", content: "partial" },
+      { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 },
+    ]);
+
+    await createAction(actionConfig, deps).execute({});
+
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({ status: "interrupted", summary: "partial" });
+  });
+
   it("marks the run failed when the agent fails", async () => {
     const deps = makeDeps([{ type: "error", error: "Model timeout" }]);
 

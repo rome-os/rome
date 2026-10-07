@@ -55,6 +55,15 @@ function WrittenText({ content }: { content: string }) {
   );
 }
 
+/** Says that a stored change lost its tail to the 20,000-character cap. */
+export function TruncatedNote({ className }: { className?: string }) {
+  return (
+    <p className={cn("px-3 pb-2 text-aux text-muted-foreground", className)}>
+      Shortened to the first 20,000 characters.
+    </p>
+  );
+}
+
 export function ChangeBody({ change }: { change: Change }) {
   return (
     <div>
@@ -63,11 +72,7 @@ export function ChangeBody({ change }: { change: Change }) {
       ) : (
         <WrittenText content={change.content} />
       )}
-      {change.truncated ? (
-        <p className="px-3 pb-2 text-aux text-muted-foreground">
-          Shortened to the first 20,000 characters.
-        </p>
-      ) : null}
+      {change.truncated ? <TruncatedNote /> : null}
     </div>
   );
 }

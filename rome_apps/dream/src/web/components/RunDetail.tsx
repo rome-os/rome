@@ -16,7 +16,13 @@ import {
 } from "../lib/api";
 import { splitFrontmatter, stripLeadingTitle } from "../lib/diff";
 import { KIND_LABEL, formatDuration } from "../lib/format";
-import { ChangeBody, FileChangeCard, FilePanel, OpenInMemoryButton } from "./FileChanges";
+import {
+  ChangeBody,
+  FileChangeCard,
+  FilePanel,
+  OpenInMemoryButton,
+  TruncatedNote,
+} from "./FileChanges";
 import { Prose } from "./Prose";
 import { RunIcon } from "./RunIcon";
 
@@ -170,8 +176,8 @@ function StatusNotice({ run }: { run: Run }) {
           <TriangleAlert />
           <AlertTitle>Stopped before finishing</AlertTitle>
           <AlertDescription>
-            The run never reported a result, usually because Rome restarted while it ran. Changes
-            recorded before that are listed below.
+            The run was stopped, or Rome restarted while it ran. Changes recorded before that are
+            listed below.
           </AlertDescription>
         </Alert>
       );
@@ -225,9 +231,7 @@ function DreamResults({ run }: { run: Run }) {
   const other = run.files.filter((f) => f.area === "skill" || f.area === "other");
 
   if (run.files.length === 0) {
-    return run.status === "completed" ? (
-      <NoResult>This dream found nothing new to remember.</NoResult>
-    ) : null;
+    return run.status === "completed" ? <NoResult>No file changes were recorded.</NoResult> : null;
   }
 
   return (
@@ -271,6 +275,7 @@ function JournalSection({ file }: { file: ChangedFile }) {
       {entry ? (
         <div className="rounded-12 border border-border bg-surface px-5 py-4">
           <Prose>{stripLeadingTitle(entry.content)}</Prose>
+          {entry.truncated ? <TruncatedNote className="mt-3 px-0 pb-0" /> : null}
         </div>
       ) : null}
       {laterEdits.length > 0 ? <FileChangeCard file={{ ...file, changes: laterEdits }} /> : null}
@@ -291,7 +296,11 @@ function SkillReviewResults({ run }: { run: Run }) {
           ))}
         </ResultSection>
       ) : run.status === "completed" ? (
-        <NoResult>Nothing in this conversation was worth saving as a skill.</NoResult>
+        <NoResult>
+          {run.summary?.trim() === NOTHING_TO_UPDATE
+            ? "Nothing in this conversation was worth saving as a skill."
+            : "No file changes were recorded."}
+        </NoResult>
       ) : null}
       {other.length > 0 ? (
         <ResultSection title="Other files" count={filesCount(other.length)}>
@@ -333,6 +342,7 @@ function SkillCard({ file }: { file: ChangedFile }) {
       {written && file.changes.every((c) => c.op === "write") ? (
         <div className="max-h-[32rem] overflow-auto px-4 py-3">
           <Prose>{written.body}</Prose>
+          {lastWrite?.truncated ? <TruncatedNote className="mt-3 px-0 pb-0" /> : null}
         </div>
       ) : (
         <div className="divide-y divide-border-subtle">
