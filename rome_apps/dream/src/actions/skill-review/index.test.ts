@@ -60,14 +60,14 @@ function seedSession(id: string, type: string, createdAt: number, name = id): vo
 function makeDeps(
   agentMessages: Array<Record<string, unknown>>,
   runCalls: Array<{ prompt: string; workingDir?: string }> = [],
-  beforeEvents: () => void = () => {},
+  beforeEvents: (workingDir: string) => void = () => {},
 ): AppActionRuntimeDeps<{ agentRunner: AgentRunner; carrierDir: string }> {
   return {
     carrierDir,
     agentRunner: {
       async *run(params: { prompt: string; workingDir?: string }) {
         runCalls.push(params);
-        beforeEvents();
+        beforeEvents(params.workingDir as string);
         for (const msg of agentMessages) {
           yield msg;
         }
@@ -83,17 +83,24 @@ function makeDeps(
   } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner; carrierDir: string }>;
 }
 
-/** Agent events for a successful Write, after placing the file on disk. */
-function writeSkill(name: string): { events: Array<Record<string, unknown>>; place: () => void } {
-  const path = join(carrierDir, "skills", name, "SKILL.md");
-  const content = `---\nname: ${name}\ndescription: ${name}\n---\n`;
+/** Agent events for a successful Write, after placing the file in the agent's working dir. */
+function writeSkill(
+  name: string,
+  content = `---\nname: ${name}\ndescription: ${name}\n---\n`,
+): { events: Array<Record<string, unknown>>; place: (workingDir: string) => void } {
   return {
-    place: () => {
+    place: (workingDir) => {
+      const path = join(workingDir, "skills", name, "SKILL.md");
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, content);
     },
     events: [
-      { type: "tool_use", id: "t1", tool: "Write", input: { file_path: path, content } },
+      {
+        type: "tool_use",
+        id: "t1",
+        tool: "Write",
+        input: { file_path: `skills/${name}/SKILL.md`, content },
+      },
       { type: "tool_result", toolUseId: "t1", tool: "Write", output: "ok" },
       { type: "result", content: `Saved ${name}.` },
     ],
@@ -200,19 +207,50 @@ describe("skill_review", () => {
     expect(runCalls[0].prompt).toContain("newest-web");
   });
 
-  it("runs the agent in a scaffolded user-skills carrier", async () => {
+  it("runs the agent on a staging copy of a scaffolded carrier", async () => {
     seedSession("web", "webchat", 1700000000);
+    mkdirSync(join(carrierDir, "skills", "existing"), { recursive: true });
+    writeFileSync(join(carrierDir, "skills", "existing", "SKILL.md"), "---\nname: existing\n---\n");
     const runCalls: Array<{ prompt: string; workingDir?: string }> = [];
+    let staged = "";
 
     await createAction(
       actionConfig,
-      makeDeps([{ type: "result", content: "Nothing to update." }], runCalls),
+      makeDeps([{ type: "result", content: "Nothing to update." }], runCalls, (workingDir) => {
+        staged = readFileSync(join(workingDir, "skills", "existing", "SKILL.md"), "utf8");
+      }),
     ).execute({});
 
-    expect(runCalls[0].workingDir).toBe(carrierDir);
-    expect(runCalls[0].prompt).toContain(carrierDir);
+    const workingDir = runCalls[0].workingDir as string;
+    expect(workingDir).not.toBe(carrierDir);
+    expect(runCalls[0].prompt).toContain(workingDir);
+    expect(staged).toContain("name: existing");
+    expect(existsSync(workingDir)).toBe(false);
     expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain("id: user-skills");
     expect(installCalls).toEqual([]);
+  });
+
+  it("leaves a skill imported into the carrier mid-review alone when its install fails", async () => {
+    seedSession("web", "webchat", 1700000000);
+    installResult = { status: "error", error: "BUILD_FAILED" };
+    const skill = writeSkill("reviewed");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(skill.events, [], (workingDir) => {
+        skill.place(workingDir);
+        // import-skill writes straight into the carrier while the review runs.
+        mkdirSync(join(carrierDir, "skills", "imported"), { recursive: true });
+        writeFileSync(
+          join(carrierDir, "skills", "imported", "SKILL.md"),
+          "---\nname: imported\n---\n",
+        );
+      }),
+    ).execute({});
+
+    expect(result.status).toBe("error");
+    expect(existsSync(join(carrierDir, "skills", "imported", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(carrierDir, "skills", "reviewed"))).toBe(false);
   });
 
   it("registers and installs a skill saved in the carrier", async () => {

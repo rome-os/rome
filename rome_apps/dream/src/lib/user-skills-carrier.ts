@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -14,7 +14,7 @@ import { isMap, isScalar, isSeq, parseDocument, YAMLSeq } from "yaml";
  * SKILL.md anywhere else (e.g. a repo-relative `rome_apps/`) saves nothing an
  * agent can find.
  */
-export const USER_SKILLS_APP_ID = "user-skills";
+const USER_SKILLS_APP_ID = "user-skills";
 
 export function userSkillsCarrierDir(env: NodeJS.ProcessEnv = process.env): string {
   const authoringRoot =
@@ -159,9 +159,8 @@ export async function registerCarrierSkills(dir: string, names: string[]): Promi
 }
 
 /**
- * Puts the carrier back as it was before a run: app.yaml text, edited
- * SKILL.md files, and no added folders. Used when the install fails, so a
- * skill that can't build doesn't break every later install of the carrier.
+ * Puts `changed` skills back as they were in `before` (removing ones that
+ * didn't exist) and restores app.yaml's text.
  */
 export async function restoreCarrier(
   dir: string,
@@ -175,6 +174,55 @@ export async function restoreCarrier(
     if (previous) await writeFile(join(dir, "skills", name, "SKILL.md"), previous);
     else await rm(join(dir, "skills", name), { recursive: true, force: true });
   }
+}
+
+/**
+ * Copies the given SKILL.md contents into the carrier, lists them in app.yaml
+ * and runs `install`. If any step fails, only these skills are put back as they
+ * were, so one skill that can't build doesn't break every later install of the
+ * carrier, and nothing else in it is touched. Call with the carrier lock held.
+ */
+export async function publishCarrierSkills(
+  dir: string,
+  skills: Map<string, Buffer>,
+  install: () => Promise<void>,
+): Promise<string[]> {
+  const names = [...skills.keys()].sort();
+  const appYaml = await readFile(join(dir, "app.yaml"), "utf8");
+  const previous = await snapshotCarrierSkills(dir);
+  try {
+    for (const name of names) {
+      await mkdir(join(dir, "skills", name), { recursive: true });
+      await writeFile(join(dir, "skills", name, "SKILL.md"), skills.get(name) as Buffer);
+    }
+    const paths = await registerCarrierSkills(dir, names);
+    await install();
+    return paths;
+  } catch (err) {
+    await restoreCarrier(dir, appYaml, previous, names).catch((restoreErr) => {
+      throw new Error(
+        `${errorMessage(err)}; restoring the carrier also failed: ${errorMessage(restoreErr)}`,
+      );
+    });
+    throw err;
+  }
+}
+
+const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/**
+ * Creates a private working copy of the carrier's skills for one review. The
+ * agent edits the copy, so nothing it writes reaches the shared carrier until
+ * the review publishes it, and a failed or stopped review leaves no trace.
+ */
+export async function stageCarrierSkills(dir: string): Promise<string> {
+  const staging = await mkdtemp(join(tmpdir(), "dream-skill-review-"));
+  await mkdir(join(staging, "skills"), { recursive: true });
+  for (const [name, content] of await snapshotCarrierSkills(dir)) {
+    await mkdir(join(staging, "skills", name));
+    await writeFile(join(staging, "skills", name, "SKILL.md"), content);
+  }
+  return staging;
 }
 
 const LOCK_STALE_MS = 2 * 60_000;
