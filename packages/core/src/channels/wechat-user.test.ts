@@ -188,6 +188,7 @@ describe("WechatUserRuntime.status", () => {
     "recreated",
     "contactless",
     "shardless",
+    "deleted",
   ])("keeps %s keys awaiting keys", async (kind) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
@@ -205,6 +206,14 @@ describe("WechatUserRuntime.status", () => {
       await database(dbDir, "message/message_0.db", "a5".repeat(16));
     } else if (kind === "contactless") {
       await readableStore(h, runtime, false, ["session/session.db", "message/message_0.db"]);
+    } else if (kind === "deleted") {
+      const dbDir = await readableStore(h, runtime, false, [
+        "session/session.db",
+        "contact/contact.db",
+        "message/message_0.db",
+        "message/message_1.db",
+      ]);
+      await rm(join(dbDir, "message/message_1.db"));
     } else await readableStore(h, runtime, false, ["session/session.db", "contact/contact.db"]);
     expect(await runtime.status()).toMatchObject({ state: "awaiting-keys", keysReady: false });
   });

@@ -959,7 +959,12 @@ export class WechatUserRuntime {
     const shards = (await readdir(join(dbDir, "message")).catch(() => [] as string[]))
       .filter((name) => /^message_\d+\.db$/.test(name))
       .map((name) => `message/${name}`);
-    const required = ["session/session.db", "contact/contact.db", ...shards];
+    // A keyed shard the client has since deleted fails every query the bridge
+    // runs over it, so it counts as required too.
+    const keyed = Object.keys(stored.keys).filter((rel) => /^message\/message_\d+\.db$/.test(rel));
+    const required = [
+      ...new Set(["session/session.db", "contact/contact.db", ...shards, ...keyed]),
+    ];
     const missing: string[] = shards.length === 0 ? ["message/message_0.db"] : [];
     for (const rel of required) {
       const salt = await fileSalt(join(dbDir, rel));
