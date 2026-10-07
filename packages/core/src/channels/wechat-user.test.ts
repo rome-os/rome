@@ -10,7 +10,7 @@
 //      classifies missing keys as terminal and everything else as transient.
 
 import { existsSync, renameSync, writeFileSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zstdCompressSync } from "node:zlib";
@@ -54,20 +54,34 @@ async function tempHome(): Promise<string> {
   return home;
 }
 
-/** An account store under `h` whose stored keys cover it, as a capture leaves
- *  it. With `stale`, the client has since created a shard no key covers. */
-async function readableStore(h: string, runtime: WechatUserRuntime, stale = false): Promise<void> {
+const SALT = "5a".repeat(16);
+
+/** A database under `dbDir` that starts with `salt`, as SQLCipher lays it out. */
+async function database(dbDir: string, rel: string, salt = SALT): Promise<void> {
+  await writeFile(await ensureFile(join(dbDir, rel)), Buffer.from(salt.repeat(4), "hex"));
+}
+
+/** An account store under `h` whose stored keys fit it, as a capture leaves
+ *  it. With `stale`, the client has since created a shard no key covers.
+ *  `databases` limits which databases exist and have keys. */
+async function readableStore(
+  h: string,
+  runtime: WechatUserRuntime,
+  stale = false,
+  databases = ["session/session.db", "contact/contact.db", "message/message_0.db"],
+): Promise<string> {
   const dbDir = join(h, "xwechat_files/wxid_guardian/db_storage");
-  const keys: Record<string, { encKey: string }> = {};
-  for (const rel of ["session/session.db", "contact/contact.db", "message/message_0.db"]) {
-    await writeFile(await ensureFile(join(dbDir, rel)), "");
-    keys[rel] = { encKey: "00".repeat(32) };
+  const keys: Record<string, { encKey: string; salt: string }> = {};
+  for (const rel of databases) {
+    await database(dbDir, rel);
+    keys[rel] = { encKey: "00".repeat(32), salt: SALT };
   }
-  if (stale) await writeFile(await ensureFile(join(dbDir, "message/message_1.db")), "");
+  if (stale) await database(dbDir, "message/message_1.db");
   await writeFile(
     await ensureFile(runtime.keysFile),
     JSON.stringify({ dbDir, wxid: "wxid_guardian", keys, capturedAt: "2026-10-04T00:00:00Z" }),
   );
+  return dbDir;
 }
 
 const LOGIN_HINTS =
@@ -168,7 +182,13 @@ describe("WechatUserRuntime.status", () => {
     });
   });
 
-  it.each(["missing", "stale"])("keeps %s keys awaiting keys", async (kind) => {
+  it.each([
+    "missing",
+    "stale",
+    "recreated",
+    "contactless",
+    "shardless",
+  ])("keeps %s keys awaiting keys", async (kind) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
@@ -178,56 +198,73 @@ describe("WechatUserRuntime.status", () => {
       }).run,
     });
     await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
-    if (kind === "stale") await readableStore(h, runtime, true);
-    else await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
+    if (kind === "missing") await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
+    else if (kind === "stale") await readableStore(h, runtime, true);
+    else if (kind === "recreated") {
+      const dbDir = await readableStore(h, runtime);
+      await database(dbDir, "message/message_0.db", "a5".repeat(16));
+    } else if (kind === "contactless") {
+      await readableStore(h, runtime, false, ["session/session.db", "message/message_0.db"]);
+    } else await readableStore(h, runtime, false, ["session/session.db", "contact/contact.db"]);
     expect(await runtime.status()).toMatchObject({ state: "awaiting-keys", keysReady: false });
   });
 });
 
 describe("WechatUserRuntime.captureKeys", () => {
-  async function capturing(answer: RunResult) {
-    const calls: { file: string; args: string[]; env?: Record<string, string> }[] = [];
+  type Call = { file: string; args: string[]; env?: Record<string, string> };
+  async function capturing(answer: RunResult, opts: { store?: boolean } = {}) {
+    const calls: Call[] = [];
+    const h = await tempHome();
     const runtime = new WechatUserRuntime({
-      home: await tempHome(),
-      runtimeDir: "/run/user/test",
+      home: h,
+      runtimeDir: join(h, "run"),
       run: async (file, args, opts) => {
         calls.push({ file, args, ...(opts?.env ? { env: opts.env } : {}) });
-        return file === process.execPath ? answer : ok();
+        if (file === "sh") return ok("wxid_guardian\n");
+        if (file !== process.execPath) return ok();
+        // The bridge leaves its passphrase file behind when it is killed.
+        await writeFile(join(opts!.env!.TMPDIR!, "capture.result"), "WECHAT_PASSPHRASE=00");
+        return answer;
       },
     });
+    if (opts.store !== false) await readableStore(h, runtime);
     return { runtime, calls };
   }
   const envelope = (body: object) => ok(JSON.stringify({ v: 1, ...body }));
+  const READY_INIT = envelope({ ok: true, data: { state: "ready", missing: [] } });
+  const bridgeCall = (calls: Call[]) => calls.find((call) => call.file === process.execPath)!;
 
   it("runs the bridge's init on the given display", async () => {
-    const { runtime, calls } = await capturing(
-      envelope({ ok: true, data: { state: "ready", missing: [] } }),
-    );
+    const { runtime, calls } = await capturing(READY_INIT);
     await runtime.captureKeys(":100");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.args.slice(1)).toEqual(["-f", "json", "init", "--wait", "540"]);
-    expect(calls[0]!.env).toMatchObject({
+    const call = bridgeCall(calls);
+    expect(call.args.slice(1)).toEqual(["-f", "json", "init", "--wait", "540"]);
+    expect(call.env).toMatchObject({
       DISPLAY: ":100",
       HOME: runtime.home,
-      XDG_RUNTIME_DIR: "/run/user/test",
+      XDG_RUNTIME_DIR: runtime.runtimeDir,
       WECHAT_CLI_HOME: runtime.bridgeHome,
     });
+    expect(call.env?.TMPDIR?.startsWith(join(runtime.runtimeDir, "wechat-capture-"))).toBe(true);
+    expect(calls.map((c) => c.file)).not.toContain("pkill");
+    expect(await readdir(runtime.runtimeDir)).toEqual([]);
   });
 
   it("reports databases the login had not created yet as pending", async () => {
-    const { runtime, calls } = await capturing(
+    const { runtime } = await capturing(
       envelope({ ok: true, data: { state: "pending", missing: ["message/message_0.db"] } }),
+      { store: false },
     );
     await expect(runtime.captureKeys(":100")).rejects.toBeInstanceOf(WechatUserStorePending);
-    expect(calls.map((call) => call.file)).toEqual([process.execPath]);
   });
 
-  it("stops the debugger when the capture fails", async () => {
+  it("stops the debugger and removes the passphrase file when the capture fails", async () => {
     const { runtime, calls } = await capturing(
       envelope({ ok: false, error: { code: "CAPTURE_FAILED", message: "no login" } }),
     );
     await expect(runtime.captureKeys(":100")).rejects.toThrow("no login");
     expect(calls.map((call) => [call.file, ...call.args].join(" "))).toContain("pkill -x gdb");
+    expect(await readdir(runtime.runtimeDir)).toEqual([]);
   });
 });
 

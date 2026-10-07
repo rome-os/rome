@@ -1,7 +1,7 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { access, mkdir, mkdtemp, open, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { zstdDecompressSync } from "node:zlib";
@@ -902,34 +902,44 @@ export class WechatUserRuntime {
    * passphrase, so only another capture can key the rest.
    */
   async captureKeys(display: string, signal?: AbortSignal): Promise<void> {
+    // The bridge writes the raw passphrase to a file under TMPDIR and removes
+    // it only when it exits cleanly, so give it a private one Rome removes.
+    await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
+    const tmp = await mkdtemp(join(this.runtimeDir, CAPTURE_TMP_PREFIX));
     let captured = false;
     try {
-      const data = initResultSchema.parse(
+      initResultSchema.parse(
         await this.bridge(["init", "--wait", String(CAPTURE_WAIT_SECONDS)], {
-          env: this.clientEnv(display),
+          env: { ...this.clientEnv(display), TMPDIR: tmp },
           timeoutMs: (CAPTURE_WAIT_SECONDS + CAPTURE_GRACE_SECONDS) * 1000,
           ...(signal ? { signal } : {}),
         }),
       );
       captured = true;
-      this.keysCheckedAt = 0;
-      if (data.state === "pending") {
-        throw new WechatUserStorePending(
-          `WeChat had not finished creating ${data.missing.join(", ")} when it signed in.`,
-        );
-      }
     } finally {
       // Killing the bridge early leaves its gdb holding the client, which then
       // never exits. Nothing else in this container runs gdb.
       if (!captured) await this.run("pkill", ["-x", "gdb"]).catch(() => {});
+      await rm(tmp, { recursive: true, force: true });
+    }
+    this.keysCheckedAt = 0;
+    const account = await this.accountDir();
+    const missing = account ? await this.missingKeys(account) : ["the account store"];
+    if (missing) {
+      throw new WechatUserStorePending(
+        `WeChat had not finished creating ${missing.join(", ")} when it signed in.`,
+      );
     }
   }
 
   /**
-   * The required databases the stored keys do not cover, or null when they
-   * cover them all. The bridge skips a shard it holds no key for, so without
-   * this a shard created after the capture reads as a chat with less history
-   * rather than as a locked store.
+   * The required databases the stored keys do not fit, or null when they fit
+   * them all: the session and contact lists the bridge opens, and every
+   * message shard, of which there must be one. The bridge skips a shard it
+   * holds no key for, so without this a shard created after the capture reads
+   * as a chat with less history rather than as a locked store. A key fits when
+   * it was derived for the salt the database now starts with, so a database
+   * the client recreated reads as locked too.
    */
   private async missingKeys(accountDir: string): Promise<string[] | null> {
     const dbDir = join(accountDir, "db_storage");
@@ -940,11 +950,15 @@ export class WechatUserRuntime {
       return ["the keys file"];
     }
     if (stored.dbDir !== dbDir) return ["this account's keys"];
-    const shards = (await readdir(join(dbDir, "message")).catch(() => [] as string[])).filter(
-      (name) => /^message_\d+\.db$/.test(name),
-    );
-    const required = ["session/session.db", ...shards.map((name) => `message/${name}`)];
-    const missing = required.filter((rel) => !(rel in stored.keys));
+    const shards = (await readdir(join(dbDir, "message")).catch(() => [] as string[]))
+      .filter((name) => /^message_\d+\.db$/.test(name))
+      .map((name) => `message/${name}`);
+    const required = ["session/session.db", "contact/contact.db", ...shards];
+    const missing: string[] = shards.length === 0 ? ["message/message_0.db"] : [];
+    for (const rel of required) {
+      const salt = await fileSalt(join(dbDir, rel));
+      if (!salt || stored.keys[rel]?.salt !== salt) missing.push(rel);
+    }
     return missing.length > 0 ? missing : null;
   }
 
@@ -1042,11 +1056,34 @@ const initResultSchema = z.object({
   missing: z.array(z.string()),
 });
 
+/** Where each capture keeps the bridge's temporary files, under the runtime
+ *  directory. */
+const CAPTURE_TMP_PREFIX = "wechat-capture-";
+
 /** The part of the bridge's keys file Rome checks before reads. */
 const storedKeysSchema = z.object({
   dbDir: z.string(),
-  keys: z.record(z.string(), z.unknown()),
+  keys: z.record(
+    z.string(),
+    z.object({ encKey: z.string().regex(/^[0-9a-f]{64}$/i), salt: z.string() }),
+  ),
 });
+
+/** The SQLCipher salt a database starts with, as hex, or null before the
+ *  client has written it. */
+async function fileSalt(path: string): Promise<string | null> {
+  let handle;
+  try {
+    handle = await open(path, "r");
+    const salt = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(salt, 0, 16, 0);
+    return bytesRead === 16 ? salt.toString("hex") : null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close();
+  }
+}
 
 /** The code the reader gives an answer too large to capture, so paged reads
  *  can retry with smaller pages. */

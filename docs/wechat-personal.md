@@ -64,9 +64,9 @@ Connect's key capture kills the client and relaunches it under the debugger. Fro
 5. Open People and link a direct WeChat contact to a person.
 6. Open that person's timeline and check the message bodies, latest message, and count.
 
-Rome captures the keys with wechat-bridge's `init`, which launches the client under gdb as a child of the runtime user, waits for the login, and writes the per-database keys to the bridge's `keys.json`. It keeps no passphrase. An account connected before the bridge captures once more after upgrading, because keys the earlier Python reader stored are not carried over. No host helper is involved.
+Rome captures the keys with wechat-bridge's `init`, which launches the client under gdb as a child of the runtime user, waits for the login, and writes the per-database keys to the bridge's `keys.json`. Rome keeps no passphrase. The bridge's temporary capture files live in a private directory under `/run` that Rome removes after the capture, including on failure or cancellation. An account connected before the bridge captures once more after upgrading, because keys the earlier Python reader stored are not carried over. No host helper is involved.
 
-Rome reads only when the stored keys cover the session database and every message shard. A shard the client creates after the capture keeps the store locked until **Connect** captures again. A readable contact list alone does not establish that message history is readable.
+Rome reads only when the stored keys fit the session database, the contact database, and every message shard, and at least one shard exists. A key fits when it was derived for the salt the database starts with. A shard the client creates or recreates after the capture keeps the store locked until **Connect** captures again. A readable contact list alone does not establish that message history is readable.
 
 If the login had not created every message shard when the capture ran, setup fails and asks for another try. An unlocked but empty store needs messages synced from the phone before People can show history.
 
