@@ -135,14 +135,17 @@ export class UsageAttributionResolver {
 
   // A person in the chain wins. Otherwise a routine run reports what fired it,
   // a webhook is an event, and an app's own call has no person behind it. A
-  // guardian reached over loopback is the agent or a CLI in the container.
+  // guardian reached over loopback is the agent or a CLI in the container. A
+  // sessionless caller may be a machine posting to an app's open route.
   private async triggerFor(params: {
     initiator: string | null;
     actor: SessionActor | null;
     rootExecutionId: string | null;
   }): Promise<UsageTrigger> {
     const { initiator, actor } = params;
-    if (actor && !(actor.kind === "guardian" && actor.via === "loopback")) return "user";
+    if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {
+      return "user";
+    }
     if (initiator?.startsWith("routine:") && params.rootExecutionId) {
       const firedBy = await this.sources.getRoutineFiredBy({
         rootExecutionId: params.rootExecutionId,

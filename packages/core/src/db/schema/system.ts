@@ -855,6 +855,7 @@ export const routineRuns = sqliteTable(
     index("idx_routine_runs_routine_id").on(table.routineId),
     index("idx_routine_runs_fired_at").on(table.firedAt),
     index("idx_routine_runs_status").on(table.status),
+    index("idx_routine_runs_execution_id").on(table.executionId),
   ],
 );
 

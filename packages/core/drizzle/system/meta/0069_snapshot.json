@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7dcfaebd-0676-4bac-8821-bfe7845ed991",
+  "id": "3c14ec91-e301-44e1-9b0e-c9ffb9cf3663",
   "prevId": "b500ea7b-2703-463f-82cd-809fd42eba57",
   "tables": {
     "action_executions": {
@@ -2247,6 +2247,13 @@
           "name": "idx_routine_runs_status",
           "columns": [
             "status"
+          ],
+          "isUnique": false
+        },
+        "idx_routine_runs_execution_id": {
+          "name": "idx_routine_runs_execution_id",
+          "columns": [
+            "execution_id"
           ],
           "isUnique": false
         }

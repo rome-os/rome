@@ -69,10 +69,10 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 - A turn event's kind is `chat`, `channel`, `app`, `routine`, or `other`. A subagent or fork turn takes the kind of its root session, read from session lineage when the event is recorded.
 - An action run event covers a finished top-level action execution that a routine fired, that an app called itself, or that a webhook sent to an app's action. An agent's tool calls are not action runs. Turn events count their model work.
 - Turn and action run events carry a trigger, which records what set the work off:
-  - `user`: a person did. This covers a chat or channel message, an app call from a signed-in session or a public page, and a routine's **Run now**.
+  - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
   - `schedule`: a schedule or poll trigger fired a routine.
   - `event`: an event or webhook trigger fired a routine, or a webhook reached an app's action.
-  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here.
+  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here. So does a sessionless call to an app, which may be a machine webhook or a person on a public page.
   - `unknown`: none of the above can be told. This includes a routine run recorded before runs stored what fired them.
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A retried fire takes the routine's current trigger.

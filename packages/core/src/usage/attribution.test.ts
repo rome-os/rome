@@ -243,12 +243,17 @@ describe("UsageAttributionResolver.forActionRun", () => {
     expect((await webhook.forActionRun(row))?.trigger).toBe("event");
   });
 
-  it("calls an app's run from a signed-in session or a public page user-initiated", async () => {
+  it("calls an app's run from a signed-in session user-initiated", async () => {
     const visitor: SessionActor = { kind: "visitor", accountId: "v", email: "v@example.com" };
     expect((await run("my_tool.run", "app:my_tool", { actor: visitor }))?.trigger).toBe("user");
+  });
+
+  // A sessionless call may be a person on a public page or a machine posting
+  // to an app's unauthenticated route, such as a connector webhook.
+  it("does not count a sessionless call as a person", async () => {
     expect(
       (await run("my_tool.run", "app:my_tool", { actor: { kind: "anonymous" } }))?.trigger,
-    ).toBe("user");
+    ).toBe("background");
   });
 
   it("skips agent tool calls, channel delivery, startup work, and core webhooks", async () => {
