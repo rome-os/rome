@@ -264,11 +264,8 @@ describe("PageTopBar", () => {
     expect(bar.querySelector("button")?.textContent).toBe("New routine");
 
     const page = screen.getByTestId("page");
-    for (const slot of ["page-header-nav", "page-actions"]) {
-      const inline = page.querySelector(`[data-slot="${slot}"]`);
-      expect(inline?.textContent).toBe("");
-      expect([...(inline?.classList ?? [])]).toContain("hidden");
-    }
+    expect(page.querySelector('[data-slot="page-header-nav"]')).toBeNull();
+    expect(page.querySelector('[data-slot="page-actions"]')).toBeNull();
     expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
 
     // The bar repeats the title for the eye only, so a reader still meets one h1.
@@ -312,6 +309,7 @@ describe("PageTopBar", () => {
     );
 
     expect(mounts).toBe(1);
+    screen.getByRole("button").focus();
     fireEvent.click(screen.getByRole("button"));
     expect(screen.getByRole("button").textContent).toBe("Clicked 1");
 
@@ -319,6 +317,7 @@ describe("PageTopBar", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByTestId("bar").querySelector("button")).not.toBeNull();
     expect(screen.getByRole("button").textContent).toBe("Clicked 1");
+    expect(document.activeElement).toBe(screen.getByRole("button"));
     fireEvent.click(screen.getByRole("button"));
 
     viewport.resize(false);
@@ -421,6 +420,42 @@ describe("PageTopBar", () => {
     const title = screen.getByTestId("bar").querySelector('[data-slot="page-top-bar-title"]');
     expect(title?.hasAttribute("data-shown")).toBe(true);
   });
+
+  for (const [where, phone, wrap] of [
+    ["outside a provider", true, (node: ReactNode) => node],
+    ["at md and wider", false, (node: ReactNode) => <InShell>{node}</InShell>],
+    ["in the bar", true, (node: ReactNode) => <InShell>{node}</InShell>],
+  ] as const) {
+    it(`gives the caller's ref and handlers the wrapper ${where}`, () => {
+      mockViewport(phone);
+      const navRef = createRef<HTMLDivElement>();
+      const actionsRef = createRef<HTMLDivElement>();
+      const onNavClick = rs.fn();
+      const onActionsClick = rs.fn();
+      render(
+        wrap(
+          <PageHeader>
+            <PageHeaderNav ref={navRef} onClick={onNavClick}>
+              <a href="/back">Back</a>
+            </PageHeaderNav>
+            <PageHeading>
+              <PageTitle>Keys</PageTitle>
+            </PageHeading>
+            <PageActions ref={actionsRef} onClick={onActionsClick}>
+              <button type="button">Add</button>
+            </PageActions>
+          </PageHeader>,
+        ),
+      );
+
+      expect(navRef.current?.dataset.slot).toBe("page-header-nav");
+      expect(actionsRef.current?.dataset.slot).toBe("page-actions");
+      fireEvent.click(screen.getByRole("link", { name: "Back" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(onNavClick).toHaveBeenCalledTimes(1);
+      expect(onActionsClick).toHaveBeenCalledTimes(1);
+    });
+  }
 
   it("gives the bar back to the fallback when the header unmounts", () => {
     mockViewport(true);

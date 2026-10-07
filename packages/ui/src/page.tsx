@@ -197,24 +197,52 @@ function useScrolledUnder(target: HTMLElement | null, edge: HTMLElement | null):
 }
 
 /**
- * Renders `children` once into a node it owns, then attaches that node to
- * `host` when given and to the inline element otherwise. The portal target
- * never changes, so moving between the page and the bar keeps the subtree's
- * state and focus instead of remounting it.
+ * Renders `element` once into a node it owns, and attaches that node to `host`
+ * when given and to an inline placeholder otherwise. The portal target never
+ * changes, so moving between the page and the bar keeps the subtree's state.
+ * Focus inside the subtree is restored after a move, since a browser blurs a
+ * node it reparents or stops rendering.
+ *
+ * The placeholder and the owned node both render as `display: contents`, so
+ * `element` lays out as if it sat where the placeholder does.
  */
-function useRelocated(children: ReactNode, host: HTMLElement | null) {
-  const [node] = useState(() => {
+function useRelocated(element: ReactNode, host: HTMLElement | null) {
+  const [{ node, focus }] = useState(() => {
     const el = document.createElement("div");
     el.style.display = "contents";
-    return el;
+    // The last control focused inside the node. A browser drops focus from a
+    // control that stops rendering, as the bar's does when the viewport
+    // crosses `md`, and that blur names no next target. A blur that names one
+    // is the user moving on, so it clears the record.
+    const record: { last: HTMLElement | null } = { last: null };
+    el.addEventListener("focusin", (event) => {
+      record.last = event.target instanceof HTMLElement ? event.target : null;
+    });
+    el.addEventListener("focusout", (event) => {
+      if (event.relatedTarget !== null) record.last = null;
+    });
+    return { node: el, focus: record };
   });
-  const [inline, setInline] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const target = host ?? inline;
-    if (target && node.parentNode !== target) target.appendChild(node);
-  }, [host, inline, node]);
+  // A ref callback rather than an effect, so the node is in the document
+  // before the subtree's own layout effects measure it.
+  const placeholder = useCallback(
+    (inline: HTMLElement | null) => {
+      const target = host ?? inline;
+      if (!target || node.parentNode === target) return;
+      target.appendChild(node);
+      const last = focus.last;
+      const lost = document.activeElement === null || document.activeElement === document.body;
+      if (last && lost && node.contains(last)) last.focus({ preventScroll: true });
+    },
+    [host, node, focus],
+  );
   useLayoutEffect(() => () => node.remove(), [node]);
-  return { setInline, portal: createPortal(children, node) };
+  return (
+    <>
+      <div ref={placeholder} style={{ display: "contents" }} />
+      {createPortal(element, node)}
+    </>
+  );
 }
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
@@ -285,19 +313,11 @@ export function PageHeader({
  * Breadcrumb or back link above the title. Inside the shell, below `md` it
  * renders in the phone top bar instead, so hold it to one link that fits there.
  */
-export function PageHeaderNav({ className, children, ...props }: ComponentProps<"div">) {
+export function PageHeaderNav({ className, ...props }: ComponentProps<"div">) {
   const host = useContext(HeaderTopBarContext)?.nav ?? null;
-  const { setInline, portal } = useRelocated(children, host);
-  return (
-    <>
-      <div
-        ref={setInline}
-        data-slot="page-header-nav"
-        className={cn("basis-full", className, host && "hidden")}
-        {...props}
-      />
-      {portal}
-    </>
+  return useRelocated(
+    <div data-slot="page-header-nav" className={cn(!host && "basis-full", className)} {...props} />,
+    host,
   );
 }
 
@@ -379,20 +399,16 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
  * control renders in the phone top bar instead. Two or more stay in the page,
  * since the bar holds one.
  */
-export function PageActions({ className, children, ...props }: ComponentProps<"div">) {
+export function PageActions({ className, ...props }: ComponentProps<"div">) {
   const barHost = useContext(HeaderTopBarContext)?.action ?? null;
-  const host = Children.toArray(children).length === 1 ? barHost : null;
-  const { setInline, portal } = useRelocated(children, host);
-  return (
-    <>
-      <div
-        ref={setInline}
-        data-slot="page-actions"
-        className={cn("flex shrink-0 flex-wrap items-center gap-2", className, host && "hidden")}
-        {...props}
-      />
-      {portal}
-    </>
+  const host = Children.toArray(props.children).length === 1 ? barHost : null;
+  return useRelocated(
+    <div
+      data-slot="page-actions"
+      className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
+      {...props}
+    />,
+    host,
   );
 }
 
