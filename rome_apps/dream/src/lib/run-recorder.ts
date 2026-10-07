@@ -18,8 +18,6 @@ export class RunRecorder {
   private readonly pending = new Map<string, FileChange[]>();
   summary = "";
   error: string | null = null;
-  /** Paths of the file changes whose tool calls succeeded, in order. */
-  readonly changedPaths: string[] = [];
   private interrupted = false;
 
   constructor(
@@ -51,7 +49,6 @@ export class RunRecorder {
       this.pending.delete(event.toolUseId);
       if (event.isError) return;
       this.repo.addChanges(this.runId, changes);
-      for (const change of changes) this.changedPaths.push(change.path);
     }
   }
 

@@ -1,12 +1,16 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
+  changedSkills,
+  commitCarrier,
   ensureUserSkillsCarrier,
-  isInside,
   registerCarrierSkills,
+  snapshotCarrierSkills,
   userSkillsCarrierDir,
+  withCarrierLock,
 } from "./user-skills-carrier.js";
 
 let root: string;
@@ -64,10 +68,68 @@ describe("user-skills carrier", () => {
     expect(yaml).not.toContain("skills: []");
   });
 
-  it("detects paths inside the carrier", () => {
-    expect(isInside(dir, join(dir, "skills/a/SKILL.md"))).toBe(true);
-    expect(isInside(dir, "skills/a/SKILL.md")).toBe(true);
-    expect(isInside(dir, join(root, "other/SKILL.md"))).toBe(false);
-    expect(isInside(dir, dir)).toBe(false);
+  it("keeps object, flow and zero-indent entries and dedupes by path", async () => {
+    addSkill("kept");
+    addSkill("flow");
+    addSkill("new");
+    writeFileSync(
+      join(dir, "app.yaml"),
+      "id: user-skills\nskills:\n- path: skills/kept\n  publicName: kept\n# a comment\n- ./skills/flow/\nweb:\n  manifest: web/manifest.json\n",
+    );
+    expect(await registerCarrierSkills(dir)).toEqual([
+      "skills/kept",
+      "./skills/flow/",
+      "skills/new",
+    ]);
+    const yaml = readFileSync(join(dir, "app.yaml"), "utf8");
+    expect(yaml).toContain("publicName: kept");
+    expect(yaml).toContain("# a comment");
+    expect(yaml).toContain("manifest: web/manifest.json");
+
+    writeFileSync(join(dir, "app.yaml"), "id: user-skills\nskills: [skills/kept, skills/x/y]\n");
+    expect(await registerCarrierSkills(dir)).toEqual([
+      "skills/kept",
+      "skills/x/y",
+      "skills/flow",
+      "skills/new",
+    ]);
+  });
+
+  it("reports added and edited skills between snapshots", async () => {
+    addSkill("same");
+    addSkill("edited");
+    const before = await snapshotCarrierSkills(dir);
+    writeFileSync(join(dir, "skills", "edited", "SKILL.md"), "---\nname: edited\n---\nmore\n");
+    addSkill("added");
+    expect(changedSkills(before, await snapshotCarrierSkills(dir))).toEqual(["added", "edited"]);
+  });
+
+  it("serializes overlapping registrations so neither skill is dropped", async () => {
+    const order: string[] = [];
+    const slow = withCarrierLock(dir, async () => {
+      order.push("a:start");
+      await new Promise((r) => setTimeout(r, 50));
+      order.push("a:end");
+    });
+    const fast = withCarrierLock(dir, async () => {
+      order.push("b:start");
+      order.push("b:end");
+    });
+    await Promise.all([slow, fast]);
+    expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"]);
+  });
+
+  it("commits the carrier when it is a git repo", async () => {
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("config", "user.email", "t@example.com");
+    git("config", "user.name", "t");
+    addSkill("committed");
+    await commitCarrier(dir, ["committed"]);
+    expect(git("log", "--format=%s")).toBe("Dream: update skill committed");
+    expect(git("status", "--porcelain")).toBe("");
+    await commitCarrier(dir, ["committed"]);
+    expect(git("rev-list", "--count", "HEAD")).toBe("1");
   });
 });

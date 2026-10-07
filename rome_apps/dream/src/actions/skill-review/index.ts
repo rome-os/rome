@@ -10,10 +10,13 @@ import {
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 import {
+  changedSkills,
+  commitCarrier,
   ensureUserSkillsCarrier,
-  isInside,
   registerCarrierSkills,
+  snapshotCarrierSkills,
   userSkillsCarrierDir,
+  withCarrierLock,
 } from "../../lib/user-skills-carrier.js";
 
 const log = createAppLogger("skill_review");
@@ -78,8 +81,10 @@ export function createAction(
       // agent's conversation history. The skill-review agent fetches its own
       // conversation history via get_webchat_conversations.
       const stopHeartbeat = keepRunAlive(runs, runId);
+      let before: Map<string, string>;
       try {
         await ensureUserSkillsCarrier(carrierDir);
+        before = await snapshotCarrierSkills(carrierDir);
         for await (const msg of agentRunner.run({
           agentName: "skill-review",
           workingDir: carrierDir,
@@ -108,16 +113,22 @@ export function createAction(
 
       // A saved SKILL.md is not a skill until the carrier listing it is
       // installed; register and install it here so the save is never silent.
-      const touchedCarrier = recorder.changedPaths.some((path) => isInside(carrierDir, path));
+      // Changes are found by diffing the carrier on disk, not by parsing tool
+      // events, whose shape differs per provider (Codex edits carry no path).
+      const changed = changedSkills(before, await snapshotCarrierSkills(carrierDir));
       let installed: string[] | undefined;
-      if (touchedCarrier) {
+      if (changed.length > 0) {
         try {
-          installed = await registerCarrierSkills(carrierDir);
-          const res = await appContext.runAction("app_management", {
-            op: "install",
-            source: { mode: "source", path: carrierDir },
+          installed = await withCarrierLock(carrierDir, async () => {
+            const skills = await registerCarrierSkills(carrierDir);
+            await commitCarrier(carrierDir, changed);
+            const res = await appContext.runAction("app_management", {
+              op: "install",
+              source: { mode: "source", path: carrierDir },
+            });
+            if (res.status === "error") throw new Error(res.error);
+            return skills;
           });
-          if (res.status === "error") throw new Error(res.error);
         } catch (err) {
           const error = `Skill saved but user-skills install failed: ${err instanceof Error ? err.message : String(err)}`;
           runs.finish(runId, { status: "failed", error });

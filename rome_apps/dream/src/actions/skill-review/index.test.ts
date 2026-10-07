@@ -254,6 +254,60 @@ describe("skill_review", () => {
     expect(run).toMatchObject({ status: "failed" });
   });
 
+  it("installs a skill written through a Codex-shaped edit event", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skill = writeSkill("codex-skill");
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps(
+        [
+          {
+            type: "tool_use",
+            id: "c1",
+            tool: "Edit",
+            input: { type: "fileChange", id: "c1", changes: [{ kind: "add" }] },
+          },
+          { type: "tool_result", toolUseId: "c1", tool: "Edit", output: "ok" },
+          { type: "result", content: "Saved." },
+        ],
+        [],
+        skill.place,
+      ),
+    ).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
+    expect(result.data).toMatchObject({ installed: ["skills/codex-skill"] });
+    expect(installCalls).toHaveLength(1);
+  });
+
+  it("keeps both skills when two reviews overlap", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const a = writeSkill("alpha");
+    const b = writeSkill("beta");
+    const listedAtInstall: string[] = [];
+    const deps = (skill: typeof a) => {
+      const d = makeDeps(skill.events, [], skill.place);
+      d.appContext.runAction = (async () => {
+        listedAtInstall.push(readFileSync(join(carrierDir, "app.yaml"), "utf8"));
+        await new Promise((r) => setTimeout(r, 20));
+        return { status: "ok", data: {} };
+      }) as never;
+      return d;
+    };
+
+    await Promise.all([
+      createAction(actionConfig, deps(a)).execute({}),
+      createAction(actionConfig, deps(b)).execute({}),
+    ]);
+
+    const yaml = readFileSync(join(carrierDir, "app.yaml"), "utf8");
+    expect(yaml).toContain("skills/alpha");
+    expect(yaml).toContain("skills/beta");
+    expect(listedAtInstall.at(-1)).toContain("skills/alpha");
+    expect(listedAtInstall.at(-1)).toContain("skills/beta");
+  });
+
   it("does not install for writes outside the carrier", async () => {
     seedSession("web", "webchat", 1700000000);
     const outside = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";

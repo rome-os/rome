@@ -1,7 +1,11 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, relative, resolve, sep } from "node:path";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { isMap, isScalar, isSeq, parseDocument, YAMLSeq } from "yaml";
 
 /**
  * The `user-skills` carrier app is where reviewed skills live. It is the same
@@ -19,6 +23,9 @@ export function userSkillsCarrierDir(env: NodeJS.ProcessEnv = process.env): stri
   return resolve(authoringRoot, USER_SKILLS_APP_ID);
 }
 
+// Keep this scaffold in sync with the copy in
+// rome_apps/skills/src/skills/import-skill/SKILL.md ("Skills install into one
+// carrier app"): both create the same carrier.
 const APP_YAML = `formatVersion: 2
 id: user-skills
 name: User Skills
@@ -89,44 +96,108 @@ export async function ensureUserSkillsCarrier(dir: string): Promise<void> {
   }
 }
 
-export function isInside(dir: string, path: string): boolean {
-  const rel = relative(dir, resolve(dir, path));
-  return rel !== "" && !rel.startsWith("..") && !rel.startsWith(sep);
+/** Content hash of every `skills/<name>/SKILL.md`, keyed by folder. */
+export async function snapshotCarrierSkills(dir: string): Promise<Map<string, string>> {
+  const snapshot = new Map<string, string>();
+  const entries = await readdir(join(dir, "skills"), { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const content = await readFile(join(dir, "skills", entry.name, "SKILL.md")).catch(() => null);
+    if (content) snapshot.set(entry.name, createHash("sha256").update(content).digest("hex"));
+  }
+  return snapshot;
 }
 
+/** Skill folders added or edited between two snapshots, sorted. */
+export function changedSkills(before: Map<string, string>, after: Map<string, string>): string[] {
+  return [...after]
+    .filter(([name, hash]) => before.get(name) !== hash)
+    .map(([name]) => name)
+    .sort();
+}
+
+function entryPath(item: unknown): string | undefined {
+  if (isScalar(item)) return String(item.value);
+  if (isMap(item)) {
+    const path = item.get("path");
+    return typeof path === "string" ? path : undefined;
+  }
+  return undefined;
+}
+
+const normalize = (path: string) => path.replace(/^\.\//, "").replace(/\/+$/, "");
+
 /**
- * Lists every `skills/<name>/SKILL.md` folder under `skills:` in app.yaml,
- * keeping entries already there. The agent only writes SKILL.md files, so
- * registration stays deterministic.
+ * Adds every `skills/<name>` folder that has a SKILL.md to `skills:` in
+ * app.yaml. Existing entries keep their form (scalar, `{ path, publicName }`,
+ * flow list) and the rest of the file is untouched; folders are matched by
+ * path, so nothing is listed twice. Returns the resulting list of paths.
  */
 export async function registerCarrierSkills(dir: string): Promise<string[]> {
-  const entries = await readdir(join(dir, "skills"), { withFileTypes: true });
-  const onDisk = entries
-    .filter((e) => e.isDirectory() && existsSync(join(dir, "skills", e.name, "SKILL.md")))
-    .map((e) => `skills/${e.name}`)
-    .sort();
-
+  const onDisk = [...(await snapshotCarrierSkills(dir)).keys()].sort().map((n) => `skills/${n}`);
   const yamlPath = join(dir, "app.yaml");
-  const lines = (await readFile(yamlPath, "utf8")).split("\n");
-  const start = lines.findIndex((line) => /^skills:/.test(line));
-  const listed: string[] = [];
-  let end = start + 1;
-  if (start !== -1) {
-    for (; end < lines.length; end++) {
-      const item = /^\s+-\s+(.+?)\s*$/.exec(lines[end] ?? "");
-      if (!item) break;
-      listed.push(item[1].replace(/^["']|["']$/g, ""));
+  const doc = parseDocument(await readFile(yamlPath, "utf8"));
+  if (doc.errors.length > 0) throw new Error(`invalid ${yamlPath}: ${doc.errors[0]?.message}`);
+
+  const existing = doc.get("skills", true);
+  const seq = isSeq(existing) ? existing : new YAMLSeq();
+  if (seq !== existing) doc.set("skills", seq);
+  const listed = seq.items.map(entryPath).filter((p): p is string => p !== undefined);
+  const known = new Set(listed.map(normalize));
+  const added = onDisk.filter((p) => !known.has(p));
+  if (added.length > 0) {
+    // A flow list (`skills: []` or `[a, b]`) is rewritten in block style.
+    seq.flow = false;
+    for (const path of added) seq.add(doc.createNode(path));
+    await writeFile(yamlPath, doc.toString());
+  }
+  return [...listed, ...added];
+}
+
+const LOCK_STALE_MS = 10 * 60_000;
+
+/**
+ * Runs `fn` while holding a lock on the carrier shared by every worker on this
+ * host, so overlapping reviews register and install one at a time. Without it,
+ * one review's app.yaml write can drop another's skill before either installs.
+ */
+export async function withCarrierLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const id = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
+  const lock = join(tmpdir(), `rome-user-skills-${id}.lock`);
+  for (;;) {
+    try {
+      await mkdir(lock);
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      const age = await stat(lock).then(
+        (s) => Date.now() - s.mtimeMs,
+        () => 0,
+      );
+      if (age > LOCK_STALE_MS) await rm(lock, { recursive: true, force: true });
+      else await new Promise((r) => setTimeout(r, 100));
     }
   }
-  const skills = [...listed, ...onDisk.filter((s) => !listed.includes(s))];
-  const block =
-    skills.length === 0 ? ["skills: []"] : ["skills:", ...skills.map((s) => `  - ${s}`)];
-  if (start === -1) {
-    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-    lines.push(...block, "");
-  } else {
-    lines.splice(start, end - start, ...block);
+  try {
+    return await fn();
+  } finally {
+    await rm(lock, { recursive: true, force: true });
   }
-  await writeFile(yamlPath, lines.join("\n"));
-  return skills;
+}
+
+const run = promisify(execFile);
+
+/**
+ * Commits the carrier when it is a git repo, as import-skill does per skill, so
+ * Dream's edits don't get folded into an unrelated later commit.
+ */
+export async function commitCarrier(dir: string, skills: string[]): Promise<void> {
+  if (!existsSync(join(dir, ".git"))) return;
+  await run("git", ["add", "-A"], { cwd: dir });
+  const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: dir }).then(
+    () => false,
+    () => true,
+  );
+  if (!staged) return;
+  await run("git", ["commit", "-m", `Dream: update skill ${skills.join(", ")}`], { cwd: dir });
 }
