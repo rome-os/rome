@@ -96,22 +96,22 @@ export async function ensureUserSkillsCarrier(dir: string): Promise<void> {
   }
 }
 
-/** Content hash of every `skills/<name>/SKILL.md`, keyed by folder. */
-export async function snapshotCarrierSkills(dir: string): Promise<Map<string, string>> {
-  const snapshot = new Map<string, string>();
+/** Content of every `skills/<name>/SKILL.md`, keyed by folder. */
+export async function snapshotCarrierSkills(dir: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>();
   const entries = await readdir(join(dir, "skills"), { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const content = await readFile(join(dir, "skills", entry.name, "SKILL.md")).catch(() => null);
-    if (content) snapshot.set(entry.name, createHash("sha256").update(content).digest("hex"));
+    if (content) snapshot.set(entry.name, content);
   }
   return snapshot;
 }
 
 /** Skill folders added or edited between two snapshots, sorted. */
-export function changedSkills(before: Map<string, string>, after: Map<string, string>): string[] {
+export function changedSkills(before: Map<string, Buffer>, after: Map<string, Buffer>): string[] {
   return [...after]
-    .filter(([name, hash]) => before.get(name) !== hash)
+    .filter(([name, content]) => !before.get(name)?.equals(content))
     .map(([name]) => name)
     .sort();
 }
@@ -128,13 +128,13 @@ function entryPath(item: unknown): string | undefined {
 const normalize = (path: string) => path.replace(/^\.\//, "").replace(/\/+$/, "");
 
 /**
- * Adds every `skills/<name>` folder that has a SKILL.md to `skills:` in
- * app.yaml. Existing entries keep their form (scalar, `{ path, publicName }`,
- * flow list) and the rest of the file is untouched; folders are matched by
- * path, so nothing is listed twice. Returns the resulting list of paths.
+ * Lists the given `skills/<name>` folders under `skills:` in app.yaml.
+ * Existing entries keep their form (scalar, `{ path, publicName }`, flow
+ * list) and the rest of the file is untouched; folders are matched by path,
+ * so nothing is listed twice. Returns the paths of the given folders.
  */
-export async function registerCarrierSkills(dir: string): Promise<string[]> {
-  const onDisk = [...(await snapshotCarrierSkills(dir)).keys()].sort().map((n) => `skills/${n}`);
+export async function registerCarrierSkills(dir: string, names: string[]): Promise<string[]> {
+  const paths = names.map((name) => `skills/${name}`);
   const yamlPath = join(dir, "app.yaml");
   const doc = parseDocument(await readFile(yamlPath, "utf8"));
   if (doc.errors.length > 0) throw new Error(`invalid ${yamlPath}: ${doc.errors[0]?.message}`);
@@ -142,16 +142,39 @@ export async function registerCarrierSkills(dir: string): Promise<string[]> {
   const existing = doc.get("skills", true);
   const seq = isSeq(existing) ? existing : new YAMLSeq();
   if (seq !== existing) doc.set("skills", seq);
-  const listed = seq.items.map(entryPath).filter((p): p is string => p !== undefined);
-  const known = new Set(listed.map(normalize));
-  const added = onDisk.filter((p) => !known.has(p));
+  const known = new Set(
+    seq.items
+      .map(entryPath)
+      .filter((p): p is string => p !== undefined)
+      .map(normalize),
+  );
+  const added = paths.filter((p) => !known.has(p));
   if (added.length > 0) {
     // A flow list (`skills: []` or `[a, b]`) is rewritten in block style.
     seq.flow = false;
     for (const path of added) seq.add(doc.createNode(path));
     await writeFile(yamlPath, doc.toString());
   }
-  return [...listed, ...added];
+  return paths;
+}
+
+/**
+ * Puts the carrier back as it was before a run: app.yaml text, edited
+ * SKILL.md files, and no added folders. Used when the install fails, so a
+ * skill that can't build doesn't break every later install of the carrier.
+ */
+export async function restoreCarrier(
+  dir: string,
+  appYaml: string,
+  before: Map<string, Buffer>,
+  changed: string[],
+): Promise<void> {
+  await writeFile(join(dir, "app.yaml"), appYaml);
+  for (const name of changed) {
+    const previous = before.get(name);
+    if (previous) await writeFile(join(dir, "skills", name, "SKILL.md"), previous);
+    else await rm(join(dir, "skills", name), { recursive: true, force: true });
+  }
 }
 
 const LOCK_STALE_MS = 2 * 60_000;

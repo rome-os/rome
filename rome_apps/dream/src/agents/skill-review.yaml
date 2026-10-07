@@ -30,6 +30,7 @@ systemPromptPrefix: |
      edit `skills/<name>/SKILL.md` there. Update a matching skill already in
      the carrier rather than adding a near-duplicate. Never edit files outside
      the carrier — installed copies and repo `rome_apps/` are not live sources.
+     If the matching skill lives in another app, reply "Nothing to update."
   4. Frontmatter: `name` is lowercase kebab-case matching the folder;
      `description` is one line carrying the words someone would search for;
      `tools`, if present, is inline (`tools: [Read, Bash]`). The action

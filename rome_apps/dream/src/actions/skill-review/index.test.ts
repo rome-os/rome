@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -238,7 +238,7 @@ describe("skill_review", () => {
     expect(runs.changes(runId)).toHaveLength(1);
   });
 
-  it("fails the run when the carrier install fails", async () => {
+  it("fails the run and rolls the carrier back when the install fails", async () => {
     seedSession("web", "webchat", 1700000000);
     installResult = { status: "error", error: "BUILD_FAILED" };
     const skill = writeSkill("deploy-preview");
@@ -252,6 +252,15 @@ describe("skill_review", () => {
     expect(result.error).toContain("BUILD_FAILED");
     const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
     expect(run).toMatchObject({ status: "failed" });
+    expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).not.toContain("deploy-preview");
+    expect(existsSync(join(carrierDir, "skills", "deploy-preview"))).toBe(false);
+
+    // The same skill written again is a fresh change, so it is retried.
+    installResult = { status: "ok", data: {} };
+    const retry = await createAction(actionConfig, makeDeps(skill.events, [], skill.place)).execute(
+      {},
+    );
+    expect(retry).toMatchObject({ status: "ok", data: { installed: ["skills/deploy-preview"] } });
   });
 
   it("installs a skill written through a Codex-shaped edit event", async () => {

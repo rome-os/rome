@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import {
   createAppLogger,
@@ -14,6 +16,7 @@ import {
   commitCarrier,
   ensureUserSkillsCarrier,
   registerCarrierSkills,
+  restoreCarrier,
   snapshotCarrierSkills,
   userSkillsCarrierDir,
   withCarrierLock,
@@ -84,7 +87,7 @@ export function createAction(
       // lock and installing are part of the run, not a stalled one.
       const stopHeartbeat = keepRunAlive(runs, runId);
       try {
-        let before: Map<string, string>;
+        let before: Map<string, Buffer>;
         try {
           await ensureUserSkillsCarrier(carrierDir);
           before = await snapshotCarrierSkills(carrierDir);
@@ -121,12 +124,21 @@ export function createAction(
         if (changed.length > 0) {
           try {
             installed = await withCarrierLock(carrierDir, async () => {
-              const skills = await registerCarrierSkills(carrierDir);
-              const res = await appContext.runAction("app_management", {
-                op: "install",
-                source: { mode: "source", path: carrierDir },
-              });
-              if (res.status === "error") throw new Error(res.error);
+              const appYaml = await readFile(join(carrierDir, "app.yaml"), "utf8");
+              let skills: string[];
+              try {
+                skills = await registerCarrierSkills(carrierDir, changed);
+                const res = await appContext.runAction("app_management", {
+                  op: "install",
+                  source: { mode: "source", path: carrierDir },
+                });
+                if (res.status === "error") throw new Error(res.error);
+              } catch (err) {
+                // One skill that can't build fails the whole carrier, so undo
+                // this run's changes rather than break every later install.
+                await restoreCarrier(carrierDir, appYaml, before, changed);
+                throw err;
+              }
               // History only; a failed commit must not undo a working install.
               await commitCarrier(carrierDir, changed).catch((err) =>
                 log.warn("user-skills commit failed", { error: String(err) }),
@@ -134,7 +146,7 @@ export function createAction(
               return skills;
             });
           } catch (err) {
-            const error = `Skill saved but user-skills install failed: ${err instanceof Error ? err.message : String(err)}`;
+            const error = `Skill not saved: user-skills install failed, changes rolled back: ${err instanceof Error ? err.message : String(err)}`;
             runs.finish(runId, { status: "failed", error });
             log.error("user-skills install failed", { error });
             return { status: "error", error };

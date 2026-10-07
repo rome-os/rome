@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
@@ -8,6 +8,7 @@ import {
   commitCarrier,
   ensureUserSkillsCarrier,
   registerCarrierSkills,
+  restoreCarrier,
   snapshotCarrierSkills,
   userSkillsCarrierDir,
   withCarrierLock,
@@ -54,7 +55,10 @@ describe("user-skills carrier", () => {
     addSkill("reviewed");
     mkdirSync(join(dir, "skills", "no-skill-md"));
 
-    expect(await registerCarrierSkills(dir)).toEqual(["skills/imported", "skills/reviewed"]);
+    expect(await registerCarrierSkills(dir, ["imported", "reviewed"])).toEqual([
+      "skills/imported",
+      "skills/reviewed",
+    ]);
     expect(readFileSync(join(dir, "app.yaml"), "utf8")).toBe(
       "id: user-skills\nskills:\n  - skills/imported\n  - skills/reviewed\nweb:\n  manifest: web/manifest.json\n",
     );
@@ -62,10 +66,12 @@ describe("user-skills carrier", () => {
 
   it("replaces the empty inline list", async () => {
     addSkill("first");
-    await registerCarrierSkills(dir);
+    addSkill("unrelated");
+    await registerCarrierSkills(dir, ["first"]);
     const yaml = readFileSync(join(dir, "app.yaml"), "utf8");
     expect(yaml).toContain("skills:\n  - skills/first\n");
     expect(yaml).not.toContain("skills: []");
+    expect(yaml).not.toContain("unrelated");
   });
 
   it("keeps object, flow and zero-indent entries and dedupes by path", async () => {
@@ -76,23 +82,16 @@ describe("user-skills carrier", () => {
       join(dir, "app.yaml"),
       "id: user-skills\nskills:\n- path: skills/kept\n  publicName: kept\n# a comment\n- ./skills/flow/\nweb:\n  manifest: web/manifest.json\n",
     );
-    expect(await registerCarrierSkills(dir)).toEqual([
-      "skills/kept",
-      "./skills/flow/",
-      "skills/new",
-    ]);
-    const yaml = readFileSync(join(dir, "app.yaml"), "utf8");
-    expect(yaml).toContain("publicName: kept");
-    expect(yaml).toContain("# a comment");
-    expect(yaml).toContain("manifest: web/manifest.json");
+    await registerCarrierSkills(dir, ["kept", "flow", "new"]);
+    expect(readFileSync(join(dir, "app.yaml"), "utf8")).toBe(
+      "id: user-skills\nskills:\n  - path: skills/kept\n    publicName: kept\n  # a comment\n  - ./skills/flow/\n  - skills/new\nweb:\n  manifest: web/manifest.json\n",
+    );
 
     writeFileSync(join(dir, "app.yaml"), "id: user-skills\nskills: [skills/kept, skills/x/y]\n");
-    expect(await registerCarrierSkills(dir)).toEqual([
-      "skills/kept",
-      "skills/x/y",
-      "skills/flow",
-      "skills/new",
-    ]);
+    await registerCarrierSkills(dir, ["kept", "new"]);
+    expect(readFileSync(join(dir, "app.yaml"), "utf8")).toBe(
+      "id: user-skills\nskills:\n  - skills/kept\n  - skills/x/y\n  - skills/new\n",
+    );
   });
 
   it("reports added and edited skills between snapshots", async () => {
@@ -102,6 +101,23 @@ describe("user-skills carrier", () => {
     writeFileSync(join(dir, "skills", "edited", "SKILL.md"), "---\nname: edited\n---\nmore\n");
     addSkill("added");
     expect(changedSkills(before, await snapshotCarrierSkills(dir))).toEqual(["added", "edited"]);
+  });
+
+  it("restores the carrier to its state before a run", async () => {
+    addSkill("edited");
+    const appYaml = readFileSync(join(dir, "app.yaml"), "utf8");
+    const before = await snapshotCarrierSkills(dir);
+    writeFileSync(join(dir, "skills", "edited", "SKILL.md"), "broken");
+    addSkill("added");
+    await registerCarrierSkills(dir, ["edited", "added"]);
+
+    await restoreCarrier(dir, appYaml, before, ["added", "edited"]);
+
+    expect(readFileSync(join(dir, "app.yaml"), "utf8")).toBe(appYaml);
+    expect(readFileSync(join(dir, "skills", "edited", "SKILL.md"), "utf8")).toContain(
+      "name: edited",
+    );
+    expect(existsSync(join(dir, "skills", "added"))).toBe(false);
   });
 
   it("serializes overlapping registrations so neither skill is dropped", async () => {
