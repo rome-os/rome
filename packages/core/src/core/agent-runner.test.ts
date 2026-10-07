@@ -343,6 +343,25 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("does not retain acquisition output for a non-WebChat session", async () => {
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-code-backed",
+      channelThreadKey: "telegram:acquisition-journal",
+    });
+    await collectMessages(session.sendTurn({ inputId: "unreplayed", prompt: "hello" }).events);
+
+    const messages: AgentMessage[] = [];
+    session.subscribe((message) => messages.push(message), { replayModelTurns: true });
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    expect(messages).toEqual([]);
+    await manager.shutdown();
+  });
+
   it("replays acquisition output before delivering an already-queued live message", async () => {
     let releaseSecondOutput!: () => void;
     const secondOutputReady = new Promise<void>((resolve) => {

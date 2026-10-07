@@ -1230,43 +1230,93 @@ async function* mergeModelSessionEvents(
   provider: AsyncIterable<ModelSessionEvent>,
   local: AsyncIterable<ModelSessionEvent>,
 ): AsyncGenerator<ModelSessionEvent> {
-  const providerIterator = provider[Symbol.asyncIterator]();
-  const localIterator = local[Symbol.asyncIterator]();
-  let providerNext = providerIterator
-    .next()
-    .then((result) => ({ source: "provider" as const, result }));
-  let localNext = localIterator.next().then((result) => ({ source: "local" as const, result }));
-  while (providerNext || localNext) {
-    const next = await Promise.race([providerNext, localNext].filter(Boolean));
-    if (next.source === "provider") {
-      if (next.result.done) providerNext = undefined as never;
-      else {
-        yield next.result.value;
-        providerNext = providerIterator
-          .next()
-          .then((result) => ({ source: "provider" as const, result }));
-      }
-      continue;
-    }
-    if (next.result.done) {
-      localNext = undefined as never;
-      continue;
-    }
-    // Local completion is one ModelSession turn. Once it begins, hold any
-    // already-ready provider frame until its terminal boundary is delivered.
-    let event = next.result.value;
+  const turns = new ModelSessionEventTurnQueue(provider, local);
+  while (true) {
+    const source = await turns.nextSource();
+    if (!source) return;
+    let next = await turns.next(source);
+    if (next.done) continue;
+
+    // Both sources speak the same ModelSession contract. Once either starts
+    // a turn, retain its stream ownership until the corresponding end. This
+    // keeps AgentSession's active SDK turn aligned with every event it sees.
     while (true) {
-      yield event;
-      const done = event.type === "model_turn_end";
-      localNext = localIterator.next().then((result) => ({ source: "local" as const, result }));
-      if (done) break;
-      const following = await localNext;
-      if (following.result.done) {
-        localNext = undefined as never;
-        break;
-      }
-      event = following.result.value;
+      yield next.value;
+      if (next.value.type === "model_turn_end") break;
+      next = await turns.next(source);
+      if (next.done) break;
     }
+  }
+}
+
+type ModelSessionEventSource = "provider" | "local";
+
+/**
+ * A bounded two-source coordinator. Each iterator has at most one completed
+ * read buffered, so an idle local iterator cannot accumulate Promise.race
+ * reactions while the provider streams a long native turn.
+ */
+class ModelSessionEventTurnQueue {
+  private readonly sources: Record<
+    ModelSessionEventSource,
+    {
+      iterator: AsyncIterator<ModelSessionEvent>;
+      ready?: IteratorResult<ModelSessionEvent>;
+      done: boolean;
+      waiting?: () => void;
+    }
+  >;
+  private readySources: ModelSessionEventSource[] = [];
+  private waitingForSource?: () => void;
+
+  constructor(provider: AsyncIterable<ModelSessionEvent>, local: AsyncIterable<ModelSessionEvent>) {
+    this.sources = {
+      provider: { iterator: provider[Symbol.asyncIterator](), done: false },
+      local: { iterator: local[Symbol.asyncIterator](), done: false },
+    };
+    this.pull("provider");
+    this.pull("local");
+  }
+
+  async nextSource(): Promise<ModelSessionEventSource | undefined> {
+    while (true) {
+      while (this.readySources.length > 0) {
+        const source = this.readySources.shift()!;
+        if (this.sources[source].ready) return source;
+      }
+      if (Object.values(this.sources).every((source) => source.done)) return undefined;
+      await new Promise<void>((resolve) => {
+        this.waitingForSource = resolve;
+      });
+    }
+  }
+
+  async next(sourceName: ModelSessionEventSource): Promise<IteratorResult<ModelSessionEvent>> {
+    const source = this.sources[sourceName];
+    while (!source.ready) {
+      if (source.done) return { value: undefined as never, done: true };
+      await new Promise<void>((resolve) => {
+        source.waiting = resolve;
+      });
+    }
+    const next = source.ready;
+    source.ready = undefined;
+    if (next.done) source.done = true;
+    else this.pull(sourceName);
+    return next;
+  }
+
+  private pull(sourceName: ModelSessionEventSource): void {
+    const source = this.sources[sourceName];
+    void source.iterator.next().then((next) => {
+      source.ready = next;
+      if (next.done) source.done = true;
+      this.readySources.push(sourceName);
+      source.waiting?.();
+      source.waiting = undefined;
+      this.waitingForSource?.();
+      this.waitingForSource = undefined;
+    });
   }
 }
 

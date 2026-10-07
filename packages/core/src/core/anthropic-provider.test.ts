@@ -1012,6 +1012,70 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
+    it("keeps a local completion distinct from a native turn that races its startup", async () => {
+      let releaseProvider!: () => void;
+      const providerReady = new Promise<void>((resolve) => {
+        releaseProvider = resolve;
+      });
+      let releaseNativeResult!: () => void;
+      const nativeResultReady = new Promise<void>((resolve) => {
+        releaseNativeResult = resolve;
+      });
+      scripted(async function* () {
+        await providerReady;
+        yield say("native");
+        await nativeResultReady;
+        yield result("native", [], "task-notification");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events: ModelSessionEvent[] = [];
+      let nativeStarted!: () => void;
+      const sawNativeStart = new Promise<void>((resolve) => {
+        nativeStarted = resolve;
+      });
+      const drain = (async () => {
+        let ended = 0;
+        for await (const event of session.events) {
+          events.push(event);
+          if (event.type === "model_turn_start" && event.answers.length === 0) nativeStarted();
+          if (event.type === "model_turn_end" && ++ended === 2) return;
+        }
+      })();
+
+      // Provider startup is queued before the local completion gets past its
+      // already-idle boundary check. The two turns must still not overlap.
+      releaseProvider();
+      const completion = session.completeTurn!({ inputId: a, text: "local" }, [
+        { type: "text", content: "local", turnPhase: "final" },
+        { type: "result", content: "local" },
+      ]);
+      await sawNativeStart;
+      releaseNativeResult();
+      await completion;
+      await drain;
+
+      const starts = events
+        .map((event, index) => ({ event, index }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            event: Extract<ModelSessionEvent, { type: "model_turn_start" }>;
+            index: number;
+          } => entry.event.type === "model_turn_start",
+        );
+      const nativeStart = starts.find((entry) => entry.event.answers.length === 0)!;
+      const localStart = starts.find((entry) => entry.event.answers.includes(a))!;
+      const localEnd = events.findIndex(
+        (event) => event.type === "model_turn_end" && event.answers.includes(a),
+      );
+      expect(localStart.index).toBeLessThan(localEnd);
+      expect(localEnd).toBeLessThan(nativeStart.index);
+      expect(events).toContainEqual(expect.objectContaining({ type: "result", content: "native" }));
+      expect(events).toContainEqual(expect.objectContaining({ type: "result", content: "local" }));
+      await session.close();
+    });
+
     it("rejects a local completion waiting behind a provider turn when the stream closes", async () => {
       let releaseProvider!: () => void;
       const providerReady = new Promise<void>((resolve) => {

@@ -1986,7 +1986,10 @@ class AgentSessionImpl implements AgentSession {
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private modelTurnListeners = new Map<string, AgentSessionModelTurnListener>();
   private modelTurnAnswersListeners = new Map<string, AgentSessionModelTurnAnswersListener>();
-  private replayingModelTurns = true;
+  // Only WebChat attaches after acquisition and needs the short replay window.
+  // Other channels consume their caller handle or a live subscription, so
+  // retaining their completed output would leak the session's whole history.
+  private replayingModelTurns: boolean;
   private readonly replayedModelTurnIds: string[] = [];
   private readonly replayedModelTurnMessages = new Map<string, StreamAgentMessage[]>();
   private readonly replayedModelTurnAnswers: Array<{ turnId: string; answers: string[] }> = [];
@@ -2051,6 +2054,7 @@ class AgentSessionImpl implements AgentSession {
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
+    this.replayingModelTurns = this.key.channelThreadKey.startsWith("webchat:");
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
     this.openModelSession = args.openModelSession;
