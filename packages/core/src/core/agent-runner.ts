@@ -299,6 +299,17 @@ export function isModelTurnEvent(event: ModelSessionEvent): event is ModelTurnEv
   );
 }
 
+/** A live code-backed model turn, used while middleware produces its reply. */
+export interface CodeBackedTurn {
+  /** Forward one middleware event through the session's model-turn stream. */
+  emit(message: AgentMessage): void;
+  /** Close the model turn after its terminal event has been emitted. */
+  complete(): Promise<void>;
+}
+
+export const CODE_BACKED_FALLBACK =
+  "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
+
 export interface ModelSession {
   readonly providerId: ProviderId;
   readonly model: string;
@@ -332,6 +343,19 @@ export interface ModelSession {
 
   /** Append without interrupting. Only `deferred` is safe to submit again. */
   steerUserInput?(input: ModelUserInput): Promise<"accepted" | "deferred">;
+
+  /**
+   * Complete a code-backed turn through the same model-turn event stream as a
+   * provider reply. The supplied terminal must answer `input.inputId`; callers
+   * settle only from the resulting model_turn_end echo.
+   */
+  completeTurn?(input: ModelUserInput, events: readonly AgentMessage[]): Promise<void>;
+
+  /**
+   * Open a live code-backed turn. Middleware forwards its events while it runs,
+   * then completes the same model-turn boundary after its terminal event.
+   */
+  startCodeBackedTurn?(input: ModelUserInput): CodeBackedTurn;
 
   /** Create an isolated provider-owned branch from this live session. */
   fork(params: ModelSessionForkParams): Promise<ModelSessionFork>;
@@ -457,6 +481,14 @@ export function createSessionFromRun(
         if (completed) emit({ type: "model_turn_end", turnId, answers });
       }
     },
+    async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
+      const turnId = uuidv4();
+      const answers = input.inputId ? [input.inputId] : [];
+      emit({ type: "model_turn_start", turnId, answers });
+      emit({ type: "model_turn_answers", turnId, added: [] });
+      for (const message of messages) emit(message);
+      emit({ type: "model_turn_end", turnId, answers });
+    },
     async fork(): Promise<ModelSessionFork> {
       throw new Error("ModelSession fork is not supported by this provider");
     },
@@ -510,22 +542,40 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
     },
   };
 
-  const FALLBACK =
-    "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
+  const startCodeBackedTurn = (input: ModelUserInput): CodeBackedTurn => {
+    const turnId = uuidv4();
+    const answers = input.inputId ? [input.inputId] : [];
+    let completed = false;
+    emit({ type: "model_turn_start", turnId, answers });
+    emit({ type: "model_turn_answers", turnId, added: [] });
+    return {
+      emit(message) {
+        if (!completed) emit(message);
+      },
+      async complete() {
+        if (completed) return;
+        completed = true;
+        emit({ type: "model_turn_end", turnId, answers });
+      },
+    };
+  };
 
   return {
     providerId: "mock",
     model: params.model,
     events,
     async sendUserInput(input: ModelUserInput): Promise<void> {
-      const turnId = uuidv4();
-      const answers = input.inputId ? [input.inputId] : [];
-      emit({ type: "model_turn_start", turnId, answers });
-      emit({ type: "model_turn_answers", turnId, added: [] });
-      emit({ type: "text", content: FALLBACK });
-      emit({ type: "result", content: FALLBACK });
-      emit({ type: "model_turn_end", turnId, answers });
+      await this.completeTurn!(input, [
+        { type: "text", content: CODE_BACKED_FALLBACK },
+        { type: "result", content: CODE_BACKED_FALLBACK },
+      ]);
     },
+    async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
+      const turn = startCodeBackedTurn(input);
+      for (const message of messages) turn.emit(message);
+      await turn.complete();
+    },
+    startCodeBackedTurn,
     async fork(): Promise<ModelSessionFork> {
       throw new Error("a code-backed agent session cannot fork");
     },

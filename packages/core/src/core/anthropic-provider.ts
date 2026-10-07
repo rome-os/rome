@@ -810,7 +810,7 @@ export class AnthropicProvider implements ModelProvider {
             if ("isReplay" in message && message.isReplay) unreadSends.delete(message.uuid);
             if ("isReplay" in message && message.isReplay && message.origin?.kind === "human") {
               if (!mintedIds.delete(message.uuid)) {
-                yield { type: "input_status", inputId: message.uuid, state: "consumed" };
+                yield { type: "input_status", inputId: message.uuid, state: "read" };
               }
             }
             for (const toolResult of extractToolResultMessages(message, toolUseNames)) {

@@ -262,14 +262,14 @@ export interface TurnInfo {
   turnId: string;
   streamId: string;
   startedAt: string;
-  status: "running" | "queued";
+  status: "running" | "queued" | "completed";
 }
 
 // Shape of POST /chat/sessions/:id/turns response.
 export interface CreateTurnResponse {
   turnId: string | null;
   inputId?: string;
-  disposition?: "started" | "queued" | "steering";
+  disposition?: "sent";
   inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;

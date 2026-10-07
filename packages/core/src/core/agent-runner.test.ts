@@ -315,6 +315,92 @@ describe("AgentRunner", () => {
     await manager.shutdown();
   });
 
+  it("routes a middleware reply through a model turn and marks its input answered", async () => {
+    const turnMiddleware = createTurnMiddlewareChain();
+    rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {
+      ctx.emit({ type: "text", content: "Scripted welcome", turnPhase: "final" });
+      ctx.emit({ type: "result", content: "Scripted welcome" });
+    });
+    const manager = createAgentSessionManager(
+      {
+        ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+        turnMiddleware,
+      },
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-code-backed",
+      channelThreadKey: "webchat:scripted-model-turn",
+    });
+    const modelTurns: string[] = [];
+    const unsubscribe = session.onModelTurnStart!((turnId) => modelTurns.push(turnId));
+    const statuses: string[] = [];
+    let events!: Promise<AgentMessage[]>;
+    session.submitInput!(
+      { inputId: "scripted-input", prompt: "hello" },
+      {
+        onTurn: (handle) => {
+          events = collectMessages(handle.events);
+        },
+        onInputStatus: (status) => {
+          statuses.push(status.state);
+        },
+      },
+    );
+
+    await expect(events).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "result", content: "Scripted welcome" }),
+        expect.objectContaining({ type: "turn_end", status: "completed" }),
+      ]),
+    );
+    expect(modelTurns).toHaveLength(1);
+    expect(statuses).toEqual(["sent", "answered"]);
+    unsubscribe();
+    await manager.shutdown();
+  });
+
+  it("streams code-backed middleware narration before the hook resolves", async () => {
+    let releaseMiddleware!: () => void;
+    const middlewareGate = new Promise<void>((resolve) => {
+      releaseMiddleware = resolve;
+    });
+    const turnMiddleware = createTurnMiddlewareChain();
+    rs.spyOn(turnMiddleware, "run").mockImplementation(async (ctx) => {
+      ctx.emit({ type: "text", content: "Welcome to Rome", turnPhase: "commentary" });
+      await middlewareGate;
+      ctx.emit({ type: "result", content: "Welcome to Rome" });
+    });
+    const manager = createAgentSessionManager(
+      {
+        ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+        turnMiddleware,
+      },
+      { keepAliveAcrossTurns: true },
+    );
+    const session = await manager.acquire({
+      agentName: "test-code-backed",
+      channelThreadKey: "webchat:scripted-live-narration",
+    });
+    const turn = session.sendTurn({ inputId: "scripted-input", prompt: "hello" });
+    const messages: AgentMessage[] = [];
+    const drained = (async () => {
+      for await (const message of turn.events) messages.push(message);
+    })();
+
+    // The welcome hook waits for specialist work after its narration. The
+    // narration must reach the caller's public model turn before that wait.
+    await rs.waitFor(() =>
+      expect(messages).toContainEqual(
+        expect.objectContaining({ type: "text", content: "Welcome to Rome" }),
+      ),
+    );
+    releaseMiddleware();
+    await drained;
+    expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+    await manager.shutdown();
+  });
+
   it("reuses a code-backed session across acquires without resolving a provider", async () => {
     // A code-backed session's null model session reports providerId "mock", but
     // the resolved active provider is real (here "anthropic"). The reuse check
@@ -1972,7 +2058,7 @@ describe("AgentRunner", () => {
       };
 
       const firstInput = submit("input-first", "first");
-      expect(firstInput.receipt.disposition).toBe("started");
+      expect(firstInput.receipt.disposition).toBe("sent");
       const first = await firstInput.turn;
       const firstMessages = collectMessages(first.events);
       await rs.waitFor(() => expect(prompts).toEqual(["first"]));
@@ -1982,7 +2068,7 @@ describe("AgentRunner", () => {
       );
 
       const secondInput = submit("input-second", "second");
-      expect(secondInput.receipt.disposition).toBe("started");
+      expect(secondInput.receipt.disposition).toBe("sent");
       const second = await secondInput.turn;
       const secondMessages = collectMessages(second.events);
       await rs.waitFor(() => expect(prompts).toEqual(["first", "second"]));
@@ -2776,7 +2862,7 @@ describe("AgentRunner", () => {
 
     it("observes input status before the SDK binds its stream sink", async () => {
       let runtime!: ReturnType<typeof createSdkEventSession>;
-      const statuses: string[] = [];
+      const statuses: Array<{ state: string; turnId?: string }> = [];
       const provider: ModelProvider = {
         id: "anthropic",
         displayName: "SDK input status",
@@ -2802,9 +2888,13 @@ describe("AgentRunner", () => {
             handle = turn;
           },
           onInputStatus: (status) => {
-            statuses.push(status.state);
+            statuses.push({ state: status.state, turnId: status.turnId });
           },
         },
+      );
+      const published: Array<{ message: AgentMessage; turnId: string }> = [];
+      const unsubscribe = session.subscribe((message, turnId) =>
+        published.push({ message, turnId }),
       );
       const messages = collectMessages(handle.events);
       await rs.waitFor(() => expect(runtime.sent).toEqual([{ inputId: "A", text: "first" }]));
@@ -2812,14 +2902,23 @@ describe("AgentRunner", () => {
       // This is the order produced by the Anthropic SDK replay: no named
       // stream sink exists yet when the provider acknowledges A.
       runtime.emit({ type: "model_turn_start", turnId: "replay", answers: [] });
-      runtime.emit({ type: "input_status", inputId: "A", state: "consumed" });
+      runtime.emit({ type: "input_status", inputId: "A", state: "read" });
+      await rs.waitFor(() =>
+        expect(published).toContainEqual(
+          expect.objectContaining({
+            message: expect.objectContaining({ type: "input_status", inputId: "A", state: "read" }),
+            turnId: "replay",
+          }),
+        ),
+      );
       runtime.emit({ type: "model_turn_answers", turnId: "replay", added: ["A"] });
       runtime.emit({ type: "result", content: "done" });
       runtime.emit({ type: "model_turn_end", turnId: "replay", answers: ["A"] });
 
       await messages;
-      expect(statuses).toContain("consumed");
-      expect(statuses.at(-1)).toBe("consumed");
+      expect(statuses).toContainEqual({ state: "read", turnId: "replay" });
+      expect(statuses.at(-1)).toMatchObject({ state: "answered" });
+      unsubscribe();
       await manager.shutdown();
     });
 
@@ -3631,6 +3730,106 @@ describe("AgentRunner", () => {
           expect.objectContaining({ type: "error", error: "session closed without a terminal" }),
           expect.objectContaining({ type: "turn_end", status: "error" }),
         ]),
+      );
+      await manager.shutdown();
+    });
+
+    it("finalizes a detached SDK turn when the provider stream dies", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK detached process death",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire({
+        agentName: "test-main",
+        channelThreadKey: "webchat:sdk-detached-process-death",
+      });
+      const published: Array<{ type: string; turnId: string; status?: string }> = [];
+      const unsubscribe = session.subscribe((message, turnId) =>
+        published.push({
+          type: message.type,
+          turnId,
+          ...(message.type === "turn_end" ? { status: message.status } : {}),
+        }),
+      );
+
+      // No caller is waiting: the SDK started this background turn itself.
+      runtime.emit({ type: "model_turn_start", turnId: "background", answers: [] });
+      // Start followed by EOF must still surface a detached visible owner.
+      await rs.waitFor(() =>
+        expect(published).toContainEqual(
+          expect.objectContaining({ type: "turn_start", turnId: "background" }),
+        ),
+      );
+      runtime.end();
+
+      await rs.waitFor(() =>
+        expect(published).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "error", turnId: "background" }),
+            { type: "turn_end", turnId: "background", status: "error" },
+          ]),
+        ),
+      );
+      unsubscribe();
+      await manager.shutdown();
+    });
+
+    it("persists an echoed answer that predates the in-memory input queue", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "resumed input echo",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const webchatRepo = new WebChatRepository(testDb.db);
+      await webchatRepo.createSession("resumed-webchat", "Resumed");
+      await webchatRepo.recordUserInput(
+        "persisted-input",
+        "resumed-webchat",
+        JSON.stringify([{ type: "text", content: "before restart" }]),
+      );
+      const manager = createAgentSessionManager(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [provider] })),
+          webchatRepo,
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const session = await manager.acquire(
+        {
+          agentName: "test-main",
+          channelThreadKey: "webchat:resumed-webchat",
+        },
+        { romeSessionId: "resumed-webchat" },
+      );
+
+      runtime.emit({
+        type: "model_turn_start",
+        turnId: "sdk-resumed",
+        answers: ["persisted-input"],
+      });
+      runtime.emit({ type: "result", content: "Recovered reply" });
+      runtime.emit({ type: "model_turn_end", turnId: "sdk-resumed", answers: ["persisted-input"] });
+
+      await rs.waitFor(async () =>
+        expect(await webchatRepo.getUserInput("resumed-webchat", "persisted-input")).toEqual({
+          inputState: "answered",
+          turnId: "sdk-resumed",
+        }),
       );
       await manager.shutdown();
     });

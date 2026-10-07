@@ -40,7 +40,12 @@ import type {
   ConversationRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
-import { createNullModelSession, isModelTurnEvent } from "./agent-runner.js";
+import {
+  CODE_BACKED_FALLBACK,
+  createNullModelSession,
+  isModelTurnEvent,
+  type CodeBackedTurn,
+} from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -348,6 +353,13 @@ export interface AgentSessionStatusEvent {
 
 export type AgentSessionSubscriber = (msg: StreamAgentMessage, turnId: string) => void;
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
+/** Fires only when the provider has opened an SDK model turn. */
+export type AgentSessionModelTurnListener = (turnId: string) => void;
+/** Reports caller input ids newly echoed by an SDK model turn. */
+export type AgentSessionModelTurnAnswersListener = (
+  turnId: string,
+  answers: readonly string[],
+) => void;
 
 export interface AgentSession {
   readonly key: AgentSessionKey;
@@ -367,6 +379,10 @@ export interface AgentSession {
   ): AgentInputReceipt;
   runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage>;
   subscribe(handler: AgentSessionSubscriber): () => void;
+  /** Model-turn boundary for consumers that render one stream per SDK turn. */
+  onModelTurnStart?(listener: AgentSessionModelTurnListener): () => void;
+  /** Caller echoes newly claimed by a provider-owned model turn. */
+  onModelTurnAnswers?(listener: AgentSessionModelTurnAnswersListener): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
@@ -1751,6 +1767,7 @@ interface SdkTurnState {
   /** The visible Rome turn for this SDK-owned model turn. */
   sink?: TurnSink;
   terminal?: ResultMessage | ErrorMessage;
+  streamAnnounced?: boolean;
 }
 
 interface TurnSink {
@@ -1958,6 +1975,8 @@ class AgentSessionImpl implements AgentSession {
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
+  private modelTurnListeners = new Map<string, AgentSessionModelTurnListener>();
+  private modelTurnAnswersListeners = new Map<string, AgentSessionModelTurnAnswersListener>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
   /** Callers waiting for the SDK turn whose result names their message id. */
@@ -1994,7 +2013,6 @@ class AgentSessionImpl implements AgentSession {
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
     (input, options) => this.sendTurn(input, options),
-    () => this.modelSession,
     (error) =>
       log.warn("conversational input dispatch failed", {
         sessionId: this.sessionId,
@@ -2195,7 +2213,10 @@ class AgentSessionImpl implements AgentSession {
         // after model_turn_start([]) but before model_turn_answers(), so it
         // must not depend on a visible stream sink having been opened yet.
         if (msg.type === "input_status") {
-          const sink = this.waitingCallers.get(msg.inputId) ?? activeTurn?.sink;
+          // The active SDK turn is the public stream. A caller handle only
+          // correlates the input; routing a read acknowledgement through it
+          // hides the update from subscribers when the SDK began detached.
+          const sink = activeTurn?.sink ?? this.waitingCallers.get(msg.inputId);
           if (!sink) {
             log.warn("agent session received input status with no caller", {
               inputId: msg.inputId,
@@ -2203,8 +2224,8 @@ class AgentSessionImpl implements AgentSession {
             });
             continue;
           }
-          await this.inputs.observe(msg, sink.turnId);
-          this.publishOutbound(sink, { ...msg, turnId: sink.turnId });
+          await this.inputs.observe({ ...msg, state: "read" }, sink.turnId);
+          this.publishOutbound(sink, { ...msg, state: "read", turnId: sink.turnId });
           continue;
         }
         // A turn the SDK starts itself has no waiting caller. It still owns a
@@ -2342,7 +2363,12 @@ class AgentSessionImpl implements AgentSession {
       // A provider stream ending while callers are still bound has no
       // trustworthy result correlation, even if a lightweight test/provider
       // does not expose isClosed. Fail those callers rather than hanging them.
-      if (session.isClosed || waiting.size > 0) {
+      if (
+        session.isClosed ||
+        streamError !== undefined ||
+        waiting.size > 0 ||
+        this.sdkTurns.size > 0
+      ) {
         this.modelSessionAvailable = false;
         // A dead provider cannot produce model_turn_end. Drop its SDK state
         // before failing sinks so closeSink can make this session idle and a
@@ -2353,16 +2379,20 @@ class AgentSessionImpl implements AgentSession {
         }
         this.sdkTurns.clear();
         this.activeSdkTurnId = undefined;
-        if (waiting.size > 0) {
-          const error =
-            streamError === undefined
-              ? "session closed without a terminal"
-              : streamFailurePayload(streamError);
+        const error =
+          streamError === undefined
+            ? "session closed without a terminal"
+            : streamFailurePayload(streamError);
+        if (deadSinks.size > 0) {
           log.warn("model session closed without a terminal", {
             sessionId: this.sessionId,
             provider: session.providerId,
             waitingCallers: waiting.size,
+            unfinishedTurns: deadSinks.size,
           });
+          // An SDK-started turn can have no caller at all. It still owns
+          // lifecycle work and subscriber delivery, so a dead provider must
+          // settle it just as it settles a caller-bound turn.
           for (const sink of deadSinks) {
             if (!sink.done) this.failTurn(sink, error);
           }
@@ -2402,6 +2432,8 @@ class AgentSessionImpl implements AgentSession {
           .map((id) => this.waitingCallers.get(id))
           .find((sink): sink is TurnSink => !!sink);
         if (streamSink) this.bindSdkTurnSink(event.turnId, streamSink);
+        else this.openSdkTurnSink(event.turnId);
+        this.announceModelTurnAnswers(event.turnId, event.answers);
         return;
       }
       case "model_turn_answers": {
@@ -2414,6 +2446,7 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         for (const id of event.added) turn.answers.add(id);
+        this.announceModelTurnAnswers(event.turnId, event.added);
         // The first named caller owns the model stream. Later names may have
         // folded into this SDK turn; they receive the same terminal below.
         const streamSink = event.added
@@ -2434,6 +2467,7 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         for (const id of event.answers) turn.answers.add(id);
+        this.announceModelTurnAnswers(event.turnId, event.answers);
         if (!turn.terminal) {
           log.warn("model turn ended without a terminal", {
             sessionId: this.sessionId,
@@ -2452,6 +2486,21 @@ class AgentSessionImpl implements AgentSession {
         // particular a background turn must finish its lifecycle and surface
         // its captured submit_output even after it names a caller.
         if (turn.sink) sinks.add(turn.sink);
+        // A model-turn answer is the only authoritative completion signal for
+        // an input: an input can be read while folding into a later SDK turn.
+        for (const id of turn.answers) {
+          const turnId = turn.sink?.turnId ?? event.turnId;
+          const untracked = await this.inputs.answer(id, turnId);
+          if (untracked && turn.sink) {
+            // A resumed provider can echo an input that was submitted before
+            // this process created its in-memory queue entry. Keep its durable
+            // progress and live subscribers in sync without resending it.
+            if (this.romeSessionId) {
+              await this.deps.webchatRepo?.updateUserInput(this.romeSessionId, untracked);
+            }
+            this.publishOutbound(turn.sink, untracked);
+          }
+        }
         for (const sink of sinks) {
           if (!sink.done) {
             await this.finishSinkFromTerminal(session, sink, turn.terminal, sink === turn.sink);
@@ -2468,6 +2517,7 @@ class AgentSessionImpl implements AgentSession {
     const acquiredOwner = !turn.sink;
     const owner = turn.sink ?? sink;
     turn.sink = owner;
+    this.announceModelTurn(turn, owner.turnId);
     this.currentSink = owner;
     // Provider acceptance can precede its first turn frame. Tell existing
     // status subscribers as soon as that SDK frame gives the session a visible
@@ -2511,7 +2561,10 @@ class AgentSessionImpl implements AgentSession {
       skillWritten: false,
       startedAtMs: Date.now(),
     };
-    if (turn) turn.sink = sink;
+    if (turn) {
+      turn.sink = sink;
+      this.announceModelTurn(turn, sink.turnId);
+    }
     this.currentSink = sink;
     this.status = "running";
     this.ensureTurnStart(sink);
@@ -3640,6 +3693,8 @@ class AgentSessionImpl implements AgentSession {
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: ResultMessage | ErrorMessage | undefined;
       let modelRan = false;
+      const middlewareEvents: AgentMessage[] = [];
+      let codeBackedTurn: CodeBackedTurn | undefined;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
         session: {
@@ -3664,13 +3719,43 @@ class AgentSessionImpl implements AgentSession {
           if (outbound.type === "result" || outbound.type === "error") {
             emittedTerminal = outbound;
           }
-          this.publishOutbound(sink, outbound);
+          // A code-backed session has already opened a correlated model turn,
+          // so narration stays live while middleware waits. Other middleware
+          // replies retain the buffered completion path below.
+          if (codeBackedTurn) codeBackedTurn.emit(outbound);
+          else middlewareEvents.push(outbound);
         },
         meta: {},
       };
 
+      // Code-backed middleware has no provider query, but it still owns a
+      // real model-session turn. Open it before executing middleware so every
+      // emitted narration block reaches the public turn stream immediately.
+      if (this.config.codeBacked) {
+        const startCodeBackedTurn = this.modelSession.startCodeBackedTurn;
+        if (!startCodeBackedTurn) {
+          throw new Error("ModelSession cannot stream a code-backed turn");
+        }
+        if (input.inputId) this.waitingCallers.set(input.inputId, sink);
+        codeBackedTurn = startCodeBackedTurn.call(this.modelSession, {
+          inputId: input.inputId,
+          text: mwInput.prompt,
+          images: input.images,
+          reasoningEffort: mwInput.reasoningEffort,
+          injectedToolResult: input.injectedToolResult,
+        });
+        modelRan = true;
+      }
+
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
+        if (codeBackedTurn) {
+          // A misconfigured code-backed middleware that calls next() still
+          // completes the already-open turn rather than minting a second one.
+          mwCtx.emit({ type: "text", content: CODE_BACKED_FALLBACK });
+          mwCtx.emit({ type: "result", content: CODE_BACKED_FALLBACK });
+          return;
+        }
         if (sink.lifecycleInterrupted) {
           // Same pre-acceptance cancellation rule as above. Once accepted,
           // the handle's interrupt path targets its matching SDK-owned sink.
@@ -3729,19 +3814,24 @@ class AgentSessionImpl implements AgentSession {
         await runModelTerminal();
       }
 
-      // Middleware-only turns still terminate here. A dispatched model turn
-      // stays open until the SDK names this input at model_turn_end.
-      if (!sink.done && !modelRan) {
-        if (input.inputId) {
-          await this.inputs.observe(
-            {
-              type: "input_status",
-              inputId: input.inputId,
-              state: emittedTerminal?.type === "error" ? "failed" : "consumed",
-            },
-            turnId,
-          );
+      // Middleware-only output is still a real ModelSession turn. A
+      // code-backed session opened its boundary above and forwards events as
+      // they arrive; other middleware sessions complete their buffered reply
+      // after the chain returns.
+      if (!sink.done && codeBackedTurn) {
+        if (!emittedTerminal) {
+          let terminal: ResultMessage | ErrorMessage = { type: "result", content: "" };
+          if (this.structuredOutputValidator) {
+            terminal = validateProviderStructuredResult(
+              terminal,
+              this.structuredOutputValidator,
+              sink.outputSchemaSuspended,
+            ) as ResultMessage | ErrorMessage;
+          }
+          mwCtx.emit(terminal);
         }
+        await codeBackedTurn.complete();
+      } else if (!sink.done && !modelRan) {
         let terminal: ResultMessage | ErrorMessage = emittedTerminal ?? {
           type: "result",
           content: "",
@@ -3752,13 +3842,30 @@ class AgentSessionImpl implements AgentSession {
             this.structuredOutputValidator,
             sink.outputSchemaSuspended,
           ) as ResultMessage | ErrorMessage;
-          this.publishOutbound(sink, terminal);
         }
-        this.finalizeTurn(sink, terminal);
+        if (!emittedTerminal) middlewareEvents.push(terminal);
+        if (input.inputId) this.waitingCallers.set(input.inputId, sink);
+        const completeTurn = this.modelSession.completeTurn;
+        if (!completeTurn) {
+          throw new Error("ModelSession cannot complete a middleware-only turn");
+        }
+        modelRan = true;
+        await completeTurn.call(
+          this.modelSession,
+          {
+            inputId: input.inputId,
+            text: mwInput.prompt,
+            images: input.images,
+            reasoningEffort: mwInput.reasoningEffort,
+            injectedToolResult: input.injectedToolResult,
+          },
+          middlewareEvents,
+        );
       }
 
       // The agent + model spans stay on this sink until its SDK result. Only
-      // middleware-only paths have no SDK terminal to close them.
+      // middleware-only paths that fail before a ModelSession completion need
+      // local span cleanup.
       if (!modelRan && sink.agentSpan === span) {
         span.setAttributes({
           "session.is_new": this.isNewSession,
@@ -3812,6 +3919,47 @@ class AgentSessionImpl implements AgentSession {
     return () => {
       this.subscribers.delete(id);
     };
+  }
+
+  onModelTurnStart(listener: AgentSessionModelTurnListener): () => void {
+    const id = uuidv4();
+    this.modelTurnListeners.set(id, listener);
+    return () => this.modelTurnListeners.delete(id);
+  }
+
+  private announceModelTurn(turn: SdkTurnState, turnId: string): void {
+    if (turn.streamAnnounced) return;
+    turn.streamAnnounced = true;
+    for (const listener of this.modelTurnListeners.values()) {
+      try {
+        listener(turnId);
+      } catch (err) {
+        log.warn("agent session model-turn listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: this.sessionId,
+        });
+      }
+    }
+  }
+
+  onModelTurnAnswers(listener: AgentSessionModelTurnAnswersListener): () => void {
+    const id = uuidv4();
+    this.modelTurnAnswersListeners.set(id, listener);
+    return () => this.modelTurnAnswersListeners.delete(id);
+  }
+
+  private announceModelTurnAnswers(turnId: string, answers: readonly string[]): void {
+    if (answers.length === 0) return;
+    for (const listener of this.modelTurnAnswersListeners.values()) {
+      try {
+        listener(turnId, answers);
+      } catch (err) {
+        log.warn("agent session model-turn answers listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: this.sessionId,
+        });
+      }
+    }
   }
 
   onStatusChange(listener: AgentSessionStatusListener): () => void {
