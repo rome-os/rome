@@ -80,66 +80,73 @@ export function createAction(
       // Open an independent session so this review does not pollute the main
       // agent's conversation history. The skill-review agent fetches its own
       // conversation history via get_webchat_conversations.
+      // The heartbeat runs until the install finishes: waiting for the carrier
+      // lock and installing are part of the run, not a stalled one.
       const stopHeartbeat = keepRunAlive(runs, runId);
-      let before: Map<string, string>;
       try {
-        await ensureUserSkillsCarrier(carrierDir);
-        before = await snapshotCarrierSkills(carrierDir);
-        for await (const msg of agentRunner.run({
-          agentName: "skill-review",
-          workingDir: carrierDir,
-          prompt:
-            `Review webchat session ${sessionId} and decide whether to save a skill. ` +
-            `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation. ` +
-            `Your working directory is the user-skills carrier (${carrierDir}); save skills as skills/<name>/SKILL.md there.`,
-        })) {
-          recorder.observe(msg);
+        let before: Map<string, string>;
+        try {
+          await ensureUserSkillsCarrier(carrierDir);
+          before = await snapshotCarrierSkills(carrierDir);
+          for await (const msg of agentRunner.run({
+            agentName: "skill-review",
+            workingDir: carrierDir,
+            prompt:
+              `Review webchat session ${sessionId} and decide whether to save a skill. ` +
+              `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation. ` +
+              `Your working directory is the user-skills carrier (${carrierDir}); save skills as skills/<name>/SKILL.md there.`,
+          })) {
+            recorder.observe(msg);
+          }
+        } catch (err) {
+          runs.finish(runId, {
+            status: "failed",
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
         }
-      } catch (err) {
-        runs.finish(runId, {
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-        });
-        throw err;
+
+        if (recorder.error !== null) {
+          runs.finish(runId, recorder.outcome());
+          log.error("skill-review agent failed", { error: recorder.error });
+          return { status: "error", error: `Skill-review agent failed: ${recorder.error}` };
+        }
+
+        // A saved SKILL.md is not a skill until the carrier listing it is
+        // installed; register and install it here so the save is never silent.
+        // Changes are found by diffing the carrier on disk, not by parsing tool
+        // events, whose shape differs per provider (Codex edits carry no path).
+        const changed = changedSkills(before, await snapshotCarrierSkills(carrierDir));
+        let installed: string[] | undefined;
+        if (changed.length > 0) {
+          try {
+            installed = await withCarrierLock(carrierDir, async () => {
+              const skills = await registerCarrierSkills(carrierDir);
+              const res = await appContext.runAction("app_management", {
+                op: "install",
+                source: { mode: "source", path: carrierDir },
+              });
+              if (res.status === "error") throw new Error(res.error);
+              // History only; a failed commit must not undo a working install.
+              await commitCarrier(carrierDir, changed).catch((err) =>
+                log.warn("user-skills commit failed", { error: String(err) }),
+              );
+              return skills;
+            });
+          } catch (err) {
+            const error = `Skill saved but user-skills install failed: ${err instanceof Error ? err.message : String(err)}`;
+            runs.finish(runId, { status: "failed", error });
+            log.error("user-skills install failed", { error });
+            return { status: "error", error };
+          }
+        }
+
+        runs.finish(runId, recorder.outcome());
+        const result = recorder.summary;
+        return { status: "ok", data: { runId, result, ...(installed ? { installed } : {}) } };
       } finally {
         stopHeartbeat();
       }
-
-      if (recorder.error !== null) {
-        runs.finish(runId, recorder.outcome());
-        log.error("skill-review agent failed", { error: recorder.error });
-        return { status: "error", error: `Skill-review agent failed: ${recorder.error}` };
-      }
-
-      // A saved SKILL.md is not a skill until the carrier listing it is
-      // installed; register and install it here so the save is never silent.
-      // Changes are found by diffing the carrier on disk, not by parsing tool
-      // events, whose shape differs per provider (Codex edits carry no path).
-      const changed = changedSkills(before, await snapshotCarrierSkills(carrierDir));
-      let installed: string[] | undefined;
-      if (changed.length > 0) {
-        try {
-          installed = await withCarrierLock(carrierDir, async () => {
-            const skills = await registerCarrierSkills(carrierDir);
-            await commitCarrier(carrierDir, changed);
-            const res = await appContext.runAction("app_management", {
-              op: "install",
-              source: { mode: "source", path: carrierDir },
-            });
-            if (res.status === "error") throw new Error(res.error);
-            return skills;
-          });
-        } catch (err) {
-          const error = `Skill saved but user-skills install failed: ${err instanceof Error ? err.message : String(err)}`;
-          runs.finish(runId, { status: "failed", error });
-          log.error("user-skills install failed", { error });
-          return { status: "error", error };
-        }
-      }
-
-      runs.finish(runId, recorder.outcome());
-      const result = recorder.summary;
-      return { status: "ok", data: { runId, result, ...(installed ? { installed } : {}) } };
     },
   };
 }

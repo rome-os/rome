@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -154,12 +154,14 @@ export async function registerCarrierSkills(dir: string): Promise<string[]> {
   return [...listed, ...added];
 }
 
-const LOCK_STALE_MS = 10 * 60_000;
+const LOCK_STALE_MS = 2 * 60_000;
+const LOCK_REFRESH_MS = 15_000;
 
 /**
  * Runs `fn` while holding a lock on the carrier shared by every worker on this
  * host, so overlapping reviews register and install one at a time. Without it,
  * one review's app.yaml write can drop another's skill before either installs.
+ * The holder keeps the lock fresh, so only a crashed holder's lock goes stale.
  */
 export async function withCarrierLock<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   const id = createHash("sha256").update(resolve(dir)).digest("hex").slice(0, 16);
@@ -178,9 +180,15 @@ export async function withCarrierLock<T>(dir: string, fn: () => Promise<T>): Pro
       else await new Promise((r) => setTimeout(r, 100));
     }
   }
+  const refresh = setInterval(() => {
+    const now = new Date();
+    utimes(lock, now, now).catch(() => {});
+  }, LOCK_REFRESH_MS);
+  refresh.unref?.();
   try {
     return await fn();
   } finally {
+    clearInterval(refresh);
     await rm(lock, { recursive: true, force: true });
   }
 }
@@ -188,16 +196,22 @@ export async function withCarrierLock<T>(dir: string, fn: () => Promise<T>): Pro
 const run = promisify(execFile);
 
 /**
- * Commits the carrier when it is a git repo, as import-skill does per skill, so
- * Dream's edits don't get folded into an unrelated later commit.
+ * Commits app.yaml and the given skill folders when the carrier is a git repo,
+ * as import-skill does per skill, so Dream's edits don't get folded into an
+ * unrelated later commit. Other uncommitted changes are left alone.
  */
 export async function commitCarrier(dir: string, skills: string[]): Promise<void> {
   if (!existsSync(join(dir, ".git"))) return;
-  await run("git", ["add", "-A"], { cwd: dir });
-  const staged = await run("git", ["diff", "--cached", "--quiet"], { cwd: dir }).then(
+  const paths = ["app.yaml", ...skills.map((name) => `skills/${name}`)];
+  await run("git", ["add", "--", ...paths], { cwd: dir });
+  const staged = await run("git", ["diff", "--cached", "--quiet", "--", ...paths], {
+    cwd: dir,
+  }).then(
     () => false,
     () => true,
   );
   if (!staged) return;
-  await run("git", ["commit", "-m", `Dream: update skill ${skills.join(", ")}`], { cwd: dir });
+  await run("git", ["commit", "-m", `Dream: update skill ${skills.join(", ")}`, "--", ...paths], {
+    cwd: dir,
+  });
 }

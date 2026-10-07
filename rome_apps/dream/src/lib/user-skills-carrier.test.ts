@@ -126,9 +126,12 @@ describe("user-skills carrier", () => {
     git("config", "user.email", "t@example.com");
     git("config", "user.name", "t");
     addSkill("committed");
+    writeFileSync(join(dir, "unrelated.txt"), "guardian's own edit\n");
     await commitCarrier(dir, ["committed"]);
     expect(git("log", "--format=%s")).toBe("Dream: update skill committed");
-    expect(git("status", "--porcelain")).toBe("");
+    expect(git("status", "--porcelain")).toBe(
+      "?? assets/\n?? package.json\n?? unrelated.txt\n?? web/".trim(),
+    );
     await commitCarrier(dir, ["committed"]);
     expect(git("rev-list", "--count", "HEAD")).toBe("1");
   });
