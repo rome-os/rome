@@ -17,6 +17,10 @@ import {
 
 const log = createLogger("codex-background-tasks");
 
+// Every thread on the shared app-server reaches every tracker, so the turn
+// state remembered for threads not yet known is bounded.
+const MAX_REMEMBERED_THREADS = 256;
+
 interface Child {
   description: string;
   // The child turn running now, once one was seen.
@@ -47,12 +51,19 @@ interface OpenWork {
 //   turns was seen, since a late one can name a turn before the current one.
 //   Each activity item arrives as both `item/started` and `item/completed`
 //   and counts once.
+// - A child's turns can start and even end before the item that names it,
+//   since Codex queues a spawn's input before emitting `started`. A thread
+//   resumed in a new model session meets its earlier children only through
+//   `interacted`. So turns on threads not yet known are remembered, and a
+//   child takes up its thread's state when an item first names it.
 // Work becomes a background task when the turn that started it completes
 // with it still running. Codex starts no turn for a finished task, so an end
 // reaches the model only if it checks on the task in a later turn.
 export class CodexBackgroundTaskTracker {
   private readonly open = new Map<string, OpenWork>();
   private readonly children = new Map<string, Child>();
+  // Threads not yet known as children: the turn running on each, or null.
+  private readonly unknownThreads = new Map<string, string | null>();
   private readonly seenActivities = new Set<string>();
   private readonly ignoredTurns = new Set<string>();
   private turnId: string | null = null;
@@ -115,7 +126,10 @@ export class CodexBackgroundTaskTracker {
     const childId = (params as { threadId?: unknown } | undefined)?.threadId;
     if (typeof childId !== "string") return [];
     const child = this.children.get(childId);
-    if (child === undefined) return [];
+    if (child === undefined) {
+      this.rememberUnknownThread(childId, method, params);
+      return [];
+    }
     if (method === Notify.turnStarted) {
       child.turnId = (params as TurnStartedNotification).turn?.id ?? null;
       child.sawTurn = true;
@@ -155,13 +169,16 @@ export class CodexBackgroundTaskTracker {
     if (!agentThreadId || this.seenActivities.has(item.id)) return [];
     this.seenActivities.add(item.id);
     const kind = item.kind;
-    if (kind === "started") {
+    if (kind === "started" || kind === "interacted") {
       if (this.children.has(agentThreadId)) return [];
       const agentPath = typeof item.agentPath === "string" ? item.agentPath : agentThreadId;
-      this.children.set(agentThreadId, { description: agentPath, turnId: null, sawTurn: false });
-      // A spawn starts the child's first turn, which may have begun before
-      // this item made the child known.
-      this.open.set(agentThreadId, agentWork(agentPath, turnId));
+      const child = this.addChild(agentThreadId, agentPath);
+      if (child.turnId !== null) return this.childRunning(agentThreadId, agentPath);
+      // A spawn starts the child's first turn even when none was seen yet.
+      // A message to an idle child starts nothing.
+      if (kind === "started" && !child.sawTurn) {
+        this.open.set(agentThreadId, agentWork(agentPath, turnId));
+      }
       return [];
     }
     if (
@@ -175,6 +192,26 @@ export class CodexBackgroundTaskTracker {
       });
     }
     return [];
+  }
+
+  private addChild(id: string, description: string): Child {
+    const turnId = this.unknownThreads.get(id);
+    this.unknownThreads.delete(id);
+    const child: Child = { description, turnId: turnId ?? null, sawTurn: turnId !== undefined };
+    this.children.set(id, child);
+    return child;
+  }
+
+  private rememberUnknownThread(threadId: string, method: string, params: unknown): void {
+    if (method !== Notify.turnStarted && method !== Notify.turnCompleted) return;
+    this.unknownThreads.delete(threadId);
+    const turnId =
+      method === Notify.turnStarted ? ((params as TurnStartedNotification).turn?.id ?? null) : null;
+    this.unknownThreads.set(threadId, turnId);
+    if (this.unknownThreads.size > MAX_REMEMBERED_THREADS) {
+      const oldest = this.unknownThreads.keys().next().value;
+      if (oldest !== undefined) this.unknownThreads.delete(oldest);
+    }
   }
 
   // A sub-agent's turn started. Inside one of this thread's turns it is open

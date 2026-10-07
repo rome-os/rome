@@ -285,4 +285,64 @@ describe("CodexBackgroundTaskTracker", () => {
       "tasks []",
     ]);
   });
+
+  it("keeps a child that failed before its spawn item out of the set", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    const child = (method: string, turn: Record<string, unknown>) =>
+      tracker.observeChildThread(method, { threadId: "child", turn });
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } });
+    child(Notify.turnStarted, { id: "c-1" });
+    child(Notify.turnCompleted, { id: "c-1", status: "failed" });
+    expect(run(tracker, [subAgent("started", "child", "turn-1"), turnCompleted("turn-1")])).toEqual(
+      [],
+    );
+  });
+
+  it("counts a child whose first turn started before its spawn item", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } });
+    tracker.observeChildThread(Notify.turnStarted, { threadId: "child", turn: { id: "c-1" } });
+    expect(run(tracker, [subAgent("started", "child", "turn-1"), turnCompleted("turn-1")])).toEqual(
+      ["tasks [child:agent]"],
+    );
+    expect(
+      tracker
+        .observeChildThread(Notify.turnCompleted, {
+          threadId: "child",
+          turn: { id: "c-1", status: "completed" },
+        })
+        .map(view),
+    ).toEqual(["ended child completed", "tasks []"]);
+  });
+
+  it("discovers an earlier session's child through a follow-up on a resumed thread", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    const child = (method: string, turn: Record<string, unknown>) =>
+      tracker.observeChildThread(method, { threadId: "old-child", turn }).map(view);
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } });
+    run(tracker, [subAgent("interacted", "old-child", "turn-1")]);
+    expect(child(Notify.turnStarted, { id: "c-9" })).toEqual([]);
+    expect(run(tracker, [turnCompleted("turn-1")])).toEqual(["tasks [old-child:agent]"]);
+    expect(child(Notify.turnCompleted, { id: "c-9", status: "completed" })).toEqual([
+      "ended old-child completed",
+      "tasks []",
+    ]);
+  });
+
+  it("discovers a followed-up child whose turn started before the follow-up item", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } });
+    tracker.observeChildThread(Notify.turnStarted, { threadId: "old-child", turn: { id: "c-9" } });
+    expect(
+      run(tracker, [subAgent("interacted", "old-child", "turn-1"), turnCompleted("turn-1")]),
+    ).toEqual(["tasks [old-child:agent]"]);
+  });
+
+  it("does not count a message to an earlier session's idle child", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-1" } });
+    expect(
+      run(tracker, [subAgent("interacted", "old-child", "turn-1"), turnCompleted("turn-1")]),
+    ).toEqual([]);
+  });
 });
