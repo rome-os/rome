@@ -154,6 +154,9 @@ export class CodexBackgroundTaskTracker {
   lost(): ModelBackgroundTaskEvent[] {
     this.open.clear();
     this.turnId = null;
+    // No turn seen before the exit is still running.
+    this.unknownThreads.clear();
+    for (const child of this.children.values()) child.turnId = null;
     if (this.tasks.length === 0) return [];
     const events: ModelBackgroundTaskEvent[] = this.tasks.map((task) => ({
       type: "background_task_end",

@@ -345,4 +345,20 @@ describe("CodexBackgroundTaskTracker", () => {
       run(tracker, [subAgent("interacted", "old-child", "turn-1"), turnCompleted("turn-1")]),
     ).toEqual([]);
   });
+
+  it("forgets turns seen before an app-server exit", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    tracker.observeChildThread(Notify.turnStarted, { threadId: "old-child", turn: { id: "c-1" } });
+    run(tracker, [subAgent("started", "known", "turn-1")]);
+    tracker.observeChildThread(Notify.turnStarted, { threadId: "known", turn: { id: "k-1" } });
+    tracker.lost();
+    tracker.observe(Notify.turnStarted, { threadId: "t", turn: { id: "turn-2" } });
+    expect(
+      run(tracker, [
+        subAgent("interacted", "old-child", "turn-2"),
+        subAgent("interacted", "known", "turn-2"),
+        turnCompleted("turn-2"),
+      ]),
+    ).toEqual([]);
+  });
 });
