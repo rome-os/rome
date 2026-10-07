@@ -1,4 +1,5 @@
 import { createRef, type ReactNode, useEffect, useState } from "react";
+import { renderToString } from "react-dom/server";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
@@ -457,6 +458,26 @@ describe("PageTopBar", () => {
     });
   }
 
+  it("calls a callback ref's own cleanup on unmount, as a plain h1 would", () => {
+    mockViewport(true);
+    const cleanup = rs.fn();
+    const ref = rs.fn(() => cleanup);
+    const { unmount } = render(
+      <InShell>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle ref={ref}>Keys</PageTitle>
+          </PageHeading>
+        </PageHeader>
+      </InShell>,
+    );
+    unmount();
+
+    expect(ref).toHaveBeenCalledTimes(1);
+    expect(ref).toHaveBeenCalledWith(expect.any(HTMLHeadingElement));
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("gives the bar back to the fallback when the header unmounts", () => {
     mockViewport(true);
     const { rerender } = render(
@@ -490,5 +511,15 @@ describe("PageTopBar", () => {
       screen.getByTestId("page").querySelector('[data-slot="page-header-nav"]'),
     ).not.toBeNull();
     expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
+  });
+});
+
+describe("Page on a server", () => {
+  it("renders the header inline without a top-bar provider", () => {
+    const markup = renderToString(<ExamplePage />);
+
+    expect(markup).toContain('data-slot="page-header-nav"');
+    expect(markup).toContain(">Apps<");
+    expect(markup).toContain(">New routine</button>");
   });
 });

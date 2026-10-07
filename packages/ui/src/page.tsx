@@ -10,7 +10,6 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
-  type Ref,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -207,7 +206,11 @@ function useScrolledUnder(target: HTMLElement | null, edge: HTMLElement | null):
  * `element` lays out as if it sat where the placeholder does.
  */
 function useRelocated(element: ReactNode, host: HTMLElement | null) {
-  const [{ node, focus }] = useState(() => {
+  // Without a provider the part has nowhere to move, so it renders inline as
+  // plain markup, which also keeps it renderable on a server.
+  const relocatable = useContext(TopBarContext) !== null && typeof document !== "undefined";
+  const [owned] = useState(() => {
+    if (!relocatable) return null;
     const el = document.createElement("div");
     el.style.display = "contents";
     // The last control focused inside the node. A browser drops focus from a
@@ -223,13 +226,15 @@ function useRelocated(element: ReactNode, host: HTMLElement | null) {
     });
     return { node: el, focus: record };
   });
+  const node = owned?.node ?? null;
+  const focus = owned?.focus ?? null;
   // A ref callback rather than an effect, so the node is in the document
   // before the subtree's own layout effects measure it.
   const placeholder = useCallback(
     (inline: HTMLElement | null) => {
       // A null call is the placeholder detaching. The unmount cleanup below
       // owns removal, so placing the node here would re-attach it to the bar.
-      if (!inline) return;
+      if (!inline || !node || !focus) return;
       const target = host ?? inline;
       if (node.parentNode === target) return;
       target.appendChild(node);
@@ -239,18 +244,14 @@ function useRelocated(element: ReactNode, host: HTMLElement | null) {
     },
     [host, node, focus],
   );
-  useLayoutEffect(() => () => node.remove(), [node]);
+  useLayoutEffect(() => () => node?.remove(), [node]);
+  if (!node) return element;
   return (
     <>
       <div ref={placeholder} style={{ display: "contents" }} />
       {createPortal(element, node)}
     </>
   );
-}
-
-function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
-  if (typeof ref === "function") ref(value);
-  else if (ref) ref.current = value;
 }
 
 /**
@@ -345,9 +346,19 @@ export function PageTitle({ className, children, ref, ...props }: ComponentProps
   const host = hosts?.title ?? null;
   const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
   const setRefs = useCallback(
-    (el: HTMLHeadingElement | null) => {
+    (el: HTMLHeadingElement) => {
       setHeading(el);
-      assignRef(ref, el);
+      // Returning a cleanup tells React to call it instead of passing null,
+      // so a caller's own cleanup runs exactly as it would on a plain `h1`.
+      const cleanup = typeof ref === "function" ? ref(el) : undefined;
+      if (ref && typeof ref === "object") ref.current = el;
+      return () => {
+        setHeading(null);
+        if (typeof ref === "function") {
+          if (typeof cleanup === "function") cleanup();
+          else ref(null);
+        } else if (ref) ref.current = null;
+      };
     },
     [ref],
   );
