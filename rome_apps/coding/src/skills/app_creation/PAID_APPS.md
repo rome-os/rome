@@ -73,14 +73,14 @@ favorRequirement:
   }
   ```
 
-  Then settle only the purchase `args.purchaseId` that is still `awaiting_payment` and whose stored request id is unset or equal to it; the dispatcher can run before the API handler stores the id.
+  Then settle only the purchase `args.purchaseId` that is still `awaiting_payment`, whose pack is this action's own tier, and whose stored request id is unset or equal to it; the dispatcher can run before the API handler stores the id. Grant the amount the action defines, never one read from args. If the sync route already settled it under this same request id, return `{ status: "ok" }` and change nothing. An error result marks a paid request as a failed dispatch.
 - **Settle idempotently from both sides.** The paid action settles with a conditional update. A `POST /purchases/:id/sync` route that the return page calls re-sends the *same* `requestAction` (same idempotency key) and settles if it finds the request settled. Whichever path runs first grants the credit, and the other does nothing. A return URL alone never grants credit.
 - After settlement, resume any work that was skipped for quota. Don't just change the number shown in the UI.
 - Owner previews of the paid UI must not create orders or charge anyone.
 
 ### Promo prices
 
-Add a cheaper action, such as `buy_pack_promo`. The server validates the code (normalized, never shipped in the bundle) and creates a promo order. The cheap action settles **only** pre-authorized promo orders. Consume a one-time code at settlement, inside the same transaction as the unlock, so an abandoned checkout doesn't burn it.
+Add a cheaper action, such as `buy_pack_promo`. The server validates the code (normalized, never shipped in the bundle) and creates a promo order. The cheap action settles **only** pre-authorized promo orders. Rome Cloud collects favors before the action runs, so reserve a one-time code atomically against the order *before* `requestAction`. Release it only when that request is declined or expired. Then two concurrent checkouts can't both pay for one code.
 
 ## 4. Verify before shipping
 
