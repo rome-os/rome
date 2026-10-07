@@ -52,6 +52,8 @@ import {
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
+import { anthropicFunding } from "../usage/funding.js";
+import type { UsageFunding } from "../usage/events.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -79,8 +81,11 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 // auto-injection from Rome's `model.turn`), which clutters the trace store
 // without adding signal. The per-round / per-tool detail is reconstructed
 // by `turn-span-translator.ts` from the message stream instead.
-const CLAUDE_AGENT_SDK_ENV = {
+// CLAUDE_CODE_ENABLE_TASKS=false keeps TodoWrite, which Rome turns into plan
+// updates. Since Claude Code 2.1.251 the default swaps it for TaskCreate.
+export const CLAUDE_AGENT_SDK_ENV = {
   IS_SANDBOX: "1",
+  CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
 
 function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
@@ -435,6 +440,7 @@ export class AnthropicProvider implements ModelProvider {
   private async buildQueryContext(): Promise<{
     env: Record<string, string | undefined>;
     authRevokedSource: AnthropicAuthRevokedSource | null;
+    funding: UsageFunding;
   }> {
     const [credentials, timezone] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(this.options.settingsRepo),
@@ -479,6 +485,7 @@ export class AnthropicProvider implements ModelProvider {
     return {
       env,
       authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, baseEnv),
+      funding: anthropicFunding({ hasCompatibleCredentials: !!credentials, env: baseEnv }),
     };
   }
 
@@ -1040,6 +1047,7 @@ export class AnthropicProvider implements ModelProvider {
     const session: ModelSession = {
       providerId,
       model: effectiveModel,
+      funding: queryContext.funding,
       // Claude fixes effort at open and ignores a per-turn effort.
       appliedReasoningEffort: effort,
       get isClosed(): boolean {

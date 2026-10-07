@@ -180,6 +180,73 @@ describe("AgentLoader", () => {
       expect(main.allowedSubagents).toContain("test-explore");
     });
 
+    it("loads a core agent without a subagent that is not in the catalog", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rome-core-subagents-"));
+      const agentYaml = (name: string, subagents: string[]) =>
+        [
+          `name: ${name}`,
+          "description: Subagent fixture.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          `allowedSubagents: [${subagents.join(", ")}]`,
+          "systemPromptPrefix: Test agent.",
+          "",
+        ].join("\n");
+      await writeFile(join(root, "main.yaml"), agentYaml("main", ["helper", "absent"]), "utf-8");
+      await writeFile(join(root, "helper.yaml"), agentYaml("helper", []), "utf-8");
+
+      try {
+        const agents = await loader.loadAll(root);
+        expect(agents.get("main")!.allowedSubagents).toEqual(["helper"]);
+        expect(loader.getRegistryLoadFailures()).toEqual([]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it("drops an app agent that references a subagent not in the catalog", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rome-app-subagents-"));
+      const agentPath = join(root, "scout.yaml");
+      await writeFile(
+        agentPath,
+        [
+          "name: scout",
+          "description: Subagent fixture.",
+          "tier: small",
+          "permissionMode: bypassPermissions",
+          "tools: []",
+          "allowedSubagents: [absent]",
+          "systemPromptPrefix: Test agent.",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const catalog = {
+        listArtifacts: () => [
+          {
+            formatVersion: 2,
+            kind: "agent",
+            publicName: "scout",
+            aliases: [],
+            ownerType: "app",
+            ownerId: "radar",
+            absolutePath: agentPath,
+          },
+        ],
+      } as unknown as AppCatalog;
+
+      try {
+        const agents = await loader.loadFromCatalog(catalog);
+        expect(agents.has("scout")).toBe(false);
+        expect(loader.getRegistryLoadFailures()).toEqual([
+          expect.objectContaining({ ownerId: "radar", publicName: "scout" }),
+        ]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
     it("throws on invalid YAML syntax", async () => {
       // Point to a nonexistent dir to verify error
       await expect(loader.loadAll("/nonexistent/path")).rejects.toThrow();

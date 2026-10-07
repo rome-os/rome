@@ -157,8 +157,8 @@ test("builds one combined Markdown Summary for all shards", async (context) => {
   const appendix = markdown.indexOf("<details>");
   assert.ok(markdown.indexOf("CHAT-09 sends a message") < appendix);
   assert.ok(markdown.indexOf("AUTH-01 opens chat") > appendix);
-  assert.doesNotMatch(markdown, /<img/);
-  assert.doesNotMatch(markdown, /#runner-step=step-1/);
+  assert.match(markdown, /<img/);
+  assert.match(markdown, /#runner-step=step-1/);
   assert.match(markdown, /Native Midscene Test report unavailable/);
 });
 
@@ -220,6 +220,35 @@ test("reports a missing expected shard as an overall failure", () => {
   assert.match(markdown, /### Needs attention/);
   assert.match(markdown, /web-shard-2.*missing/);
   assert.doesNotMatch(markdown, /All 1 cases passed/);
+});
+
+test("keeps shard screenshots linked when the combined report is incomplete", () => {
+  const markdown = renderMarkdown({
+    projects: [
+      {
+        name: "web-shard-1",
+        status: "failed",
+        reportPath: "midscene-shard-1/midscene_run/report/test-run.html",
+        cases: [
+          {
+            name: "CHAT-01",
+            status: "failed",
+            reason: "Assertion failed",
+            reportPath: "midscene-shard-1/midscene_run/report/test-run.html",
+            screenshotPath: "midscene-shard-1/midscene_run/report/screenshots/one.jpeg",
+            stepId: "step-1",
+          },
+        ],
+      },
+      { name: "web-shard-2", status: "missing", cases: [] },
+    ],
+    models: [],
+    runUrl: "https://example.test/run",
+    pagesUrl: "https://example.test/runs/1/",
+    producerResult: "failure",
+  });
+  assert.match(markdown, /Native Midscene Test report unavailable/);
+  assert.match(markdown, /<a href="[^\"]+runner-step=step-1"><img src="[^\"]+one\.jpeg"/);
 });
 
 test("keeps a failed case when its native report is missing", async (context) => {

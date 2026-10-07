@@ -109,6 +109,7 @@ import {
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
 import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
+import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 import type {
@@ -374,6 +375,8 @@ interface ManagerDeps {
   turnMiddleware?: TurnMiddlewareChain;
   /** Resolve the effective reset policy from the existing external thread identity. */
   resolveProviderSessionReset?: (ref: ConversationRef) => Promise<ProviderSessionResetPolicy>;
+  /** Receives every turn this manager's sessions finish, forked turns included. */
+  usageRecorder?: TurnUsageSink;
 }
 
 interface ManagerOptions {
@@ -1776,6 +1779,14 @@ interface TurnSink {
   subagentLinksCleared: boolean;
   /** A schema-bound turn is terminal-only and cannot be resumed after a parked action. */
   outputSchemaSuspended: boolean;
+  /**
+   * The model session's `lastProviderTurnId` when the turn took the turn
+   * mutex. A turn that never reached the provider leaves it unchanged, so an
+   * unchanged id belongs to an earlier turn. Taking it at queue time instead
+   * would hand a queued turn the id of the turn ahead of it.
+   */
+  providerTurnIdAtStart?: string;
+  usageRecorded: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -2443,7 +2454,42 @@ class AgentSessionImpl implements AgentSession {
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
+    this.recordTurnUsage(sink, terminal);
     this.closeSink(sink);
+  }
+
+  private recordTurnUsage(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
+    const recorder = this.deps.usageRecorder;
+    if (!recorder || sink.usageRecorded) return;
+    sink.usageRecorded = true;
+    const accounting = terminal.accounting;
+    const stop = resolveTurnStop({
+      accounting,
+      terminalKind: terminal.type,
+      interrupted: sink.lifecycleInterrupted,
+    });
+    const providerTurnId = this.modelSession.lastProviderTurnId;
+    recorder.recordTurn({
+      turnId: sink.turnId,
+      romeSessionId: sink.romeSessionId,
+      romeSessionType: sink.romeSessionType,
+      agentName: this.key.agentName,
+      status: classifyAgentTurnStatus({
+        terminalKind: terminal.type,
+        stop,
+        interrupted: sink.lifecycleInterrupted,
+      }),
+      provider: this.modelSession.providerId,
+      model: this.modelSession.model,
+      funding: this.modelSession.funding,
+      providerTurnId: providerTurnId !== sink.providerTurnIdAtStart ? providerTurnId : undefined,
+      accounting,
+      durationMs:
+        sink.lifecycleStartedAtMs === undefined
+          ? accounting?.durationMs
+          : Date.now() - sink.lifecycleStartedAtMs,
+      finishedAt: new Date(),
+    });
   }
 
   /**
@@ -2805,6 +2851,7 @@ class AgentSessionImpl implements AgentSession {
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
+    let terminalAccounting: TurnResultEvent["accounting"];
     let outputSchemaSuspended = false;
     // Assigned inside the mutex below, after ensureModelSessionForTurn() may
     // have replaced this.modelSession. See the guard in the `finally`.
@@ -2919,18 +2966,22 @@ class AgentSessionImpl implements AgentSession {
             outputSchemaSuspended,
           );
           const projectedOut = out as StreamAgentEvent;
-          // Relayed subagent blocks carry the child's agent tag; everything
-          // else is this agent's own output.
-          yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
-          if (isTerminalEvent(out)) {
+          // Settle the outcome before yielding the terminal: a consumer that
+          // stops on it goes straight to `finally`.
+          const terminal = isTerminalEvent(out);
+          if (terminal) {
+            terminalAccounting = out.accounting;
             status = isInterruptedAccounting(out.accounting)
               ? "interrupted"
               : out.type === "error"
                 ? "error"
                 : "completed";
             terminalSeen = true;
-            break;
           }
+          // Relayed subagent blocks carry the child's agent tag; everything
+          // else is this agent's own output.
+          yield { ...projectedOut, agent: projectedOut.agent ?? this.key.agentName };
+          if (terminal) break;
         }
         if (!terminalSeen) {
           status = "error";
@@ -2956,6 +3007,22 @@ class AgentSessionImpl implements AgentSession {
         agent: this.key.agentName,
       };
     } finally {
+      // A consumer that abandons the stream before its terminal leaves the
+      // turn with no outcome, which the lifecycle vocabulary calls stopped.
+      this.deps.usageRecorder?.recordTurn({
+        turnId,
+        romeSessionId: forkSessionId,
+        romeSessionType: "fork",
+        agentName: this.key.agentName,
+        status: terminalSeen || status !== "completed" ? status : "stopped",
+        provider: forkSession?.providerId ?? this.modelSession.providerId,
+        model: forkSession?.model ?? this.modelSession.model,
+        funding: (forkSession ?? this.modelSession).funding,
+        providerTurnId: forkSession?.lastProviderTurnId,
+        accounting: terminalAccounting,
+        durationMs: Date.now() - startMs,
+        finishedAt: new Date(),
+      });
       // Before close(): a closed ModelSession no longer reports the thread this
       // needs. Each condition is load-bearing:
       //   • terminalSeen — `status` is initialized to "completed", so a
@@ -3103,6 +3170,7 @@ class AgentSessionImpl implements AgentSession {
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
       outputSchemaSuspended: false,
+      usageRecorded: false,
     };
     const events = this.buildTurnEvents(sink);
 
@@ -3149,6 +3217,7 @@ class AgentSessionImpl implements AgentSession {
     void this.turnMutex
       .runExclusive(
         async () => {
+          sink.providerTurnIdAtStart = this.modelSession.lastProviderTurnId;
           try {
             await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
           } catch (err) {

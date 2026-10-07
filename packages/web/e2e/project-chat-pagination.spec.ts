@@ -37,6 +37,7 @@ async function mockDashboard(context: BrowserContext, chats: ProjectDashboardCha
       totalCostUsd: 0,
       totalTokens: 0,
     },
+    providerUsage: { month: [], total: [] },
     usage: [],
   };
   await context.route("**/api/projects/dashboard?*", (route) => route.fulfill({ json: dashboard }));

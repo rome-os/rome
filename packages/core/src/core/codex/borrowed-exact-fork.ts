@@ -26,6 +26,7 @@ import {
 import { stripLegacyReasoningSuffix } from "./common.js";
 import { AgentMessageSink } from "./session.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";
+import type { UsageFunding } from "../../usage/events.js";
 import { createRomeDynamicTools } from "./rome-dynamic-tools.js";
 
 export interface BorrowedExactForkCompatibility {
@@ -73,6 +74,7 @@ export interface CreateBorrowedExactForkSessionArgs {
   runTurn(input: ModelUserInput, runtime: CodexTurnRuntime): Promise<void>;
   revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
+  funding?: () => UsageFunding | undefined;
 }
 
 /** Build the ephemeral one-turn ModelSession used only by eligible exact forks. */
@@ -98,6 +100,7 @@ export async function createBorrowedExactForkSession(
   let inputSent = false;
   let runPromise: Promise<void> = Promise.resolve();
   let closePromise: Promise<void> | null = null;
+  let lastProviderTurnId: string | undefined;
   const runtime: CodexTurnRuntime = {
     ownerSessionId: args.forkSessionId,
     sink,
@@ -108,6 +111,9 @@ export async function createBorrowedExactForkSession(
     // Revert happens before the result/error event, so consumers can never
     // observe success while the source conversation still contains the turn.
     beforeTerminal: async ({ threadId, turnId }) => await args.revertTurn(threadId, turnId),
+    onProviderTurn: (turnId) => {
+      lastProviderTurnId = turnId;
+    },
   };
 
   return {
@@ -115,6 +121,12 @@ export async function createBorrowedExactForkSession(
     model: args.openParams.model,
     events: sink.iter(),
     providerThreadId: args.sourceThreadId,
+    get funding(): UsageFunding | undefined {
+      return args.funding?.();
+    },
+    get lastProviderTurnId(): string | undefined {
+      return lastProviderTurnId;
+    },
     sendUserInput: async (input) => {
       if (closed || closing) throw new Error("ModelSession is closed");
       if (inputSent) throw new Error("Exact Codex forks support one turn");

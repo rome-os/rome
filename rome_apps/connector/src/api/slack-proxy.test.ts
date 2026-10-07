@@ -1,8 +1,13 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { readSlackOAuthTokens, selectSlackToken, type SlackOAuthTokens } from "./slack-proxy.js";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import {
+  readSlackOAuthTokens,
+  selectSlackToken,
+  slackProxyCall,
+  type SlackOAuthTokens,
+} from "./slack-proxy.js";
 
 const tokens: SlackOAuthTokens = { botToken: "xoxb-bot", userToken: "xoxp-user", teamId: "T1" };
 
@@ -59,5 +64,28 @@ describe("readSlackOAuthTokens", () => {
     expect(await readSlackOAuthTokens()).toBeNull();
     writeFileSync(file, JSON.stringify({ userToken: "xoxp-u" }));
     expect(await readSlackOAuthTokens()).toBeNull();
+  });
+});
+
+describe("slackProxyCall", () => {
+  afterEach(() => rs.restoreAllMocks());
+
+  it("keeps the injected token when the caller sends authorization in another case", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ ok: true }));
+
+    await slackProxyCall({
+      tokens,
+      endpoint: "https://slack.com/api/chat.postMessage",
+      method: "POST",
+      body: "channel=C1",
+      headers: {
+        authorization: "Bearer caller",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    const headers = new Headers((fetch.mock.calls[0]?.[1] as RequestInit).headers);
+    expect(headers.get("authorization")).toBe("Bearer xoxb-bot");
+    expect(headers.get("content-type")).toBe("application/x-www-form-urlencoded");
   });
 });

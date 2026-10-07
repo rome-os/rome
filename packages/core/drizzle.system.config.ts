@@ -26,6 +26,7 @@ export default defineConfig({
     "webchat_sessions",
     "webchat_workspace_layouts",
     "action_executions",
+    "usage_outbox",
     "webhook_invocations",
     "webchat_messages",
     "webchat_trace_blocks",

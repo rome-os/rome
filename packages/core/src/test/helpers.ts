@@ -520,7 +520,7 @@ export async function buildTestDeps(
   const appStore = createAppStoreService({ appCatalog });
 
   // The agent loader stays real but unloaded. Core agent YAMLs cannot load
-  // here: `core:main` references the `coding:planning` subagent,
+  // here: `core:main` references the `assistant:explore` subagent,
   // and the loader fail-closes on unresolvable core-owned refs — production
   // only has a valid `main` because required first-party apps are installed
   // before startApi. Tests that exercise agent turns load fixture agents

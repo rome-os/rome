@@ -16,13 +16,17 @@ import type {
   ProjectDashboardChat,
   ProjectDashboardChatPage,
   ProjectDashboardChatsResponse,
+  ProjectDashboardProviderUsage,
   ProjectDashboardResponse,
   ProjectDashboardUsageDay,
 } from "@rome/api-types/projects";
 import { buildProjectChatPreview } from "@/lib/project-chat-preview";
 import {
+  buildProjectProviderUsageRows,
   buildProjectUsageChartTotals,
   buildProjectUsageTokenBreakdown,
+  type ProjectProviderUsageRow,
+  type ProjectUsageProviderKey,
 } from "@/lib/project-usage-totals";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 import { cn } from "@/lib/utils";
@@ -30,6 +34,7 @@ import { ProjectDashboardMissingError, useProjectDashboard } from "@/lib/use-pro
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SyncStatusPanel } from "@/components/sync/SyncStatusPanel";
+import { CodexIcon, ModelProviderIcon } from "@/components/brand-icons/ai-tool-icons";
 
 const heroClassName = "flex shrink-0 items-start gap-3 py-1";
 const heroAvatarClassName =
@@ -43,8 +48,14 @@ const sectionSubtitleClassName = "mt-1 text-aux whitespace-nowrap text-subtle-fo
 const panelClassName = "flex h-[280px] flex-col rounded-12 border border-border bg-surface p-4";
 const CHAT_PAGE_SIZE = 20;
 
+// One decimal keeps every token figure at six characters or fewer, so the provider
+// table's five numeric columns fit beside the share bar on a 641px dashboard.
+// Rounding the integer count rounds halves up: toFixed(1) on 987.65 gives 987.6,
+// because the double sits just below the half. Each tier starts where the one
+// below would round to 1000, so 999,960,000 reads 1B rather than 1000M.
 const fmtTokens = (n: number): string => {
-  if (n >= 1e6) return (n / 1e6).toFixed(2).replace(/\.?0+$/, "") + "M";
+  if (n >= 999_950_000) return `${Math.round(n / 1e8) / 10}B`;
+  if (n >= 999_500) return `${Math.round(n / 1e5) / 10}M`;
   if (n >= 1e3) return (n / 1e3).toFixed(0) + "K";
   return String(n);
 };
@@ -58,6 +69,27 @@ const fmtCost = (n: number): string => {
 };
 
 const fmtPercent = (value: number): string => `${Math.round(value * 100)}%`;
+// A share that rounds to zero still exists; say so rather than print 0%.
+const fmtShare = (value: number): string =>
+  value > 0 && value < 0.005 ? "<1%" : fmtPercent(value);
+
+// Axis ticks get three significant digits so they fit the axis gutter unclipped.
+const axisNumberFormat = new Intl.NumberFormat("en", {
+  maximumSignificantDigits: 3,
+  notation: "compact",
+});
+
+type UsageMetric = "tokens" | "cost";
+type UsageBreakdown = "type" | "provider";
+type ProviderUsagePeriod = "recent" | "month" | "total";
+
+// Claude takes the theme's strong color and Codex the ink, so the pair stays
+// distinct in every theme and mode without reaching past the semantic tokens.
+const PROVIDER_SERIES: Record<ProjectUsageProviderKey, { color: string; label: string }> = {
+  claude: { color: "var(--primary)", label: "Claude" },
+  codex: { color: "color-mix(in oklch, var(--foreground) 72%, transparent)", label: "Codex" },
+  other: { color: "color-mix(in oklch, var(--foreground) 24%, transparent)", label: "Other" },
+};
 
 const AUXILIARY_CHART_TEXT = {
   fill: "var(--subtle-foreground)",
@@ -146,7 +178,8 @@ function DashboardBody({
   onStartChat?: (projectPath: string) => void;
 }) {
   const location = useLocation();
-  const [usageMode, setUsageMode] = useState<"tokens" | "cost">("tokens");
+  const [usageMode, setUsageMode] = useState<UsageMetric>("tokens");
+  const [usageBreakdown, setUsageBreakdown] = useState<UsageBreakdown>("type");
   const [query, setQuery] = useState("");
   const [visibleChatLimit, setVisibleChatLimit] = useState(CHAT_PAGE_SIZE);
   const [chats, setChats] = useState<ProjectDashboardChat[]>(dashboard.chats);
@@ -316,7 +349,7 @@ function DashboardBody({
     <section className="@container/project-dashboard flex h-full min-h-0 flex-col bg-surface font-sans text-ui text-foreground antialiased [text-rendering:optimizeLegibility]">
       <div
         ref={bodyRef}
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-hidden px-8 pt-5 pb-6 @max-[640px]/project-dashboard:overflow-y-auto @max-[640px]/project-dashboard:px-6 @max-[640px]/project-dashboard:py-5 @max-[480px]/project-dashboard:p-5"
+        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 pt-5 pb-6 @max-[640px]/project-dashboard:px-6 @max-[640px]/project-dashboard:py-5 @max-[480px]/project-dashboard:p-5"
       >
         {isAllProjects ? (
           <header className={heroClassName}>
@@ -391,28 +424,42 @@ function DashboardBody({
           </section>
 
           <section className={cn(panelClassName, "gap-2 @max-[640px]/project-dashboard:h-[260px]")}>
-            <header className={panelHeaderClassName}>
+            <header className={cn(panelHeaderClassName, "flex-wrap")}>
               <div>
                 <h2 className={sectionTitleClassName}>Usage</h2>
                 <div className={sectionSubtitleClassName}>Last 14 days</div>
               </div>
-              <SegmentedControl
-                size="sm"
-                aria-label="Usage metric"
-                value={usageMode}
-                onValueChange={(next: string) => setUsageMode(next as "tokens" | "cost")}
-                className="shrink-0"
-                options={[
-                  { value: "tokens", label: "Tokens" },
-                  { value: "cost", label: "Cost" },
-                ]}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <SegmentedControl
+                  size="sm"
+                  aria-label="Usage breakdown"
+                  value={usageBreakdown}
+                  onValueChange={(next: string) => setUsageBreakdown(next as UsageBreakdown)}
+                  options={[
+                    { value: "type", label: "By type" },
+                    { value: "provider", label: "By provider" },
+                  ]}
+                />
+                <SegmentedControl
+                  size="sm"
+                  aria-label="Usage metric"
+                  value={usageMode}
+                  onValueChange={(next: string) => setUsageMode(next as UsageMetric)}
+                  options={[
+                    { value: "tokens", label: "Tokens" },
+                    { value: "cost", label: "Cost" },
+                  ]}
+                />
+              </div>
             </header>
-            <UsageChart mode={usageMode} usage={dashboard.usage} />
+            <UsageChart breakdown={usageBreakdown} mode={usageMode} usage={dashboard.usage} />
           </section>
         </div>
 
-        <section className="flex min-h-0 flex-1 flex-col">
+        <ProviderUsagePanel dashboard={dashboard} />
+
+        {/* The panels above can outgrow a short viewport; the body scrolls instead of collapsing the list. */}
+        <section className="flex min-h-[320px] flex-1 flex-col">
           <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className={sectionTitleClassName}>Recent chats</h2>
@@ -522,33 +569,318 @@ function StatCell({
   );
 }
 
+const PROVIDER_USAGE_PERIODS: Record<ProviderUsagePeriod, { empty: string; label: string }> = {
+  recent: { empty: "No usage in the last 14 days.", label: "14 days" },
+  month: { empty: "No usage this month.", label: "This month" },
+  total: { empty: "No usage recorded yet.", label: "All time" },
+};
+
+const providerCellClassName = "h-11 border-t border-border px-2 align-middle";
+const providerNumericCellClassName = cn(
+  providerCellClassName,
+  "text-right font-mono whitespace-nowrap text-foreground",
+);
+const providerHeaderCellClassName =
+  "h-8 px-2 text-left align-middle text-aux font-normal whitespace-nowrap text-muted-foreground";
+// Narrow dashboards keep the share and the totals; the token split drops first.
+const providerDetailClassName = "@max-[640px]/project-dashboard:hidden";
+// Phone dashboards keep only the total the share is computed from, so the share
+// and the figure beside it always measure the same thing.
+const providerOffBasisClassName = "@max-[480px]/project-dashboard:hidden";
+
+type ProviderUsageFigureSet = Omit<ProjectProviderUsageRow, "key">;
+
+const PROVIDER_TABLE_COLUMNS: Array<{
+  basis?: UsageMetric;
+  detail: boolean;
+  format: (figures: ProviderUsageFigureSet) => string;
+  key: string;
+  label: string;
+}> = [
+  { detail: true, format: (figures) => fmtTokens(figures.input), key: "input", label: "Input" },
+  { detail: true, format: (figures) => fmtTokens(figures.output), key: "output", label: "Output" },
+  { detail: true, format: (figures) => fmtTokens(figures.cached), key: "cached", label: "Cached" },
+  {
+    basis: "tokens",
+    detail: false,
+    format: (figures) => fmtTokens(figures.total),
+    key: "total",
+    label: "Tokens",
+  },
+  {
+    basis: "cost",
+    detail: false,
+    format: (figures) => fmtCost(figures.cost),
+    key: "cost",
+    label: "Spend",
+  },
+];
+
+function ProviderUsagePanel({ dashboard }: { dashboard: ProjectDashboardResponse }) {
+  const [period, setPeriod] = useState<ProviderUsagePeriod>("month");
+  const rows = useMemo(() => {
+    const source: ProjectDashboardProviderUsage[] =
+      period === "recent"
+        ? dashboard.usage.flatMap((day) => day.providers)
+        : dashboard.providerUsage[period];
+    return buildProjectProviderUsageRows(source);
+  }, [dashboard, period]);
+  const total = rows.reduce(
+    (acc, row) => ({
+      cached: acc.cached + row.cached,
+      cost: acc.cost + row.cost,
+      input: acc.input + row.input,
+      output: acc.output + row.output,
+      total: acc.total + row.total,
+    }),
+    { cached: 0, cost: 0, input: 0, output: 0, total: 0 },
+  );
+  // Spend is the figure people budget against; tokens stand in when no run reported a cost.
+  const shareBasis: UsageMetric = total.cost > 0 ? "cost" : "tokens";
+  const shareOf = (row: { cost: number; total: number }) => {
+    const denominator = shareBasis === "cost" ? total.cost : total.total;
+    if (denominator <= 0) return 0;
+    return (shareBasis === "cost" ? row.cost : row.total) / denominator;
+  };
+  const sortedRows = [...rows].sort((a, b) => {
+    if (a.key === "other" || b.key === "other") return a.key === "other" ? 1 : -1;
+    return shareOf(b) - shareOf(a);
+  });
+  const shareLabelSuffix = shareBasis === "cost" ? " of spend" : " of tokens";
+
+  return (
+    <section className="flex shrink-0 flex-col gap-2 rounded-12 border border-border bg-surface p-4">
+      <header className={cn(panelHeaderClassName, "flex-wrap")}>
+        <div className="min-w-0">
+          <h2 className={sectionTitleClassName}>By provider</h2>
+          <div className={cn(sectionSubtitleClassName, "whitespace-normal")}>
+            Tokens and spend per model provider
+          </div>
+        </div>
+        <SegmentedControl
+          size="sm"
+          aria-label="Provider usage period"
+          value={period}
+          onValueChange={(next: string) => setPeriod(next as ProviderUsagePeriod)}
+          options={(Object.keys(PROVIDER_USAGE_PERIODS) as ProviderUsagePeriod[]).map((value) => ({
+            value,
+            label: PROVIDER_USAGE_PERIODS[value].label,
+          }))}
+        />
+      </header>
+
+      {sortedRows.length === 0 ? (
+        <div className="rounded-8 border border-dashed border-border px-4 py-5 text-center text-aux text-subtle-foreground">
+          {PROVIDER_USAGE_PERIODS[period].empty}
+        </div>
+      ) : (
+        <table className="w-full border-collapse text-ui">
+          <caption className="sr-only">
+            Usage by provider, {PROVIDER_USAGE_PERIODS[period].label.toLowerCase()}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col" className={cn(providerHeaderCellClassName, "w-[24%]")}>
+                Provider
+              </th>
+              <th scope="col" className={providerHeaderCellClassName}>
+                Share
+                <span className={providerOffBasisClassName}>{shareLabelSuffix}</span>
+              </th>
+              {PROVIDER_TABLE_COLUMNS.map((column) => (
+                <th
+                  key={column.key}
+                  scope="col"
+                  className={cn(
+                    providerHeaderCellClassName,
+                    "w-[11%] text-right",
+                    providerColumnHiddenClassName(column, shareBasis),
+                  )}
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map((row) => (
+              <ProviderUsageTableRow
+                key={row.key}
+                row={row}
+                share={shareOf(row)}
+                shareBasis={shareBasis}
+              />
+            ))}
+          </tbody>
+          {sortedRows.length > 1 && (
+            <tfoot>
+              <tr>
+                <th
+                  scope="row"
+                  className={cn(
+                    providerCellClassName,
+                    "text-left font-normal text-muted-foreground",
+                  )}
+                >
+                  Total
+                </th>
+                <td className={providerCellClassName} />
+                <ProviderUsageFigures figures={total} shareBasis={shareBasis} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      )}
+    </section>
+  );
+}
+
+function ProviderUsageTableRow({
+  row,
+  share,
+  shareBasis,
+}: {
+  row: ProjectProviderUsageRow;
+  share: number;
+  shareBasis: UsageMetric;
+}) {
+  const series = PROVIDER_SERIES[row.key];
+  return (
+    <tr>
+      <th scope="row" className={cn(providerCellClassName, "text-left font-normal")}>
+        <span className="flex min-w-0 items-center gap-2">
+          <ProviderMark providerKey={row.key} />
+          <span className="truncate text-foreground">{series.label}</span>
+        </span>
+      </th>
+      <td className={providerCellClassName}>
+        {/* The bar takes whatever width the figures leave, so it shrinks before any figure
+            clips. Below a 340px dashboard it would be a few pixels wide, so the percentage
+            stands alone. */}
+        <span className="flex items-center gap-3 @max-[480px]/project-dashboard:gap-2">
+          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-muted @max-[340px]/project-dashboard:hidden">
+            <span
+              className="block h-full w-full origin-left rounded-full transition-transform duration-200 ease-in-out motion-reduce:transition-none"
+              style={{ background: series.color, transform: `scaleX(${Math.min(1, share)})` }}
+            />
+          </span>
+          <span className="w-10 shrink-0 text-right font-mono text-aux text-muted-foreground">
+            {fmtShare(share)}
+          </span>
+        </span>
+      </td>
+      <ProviderUsageFigures figures={row} shareBasis={shareBasis} />
+    </tr>
+  );
+}
+
+function providerColumnHiddenClassName(
+  column: (typeof PROVIDER_TABLE_COLUMNS)[number],
+  shareBasis: UsageMetric,
+): string | false {
+  if (column.detail) return providerDetailClassName;
+  return column.basis !== undefined && column.basis !== shareBasis && providerOffBasisClassName;
+}
+
+function ProviderUsageFigures({
+  figures,
+  shareBasis,
+}: {
+  figures: ProviderUsageFigureSet;
+  shareBasis: UsageMetric;
+}) {
+  return PROVIDER_TABLE_COLUMNS.map((column) => (
+    <td
+      key={column.key}
+      className={cn(
+        providerNumericCellClassName,
+        providerColumnHiddenClassName(column, shareBasis),
+      )}
+    >
+      {column.format(figures)}
+    </td>
+  ));
+}
+
+function ProviderMark({ providerKey }: { providerKey: ProjectUsageProviderKey }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex size-6 shrink-0 items-center justify-center rounded-4 border border-border bg-surface"
+    >
+      {providerKey === "codex" ? (
+        <CodexIcon aria-hidden className="size-3.5 text-foreground" />
+      ) : (
+        <ModelProviderIcon
+          provider={providerKey === "claude" ? "anthropic" : null}
+          className="size-3.5"
+        />
+      )}
+    </span>
+  );
+}
+
+interface UsageSeries {
+  color: string;
+  key: string;
+  label: string;
+}
+
+type UsageChartDatum = {
+  date: string;
+  isToday: boolean;
+  total: number;
+} & Record<string, number | string | boolean>;
+
+const TOKEN_TYPE_SERIES: UsageSeries[] = [
+  { color: "var(--brand)", key: "output", label: "Output" },
+  { color: "color-mix(in oklch, var(--brand) 45%, transparent)", key: "input", label: "Input" },
+  { color: "color-mix(in oklch, var(--brand) 18%, transparent)", key: "cached", label: "Cached" },
+];
+const COST_SERIES: UsageSeries[] = [{ color: "var(--brand)", key: "cost", label: "Cost" }];
+
 function UsageChart({
+  breakdown,
   mode,
   usage,
 }: {
-  mode: "tokens" | "cost";
+  breakdown: UsageBreakdown;
+  mode: UsageMetric;
   usage: ProjectDashboardUsageDay[];
 }) {
   const isTokens = mode === "tokens";
   const patternId = useId().replaceAll(":", "");
   const totals = useMemo(() => buildProjectUsageChartTotals(usage), [usage]);
-  const chartData = useMemo(
-    () =>
-      usage.map((day, index) => {
-        const tokens = buildProjectUsageTokenBreakdown(day);
-        return {
-          cached: tokens.cached,
-          cost: day.costUsd,
-          date: day.date,
-          input: tokens.input,
-          isToday: index === usage.length - 1,
-          output: tokens.output,
-          total: tokens.total,
-        };
-      }),
+  const providerTotals = useMemo(
+    () => buildProjectProviderUsageRows(usage.flatMap((day) => day.providers)),
     [usage],
   );
-  const maximum = Math.max(1, ...chartData.map((datum) => (isTokens ? datum.total : datum.cost)));
+  const series = useMemo<UsageSeries[]>(() => {
+    if (breakdown === "provider") {
+      return providerTotals.map((row) => ({ ...PROVIDER_SERIES[row.key], key: row.key }));
+    }
+    return isTokens ? TOKEN_TYPE_SERIES : COST_SERIES;
+  }, [breakdown, isTokens, providerTotals]);
+  const chartData = useMemo(
+    () =>
+      usage.map((day, index): UsageChartDatum => {
+        const base = { date: day.date, isToday: index === usage.length - 1 };
+        if (breakdown === "provider") {
+          const values: Record<string, number> = {};
+          let total = 0;
+          for (const row of buildProjectProviderUsageRows(day.providers)) {
+            values[row.key] = isTokens ? row.total : row.cost;
+            total += values[row.key];
+          }
+          return { ...base, ...values, total };
+        }
+        if (!isTokens) return { ...base, cost: day.costUsd, total: day.costUsd };
+        const tokens = buildProjectUsageTokenBreakdown(day);
+        return { ...base, ...tokens };
+      }),
+    [breakdown, isTokens, usage],
+  );
+  const maximum = Math.max(1, ...chartData.map((datum) => datum.total));
   const firstDate = chartData[0]?.date;
   const lastDate = chartData.at(-1)?.date;
   const xTicks = firstDate
@@ -558,59 +890,40 @@ function UsageChart({
     : [];
 
   const fmt = (v: number) => (isTokens ? fmtTokens(v) : fmtCost(v));
-
-  const seriesColors = {
-    output: "var(--brand)",
-    input: "color-mix(in oklch, var(--brand) 45%, transparent)",
-    cached: "color-mix(in oklch, var(--brand) 18%, transparent)",
+  const seriesTotal = (key: string): number => {
+    if (breakdown === "provider") {
+      const row = providerTotals.find((candidate) => candidate.key === key);
+      return row ? (isTokens ? row.total : row.cost) : 0;
+    }
+    return totals[key as keyof typeof totals];
   };
+  const legendSeries = series.length > 1 ? series : [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {isTokens ? (
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
-            <span className="text-muted-foreground">Total</span>
-            <span className="font-mono text-aux text-foreground">{fmtTokens(totals.total)}</span>
+      <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
+          <span className="text-muted-foreground">{isTokens ? "Total" : "Total spend"}</span>
+          <span className="font-mono text-aux text-foreground">
+            {isTokens ? fmtTokens(totals.total) : fmtCost(totals.cost)}
           </span>
-          <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
-            <span
-              className="size-2 shrink-0 self-center"
-              style={{ background: seriesColors.output }}
-            />
-            <span className="text-muted-foreground">Output</span>
-            <span className="font-mono text-foreground">{fmtTokens(totals.output)}</span>
+        </span>
+        {legendSeries.map((entry) => (
+          <span
+            key={entry.key}
+            className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground"
+          >
+            <span className="size-2 shrink-0 self-center" style={{ background: entry.color }} />
+            <span className="text-muted-foreground">{entry.label}</span>
+            <span className="font-mono text-foreground">{fmt(seriesTotal(entry.key))}</span>
           </span>
-          <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
-            <span
-              className="size-2 shrink-0 self-center"
-              style={{ background: seriesColors.input }}
-            />
-            <span className="text-muted-foreground">Input</span>
-            <span className="font-mono text-foreground">{fmtTokens(totals.input)}</span>
-          </span>
-          <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
-            <span
-              className="size-2 shrink-0 self-center"
-              style={{ background: seriesColors.cached }}
-            />
-            <span className="text-muted-foreground">Cached</span>
-            <span className="font-mono text-foreground">{fmtTokens(totals.cached)}</span>
-          </span>
-        </div>
-      ) : (
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="inline-flex items-baseline gap-1 text-aux whitespace-nowrap text-muted-foreground">
-            <span className="text-muted-foreground">Total spend</span>
-            <span className="font-mono text-aux text-foreground">{fmtCost(totals.cost)}</span>
-          </span>
-        </div>
-      )}
+        ))}
+      </div>
 
       <div
         className="min-h-[120px] min-w-0 flex-1"
         role="img"
-        aria-label={`${mode} usage over the last 14 days`}
+        aria-label={`${mode} usage${breakdown === "provider" ? " by provider" : ""} over the last 14 days`}
       >
         <ResponsiveContainer
           width="100%"
@@ -620,22 +933,22 @@ function UsageChart({
         >
           <BarChart
             data={chartData}
-            margin={{ top: 6, right: 4, bottom: 0, left: 0 }}
+            margin={{ top: 6, right: 12, bottom: 0, left: 0 }}
             barCategoryGap={4}
             barGap={0}
             accessibilityLayer
           >
             <defs>
-              {Object.entries(seriesColors).map(([name, color]) => (
+              {series.map((entry) => (
                 <pattern
-                  key={name}
-                  id={`${patternId}-${name}`}
+                  key={entry.key}
+                  id={`${patternId}-${entry.key}`}
                   width="6"
                   height="6"
                   patternUnits="userSpaceOnUse"
                   patternTransform="rotate(45)"
                 >
-                  <rect width="6" height="6" fill={color} />
+                  <rect width="6" height="6" fill={entry.color} />
                   <rect
                     width="2"
                     height="6"
@@ -661,19 +974,21 @@ function UsageChart({
               tickLine={false}
               tickMargin={8}
               ticks={[0, maximum / 2, maximum]}
-              width={44}
+              width={52}
               allowDecimals={!isTokens}
               allowDataOverflow
               domain={[0, maximum]}
               tick={AUXILIARY_CHART_TEXT}
-              tickFormatter={fmt}
+              tickFormatter={(value: number) =>
+                `${isTokens ? "" : "$"}${axisNumberFormat.format(value)}`
+              }
             />
             <ChartTooltip
               isAnimationActive={false}
               cursor={{ fill: "var(--surface-hover)", radius: 4 }}
               wrapperStyle={{ outline: "none", zIndex: 10 }}
               content={({ active, payload }) => {
-                const datum = payload?.[0]?.payload as (typeof chartData)[number] | undefined;
+                const datum = payload?.[0]?.payload as UsageChartDatum | undefined;
                 if (!active || !datum) return null;
                 return (
                   <div
@@ -683,105 +998,60 @@ function UsageChart({
                     <div className="mb-1 text-aux text-muted-foreground">
                       {fmtDateLabel(datum.date)}
                     </div>
-                    {isTokens ? (
+                    {series.length > 1 ? (
                       <>
-                        <TooltipRow
-                          color={seriesColors.output}
-                          label="Output"
-                          value={fmtTokens(datum.output)}
-                        />
-                        <TooltipRow
-                          color={seriesColors.input}
-                          label="Input"
-                          value={fmtTokens(datum.input)}
-                        />
-                        <TooltipRow
-                          color={seriesColors.cached}
-                          label="Cached"
-                          value={fmtTokens(datum.cached)}
-                        />
+                        {series.map((entry) => (
+                          <TooltipRow
+                            key={entry.key}
+                            color={entry.color}
+                            label={entry.label}
+                            value={fmt(Number(datum[entry.key] ?? 0))}
+                          />
+                        ))}
                         <div className="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2 text-aux">
                           <span className="text-muted-foreground">Total</span>
                           <span className="font-mono text-popover-foreground">
-                            {fmtTokens(datum.total)}
+                            {fmt(datum.total)}
                           </span>
                         </div>
                       </>
                     ) : (
-                      <div className="font-mono text-popover-foreground">{fmtCost(datum.cost)}</div>
+                      <div className="font-mono text-popover-foreground">{fmt(datum.total)}</div>
                     )}
                   </div>
                 );
               }}
             />
-            {isTokens ? (
-              <>
-                <Bar
-                  dataKey="output"
-                  name="Output"
-                  stackId="tokens"
-                  fill={seriesColors.output}
-                  radius={[0, 0, 2, 2]}
-                  isAnimationActive={false}
-                >
-                  {chartData.map((datum) => (
-                    <Cell
-                      key={datum.date}
-                      fill={datum.isToday ? `url(#${patternId}-output)` : seriesColors.output}
-                    />
-                  ))}
-                </Bar>
-                <Bar
-                  dataKey="input"
-                  name="Input"
-                  stackId="tokens"
-                  fill={seriesColors.input}
-                  isAnimationActive={false}
-                >
-                  {chartData.map((datum) => (
-                    <Cell
-                      key={datum.date}
-                      fill={datum.isToday ? `url(#${patternId}-input)` : seriesColors.input}
-                    />
-                  ))}
-                </Bar>
-                <Bar
-                  dataKey="cached"
-                  name="Cached"
-                  stackId="tokens"
-                  fill={seriesColors.cached}
-                  radius={[3, 3, 0, 0]}
-                  isAnimationActive={false}
-                >
-                  {chartData.map((datum) => (
-                    <Cell
-                      key={datum.date}
-                      fill={datum.isToday ? `url(#${patternId}-cached)` : seriesColors.cached}
-                    />
-                  ))}
-                </Bar>
-              </>
-            ) : (
+            {series.map((entry, index) => (
               <Bar
-                dataKey="cost"
-                name="Cost"
-                fill={seriesColors.output}
-                radius={[3, 3, 2, 2]}
+                key={entry.key}
+                dataKey={entry.key}
+                name={entry.label}
+                stackId="usage"
+                fill={entry.color}
+                radius={barRadius(index, series.length)}
                 isAnimationActive={false}
               >
                 {chartData.map((datum) => (
                   <Cell
                     key={datum.date}
-                    fill={datum.isToday ? `url(#${patternId}-output)` : seriesColors.output}
+                    fill={datum.isToday ? `url(#${patternId}-${entry.key})` : entry.color}
                   />
                 ))}
               </Bar>
-            )}
+            ))}
           </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
   );
+}
+
+/** Rounds the outer ends of a stack: the base gets a soft foot, the top a cap. */
+function barRadius(index: number, count: number): [number, number, number, number] {
+  const top = index === count - 1 ? 3 : 0;
+  const bottom = index === 0 ? 2 : 0;
+  return [top, top, bottom, bottom];
 }
 
 function TooltipRow({ color, label, value }: { color: string; label: string; value: string }) {

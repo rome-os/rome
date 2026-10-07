@@ -1425,6 +1425,16 @@ describe("AnthropicProvider", () => {
       );
     });
 
+    it("keeps TodoWrite on for plan updates", async () => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+
+      const session = await provider.openSession(buildParams());
+      await collectEvents(session);
+      await session.close();
+
+      expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_ENABLE_TASKS).toBe("false");
+    });
+
     it.each([
       ["low", "low"],
       ["high", "high"],

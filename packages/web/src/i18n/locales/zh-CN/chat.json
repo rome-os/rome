@@ -223,6 +223,13 @@
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置",
+    "zoomLevel": "缩放",
+    "previewImage": "预览",
+    "playVideo": "播放",
+    "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -358,7 +365,6 @@
       "sendStatus": "发送消息失败({{status}})。",
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
-      "attachStreamStatus": "附加流失败,轮次 {{turnId}}({{status}})。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。"
     }

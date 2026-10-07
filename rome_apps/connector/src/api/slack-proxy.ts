@@ -115,10 +115,9 @@ export async function slackProxyCall(params: {
   }
 
   // Caller headers win over the defaults so an explicit Content-Type can override
-  // Slack's JSON default (e.g. a form-encoded call).
-  const headers: Record<string, string> = {
-    "User-Agent": "rome-connector",
-  };
+  // Slack's JSON default (e.g. a form-encoded call). `Headers` matches names
+  // case-insensitively, so `content-type` replaces the default.
+  const headers = new Headers({ "User-Agent": "rome-connector" });
 
   let serializedBody: string | undefined;
   if (params.body !== undefined && params.method !== "GET" && params.method !== "HEAD") {
@@ -126,14 +125,16 @@ export async function slackProxyCall(params: {
       serializedBody = params.body;
     } else {
       serializedBody = JSON.stringify(params.body);
-      headers["Content-Type"] = "application/json; charset=utf-8";
+      headers.set("Content-Type", "application/json; charset=utf-8");
     }
   }
-  Object.assign(headers, params.headers ?? {});
+  for (const [name, value] of Object.entries(params.headers ?? {})) {
+    headers.set(name, value);
+  }
 
   // Pin the credential LAST so caller-supplied `headers` can never override the
   // injected token — Rome owns the Authorization header, the agent never sets it.
-  headers.Authorization = `Bearer ${token}`;
+  headers.set("Authorization", `Bearer ${token}`);
 
   const res = await fetch(url, { method: params.method, headers, body: serializedBody });
 

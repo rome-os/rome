@@ -55,6 +55,7 @@ function textMessage(content: string): string {
 function traceMessage(
   accounting: {
     costUsd: number;
+    provider?: string;
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
@@ -62,10 +63,10 @@ function traceMessage(
   },
   hiddenText?: string,
 ): string {
-  const { costUsd, ...usage } = accounting;
+  const { costUsd, provider, ...usage } = accounting;
   const blocks: unknown[] = [];
   if (hiddenText) blocks.push({ type: "text", content: hiddenText });
-  blocks.push({ type: "result", accounting: { costUsd, usage } });
+  blocks.push({ type: "result", accounting: { costUsd, provider, usage } });
   return JSON.stringify(blocks);
 }
 
@@ -296,6 +297,7 @@ describe("Projects files API", () => {
         traceMessage(
           {
             costUsd: 0.25,
+            provider: "anthropic",
             inputTokens: 100,
             outputTokens: 20,
             cacheReadTokens: 10,
@@ -337,13 +339,24 @@ describe("Projects files API", () => {
         ],
       });
       expect(body.chats[0].searchText).not.toContain("intermediate hidden trace content");
+      const anthropicUsage = {
+        cacheReadTokens: 10,
+        cacheWriteTokens: 5,
+        costUsd: 0.25,
+        inputTokens: 100,
+        outputTokens: 20,
+        provider: "anthropic",
+      };
       expect(body.usage.find((day) => day.date === todayKey)).toMatchObject({
         cacheReadTokens: 10,
         cacheWriteTokens: 5,
         inputTokens: 100,
         outputTokens: 20,
         costUsd: 0.25,
+        providers: [anthropicUsage],
       });
+      expect(body.usage.find((day) => day.date !== todayKey)?.providers).toEqual([]);
+      expect(body.providerUsage).toEqual({ month: [anthropicUsage], total: [anthropicUsage] });
     });
 
     it("returns aggregate usage stats and recent chats for the projects root", async () => {

@@ -184,6 +184,9 @@ export async function executeSummon(
     let romeSession: RomeSessionRef | undefined;
     let output: unknown;
     let runError: string | undefined;
+    let hasResult = false;
+    let turnStarted = false;
+    let turnStatus: "completed" | "interrupted" | "error" | undefined;
 
     for await (const msg of deps.agentRunner.run({
       agentName,
@@ -196,10 +199,14 @@ export async function executeSummon(
       // caller's; keep them local and forward only content. session_init still
       // forwards — the trace UI keys the sub-agent header off it.
       if (msg.type === "turn_start") {
+        turnStarted = true;
         resolvedSessionId = msg.sessionId;
         continue;
       }
-      if (msg.type === "turn_end") continue;
+      if (msg.type === "turn_end") {
+        turnStatus = msg.status;
+        continue;
+      }
 
       if (msg.type === "session_init" && msg.romeSession && !romeSession) {
         romeSession = msg.romeSession;
@@ -215,6 +222,7 @@ export async function executeSummon(
       deps.emitAgentMessage?.({ ...msg, agent: agentName });
 
       if (msg.type === "result") {
+        hasResult = true;
         result = msg.content;
         if (Object.prototype.hasOwnProperty.call(msg, "structuredOutput")) {
           output = msg.structuredOutput;
@@ -230,6 +238,19 @@ export async function executeSummon(
           ? `Summoned agent "${agentName}" failed to start: ${runError}`
           : `Summoned agent "${agentName}" did not provide a durable Rome session`,
       );
+    }
+
+    // An abort can also emit an error block. The turn outcome owns cancellation.
+    if (turnStatus === "interrupted") {
+      throw new Error(`Summoned agent "${agentName}" was interrupted`);
+    }
+    if (runError !== undefined || turnStatus === "error") {
+      throw new Error(
+        `Summoned agent "${agentName}" failed: ${runError || "turn ended with an error"}`,
+      );
+    }
+    if (!hasResult || (turnStarted && turnStatus === undefined)) {
+      throw new Error(`Summoned agent "${agentName}" ended without a completed result`);
     }
 
     return {

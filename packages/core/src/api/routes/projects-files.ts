@@ -5,6 +5,7 @@ import type {
   ProjectDashboardChatsResponse,
   ProjectDashboardResolveResponse,
   ProjectDashboardResponse,
+  ProjectDashboardProviderUsageTotals,
   ProjectDashboardUsageDay,
 } from "@rome/api-types/projects";
 import { existsSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
@@ -401,6 +402,7 @@ function createUsageDays(
       date: shiftDayKey(today, -index),
       inputTokens: 0,
       outputTokens: 0,
+      providers: [],
     });
   }
 
@@ -486,6 +488,19 @@ function applyUsageTotals(usage: ProjectDashboardUsageDay[], totals: ProjectUsag
       day.costUsd = row.costUsd;
     }
   }
+  for (const row of totals.providerDays) {
+    const { date: dayKey, ...providerUsage } = row;
+    usageByDate.get(dayKey)?.providers.push(providerUsage);
+  }
+}
+
+function createProviderUsageTotals(
+  totals: ProjectUsageTotals,
+): ProjectDashboardProviderUsageTotals {
+  return {
+    month: totals.providerTotals.map((row) => ({ ...row.month, provider: row.provider })),
+    total: totals.providerTotals.map((row) => ({ ...row.total, provider: row.provider })),
+  };
 }
 
 function createUsageStats(totals: ProjectUsageTotals, usage: ProjectDashboardUsageDay[]) {
@@ -497,6 +512,7 @@ function createUsageStats(totals: ProjectUsageTotals, usage: ProjectDashboardUsa
     ),
     monthCostUsd: totals.monthCostUsd,
     monthTokens: totals.monthTokens,
+    providerUsage: createProviderUsageTotals(totals),
     totalCacheReadTokens: totals.totalCacheReadTokens,
     totalCacheWriteTokens: totals.totalCacheWriteTokens,
     totalCostUsd: totals.totalCostUsd,
@@ -597,6 +613,7 @@ async function buildProjectUsageStats(
   cacheHitRate: number;
   monthCostUsd: number;
   monthTokens: number;
+  providerUsage: ProjectDashboardProviderUsageTotals;
   totalCacheReadTokens: number;
   totalCacheWriteTokens: number;
   totalCostUsd: number;
@@ -699,6 +716,7 @@ async function buildAllProjectsDashboard(
       totalCostUsd: usageStats.totalCostUsd,
       totalTokens: usageStats.totalTokens,
     },
+    providerUsage: usageStats.providerUsage,
     usage: usageStats.usage,
   };
 }
@@ -837,6 +855,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
         totalCostUsd: usageStats.totalCostUsd,
         totalTokens: usageStats.totalTokens,
       },
+      providerUsage: usageStats.providerUsage,
       usage: usageStats.usage,
     };
 

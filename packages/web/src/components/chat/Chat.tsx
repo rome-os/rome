@@ -47,6 +47,8 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  isAwaitingGuardian,
+  isLastTurnFailed,
   type AgentIdentity,
   type HandoffNode,
 } from "@/components/chat/chat-view";
@@ -59,6 +61,7 @@ import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
+import { useChatTabStatus } from "@/hooks/use-tab-status";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
@@ -129,6 +132,12 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 // (and the Stop button's turnId) stuck on a stale turn. Three missed
 // keepalives + margin.
 const STREAM_STALL_TIMEOUT_MS = 50_000;
+
+// A dropped turn stream is retried against the same turnId. Short and capped:
+// the server answers definitively (replayed `done`, or 404 once the turn is
+// gone), so a retry is cheap, and a resumed mobile tab catches up quickly.
+const TURN_RESUME_BASE_DELAY_MS = 1_000;
+const TURN_RESUME_MAX_DELAY_MS = 5_000;
 
 // After an interrupt is accepted, a healthy stream delivers `done` almost
 // immediately. If the local streaming entry survives this grace period the
@@ -309,6 +318,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
+  // Turns in this chat the server reported finished (a terminal stream event).
+  // A dropped connection ends the local stream but not the turn, so it never
+  // counts here.
+  const [turnEnds, setTurnEnds] = useState(0);
   const [streamReconnectRevision, setStreamReconnectRevision] = useState(0);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
@@ -530,6 +543,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const currentSnapshot = floorSessionStream?.snapshot ?? null;
   const runningTurnId = floorSessionStream?.turnId ?? null;
   const isActiveSessionStreaming = !!floorSessionStream;
+  const awaitingGuardian = useMemo(
+    () => isAwaitingGuardian(view, runningTurnId),
+    [view, runningTurnId],
+  );
+  const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // Typewriter-paced reveal of the latest assistant text block — the SSE
   // stream updates in provider-sized deltas; this smooths them into typing.
   // Keyed by turn + block: a new block retypes from zero (delayed fold — it
@@ -573,8 +591,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     }
   }, []);
 
+  const isMountedRef = useRef(true);
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       for (const controller of turnStreamControllersRef.current.values()) {
         controller.abort();
       }
@@ -582,8 +603,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     };
   }, []);
 
+  // A chat that changes while its tab is hidden stays unread, so the sidebar
+  // and other devices show it as new until the guardian comes back.
+  const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        hiddenReadsRef.current.add(id);
+        return;
+      }
       try {
         await apiMarkSessionRead(id);
         notifySessionsChanged();
@@ -593,6 +621,16 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     },
     [notifySessionsChanged],
   );
+  useEffect(() => {
+    const flush = () => {
+      if (document.visibilityState === "hidden") return;
+      const ids = [...hiddenReadsRef.current];
+      hiddenReadsRef.current.clear();
+      for (const id of ids) void markSessionRead(id);
+    };
+    document.addEventListener("visibilitychange", flush);
+    return () => document.removeEventListener("visibilitychange", flush);
+  }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
@@ -745,10 +783,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
-    async (res: Response, sessionId: string, turnId: string) => {
+    // Resolves true once the turn reported a terminal event (`done` or
+    // `stream_error`); false means the transport ended first.
+    async (res: Response, sessionId: string, turnId: string): Promise<boolean> => {
       if (!res.body) {
         setStreamError(t("stream.errors.emptyStream"));
-        return;
+        return false;
       }
 
       const reader = res.body.getReader();
@@ -784,10 +824,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }),
         ]).finally(() => clearTimeout(stallTimer));
         if (result === "stalled") {
-          // Dead connection. Release the reader and fall through to the
-          // final reload; the caller's finally block tears the streaming
-          // entry down and the floor reattach poll re-attaches from
-          // GET /turns if the turn is in fact still running server-side.
+          // Dead connection. Release the reader; followTurn reopens the
+          // same turn's stream.
           void reader.cancel().catch(() => {});
           break;
         }
@@ -825,6 +863,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
@@ -842,6 +881,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             } catch {
               // ignore parse errors
             }
+            if (isReadVisibleSession(sessionId)) setTurnEnds((n) => n + 1);
             shouldStop = true;
             break;
           }
@@ -856,11 +896,12 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 segArr.push(seg);
               }
               flushSnapshot();
-              onSessionMessageRef.current?.({
-                sessionId,
-                turnId,
-                segment: seg,
-              });
+              // Only the floor's turn drives the host's workspace follow. A
+              // background turn (e.g. a parent that handed off) keeps its own
+              // trace without retargeting the host.
+              if (sessionId === floorSessionIdRef.current) {
+                onSessionMessageRef.current?.({ sessionId, turnId, segment: seg });
+              }
             } catch {
               // ignore parse errors
             }
@@ -931,7 +972,11 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 route?: string;
                 params?: Record<string, string | number | boolean>;
               };
-              if (appId) autoPlaceApp(appId, route, params);
+              // The floor owns the workspace; a background turn's replayed
+              // placement would remount (and reset) a widget in use.
+              if (appId && sessionId === floorSessionIdRef.current) {
+                autoPlaceApp(appId, route, params);
+              }
             } catch {
               // ignore parse errors
             }
@@ -940,10 +985,88 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         }
       }
 
-      // After stream ends, reload messages from DB (gets both trace + assistant)
-      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      return shouldStop;
     },
-    [loadMessages, t, updateSessionSnapshot, updateSessionAssistantText],
+    [t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
+  );
+
+  // Follow one turn to its end. A dropped SSE connection (mobile background,
+  // network swap, stall) is not a turn outcome, so the live entry stays up and
+  // the same turn's stream is reopened. The server replays a turn's stream —
+  // including its terminal `done` for 30 s after it ends — and 404s once the
+  // turn is gone, so each retry gets a definitive answer. Settlement is keyed
+  // to this turnId: if Stop or a newer turn took the entry over, we just leave.
+  // The persisted answer loads before the live preview is released.
+  const followTurn = useCallback(
+    async (sessionId: string, turnId: string): Promise<void> => {
+      const ownsEntry = () =>
+        isMountedRef.current && streamingSessionsRef.current.get(sessionId)?.turnId === turnId;
+      let delayMs = TURN_RESUME_BASE_DELAY_MS;
+      let shownError: string | null = null;
+      let controller: AbortController;
+      for (;;) {
+        controller = createTurnStreamController(turnId);
+        try {
+          const res = await openTurnStream(turnId, controller.signal);
+          if (res.status === 404) break;
+          if (res.ok && res.body) {
+            if (shownError) {
+              const cleared = shownError;
+              setStreamError((current) => (current === cleared ? null : current));
+              shownError = null;
+            }
+            const openedAt = Date.now();
+            if (await consumeStream(res, sessionId, turnId)) break;
+            // Retry fast after a connection that held; keep backing off when
+            // streams keep closing right away.
+            if (Date.now() - openedAt >= TURN_RESUME_MAX_DELAY_MS) {
+              delayMs = TURN_RESUME_BASE_DELAY_MS;
+            }
+          } else if (sessionId === floorSessionIdRef.current) {
+            // The composer banner belongs to the floor; a background turn
+            // retries quietly.
+            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            setStreamError(shownError);
+          }
+        } catch {
+          // Network blip or aborted reader: retry below.
+        }
+        // Hold the controller through the backoff so Stop's force-release or
+        // unmount can still abort this follower. Both already settled the
+        // turn, so an abort ends the follower at once; waiting out the
+        // backoff would hold the send bookkeeping and swallow a new send.
+        const { signal } = controller;
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) return resolve();
+          const timer = setTimeout(resolve, delayMs);
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        releaseTurnStreamController(turnId, controller);
+        if (signal.aborted) return;
+        delayMs = Math.min(delayMs * 2, TURN_RESUME_MAX_DELAY_MS);
+        if (!ownsEntry()) return;
+      }
+      releaseTurnStreamController(turnId, controller);
+      if (!isMountedRef.current) return;
+      await loadMessages(sessionId, { force: true, dropLocalOptimistic: true });
+      endSessionStream(sessionId, turnId);
+    },
+    [
+      consumeStream,
+      createTurnStreamController,
+      releaseTurnStreamController,
+      loadMessages,
+      endSessionStream,
+      streamingSessionsRef,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -957,7 +1080,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     let cancelled = false;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
-    let streamController: AbortController | null = null;
 
     const schedule = (delayMs: number) => {
       if (cancelled) return;
@@ -978,7 +1100,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         schedule(2000);
         return;
       }
-      let attachedTurnId: string | null = null;
       try {
         // List in-flight turns by turnId. Reattach to the running
         // one (or the first queued one) — its events stream is keyed by
@@ -986,36 +1107,21 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         // while we're polling.
         const turns = await listSessionTurns(reattachSessionId);
         if (!turns || turns.length === 0 || cancelled) return;
+        // A foreground send may have started while the lookup was in flight.
+        // It already follows its turn; a second follower would fight it for
+        // the stream controller.
+        if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
-        attachedTurnId = target.turnId;
-        startSessionStream(reattachSessionId, attachedTurnId);
+        startSessionStream(reattachSessionId, target.turnId);
         setStreamError(null);
-
-        streamController = createTurnStreamController(attachedTurnId);
-        const streamRes = await openTurnStream(attachedTurnId, streamController.signal);
-        if (!streamRes.ok) {
-          if (streamRes.status !== 404 && !cancelled) {
-            setStreamError(t("stream.errors.reconnectStatus", { status: streamRes.status }));
-          }
-          return;
-        }
-
-        await consumeStream(streamRes, reattachSessionId, attachedTurnId);
+        // Not cancelled with this effect: followTurn ends with its turn (or
+        // on unmount), and the entry it holds keeps this poll from doubling up.
+        await followTurn(reattachSessionId, target.turnId);
       } catch {
         // Silent on poll/network blips — keep trying so backend-initiated
         // streams (e.g. queued approvals) eventually attach.
       } finally {
-        if (attachedTurnId) {
-          if (streamController) {
-            releaseTurnStreamController(attachedTurnId, streamController);
-            streamController = null;
-          }
-          // Turn-guarded: this reattach finalizer must only clear the entry
-          // it installed. If a newer turn (foreground send or fresh reattach)
-          // has replaced it in the meantime, endSessionStream is a no-op.
-          endSessionStream(reattachSessionId, attachedTurnId);
-        }
         if (!cancelled) {
           schedule(2000);
         }
@@ -1026,19 +1132,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
     return () => {
       cancelled = true;
-      streamController?.abort();
       if (pollTimer) clearTimeout(pollTimer);
     };
-  }, [
-    floorSessionId,
-    consumeStream,
-    streamReconnectRevision,
-    startSessionStream,
-    endSessionStream,
-    createTurnStreamController,
-    releaseTurnStreamController,
-    t,
-  ]);
+  }, [floorSessionId, followTurn, streamReconnectRevision, startSessionStream]);
 
   // Shared lifecycle for "post a turn → attach SSE → consume" so both the
   // composer send and the inline app-component submit go through the same
@@ -1136,28 +1232,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
       startSessionStream(sendingSessionId, pendingTurnId);
 
-      // turn is already submitted, so a failed attach or a mid-stream drop must
-      // never reject this function — that rejection is what used to restore the
-      // already-sent input. On any stream failure we just tear our bookkeeping
-      // down and let the floor reattach effect re-attach from GET /turns; the
-      // turn keeps running server-side.
+      // The turn is already submitted, so a failed attach or a mid-stream drop
+      // must never reject this function — that rejection is what used to
+      // restore the already-sent input. followTurn rides out dropped
+      // connections and settles only when the turn itself ends.
       void (async () => {
-        const streamController = createTurnStreamController(pendingTurnId);
         try {
-          const streamRes = await openTurnStream(pendingTurnId, streamController.signal);
-          if (!streamRes.ok || !streamRes.body) {
-            setStreamError(
-              t("stream.errors.attachStreamStatus", {
-                turnId: pendingTurnId,
-                status: streamRes.status,
-              }),
-            );
-            return;
-          }
-          await consumeStream(streamRes, sendingSessionId, pendingTurnId);
-        } catch {
-          // Mid-stream drop (reader rejected, network blip). Silent like the
-          // reattach poll: bumping the reconnect revision below re-triggers it.
+          await followTurn(sendingSessionId, pendingTurnId);
         } finally {
           const turns = inflightTurnsRef.current.get(sendingSessionId);
           if (turns) {
@@ -1177,20 +1258,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
             setStreamReconnectRevision((revision) => revision + 1);
             endSessionStream(sendingSessionId, pendingTurnId);
           }
-          releaseTurnStreamController(pendingTurnId, streamController);
         }
       })();
     },
-    [
-      consumeStream,
-      endSessionStream,
-      startSessionStream,
-      streamingSessionsRef,
-      t,
-      scrollToBottom,
-      createTurnStreamController,
-      releaseTurnStreamController,
-    ],
+    [followTurn, endSessionStream, startSessionStream, streamingSessionsRef, t, scrollToBottom],
   );
 
   // Send a turn into the active session. The composer owns the input state
@@ -1411,6 +1482,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const activeSubmission = useMemo(
     () => (floorHandoff ? findActiveSubmission(floorMessages) : null),
     [floorHandoff, floorMessages],
+  );
+  // A submission waiting on Approve is the specialist asking the guardian, the
+  // same as an open card.
+  useChatTabStatus(
+    isActiveSessionStreaming,
+    awaitingGuardian || activeSubmission !== null,
+    lastTurnFailed && !isActiveSessionStreaming,
+    turnEnds,
   );
 
   // Verbal approval: the specialist relays the guardian's "yes" via

@@ -78,21 +78,19 @@ GitHub Actions (6 shards)
   built-in entry is expanded and cross-page sidebar clicks are deterministic.
 - **AI-native interaction**: `aiAct` performs navigation, typing, scrolling,
   menu selection, and other user actions from a goal. `aiAssert` checks visible
-  outcomes. `app.open` handles isolated setup, and `app.expectUrl` checks the
-  address bar when required.
+  outcomes. `app.open` handles isolated setup.
 - **Env-driven selection**: `MIDSCENE_INCLUDE_TAGS` / `MIDSCENE_EXCLUDE_TAGS`
   (comma-separated, OR semantics), `MIDSCENE_RETRY`, `HEADLESS` — the same
   entry point serves local single-case iteration and CI sharding.
 
-The harness registers only the custom nodes used by committed cases. Each case
-uses one `app.open` and may use `app.expectUrl` when the browser address is not
-visible to the model. Run `npm run nodes` in `tests/midscene` to generate a
+The harness registers two custom nodes used by committed cases. Each case
+uses one `app.open`. Run `npm run nodes` in `tests/midscene` to generate a
 local reference for the full node list.
 
 | Node | Purpose |
 | --- | --- |
 | `app.open` | Open a route in a fresh context, seed language/pins, wait for the sidebar or login page |
-| `app.expectUrl` | URL substring / `re:` regex assertion |
+| `app.expectRenameConflict` | Check that FILE-03's rename request received HTTP 409 after `aiAct` submitted it |
 
 ## 3. Mock-Mode Contract (for Case Authors)
 
@@ -130,17 +128,24 @@ The workflow file is the source of truth for step-level details (action pins,
 timeouts, cache flags). This section records the design decisions and the
 reasons behind them.
 
-- **Triggers**: pushes to `main` on a scoped path set (the workflow itself,
-  `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md), all of `packages/web/**`, the workspace packages
-  rebuilt by `build:kit` — `packages/ui`, `packages/web-content`,
-  `packages/api-types`, `packages/app-runtime-sdk` — and `pnpm-lock.yaml`),
-  the same paths on `pull_request`, plus manual `workflow_dispatch`. A PR
-  runs two secret-free jobs. `harness-validation` installs the package,
-  type-checks it, collects YAML cases, checks the catalog, and tests report
-  scripts without starting a browser or model. `mock-boundary-validation`
-  starts the mock server and checks MSW, browser HTTP, and WebSocket blocking
-  without model credentials. The model-backed `midscene` matrix runs on the upstream
-  `main` branch or by manual dispatch in a fork using that fork's secrets.
+- **Triggers**: the independent Midscene workflow runs the full model-backed
+  suite nightly against the latest upstream `main` commit. Its daily schedule
+  is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
+  It does not depend on the ordinary CI or Nightly workflow.
+  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
+  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
+  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
+  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
+  A matching PR runs two secret-free jobs. `harness-validation` installs the
+  package, type-checks it, collects YAML cases, checks the catalog, and tests
+  report scripts without starting a browser or model.
+  `mock-boundary-validation` starts the mock server and checks MSW, browser
+  HTTP, and WebSocket blocking without model credentials.
+  Manual `workflow_dispatch` also runs the full suite on upstream `main`.
+  A fork owner may manually dispatch a fork branch using that fork's secrets.
+  Set `report_source_run_id` to rebuild reports from an existing run's shard
+  artifacts without model calls. Report publishing requires the repository to
+  match `MIDSCENE_PUBLISH_REPO`.
   The matrix does not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
   environment in the workflow does **not** create its reviewer gate — an
@@ -179,13 +184,14 @@ reasons behind them.
 - **Sharding**: a 6-entry matrix selected by `MIDSCENE_INCLUDE_TAGS=shard-N`.
   Every case carries exactly one `shard-N` tag. `fail-fast: false`,
   `max-parallel: 1`, a 45-minute per-job timeout, and 2 case-level retries.
-- **Evidence**: runs in `quanru/rome` upload the `midscene_run/` and
-  `.midscene/` report artifacts. Each visual shard writes a Markdown job
+- **Evidence**: every model-backed run uploads the `midscene_run/` and
+  `.midscene/` shard artifacts, including failed runs. A repository with
+  `MIDSCENE_PUBLISH_REPO` set to its full name also writes a Markdown job
   Summary. The aggregation job puts abnormal cases first in the run Summary
   and passed cases in a collapsed appendix. Each case has a screenshot and
   exact report-step link when available. Midscene merges the native Test
-  reports across shards, and GitHub Pages publishes that report. Runs in
-  `rome-os/rome` execute the cases without these report jobs.
+  reports across shards, and GitHub Pages publishes that report when available.
+  An incomplete merge still publishes available shard reports.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.

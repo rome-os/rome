@@ -137,6 +137,11 @@ export class CodexAppServerManager {
     await this.ensureConnection();
   }
 
+  /** The provider Codex turns run on: null for the guardian's own login. */
+  getDefaultProvider(): string | null {
+    return this.defaultProvider;
+  }
+
   /**
    * Replace Codex immediately with a process whose default provider is
    * `provider`. This deliberately has the same effect as an app-server exit:
