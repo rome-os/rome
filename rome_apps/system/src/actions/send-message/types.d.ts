@@ -44,7 +44,8 @@ export type ChatChannel =
   | "wechat"
   | "discord"
   | "webchat"
-  | "feishu";
+  | "feishu"
+  | "agents";
 
 interface SendMessageBase {
   /** Exact Connection that owns the opaque provider conversation. */

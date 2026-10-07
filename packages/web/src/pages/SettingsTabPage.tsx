@@ -1167,11 +1167,11 @@ const TIER_MODEL_MAPPING_FIELDS: Array<{
   placeholder: string;
 }> = [
   { provider: "openai", tier: "large", placeholder: "gpt-6.1-sol" },
-  { provider: "openai", tier: "medium", placeholder: "gpt-5.6-terra" },
+  { provider: "openai", tier: "medium", placeholder: "gpt-6.1-sol" },
   { provider: "openai", tier: "small", placeholder: "gpt-6-luna" },
   { provider: "anthropic", tier: "large", placeholder: "claude-opus-5-5[1m]" },
   { provider: "anthropic", tier: "medium", placeholder: "claude-sonnet-5-5" },
-  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-4-5-20251001" },
+  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-5-5" },
 ];
 
 function normalizeTierModelMappings(value: unknown): TierModelMappings {

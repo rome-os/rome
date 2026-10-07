@@ -1,8 +1,8 @@
 {
-  "id": "cffa4821-4568-4c00-bc70-2f4c8df6d661",
-  "prevId": "b500ea7b-2703-463f-82cd-809fd42eba57",
   "version": "6",
   "dialect": "sqlite",
+  "id": "3c14ec91-e301-44e1-9b0e-c9ffb9cf3663",
+  "prevId": "b500ea7b-2703-463f-82cd-809fd42eba57",
   "tables": {
     "action_executions": {
       "name": "action_executions",
@@ -328,15 +328,15 @@
         "channel_mappings_person_id_persons_id_fk": {
           "name": "channel_mappings_person_id_persons_id_fk",
           "tableFrom": "channel_mappings",
+          "tableTo": "persons",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "persons",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1812,8 +1812,8 @@
             "session_id",
             "created_at"
           ],
-          "where": "\"rome_agent_messages\".\"role\" = 'trace'",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_agent_messages\".\"role\" = 'trace'"
         },
         "idx_rome_agent_messages_platform_message": {
           "name": "idx_rome_agent_messages_platform_message",
@@ -1821,8 +1821,8 @@
             "session_id",
             "platform_message_id"
           ],
-          "where": "\"rome_agent_messages\".\"platform_message_id\" IS NOT NULL",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_agent_messages\".\"platform_message_id\" IS NOT NULL"
         }
       },
       "foreignKeys": {},
@@ -1875,16 +1875,16 @@
           "columns": [
             "message_id"
           ],
-          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') IN ('result', 'error')",
-          "isUnique": false
+          "isUnique": false,
+          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') IN ('result', 'error')"
         },
         "idx_rome_agent_trace_blocks_turn_end_message": {
           "name": "idx_rome_agent_trace_blocks_turn_end_message",
           "columns": [
             "message_id"
           ],
-          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') = 'turn_end'",
-          "isUnique": false
+          "isUnique": false,
+          "where": "json_extract(\"rome_agent_trace_blocks\".\"content\", '$.type') = 'turn_end'"
         }
       },
       "foreignKeys": {},
@@ -2145,8 +2145,8 @@
             "source_channel",
             "source_thread_id"
           ],
-          "where": "\"rome_sessions\".\"type\" = 'channel' AND \"rome_sessions\".\"source_channel\" IS NOT NULL AND \"rome_sessions\".\"source_thread_id\" IS NOT NULL",
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"rome_sessions\".\"type\" = 'channel' AND \"rome_sessions\".\"source_channel\" IS NOT NULL AND \"rome_sessions\".\"source_thread_id\" IS NOT NULL"
         },
         "idx_rome_sessions_parent_session": {
           "name": "idx_rome_sessions_parent_session",
@@ -2199,6 +2199,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "fired_by": {
+          "name": "fired_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "fired_at": {
           "name": "fired_at",
           "type": "integer",
@@ -2242,21 +2249,28 @@
             "status"
           ],
           "isUnique": false
+        },
+        "idx_routine_runs_execution_id": {
+          "name": "idx_routine_runs_execution_id",
+          "columns": [
+            "execution_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
         "routine_runs_routine_id_routines_id_fk": {
           "name": "routine_runs_routine_id_routines_id_fk",
           "tableFrom": "routine_runs",
+          "tableTo": "routines",
           "columnsFrom": [
             "routine_id"
           ],
-          "tableTo": "routines",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2498,15 +2512,15 @@
         "session_turn_checkpoints_session_id_sessions_id_fk": {
           "name": "session_turn_checkpoints_session_id_sessions_id_fk",
           "tableFrom": "session_turn_checkpoints",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3127,15 +3141,15 @@
         "webchat_turn_feedback_session_id_rome_sessions_id_fk": {
           "name": "webchat_turn_feedback_session_id_rome_sessions_id_fk",
           "tableFrom": "webchat_turn_feedback",
+          "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "rome_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -3180,15 +3194,15 @@
         "webchat_workspace_layouts_session_id_rome_sessions_id_fk": {
           "name": "webchat_workspace_layouts_session_id_rome_sessions_id_fk",
           "tableFrom": "webchat_workspace_layouts",
+          "tableTo": "rome_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "rome_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3329,9 +3343,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

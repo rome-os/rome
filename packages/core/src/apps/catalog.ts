@@ -57,6 +57,7 @@ export class AppCatalog {
   private readonly markBroken: MarkBrokenFn;
   private readonly internalMap = new Map<AppId, AppView | ResolvedApp>();
   private readonly subscribers: RegisteredSubscriber[] = [];
+  private readonly settledListeners: RegisteredSubscriber[] = [];
   private readonly refreshMutex = new Mutex();
 
   constructor(opts: AppCatalogOptions) {
@@ -111,6 +112,30 @@ export class AppCatalog {
       const idx = this.subscribers.indexOf(entry);
       if (idx >= 0) this.subscribers.splice(idx, 1);
     };
+  }
+
+  /**
+   * Registers a listener that runs once every subscriber has handled an event,
+   * so it observes the runtime after the whole change has been absorbed. It
+   * runs inside the serialized refresh, like a subscriber, so it must not await
+   * another refresh. A throw is logged and does not reach the other listeners.
+   */
+  onSettled(handler: SubscriberHandler): Unsubscribe {
+    const entry: RegisteredSubscriber = { name: handler.name || "anonymous", handler };
+    this.settledListeners.push(entry);
+    return () => {
+      const idx = this.settledListeners.indexOf(entry);
+      if (idx >= 0) this.settledListeners.splice(idx, 1);
+    };
+  }
+
+  /**
+   * Runs `fn` between refreshes: after any refresh in progress has finished,
+   * settled listeners included, and before the next one starts. `fn` must not
+   * await a refresh.
+   */
+  whenIdle<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.refreshMutex.runExclusive(fn);
   }
 
   /**
@@ -189,7 +214,7 @@ export class AppCatalog {
   }
 
   private async fireEvent(event: CatalogEvent): Promise<void> {
-    for (const subscriber of this.subscribers) {
+    for (const subscriber of [...this.subscribers, ...this.settledListeners]) {
       try {
         await subscriber.handler(event);
       } catch (err) {

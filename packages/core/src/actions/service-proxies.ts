@@ -21,6 +21,7 @@ import {
   WorkerRpcSendError,
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -154,23 +155,30 @@ export class AppManagerProxy implements AppLifecycle {
     });
   }
 
+  // install, uninstall, and setEnabled carry the caller's hook chain, so the
+  // app-started hooks they cause count against the chain's recursion budget.
   async install(params: { source: unknown; enabled?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.install", params, {
+    return await getWorkerRpc().call("apps.install", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async uninstall(params: { appId: string; purge?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.uninstall", params, {
+    return await getWorkerRpc().call("apps.uninstall", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async setEnabled(params: { appId: string; enabled: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.setEnabled", params, {
+    return await getWorkerRpc().call("apps.setEnabled", withHookChain(params), {
       timeoutMs: SHORT_RPC_TIMEOUT_MS,
     });
   }
+}
+
+function withHookChain<T extends object>(params: T): T {
+  const hookInvocationContext = getCurrentHookInvocationContext();
+  return hookInvocationContext ? { ...params, hookInvocationContext } : params;
 }
 
 /** Worker-side stand-in for the main-process Rome App Store read surface. */

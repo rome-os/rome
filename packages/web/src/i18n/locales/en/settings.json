@@ -162,6 +162,15 @@
           }
         }
       },
+      "agents": {
+        "bot": {
+          "title": "Messages with your other agents",
+          "bullets": {
+            "reply": "Your dots message your agent through Rome Cloud",
+            "start": "Your agent messages a dot when something needs its attention"
+          }
+        }
+      },
       "webchat": {
         "bot": {
           "title": "Dashboard chat",

@@ -37,7 +37,7 @@ function setup(credential: string | null = "cred-a") {
         credentials.push(queuedUnder);
       },
     },
-    attribution: { forTurn: async () => ({ kind: "chat", appId: null }) },
+    attribution: { forTurn: async () => ({ kind: "chat", appId: null, trigger: "user" }) },
     credential: () => credential,
   });
   return { recorder, queued, credentials };
@@ -54,6 +54,7 @@ describe("UsageRecorder", () => {
         eventId: "turn-1",
         kind: "chat",
         appId: null,
+        trigger: "user",
         status: "completed",
         provider: "openai",
         model: "gpt-6-sol",
@@ -113,10 +114,41 @@ describe("UsageRecorder", () => {
           throw new Error("disk full");
         },
       },
-      attribution: { forTurn: async () => ({ kind: "chat", appId: null }) },
+      attribution: { forTurn: async () => ({ kind: "chat", appId: null, trigger: "user" }) },
       credential: () => "cred-a",
     });
     expect(() => recorder.recordTurn(facts())).not.toThrow();
+    expect(() => recorder.recordLogin("password")).not.toThrow();
     await recorder.flush();
+  });
+
+  it("queues one login event per sign-in, carrying the method as its kind", async () => {
+    const { recorder, queued, credentials } = setup();
+    recorder.recordLogin("rome_cloud");
+    recorder.recordLogin("password");
+    await recorder.flush();
+    expect(queued).toEqual([
+      {
+        type: "login",
+        eventId: expect.any(String),
+        kind: "rome_cloud",
+        occurredAt: expect.any(String),
+      },
+      {
+        type: "login",
+        eventId: expect.any(String),
+        kind: "password",
+        occurredAt: expect.any(String),
+      },
+    ]);
+    expect(queued[0].eventId).not.toBe(queued[1].eventId);
+    expect(credentials).toEqual(["cred-a", "cred-a"]);
+  });
+
+  it("records no login while the instance is not signed in", async () => {
+    const { recorder, queued } = setup(null);
+    recorder.recordLogin("password");
+    await recorder.flush();
+    expect(queued).toEqual([]);
   });
 });

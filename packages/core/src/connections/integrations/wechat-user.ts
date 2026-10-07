@@ -22,18 +22,15 @@
 // degradation, not a revoked login.
 
 import { z } from "zod";
-import { rm } from "node:fs/promises";
 import type { ConversationDescriptor, ConversationId } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
   WechatUserRuntime,
-  WechatUserStorePending,
   type WechatUserConversation,
   type WechatUserStatus,
 } from "../../channels/wechat-user.js";
-import { recoverWechatPassphrase, stageCaptureDriver } from "../../channels/wechat-user-keys.js";
 import { WECHAT_USER_CHANNEL } from "../../channels/wechat-user-messages.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
@@ -220,14 +217,6 @@ function keysView(remembered: boolean, desktop: string): SetupView {
 
 export interface WechatUserSetupDeps {
   runtime: WechatUserRuntime;
-  /** Recover the store passphrase. Injectable for tests. It launches the client
-   *  under gdb in this container and blocks until a login derives the key, so the
-   *  caller shows the scan walkthrough alongside it rather than waiting for a
-   *  login first. */
-  /** Launches the client on `display` and returns its store passphrase. */
-  recoverPassphrase: (signal: AbortSignal, display: string) => Promise<string>;
-  /** Stage the capture driver inside this container before recovery runs. */
-  stageDriver: () => Promise<void>;
   pollIntervalMs?: number;
   loginTimeoutMs?: number;
   /** How often to re-screenshot the login window into the scan view. */
@@ -236,15 +225,13 @@ export interface WechatUserSetupDeps {
 
 /**
  * Build the WeChat user-account conferral setup. A linear coroutine:
- *   1. `ensure-runtime` — install the client and reader if absent, bring up the
- *      session the client draws into, and stage the capture driver (an
- *      already-ready account confers immediately). The client is not started
- *      here; recovery launches it under gdb to catch the first login's key.
- *   2. `capture-login` — recover the store passphrase via the hosting VM root
- *      script, which launches the client so the QR appears; stream that QR into
- *      the view while the guardian signs in, then derive and verify the
- *      per-database keys in the container and wait until the store reads
- *      unlocked,
+ *   1. `ensure-runtime` — install the client if absent and bring up the
+ *      session the client draws into (an already-ready account confers
+ *      immediately). The client is not started here; the capture launches it
+ *      under gdb to catch the first login's key.
+ *   2. `capture-login` — capture the store keys with the bridge, which launches
+ *      the client so the QR appears; stream that QR into the view while the
+ *      guardian signs in, then wait until the store reads unlocked,
  *   3. return the terminal conferral: custody marker + account identity.
  * Nothing durable exists before the terminal return. Cancelling writes nothing;
  * the only state left behind is the client's own session, which the guardian
@@ -300,12 +287,10 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           interact.show(installingView());
           await runtime.install(signal);
         }
-        await runtime.installReader(signal);
-        // The client is deliberately not started here — recovery launches it under
-        // gdb to own it from birth and catch the first login. Only the session it
-        // draws into and the capture driver are readied.
+        // The client is deliberately not started here — the capture launches it
+        // under gdb to own it from birth and catch the first login. Only the
+        // session it draws into is readied.
         await runtime.prepareSession();
-        await deps.stageDriver();
         return null;
       });
 
@@ -315,21 +300,21 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
           // Held already when the first step took the capture path; taken
           // here when this step runs on its own.
           lease.release ??= runtime.holdCapture();
-          // Recovery launches the client, so the login window appears once this
-          // begins. While recovery waits for the guardian to sign in, poll that
-          // window and stream it into the view as the scannable QR, so the
-          // guardian scans inside Rome rather than opening the desktop. The
-          // passphrase comes back the moment that first login derives the key.
+          // The capture launches the client, so the login window appears once
+          // this begins. While the capture waits for the guardian to sign in,
+          // poll that window and stream it into the view as the scannable QR, so
+          // the guardian scans inside Rome rather than opening the desktop. The
+          // capture ends once that first login unlocks the store.
           // A cached account store makes the client show a sign-in button, which
           // needs the desktop, so that case skips the QR stream.
           const remembered = (await runtime.status()).loggedIn;
-          // Recovery replaces any running client, so it starts on WeChat's own
-          // desktop. Recovery, the QR capture and the links all use the display
-          // this returns, never a legacy client's that a status() reports.
+          // The capture replaces any running client, so it starts on WeChat's
+          // own desktop. The capture, the QR stream and the links all use the
+          // display this returns, never a legacy client's that a status() reports.
           const display = await runtime.ensureDesktop(signal);
           const desktopPath = runtime.desktopPathFor(display);
           interact.show(remembered ? rememberedView(desktopPath) : scanView(desktopPath));
-          const recovery = deps.recoverPassphrase(signal, display);
+          const capture = runtime.captureKeys(display, signal);
           const qr = { stop: remembered };
           const qrLoop = (async () => {
             let last: string | undefined;
@@ -343,23 +328,10 @@ export function makeWechatUserSetup(deps: WechatUserSetupDeps): SetupFn {
             }
           })();
           try {
-            const passphrase = await recovery;
+            await capture;
             qr.stop = true;
             await qrLoop;
             interact.show(keysView(remembered, desktopPath));
-            await waitFor(signal, (s) => s.loggedIn);
-            // Derive and verify the per-database keys from the captured passphrase.
-            const deadline = Date.now() + loginTimeoutMs;
-            for (;;) {
-              try {
-                await runtime.readerCommand(["derive", "--passphrase", passphrase], signal);
-                break;
-              } catch (error) {
-                if (!(error instanceof WechatUserStorePending) || Date.now() >= deadline)
-                  throw error;
-                await abortableDelay(pollIntervalMs, signal);
-              }
-            }
             return waitFor(signal, (s) => s.running && s.state === "ready");
           } catch (error) {
             qr.stop = true;
@@ -425,23 +397,9 @@ export function createWechatUserDescriptor(
   const runtime = deps.runtime ?? new WechatUserRuntime();
   const reader = new WechatUserReader(runtime);
 
-  const recoverPassphrase = async (signal: AbortSignal, display: string): Promise<string> => {
-    const driverDir = await stageCaptureDriver(runtime.runtimeDir);
-    try {
-      return await recoverWechatPassphrase(
-        { driverDir, home: runtime.home, runtimeDir: runtime.runtimeDir, display },
-        signal,
-      );
-    } finally {
-      await rm(driverDir, { recursive: true, force: true });
-    }
-  };
-
   const sessionScheme = wechatUserSessionScheme(reader);
   sessionScheme.setup = makeWechatUserSetup({
     runtime,
-    recoverPassphrase,
-    stageDriver: async () => {},
     ...(deps.pollIntervalMs !== undefined ? { pollIntervalMs: deps.pollIntervalMs } : {}),
   });
 

@@ -316,6 +316,7 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     issueGuardianSession(c, userId);
+    deps.loginUsage.recordLogin("password");
     return c.json({ success: true });
   });
 
@@ -586,6 +587,7 @@ export function authRoutes(deps: ApiDeps): Hono {
     }
 
     issueGuardianSession(c, claims.userId);
+    deps.loginUsage.recordLogin("handoff");
 
     return c.redirect(createTailnetRedirectUrl(claims.targetHost, nextPath).toString(), 303);
   });

@@ -2,9 +2,10 @@ name: send_message
 type: system
 description: >-
   Send a message through any registered Rome channel (telegram,
-  whatsapp, discord, wechat, webchat, feishu, and email). Prefer this
-  over any external Gmail tool when sending or replying to mail
-  as Rome.
+  whatsapp, discord, wechat, webchat, feishu, email, and agents). Use
+  "agents" to message another agent in the Rome Cloud account, such as
+  a dot, with its endpoint name as the threadId. Prefer this over any
+  external Gmail tool when sending or replying to mail as Rome.
 complexity: simple
 speed: fast
 reliability: high

@@ -33,6 +33,7 @@ import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
 import { settings } from "../../db/schema.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
@@ -277,7 +278,10 @@ async function loadArtifactDetailsByApp(
 }
 
 async function loadPublicAccessConfig(deps: ApiDeps): Promise<PublicAccessConfig> {
-  const rows = await deps.db.select().from(settings).where(eq(settings.key, "publicAccess"));
+  const rows = await deps.db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
   return rows.length > 0 && rows[0].value
     ? normalizePublicAccessConfig(rows[0].value)
     : DEFAULT_PUBLIC_ACCESS_CONFIG;

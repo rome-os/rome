@@ -1,5 +1,6 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission } from "./channels/pairing.js";
+import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -17,6 +18,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
@@ -25,6 +27,7 @@ import { UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
+import type { SessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -65,6 +68,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
+import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService } from "./channels/channels-service.js";
@@ -107,6 +111,7 @@ import { createModelResolver } from "./core/model-resolver.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
+import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn } from "./core/chat-stop.js";
@@ -184,6 +189,7 @@ import {
 } from "./apps/artifact-id.js";
 import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
+import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import {
   ConversationSettingsRepository,
@@ -315,14 +321,25 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  const pairingAdmission = createPairingAdmission({
+    approvalsRepo,
+    personMappingRepo,
+    talkGrants: (service) =>
+      connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+  });
+  const linkAgentToGuardian = createAgentsGuardianLink({
+    personMappingRepo,
+    settingsRepo,
+    channel: AGENTS_SERVICE,
+  });
   const talkRouter = createTalkRouter(
     connectionRegistry,
-    createPairingAdmission({
-      approvalsRepo,
-      personMappingRepo,
-      talkGrants: (service) =>
-        connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
-    }),
+    async (connectionId, service, message, router) => {
+      // Before the inbox resolves the sender, so the first message already
+      // reads as the guardian's.
+      if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
+      return pairingAdmission(connectionId, service, message, router);
+    },
   );
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the service
@@ -583,6 +600,9 @@ async function main() {
   const turnMiddlewareChain = createTurnMiddlewareChain({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
+  const appStartedDispatcher = createAppStartedDispatcher({
+    appRuntimeServices: lifecycleAppRuntimeServices,
+  });
 
   // Retries failed actions once after 30s.
   const routineEngine = new RoutineEngine(
@@ -673,8 +693,21 @@ async function main() {
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
-      getExecutionInitiator: async (id) =>
-        (await actionExecutionsRepo.findById(id))?.initiator ?? null,
+      getExecution: async (id) => {
+        const row = await actionExecutionsRepo.findById(id);
+        return row
+          ? {
+              initiator: row.initiator,
+              actor: (row.actor ?? null) as SessionActor | null,
+              rootExecutionId: row.rootExecutionId,
+            }
+          : null;
+      },
+      // A retried fire runs under a new root with no routine run, so it falls
+      // back to the routine's trigger.
+      getRoutineFiredBy: async ({ rootExecutionId, routineName }) =>
+        (await routineRunsRepo.findFiredBy(rootExecutionId)) ??
+        (await routinesRepo.findTriggerTypeByName(routineName)),
     },
     createUsageAppDirectory({ agentLoader, actionRegistry, appCatalog }),
   );
@@ -984,6 +1017,21 @@ async function main() {
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 
+  // Loads now so load failures join this boot's runtime status. Calls wait
+  // for `appStartedDispatcher.open()` below. An app-keys change does not
+  // reload it: the hook runs once per app start, not once per environment.
+  await registerCatalogHookLoad({
+    sourcePrefix: "app-started",
+    warnMessage: "some app-started hooks failed to initialize",
+    load: () => appStartedDispatcher.reconcile(appCatalog),
+    failureSource: (failure) => `app-started:${failure.path}`,
+  });
+  // After every subscriber, wherever it registers: a hook that runs an action
+  // must reach a worker forked after `actionWorkerWarmPoolInvalidator`.
+  appCatalog.onSettled(function appStartedFlush() {
+    appStartedDispatcher.flush(appCatalog);
+  });
+
   const messageHandlerRegistered = actionRegistry.has("message_handler");
   if (!messageHandlerRegistered) {
     const ownerId =
@@ -1055,6 +1103,13 @@ async function main() {
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: { registry: connectionRegistry, router: talkRouter },
+    connectionAccounts: {
+      [AGENTS_SERVICE]: agentsAccounts({
+        client: createRomeCloudAgentsClient(),
+        isConnected: () =>
+          connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
+      }),
+    },
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
@@ -1352,6 +1407,7 @@ async function main() {
       favorService,
       systemUpgradeService,
       isCloudAuthEnabled,
+      loginUsage: usageRecorder,
       connectionRegistry,
       setupManager,
     };
@@ -1460,6 +1516,11 @@ async function main() {
     ([name, record]) =>
       `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
   );
+  // Every boot step above is done, so app-started hooks can rely on actions,
+  // routines, and agents. The API already serves requests, so an install may
+  // be mid-refresh: open between refreshes, never inside one.
+  await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
+
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],

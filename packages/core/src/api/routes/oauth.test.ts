@@ -93,8 +93,14 @@ function makeRegistry(): ConnectionRegistry {
   return registry;
 }
 
+const logins: string[] = [];
+
 function makeDeps(registry?: ConnectionRegistry): ApiDeps {
-  return { db: {}, connectionRegistry: registry } as unknown as ApiDeps;
+  return {
+    db: {},
+    connectionRegistry: registry,
+    loginUsage: { recordLogin: (method: string) => logins.push(method) },
+  } as unknown as ApiDeps;
 }
 
 async function postRedeem(deps: ApiDeps) {
@@ -109,6 +115,7 @@ async function postRedeem(deps: ApiDeps) {
 describe("POST /oauth/redeem — ledger-only provider write path", () => {
   beforeEach(() => {
     rs.clearAllMocks();
+    logins.length = 0;
   });
   afterEach(() => {
     while (openDbs.length) openDbs.pop()?.();
@@ -146,6 +153,8 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
     // Only github was minted.
     expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("google")).toHaveLength(0);
+    // A redeem with no session yet is a sign-in.
+    expect(logins).toEqual(["oauth"]);
   });
 
   it("slack: imports the two-token bundle into the workspace grant", async () => {

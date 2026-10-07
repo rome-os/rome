@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  AppManagerProxy,
   BackendTurnRunnerProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
 } from "./service-proxies.js";
+import {
+  runWithHookInvocationContext,
+  runWithoutHookInvocationContext,
+  type HookInvocationContext,
+} from "../core/hook-recursion.js";
+import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { AppLifecycleService } from "../apps/lifecycle-service.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import {
   setWorkerRpcInProcessDispatcher,
   WorkerRpcDisconnectError,
@@ -257,5 +266,77 @@ describe("NotifyServiceProxy", () => {
     await expect(new NotifyServiceProxy().send()).rejects.toThrow(
       /not running in a Node\.js child process/,
     );
+  });
+});
+
+describe("AppManagerProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  const chain: HookInvocationContext = {
+    rootInvocationId: "root-1",
+    depth: 1,
+    chain: [{ hookType: "app", appId: "looper", hookName: "app-started" }],
+  };
+
+  it("sends the caller's hook chain with every lifecycle call", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return {};
+    });
+    const proxy = new AppManagerProxy();
+
+    await runWithHookInvocationContext(chain, async () => {
+      await proxy.install({ source: { mode: "bundle", path: "/tmp/app" } });
+      await proxy.uninstall({ appId: "looper" });
+      await proxy.setEnabled({ appId: "looper", enabled: true });
+    });
+    await proxy.setEnabled({ appId: "looper", enabled: false });
+
+    expect(calls).toEqual([
+      {
+        method: "apps.install",
+        params: { source: { mode: "bundle", path: "/tmp/app" }, hookInvocationContext: chain },
+      },
+      { method: "apps.uninstall", params: { appId: "looper", hookInvocationContext: chain } },
+      {
+        method: "apps.setEnabled",
+        params: { appId: "looper", enabled: true, hookInvocationContext: chain },
+      },
+      { method: "apps.setEnabled", params: { appId: "looper", enabled: false } },
+    ]);
+  });
+
+  it("delivers the chain to the app manager across the worker hop", async () => {
+    process.send = undefined;
+    let seen: HookInvocationContext | undefined;
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const server = new WorkerRpcServer({
+      appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
+    } as unknown as WorkerRpcServices);
+    // A real worker hop serializes the params and loses the caller's async
+    // context. Model both, so only the params can carry the chain.
+    setWorkerRpcInProcessDispatcher((method, params) =>
+      runWithoutHookInvocationContext(() =>
+        server.dispatchInProcess(method, JSON.parse(JSON.stringify(params))),
+      ),
+    );
+
+    await runWithHookInvocationContext(chain, () =>
+      new AppManagerProxy().setEnabled({ appId: "looper", enabled: true }),
+    );
+
+    expect(appManager.setEnabled).toHaveBeenCalledWith("looper", true);
+    expect(seen).toEqual(chain);
   });
 });

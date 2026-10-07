@@ -75,7 +75,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
 
   return (
     <div
-      className="my-3 rounded-12 border border-border bg-surface-muted px-4 py-3 text-foreground"
+      className="@container my-3 rounded-12 border border-border bg-surface-muted px-4 py-3 text-foreground"
       aria-busy={options?.loading || undefined}
     >
       <div className="flex items-center justify-between gap-4">
@@ -117,7 +117,9 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
             {formatTraceNumber(aggregateTokens)}
           </span>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-5 gap-y-2">
+        {/* Two label-and-count pairs need about 18rem side by side, more than
+            a phone-width trace drawer leaves, so narrow cards stack them. */}
+        <div className="mt-2 grid grid-cols-1 gap-x-5 gap-y-2 @min-[18rem]:grid-cols-2">
           <UsageStat label={t("usage.labels.cacheRead")} value={accounting.usage.cacheReadTokens} />
           <UsageStat
             label={t("usage.labels.cacheWrite")}
@@ -173,7 +175,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
       ) : null}
 
       {context ? (
-        <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border pt-3">
           <span className="text-aux text-muted-foreground">
             {t(
               accounting.includedSubagentCount
@@ -181,7 +183,9 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
                 : "usage.labels.context",
             )}
           </span>
-          <span className="flex items-center gap-2">
+          {/* The count never breaks mid-number, so on a narrow card the ring
+              and count wrap below the label instead. */}
+          <span className="ml-auto flex items-center gap-2">
             {contextPercent !== null ? (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -227,7 +231,7 @@ export function UsageSummaryView({ accounting }: { accounting: TraceAccounting }
                 </TooltipContent>
               </Tooltip>
             ) : null}
-            <span className="font-mono text-aux text-foreground tabular-nums">
+            <span className="whitespace-nowrap font-mono text-aux text-foreground tabular-nums">
               {context.windowTokens
                 ? `${formatTraceNumber(context.usedTokens)} / ${formatTraceNumber(context.windowTokens)}`
                 : formatTraceNumber(context.usedTokens)}

@@ -1,9 +1,9 @@
 // Contract check against a REAL signed-in WeChat client in this container.
 //
 // The unit tests prove Rome reads the shape it expects; only this proves the
-// reader helper answers it. The helper reads a vendor's SQLCipher schema
-// through a pinned CLI, so the parse is the part most likely to rot — a WeChat
-// update can change a chat address or a message kind without touching this repo.
+// bridge answers it. wechat-bridge reads a vendor's SQLCipher schema, pinned to
+// one version, so the parse is the part most likely to rot — a WeChat update
+// can change a chat address or a message kind without touching this repo.
 //
 // Skipped unless `WECHAT_USER_TEST=1` and a client is installed, signed in, and
 // unlocked in this container:

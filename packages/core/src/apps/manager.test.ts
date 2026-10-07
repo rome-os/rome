@@ -588,6 +588,27 @@ sideEffects: read-only
     expect(finalA.current?.state).toBe("installed");
   });
 
+  it("runs settled listeners after every subscriber, even ones registered later", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    const order: string[] = [];
+    harness.catalog.onSettled(function settled(event) {
+      order.push(`settled:${event.current?.state}`);
+    });
+    harness.catalog.subscribe(async function slowSubscriber(event) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(`subscriber:${event.current?.state}`);
+    });
+
+    await harness.appManager.install({ source });
+
+    expect(order).toEqual([
+      "subscriber:installing",
+      "settled:installing",
+      "subscriber:installed",
+      "settled:installed",
+    ]);
+  });
+
   it("does not resolve install until the active bundle reaches catalog subscribers", async () => {
     const source: SpecSource = { mode: "bundle", path: packedRoot };
     let releaseInstalledSubscriber!: () => void;

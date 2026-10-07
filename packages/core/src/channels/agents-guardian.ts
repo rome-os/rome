@@ -1,0 +1,75 @@
+/**
+ * Links the guardian's own agents to the guardian. An endpoint in this Rome's
+ * Rome Cloud account belongs to the account holder: Cloud admits a dot only
+ * after the person confirms its pairing check number, and it is Cloud, not the
+ * sender, that marks a message `sameAccount`. So the first message from such an
+ * endpoint links its `agents` account to the guardian before the inbox
+ * resolves the sender, and the dot speaks as the guardian from that message on.
+ *
+ * Only an account nobody has decided about is linked. A link to anyone, a
+ * dismissal, or an earlier automatic link the guardian has since removed all
+ * stand. Unlinking leaves no row behind, so Rome records each endpoint it
+ * linked here and never links it again.
+ */
+
+import type { InboundMessage } from "../connections/types.js";
+import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("agents-guardian");
+
+/** The settings key holding every endpoint this admission has linked. */
+export const AGENTS_GUARDIAN_LINKED_KEY = "agentsGuardianLinkedEndpoints";
+
+function isSameAccount(message: InboundMessage): boolean {
+  const from = (message.raw as Partial<AgentMessageEnvelope> | undefined)?.from;
+  return from?.sameAccount === true && from.endpoint === message.senderId;
+}
+
+export function createAgentsGuardianLink(deps: {
+  personMappingRepo: Pick<
+    PersonMappingRepository,
+    "findByChannelUser" | "findByBondLevel" | "addChannelMapping"
+  >;
+  settingsRepo: Pick<SettingsRepository, "get" | "set">;
+  channel: string;
+}) {
+  // The router admits different senders at once, and the record of linked
+  // endpoints is one setting, so its read and write run one sender at a time.
+  let queue: Promise<unknown> = Promise.resolve();
+
+  async function link(message: InboundMessage): Promise<void> {
+    const endpoint = message.senderId;
+    if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
+    const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
+    if (linked.includes(endpoint)) return;
+    const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
+    if (!guardian) return;
+    // The record goes first. If the link then fails, the endpoint stays
+    // unlinked, which is the guardian's call to change. The other order could
+    // leave a link that the guardian's unlink does not keep removed.
+    await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, endpoint]);
+    await deps.personMappingRepo.addChannelMapping(
+      guardian.id,
+      deps.channel,
+      endpoint,
+      message.senderDisplayName,
+    );
+    log.info("linked a same-account agent to the guardian", { endpoint });
+  }
+
+  /** Links the sender when it qualifies. Never refuses the message. */
+  return (message: InboundMessage): Promise<void> => {
+    if (!isSameAccount(message)) return Promise.resolve();
+    const run = queue.then(() => link(message));
+    queue = run.catch((err: unknown) => {
+      log.warn("Could not link a same-account agent", {
+        endpoint: message.senderId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return queue as Promise<void>;
+  };
+}

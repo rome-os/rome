@@ -1438,7 +1438,7 @@ describe("AnthropicProvider", () => {
     it.each([
       ["low", "low"],
       ["high", "high"],
-      ["xhigh", "max"],
+      ["xhigh", "xhigh"],
     ] as const)("maps %s reasoning effort to Claude effort %s", async (configured, expected) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
 

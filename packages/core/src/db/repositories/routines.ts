@@ -57,6 +57,17 @@ export class RoutinesRepository {
     return rows[0] ?? null;
   }
 
+  /** The trigger type shared by every routine named `name`. Names are not
+   * unique, so this is null when the routines disagree or none has the name. */
+  async findTriggerTypeByName(name: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ trigger: routines.trigger })
+      .from(routines)
+      .where(eq(routines.name, name));
+    const types = new Set(rows.map((row) => (row.trigger as Trigger).type));
+    return types.size === 1 ? [...types][0] : null;
+  }
+
   /** Look up a routine by its caller-assigned `key`. Used by create_routine to
    * reject a duplicate key before insert (the column's UNIQUE constraint is the
    * authoritative backstop). Returns null when the key is unused. */

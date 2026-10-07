@@ -1,3 +1,4 @@
+import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
 import type { ActionLoader } from "../actions/loader.js";
@@ -183,6 +184,8 @@ export interface ApiDeps {
    * (`GET /api/bootstrap` behind `/login`) and the cloud-login start/callback —
    * so flipping the gate takes effect without restarting the instance. */
   isCloudAuthEnabled: () => Promise<boolean>;
+  /** Reports each guardian sign-in to Rome Cloud as a usage event. */
+  loginUsage: LoginUsageSink;
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;
