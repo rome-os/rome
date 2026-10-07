@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, max, sql } from "drizzle-orm";
 import type { AppDbContext, DrizzleDb } from "@rome-os/app-runtime";
 import type { FileChange } from "../../lib/changes.js";
 import { STALE_RUN_MS } from "../../lib/run-view.js";
@@ -18,6 +18,7 @@ export interface Run {
   summary: string | null;
   error: string | null;
   startedAt: Date;
+  heartbeatAt: Date | null;
   finishedAt: Date | null;
 }
 
@@ -40,6 +41,7 @@ export class RunsRepository {
 
   start(input: RunStart): string {
     const id = crypto.randomUUID();
+    const now = new Date();
     this.db
       .insert(this.tables.runs)
       .values({
@@ -49,7 +51,8 @@ export class RunsRepository {
         windowHours: input.windowHours ?? null,
         reviewedSessionId: input.reviewedSessionId ?? null,
         reviewedSessionName: input.reviewedSessionName ?? null,
-        startedAt: new Date(),
+        startedAt: now,
+        heartbeatAt: now,
       })
       .run();
     return id;
@@ -58,7 +61,7 @@ export class RunsRepository {
   /**
    * Starts a dream unless one is already running, as one statement so two
    * entry points (the page and the nightly routine) cannot both win. A run
-   * left active past the stale window does not block. The page reserves it
+   * whose heartbeat lapsed does not block; a long one that is still alive does. The page reserves it
    * `queued` for the action it dispatches to `claim`; an action that runs
    * straight away reserves it `running`.
    */
@@ -70,12 +73,12 @@ export class RunsRepository {
     const id = crypto.randomUUID();
     const now = Date.now();
     const result = this.db.run(sql`
-      INSERT INTO ${runs} (id, kind, status, window_hours, started_at)
-      SELECT ${id}, 'dream', ${status}, ${windowHours}, ${now}
+      INSERT INTO ${runs} (id, kind, status, window_hours, started_at, heartbeat_at)
+      SELECT ${id}, 'dream', ${status}, ${windowHours}, ${now}, ${now}
       WHERE NOT EXISTS (
         SELECT 1 FROM ${runs}
         WHERE kind = 'dream' AND status IN ('queued', 'running')
-          AND started_at > ${now - STALE_RUN_MS}
+          AND heartbeat_at > ${now - STALE_RUN_MS}
       )
     `) as { changes: number };
     if (result.changes > 0) return { id, reserved: true };
@@ -84,15 +87,37 @@ export class RunsRepository {
     return { id: running.id, reserved: false };
   }
 
-  /** Moves a queued dream to running. Only one caller can win it. */
+  /**
+   * Moves a queued dream to running. Only one caller can win it, and a
+   * reservation that expired cannot be won: a newer dream may already own
+   * the memory by then.
+   */
   claim(id: string): boolean {
     const { runs } = this.tables;
+    const now = Date.now();
     const result = this.db
       .update(runs)
-      .set({ status: "running" })
-      .where(and(eq(runs.id, id), eq(runs.kind, "dream"), eq(runs.status, "queued")))
+      .set({ status: "running", heartbeatAt: new Date(now) })
+      .where(
+        and(
+          eq(runs.id, id),
+          eq(runs.kind, "dream"),
+          eq(runs.status, "queued"),
+          gt(runs.heartbeatAt, new Date(now - STALE_RUN_MS)),
+        ),
+      )
       .run() as { changes: number };
     return result.changes > 0;
+  }
+
+  /** Marks the run's owner as alive. A finished run is left alone. */
+  heartbeat(id: string): void {
+    const { runs } = this.tables;
+    this.db
+      .update(runs)
+      .set({ heartbeatAt: new Date() })
+      .where(and(eq(runs.id, id), inArray(runs.status, ["queued", "running"])))
+      .run();
   }
 
   finish(

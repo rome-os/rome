@@ -24,6 +24,9 @@ export function createAppDbSchema(tablePrefix: string = "dream") {
       summary: text("summary"),
       error: text("error"),
       startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+      /** Refreshed while the owning action is alive. An active run whose
+       *  heartbeat lapses is treated as abandoned. */
+      heartbeatAt: integer("heartbeat_at", { mode: "timestamp_ms" }),
       finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
     },
     (t) => [index(`${tablePrefix}__runs_started_idx`).on(t.startedAt)],

@@ -12,12 +12,16 @@ import {
  * so the page and the API cannot drift apart.
  */
 
+/** How often an action refreshes its run's heartbeat while it works. */
+export const HEARTBEAT_MS = 60 * 1000;
+
 /**
- * A run still marked running this long after it started is treated as
- * interrupted: the process that owned it restarted or crashed before it could
- * record an outcome. A dream over a day of history finishes well inside this.
+ * An active run whose heartbeat is older than this has lost its owner: the
+ * process restarted or crashed before it could record an outcome. It shows as
+ * interrupted and stops blocking the next dream. A run's age alone never
+ * expires it, because nothing can stop an agent that is still working.
  */
-export const STALE_RUN_MS = 60 * 60 * 1000;
+export const STALE_RUN_MS = 10 * HEARTBEAT_MS;
 
 /** A queued run shows as running: the page started it and the agent is on its way. */
 type RunViewStatus = Exclude<RunStatus, "queued"> | "interrupted";
@@ -53,7 +57,8 @@ export interface DreamSchedule {
 
 function viewStatus(run: Run, now: number): RunViewStatus {
   if (run.status !== "queued" && run.status !== "running") return run.status;
-  return now - run.startedAt.getTime() > STALE_RUN_MS ? "interrupted" : "running";
+  const lastSeen = (run.heartbeatAt ?? run.startedAt).getTime();
+  return now - lastSeen > STALE_RUN_MS ? "interrupted" : "running";
 }
 
 function summarizeOutcome(changes: Array<Pick<FileChange, "op" | "path">>): RunOutcome {

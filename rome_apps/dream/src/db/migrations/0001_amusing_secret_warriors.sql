@@ -1,0 +1,1 @@
+ALTER TABLE `dream__runs` ADD `heartbeat_at` integer;

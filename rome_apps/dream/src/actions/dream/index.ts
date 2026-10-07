@@ -8,7 +8,7 @@ import {
   type Routine,
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
-import { RunRecorder } from "../../lib/run-recorder.js";
+import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 
 const log = createAppLogger("dream");
 
@@ -141,6 +141,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
       let turnCount = 0;
 
+      const stopHeartbeat = keepRunAlive(runs, runId);
       try {
         for await (const msg of agentRunner.run({
           agentName: "dream",
@@ -155,6 +156,8 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           error: err instanceof Error ? err.message : String(err),
         });
         throw err;
+      } finally {
+        stopHeartbeat();
       }
 
       runs.finish(runId, recorder.outcome());

@@ -239,11 +239,11 @@ describe("dream", () => {
     expect(runs.listRecent({ limit: 10 })).toHaveLength(1);
   });
 
-  it("does not let a stale running dream block the next one", async () => {
+  it("does not let a dream whose owner stopped heartbeating block the next one", async () => {
     const runs = createRunsRepository(appDb());
     const stale = runs.start({ kind: "dream", windowHours: 24 });
     testDb.db.run(
-      sql`UPDATE dream__runs SET started_at = ${Date.now() - 2 * 60 * 60 * 1000} WHERE id = ${stale}`,
+      sql`UPDATE dream__runs SET heartbeat_at = ${Date.now() - 20 * 60 * 1000} WHERE id = ${stale}`,
     );
 
     const result = await createAction(
@@ -253,6 +253,60 @@ describe("dream", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect((result.data as { runId: string }).runId).not.toBe(stale);
+  });
+
+  it("keeps blocking while a long dream is still heartbeating", async () => {
+    const runs = createRunsRepository(appDb());
+    const live = runs.start({ kind: "dream", windowHours: 24 });
+    testDb.db.run(
+      sql`UPDATE dream__runs SET started_at = ${Date.now() - 2 * 60 * 60 * 1000} WHERE id = ${live}`,
+    );
+
+    const result = await createAction(actionConfig, makeDeps([])).execute({});
+
+    expect(result.status === "ok" && result.data).toMatchObject({ runId: live, skipped: true });
+  });
+
+  it("refuses to claim a queued run whose reservation expired", async () => {
+    const runs = createRunsRepository(appDb());
+    const { id: runId } = runs.reserveDream(24, "queued");
+    testDb.db.run(
+      sql`UPDATE dream__runs SET heartbeat_at = ${Date.now() - 20 * 60 * 1000} WHERE id = ${runId}`,
+    );
+    const run = rs.fn();
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+
+    const result = await createAction(actionConfig, deps).execute({ runId });
+
+    expect(result.status === "ok" && result.data).toMatchObject({ skipped: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("heartbeats the run while its agent is still working", async () => {
+    rs.useFakeTimers({ now: Date.now() });
+    try {
+      const runs = createRunsRepository(appDb());
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const deps = makeDeps([]);
+      (deps.agentRunner as unknown as { run: unknown }).run = async function* () {
+        await gate;
+        yield { type: "result", content: "done" };
+      };
+
+      const pending = createAction(actionConfig, deps).execute({});
+      await rs.advanceTimersByTimeAsync(5 * 60 * 1000);
+      const [run] = runs.listRecent({ limit: 1 });
+      expect(Date.now() - (run?.heartbeatAt?.getTime() ?? 0)).toBeLessThanOrEqual(60 * 1000);
+
+      release();
+      await pending;
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("runs a reserved dream once when two invocations carry its runId", async () => {

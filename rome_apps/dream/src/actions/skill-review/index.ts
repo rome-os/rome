@@ -8,7 +8,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
-import { RunRecorder } from "../../lib/run-recorder.js";
+import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 
 const log = createAppLogger("skill_review");
 
@@ -70,6 +70,7 @@ export function createAction(
       // Open an independent session so this review does not pollute the main
       // agent's conversation history. The skill-review agent fetches its own
       // conversation history via get_webchat_conversations.
+      const stopHeartbeat = keepRunAlive(runs, runId);
       try {
         for await (const msg of agentRunner.run({
           agentName: "skill-review",
@@ -85,6 +86,8 @@ export function createAction(
           error: err instanceof Error ? err.message : String(err),
         });
         throw err;
+      } finally {
+        stopHeartbeat();
       }
 
       runs.finish(runId, recorder.outcome());

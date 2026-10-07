@@ -1,6 +1,7 @@
 import type { AgentEvent } from "@rome-os/app-runtime";
 import type { RunsRepository } from "../db/repositories/runs.js";
 import { changesFromToolUse, type FileChange } from "./changes.js";
+import { HEARTBEAT_MS } from "./run-view.js";
 
 type RunOutcome = Parameters<RunsRepository["finish"]>[1];
 
@@ -56,4 +57,15 @@ export class RunRecorder {
     if (this.error !== null) return { status: "failed", error: this.error };
     return { status: "completed", summary: this.summary };
   }
+}
+
+/**
+ * Refreshes the run's heartbeat until the returned function stops it. A run
+ * keeps blocking the next dream for as long as this is beating, however long
+ * its agent takes.
+ */
+export function keepRunAlive(runs: RunsRepository, runId: string): () => void {
+  const timer = setInterval(() => runs.heartbeat(runId), HEARTBEAT_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
