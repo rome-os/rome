@@ -490,6 +490,7 @@ async function main() {
     firstParty: firstPartyBoot.firstPartyAppIds,
     installed: firstPartyBoot.installed,
     reinstalled: firstPartyBoot.reinstalled,
+    failed: firstPartyBoot.failed.map((failure) => failure.appId),
   });
   appsLog.info("artifact legacy bindings loaded", {
     agents: Object.keys(artifactIdentity.legacyBindings.agent).length,

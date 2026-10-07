@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
@@ -6,6 +6,7 @@ import { installFirstPartyAppsAtBoot, shouldReinstallFirstPartyAppAtBoot } from 
 import { hashArtifact, packArtifact } from "./packaging/index.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema } from "./lockfile.js";
+import type { AppManager, InstallResult } from "./manager.js";
 
 describe("shouldReinstallFirstPartyAppAtBoot", () => {
   let artifactDir: string;
@@ -114,12 +115,39 @@ describe("installFirstPartyAppsAtBoot", () => {
     return packed.outDir;
   }
 
-  async function bootInstall() {
+  async function bootInstall(
+    appManager: Pick<AppManager, "install" | "uninstall"> = harness.appManager,
+  ) {
     return await installFirstPartyAppsAtBoot({
-      appManager: harness.appManager,
+      appManager,
       appCatalog: harness.catalog,
       projectRoot,
+      retryDelayMs: 0,
     });
+  }
+
+  /** Wraps the real manager so the first `failures` installs of `appId` report failed. */
+  function failingInstalls(appId: string, failures: number) {
+    const attempts: string[] = [];
+    let remaining = failures;
+    const appManager: Pick<AppManager, "install" | "uninstall"> = {
+      install: async (opts) => {
+        const result = await harness.appManager.install(opts);
+        attempts.push(result.appId);
+        if (result.appId !== appId || remaining === 0) return result;
+        remaining -= 1;
+        const failed: InstallResult = {
+          appId,
+          state: "failed",
+          installedHash: null,
+          installedVersion: null,
+          error: { code: "INSTALLER_ERROR", message: "Command failed: pnpm install (exit 1)" },
+        };
+        return failed;
+      },
+      uninstall: (id, opts) => harness.appManager.uninstall(id, opts),
+    };
+    return { appManager, attempts };
   }
 
   /** Absent lockfile means nothing was ever installed — entry is undefined. */
@@ -217,5 +245,70 @@ describe("installFirstPartyAppsAtBoot", () => {
     await expect(bootInstall()).rejects.toThrow(/impostor/);
     expect(await readLockfileEntry("alpha")).toBeUndefined();
     expect(await readLockfileEntry("impostor")).toBeUndefined();
+  });
+
+  it("retries a failed install once and counts the retry's success", async () => {
+    await packFirstParty("alpha", "0.1.0");
+    const { appManager, attempts } = failingInstalls("alpha", 1);
+
+    const result = await bootInstall(appManager);
+
+    expect(attempts).toEqual(["alpha", "alpha"]);
+    expect(result.installed).toEqual(["alpha"]);
+    expect(result.failed).toEqual([]);
+  });
+
+  it("reports an app that fails twice and still installs the rest", async () => {
+    await packFirstParty("alpha", "0.1.0");
+    await packFirstParty("beta", "0.1.0");
+    const { appManager, attempts } = failingInstalls("alpha", 2);
+
+    const result = await bootInstall(appManager);
+
+    expect(attempts).toEqual(["alpha", "alpha", "beta"]);
+    expect(result.installed).toEqual(["beta"]);
+    expect(result.failed).toEqual([
+      { appId: "alpha", error: "Command failed: pnpm install (exit 1)", priorHash: null },
+    ]);
+  });
+
+  describe("when pnpm fails", () => {
+    let binDir: string;
+    let originalPath: string | undefined;
+
+    beforeEach(async () => {
+      binDir = await mkdtemp(join(tmpdir(), "rome-fake-pnpm-bin-"));
+      const fakePnpm = join(binDir, "pnpm");
+      await writeFile(
+        fakePnpm,
+        "#!/bin/sh\necho '[ERR_PNPM_JSON_PARSE] Unexpected end of JSON input'\nexit 1\n",
+      );
+      await chmod(fakePnpm, 0o755);
+      originalPath = process.env.PATH;
+      process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    });
+
+    afterEach(async () => {
+      process.env.PATH = originalPath;
+      await rm(binDir, { recursive: true, force: true });
+    });
+
+    it("records pnpm's own diagnostic as the failure and in the lockfile", async () => {
+      const artifactDir = await packFirstParty("alpha", "0.1.0");
+      // Written after packing so the pack step itself never runs pnpm.
+      await writeFile(
+        join(artifactDir, "package.json"),
+        JSON.stringify({ name: "alpha", private: true, dependencies: { react: "^19.1.0" } }),
+      );
+
+      const result = await bootInstall();
+
+      expect(result.installed).toEqual([]);
+      expect(result.failed.map((failure) => failure.appId)).toEqual(["alpha"]);
+      expect(result.failed[0]?.error).toContain("[ERR_PNPM_JSON_PARSE]");
+      const entry = await readLockfileEntry("alpha");
+      expect(entry?.state).toBe("failed");
+      expect(entry?.lastError?.message).toContain("[ERR_PNPM_JSON_PARSE]");
+    });
   });
 });

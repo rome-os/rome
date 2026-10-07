@@ -11,7 +11,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { buildSourceWorkspace, packArtifact } from "./pack.js";
+import { buildSourceWorkspace, packArtifact, runPnpm } from "./pack.js";
 import { hashArtifact } from "./hash.js";
 import {
   classifyAppDir,
@@ -708,5 +708,68 @@ describe("buildSourceWorkspace", () => {
     await expect(buildSourceWorkspace(repo, { projectRoot: workDir })).rejects.toThrow(
       /pnpm build:apps/,
     );
+  });
+});
+
+describe("runPnpm", () => {
+  let binDir: string;
+  let cwd: string;
+  let originalPath: string | undefined;
+
+  beforeEach(() => {
+    binDir = mkdtempSync(join(tmpdir(), "rome-fake-pnpm-bin-"));
+    cwd = mkdtempSync(join(tmpdir(), "rome-fake-pnpm-cwd-"));
+    originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+  });
+
+  afterEach(() => {
+    process.env.PATH = originalPath;
+    rmSync(binDir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function fakePnpm(script: string): void {
+    writeFileSync(join(binDir, "pnpm"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  }
+
+  it("resolves when pnpm exits 0", async () => {
+    fakePnpm("echo ok\nexit 0");
+    await expect(runPnpm(["install"], { cwd })).resolves.toBeUndefined();
+  });
+
+  it("carries the tail of pnpm's stdout and stderr on a non-zero exit", async () => {
+    fakePnpm(
+      [
+        "echo 'Progress: resolved 3'",
+        "printf '\\033[31m[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/x: Not Found\\033[39m\\n'",
+        "echo 'a warning on stderr' >&2",
+        "exit 1",
+      ].join("\n"),
+    );
+    const err = await runPnpm(["install", "--prod"], { cwd }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain(`Command failed: pnpm install --prod (cwd: ${cwd}, exit 1)`);
+    expect(message).toContain("pnpm output (tail):");
+    expect(message).toContain("[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/x: Not Found");
+    expect(message).toContain("a warning on stderr");
+    expect(message).not.toContain("\u001b[");
+  });
+
+  it("keeps only the last lines of long output", async () => {
+    fakePnpm('i=0\nwhile [ $i -lt 200 ]; do echo "line $i"; i=$((i+1)); done\nexit 1');
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    const tail = message.split("pnpm output (tail):\n")[1]?.split("\n");
+    expect(tail?.[0]).toBe("line 170");
+    expect(tail?.at(-1)).toBe("line 199");
+  });
+
+  it("leaves the message unchanged when pnpm printed nothing", async () => {
+    fakePnpm("exit 2");
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toBe(`Command failed: pnpm install (cwd: ${cwd}, exit 2)`);
   });
 });

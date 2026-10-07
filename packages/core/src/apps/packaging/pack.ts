@@ -13,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { appIdToPathSegment } from "./app-id.js";
 import { readManifestSummary, type ManifestSummary } from "./manifest.js";
 import { PACKED_ARTIFACT_SENTINEL } from "./recognition.js";
@@ -271,21 +272,43 @@ export async function readPackageManifest(appRoot: string): Promise<PackageJsonM
  */
 const PNPM_TIMEOUT_MS = 5 * 60 * 1000;
 
+// Bounds on the pnpm output a failure carries. The error message lands in the
+// lockfile's `lastError` and in telemetry, so it stays small.
+const PNPM_OUTPUT_BUFFER_CHARS = 16 * 1024;
+const PNPM_OUTPUT_TAIL_LINES = 30;
+const PNPM_OUTPUT_TAIL_CHARS = 4000;
+
+/**
+ * Run pnpm in `cwd`. Output still streams to this process's stdout and stderr.
+ * On a non-zero exit or a timeout, the rejection's message ends with the tail
+ * of pnpm's combined output, since pnpm prints its `ERR_PNPM_*` diagnostics to
+ * stdout and the exit code alone does not say why.
+ */
 export function runPnpm(args: string[], options: { cwd: string }): Promise<void> {
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PNPM_TIMEOUT_MS);
     const child = spawn("pnpm", args, {
       cwd: options.cwd,
-      stdio: "inherit",
+      stdio: ["inherit", "pipe", "pipe"],
       signal: controller.signal,
     });
-    child.once("exit", (code) => {
+    let output = "";
+    const capture = (sink: NodeJS.WriteStream) => (chunk: Buffer) => {
+      sink.write(chunk);
+      output = (output + chunk.toString("utf-8")).slice(-PNPM_OUTPUT_BUFFER_CHARS);
+    };
+    child.stdout?.on("data", capture(process.stdout));
+    child.stderr?.on("data", capture(process.stderr));
+    // `close` waits for the piped streams to drain, so `output` is complete.
+    child.once("close", (code) => {
       clearTimeout(timer);
+      const command = `pnpm ${args.join(" ")}`;
       if (controller.signal.aborted) {
         rejectPromise(
           new Error(
-            `Command timed out after ${PNPM_TIMEOUT_MS}ms: pnpm ${args.join(" ")} (cwd: ${options.cwd})`,
+            `Command timed out after ${PNPM_TIMEOUT_MS}ms: ${command} (cwd: ${options.cwd})` +
+              formatOutputTail(output),
           ),
         );
         return;
@@ -296,7 +319,8 @@ export function runPnpm(args: string[], options: { cwd: string }): Promise<void>
       }
       rejectPromise(
         new Error(
-          `Command failed: pnpm ${args.join(" ")} (cwd: ${options.cwd}, exit ${code ?? "null"})`,
+          `Command failed: ${command} (cwd: ${options.cwd}, exit ${code ?? "null"})` +
+            formatOutputTail(output),
         ),
       );
     });
@@ -306,6 +330,16 @@ export function runPnpm(args: string[], options: { cwd: string }): Promise<void>
       rejectPromise(err);
     });
   });
+}
+
+function formatOutputTail(output: string): string {
+  const lines = stripVTControlCharacters(output)
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return "";
+  const tail = lines.slice(-PNPM_OUTPUT_TAIL_LINES).join("\n").slice(-PNPM_OUTPUT_TAIL_CHARS);
+  return `\npnpm output (tail):\n${tail}`;
 }
 
 /**
