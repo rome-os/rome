@@ -620,14 +620,26 @@ export class AnthropicProvider implements ModelProvider {
     // Middleware-only replies still use the shared ModelSession turn stream;
     // they never need to manufacture a provider request.
     const localTurnEvents = new AsyncMessageQueue<ModelSessionEvent>();
-    let resolveProviderBoundary: (() => void) | undefined;
+    const providerBoundaryWaiters = new Set<{
+      resolve: () => void;
+      reject: (error: Error) => void;
+    }>();
     let localCompletionTail = Promise.resolve();
+    const settleProviderBoundaryWaiters = (error?: Error): void => {
+      for (const waiter of providerBoundaryWaiters) {
+        if (error) waiter.reject(error);
+        else waiter.resolve();
+      }
+      providerBoundaryWaiters.clear();
+    };
     const waitForProviderBoundary = async (): Promise<void> => {
       while (projection.isOpen) {
-        await new Promise<void>((resolve) => {
-          resolveProviderBoundary = resolve;
+        if (closed) throw new Error("ModelSession is closed");
+        await new Promise<void>((resolve, reject) => {
+          providerBoundaryWaiters.add({ resolve, reject });
         });
       }
+      if (closed) throw new Error("ModelSession is closed");
     };
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
@@ -954,10 +966,7 @@ export class AnthropicProvider implements ModelProvider {
             }
             yield* projection.end(message, settles);
           }
-          if (!projection.isOpen) {
-            resolveProviderBoundary?.();
-            resolveProviderBoundary = undefined;
-          }
+          if (!projection.isOpen) settleProviderBoundaryWaiters();
         }
         // A Query that ends without its result has lost the SDK's turn
         // correlation. Do not invent one: the session layer fails any caller
@@ -994,6 +1003,8 @@ export class AnthropicProvider implements ModelProvider {
               : undefined,
         );
       } finally {
+        const error = new Error("ModelSession is closed");
+        settleProviderBoundaryWaiters(error);
         localTurnEvents.end();
         closed = true;
       }
@@ -1155,6 +1166,7 @@ export class AnthropicProvider implements ModelProvider {
         } catch {
           // ignore
         }
+        settleProviderBoundaryWaiters(new Error("ModelSession is closed"));
         localTurnEvents.end();
         closed = true;
       },
@@ -1220,30 +1232,40 @@ async function* mergeModelSessionEvents(
 ): AsyncGenerator<ModelSessionEvent> {
   const providerIterator = provider[Symbol.asyncIterator]();
   const localIterator = local[Symbol.asyncIterator]();
-  let providerNext:
-    | Promise<{ source: "provider"; result: IteratorResult<ModelSessionEvent> }>
-    | undefined = providerIterator.next().then((result) => ({ source: "provider", result }));
-  let localNext:
-    | Promise<{ source: "local"; result: IteratorResult<ModelSessionEvent> }>
-    | undefined = localIterator.next().then((result) => ({ source: "local", result }));
+  let providerNext = providerIterator
+    .next()
+    .then((result) => ({ source: "provider" as const, result }));
+  let localNext = localIterator.next().then((result) => ({ source: "local" as const, result }));
   while (providerNext || localNext) {
-    const next = await Promise.race(
-      [providerNext, localNext].filter(Boolean) as Promise<{
-        source: "provider" | "local";
-        result: IteratorResult<ModelSessionEvent>;
-      }>[],
-    );
+    const next = await Promise.race([providerNext, localNext].filter(Boolean));
     if (next.source === "provider") {
-      if (next.result.done) providerNext = undefined;
+      if (next.result.done) providerNext = undefined as never;
       else {
         yield next.result.value;
-        providerNext = providerIterator.next().then((result) => ({ source: "provider", result }));
+        providerNext = providerIterator
+          .next()
+          .then((result) => ({ source: "provider" as const, result }));
       }
-    } else if (next.result.done) {
-      localNext = undefined;
-    } else {
-      yield next.result.value;
-      localNext = localIterator.next().then((result) => ({ source: "local", result }));
+      continue;
+    }
+    if (next.result.done) {
+      localNext = undefined as never;
+      continue;
+    }
+    // Local completion is one ModelSession turn. Once it begins, hold any
+    // already-ready provider frame until its terminal boundary is delivered.
+    let event = next.result.value;
+    while (true) {
+      yield event;
+      const done = event.type === "model_turn_end";
+      localNext = localIterator.next().then((result) => ({ source: "local" as const, result }));
+      if (done) break;
+      const following = await localNext;
+      if (following.result.done) {
+        localNext = undefined as never;
+        break;
+      }
+      event = following.result.value;
     }
   }
 }

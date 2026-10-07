@@ -3936,22 +3936,27 @@ class AgentSessionImpl implements AgentSession {
     options?: AgentSessionSubscriptionOptions,
   ): () => void {
     const id = uuidv4();
-    this.subscribers.set(id, handler);
+    let active = true;
     if (options?.replayModelTurns && this.replayingModelTurns) {
-      // onModelTurnStart/onModelTurnAnswers register immediately after this
-      // subscription. Defer message replay one microtask so their buffers
-      // exist before pre-acquire output is delivered.
+      // Do not make this listener live until its snapshot drains. New output
+      // remains in the acquisition journal, so it is delivered once and in order.
       queueMicrotask(() => {
-        if (!this.replayingModelTurns) return;
+        if (!active || !this.replayingModelTurns) return;
         for (const [turnId, messages] of this.replayedModelTurnMessages)
           for (const message of messages) handler(message, turnId);
         this.replayingModelTurns = false;
         this.replayedModelTurnIds.length = 0;
         this.replayedModelTurnMessages.clear();
         this.replayedModelTurnAnswers.length = 0;
+        if (active) this.subscribers.set(id, handler);
       });
+    } else {
+      this.subscribers.set(id, handler);
     }
-    return () => this.subscribers.delete(id);
+    return () => {
+      active = false;
+      this.subscribers.delete(id);
+    };
   }
 
   onModelTurnStart(
