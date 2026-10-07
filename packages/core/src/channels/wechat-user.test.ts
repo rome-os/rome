@@ -222,8 +222,14 @@ describe("WechatUserRuntime.captureKeys", () => {
         calls.push({ file, args, ...(opts?.env ? { env: opts.env } : {}) });
         if (file === "sh") return ok("wxid_guardian\n");
         if (file !== process.execPath) return ok();
-        // The bridge leaves its passphrase file behind when it is killed.
-        await writeFile(join(opts!.env!.TMPDIR!, "capture.result"), "WECHAT_PASSPHRASE=00");
+        // The bridge leaves its passphrase file behind when it is killed, and
+        // the client it launched keeps using TMPDIR.
+        const tmp = opts!.env!.TMPDIR!;
+        await writeFile(
+          await ensureFile(join(tmp, "wechat-cli-capture-1/capture.result")),
+          "WECHAT_PASSPHRASE=00",
+        );
+        await writeFile(join(tmp, "client.tmp"), "");
         return answer;
       },
     });
@@ -245,9 +251,8 @@ describe("WechatUserRuntime.captureKeys", () => {
       XDG_RUNTIME_DIR: runtime.runtimeDir,
       WECHAT_CLI_HOME: runtime.bridgeHome,
     });
-    expect(call.env?.TMPDIR?.startsWith(join(runtime.runtimeDir, "wechat-capture-"))).toBe(true);
     expect(calls.map((c) => c.file)).not.toContain("pkill");
-    expect(await readdir(runtime.runtimeDir)).toEqual([]);
+    expect(await readdir(call.env!.TMPDIR!)).toEqual(["client.tmp"]);
   });
 
   it("reports databases the login had not created yet as pending", async () => {
@@ -264,7 +269,7 @@ describe("WechatUserRuntime.captureKeys", () => {
     );
     await expect(runtime.captureKeys(":100")).rejects.toThrow("no login");
     expect(calls.map((call) => [call.file, ...call.args].join(" "))).toContain("pkill -x gdb");
-    expect(await readdir(runtime.runtimeDir)).toEqual([]);
+    expect(await readdir(join(runtime.runtimeDir, "wechat-tmp"))).toEqual(["client.tmp"]);
   });
 });
 

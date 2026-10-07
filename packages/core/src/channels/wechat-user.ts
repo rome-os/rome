@@ -1,7 +1,7 @@
 // WeChat user-account (personal) transport. Channel contract: docs/architecture/channels.md.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, open, readdir, readFile, rm, symlink } from "node:fs/promises";
+import { access, mkdir, open, readdir, readFile, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { zstdDecompressSync } from "node:zlib";
@@ -902,10 +902,12 @@ export class WechatUserRuntime {
    * passphrase, so only another capture can key the rest.
    */
   async captureKeys(display: string, signal?: AbortSignal): Promise<void> {
-    // The bridge writes the raw passphrase to a file under TMPDIR and removes
-    // it only when it exits cleanly, so give it a private one Rome removes.
-    await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
-    const tmp = await mkdtemp(join(this.runtimeDir, CAPTURE_TMP_PREFIX));
+    // The bridge writes the raw passphrase under TMPDIR and removes it only
+    // when it exits cleanly, so point TMPDIR at a private directory and clear
+    // the bridge's capture files from it afterwards. The client launched under
+    // gdb inherits TMPDIR, so the directory itself stays.
+    const tmp = join(this.runtimeDir, CAPTURE_TMP_DIR);
+    await mkdir(tmp, { recursive: true, mode: 0o700 });
     let captured = false;
     try {
       initResultSchema.parse(
@@ -920,7 +922,11 @@ export class WechatUserRuntime {
       // Killing the bridge early leaves its gdb holding the client, which then
       // never exits. Nothing else in this container runs gdb.
       if (!captured) await this.run("pkill", ["-x", "gdb"]).catch(() => {});
-      await rm(tmp, { recursive: true, force: true });
+      for (const name of await readdir(tmp).catch(() => [] as string[])) {
+        if (name.startsWith(BRIDGE_CAPTURE_PREFIX)) {
+          await rm(join(tmp, name), { recursive: true, force: true });
+        }
+      }
     }
     this.keysCheckedAt = 0;
     const account = await this.accountDir();
@@ -1056,9 +1062,11 @@ const initResultSchema = z.object({
   missing: z.array(z.string()),
 });
 
-/** Where each capture keeps the bridge's temporary files, under the runtime
- *  directory. */
-const CAPTURE_TMP_PREFIX = "wechat-capture-";
+/** The captured client's TMPDIR, under the runtime directory. */
+const CAPTURE_TMP_DIR = "wechat-tmp";
+
+/** How the bridge names the temporary directory holding its passphrase file. */
+const BRIDGE_CAPTURE_PREFIX = "wechat-cli-capture-";
 
 /** The part of the bridge's keys file Rome checks before reads. */
 const storedKeysSchema = z.object({
