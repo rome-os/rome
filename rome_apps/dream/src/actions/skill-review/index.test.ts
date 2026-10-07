@@ -1,9 +1,15 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
+import { createRunsRepository } from "../../db/repositories/runs.js";
 import { createAction } from "./index.js";
+
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
 
 const actionConfig = {
   name: "skill_review",
@@ -15,40 +21,59 @@ const actionConfig = {
   sideEffects: "write",
 } as const;
 
+let testDb: TestDb;
+
+beforeEach(() => {
+  testDb = createTestDb();
+  migrate(testDb.db as never, {
+    migrationsFolder: MIGRATIONS_DIR,
+    migrationsTable: "__drizzle_migrations_app_dream",
+  });
+});
+
+afterEach(() => {
+  testDb.close();
+});
+
+const appDb = () => ({
+  connection: testDb.db,
+  tablePrefix: "dream",
+  tableName: (name: string) => `dream__${name}`,
+});
+
+function seedSession(id: string, type: string, createdAt: number, name = id): void {
+  testDb.db.run(sql`
+    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
+    VALUES (${id}, ${name}, ${type}, ${createdAt}, ${createdAt})
+  `);
+}
+
 function makeDeps(
-  agentMessages: Array<{ type: string; content?: string; error?: string; sessionId?: string }>,
-  dbGetResult?: { id: string } | undefined,
+  agentMessages: Array<Record<string, unknown>>,
+  runCalls: Array<{ prompt: string }> = [],
 ): AppActionRuntimeDeps<{ agentRunner: AgentRunner }> {
   return {
     agentRunner: {
-      async *run() {
+      async *run(params: { prompt: string }) {
+        runCalls.push(params);
         for (const msg of agentMessages) {
           yield msg;
         }
       },
     } as unknown as AgentRunner,
-    appContext: {
-      db: {
-        connection: {
-          get: () => dbGetResult,
-        },
-      },
-    },
+    appContext: { db: appDb() },
   } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner }>;
 }
 
 describe("skill_review", () => {
   it("returns agent result on success", async () => {
-    const deps = makeDeps(
-      [
-        { type: "session_init", sessionId: "agent-session-1" },
-        { type: "result", content: "Nothing to update." },
-      ],
-      { id: "webchat-session-1" },
-    );
+    seedSession("webchat-session-1", "webchat", 1700000000);
+    const deps = makeDeps([
+      { type: "session_init", sessionId: "agent-session-1" },
+      { type: "result", content: "Nothing to update." },
+    ]);
 
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({});
+    const result = await createAction(actionConfig, deps).execute({});
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { result: string };
@@ -56,93 +81,86 @@ describe("skill_review", () => {
   });
 
   it("returns failure when agent emits an error", async () => {
-    const deps = makeDeps([{ type: "error", error: "Model API failure" }], {
-      id: "webchat-session-1",
-    });
+    seedSession("webchat-session-1", "webchat", 1700000000);
+    const deps = makeDeps([{ type: "error", error: "Model API failure" }]);
 
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({});
+    const result = await createAction(actionConfig, deps).execute({});
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toContain("Model API failure");
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({ status: "failed", error: "Model API failure" });
   });
 
   it("returns early when no webchat sessions exist", async () => {
-    const deps = makeDeps([], undefined);
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({});
+    const result = await createAction(actionConfig, makeDeps([])).execute({});
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     const data = result.data as { result: string };
     expect(data.result).toBe("No webchat sessions found.");
+    expect(createRunsRepository(appDb()).listRecent({ limit: 1 })).toEqual([]);
   });
 
   it("uses explicit sessionId when provided", async () => {
+    seedSession("newer-session", "webchat", 1700000100);
+    seedSession("explicit-session-42", "webchat", 1700000000, "Fix the deploy script");
     const runCalls: Array<{ prompt: string }> = [];
-    const deps = {
-      agentRunner: {
-        async *run(params: { prompt: string }) {
-          runCalls.push(params);
-          yield { type: "result", content: "done" };
-        },
-      } as unknown as AgentRunner,
-      appContext: {
-        db: {
-          connection: {
-            get: () => ({ id: "should-not-be-used" }),
-          },
-        },
-      },
-    } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner }>;
 
-    const action = createAction(actionConfig, deps);
-    await action.execute({ sessionId: "explicit-session-42" });
+    await createAction(
+      actionConfig,
+      makeDeps([{ type: "result", content: "done" }], runCalls),
+    ).execute({
+      sessionId: "explicit-session-42",
+    });
 
     expect(runCalls).toHaveLength(1);
     expect(runCalls[0].prompt).toContain("explicit-session-42");
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({
+      reviewedSessionId: "explicit-session-42",
+      reviewedSessionName: "Fix the deploy script",
+    });
   });
-});
-
-describe("skill_review against the system schema", () => {
-  let testDb: TestDb;
-
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-
-  afterEach(() => {
-    testDb.close();
-  });
-
-  function seedSession(id: string, type: string, createdAt: number): void {
-    testDb.db.run(sql`
-      INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
-      VALUES (${id}, ${id}, ${type}, ${createdAt}, ${createdAt})
-    `);
-  }
 
   it("reviews the newest webchat session, not a newer channel or background run", async () => {
     seedSession("older-web", "webchat", 1700000000);
     seedSession("newest-web", "webchat", 1700000100);
     seedSession("group-chat", "channel", 1700000200);
     seedSession("dream-run", "action", 1700000300);
-
     const runCalls: Array<{ prompt: string }> = [];
-    const deps = {
-      agentRunner: {
-        async *run(params: { prompt: string }) {
-          runCalls.push(params);
-          yield { type: "result", content: "done" };
-        },
-      } as unknown as AgentRunner,
-      appContext: { db: { connection: testDb.db } },
-    } as unknown as AppActionRuntimeDeps<{ agentRunner: AgentRunner }>;
 
-    const result = await createAction(actionConfig, deps).execute({});
+    const result = await createAction(
+      actionConfig,
+      makeDeps([{ type: "result", content: "done" }], runCalls),
+    ).execute({});
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect(runCalls).toHaveLength(1);
     expect(runCalls[0].prompt).toContain("newest-web");
+  });
+
+  it("records the skill the agent saved", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const skillPath = "/repo/rome_apps/coding/src/skills/deploy/SKILL.md";
+    const deps = makeDeps([
+      {
+        type: "tool_use",
+        id: "t1",
+        tool: "Write",
+        input: { file_path: skillPath, content: "# Deploy" },
+      },
+      { type: "tool_result", toolUseId: "t1", tool: "Write", output: "ok" },
+      { type: "result", content: "Saved the deploy skill." },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { runId } = result.data as { runId: string };
+    const runs = createRunsRepository(appDb());
+    expect(runs.byId(runId)).toMatchObject({ kind: "skill_review", status: "completed" });
+    expect(runs.changes(runId)).toEqual([
+      { op: "write", path: skillPath, content: "# Deploy", previous: null, truncated: false },
+    ]);
   });
 });

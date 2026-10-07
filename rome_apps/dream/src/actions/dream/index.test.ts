@@ -1,7 +1,14 @@
-import { describe, it, expect, rs } from "@rstest/core";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { createRunsRepository } from "../../db/repositories/runs.js";
 import { createAction, type DreamDeps } from "./index.js";
+
+const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
 
 const actionConfig = {
   name: "dream",
@@ -13,8 +20,28 @@ const actionConfig = {
   sideEffects: "write",
 } as const;
 
+let testDb: TestDb;
+
+beforeEach(() => {
+  testDb = createTestDb();
+  migrate(testDb.db as never, {
+    migrationsFolder: MIGRATIONS_DIR,
+    migrationsTable: "__drizzle_migrations_app_dream",
+  });
+});
+
+afterEach(() => {
+  testDb.close();
+});
+
+const appDb = () => ({
+  connection: testDb.db,
+  tablePrefix: "dream",
+  tableName: (name: string) => `dream__${name}`,
+});
+
 function makeDeps(
-  agentMessages: Array<{ type: string; content?: string; error?: string }>,
+  agentMessages: Array<Record<string, unknown>>,
   overrides?: {
     runAction?: (...args: unknown[]) => Promise<ActionResult>;
     listRoutines?: () => Promise<Array<{ actionName: string; name: string }>>;
@@ -29,6 +56,7 @@ function makeDeps(
       },
     } as unknown as AgentRunner,
     appContext: {
+      db: appDb(),
       runAction: overrides?.runAction ?? rs.fn().mockResolvedValue({ status: "ok" }),
       listRoutines: overrides?.listRoutines ?? rs.fn().mockResolvedValue([]),
     },
@@ -138,5 +166,70 @@ describe("dream", () => {
 
     expect(result.status).toBe("ok");
     expect(runAction).toHaveBeenCalledWith("create_routine", expect.anything());
+  });
+  it("records the run and the files its agent changed", async () => {
+    const deps = makeDeps([
+      {
+        type: "tool_use",
+        id: "t1",
+        tool: "Edit",
+        input: { file_path: "/p/memory/MEMORY.md", old_string: "a", new_string: "b" },
+      },
+      { type: "tool_result", toolUseId: "t1", tool: "Edit", output: "ok" },
+      {
+        type: "tool_use",
+        id: "t2",
+        tool: "Edit",
+        input: { file_path: "/p/memory/IDENTITY.md", old_string: "x", new_string: "y" },
+      },
+      { type: "tool_result", toolUseId: "t2", tool: "Edit", output: "no match", isError: true },
+      {
+        type: "tool_use",
+        id: "t3",
+        tool: "Write",
+        input: { file_path: "/p/memory/journal/2026/10/06.md", content: "# Journal" },
+      },
+      { type: "tool_result", toolUseId: "t3", tool: "Write", output: "ok" },
+      { type: "result", content: "Wrote the journal." },
+    ]);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const { runId } = result.data as { runId: string };
+    const runs = createRunsRepository(appDb());
+    expect(runs.byId(runId)).toMatchObject({
+      kind: "dream",
+      status: "completed",
+      summary: "Wrote the journal.",
+    });
+    // The failed edit changed nothing, so it is not recorded.
+    expect(runs.changes(runId).map((c) => c.path)).toEqual([
+      "/p/memory/MEMORY.md",
+      "/p/memory/journal/2026/10/06.md",
+    ]);
+  });
+
+  it("reports into a run the page already created", async () => {
+    const runs = createRunsRepository(appDb());
+    const runId = runs.start({ kind: "dream", windowHours: 24 });
+    const deps = makeDeps([{ type: "result", content: "done" }]);
+
+    const result = await createAction(actionConfig, deps).execute({ runId });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect((result.data as { runId: string }).runId).toBe(runId);
+    expect(runs.listRecent({ limit: 10 })).toHaveLength(1);
+    expect(runs.byId(runId)?.status).toBe("completed");
+  });
+
+  it("marks the run failed when the agent fails", async () => {
+    const deps = makeDeps([{ type: "error", error: "Model timeout" }]);
+
+    await createAction(actionConfig, deps).execute({});
+
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run).toMatchObject({ status: "failed", error: "Model timeout" });
+    expect(run?.finishedAt).toBeInstanceOf(Date);
   });
 });
