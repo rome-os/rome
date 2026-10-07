@@ -872,7 +872,6 @@ async function main() {
     backendTurnRunner,
     // Real push sender in main; the worker gets a NotifyServiceProxy.
     notify: notifyClient,
-    feedback: feedbackClient,
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its availability reads
     // the same AiToolState the model resolver gates on.
@@ -901,6 +900,7 @@ async function main() {
       repositories: appRuntimeRepositories,
       favorService,
       hostExecution,
+      feedback: feedbackClient,
     },
   );
 
@@ -912,6 +912,7 @@ async function main() {
       repositories: appRuntimeRepositories,
       favorService,
       hostExecution,
+      feedback: feedbackClient,
     }),
   );
   appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {

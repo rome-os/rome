@@ -169,7 +169,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       systemUpgrade: new SystemUpgradeServiceProxy(),
       backendTurnRunner: new BackendTurnRunnerProxy(),
       notify: new NotifyServiceProxy(),
-      feedback: new FeedbackServiceProxy(),
       actionEngine,
       actionRegistry: new ActionRegistryProxy(),
       emitAgentMessage,
@@ -192,6 +191,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,
       }),
+      feedback: new FeedbackServiceProxy(),
     },
   );
   if (agentLoader.getRegistryLoadFailures().length > 0) {

@@ -41,7 +41,7 @@ type RuntimeContextGlobal = typeof globalThis & {
 describe("app runtime context", () => {
   const tempDirs: string[] = [];
 
-  it("injects host execution only into system actions in both main and worker loaders", async () => {
+  it("injects host execution and feedback only into system actions in both main and worker loaders", async () => {
     for (const register of [registerAppActions, registerLazyAppActions]) {
       for (const appId of ["system", "ordinary-app"]) {
         const app = resolvedApp(appId);
@@ -52,7 +52,7 @@ describe("app runtime context", () => {
 export function createAction(config, deps) {
   return {
     config,
-    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution) } }),
+    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution), hasFeedback: Boolean(deps.feedback) } }),
   };
 }
 `,
@@ -88,12 +88,13 @@ export function createAction(config, deps) {
             actionEngine: {} as ActionEngine,
             repositories: createRepositories(),
             hostExecution: new HostExecutionService({ enabled: false }),
+            feedback: { send: async () => ({ kind: "ok" }) },
           },
         );
         expect(loaded.failed).toEqual([]);
         expect(await registry.get("host_probe")?.execute({})).toEqual({
           status: "ok",
-          data: { hasHostExecution: appId === "system" },
+          data: { hasHostExecution: appId === "system", hasFeedback: appId === "system" },
         });
       }
     }
