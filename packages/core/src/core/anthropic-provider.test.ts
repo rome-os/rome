@@ -5,7 +5,7 @@ import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
 import * as anthropicLoginModule from "../lib/anthropic-login.js" with { rstest: "importActual" };
 import { AnthropicProvider } from "./anthropic-provider.js";
 import type { AgentMessage } from "../types.js";
-import { isModelTurnEvent } from "./agent-runner.js";
+import { isModelBackgroundTaskEvent, isModelTurnEvent } from "./agent-runner.js";
 import { expectModelSessionTurnContract } from "../test/model-session-contract.js";
 import type {
   ModelSession,
@@ -93,8 +93,8 @@ function mockThrowingQuery(error: unknown) {
 async function collectEvents(session: ModelSession): Promise<AgentMessage[]> {
   const messages: AgentMessage[] = [];
   for await (const msg of session.events) {
-    // Turn boundaries have their own tests ("turns follow the SDK's turns").
-    if (isModelTurnEvent(msg)) continue;
+    // Turn boundaries and background tasks have their own tests.
+    if (isModelTurnEvent(msg) || isModelBackgroundTaskEvent(msg)) continue;
     // Strip non-deterministic timestamps so deep-equal stays stable.
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
@@ -108,7 +108,9 @@ async function collectEvents(session: ModelSession): Promise<AgentMessage[]> {
 async function* withoutTurnEvents(
   events: AsyncIterable<ModelSessionEvent>,
 ): AsyncGenerator<AgentMessage> {
-  for await (const event of events) if (!isModelTurnEvent(event)) yield event;
+  for await (const event of events) {
+    if (!isModelTurnEvent(event) && !isModelBackgroundTaskEvent(event)) yield event;
+  }
 }
 
 function buildParams(overrides: Partial<ModelSessionParams> = {}): ModelSessionParams {
@@ -206,6 +208,10 @@ describe("AnthropicProvider", () => {
           return `error ${event.error}`;
         case "text":
           return `text ${event.content}`;
+        case "background_tasks":
+          return `tasks [${event.tasks.map((task) => `${task.id}:${task.kind}`)}]`;
+        case "background_task_end":
+          return `ended ${event.end.id} ${event.end.status}`;
         default:
           return undefined;
       }
@@ -270,10 +276,53 @@ describe("AnthropicProvider", () => {
         "text DONE",
         "result DONE",
         "end [A]",
+        "ended b1 completed",
         "start []",
         "text The task finished.",
         "result The task finished.",
         "end []",
+      ]);
+      await session.close();
+    });
+
+    it("reports background tasks between turns in Rome's words", async () => {
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield result("DONE", [first.uuid], "human");
+        // No Rome turn is open from here.
+        yield {
+          type: "system",
+          subtype: "background_tasks_changed",
+          tasks: [
+            { task_id: "b1", task_type: "local_bash", description: "sleep 900" },
+            { task_id: "s1", task_type: "local_agent", description: "research" },
+            { task_id: "w1", task_type: "monitor", description: "watcher", ambient: true },
+          ],
+        };
+        yield {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "b0",
+          status: "stopped",
+          reason: "worker_restart",
+          output_file: "",
+          summary: "orphaned",
+        };
+        yield { ...notification, task_id: "w1", ambient: true };
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "Start it.", inputId: a });
+      expect(await read(session)).toEqual([
+        "start []",
+        "read A",
+        "answers +[A]",
+        "text DONE",
+        "result DONE",
+        "end [A]",
+        "tasks [b1:shell,s1:agent]",
+        "ended b0 lost",
       ]);
       await session.close();
     });
@@ -292,6 +341,7 @@ describe("AnthropicProvider", () => {
       );
       await session.sendUserInput({ text: "Reply with PONG.", inputId: a });
       expect(await read(session, 2)).toEqual([
+        "ended b1 completed",
         "start []",
         "result ",
         "end []",
@@ -387,6 +437,7 @@ describe("AnthropicProvider", () => {
       await new Promise((resolve) => setImmediate(resolve));
       await session.sendUserInput({ text: "Reply SUMMONED", inputId: a });
       expect(await reading).toEqual([
+        "ended b1 completed",
         "start []",
         "read A",
         "answers +[A]",

@@ -967,6 +967,50 @@ describe("AgentRunner", () => {
       expect(onFork).not.toHaveBeenCalled();
     });
 
+    it("follows the model session's background tasks between turns", async () => {
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      const provider: ModelProvider = {
+        id: "anthropic",
+        displayName: "SDK background tasks",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          runtime = createSdkEventSession(params);
+          return runtime.session;
+        },
+      };
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const key = { agentName: "test-main", channelThreadKey: "webchat:background-tasks" };
+      try {
+        const session = await manager.acquire(key);
+        const published: string[] = [];
+        session.subscribe((message) => published.push(message.type));
+        const turn = collectMessages(session.sendTurn({ inputId: "A", prompt: "Start" }).events);
+        await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+        runtime.emit({ type: "model_turn_start", turnId: "answer-a", answers: ["A"] });
+        runtime.emit({ type: "result", content: "Started" });
+        runtime.emit({ type: "model_turn_end", turnId: "answer-a", answers: ["A"] });
+        await turn;
+        expect(session.backgroundTasks).toEqual([]);
+
+        const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
+        runtime.emit({ type: "background_tasks", tasks: [task] });
+        runtime.emit({ type: "background_task_end", end: { id: "b0", status: "lost" } });
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([task]));
+        // Task events are the session's own; no turn or subscriber sees them.
+        expect(published).not.toContain("background_tasks");
+        expect(published).not.toContain("background_task_end");
+
+        // The provider process ended, and its tasks with it.
+        runtime.end();
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([]));
+      } finally {
+        await manager.shutdown();
+      }
+    });
+
     it("keeps fork sources leased and resumes them after idle eviction", async () => {
       rs.useFakeTimers();
       const provider = withForkSupport(
@@ -3543,6 +3587,57 @@ describe("AgentRunner", () => {
       runtimes[1].emit({ type: "model_turn_end", turnId: "sdk-S", answers: ["S"] });
       await retryMessages;
       await manager.shutdown();
+    });
+
+    it("drops a replaced backend's background tasks even when its replacement fails to open", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      let runtime!: ReturnType<typeof createSdkEventSession>;
+      let opens = 0;
+      const provider: ModelProvider = {
+        id: "openai",
+        displayName: "Codex",
+        builtinTools: new Set<string>(),
+        async openSession(params) {
+          if (++opens > 1) throw new Error("replacement failed to open");
+          runtime = createSdkEventSession(params);
+          return { ...runtime.session, providerId: "openai" };
+        },
+      };
+      const modelResolver = createModelResolver({
+        providers: [provider],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+        keepAliveAcrossTurns: true,
+      });
+      try {
+        const session = await manager.acquire({
+          agentName: "test-main",
+          channelThreadKey: "webchat:tasks-failed-replacement",
+        });
+        const a = collectMessages(session.sendTurn({ inputId: "A", prompt: "first" }).events);
+        await rs.waitFor(() => expect(runtime.sent).toHaveLength(1));
+        runtime.emit({ type: "model_turn_start", turnId: "sdk-A", answers: ["A"] });
+        // An error keeps the session unpinned, so the next turn re-resolves.
+        runtime.emit({ type: "error", error: "first backend failed" });
+        runtime.emit({ type: "model_turn_end", turnId: "sdk-A", answers: ["A"] });
+        await a;
+        const task = { id: "b1", kind: "shell", description: "sleep 900", seenAt: 1 } as const;
+        runtime.emit({ type: "background_tasks", tasks: [task] });
+        await rs.waitFor(() => expect(session.backgroundTasks).toEqual([task]));
+
+        state.codex.solAccess = false;
+        await collectMessages(session.sendTurn({ inputId: "B", prompt: "second" }).events).catch(
+          () => {},
+        );
+        await rs.waitFor(() => expect(opens).toBe(2));
+        expect(session.backgroundTasks).toEqual([]);
+      } finally {
+        await manager.shutdown();
+      }
     });
 
     it("owns an early background submission before its first visible block", async () => {

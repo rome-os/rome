@@ -289,7 +289,13 @@ export type ModelTurnEvent =
       answers: string[];
     };
 
-export type ModelSessionEvent = AgentMessage | ModelTurnEvent;
+export type ModelSessionEvent = AgentMessage | ModelTurnEvent | ModelBackgroundTaskEvent;
+
+export function isModelBackgroundTaskEvent(
+  event: ModelSessionEvent,
+): event is ModelBackgroundTaskEvent {
+  return event.type === "background_tasks" || event.type === "background_task_end";
+}
 
 export function isModelTurnEvent(event: ModelSessionEvent): event is ModelTurnEvent {
   return (
@@ -309,6 +315,55 @@ export interface CodeBackedTurn {
 
 export const CODE_BACKED_FALLBACK =
   "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
+
+/**
+ * What kind of work a background task is, in Rome's words. Each provider maps
+ * its own task types onto these and keeps its value in `raw`.
+ */
+export type ModelBackgroundTaskKind = "shell" | "agent" | "other";
+
+/** A background task a provider session is running (a backgrounded shell or subagent). */
+export interface ModelBackgroundTask {
+  readonly id: string;
+  readonly kind: ModelBackgroundTaskKind;
+  readonly description: string;
+  /** When this session first saw the task running. */
+  readonly seenAt: number;
+  /** The provider's own task type, e.g. Claude's `local_bash`. */
+  readonly raw?: string;
+}
+
+/**
+ * How a background task ended, in Rome's words. `interrupted` matches
+ * `AgentStopReason`; `lost` is a task the provider can no longer reach, such
+ * as one orphaned by a provider process restart.
+ */
+export type ModelBackgroundTaskEndStatus = "completed" | "failed" | "interrupted" | "lost";
+
+export interface ModelBackgroundTaskEnd {
+  readonly id: string;
+  readonly status: ModelBackgroundTaskEndStatus;
+  readonly summary?: string;
+  /** The provider's own end status, e.g. Claude's `stopped`. */
+  readonly raw?: string;
+}
+
+/**
+ * A provider's background tasks, reported in its event stream. Internal to
+ * core, like ModelTurnEvent: AgentSession reads them and never forwards them
+ * to clients. They belong to no model turn and may arrive inside or between
+ * turns.
+ *
+ * `background_tasks` carries the full set of running tasks after every change
+ * and replaces the previous one. A provider whose native signals are only
+ * start and end edges builds the set itself. The set starts empty with each
+ * model session and ends with its stream, since the tasks end with the
+ * provider process. `background_task_end` reports one task's end; the next
+ * `background_tasks` drops it.
+ */
+export type ModelBackgroundTaskEvent =
+  | { type: "background_tasks"; tasks: readonly ModelBackgroundTask[] }
+  | { type: "background_task_end"; end: ModelBackgroundTaskEnd };
 
 export interface ModelSession {
   readonly providerId: ProviderId;

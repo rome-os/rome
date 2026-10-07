@@ -33,6 +33,7 @@ import {
   evaluateBorrowedExactFork,
 } from "./codex/borrowed-exact-fork.js";
 import { AgentMessageSink, SerialTurnCoordinator, TurnDispatcher } from "./codex/session.js";
+import { CodexBackgroundTaskTracker } from "./codex/background-tasks.js";
 import {
   createGeneratedImageTracker,
   createImageTraceSessionState,
@@ -513,6 +514,9 @@ export class CodexAppServerProvider implements ModelProvider {
     }
 
     const sink = new AgentMessageSink();
+    // Background work outlives the turn that started it, so it is tracked
+    // from every notification, ahead of the active-turn guards below.
+    const backgroundTasks = new CodexBackgroundTaskTracker();
     // Image-generation trace. The app-server delivers it as `imageGeneration`
     // thread items (inline `result` + `savedPath`); a filesystem tracker over
     // ~/.codex/generated_images backstops any image codex writes without an
@@ -687,6 +691,17 @@ export class CodexAppServerProvider implements ModelProvider {
     };
 
     const onNotification = (method: string, params2: unknown): void => {
+      // A borrowed exact fork's turn runs on this thread but is not this
+      // session's work, and its history is reverted afterwards.
+      if (
+        method === Notify.turnStarted &&
+        activeTurn &&
+        activeTurn.ownerSessionId !== params.sessionId
+      ) {
+        const forkTurnId = (params2 as TurnStartedNotification).turn?.id;
+        if (forkTurnId) backgroundTasks.ignoreTurn(forkTurnId);
+      }
+      for (const event of backgroundTasks.observe(method, params2)) sink.push(event);
       switch (method) {
         case Notify.turnStarted: {
           const p = params2 as TurnStartedNotification;
@@ -890,6 +905,7 @@ export class CodexAppServerProvider implements ModelProvider {
       onDynamicToolCall,
       onExit: () => {
         if (closed) return;
+        for (const event of backgroundTasks.lost()) sink.push(event);
         const turn = activeTurn;
         if (!turn) return;
         // Exit after turn/start was acknowledged means turn/completed will
@@ -911,6 +927,14 @@ export class CodexAppServerProvider implements ModelProvider {
     );
     threadId = openedThread.threadId;
     session.providerThreadId = threadId;
+    // Sub-agents run on their own threads, which no binding claims.
+    const onChildTurn = (method: string) => (childParams: unknown) => {
+      if (closed) return;
+      for (const event of backgroundTasks.observeChildThread(method, childParams)) sink.push(event);
+    };
+    const unfollowChildTurns = [Notify.turnStarted, Notify.turnCompleted].map((method) =>
+      this.appServerManager.onNotification(method, onChildTurn(method)),
+    );
 
     const sourceRuntime: CodexTurnRuntime = {
       ownerSessionId: params.sessionId,
@@ -1395,6 +1419,7 @@ export class CodexAppServerProvider implements ModelProvider {
       await dispatcher.waitForIdle();
       await turnCoordinator.waitForIdle();
       closed = true;
+      for (const unfollow of unfollowChildTurns) unfollow();
       if (threadId) await this.appServerManager.unsubscribe(threadId);
       sink.end();
     };
