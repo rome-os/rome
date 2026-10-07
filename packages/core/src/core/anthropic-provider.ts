@@ -53,6 +53,7 @@ import {
 } from "./anthropic-auth-revoked.js";
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
+import { BackgroundTaskTracker } from "./background-tasks.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { echoedSendIds, SdkTurnProjection } from "./sdk-turn-projection.js";
 import {
@@ -533,6 +534,8 @@ export class AnthropicProvider implements ModelProvider {
     // Uuids minted for sends without an inputId (forks, titles). Rome issued
     // no id for them, so their replay reports no input status.
     const mintedIds = new Set<string>();
+    // The session's background tasks, followed between turns as well.
+    const backgroundTasks = new BackgroundTaskTracker();
     // A cancelled first turn can leave a user-only transcript that is not
     // resumable. Its id is still reserved by the CLI, so don't reuse it.
     const sdkSessionId =
@@ -684,6 +687,7 @@ export class AnthropicProvider implements ModelProvider {
       }
       try {
         for await (const message of q) {
+          backgroundTasks.observe(message);
           for (const event of projection.before(message)) {
             // A send the SDK names in its echo has been picked up.
             const named = event.type === "model_turn_answers" ? event.added : event.answers;
@@ -996,6 +1000,7 @@ export class AnthropicProvider implements ModelProvider {
       } finally {
         localTurnEvents.end();
         closed = true;
+        backgroundTasks.reset();
       }
     })();
     const events = mergeModelSessionEvents(providerEvents, localTurnEvents.iter());
@@ -1132,6 +1137,9 @@ export class AnthropicProvider implements ModelProvider {
             });
           },
         };
+      },
+      onBackgroundTasks(listener) {
+        return backgroundTasks.subscribe(listener);
       },
       async interrupt(reason?: string): Promise<void> {
         log.info("ModelSession interrupt requested", { reason });

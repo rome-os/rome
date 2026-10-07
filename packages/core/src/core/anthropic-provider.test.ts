@@ -278,6 +278,54 @@ describe("AnthropicProvider", () => {
       await session.close();
     });
 
+    it("follows background tasks between turns and empties them on close", async () => {
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield result("DONE", [first.uuid], "human");
+        // No Rome turn is open from here.
+        yield {
+          type: "system",
+          subtype: "background_tasks_changed",
+          tasks: [
+            { task_id: "b1", task_type: "local_bash", description: "sleep 900" },
+            { task_id: "w1", task_type: "monitor", description: "watcher", ambient: true },
+          ],
+        };
+        yield {
+          type: "system",
+          subtype: "task_notification",
+          task_id: "b0",
+          status: "stopped",
+          reason: "worker_restart",
+          output_file: "",
+          summary: "orphaned",
+        };
+        await sent();
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const changes: string[][] = [];
+      const ends: unknown[] = [];
+      session.onBackgroundTasks?.({
+        onChange: (tasks) => changes.push(tasks.map((task) => task.id)),
+        onEnd: (end) => ends.push(end),
+      });
+      await session.sendUserInput({ text: "Start it.", inputId: a });
+      const events = session.events[Symbol.asyncIterator]();
+      const drained = (async () => {
+        while (!(await events.next()).done);
+      })();
+      await rs.waitFor(() => expect(ends).toHaveLength(1));
+      expect(changes).toEqual([["b1"]]);
+      expect(ends).toEqual([
+        { id: "b0", status: "stopped", reason: "worker_restart", summary: "orphaned" },
+      ]);
+      await session.close();
+      await drained;
+      expect(changes).toEqual([["b1"], []]);
+    });
+
     it("reports a resumed session's empty notification result as its own turn (#510)", async () => {
       scripted(async function* (sent) {
         const prompt = await sent();
