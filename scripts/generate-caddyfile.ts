@@ -22,6 +22,7 @@ import {
 } from "../packages/core/src/lib/runtime-config.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../packages/core/src/lib/public-access-config.js";
@@ -35,9 +36,9 @@ const GATEWAY_DIR = "/etc/caddy/static";
 function readPublicAccessConfig(): PublicAccessConfig {
   try {
     const sqlite = new Database(SQLITE_PATH, { readonly: true });
-    const row = sqlite.prepare("SELECT value FROM settings WHERE key = ?").get("publicAccess") as
-      | { value: string }
-      | undefined;
+    const row = sqlite
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(PUBLIC_ACCESS_SETTING_KEY) as { value: string } | undefined;
     sqlite.close();
 
     if (row) {
