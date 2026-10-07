@@ -252,4 +252,37 @@ describe("CodexBackgroundTaskTracker", () => {
       tracker.observeChildThread(Notify.turnStarted, { threadId: "child", turn: { id: "c" } }),
     ).toEqual([]);
   });
+
+  it("counts each activity item once, though it arrives as both item edges", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    const [, completed] = subAgent("started", "child", "turn-1");
+    const started = [Notify.itemStarted, completed] as const;
+    expect(run(tracker, [started])).toEqual([]);
+    // The child fails between the spawn item's two edges.
+    const child = (method: string, turn: Record<string, unknown>) =>
+      tracker.observeChildThread(method, { threadId: "child", turn });
+    child(Notify.turnStarted, { id: "c-1" });
+    child(Notify.turnCompleted, { id: "c-1", status: "failed" });
+    expect(run(tracker, [subAgent("started", "child", "turn-1"), turnCompleted("turn-1")])).toEqual(
+      [],
+    );
+    expect(tracker.current).toEqual([]);
+  });
+
+  it("keeps a restarted sub-agent when its previous turn's completion arrives late", () => {
+    const tracker = new CodexBackgroundTaskTracker();
+    run(tracker, [subAgent("started", "child", "turn-1")]);
+    const child = (method: string, turn: Record<string, unknown>) =>
+      tracker.observeChildThread(method, { threadId: "child", turn }).map(view);
+    child(Notify.turnStarted, { id: "c-1" });
+    child(Notify.turnCompleted, { id: "c-1", status: "completed" });
+    run(tracker, [turnCompleted("turn-1")]);
+    expect(child(Notify.turnStarted, { id: "c-2" })).toEqual(["tasks [child:agent]"]);
+    expect(run(tracker, [subAgent("completed", "child", "turn-1")])).toEqual([]);
+    expect(child(Notify.turnCompleted, { id: "c-1", status: "completed" })).toEqual([]);
+    expect(child(Notify.turnCompleted, { id: "c-2", status: "completed" })).toEqual([
+      "ended child completed",
+      "tasks []",
+    ]);
+  });
 });

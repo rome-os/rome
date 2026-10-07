@@ -17,6 +17,15 @@ import {
 
 const log = createLogger("codex-background-tasks");
 
+interface Child {
+  description: string;
+  // The child turn running now, once one was seen.
+  turnId: string | null;
+  // Once a child turn was seen, the child's own turns decide whether it
+  // runs, and activity items, which can arrive late, no longer end it.
+  sawTurn: boolean;
+}
+
 interface OpenWork {
   kind: ModelBackgroundTaskKind;
   description: string;
@@ -34,13 +43,17 @@ interface OpenWork {
 //   starts another turn on a child that already finished, but its
 //   `interacted` item is the same one `send_message` sends without starting a
 //   turn, so the child's own `turn/started` and `turn/completed` decide. A
-//   `completed` or `interrupted` activity item also ends it.
+//   `completed` or `interrupted` activity item ends it only until one of its
+//   turns was seen, since a late one can name a turn before the current one.
+//   Each activity item arrives as both `item/started` and `item/completed`
+//   and counts once.
 // Work becomes a background task when the turn that started it completes
 // with it still running. Codex starts no turn for a finished task, so an end
 // reaches the model only if it checks on the task in a later turn.
 export class CodexBackgroundTaskTracker {
   private readonly open = new Map<string, OpenWork>();
-  private readonly children = new Map<string, string>();
+  private readonly children = new Map<string, Child>();
+  private readonly seenActivities = new Set<string>();
   private readonly ignoredTurns = new Set<string>();
   private turnId: string | null = null;
   private tasks: readonly ModelBackgroundTask[] = [];
@@ -101,11 +114,19 @@ export class CodexBackgroundTaskTracker {
   observeChildThread(method: string, params: unknown): ModelBackgroundTaskEvent[] {
     const childId = (params as { threadId?: unknown } | undefined)?.threadId;
     if (typeof childId !== "string") return [];
-    const description = this.children.get(childId);
-    if (description === undefined) return [];
-    if (method === Notify.turnStarted) return this.childRunning(childId, description);
+    const child = this.children.get(childId);
+    if (child === undefined) return [];
+    if (method === Notify.turnStarted) {
+      child.turnId = (params as TurnStartedNotification).turn?.id ?? null;
+      child.sawTurn = true;
+      return this.childRunning(childId, child.description);
+    }
     if (method === Notify.turnCompleted) {
-      const status = (params as TurnCompletedNotification).turn?.status;
+      const turn = (params as TurnCompletedNotification).turn;
+      if (child.turnId !== null && turn?.id !== child.turnId) return [];
+      child.turnId = null;
+      child.sawTurn = true;
+      const status = turn?.status;
       return this.end(childId, {
         id: childId,
         status: childTurnEndStatus(status),
@@ -131,17 +152,22 @@ export class CodexBackgroundTaskTracker {
 
   private onSubAgentActivity(item: GenericThreadItem, turnId: string): ModelBackgroundTaskEvent[] {
     const agentThreadId = typeof item.agentThreadId === "string" ? item.agentThreadId : undefined;
-    if (!agentThreadId) return [];
+    if (!agentThreadId || this.seenActivities.has(item.id)) return [];
+    this.seenActivities.add(item.id);
     const kind = item.kind;
     if (kind === "started") {
+      if (this.children.has(agentThreadId)) return [];
       const agentPath = typeof item.agentPath === "string" ? item.agentPath : agentThreadId;
-      this.children.set(agentThreadId, agentPath);
-      if (!this.open.has(agentThreadId) && !this.isTask(agentThreadId)) {
-        this.open.set(agentThreadId, agentWork(agentPath, turnId));
-      }
+      this.children.set(agentThreadId, { description: agentPath, turnId: null, sawTurn: false });
+      // A spawn starts the child's first turn, which may have begun before
+      // this item made the child known.
+      this.open.set(agentThreadId, agentWork(agentPath, turnId));
       return [];
     }
-    if (kind === "completed" || kind === "interrupted") {
+    if (
+      (kind === "completed" || kind === "interrupted") &&
+      !this.children.get(agentThreadId)?.sawTurn
+    ) {
       return this.end(agentThreadId, {
         id: agentThreadId,
         status: kind === "completed" ? "completed" : "interrupted",
