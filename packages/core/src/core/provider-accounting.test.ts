@@ -5,18 +5,17 @@ import { buildAgentAccounting, calculateImpliedCostUsd } from "./provider-accoun
 describe("provider-accounting", () => {
   // A model without a pricing rule records no cost at all, and the session
   // shows "API cost unknown". Adding a selectable model must add its price.
-  it.each(Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS))(
-    "prices selectable model $id ($providerId $model)",
-    ({ providerId, model }) => {
-      const cost = calculateImpliedCostUsd(providerId, model, {
-        inputTokens: 1_000_000,
-        outputTokens: 1_000_000,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      });
-      expect(cost).toBeGreaterThan(0);
-    },
-  );
+  it.each(
+    Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS),
+  )("prices selectable model $id ($providerId $model)", ({ providerId, model }) => {
+    const cost = calculateImpliedCostUsd(providerId, model, {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(cost).toBeGreaterThan(0);
+  });
 
   it("calculates Anthropic Fable 5.1 costs using cache read and 5-minute cache write rates", () => {
     const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-fable-5-1[1m]", {
