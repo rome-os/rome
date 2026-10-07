@@ -471,6 +471,42 @@ describe("ActionEngine", () => {
         children[1].completeNext();
       });
 
+      it("hands a queued root the warm worker, both when it becomes ready and when it returns", async () => {
+        const registry = new ActionRegistryImpl([]);
+        registry.register(buildAction("root"));
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          maxWorkerProcesses: 1,
+          actionWorkerFork,
+          clock: new FakeClock(),
+        });
+
+        // The starting warm worker fills the cap, so the root waits for it
+        // rather than counting it as busy or forking past the cap.
+        engine.startWorkerWarmPool();
+        const first = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(actionMessages(children[0])).toHaveLength(0);
+
+        children[0].emit("message", { type: "ready" });
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+
+        const second = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        children[0].completeNext();
+        await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(2));
+        children[0].completeNext();
+        await expect(second).resolves.toEqual({ status: "ok", data: "root" });
+
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await engine.stopWorkerWarmPool();
+      });
+
       it("still fails a nested delegation at once while roots queue", async () => {
         const { engine, children } = createQueueingEngine(1);
 

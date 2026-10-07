@@ -51,7 +51,9 @@ Future diffs must respect:
 
 The decision above failed every call at the worker cap, and it stands for nested calls and for any root whose caller may hold a worker. A root run that opts into `whenWorkersBusy: "queue"` waits instead. It waits in arrival order for a slot, and it fails with the same capacity error once a ten-minute deadline passes.
 
-Three callers opt in, because none of them holds a worker while it waits. A routine fire starts from the routine engine in main. An app's `runAction` outside any execution starts from app code in main, such as an API handler. A detached dispatch counts as accepted once it joins the queue, so a worker that dispatches never waits on capacity. Agent tool calls stay fail-fast. An agent session lives in main, but the `summon` or `send_message` that drives its turn usually holds a worker, so a queued tool call could wait on the slot its own ancestor occupies.
+Three callers opt in, because no worker waits on any of them. A routine fire starts from the routine engine in main. An app API request from outside the instance (an external webhook, a relay replay, a browser session) gets an app context whose `runAction` queues. A detached dispatch counts as accepted once it joins the queue, so a worker that dispatches never waits on capacity.
+
+Every other caller stays fail-fast. An agent session lives in main, but the `summon` or `send_message` that drives its turn usually holds a worker, so a queued tool call could wait on the slot its own ancestor occupies. The same holds for app code that runs during such a turn, such as turn middleware, and for a loopback API request, which can come from the agent itself. A missing execution store does not prove independence, because main clears that store at every worker ingress, so the opt-in is set where the caller is known rather than inferred from ambient context.
 
 Queued roots never take the last two slots. Those stay with fail-fast callers, so a backlog of background roots cannot fail every agent tool call and interactive turn until it drains.
 

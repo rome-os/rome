@@ -514,6 +514,51 @@ export function createApiHandler(ctx) {
     });
   });
 
+  it.each([
+    { label: "an external webhook", caller: { kind: "anonymous" }, expected: "queue" },
+    // A loopback caller can be an agent whose turn a worker drives.
+    {
+      label: "a loopback caller",
+      caller: { kind: "guardian", userId: "g", via: "loopback" },
+      expected: "fail",
+    },
+  ] as const)("an app API request from $label gets whenWorkersBusy $expected", async ({
+    caller,
+    expected,
+  }) => {
+    const apiEntryPath = join(await tempDir(), "index.js");
+    await writeFile(
+      apiEntryPath,
+      `
+export function createApiHandler(ctx) {
+  return { handle: async () => { await ctx.runAction("probe", {}); return new Response("ok"); } };
+}
+`,
+      "utf-8",
+    );
+    const run = rs.fn(async () => ({ status: "ok", data: null }));
+    const app = resolvedApp("busy-probe-app", { apiEntryPath });
+    await new AppApiDispatcher(catalogFor(app), {
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: { run } as unknown as ActionEngine,
+      repositories: createRepositories(),
+    }).dispatch(app.appId, {
+      method: "POST",
+      path: ["webhook"],
+      headers: {},
+      query: new URLSearchParams(),
+      caller,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      "probe",
+      {},
+      expect.objectContaining({ whenWorkersBusy: expected }),
+      undefined,
+      undefined,
+    );
+  });
+
   async function tempDir(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "rome-app-runtime-context-"));
     tempDirs.push(dir);
@@ -574,7 +619,12 @@ describe("runAction invocation port", () => {
     expect(err).toMatchObject({ actionName: "nope", code: "not_found" });
   });
 
-  it("queues a main-process call for a worker instead of failing on a busy pool", async () => {
+  it.each([
+    // A shared app context also serves code a waiting worker depends on, such
+    // as turn middleware during a summon-driven turn, so it fails fast.
+    { label: "fails fast by default", option: undefined, expected: "fail" },
+    { label: "queues when built for an independent caller", option: "queue", expected: "queue" },
+  ] as const)("$label when every worker is busy", async ({ option, expected }) => {
     const engine = new ActionEngine(new ActionRegistryImpl([]));
     const run = rs.spyOn(engine, "run").mockResolvedValue({ status: "ok", data: null });
     const context = createRomeAppContext(resolvedApp("invoker-app"), {
@@ -582,6 +632,7 @@ describe("runAction invocation port", () => {
       db: {} as RomeAppRuntimeServices["db"],
       actionEngine: engine,
       repositories: createRepositories(),
+      whenWorkersBusy: option,
     });
 
     await context.runAction("publish_event", { name: "x.y" });
@@ -589,7 +640,7 @@ describe("runAction invocation port", () => {
     expect(run).toHaveBeenCalledWith(
       "publish_event",
       { name: "x.y" },
-      expect.objectContaining({ initiator: "app:invoker-app", whenWorkersBusy: "queue" }),
+      expect.objectContaining({ initiator: "app:invoker-app", whenWorkersBusy: expected }),
       undefined,
       undefined,
     );

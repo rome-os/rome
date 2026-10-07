@@ -155,9 +155,10 @@ export interface ActionRunContext {
    * `"queue"` waits in FIFO order for a slot, then throws that error if none
    * opens within the engine's queue deadline. Queue only from a caller that
    * holds no action worker and waits on no caller that does — a routine fire,
-   * an app's main-process call, a detached dispatch. A worker-held caller that
-   * queues can wait on its own slot. Read on the root only and never inherited
-   * by nested calls, which always fail fast. */
+   * an external app API request, a detached dispatch. A missing execution
+   * store does not prove that, since worker ingress clears it. A worker-held
+   * caller that queues can wait on its own slot. Read on the root only and
+   * never inherited by nested calls, which always fail fast. */
   whenWorkersBusy?: "fail" | "queue";
   executionId?: string;
   rootExecutionId?: string;
