@@ -227,8 +227,11 @@ function useRelocated(element: ReactNode, host: HTMLElement | null) {
   // before the subtree's own layout effects measure it.
   const placeholder = useCallback(
     (inline: HTMLElement | null) => {
+      // A null call is the placeholder detaching. The unmount cleanup below
+      // owns removal, so placing the node here would re-attach it to the bar.
+      if (!inline) return;
       const target = host ?? inline;
-      if (!target || node.parentNode === target) return;
+      if (node.parentNode === target) return;
       target.appendChild(node);
       const last = focus.last;
       const lost = document.activeElement === null || document.activeElement === document.body;

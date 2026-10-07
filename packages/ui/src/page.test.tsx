@@ -464,9 +464,22 @@ describe("PageTopBar", () => {
         <ExamplePage />
       </InShell>,
     );
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      rerender(<InShell />);
+      rerender(
+        <InShell>
+          <ExamplePage />
+        </InShell>,
+      );
+    }
     rerender(<InShell />);
 
-    expect(screen.getByTestId("bar").textContent).toBe("Rome");
+    const bar = screen.getByTestId("bar");
+    expect(bar.textContent).toBe("Rome");
+    // The nav, title and action hosts hold nothing a header left behind.
+    const hosts = bar.querySelectorAll('[data-slot="page-top-bar"] > div');
+    expect(hosts).toHaveLength(3);
+    for (const host of hosts) expect(host.childNodes).toHaveLength(0);
   });
 
   it("renders every part in the page alone outside a provider", () => {
