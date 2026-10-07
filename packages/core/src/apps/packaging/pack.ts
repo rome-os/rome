@@ -310,14 +310,21 @@ export function runPnpm(
     const streams = [child.stdout, child.stderr].filter(
       (stream): stream is NonNullable<typeof stream> => stream !== null,
     );
-    const capture = (sink: NodeJS.WriteStream) => (chunk: string) => {
-      sink.write(chunk);
+    const capture = (chunk: string) => {
       output = (output + chunk).slice(-PNPM_OUTPUT_BUFFER_CHARS);
     };
     // setEncoding decodes across chunk boundaries, so multi-byte characters
-    // split between two chunks survive.
-    child.stdout?.setEncoding("utf8").on("data", capture(process.stdout));
-    child.stderr?.setEncoding("utf8").on("data", capture(process.stderr));
+    // split between two chunks survive. `pipe` forwards with backpressure, so
+    // a slow log sink slows pnpm instead of queueing its output in memory.
+    for (const [stream, sink] of [
+      [child.stdout, process.stdout],
+      [child.stderr, process.stderr],
+    ] as const) {
+      if (!stream) continue;
+      stream.setEncoding("utf8");
+      stream.on("data", capture);
+      stream.pipe(sink, { end: false });
+    }
 
     let settled = false;
     const settle = (finish: () => void) => {
@@ -334,7 +341,10 @@ export function runPnpm(
       const command = `pnpm ${args.join(" ")}`;
       const finish = () =>
         settle(() => {
-          for (const stream of streams) stream.destroy();
+          for (const stream of streams) {
+            stream.unpipe();
+            stream.destroy();
+          }
           if (timedOut) {
             rejectPromise(
               new Error(
@@ -380,8 +390,16 @@ export function runPnpm(
   });
 }
 
+// The tail is persisted to the lockfile and sent to telemetry, so strip the
+// credentials a registry URL or an `.npmrc` echo can carry.
+function redactSecrets(text: string): string {
+  return text
+    .replace(/(\/\/)[^/@\s]+@/g, "$1***@")
+    .replace(/(_auth(?:Token)?\s*=\s*)\S+/gi, "$1***");
+}
+
 function formatOutputTail(output: string): string {
-  const lines = stripVTControlCharacters(output)
+  const lines = redactSecrets(stripVTControlCharacters(output))
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter((line) => line.length > 0);

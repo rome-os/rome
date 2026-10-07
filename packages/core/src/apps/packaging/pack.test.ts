@@ -792,6 +792,22 @@ describe("runPnpm", () => {
     expect(message).toContain("\u2715 failed");
   });
 
+  it("redacts credentials from the tail", async () => {
+    fakePnpm(
+      [
+        "echo 'GET https://user:s3cret@registry.example.com/x: 401'",
+        "echo '//registry.example.com/:_authToken=npm_abc123'",
+        "exit 1",
+      ].join("\n"),
+    );
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toContain("https://***@registry.example.com/x: 401");
+    expect(message).toContain("_authToken=***");
+    expect(message).not.toContain("s3cret");
+    expect(message).not.toContain("npm_abc123");
+  });
+
   it("leaves the message unchanged when pnpm printed nothing", async () => {
     fakePnpm("exit 2");
     const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)

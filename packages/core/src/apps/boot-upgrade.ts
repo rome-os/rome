@@ -83,7 +83,7 @@ export interface FirstPartyBootFailure {
   appId: string;
   /** Message of the last attempt, including the tail of pnpm's output when pnpm failed. */
   error: string;
-  /** Bundle still served from the prior install, or null when the app is absent. */
+  /** Hash of the last successful install still on disk (not loaded while the app is `failed`), or null when never installed. */
   priorHash: string | null;
 }
 
