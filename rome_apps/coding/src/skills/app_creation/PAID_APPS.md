@@ -44,7 +44,7 @@ favorRequirement:
       from: $.pack            # JSONPath into the action args; a bare key is rejected
 ```
 
-- `index.ts` must export an `inputSchema` covering every arg the API sends (`purchaseId`, `pack`). Without it the price never registers with Rome Cloud (the sync error is only logged) and checkout fails.
+- The `Action` returned by `createAction()` must include an `inputSchema` that covers every arg the API sends (`purchaseId`, `pack`). See [`REFERENCE.md` → Actions](./REFERENCE.md#actions-createactionconfig-deps). A separate `export const inputSchema` is not read. Without the schema the price never registers with Rome Cloud (the sync error is only logged), and checkout fails.
 - **One action per price.** Use a separate action for each tier or promotional price. Never let the browser send a price or a quantity. Keep the pack definitions on the server.
 - **Create the purchase row first.** The API handler stores `{ id, owner, pack, status: "awaiting_payment" }`, then calls:
 
@@ -63,7 +63,17 @@ favorRequirement:
   - `queued`: credit the purchase only if `request.status === "settled"`.
   - `declined`: mark the purchase declined.
   - `error` with `visitor_auth_required` or `visitor_favor_auth_required`: return `visitorAuthRequired()`. Any other error leaves the purchase uncredited and retryable.
-- **The paid action settles only favor-dispatched runs.** `visibility: explicit` does not stop exact-name agent allowlists, routines, or `ctx.runAction` from running it, and those paths don't charge. Read `getCurrentActionContext()?.sharedContext.favorActionRequestId`. If it is missing, return an error and change nothing. Otherwise settle only the purchase `args.purchaseId` that is still `awaiting_payment` and whose stored request id is unset or equal to it; the dispatcher can run before the API handler stores the id.
+- **The paid action settles only favor-dispatched runs.** `visibility: explicit` does not stop exact-name agent allowlists, routines, or `ctx.runAction` from running it, and those paths don't charge. Nested runs inherit `sharedContext`, so also require the id to match the current execution. If the check fails, return an error and change nothing:
+
+  ```ts
+  const run = getCurrentActionContext();
+  const favorId = run?.sharedContext?.favorActionRequestId;
+  if (typeof favorId !== "string" || run?.executionId !== favorId) {
+    return { status: "error", error: "not_a_favor_dispatch" };
+  }
+  ```
+
+  Then settle only the purchase `args.purchaseId` that is still `awaiting_payment` and whose stored request id is unset or equal to it; the dispatcher can run before the API handler stores the id.
 - **Settle idempotently from both sides.** The paid action settles with a conditional update. A `POST /purchases/:id/sync` route that the return page calls re-sends the *same* `requestAction` (same idempotency key) and settles if it finds the request settled. Whichever path runs first grants the credit, and the other does nothing. A return URL alone never grants credit.
 - After settlement, resume any work that was skipped for quota. Don't just change the number shown in the UI.
 - Owner previews of the paid UI must not create orders or charge anyone.
