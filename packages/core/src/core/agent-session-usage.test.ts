@@ -18,6 +18,7 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import type { TurnMiddlewareChain } from "./turn-middleware.js";
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -39,6 +40,7 @@ describe("AgentSession turn usage", () => {
   let providerTurnId: string | undefined;
   let forkable: boolean;
   let funding: UsageFunding;
+  let beforeModelDispatch: (() => Promise<void>) | undefined;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -61,6 +63,7 @@ describe("AgentSession turn usage", () => {
     providerTurnId = undefined;
     forkable = false;
     funding = "byok";
+    beforeModelDispatch = undefined;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
@@ -89,6 +92,14 @@ describe("AgentSession turn usage", () => {
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
+    const turnMiddleware: TurnMiddlewareChain = {
+      loadFromCatalog: async () => [],
+      run: async (_ctx, terminal) => {
+        await beforeModelDispatch?.();
+        await terminal();
+      },
+      size: () => 1,
+    };
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
@@ -103,6 +114,7 @@ describe("AgentSession turn usage", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
       },
       { keepAliveAcrossTurns: true },
@@ -231,6 +243,34 @@ describe("AgentSession turn usage", () => {
     await drain(second.events);
 
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
+  });
+
+  it("records funding from the payer that dispatches after turn preparation", async () => {
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let preparationStarted!: () => void;
+    const preparationStartedPromise = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    beforeModelDispatch = async () => {
+      preparationStarted();
+      await preparationGate;
+    };
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+
+    const session = await manager.acquire(key);
+    const turn = session.sendTurn({ prompt: "prepare, then send" });
+    await preparationStartedPromise;
+    funding = "rome_credits";
+    releasePreparation();
+    await drain(turn.events);
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.funding).toBe("rome_credits");
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {

@@ -3291,7 +3291,6 @@ class AgentSessionImpl implements AgentSession {
     }
     this.currentSink = sink;
     this.currentTurnId = turnId;
-    sink.funding = this.modelSession.funding;
     this.status = "running";
     this.emitStatus();
 
@@ -3437,6 +3436,7 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
+            sink.funding = this.modelSession.funding;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

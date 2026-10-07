@@ -135,8 +135,10 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
 
     const [status, usage] = await Promise.allSettled([probes.codexStatus(), probes.codexUsage()]);
     if (status.status === "fulfilled") {
+      const previousCodexLogin = value.codex.loggedIn;
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
+      notifyCodexLoginChanged(previousCodexLogin);
     }
     if (usage.status === "fulfilled" && usage.value && !usage.value.error) {
       value.codex.usage = usage.value;
@@ -167,13 +169,11 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       return { codex: { ...value.codex }, claude: { ...value.claude } };
     },
     async refresh(provider) {
-      const previousCodexLogin = value.codex.loggedIn;
       if (provider) {
         await refreshProviderLocked(provider);
       } else {
         await Promise.all([refreshProviderLocked("openai"), refreshProviderLocked("anthropic")]);
       }
-      notifyCodexLoginChanged(previousCodexLogin);
       return state.get();
     },
     async markAuthRevoked(provider) {

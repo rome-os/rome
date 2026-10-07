@@ -109,6 +109,36 @@ describe("AIToolState", () => {
     expect(onCodexLoginChanged).toHaveBeenCalledTimes(2);
   });
 
+  it("notifies a Codex login change before unrelated full-refresh probes settle", async () => {
+    let releaseClaude!: () => void;
+    const claudeGate = new Promise<void>((resolve) => {
+      releaseClaude = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        claudeStatus: async () => {
+          await claudeGate;
+          return { loggedIn: true };
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseClaude();
+      await refresh;
+    }
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {
