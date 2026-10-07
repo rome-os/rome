@@ -231,6 +231,7 @@ export interface ModelSessionForkSource {
   sourceSessionId: string;
   sourceProviderThreadId?: string;
   mode: ModelSessionForkMode;
+  configurationMode?: ModelSessionForkParams["configurationMode"];
   sourceCheckpoint?: string;
 }
 

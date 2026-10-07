@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
   rstest: "importActual",
 };
@@ -1111,6 +1114,114 @@ describe("AnthropicProvider", () => {
 
     await forkSession.close();
     await source.close();
+  });
+
+  describe("thinking blocks in forks", () => {
+    const sourceId = "22222222-2222-4222-8222-222222222222";
+    const forkId = "33333333-3333-4333-8333-333333333333";
+    let configDir: string;
+    let cwd: string;
+    let projectDir: string;
+    let previousConfigDir: string | undefined;
+
+    beforeEach(async () => {
+      configDir = await mkdtemp(join(tmpdir(), "rome-claude-config-"));
+      cwd = await realpath(await mkdtemp(join(tmpdir(), "rome-claude-cwd-")));
+      projectDir = join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+      await mkdir(projectDir, { recursive: true });
+      const source = [
+        {
+          type: "user",
+          uuid: "u1",
+          parentUuid: null,
+          sessionId: sourceId,
+          message: { role: "user", content: "hi" },
+        },
+        {
+          type: "assistant",
+          uuid: "t1",
+          parentUuid: "u1",
+          sessionId: sourceId,
+          message: {
+            id: "m1",
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "", signature: "sig" }],
+          },
+        },
+        {
+          type: "assistant",
+          uuid: "a1",
+          parentUuid: "t1",
+          sessionId: sourceId,
+          message: { id: "m1", role: "assistant", content: [{ type: "text", text: "hello" }] },
+        },
+      ];
+      await writeFile(
+        join(projectDir, `${sourceId}.jsonl`),
+        `${source.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      );
+      previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+    });
+
+    afterEach(async () => {
+      if (previousConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousConfigDir;
+      await rm(configDir, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    });
+
+    async function openFork(configurationMode: "isolated" | "exact") {
+      const provider = new AnthropicProvider();
+      const source = await provider.openSession(
+        buildParams({ sessionId: sourceId, isNewSession: true, workingDir: cwd }),
+      );
+      const fork = await source.fork({
+        sessionId: forkId,
+        configurationMode,
+        sourceCheckpoint: "a1",
+      });
+      const forkSession = await fork.open(buildForkOpenParams({ workingDir: cwd }));
+      return { source, forkSession, options: queryMock.mock.calls[1]![0].options };
+    }
+
+    it("resumes an isolated fork from a thinking-free copy and deletes the copy on close", async () => {
+      const { source, forkSession, options } = await openFork("isolated");
+
+      expect(options).toMatchObject({
+        forkSession: true,
+        sessionId: forkId,
+        resumeSessionAt: "a1",
+      });
+      expect(options.resume).not.toBe(sourceId);
+      const copy = await readFile(join(projectDir, `${options.resume}.jsonl`), "utf8");
+      expect(copy).not.toContain("thinking");
+      expect(copy).toContain('"uuid":"a1","parentUuid":"u1"');
+
+      await forkSession.close();
+      await source.close();
+      expect(await readdir(projectDir)).toEqual([`${sourceId}.jsonl`]);
+    });
+
+    it("resumes an exact fork from its source with thinking blocks intact", async () => {
+      const { source, forkSession, options } = await openFork("exact");
+
+      expect(options).toMatchObject({ resume: sourceId, resumeSessionAt: "a1" });
+      expect(await readdir(projectDir)).toEqual([`${sourceId}.jsonl`]);
+
+      await forkSession.close();
+      await source.close();
+    });
+
+    it("resumes an isolated fork from its source when the transcript cannot be copied", async () => {
+      await rm(join(projectDir, `${sourceId}.jsonl`));
+
+      const { source, forkSession, options } = await openFork("isolated");
+
+      expect(options).toMatchObject({ resume: sourceId, resumeSessionAt: "a1" });
+      await forkSession.close();
+      await source.close();
+    });
   });
 
   it("rejects a second open of the same Claude fork descriptor", async () => {

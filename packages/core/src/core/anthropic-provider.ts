@@ -52,6 +52,11 @@ import {
 import { buildAnthropicMcpServers } from "./anthropic-mcp-servers.js";
 import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
+import {
+  type ThinkingFreeTranscript,
+  type WriteThinkingFreeTranscriptParams,
+  writeThinkingFreeTranscript,
+} from "./claude-thinking-free-fork.js";
 import { anthropicFunding } from "../usage/funding.js";
 import type { UsageFunding } from "../usage/events.js";
 import {
@@ -200,6 +205,35 @@ function isToolUseBlock(block: AssistantContentBlock): block is BetaToolUseBlock
 
 function isToolResultParam(block: UserContentBlock): block is BetaToolResultBlockParam {
   return block.type === "tool_result";
+}
+
+/**
+ * Prepares the resume source for a fork that does not keep its source's tool
+ * list. Returns undefined when the fork should resume its source unchanged:
+ * the source holds no thinking block, or its transcript could not be copied.
+ * Claude Code then replays the source as is and retries on the API's
+ * prefix-mismatch 400.
+ */
+async function openThinkingFreeForkSource(
+  params: WriteThinkingFreeTranscriptParams,
+): Promise<ThinkingFreeTranscript | undefined> {
+  try {
+    const transcript = await writeThinkingFreeTranscript(params);
+    if (transcript) {
+      log.info("isolated fork resumes a thinking-free copy of its source", {
+        sourceSessionId: params.sourceSessionId,
+        copySessionId: transcript.sessionId,
+        strippedBlockCount: transcript.strippedBlockCount,
+      });
+    }
+    return transcript;
+  } catch (err) {
+    log.warn("isolated fork resumes its source with thinking blocks", {
+      sourceSessionId: params.sourceSessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
 }
 
 function buildRawUsage(usage: BetaUsageShape): Record<string, unknown> | undefined {
@@ -579,6 +613,23 @@ export class AnthropicProvider implements ModelProvider {
     const sdkSessionId =
       params.isNewSession === false && !params.providerThreadId ? randomUUID() : sessionId;
 
+    const forkSource = params.fork;
+    const forkSourceThreadId = forkSource
+      ? (forkSource.sourceProviderThreadId ?? forkSource.sourceSessionId)
+      : undefined;
+    const thinkingFreeSource =
+      forkSource && forkSourceThreadId && forkSource.configurationMode !== "exact"
+        ? await openThinkingFreeForkSource({
+            sourceSessionId: forkSourceThreadId,
+            cwd: params.workingDir ?? process.cwd(),
+            configDir: queryEnv.CLAUDE_CONFIG_DIR,
+            checkpoint: forkSource.sourceCheckpoint,
+          })
+        : undefined;
+    const forkResumeAt = thinkingFreeSource
+      ? thinkingFreeSource.resumeSessionAt
+      : forkSource?.sourceCheckpoint;
+
     const q = query({
       prompt: inputQueue.iter(),
       options: {
@@ -608,12 +659,10 @@ export class AnthropicProvider implements ModelProvider {
         ...(params.workingDir ? { cwd: params.workingDir } : {}),
         ...(params.fork
           ? {
-              resume: params.fork.sourceProviderThreadId ?? params.fork.sourceSessionId,
+              resume: thinkingFreeSource?.sessionId ?? forkSourceThreadId,
               forkSession: true,
               sessionId,
-              ...(params.fork.sourceCheckpoint
-                ? { resumeSessionAt: params.fork.sourceCheckpoint }
-                : {}),
+              ...(forkResumeAt ? { resumeSessionAt: forkResumeAt } : {}),
             }
           : // Resume only once a real turn has actually written a transcript for
             // this id. `providerThreadId` is captured from the SDK's own
@@ -1162,6 +1211,7 @@ export class AnthropicProvider implements ModelProvider {
                 sourceSessionId,
                 sourceProviderThreadId,
                 mode,
+                configurationMode: forkParams.configurationMode,
                 sourceCheckpoint: forkParams.sourceCheckpoint,
               },
             });
@@ -1189,6 +1239,11 @@ export class AnthropicProvider implements ModelProvider {
           // ignore
         }
         closed = true;
+        await thinkingFreeSource?.dispose().catch((err: unknown) => {
+          log.warn("failed to delete thinking-free fork source", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       },
     };
 
