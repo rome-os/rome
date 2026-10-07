@@ -5,10 +5,14 @@ import {
   type AgentMessagingClient,
   AgentMessagingError,
 } from "../../lib/rome-cloud-agents.js";
+import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected } from "../errors.js";
+import { DrizzleGrantLedger } from "../ledger-db.js";
+import { ConnectionRegistry } from "../registry.js";
 import type { InboundMessage, StreamFault } from "../types.js";
 import {
   createAgentsTalker,
+  makeAgentsDescriptor,
   makeAgentsSetup,
   reviveAgentsProfile,
   toAgentInboundMessage,
@@ -137,6 +141,30 @@ describe("agents channel", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls).toBe(1);
     await talker.stop();
+  });
+
+  it("degrades the grant when Cloud rejects the token, rather than renewing it unchanged", async () => {
+    const client = fakeClient([]);
+    const rejected = new AgentMessagingError("not linked", undefined, "no_token");
+    client.poll = async () => {
+      throw rejected;
+    };
+    client.endpoints = async () => {
+      throw rejected;
+    };
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(createTestDb().db),
+    });
+    registry.register(makeAgentsDescriptor(client));
+    const conn = await registry.connect("agents");
+    await registry.importCredential(
+      conn.id,
+      "cloud",
+      { material: { endpoint: "home-rome" }, expiresAt: "never" },
+      { endpoint: "home-rome" },
+    );
+    await until(() => conn.auth.grants().cloud === "degraded");
+    expect(conn.talk).toBeNull();
   });
 
   it("refuses attachments rather than sending only the text", async () => {

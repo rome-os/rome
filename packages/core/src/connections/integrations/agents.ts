@@ -114,7 +114,14 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
       throw new Error("conferral driven by the connect setup");
     },
     // The instance token is the real credential and Cloud renews nothing here.
-    async renew(cred: Credential): Promise<Credential> {
+    // A token Cloud still refuses needs the guardian, so renewal only confirms
+    // it works; returning it unchanged would rebuild a talker that faults again.
+    async renew(cred: Credential): Promise<Credential | "re-confer"> {
+      try {
+        await client.endpoints();
+      } catch (err) {
+        if (isRejectedToken(err)) return "re-confer";
+      }
       return cred;
     },
     setup: makeAgentsSetup(client),

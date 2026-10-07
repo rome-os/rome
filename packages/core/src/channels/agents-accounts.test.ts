@@ -62,12 +62,16 @@ describe("the agents address book", () => {
     expect(client.calls).toBe(2);
   });
 
-  it("lists no one when Cloud fails, and asks again next time", async () => {
+  it("lists no one when Cloud fails, and asks again only after the read ages", async () => {
+    let now = 0;
     const client = cloud([atlas]);
     client.fail = true;
-    const book = agentsAccounts({ client, isConnected: () => true });
+    const book = agentsAccounts({ client, isConnected: () => true, now: () => now });
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
     client.fail = false;
+    expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
+    expect(client.calls).toBe(1);
+    now = 60_000;
     expect((await book.listAccounts({ limit: 100 })).accounts).toHaveLength(1);
   });
 });

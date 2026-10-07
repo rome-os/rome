@@ -53,12 +53,13 @@ export function agentsAccounts(deps: {
           .map(toAccount)
           .sort((a, b) => compareCodePoints(a.id, b.id)),
       // Every address book is read for every People page, so an unreachable
-      // Cloud lists no agents rather than failing the page.
+      // Cloud lists no agents rather than failing the page. The empty answer
+      // is kept like any other read, so an outage does not hold each page
+      // load for Cloud's timeout.
       (err: unknown) => {
         log.warn("Could not list agent endpoints", {
           error: err instanceof Error ? err.message : String(err),
         });
-        read = null;
         return [];
       },
     );
