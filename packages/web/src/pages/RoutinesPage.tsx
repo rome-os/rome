@@ -928,49 +928,34 @@ function DoneSection({
 }
 
 // "Run now": fires the routine's action immediately — real execution, the same
-// path as a scheduled fire. The button disables while the request is in flight,
-// and when the routine is already running or paused. A run-level failure surfaces
-// on the card via the status badge once the list refetches; a request that never
-// reached the server has nothing to refetch, so it reports through `onError`.
+// path as a scheduled fire. The card owns the in-flight state, since the "⋯"
+// menu's Run now shares it.
 function RunNowButton({
-  routineId,
   label,
   disabled,
-  onError,
+  inFlight,
+  onRun,
 }: {
-  routineId: string;
   label: string;
   disabled: boolean;
-  onError: (message: string) => void;
+  inFlight: boolean;
+  onRun: () => void;
 }) {
   const { t } = useTranslation("routines");
-  const runNow = useRunRoutineNow();
-  const [inFlight, setInFlight] = useState(false);
 
-  const handleRun = async () => {
-    if (inFlight || disabled) return;
-    setInFlight(true);
-    try {
-      await runNow(routineId);
-    } catch {
-      onError(t("errors.runFailed"));
-    } finally {
-      setInFlight(false);
-    }
-  };
-
-  // Hidden on phones so the routine name keeps the row's width. The "⋯" menu
-  // still offers Run now there. StopButton stays inline: the menu has no Stop.
+  // Hidden on phones while idle so the routine name keeps the row's width; the
+  // "⋯" menu offers Run now there. It shows during a run so the spinner confirms
+  // a run started from the menu.
   return (
     <Button
       variant="outline"
       size="sm"
-      onClick={handleRun}
+      onClick={onRun}
       disabled={disabled || inFlight}
       aria-label={
         inFlight ? t("run.loadingLabel", { name: label }) : t("run.ariaLabel", { name: label })
       }
-      className="gap-2 text-muted-foreground max-sm:hidden"
+      className={`gap-2 text-muted-foreground ${inFlight ? "" : "max-sm:hidden"}`}
     >
       {inFlight ? (
         <Spinner size="sm" label={t("run.loadingLabel", { name: label })} />
@@ -1086,12 +1071,21 @@ function RoutineCard({
       : { lead: "next run ", value: nextRel }
     : null;
 
-  const handleMenuRun = async () => {
-    if (!routine.enabled || isStoppable) return;
+  // One in-flight state for the inline button and the menu item, so neither can
+  // start a second run while the first request is pending. The request resolves
+  // only when the run finishes. A run-level failure surfaces on the card via the
+  // status badge once the list refetches; a request that never reached the
+  // server has nothing to refetch, so it reports through `onError`.
+  const [runInFlight, setRunInFlight] = useState(false);
+  const handleRun = async () => {
+    if (runInFlight || !routine.enabled || isStoppable) return;
+    setRunInFlight(true);
     try {
       await runNow(routine.id);
     } catch {
       onError(t("errors.runFailed"));
+    } finally {
+      setRunInFlight(false);
     }
   };
 
@@ -1145,10 +1139,10 @@ function RoutineCard({
           <StopButton routineId={routine.id} label={accessibleName} onError={onError} />
         ) : (
           <RunNowButton
-            routineId={routine.id}
             label={accessibleName}
             disabled={!routine.enabled}
-            onError={onError}
+            inFlight={runInFlight}
+            onRun={handleRun}
           />
         )}
         <Switch
@@ -1166,7 +1160,10 @@ function RoutineCard({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled={!routine.enabled || isStoppable} onSelect={handleMenuRun}>
+            <DropdownMenuItem
+              disabled={!routine.enabled || isStoppable || runInFlight}
+              onSelect={handleRun}
+            >
               {t("run.now")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
