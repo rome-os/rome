@@ -393,8 +393,8 @@ importers:
         specifier: ^13.0.0
         version: 13.0.0
       wechat-bridge:
-        specifier: 0.1.0
-        version: 0.1.0
+        specifier: 0.2.0
+        version: 0.2.0
       ws:
         specifier: ^8.18.0
         version: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -13345,8 +13345,8 @@ packages:
     resolution: {integrity: sha512-/REy6amwPZl44DDzvRCkaI1q1bIiQB0mEFQLUrhz3z2EK91cp3n72rAjUlrTP0zV22HJIUOVHQGPxhFRjxjt+Q==}
     engines: {node: '>=4.0.0'}
 
-  wechat-bridge@0.1.0:
-    resolution: {integrity: sha512-vM1IuAhhQYmUpP7AvWG5WdELSRqnYgukihbM5ldqHDB2rhrht+44JFnpImwuIRzFMSAKFLHTnte2QiA5BK5ZZw==}
+  wechat-bridge@0.2.0:
+    resolution: {integrity: sha512-DUuQAC0QrN1WVrCptUlMkR2AEk6Iwo5SgFxO/tBxCV9nO6lE+Aly+miGF4wGH77SZgIhNuDnmigL7sNCHqEvZA==}
     hasBin: true
 
   whatwg-encoding@3.1.1:
@@ -27081,7 +27081,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  wechat-bridge@0.1.0: {}
+  wechat-bridge@0.2.0: {}
 
   whatwg-encoding@3.1.1:
     dependencies:
