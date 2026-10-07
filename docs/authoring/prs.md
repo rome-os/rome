@@ -50,7 +50,7 @@ When more than one reasonable design existed, name the alternatives and why this
 
 A checklist: `[x]` for what the author verified, `[ ]` for what remains. Name the command or the manual step behind each verified item.
 
-A PR that changes what the dashboard or an app shows attaches screenshots of the changed view at two sizes:
+A PR that changes what the dashboard or an app shows pastes screenshots of the changed view into its description at two sizes. GitHub hosts pasted images outside the repository, so never commit them.
 
 | Size | Viewport | Touch |
 |---|---|---|
