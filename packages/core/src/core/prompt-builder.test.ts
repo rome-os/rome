@@ -230,6 +230,18 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain("`http://127.0.0.1:4141/apps/<appId>` to use a specific app");
   });
 
+  it("asks guardian-facing agents to state a short plan before long-running work", () => {
+    const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
+    const section = prompt.split("# Asking The Guardian For Input\n\n")[1];
+
+    expect(section).toContain("Before you start a long-running task");
+    expect(section).toContain("state your plan, then start without waiting for approval");
+    expect(section).toContain("ASD-STE100 Simplified Technical English");
+
+    const withoutAskTool = new PromptBuilder().build(mainConfig, corePromptOptions);
+    expect(withoutAskTool).not.toContain("Before you start a long-running task");
+  });
+
   it("advertises the globally available Discord CLI to every agent", () => {
     const subAgentConfig: AgentConfig = {
       ...mainConfig,
