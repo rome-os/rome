@@ -105,6 +105,19 @@ describe("skill_review", () => {
     expect(run?.status).toBe("interrupted");
   });
 
+  it("records an error followed by an interrupted turn as interrupted", async () => {
+    seedSession("webchat-session-1", "webchat", 1700000000);
+    const deps = makeDeps([
+      { type: "error", error: "aborted" },
+      { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 },
+    ]);
+
+    await createAction(actionConfig, deps).execute({});
+
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run?.status).toBe("interrupted");
+  });
+
   it("returns early when no webchat sessions exist", async () => {
     const result = await createAction(actionConfig, makeDeps([])).execute({});
 

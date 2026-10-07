@@ -5,7 +5,8 @@ import { STALE_RUN_MS } from "../../lib/run-view.js";
 import { createAppDbSchema } from "../schema.js";
 
 export type RunKind = "dream" | "skill_review";
-export type RunStatus = "running" | "completed" | "interrupted" | "failed";
+/** `queued`: reserved by the page and not yet claimed by an action. */
+export type RunStatus = "queued" | "running" | "completed" | "interrupted" | "failed";
 
 export interface Run {
   id: string;
@@ -57,24 +58,41 @@ export class RunsRepository {
   /**
    * Starts a dream unless one is already running, as one statement so two
    * entry points (the page and the nightly routine) cannot both win. A run
-   * left `running` past the stale window does not block.
+   * left active past the stale window does not block. The page reserves it
+   * `queued` for the action it dispatches to `claim`; an action that runs
+   * straight away reserves it `running`.
    */
-  reserveDream(windowHours: number): { id: string; reserved: boolean } {
+  reserveDream(
+    windowHours: number,
+    status: "queued" | "running",
+  ): { id: string; reserved: boolean } {
     const { runs } = this.tables;
     const id = crypto.randomUUID();
     const now = Date.now();
     const result = this.db.run(sql`
       INSERT INTO ${runs} (id, kind, status, window_hours, started_at)
-      SELECT ${id}, 'dream', 'running', ${windowHours}, ${now}
+      SELECT ${id}, 'dream', ${status}, ${windowHours}, ${now}
       WHERE NOT EXISTS (
         SELECT 1 FROM ${runs}
-        WHERE kind = 'dream' AND status = 'running' AND started_at > ${now - STALE_RUN_MS}
+        WHERE kind = 'dream' AND status IN ('queued', 'running')
+          AND started_at > ${now - STALE_RUN_MS}
       )
     `) as { changes: number };
     if (result.changes > 0) return { id, reserved: true };
     const running = this.latestRunning("dream");
     if (!running) throw new Error("dream reservation lost without a running dream");
     return { id: running.id, reserved: false };
+  }
+
+  /** Moves a queued dream to running. Only one caller can win it. */
+  claim(id: string): boolean {
+    const { runs } = this.tables;
+    const result = this.db
+      .update(runs)
+      .set({ status: "running" })
+      .where(and(eq(runs.id, id), eq(runs.kind, "dream"), eq(runs.status, "queued")))
+      .run() as { changes: number };
+    return result.changes > 0;
   }
 
   finish(
@@ -145,7 +163,7 @@ export class RunsRepository {
     return this.db
       .select()
       .from(runs)
-      .where(and(eq(runs.kind, kind), eq(runs.status, "running")))
+      .where(and(eq(runs.kind, kind), inArray(runs.status, ["queued", "running"])))
       .orderBy(desc(runs.startedAt))
       .limit(1)
       .get() as Run | undefined;

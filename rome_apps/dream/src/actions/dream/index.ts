@@ -92,23 +92,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
     async execute(args): Promise<ActionResult> {
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const runs = createRunsRepository(appContext.db);
-      const requestedRun = typeof args.runId === "string" ? runs.byId(args.runId) : undefined;
-      let runId: string;
-      if (requestedRun?.kind === "dream" && requestedRun.status === "running") {
-        runId = requestedRun.id;
-      } else {
-        const reservation = runs.reserveDream(windowHours);
-        if (!reservation.reserved) {
-          // Two agents editing the same memory and journal would overwrite
-          // each other, so a dream that overlaps another one stands down.
-          log.info("dream skipped, another dream is running", { runId: reservation.id });
-          return {
-            status: "ok",
-            data: { runId: reservation.id, windowHours, skipped: true, summary: "" },
-          };
-        }
-        runId = reservation.id;
+      // The page reserves a queued run and passes its id, and claiming it is
+      // what makes this the one execution that works on it. Any other caller
+      // reserves its own run. Either way a dream that overlaps another stands
+      // down: two agents editing the same memory and journal would overwrite
+      // each other.
+      const reservation =
+        typeof args.runId === "string"
+          ? { id: args.runId, reserved: runs.claim(args.runId) }
+          : runs.reserveDream(windowHours, "running");
+      if (!reservation.reserved) {
+        log.info("dream skipped, another dream has this run", { runId: reservation.id });
+        return {
+          status: "ok",
+          data: { runId: reservation.id, windowHours, skipped: true, summary: "" },
+        };
       }
+      const runId = reservation.id;
       const recorder = new RunRecorder(runs, runId);
 
       log.info("dream started", { windowHours, runId });
@@ -139,9 +139,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         `7. Write today's journal entry at memory/journal/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${String(now.getUTCDate()).padStart(2, "0")}.md`,
       ].join("\n");
 
-      let resultContent = "";
       let turnCount = 0;
-      let interrupted = false;
 
       try {
         for await (const msg of agentRunner.run({
@@ -149,18 +147,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
           prompt,
         })) {
           recorder.observe(msg);
-          if (msg.type === "result") {
-            resultContent = msg.content as string;
-          } else if (msg.type === "error") {
-            log.error("dream agent failed", { error: msg.error });
-            runs.finish(runId, { status: "failed", error: msg.error });
-            return { status: "error", error: `Dream agent failed: ${msg.error}` };
-          } else if (msg.type === "text") {
-            turnCount++;
-          } else if (msg.type === "turn_end") {
-            // A stopped turn still emits a (partial) `result` first.
-            interrupted = msg.status === "interrupted";
-          }
+          if (msg.type === "text") turnCount++;
         }
       } catch (err) {
         runs.finish(runId, {
@@ -170,10 +157,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         throw err;
       }
 
-      runs.finish(runId, {
-        status: interrupted ? "interrupted" : "completed",
-        summary: resultContent,
-      });
+      runs.finish(runId, recorder.outcome());
+      if (recorder.error !== null) {
+        log.error("dream agent failed", { error: recorder.error });
+        return { status: "error", error: `Dream agent failed: ${recorder.error}` };
+      }
+      const resultContent = recorder.summary;
       log.info("dream completed", { turnCount, resultLength: resultContent.length, runId });
 
       return {

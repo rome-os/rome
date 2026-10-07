@@ -70,8 +70,6 @@ export function createAction(
       // Open an independent session so this review does not pollute the main
       // agent's conversation history. The skill-review agent fetches its own
       // conversation history via get_webchat_conversations.
-      let result = "";
-      let interrupted = false;
       try {
         for await (const msg of agentRunner.run({
           agentName: "skill-review",
@@ -80,16 +78,6 @@ export function createAction(
             `Use get_webchat_conversations with sessionId: "${sessionId}" to fetch the conversation.`,
         })) {
           recorder.observe(msg);
-          if (msg.type === "result") {
-            result = msg.content as string;
-          } else if (msg.type === "error") {
-            log.error("skill-review agent failed", { error: msg.error });
-            runs.finish(runId, { status: "failed", error: msg.error });
-            return { status: "error", error: `Skill-review agent failed: ${msg.error}` };
-          } else if (msg.type === "turn_end") {
-            // A stopped turn still emits a (partial) `result` first.
-            interrupted = msg.status === "interrupted";
-          }
         }
       } catch (err) {
         runs.finish(runId, {
@@ -99,7 +87,12 @@ export function createAction(
         throw err;
       }
 
-      runs.finish(runId, { status: interrupted ? "interrupted" : "completed", summary: result });
+      runs.finish(runId, recorder.outcome());
+      if (recorder.error !== null) {
+        log.error("skill-review agent failed", { error: recorder.error });
+        return { status: "error", error: `Skill-review agent failed: ${recorder.error}` };
+      }
+      const result = recorder.summary;
       return { status: "ok", data: { runId, result } };
     },
   };

@@ -163,7 +163,7 @@ describe("dream API", () => {
     const { runId } = (await res.json()) as { runId: string };
 
     expect(res.status).toBe(202);
-    expect(createRunsRepository(appDb()).byId(runId)?.status).toBe("running");
+    expect(createRunsRepository(appDb()).byId(runId)?.status).toBe("queued");
     expect(runAction).toHaveBeenCalledWith("dream:dream", { runId }, { detached: true });
   });
 

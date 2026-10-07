@@ -213,7 +213,7 @@ describe("dream", () => {
 
   it("reports into a run the page already created", async () => {
     const runs = createRunsRepository(appDb());
-    const runId = runs.start({ kind: "dream", windowHours: 24 });
+    const { id: runId } = runs.reserveDream(24, "queued");
     const deps = makeDeps([{ type: "result", content: "done" }]);
 
     const result = await createAction(actionConfig, deps).execute({ runId });
@@ -253,6 +253,37 @@ describe("dream", () => {
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
     expect((result.data as { runId: string }).runId).not.toBe(stale);
+  });
+
+  it("runs a reserved dream once when two invocations carry its runId", async () => {
+    const runs = createRunsRepository(appDb());
+    const { id: runId } = runs.reserveDream(24, "queued");
+    const run = rs.fn(async function* () {
+      yield { type: "result", content: "done" };
+    });
+    const deps = makeDeps([]);
+    (deps.agentRunner as unknown as { run: unknown }).run = run;
+    const action = createAction(actionConfig, deps);
+
+    const results = await Promise.all([action.execute({ runId }), action.execute({ runId })]);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(
+      results.filter((r) => r.status === "ok" && (r.data as { skipped?: boolean }).skipped),
+    ).toHaveLength(1);
+    expect(runs.byId(runId)?.status).toBe("completed");
+  });
+
+  it("records an error followed by an interrupted turn as interrupted", async () => {
+    const deps = makeDeps([
+      { type: "error", error: "aborted" },
+      { type: "turn_end", turnId: "t", status: "interrupted", durationMs: 5 },
+    ]);
+
+    await createAction(actionConfig, deps).execute({});
+
+    const [run] = createRunsRepository(appDb()).listRecent({ limit: 1 });
+    expect(run?.status).toBe("interrupted");
   });
 
   it("marks the run interrupted when the agent turn is stopped", async () => {

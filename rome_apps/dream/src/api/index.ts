@@ -45,7 +45,7 @@ class DreamApiHandler implements RomeAppApiHandler {
       if (request.caller.kind !== "guardian") {
         return json({ error: "forbidden" }, { status: 403 });
       }
-      const reservation = runs.reserveDream(24);
+      const reservation = runs.reserveDream(24, "queued");
       if (!reservation.reserved) {
         return json({ error: "already_running", runId: reservation.id }, { status: 409 });
       }

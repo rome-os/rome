@@ -19,7 +19,8 @@ import {
  */
 export const STALE_RUN_MS = 60 * 60 * 1000;
 
-type RunViewStatus = RunStatus | "interrupted";
+/** A queued run shows as running: the page started it and the agent is on its way. */
+type RunViewStatus = Exclude<RunStatus, "queued"> | "interrupted";
 
 interface RunOutcome {
   journal: boolean;
@@ -51,10 +52,8 @@ export interface DreamSchedule {
 }
 
 function viewStatus(run: Run, now: number): RunViewStatus {
-  if (run.status === "running" && now - run.startedAt.getTime() > STALE_RUN_MS) {
-    return "interrupted";
-  }
-  return run.status;
+  if (run.status !== "queued" && run.status !== "running") return run.status;
+  return now - run.startedAt.getTime() > STALE_RUN_MS ? "interrupted" : "running";
 }
 
 function summarizeOutcome(changes: Array<Pick<FileChange, "op" | "path">>): RunOutcome {

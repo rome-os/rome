@@ -12,7 +12,7 @@ export function createAppDbSchema(tablePrefix: string = "dream") {
       id: text("id").primaryKey(),
       /** "dream" | "skill_review" */
       kind: text("kind").notNull(),
-      /** "running" | "completed" | "interrupted" | "failed" */
+      /** "queued" | "running" | "completed" | "interrupted" | "failed" */
       status: text("status").notNull(),
       /** Hours of history a dream reviewed. Null for a skill review. */
       windowHours: integer("window_hours"),
