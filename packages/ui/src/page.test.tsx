@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { type ReactNode, useEffect, useState } from "react";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   Measure,
   Page,
@@ -187,22 +187,71 @@ describe("PageNav", () => {
 function InShell({ children }: { children?: ReactNode }) {
   return (
     <PageTopBarProvider>
-      <div data-testid="bar">
+      <header data-testid="bar">
         <PageTopBarOutlet fallback={<span>Rome</span>} />
-      </div>
+      </header>
       {children}
     </PageTopBarProvider>
   );
 }
 
+function mockViewport(initialPhone: boolean) {
+  let phone = initialPhone;
+  const listeners = new Set<() => void>();
+  rs.spyOn(window, "matchMedia").mockImplementation(
+    () =>
+      ({
+        get matches() {
+          return phone;
+        },
+        addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      }) as unknown as MediaQueryList,
+  );
+  return {
+    resize(nextPhone: boolean) {
+      phone = nextPhone;
+      act(() => {
+        for (const listener of listeners) listener();
+      });
+    },
+  };
+}
+
+function bottomAt(el: Element, bottom: () => number) {
+  rs.spyOn(el, "getBoundingClientRect").mockImplementation(
+    () => ({ bottom: bottom(), top: 0, left: 0, right: 0, width: 0, height: 0 }) as DOMRect,
+  );
+}
+
+let mounts = 0;
+function CountingAction() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    mounts += 1;
+  }, []);
+  return (
+    <button type="button" onClick={() => setCount(count + 1)}>
+      Clicked {count}
+    </button>
+  );
+}
+
 describe("PageTopBar", () => {
+  afterEach(() => {
+    rs.restoreAllMocks();
+    mounts = 0;
+  });
+
   it("shows the fallback while no header holds the bar", () => {
+    mockViewport(true);
     render(<InShell />);
 
     expect(screen.getByTestId("bar").textContent).toBe("Rome");
   });
 
-  it("moves the back link and a lone action into the bar, and keeps the h1 in the page", () => {
+  it("renders the back link and a lone action in the bar on a phone, and keeps the h1 in the page", () => {
+    mockViewport(true);
     render(
       <InShell>
         <ExamplePage />
@@ -215,10 +264,9 @@ describe("PageTopBar", () => {
     expect(bar.querySelector("button")?.textContent).toBe("New routine");
 
     const page = screen.getByTestId("page");
-    const nav = page.querySelector('[data-slot="page-header-nav"]');
-    const actions = page.querySelector('[data-slot="page-actions"]');
-    expect([...(nav?.classList ?? [])]).toContain("max-md:hidden");
-    expect([...(actions?.classList ?? [])]).toContain("max-md:hidden");
+    expect(page.querySelector('[data-slot="page-header-nav"]')).toBeNull();
+    expect(page.querySelector('[data-slot="page-actions"]')).toBeNull();
+    expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
 
     // The bar repeats the title for the eye only, so a reader still meets one h1.
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
@@ -227,7 +275,53 @@ describe("PageTopBar", () => {
     expect(title?.getAttribute("aria-hidden")).toBe("true");
   });
 
+  it("keeps every part in the page at md and wider", () => {
+    mockViewport(false);
+    render(
+      <InShell>
+        <ExamplePage />
+      </InShell>,
+    );
+
+    const bar = screen.getByTestId("bar");
+    expect(bar.querySelector("button")).toBeNull();
+    expect(bar.querySelector('[data-slot="page-top-bar-title"]')).toBeNull();
+    const page = screen.getByTestId("page");
+    expect(page.querySelector('[data-slot="page-header-nav"]')?.textContent).toBe("Apps");
+    expect(page.querySelector('[data-slot="page-actions"] button')?.textContent).toBe(
+      "New routine",
+    );
+  });
+
+  it("mounts a stateful action once, and moves it when the viewport crosses md", () => {
+    const viewport = mockViewport(false);
+    render(
+      <InShell>
+        <PageHeader>
+          <PageHeading>
+            <PageTitle>Keys</PageTitle>
+          </PageHeading>
+          <PageActions>
+            <CountingAction />
+          </PageActions>
+        </PageHeader>
+      </InShell>,
+    );
+
+    expect(mounts).toBe(1);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+
+    viewport.resize(true);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByTestId("bar").querySelector("button")).not.toBeNull();
+
+    viewport.resize(false);
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByTestId("bar").querySelector("button")).toBeNull();
+  });
+
   it("keeps two or more actions in the page, since the bar holds one", () => {
+    mockViewport(true);
     render(
       <InShell>
         <PageHeader>
@@ -246,7 +340,51 @@ describe("PageTopBar", () => {
     expect(screen.getAllByRole("button")).toHaveLength(2);
   });
 
+  it("shows the bar's title once the h1's bottom edge passes the bar header's bottom", () => {
+    mockViewport(true);
+    let headingBottom = 120;
+    let barBottom = 56;
+    rs.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      // Runs the frame at once. Returning 0 marks no frame pending, as the
+      // hook's own reset does once a real frame has run.
+      callback(0);
+      return 0;
+    });
+    rs.spyOn(HTMLHeadingElement.prototype, "getBoundingClientRect").mockImplementation(
+      () => ({ bottom: headingBottom }) as DOMRect,
+    );
+
+    render(
+      <InShell>
+        <ExamplePage />
+      </InShell>,
+    );
+    bottomAt(screen.getByTestId("bar"), () => barBottom);
+    const title = () => screen.getByTestId("bar").querySelector('[data-slot="page-top-bar-title"]');
+
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(title()?.hasAttribute("data-shown")).toBe(false);
+
+    // Covered by the header itself, not by some inner box of it.
+    headingBottom = 56;
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(title()?.hasAttribute("data-shown")).toBe(true);
+
+    // A taller bar moves the boundary without a remount.
+    headingBottom = 70;
+    barBottom = 80;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(title()?.hasAttribute("data-shown")).toBe(true);
+  });
+
   it("gives the bar back to the fallback when the header unmounts", () => {
+    mockViewport(true);
     const { rerender } = render(
       <InShell>
         <ExamplePage />
@@ -258,10 +396,12 @@ describe("PageTopBar", () => {
   });
 
   it("renders every part in the page alone outside a provider", () => {
+    mockViewport(true);
     render(<ExamplePage />);
 
-    const nav = screen.getByTestId("page").querySelector('[data-slot="page-header-nav"]');
-    expect([...(nav?.classList ?? [])]).not.toContain("max-md:hidden");
+    expect(
+      screen.getByTestId("page").querySelector('[data-slot="page-header-nav"]'),
+    ).not.toBeNull();
     expect(screen.getAllByRole("button", { name: "New routine" })).toHaveLength(1);
   });
 });
