@@ -57,6 +57,11 @@ export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbac
     schema: feedbackInputSchema,
     async execute(input): Promise<ActionResult> {
       const context = getCurrentActionContext();
+      // Agents report; installed apps must not open a channel into Rome triage
+      // or spend the agent budget.
+      if (context?.callerAppId && context.callerAppId !== "system") {
+        return { status: "error", error: "app_callers_not_supported" };
+      }
       const outcome = await deps.feedback.send({
         ...input,
         reporter: {
