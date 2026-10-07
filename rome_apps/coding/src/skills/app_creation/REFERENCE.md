@@ -564,6 +564,9 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   public app any surviving header is attacker-controlled. In the web UI,
   `useCaller()` / `getCaller()` from `@rome-os/app-web-sdk` return the same
   identity for UI gating only; enforcement belongs in the API handler.
+  For per-visitor private data, quotas, or favor charges
+  (`favorRequirement` + `ctx.favors.requestAction`), follow
+  [`PAID_APPS.md`](./PAID_APPS.md).
 - `RomeAppContext` — handler-injected context; common fields: `ctx.app.id`,
   `ctx.app.version`, `ctx.log`, `ctx.runAction`, `ctx.db`,
   `ctx.repositories`.
