@@ -4,7 +4,7 @@ Rome ships two kinds of release artifacts: the **runtime Docker image** (the pro
 
 ## Rome runtime image (Docker Hub)
 
-The runtime image is released through [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml), on a `v*` tag push or a weekday schedule. It builds multi-arch (amd64 + arm64) images and publishes to the repository named by `IMAGE_NAME` in that workflow. A stable release uses `vMAJOR.MINOR.PATCH`, and a prerelease appends `-rc.N`.
+The runtime image is released through [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml), on a `v*` tag push, a weekday schedule, or a manual run. It builds multi-arch (amd64 + arm64) images and publishes to the repository named by `IMAGE_NAME` in that workflow. A stable release uses `vMAJOR.MINOR.PATCH`, and a prerelease appends `-rc.N`.
 
 ### Scheduled patch releases
 
@@ -18,9 +18,11 @@ The scheduled run creates an annotated tag with `GITHUB_TOKEN` and publishes it 
 
 Rerunning a scheduled run reuses its original tag. To retry a failed build or publish, rerun the failed jobs. The [tagging contract](#tagging-contract) rejects any attempt to overwrite an image version that already exists.
 
+A manual run follows the same rules. Start it from the workflow's **Run workflow** button on `main`. It bumps the patch version of the latest `main` commit after that commit's CI passes. A run started from any other branch fails without creating a tag.
+
 ### Manual releases
 
-The steps for cutting a manual release — preflight, version choice, the confirmed push, and verification — live in the [`release-rome-image`](../.claude/skills/release-rome-image/SKILL.md) skill. Follow it rather than running the helper directly.
+To cut a patch release, start a manual run as described above. For a minor, major, or prerelease version, push the tag yourself. The steps for cutting a manual release — preflight, version choice, the confirmed push, and verification — live in the [`release-rome-image`](../.claude/skills/release-rome-image/SKILL.md) skill. Follow it rather than running the helper directly.
 
 `scripts/dev/create-patch-release-tag.sh` is a planning aid the skill calls with `--dry-run` to compute the next patch version, not a release command. It accepts `--remote`, `--branch`, `--prefix`, and the matching `ROME_RELEASE_*` environment variables. **A bare invocation creates the annotated tag and pushes it**, which starts the publish with nothing between it and Docker Hub. Pass `--dry-run` to see the version and target commit without releasing.
 
