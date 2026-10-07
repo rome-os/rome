@@ -427,7 +427,7 @@ export function SessionsOverview({
               onSeriesSelect={onSeriesSelect}
             />
           </section>
-          <div className="order-first xl:order-last xl:border-l xl:border-border-subtle xl:pl-8">
+          <div className="order-first min-w-0 xl:order-last xl:border-l xl:border-border-subtle xl:pl-8">
             <RecentSessions
               sessions={recentSessions}
               error={recentSessionsError}
