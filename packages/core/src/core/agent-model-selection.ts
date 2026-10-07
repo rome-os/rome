@@ -26,5 +26,5 @@ export function resolveAgentModelRequest(
   if (!config.tier) {
     throw new Error("Agent config requires a tier or a provider with modelId");
   }
-  return { tier: config.tier, providerId: config.providerId ?? providerAffinity };
+  return { tier: config.tier, providerId: providerAffinity ?? config.providerId };
 }

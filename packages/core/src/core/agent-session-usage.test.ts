@@ -7,6 +7,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
+import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -37,6 +38,7 @@ describe("AgentSession turn usage", () => {
   let nextRun: () => AsyncIterable<AgentEvent>;
   let providerTurnId: string | undefined;
   let forkable: boolean;
+  let funding: UsageFunding;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -58,6 +60,7 @@ describe("AgentSession turn usage", () => {
     recorded = [];
     providerTurnId = undefined;
     forkable = false;
+    funding = "byok";
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
@@ -65,7 +68,7 @@ describe("AgentSession turn usage", () => {
       openSession: async (params) => {
         const session = createSessionFromRun("openai", () => nextRun(), params);
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
-        Object.defineProperty(session, "funding", { get: () => "byok" });
+        Object.defineProperty(session, "funding", { get: () => funding });
         if (forkable) {
           session.fork = async (fork) => ({
             providerId: "openai",
@@ -183,6 +186,51 @@ describe("AgentSession turn usage", () => {
       ["completed", "provider-turn-1"],
       ["error", undefined],
     ]);
+  });
+
+  it("keeps funding from the turn's payer when the payer changes during it", async () => {
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstStarted!: () => void;
+    const firstStartedPromise = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    nextRun = async function* () {
+      firstStarted();
+      await firstRelease;
+      yield { type: "error", error: "Codex exited" };
+    };
+
+    const session = await manager.acquire(key);
+    const first = session.sendTurn({ prompt: "ChatGPT-funded" });
+    await firstStartedPromise;
+    funding = "rome_credits";
+    releaseFirst();
+    await drain(first.events);
+
+    let releaseSecond!: () => void;
+    const secondRelease = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let secondStarted!: () => void;
+    const secondStartedPromise = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    nextRun = async function* () {
+      secondStarted();
+      await secondRelease;
+      yield { type: "error", error: "Codex exited" };
+    };
+
+    const second = session.sendTurn({ prompt: "Credit-funded" });
+    await secondStartedPromise;
+    funding = "subscription";
+    releaseSecond();
+    await drain(second.events);
+
+    expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {

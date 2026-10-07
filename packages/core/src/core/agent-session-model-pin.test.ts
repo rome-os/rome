@@ -175,6 +175,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(anthropic.openSession).not.toHaveBeenCalled();
     await firstManager.shutdown();
 
+    await writeConfig({ provider: "anthropic", modelId: undefined, tier: "large" });
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "third" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-sol", "gpt-6-sol", "gpt-6-sol"]);

@@ -109,6 +109,7 @@ import {
   type AgentTurnParentRef,
 } from "./agent-lifecycle.js";
 import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
+import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
@@ -1786,6 +1787,8 @@ interface TurnSink {
    * would hand a queued turn the id of the turn ahead of it.
    */
   providerTurnIdAtStart?: string;
+  /** Payer of the provider session that executes this turn. */
+  funding?: UsageFunding;
   usageRecorded: boolean;
 }
 
@@ -2481,7 +2484,7 @@ class AgentSessionImpl implements AgentSession {
       }),
       provider: this.modelSession.providerId,
       model: this.modelSession.model,
-      funding: this.modelSession.funding,
+      funding: sink.funding,
       providerTurnId: providerTurnId !== sink.providerTurnIdAtStart ? providerTurnId : undefined,
       accounting,
       durationMs:
@@ -2847,6 +2850,8 @@ class AgentSessionImpl implements AgentSession {
     // a terminal. Mirror the failTurn handling of regular turns by
     // synthesizing the error terminal here.
     let forkSession: ModelSession | undefined;
+    let sourceFunding: UsageFunding | undefined;
+    let forkFunding: UsageFunding | undefined;
     let forkUsesRomeCredits = this.usesRomeCredits;
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
@@ -2879,6 +2884,7 @@ class AgentSessionImpl implements AgentSession {
           }
           await this.ensureModelSessionForTurn();
           const sourceModelSession = this.modelSession;
+          sourceFunding = sourceModelSession.funding;
           sourceProviderThreadId = sourceModelSession.providerThreadId;
           if (input.sourceCheckpoint) {
             if (input.sourceCheckpoint.providerId !== sourceModelSession.providerId) {
@@ -2932,6 +2938,7 @@ class AgentSessionImpl implements AgentSession {
         });
         disposeForkResources = forkOpen.dispose;
         forkSession = await fork.open(forkOpen.params);
+        forkFunding = forkSession.funding;
         await forkSession.sendUserInput({
           text: input.prompt,
           reasoningEffort: input.reasoningEffort,
@@ -3017,7 +3024,7 @@ class AgentSessionImpl implements AgentSession {
         status: terminalSeen || status !== "completed" ? status : "stopped",
         provider: forkSession?.providerId ?? this.modelSession.providerId,
         model: forkSession?.model ?? this.modelSession.model,
-        funding: (forkSession ?? this.modelSession).funding,
+        funding: forkFunding ?? sourceFunding,
         providerTurnId: forkSession?.lastProviderTurnId,
         accounting: terminalAccounting,
         durationMs: Date.now() - startMs,
@@ -3284,6 +3291,7 @@ class AgentSessionImpl implements AgentSession {
     }
     this.currentSink = sink;
     this.currentTurnId = turnId;
+    sink.funding = this.modelSession.funding;
     this.status = "running";
     this.emitStatus();
 
