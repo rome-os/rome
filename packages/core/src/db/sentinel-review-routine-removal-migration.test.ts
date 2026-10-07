@@ -22,7 +22,7 @@ function removalMigration(): string {
   };
   const matches = journal.entries
     .map((entry) => readFileSync(join(MIGRATIONS_DIR, `${entry.tag}.sql`), "utf8"))
-    .filter((sql) => /DELETE FROM `routines` WHERE `action_name` = 'sentinel_review'/.test(sql));
+    .filter((sql) => /DELETE FROM `routines` WHERE `action_name` IN \('sentinel_review', 'system:sentinel_review'\)/.test(sql));
 
   expect(matches, "exactly one migration should delete sentinel_review routines").toHaveLength(1);
   return matches[0];
@@ -60,11 +60,13 @@ function databaseWithRoutines(): Database.Database {
 
   const routine = sqlite.prepare("INSERT INTO routines (id, action_name) VALUES (?, ?)");
   routine.run("sentinel", "sentinel_review");
+  routine.run("sentinel-canonical", "system:sentinel_review");
   routine.run("upgrade", "system_upgrade");
 
   const run = sqlite.prepare("INSERT INTO routine_runs (id, routine_id) VALUES (?, ?)");
   run.run("sentinel-run-1", "sentinel");
   run.run("sentinel-run-2", "sentinel");
+  run.run("sentinel-canonical-run", "sentinel-canonical");
   run.run("upgrade-run", "upgrade");
 
   const event = sqlite.prepare("INSERT INTO events (id, action_name) VALUES (?, ?)");
@@ -82,7 +84,7 @@ function ids(sqlite: Database.Database, table: string): string[] {
 }
 
 describe("sentinel_review routine removal migration", () => {
-  it("deletes sentinel_review routines and their runs, and keeps every other routine", () => {
+  it("deletes bare and canonical sentinel_review routines and their runs, and keeps every other routine", () => {
     const sqlite = databaseWithRoutines();
     try {
       applyMigration(sqlite, removalMigration());
