@@ -9,7 +9,9 @@ import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 /** A message as Cloud delivers it. Cloud sets `messageId`, `from`, and `sentAt`. */
 export interface AgentMessageEnvelope {
   messageId: string;
-  from: { endpoint: string; kind: "dot" | "rome" };
+  /** `sameAccount` is Cloud's statement that the sender is in this Rome's
+   *  account. An older Cloud omits it, and Rome then trusts no sender. */
+  from: { endpoint: string; kind: "dot" | "rome"; sameAccount?: boolean };
   to: { endpoint: string };
   sentAt: string;
   text: string;

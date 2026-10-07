@@ -5,8 +5,10 @@
 // instance acknowledges it, so the talker polls and acknowledges after
 // delivering. The instance token is the credential and lives outside the
 // grant; the grant only records the endpoint name Cloud assigned. A sender is
-// never mapped to a person here: an agent message arrives from an unlinked
-// sender, and the guardian decides whether Rome may answer it.
+// never mapped to a person here. A sender Cloud marks as in this Rome's own
+// account is linked to the guardian when its message is admitted
+// (channels/agents-guardian.ts); any other sender stays unlinked, and the
+// guardian decides whether Rome may answer it.
 
 import type { ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
