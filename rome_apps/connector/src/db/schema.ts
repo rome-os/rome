@@ -12,9 +12,10 @@ export const emittedEvents = sqliteTable(
     receivedAt: integer("received_at", { mode: "timestamp" }).notNull(),
     payloadJson: text("payload_json").notNull(),
     // Outbox state. A row is owed a publish to Rome's bus until `publishedAt`
-    // is set. A publisher claims it first, and the claim lapses after a lease.
+    // is set. `nextAttemptAt` holds it back while a publisher's claim lasts and
+    // while a failed publish backs off. `publishAttempts` counts failures.
     publishedAt: integer("published_at", { mode: "timestamp" }),
-    publishClaimedAt: integer("publish_claimed_at", { mode: "timestamp" }),
+    nextAttemptAt: integer("next_attempt_at", { mode: "timestamp" }),
     publishAttempts: integer("publish_attempts").notNull().default(0),
   },
   (table) => [

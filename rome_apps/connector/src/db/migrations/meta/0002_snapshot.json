@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7f2f75b1-ac61-4dff-bc57-bafb9860c259",
+  "id": "2f080be3-5354-4e97-8269-3706fad213d9",
   "prevId": "1bf26c37-b4d0-4022-979c-560a8c2a0c7b",
   "tables": {
     "connector__emitted_events": {
@@ -56,8 +56,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "publish_claimed_at": {
-          "name": "publish_claimed_at",
+        "next_attempt_at": {
+          "name": "next_attempt_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

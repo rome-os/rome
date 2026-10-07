@@ -8,10 +8,17 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { AppDbContext } from "@rome-os/app-runtime";
 import type { Logger } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { EventsRepo, MAX_PUBLISH_ATTEMPTS, PUBLISH_CLAIM_LEASE_MS } from "./events-repo.js";
+import {
+  EMITTED_EVENTS_RING_CAP,
+  EventsRepo,
+  MAX_PUBLISH_ATTEMPTS,
+  PUBLISH_CLAIM_LEASE_MS,
+  publishRetryDelayMs,
+} from "./events-repo.js";
 import {
   processGithubWebhook,
   processVerifiedWebhook,
+  MAX_EVENT_AGE_MS,
   publishPendingEvents,
   type ResolveToolkitSlug,
   type RunAction,
@@ -233,7 +240,8 @@ function silentLog(): Logger & { error: ReturnType<typeof rs.fn>; warn: ReturnTy
 
 describe("publishPendingEvents", () => {
   let harness: ReturnType<typeof makeCtx>;
-  const receivedAt = new Date("2026-05-28T00:00:00Z");
+  const receivedAt = new Date();
+  const at = (offsetMs: number) => new Date(receivedAt.getTime() + offsetMs);
 
   beforeEach(() => {
     harness = makeCtx();
@@ -284,8 +292,8 @@ describe("publishPendingEvents", () => {
   });
 
   it("publishes the oldest event first", async () => {
-    await store("evt-late", new Date("2026-05-28T00:02:00Z"), { order: 2 });
-    await store("evt-early", new Date("2026-05-28T00:01:00Z"), { order: 1 });
+    await store("evt-late", at(2 * 60_000), { order: 2 });
+    await store("evt-early", at(1 * 60_000), { order: 1 });
     const { calls, run } = recordingRunAction();
 
     await publishPendingEvents(harness.repo, run, silentLog());
@@ -293,27 +301,36 @@ describe("publishPendingEvents", () => {
     expect(calls.map((call) => call.args.payload)).toEqual([{ order: 1 }, { order: 2 }]);
   });
 
-  it("keeps a failed event owed and publishes it on the next drain", async () => {
+  const capacityError = async () => {
+    throw new Error("Action worker capacity reached (max 8 live workers)");
+  };
+
+  it("retries a failed event only after its backoff, so a burst spends one attempt", async () => {
     await store("evt-retry");
     const log = silentLog();
-    const failing: RunAction = async () => {
-      throw new Error("Action worker capacity reached (max 8 live workers)");
-    };
+    const failedAt = at(5 * 60_000);
 
-    await publishPendingEvents(harness.repo, failing, log);
+    await publishPendingEvents(harness.repo, capacityError, log, () => failedAt);
     expect(log.warn).toHaveBeenCalledWith(
-      "event publish failed, will retry on the next webhook",
+      "event publish failed, will retry",
       expect.objectContaining({ eventId: "evt-retry", attempts: 1 }),
     );
 
+    // A burst of deliveries before the backoff ends leaves the event alone.
     const { calls, run } = recordingRunAction();
-    await publishPendingEvents(harness.repo, run, log);
+    for (let i = 0; i < MAX_PUBLISH_ATTEMPTS; i++) {
+      await publishPendingEvents(harness.repo, run, log, () => failedAt);
+    }
+    expect(calls).toHaveLength(0);
+
+    const due = new Date(failedAt.getTime() + publishRetryDelayMs(1));
+    await publishPendingEvents(harness.repo, run, log, () => due);
     expect(calls).toHaveLength(1);
   });
 
   it("publishes each event once when two drains overlap", async () => {
-    await store("evt-a", new Date("2026-05-28T00:01:00Z"));
-    await store("evt-b", new Date("2026-05-28T00:02:00Z"));
+    await store("evt-a", at(1 * 60_000));
+    await store("evt-b", at(2 * 60_000));
     const { calls, run } = recordingRunAction();
 
     await Promise.all([
@@ -324,39 +341,78 @@ describe("publishPendingEvents", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("reclaims an event whose publisher died once the claim lapses", async () => {
+  it("reclaims an event whose publisher died, without spending an attempt", async () => {
     await store("evt-orphan");
-    const claimedAt = new Date("2026-05-28T01:00:00Z");
-    expect(await harness.repo.claimNextUnpublished(claimedAt)).not.toBeNull();
+    let clock = at(5 * 60_000);
+    // Fail up to the last attempt, then let the final publisher die mid-publish.
+    for (let failures = 1; failures < MAX_PUBLISH_ATTEMPTS; failures++) {
+      await publishPendingEvents(harness.repo, capacityError, silentLog(), () => clock);
+      clock = new Date(clock.getTime() + publishRetryDelayMs(failures));
+    }
+    expect(await harness.repo.claimNextUnpublished(clock)).not.toBeNull();
     const { calls, run } = recordingRunAction();
 
-    await publishPendingEvents(harness.repo, run, silentLog(), () => claimedAt);
+    await publishPendingEvents(harness.repo, run, silentLog(), () => clock);
     expect(calls).toHaveLength(0);
 
-    const lapsed = new Date(claimedAt.getTime() + PUBLISH_CLAIM_LEASE_MS);
+    const lapsed = new Date(clock.getTime() + PUBLISH_CLAIM_LEASE_MS);
     await publishPendingEvents(harness.repo, run, silentLog(), () => lapsed);
     expect(calls).toHaveLength(1);
   });
 
   it("gives up on an event after the last attempt so it stops blocking the line", async () => {
-    await store("evt-poison", new Date("2026-05-28T00:01:00Z"));
+    await store("evt-poison", at(1 * 60_000));
     const log = silentLog();
-    const failing: RunAction = async () => {
-      throw new Error("invalid payload");
-    };
-    for (let attempt = 0; attempt < MAX_PUBLISH_ATTEMPTS; attempt++) {
-      await publishPendingEvents(harness.repo, failing, log);
+    let clock = at(5 * 60_000);
+    for (let failures = 1; failures <= MAX_PUBLISH_ATTEMPTS; failures++) {
+      await publishPendingEvents(harness.repo, capacityError, log, () => clock);
+      clock = new Date(clock.getTime() + publishRetryDelayMs(failures));
     }
     expect(log.error).toHaveBeenCalledWith(
       "gave up publishing event to bus",
       expect.objectContaining({ eventId: "evt-poison", attempts: MAX_PUBLISH_ATTEMPTS }),
     );
 
-    await store("evt-next", new Date("2026-05-28T00:02:00Z"));
+    await store("evt-next", at(2 * 60_000));
     const { calls, run } = recordingRunAction();
-    await publishPendingEvents(harness.repo, run, log);
+    await publishPendingEvents(harness.repo, run, log, () => clock);
     expect(calls).toHaveLength(1);
-    expect(calls[0].args.name).toBe("provider:event:gmail.gmail_new_gmail_message");
+  });
+
+  it("abandons an owed event once it is too old to fire", async () => {
+    await store("evt-stale");
+    const log = silentLog();
+    const { calls, run } = recordingRunAction();
+
+    const later = new Date(receivedAt.getTime() + MAX_EVENT_AGE_MS + 60_000);
+    await publishPendingEvents(harness.repo, run, log, () => later);
+
+    expect(calls).toHaveLength(0);
+    expect(log.error).toHaveBeenCalledWith(
+      "gave up publishing event to bus",
+      expect.objectContaining({ eventId: "evt-stale", reason: "expired" }),
+    );
+  });
+
+  it("never prunes an event still owed a publish", async () => {
+    await store("evt-owed", at(-60 * 60_000));
+    for (let i = 0; i < EMITTED_EVENTS_RING_CAP; i++) {
+      await store(`evt-${i}`, new Date(receivedAt.getTime() + i * 1000));
+    }
+
+    const ids = (await harness.repo.listEvents({ limit: EMITTED_EVENTS_RING_CAP + 1 })).map(
+      (row) => row.eventId,
+    );
+    expect(ids).toContain("evt-owed");
+
+    const { run } = recordingRunAction();
+    await publishPendingEvents(harness.repo, run, silentLog(), () => receivedAt);
+    await store("evt-newest", new Date(receivedAt.getTime() + 600_000));
+    const after = (await harness.repo.listEvents({ limit: EMITTED_EVENTS_RING_CAP + 1 })).map(
+      (row) => row.eventId,
+    );
+    expect(after).not.toContain("evt-owed");
+    expect(after).toHaveLength(EMITTED_EVENTS_RING_CAP);
   });
 });
 

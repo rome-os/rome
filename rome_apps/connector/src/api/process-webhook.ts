@@ -1,5 +1,5 @@
 import type { Logger } from "@rome-os/app-runtime";
-import { EventsRepo, MAX_PUBLISH_ATTEMPTS } from "./events-repo.js";
+import { EventsRepo, MAX_PUBLISH_ATTEMPTS, publishRetryDelayMs } from "./events-repo.js";
 import { normalizeGithubPayload } from "./github-webhook.js";
 import {
   extractEventType,
@@ -29,19 +29,24 @@ const EVENT_SOURCE = "connector";
 
 export type RunAction = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
+/** An owed event older than this is abandoned rather than published, since a
+ * routine fired for a day-old webhook (a stale PR review) does more harm than
+ * good. */
+export const MAX_EVENT_AGE_MS = 24 * 60 * 60_000;
+
 /**
- * Drains the outbox: publishes each stored event still owed a publish onto
- * Rome's central bus through the system `publish_event` action, oldest first,
- * so routines with a matching `event-bus` trigger fire. The bus event's `name`
- * is the event's topic, the same string `POST /feeds` returned to the feed
- * creator.
+ * Drains the outbox: publishes each stored event that is owed a publish and
+ * due for an attempt onto Rome's central bus through the system
+ * `publish_event` action, oldest first, so routines with a matching
+ * `event-bus` trigger fire. The bus event's `name` is the event's topic, the
+ * same string `POST /feeds` returned to the feed creator.
  *
- * Stops at the first failed publish and leaves that event for the next drain.
- * After MAX_PUBLISH_ATTEMPTS failures an event is abandoned. Delivery is
- * at-least-once: a process that dies between publishing and recording it
- * publishes the event again once its claim lapses. Safe to run concurrently.
- * A deduped webhook retry never republishes, because the stored row is
- * already published or claimed.
+ * A failed publish backs off (publishRetryDelayMs) and ends the drain. After
+ * MAX_PUBLISH_ATTEMPTS failures, or past MAX_EVENT_AGE_MS, an event is
+ * abandoned with an error log. Delivery is at-least-once: a process that dies
+ * between publishing and recording it publishes the event again once its
+ * claim lapses. Safe to run concurrently. A deduped webhook retry never
+ * republishes, because the stored row is already published or claimed.
  */
 export async function publishPendingEvents(
   repo: EventsRepo,
@@ -50,9 +55,15 @@ export async function publishPendingEvents(
   now: () => Date = () => new Date(),
 ): Promise<void> {
   for (;;) {
-    const event = await repo.claimNextUnpublished(now());
+    const claimedAt = now();
+    const event = await repo.claimNextUnpublished(claimedAt);
     if (!event) return;
     const fields = { eventId: event.eventId, topic: event.topic, provider: event.provider };
+    if (claimedAt.getTime() - event.receivedAt.getTime() > MAX_EVENT_AGE_MS) {
+      await repo.abandon(event.eventId);
+      log.error("gave up publishing event to bus", { ...fields, reason: "expired" });
+      continue;
+    }
     try {
       await runAction(PUBLISH_EVENT_ACTION, {
         name: event.topic,
@@ -60,18 +71,18 @@ export async function publishPendingEvents(
         payload: JSON.parse(event.payloadJson) as unknown,
       });
     } catch (err) {
-      await repo.releaseClaim(event.eventId);
+      const failures = event.publishAttempts + 1;
       const error = err instanceof Error ? err.message : String(err);
-      if (event.publishAttempts >= MAX_PUBLISH_ATTEMPTS) {
-        log.error("gave up publishing event to bus", {
-          ...fields,
-          attempts: event.publishAttempts,
-          error,
-        });
+      if (failures >= MAX_PUBLISH_ATTEMPTS) {
+        await repo.abandon(event.eventId);
+        log.error("gave up publishing event to bus", { ...fields, attempts: failures, error });
       } else {
-        log.warn("event publish failed, will retry on the next webhook", {
+        const retryAt = new Date(now().getTime() + publishRetryDelayMs(failures));
+        await repo.recordFailedPublish(event.eventId, failures, retryAt);
+        log.warn("event publish failed, will retry", {
           ...fields,
-          attempts: event.publishAttempts,
+          attempts: failures,
+          retryAt: retryAt.toISOString(),
           error,
         });
       }

@@ -295,7 +295,7 @@ describe("connector API GitHub webhook outbox", () => {
     sqlite.close();
   });
 
-  it("retries an event left unpublished when the next delivery arrives", async () => {
+  it("retries an event left unpublished on a delivery after its backoff", async () => {
     const { db, sqlite } = migratedDb();
     const runAction = rs
       .fn()
@@ -310,16 +310,19 @@ describe("connector API GitHub webhook outbox", () => {
     } as unknown as RomeAppContext;
 
     await createApiHandler(ctx).handle(await githubDelivery("delivery-1"));
-    // The failure is logged after its claim is released.
     await rs.waitFor(() => expect(log.warn).toHaveBeenCalledOnce());
+    // Fast-forward past the backoff.
+    sqlite.prepare("UPDATE connector__emitted_events SET next_attempt_at = 0").run();
     await createApiHandler(ctx).handle(await githubDelivery("delivery-2"));
 
     await rs.waitFor(() => expect(runAction).toHaveBeenCalledTimes(3));
-    expect(
-      sqlite
-        .prepare("SELECT count(*) AS n FROM connector__emitted_events WHERE published_at IS NULL")
-        .get(),
-    ).toEqual({ n: 0 });
+    await rs.waitFor(() =>
+      expect(
+        sqlite
+          .prepare("SELECT count(*) AS n FROM connector__emitted_events WHERE published_at IS NULL")
+          .get(),
+      ).toEqual({ n: 0 }),
+    );
     sqlite.close();
   });
 });
