@@ -64,6 +64,15 @@ describe("send_feedback", () => {
       reporter: { kind: "agent", agentName: "main", sessionId: "s", turnId: "t", executionId: "e" },
     });
   });
+  it("records the calling app when an installed app invokes the action", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", callerAppId: "some-app" }));
+    const { action: a, send } = action();
+    await a.execute(input);
+    expect(send).toHaveBeenCalledWith({
+      ...input,
+      reporter: { kind: "agent", executionId: "e", callerAppId: "some-app" },
+    });
+  });
   it.each([
     "no_token",
     "unconfigured",

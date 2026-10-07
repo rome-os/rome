@@ -9,9 +9,11 @@ export interface AgentReporter {
   sessionId?: string;
   turnId?: string;
   executionId?: string;
+  /** Set when an installed app, not an agent turn, invoked the action. */
+  callerAppId?: string;
 }
 
-export type AgentFeedback = z.infer<typeof feedbackInput> & { reporter: AgentReporter };
+export type AgentFeedback = z.infer<typeof feedbackInputSchema> & { reporter: AgentReporter };
 
 export type FeedbackOutcome =
   | { kind: "ok" }
@@ -27,7 +29,8 @@ export interface FeedbackService {
   send(input: AgentFeedback): Promise<FeedbackOutcome>;
 }
 
-const feedbackInput = z
+/** Runtime limits are checked against core by feedback-structural-sync.test.ts. */
+export const feedbackInputSchema = z
   .object({
     category: z.enum(["bug", "missing_capability", "docs_or_skill", "ux", "other"]),
     summary: z
@@ -51,7 +54,7 @@ export interface SendFeedbackDeps {
 export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbackDeps): Action {
   return defineAction({
     config,
-    schema: feedbackInput,
+    schema: feedbackInputSchema,
     async execute(input): Promise<ActionResult> {
       const context = getCurrentActionContext();
       const outcome = await deps.feedback.send({
@@ -62,6 +65,7 @@ export function createSendFeedbackAction(config: ActionConfig, deps: SendFeedbac
           sessionId: context?.sessionId,
           turnId: context?.turnId,
           executionId: context?.executionId,
+          ...(context?.callerAppId ? { callerAppId: context.callerAppId } : {}),
         },
       });
       switch (outcome.kind) {

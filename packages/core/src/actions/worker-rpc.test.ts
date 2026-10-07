@@ -930,7 +930,7 @@ describe("feedback.send dispatch", () => {
     category: "bug",
     summary: "Broken",
     details: "Repro",
-    reporter: { kind: "agent", agentName: "main" },
+    reporter: { kind: "agent", agentName: "main", callerAppId: "some-app" },
   };
   it("forwards validated fields and runtime provenance", async () => {
     const send = rs.fn(async () => ({ kind: "ok" }));

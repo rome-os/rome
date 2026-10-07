@@ -30,6 +30,8 @@ export interface AgentReporter {
   sessionId?: string;
   turnId?: string;
   executionId?: string;
+  /** Set when an installed app, not an agent turn, invoked the action. */
+  callerAppId?: string;
 }
 
 export type AgentFeedback = z.infer<typeof feedbackInputSchema> & { reporter: AgentReporter };
@@ -42,6 +44,7 @@ export const feedbackSendSchema = feedbackInputSchema.safeExtend({
       sessionId: z.string().optional(),
       turnId: z.string().optional(),
       executionId: z.string().optional(),
+      callerAppId: z.string().optional(),
     })
     .strict(),
 });
