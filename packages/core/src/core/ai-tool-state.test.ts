@@ -1,6 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { createAIToolState, type AIToolStateProbes } from "./ai-tool-state.js";
-import { createRomeCreditsPayer } from "./rome-credits-payer.js";
 
 function probes(overrides: Partial<AIToolStateProbes> = {}): AIToolStateProbes {
   return {
@@ -85,6 +84,31 @@ describe("AIToolState", () => {
     expect(state.get().codex.quotaExhausted).toBe(false);
   });
 
+  it("notifies only when the Codex login changes", async () => {
+    let loggedIn = true;
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({ codexStatus: async () => ({ loggedIn }) }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    state.markQuotaExhausted("openai");
+    expect(onCodexLoginChanged).not.toHaveBeenCalled();
+
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    state.markQuotaExhausted("openai");
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    loggedIn = false;
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(2);
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {
@@ -113,46 +137,6 @@ describe("AIToolState", () => {
     await refresh;
 
     expect(state.get().codex.quotaExhausted).toBe(true);
-  });
-
-  it("does not briefly switch the payer back while an older refresh settles", async () => {
-    let releaseUsage!: () => void;
-    const usageGate = new Promise<void>((resolve) => {
-      releaseUsage = resolve;
-    });
-    const payerChanges: Array<string | null> = [];
-    let syncPayer = (): void => {};
-    const state = createAIToolState({
-      probes: probes({
-        codexUsage: async () => {
-          await usageGate;
-          return {
-            checkedAt: "2026-08-07T00:00:00.000Z",
-            source: "test",
-            fiveHour: { usedPercent: 50 },
-          };
-        },
-      }),
-      onChange: () => syncPayer(),
-      startRefresh: false,
-      refreshIntervalMs: null,
-    });
-    const payer = createRomeCreditsPayer({
-      aiToolState: state,
-      appServerManager: {
-        setDefaultProvider: (provider) => payerChanges.push(provider),
-        restart: () => {},
-      },
-      getInstanceToken: () => "romeinst_test",
-    });
-    syncPayer = () => payer.sync();
-
-    const refresh = state.refresh("openai");
-    state.markQuotaExhausted("openai");
-    releaseUsage();
-    await refresh;
-
-    expect(payerChanges).toEqual(["rome_credits"]);
   });
 
   it.each([

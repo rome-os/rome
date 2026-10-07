@@ -14,10 +14,10 @@ export interface RomeCreditsPayer {
 }
 
 /**
- * Selects Codex's process-wide payer. The guardian's ChatGPT login wins; Rome
- * credits are only used when that login is unavailable and this instance holds
- * a Rome Cloud credential. `setDefaultProvider` deliberately hard-restarts
- * Codex when this selection changes.
+ * Selects Codex's process-wide payer from login state. The guardian's ChatGPT
+ * login wins; Rome credits are only used when ChatGPT is disconnected and this
+ * instance holds a Rome Cloud credential. `setDefaultProvider` deliberately
+ * hard-restarts Codex when this selection changes.
  */
 export function createRomeCreditsPayer(options: {
   aiToolState: Pick<AIToolState, "get">;
@@ -33,11 +33,11 @@ export function createRomeCreditsPayer(options: {
     sync() {
       if (closed) return;
       const codex = options.aiToolState.get().codex;
-      const ownLoginCanRun = codex.loggedIn !== false && !codex.quotaExhausted;
+      const hasChatGptLogin = codex.loggedIn !== false;
       const nextToken = token();
       const tokenChanged = nextToken !== instanceToken;
       instanceToken = nextToken;
-      const next = !ownLoginCanRun && nextToken ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
+      const next = !hasChatGptLogin && nextToken ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
       if (next === provider) {
         if (tokenChanged) options.appServerManager.restart();
         return;

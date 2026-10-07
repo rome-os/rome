@@ -111,7 +111,7 @@ export interface CreateModelResolverOptions {
   aiToolState: Pick<AIToolState, "get" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
-  romeCreditsPayer?: Pick<RomeCreditsPayer, "sync" | "isUsingRomeCredits">;
+  romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits">;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -239,7 +239,6 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   return {
     async getModelProvider(request) {
-      options.romeCreditsPayer?.sync();
       if (request.exact) {
         const state = options.aiToolState.get();
         const { providerId, model } = request.exact;
@@ -265,10 +264,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
-      // Settings reads can yield while account state changes. Re-sync and read
-      // the live snapshots after the final await so model and process payer
-      // always describe the same Codex generation.
-      options.romeCreditsPayer?.sync();
+      // Settings reads can yield while account state changes. Read the payer
+      // and provider state after the final await so this resolution sees the
+      // current login-selected payer.
       const state = options.aiToolState.get();
       const usingRomeCredits = options.romeCreditsPayer?.isUsingRomeCredits() === true;
       const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;

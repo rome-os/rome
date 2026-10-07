@@ -32,7 +32,6 @@ function resolver(
             : null) as T | null,
     },
     romeCreditsPayer: {
-      sync: () => {},
       isUsingRomeCredits: () => usingRomeCredits,
     },
   });
@@ -52,10 +51,10 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("uses Rome credit tier models when ChatGPT cannot run", async () => {
+  it("uses Rome credit tier models when ChatGPT is disconnected", async () => {
     const r = resolver(
       {
-        codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
         claude: { loggedIn: false, quotaExhausted: false },
       },
       { tierModelMappings: { openai: { large: "custom-model" } } },
@@ -100,14 +99,13 @@ describe("ModelResolver", () => {
         },
       },
       romeCreditsPayer: {
-        sync: () => {},
         isUsingRomeCredits: () => usingRomeCredits,
       },
     });
 
     const resolution = r.getModelProvider({ tier: "large" });
     await settingsStarted;
-    state.codex.quotaExhausted = true;
+    state.codex.loggedIn = false;
     usingRomeCredits = true;
     releaseSettings();
 

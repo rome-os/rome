@@ -107,7 +107,6 @@ describe("agent model pins through AgentSessionManager", () => {
           providers: [openai.provider, anthropic.provider],
           aiToolState: { get: () => state, refresh: async () => state },
           romeCreditsPayer: {
-            sync: () => {},
             isUsingRomeCredits: () =>
               typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
           },
@@ -182,7 +181,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(anthropic.openSession).not.toHaveBeenCalled();
   });
 
-  it("persists the own-provider pin after same-model credit recovery", async () => {
+  it("persists the ChatGPT pin after connecting it to a credit session", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "medium" });
     state.codex.loggedIn = false;
     state.claude.loggedIn = false;
@@ -197,9 +196,8 @@ describe("agent model pins through AgentSessionManager", () => {
     });
 
     // Both payers use Terra for medium, so reusing this ModelSession must still
-    // reset persistence when the payer switches back to the guardian.
+    // reset persistence when the guardian connects ChatGPT.
     state.codex.loggedIn = true;
-    state.codex.quotaExhausted = false;
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);
 

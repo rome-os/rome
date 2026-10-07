@@ -52,8 +52,8 @@ export interface CreateAIToolStateOptions {
   /** Null disables the hourly timer (used by deterministic unit tests). */
   refreshIntervalMs?: number | null;
   startRefresh?: boolean;
-  /** Called after provider availability may have changed. */
-  onChange?: () => void;
+  /** Called when a Codex login is connected or disconnected. */
+  onCodexLoginChanged?: () => void;
 }
 
 function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
@@ -112,15 +112,9 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
-  const notifyChange = (): void => options.onChange?.();
-  const quotaSignalVersions: Record<AIToolProviderId, number> = { openai: 0, anthropic: 0 };
-  const applyRuntimeQuotaSignal = (provider: AIToolProviderId): boolean => {
-    const target = provider === "openai" ? value.codex : value.claude;
-    if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
-    target.quotaExhausted = true;
-    return true;
+  const notifyCodexLoginChanged = (previous: boolean | undefined): void => {
+    if (previous !== value.codex.loggedIn) options.onCodexLoginChanged?.();
   };
-
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
       const [status, usage] = await Promise.allSettled([
@@ -159,18 +153,11 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     const existing = refreshesInFlight.get(provider);
     if (existing) return existing;
 
-    const quotaSignalVersion = quotaSignalVersions[provider];
-    const pending = refreshProvider(provider)
-      .then(() => {
-        // A runtime failure that arrived while this older probe was in flight
-        // wins before refresh() publishes availability to the payer.
-        if (quotaSignalVersions[provider] !== quotaSignalVersion) applyRuntimeQuotaSignal(provider);
-      })
-      .finally(() => {
-        if (refreshesInFlight.get(provider) === pending) {
-          refreshesInFlight.delete(provider);
-        }
-      });
+    const pending = refreshProvider(provider).finally(() => {
+      if (refreshesInFlight.get(provider) === pending) {
+        refreshesInFlight.delete(provider);
+      }
+    });
     refreshesInFlight.set(provider, pending);
     return pending;
   };
@@ -180,12 +167,13 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       return { codex: { ...value.codex }, claude: { ...value.claude } };
     },
     async refresh(provider) {
+      const previousCodexLogin = value.codex.loggedIn;
       if (provider) {
         await refreshProviderLocked(provider);
       } else {
         await Promise.all([refreshProviderLocked("openai"), refreshProviderLocked("anthropic")]);
       }
-      notifyChange();
+      notifyCodexLoginChanged(previousCodexLogin);
       return state.get();
     },
     async markAuthRevoked(provider) {
@@ -193,6 +181,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       // may still hold the old "logged in" answer. Let that work drain first,
       // then make the runtime failure the newest authoritative observation.
       await refreshesInFlight.get(provider);
+      const previousCodexLogin = value.codex.loggedIn;
       const target = provider === "openai" ? value.codex : value.claude;
       target.loggedIn = false;
       target.needsReauth = true;
@@ -200,12 +189,20 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         value.codex.solAccess = false;
         value.codex.lunaAccess = false;
       }
-      notifyChange();
+      notifyCodexLoginChanged(previousCodexLogin);
     },
     markQuotaExhausted(provider) {
-      if (!applyRuntimeQuotaSignal(provider)) return;
-      quotaSignalVersions[provider] += 1;
-      notifyChange();
+      const applyRuntimeSignal = (): boolean => {
+        const target = provider === "openai" ? value.codex : value.claude;
+        if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
+        target.quotaExhausted = true;
+        return true;
+      };
+      if (!applyRuntimeSignal()) return;
+
+      // Keep this newer runtime signal after any older probe settles.
+      const olderRefresh = refreshesInFlight.get(provider);
+      if (olderRefresh) void olderRefresh.then(applyRuntimeSignal, applyRuntimeSignal);
     },
     close() {
       if (timer) clearInterval(timer);

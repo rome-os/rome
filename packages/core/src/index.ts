@@ -536,7 +536,7 @@ async function main() {
       codexStatus: () => codexAccountService.getStatus(),
       codexUsage: () => codexAccountService.getUsage(),
     },
-    onChange: () => syncRomeCreditsPayer(),
+    onCodexLoginChanged: () => syncRomeCreditsPayer(),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
     aiToolState,
