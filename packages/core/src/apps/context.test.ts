@@ -574,6 +574,27 @@ describe("runAction invocation port", () => {
     expect(err).toMatchObject({ actionName: "nope", code: "not_found" });
   });
 
+  it("queues a main-process call for a worker instead of failing on a busy pool", async () => {
+    const engine = new ActionEngine(new ActionRegistryImpl([]));
+    const run = rs.spyOn(engine, "run").mockResolvedValue({ status: "ok", data: null });
+    const context = createRomeAppContext(resolvedApp("invoker-app"), {
+      catalog: catalogFor(resolvedApp("invoker-app")),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: engine,
+      repositories: createRepositories(),
+    });
+
+    await context.runAction("publish_event", { name: "x.y" });
+
+    expect(run).toHaveBeenCalledWith(
+      "publish_event",
+      { name: "x.y" },
+      expect.objectContaining({ initiator: "app:invoker-app", whenWorkersBusy: "queue" }),
+      undefined,
+      undefined,
+    );
+  });
+
   it("rejects with code handler_error carrying the handler's message", async () => {
     const context = contextWithActions([
       probeAction("explodes", async () => {

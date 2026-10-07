@@ -141,3 +141,40 @@ describe("RoutineEngine run records", () => {
     expect(firedBy.sort()).toEqual(["run_now", "schedule"]);
   });
 });
+
+describe("RoutineEngine worker admission", () => {
+  let testDb: TestDb;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+
+  afterEach(() => testDb.close());
+
+  it("queues its action for a worker instead of failing on a busy pool", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const run = rs.fn(async () => ({ status: "success", result: null }));
+    const engine = new RoutineEngine(
+      routines,
+      runs,
+      { run } as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const id = await routines.create({
+      name: "digest",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    await engine.runNow(id);
+
+    expect(run).toHaveBeenCalledWith(
+      "noop",
+      expect.anything(),
+      expect.objectContaining({ whenWorkersBusy: "queue" }),
+    );
+  });
+});

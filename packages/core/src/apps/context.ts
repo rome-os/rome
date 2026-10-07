@@ -218,6 +218,9 @@ export function createRomeAppContext(
             {
               initiator: `app:${app.appId}`,
               callerAppId: app.appId,
+              // Outside any execution, the caller is app code in main (an API
+              // handler, a scheduler), which holds no action worker to deadlock on.
+              whenWorkersBusy: "queue",
             },
             undefined,
             actionEventObserver,

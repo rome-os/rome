@@ -46,3 +46,19 @@ Future diffs must respect:
 - Main handles a new worker-callable service on the connection it holds to that worker, and the service joins the [Worker RPC surface](../architecture/api.md#worker-rpc). No intermediate worker relays it.
 - Nested delegation stays a process-layer command. Main runs the already-approved payload and does not re-dispatch it through its own action dispatch, which would create a second logical root. The one request that does enter main's action dispatch is the explicit detached one, because its contract is a new root. Main accepts that request only when the payload names no parent and its execution id equals its root execution id.
 - Per-worker state keys off execution identity, not process parentage. Main hands the same pooled worker to a root action and to a delegated nested call, so a reused worker carries nothing from an earlier root.
+
+## Amendment (2026-10-07): a root whose caller holds no worker queues
+
+The decision above failed every call at the worker cap, and it stands for nested calls and for any root whose caller may hold a worker. A root run that opts into `whenWorkersBusy: "queue"` waits instead. It waits in arrival order for a slot, and it fails with the same capacity error once a ten-minute deadline passes.
+
+Three callers opt in, because none of them holds a worker while it waits. A routine fire starts from the routine engine in main. An app's `runAction` outside any execution starts from app code in main, such as an API handler. A detached dispatch counts as accepted once it joins the queue, so a worker that dispatches never waits on capacity. Agent tool calls stay fail-fast. An agent session lives in main, but the `summon` or `send_message` that drives its turn usually holds a worker, so a queued tool call could wait on the slot its own ancestor occupies.
+
+Queued roots never take the last two slots. Those stay with fail-fast callers, so a backlog of background roots cannot fail every agent tool call and interactive turn until it drains.
+
+Alternatives rejected for this amendment:
+
+- **Queue every root.** Rejected because an agent tool call is a root in main whose caller is a worker waiting on the turn, so a full pool of turn-holding workers would wait on each other until the deadline.
+- **Retry at each caller.** Rejected because every scheduling boundary would reimplement the same backoff, and a caller that gives up drops work such as a routine fire with no second delivery.
+- **Raise the cap.** Rejected because a burst of long agent roots fills any fixed cap, and the cap exists to bound memory on the smallest instance.
+
+This amends the consequence that reaching the cap fails the call immediately. Future diffs must respect: a caller opts into queueing only when it holds no worker and no worker waits on it synchronously, and the queue never admits a root into a reserved slot.
