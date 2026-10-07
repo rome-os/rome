@@ -86,7 +86,7 @@ The sentinel is a lightweight [agent](agents.md) that triages messages from untr
 
 **Contracts:**
 
-- All sentinel decisions are recorded. The main agent periodically reviews the log (cadence configurable) to catch anything that needs follow-up.
+- All sentinel decisions are recorded in the sentinel log, which the guardian reviews from the Inbox triage view.
 - The sentinel only sees messages the [policy engine](#policies) routes to it. It is not in the path of trusted senders' messages.
 
 **Not to be confused with:**
