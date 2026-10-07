@@ -50,6 +50,15 @@ When more than one reasonable design existed, name the alternatives and why this
 
 A checklist: `[x]` for what the author verified, `[ ]` for what remains. Name the command or the manual step behind each verified item.
 
+A PR that changes what the dashboard or an app shows attaches screenshots of the changed view at two sizes:
+
+| Size | Viewport | Touch |
+|---|---|---|
+| Phone | 390×844 | On |
+| Desktop | 1280×900 | Off |
+
+Add a third at 320×800 when the view holds a table, a toolbar, or a row of buttons, since those overflow first. Take them in your browser's device mode under `pnpm start:web:mock`. A phone screenshot shows the phone layout was designed rather than left to shrink: no sideways scroll, nothing cut off at the edge, and every action reachable without hover.
+
 ### Not in this PR
 
 One bullet per deferral, each naming the deferred thing and a one-clause reason or pointer.
