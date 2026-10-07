@@ -57,9 +57,10 @@ An [app start](../concepts/apps.md#hooks) calls the app's `app-started` hook. Th
 
 - The dispatcher subscribes after the action loader and the other hook loaders, so an app's actions are registered before its app-started hook loads.
 - Boot loads app-started hooks with the other hook kinds and calls none until boot finishes. A hook whose app starts later runs when the catalog event for that app reaches the dispatcher.
-- The installed content hash identifies an app start. An app that leaves the resolved set by a disable, an uninstall, or a broken resolve is forgotten, so its next resolve is a new start.
+- The installed content hash identifies an app start. An app that leaves the resolved set by a disable, an uninstall, a failed install, or a broken resolve is forgotten, so its next resolve is a new start.
+- An install in progress keeps the app's start. The `installing` overlay drops the app from the resolved set until the install finishes, and a re-install of identical content is not a new start.
 - An app-keys change reloads the other hook kinds but not app-started hooks.
-- A hook call carries the [hook invocation chain](../adrs/hook-recursion-chain-crosses-queue-boundaries.md) of the work that caused the app start. A boot call starts a new chain.
+- A hook call carries the [hook invocation chain](../adrs/hook-recursion-chain-crosses-queue-boundaries.md) of the work that caused the app start. An install, uninstall, or enable that an action worker requests over `apps.*` RPC sends the chain with the request, and the main process restores it before the catalog refreshes. A boot call starts a new chain.
 
 ## Crash model
 

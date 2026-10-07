@@ -1246,7 +1246,13 @@ export function createHook(deps: AppStartedHookDeps): AppStartedHook {
       if (routines.some((routine) => routine.name === "nightly-sync")) return;
       const result = await deps.appContext.runAction("system:create_routine", {
         name: "nightly-sync",
-        trigger: { type: "schedule", tzid: "UTC", localTime: "02:00", rrule: "FREQ=DAILY" },
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "floating", // 02:00 in the guardian's timezone
+          localTime: "02:00",
+          rrule: "FREQ=DAILY",
+        },
         actionName: "my-app:sync",
         args: {},
       });

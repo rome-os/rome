@@ -1,12 +1,14 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppStartedEvent } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
+import { packArtifact } from "../apps/packaging/index.js";
 import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
+import { createTestApps } from "../apps/test-helpers.js";
 import { createAppStartedDispatcher } from "./app-started.js";
 import type { HookInvocationContext } from "./hook-recursion.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
@@ -22,6 +24,8 @@ type AppStartedGlobal = typeof globalThis & {
   __appStartedContexts?: Array<HookInvocationContext | undefined>;
   __appStartedCaptureContext?: () => void;
   __appStartedRelease?: () => void;
+  __appStartedRestart?: () => Promise<void>;
+  __appStartedRestarted?: boolean;
 };
 
 const testGlobal = globalThis as AppStartedGlobal;
@@ -266,6 +270,116 @@ export function createHook(deps) {
     return dir;
   }
 });
+
+describe("AppStartedDispatcher through the app manager", () => {
+  afterEach(() => {
+    delete testGlobal.__appStartedCalls;
+  });
+
+  it("starts once per bundle across install, re-install, upgrade, and re-enable", async () => {
+    const harness = await createTestApps();
+    try {
+      const dispatcher = createDispatcher(harness.catalog);
+      // Mirrors the boot wiring: every catalog event reconciles.
+      harness.catalog.subscribe(async function appStartedSubscriber() {
+        await dispatcher.reconcile(harness.catalog);
+      });
+      dispatcher.open();
+      const v1 = await packHookApp(harness.profileRoot, "v1", "0.0.1");
+      const v2 = await packHookApp(harness.profileRoot, "v2", "0.0.2");
+
+      await harness.appManager.install({ source: { mode: "bundle", path: v1 } });
+      await flush();
+      expect(calls().map((call) => call.event.appVersion)).toEqual(["0.0.1"]);
+
+      // A re-install of identical content passes through the `installing`
+      // overlay, which drops the app from the resolved set until it finishes.
+      await harness.appManager.install({ source: { mode: "bundle", path: v1 } });
+      await flush();
+      expect(calls()).toHaveLength(1);
+
+      await harness.appManager.install({ source: { mode: "bundle", path: v2 } });
+      await flush();
+      expect(calls().map((call) => call.event.appVersion)).toEqual(["0.0.1", "0.0.2"]);
+
+      await harness.appManager.setEnabled("starter", false);
+      await harness.appManager.setEnabled("starter", true);
+      await flush();
+      expect(calls().map((call) => call.event.appVersion)).toEqual(["0.0.1", "0.0.2", "0.0.2"]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
+  it("stops a hook that restarts its own app at the recursion guard", async () => {
+    const harness = await createTestApps();
+    try {
+      const dispatcher = createDispatcher(harness.catalog);
+      harness.catalog.subscribe(async function appStartedSubscriber() {
+        await dispatcher.reconcile(harness.catalog);
+      });
+      dispatcher.open();
+      testGlobal.__appStartedRestart = async () => {
+        await harness.appManager.setEnabled("starter", false);
+        await harness.appManager.setEnabled("starter", true);
+      };
+      const looping = await packHookApp(
+        harness.profileRoot,
+        "looping",
+        "0.0.1",
+        "await globalThis.__appStartedRestart(); globalThis.__appStartedRestarted = true;",
+      );
+
+      await harness.appManager.install({ source: { mode: "bundle", path: looping } });
+      await rs.waitFor(() => expect(testGlobal.__appStartedRestarted).toBe(true));
+      await flush();
+
+      expect(calls()).toHaveLength(1);
+    } finally {
+      delete testGlobal.__appStartedRestart;
+      delete testGlobal.__appStartedRestarted;
+      await harness.cleanup();
+    }
+  });
+});
+
+async function packHookApp(
+  root: string,
+  name: string,
+  version: string,
+  afterRecord = "",
+): Promise<string> {
+  const workspace = join(root, `workspace-${name}`);
+  await mkdir(join(workspace, "hooks", "app-started"), { recursive: true });
+  await writeFile(
+    join(workspace, "app.yaml"),
+    `formatVersion: 1
+id: starter
+version: ${version}
+description: app-started fixture
+agents: []
+actions: []
+skills: []
+hooks:
+  - hooks/app-started
+`,
+    "utf-8",
+  );
+  await writeFile(
+    join(workspace, "hooks", "app-started", "index.js"),
+    `export function createHook(deps) {
+  return {
+    async onAppStarted(event) {
+      globalThis.__appStartedCalls ??= [];
+      globalThis.__appStartedCalls.push({ appId: deps.appId, event, hasAppContext: true });
+      ${afterRecord}
+    },
+  };
+}
+`,
+    "utf-8",
+  );
+  return (await packArtifact(workspace, `${workspace}.packed`)).outDir;
+}
 
 function calls(): StartedCall[] {
   return testGlobal.__appStartedCalls ?? [];

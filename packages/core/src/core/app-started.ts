@@ -101,7 +101,16 @@ export function createAppStartedDispatcher(
 
     for (const appId of [...seen.keys()]) {
       const app = active.get(appId);
-      if (!app || startKey(app.app) !== seen.get(appId)) forget(appId);
+      if (app) {
+        if (startKey(app.app) !== seen.get(appId)) forget(appId);
+        continue;
+      }
+      // An install refreshes the catalog with an `installing` overlay before
+      // it writes the new bundle, which drops the app from `listResolved()`
+      // until the terminal refresh. Keeping the key across that overlay is
+      // what stops a re-install of identical content from counting as a new
+      // start. Every other exit from the resolved set ends the start.
+      if (catalog.get(appId)?.state !== "installing") forget(appId);
     }
 
     for (const [appId, { app, artifacts }] of active) {

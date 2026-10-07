@@ -11,6 +11,10 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
+import {
+  getCurrentHookInvocationContext,
+  runWithHookInvocationContext,
+} from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
 
 interface SubprocessEngine {
@@ -294,6 +298,89 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({ appId: "demo", enabled: false });
     expect(appManager.setEnabled).toHaveBeenCalledWith("demo", false);
+  });
+
+  it("runs apps.setEnabled under the caller's hook chain", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    const hookInvocationContext = {
+      rootInvocationId: "root-1",
+      depth: 1,
+      chain: [{ hookType: "app", appId: "demo", hookName: "app-started" }],
+    };
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(appManager.setEnabled).toHaveBeenCalledWith("demo", true);
+    expect(seen).toEqual(hookInvocationContext);
+  });
+
+  it("runs apps.install without a hook chain when the caller sent none", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {}),
+      install: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+        return { appId: "demo" };
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = makeFakeWorker();
+    const stale = {
+      rootInvocationId: "stale",
+      depth: 3,
+      chain: [{ hookType: "app", appId: "other", hookName: "app-started" }],
+    };
+    // A pooled worker's IPC callbacks run in the async context of whatever
+    // forked it, here a stale hook chain.
+    let pooledWorkerResource!: AsyncResource;
+    runWithHookInvocationContext(stale, () => {
+      pooledWorkerResource = new AsyncResource("pooled-worker-ipc");
+      server.attach(fake.worker);
+    });
+
+    const id = nextId++;
+    pooledWorkerResource.runInAsyncScope(() => {
+      fake.emitter.emit("message", {
+        type: "rpc_request",
+        clientId: "client-1",
+        id,
+        method: "apps.install",
+        params: { source: { mode: "bundle", path: "/tmp/demo" } },
+      });
+    });
+    await rs.waitFor(() => expect(fake.sent.some((message) => message.id === id)).toBe(true));
+    pooledWorkerResource.emitDestroy();
+
+    expect(appManager.install).toHaveBeenCalled();
+    expect(seen).toBeUndefined();
+  });
+
+  it("rejects apps.setEnabled with a malformed hook chain without touching the service", async () => {
+    const { server, appManager } = makeServer({});
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext: { rootInvocationId: "root-1", depth: -1, chain: [] },
+    });
+
+    expect(response.error).toContain("apps.setEnabled: invalid params");
+    expect(appManager.setEnabled).not.toHaveBeenCalled();
   });
 
   it("rejects apps.setEnabled when enabled is missing without touching the service", async () => {

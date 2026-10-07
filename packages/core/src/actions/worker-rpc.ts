@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { actionExecutionContext } from "./context.js";
 import { replayContext } from "./replay.js";
 import { z } from "zod";
+import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import type {
   BackendTurnRunner,
@@ -97,19 +98,37 @@ const AppsCreateParams = z.union([
     .strict(),
 ]);
 
+// The hook chain of the worker-side caller. An install or an enable starts
+// the app, and the app-started dispatch reads the chain from the async context
+// of the catalog refresh, so the handler restores it around the call.
+const HookInvocationContextParam = z.object({
+  rootInvocationId: z.string().min(1),
+  depth: z.number().int().nonnegative(),
+  chain: z.array(
+    z.object({
+      hookType: z.string().min(1),
+      appId: z.string().min(1),
+      hookName: z.string().min(1),
+    }),
+  ),
+});
+
 const AppsInstallParams = z.object({
   source: SpecSourceSchema,
   enabled: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsUninstallParams = z.object({
   appId: AppIdSchema,
   purge: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsSetEnabledParams = z.object({
   appId: AppIdSchema,
   enabled: z.boolean(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppStoreListListingsParams = z.object({
@@ -356,19 +375,40 @@ export class WorkerRpcServer {
     return await this.services.appLifecycle.create(createParams);
   }
 
+  // Each lifecycle handler runs under the caller's hook chain, or under none.
+  // Running under none is deliberate: a pooled worker's IPC callback carries
+  // the async context of whatever forked it, which is not this caller's.
   private async handleAppsInstall(params: unknown): Promise<unknown> {
-    const installParams = parseParams("apps.install", AppsInstallParams, params);
-    return await this.services.appLifecycle.install(installParams);
+    const { hookInvocationContext, ...installParams } = parseParams(
+      "apps.install",
+      AppsInstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.install(installParams),
+    );
   }
 
   private async handleAppsUninstall(params: unknown): Promise<unknown> {
-    const { appId, purge } = parseParams("apps.uninstall", AppsUninstallParams, params);
-    return await this.services.appLifecycle.uninstall({ appId, purge });
+    const { appId, purge, hookInvocationContext } = parseParams(
+      "apps.uninstall",
+      AppsUninstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.uninstall({ appId, purge }),
+    );
   }
 
   private async handleAppsSetEnabled(params: unknown): Promise<unknown> {
-    const { appId, enabled } = parseParams("apps.setEnabled", AppsSetEnabledParams, params);
-    return await this.services.appLifecycle.setEnabled({ appId, enabled });
+    const { appId, enabled, hookInvocationContext } = parseParams(
+      "apps.setEnabled",
+      AppsSetEnabledParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.setEnabled({ appId, enabled }),
+    );
   }
 
   private async handleAppStoreListListings(params: unknown): Promise<unknown> {
