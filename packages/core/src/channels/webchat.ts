@@ -5,13 +5,14 @@ import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
+import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
 
 const log = createLogger("webchat");
 const DEFAULT_HISTORY_WINDOW_HOURS = 24;
 export const WEBCHAT_GUARDIAN_USER_ID = "guardian";
 
 function prettyAgentName(name: string | null): string {
-  if (!name || isCoreMainAgentId(name)) return "Rome";
+  if (!name || isCoreMainAgentId(name)) return DEFAULT_BOT_DISPLAY_NAME;
   return artifactLocalName(name)
     .split(/[-_\s]+/)
     .filter(Boolean)

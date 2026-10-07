@@ -52,6 +52,7 @@ import {
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
   normalizeDiscordEndpoint,
 } from "@rome/api-types/discord-broker";
+import { preserveMentionOnlyText } from "./mention-only.js";
 
 interface DiscordRestMessage {
   id: string;
@@ -289,6 +290,21 @@ export function buildDiscordSlashCommands() {
 export function normalizeDiscordMessageText(content: string, botId?: string): string {
   if (!botId) return content.trim();
   return content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
+}
+
+/**
+ * Builds the agent-facing text for an inbound message: the bot mention is
+ * stripped from prose, and a message that was only the mention keeps it as
+ * `@<bot name>`. Only a typed `<@id>` token counts; a reply that merely pings
+ * the bot puts it in `message.mentions` without any token, and stays as-is.
+ */
+export function discordInboundText(
+  content: string,
+  bot?: { id: string; displayName?: string },
+): string {
+  const text = normalizeDiscordMessageText(content, bot?.id);
+  const typedMention = bot ? new RegExp(`<@!?${bot.id}>`).test(content) : false;
+  return preserveMentionOnlyText(text, typedMention, bot?.displayName);
 }
 
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
@@ -804,7 +820,16 @@ export class DiscordAdapter implements ProviderAdapter {
     if (!this.handler) return;
 
     // Strip the bot @mention from message text so the agent sees clean input
-    const text = normalizeDiscordMessageText(message.content, this.client.user?.id);
+    const botUser = this.client.user;
+    const text = discordInboundText(
+      message.content,
+      botUser
+        ? {
+            id: botUser.id,
+            displayName: message.guild?.members.me?.displayName ?? botUser.displayName,
+          }
+        : undefined,
+    );
 
     let threadName: string | undefined;
     if (!isDm && "name" in message.channel) {

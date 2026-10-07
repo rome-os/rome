@@ -9,6 +9,7 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import type { ProviderAdapter } from "./adapter.js";
+import { preserveMentionOnlyText } from "./mention-only.js";
 import type { NormalizedMessage, OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -21,6 +22,8 @@ import type {
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
+/** Feishu content types whose bot mention can be the whole message. */
+const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
 
 export interface FeishuConfig {
   appId: string;
@@ -228,13 +231,19 @@ export class FeishuAdapter implements ProviderAdapter {
     if (m.senderId && m.senderId === this.channel.botIdentity?.openId) return;
 
     // MVP: text-bearing messages only. Media-only messages arrive with empty
-    // content and are dropped until attachment support lands.
+    // content and are dropped until attachment support lands. The SDK strips
+    // the bot mention, so a text or rich-text post that was only the mention
+    // is restored as the visible mention instead of being dropped.
     const commandText = stripMentionPlaceholders(m.content ?? "", m.mentions);
     const resolvedText = resolveMentions(m.content ?? "", m.mentions);
     const text =
       m.mentionedBot && isStopCommand(commandText)
         ? "/stop"
-        : resolvedText || (m.rawContentType === "text" && m.mentionedBot ? "hello" : "");
+        : preserveMentionOnlyText(
+            resolvedText,
+            m.mentionedBot && TEXT_BEARING_CONTENT_TYPES.has(m.rawContentType),
+            this.channel.botIdentity?.name,
+          );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
     const addressing: MessageAddressing =

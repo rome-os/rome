@@ -276,7 +276,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0]).toMatchObject({ text: "/stop", addressing: "mention" });
   });
 
-  it("delivers an @-only group message as a greeting", async () => {
+  it("preserves an @-only group message as the visible bot mention", async () => {
     await channel.emit({
       chatType: "group",
       content: "",
@@ -286,7 +286,32 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0].text).toBe("hello");
+    expect(captured[0]).toMatchObject({ text: "@Rome", addressing: "mention" });
+  });
+
+  it("preserves an @-only rich-text post as the visible bot mention", async () => {
+    await channel.emit({
+      chatType: "group",
+      content: "",
+      rawContentType: "post",
+      mentions: [],
+      mentionedBot: true,
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0].text).toBe("@Rome");
+  });
+
+  it("still drops a media-only message that mentions the bot", async () => {
+    await channel.emit({
+      chatType: "group",
+      content: "",
+      rawContentType: "image",
+      mentions: [],
+      mentionedBot: true,
+    });
+
+    expect(captured).toHaveLength(0);
   });
 
   it("ignores group messages that do not mention the bot by default", async () => {
