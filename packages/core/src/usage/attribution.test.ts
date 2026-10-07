@@ -256,6 +256,13 @@ describe("UsageAttributionResolver.forActionRun", () => {
     ).toBe("background");
   });
 
+  it("does not count a Run now from the agent or a CLI over loopback as a person", async () => {
+    const manual = resolver({}, {}, { root: "run_now" });
+    const loopback: SessionActor = { kind: "guardian", userId: "g", via: "loopback" };
+    const row = { actionName: "core.memory", initiator: "routine:Digest", rootExecutionId: "root" };
+    expect((await manual.forActionRun({ ...row, actor: loopback }))?.trigger).toBe("background");
+  });
+
   it("skips agent tool calls, channel delivery, startup work, and core webhooks", async () => {
     expect(await run("news.digest", "agent:main")).toBeNull();
     expect(await run("news.digest", "channel:webchat")).toBeNull();

@@ -72,10 +72,10 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
   - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
   - `schedule`: a schedule or poll trigger fired a routine.
   - `event`: an event or webhook trigger fired a routine, or a webhook reached an app's action.
-  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here. So does a sessionless call to an app, which may be a machine webhook or a person on a public page.
-  - `unknown`: none of the above can be told. This includes a routine run recorded before runs stored what fired them.
+  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page.
+  - `unknown`: none of the above can be told.
 
-  A turn takes the trigger of its root session's chain. A routine run records what fired it. A retried fire takes the routine's current trigger.
+  A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
 - A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `handoff`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
 - Funding is `rome_credits`, `byok`, `subscription`, or `unknown`, decided by the provider that served the turn.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.

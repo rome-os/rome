@@ -146,6 +146,7 @@ export class UsageAttributionResolver {
     if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {
       return "user";
     }
+    if (actor?.kind === "guardian") return "background";
     if (initiator?.startsWith("routine:") && params.rootExecutionId) {
       const firedBy = await this.sources.getRoutineFiredBy({
         rootExecutionId: params.rootExecutionId,

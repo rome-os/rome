@@ -1,6 +1,6 @@
 import { and, eq, desc, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { routineRuns } from "../schema.js";
+import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import type { RoutineRun, RoutineRunStatus, RoutineStats } from "../../routines/types.js";
 
@@ -75,14 +75,18 @@ export class RoutineRunsRepository {
   }
 
   /** What fired the run rooted at `executionId`: a trigger type or `run_now`.
-   * Null when no run has that root or the run predates the column. */
+   * A run that predates the column reports its routine's current trigger type.
+   * Null when no run has that root. */
   async findFiredBy(executionId: string): Promise<string | null> {
     const rows = await this.db
-      .select({ firedBy: routineRuns.firedBy })
+      .select({ firedBy: routineRuns.firedBy, trigger: routines.trigger })
       .from(routineRuns)
+      .leftJoin(routines, eq(routines.id, routineRuns.routineId))
       .where(eq(routineRuns.executionId, executionId))
       .limit(1);
-    return rows[0]?.firedBy ?? null;
+    const row = rows[0];
+    if (!row) return null;
+    return row.firedBy ?? (row.trigger as { type: string } | null)?.type ?? null;
   }
 
   async findByRoutineId(
