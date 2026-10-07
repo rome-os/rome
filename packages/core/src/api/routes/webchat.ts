@@ -3169,6 +3169,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // Title generation belongs to the accepted first input, not to a model
+    // turn: one input can produce background turns as well as its reply.
+    void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
 
     let agentSess;
     try {
@@ -3196,7 +3199,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
         const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
         enqueueStream(sessionId, stream);
-        void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         await deps.webchatRepo.addMessage(
           randomUUID(),
           sessionId,
@@ -3253,7 +3255,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
       stream.interrupt = handle.interrupt;
       enqueueStream(sessionId, stream);
-      void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
 
       const unsubscribeStatus = agentSess.onStatusChange((evt) => {
         emitToStream(
@@ -3747,53 +3748,62 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }),
         );
       };
-      const unsubscribeMessages = agentSess.subscribe((message, turnId) => {
-        const turn = turns.get(turnId);
-        if (!turn) return;
-        push(turn, message);
-        // The iterator closes over `turn`, so the active drain can consume its
-        // terminal frame after this entry is gone. Retaining it in the lookup
-        // would leak one buffer for every completed SDK turn in a long-lived
-        // webchat session.
-        if (message.type === "turn_end") turns.delete(turnId);
-      });
-      const unsubscribeTurns = agentSess.onModelTurnStart((turnId) => {
-        // A provider-owned boundary wins over the provisional caller handle.
-        // If the caller later ends, its buffer must not open a duplicate stream.
-        dropCallerFallback(turnId);
-        if (turns.has(turnId) || streamsByTurnId.has(turnId)) return;
-        const turn: BufferedModelTurn = { values: [], resolvers: [], ended: false };
-        turns.set(turnId, turn);
-        const handle: AgentTurnHandle = {
-          turnId,
-          turnContext: otelContext.active(),
-          events: {
-            [Symbol.asyncIterator]: () => ({ next: () => next(turn) }),
-          },
-          // Stop always reaches the model-session Query.interrupt path. The
-          // expected id prevents this stream from cancelling a later SDK turn.
-          interrupt: (reason) => agentSess.interrupt(reason, turnId),
-        };
-        void attachTurn(handle).catch((error) =>
-          log.error("failed to attach SDK model turn", {
+      const unsubscribeMessages = agentSess.subscribe(
+        (message, turnId) => {
+          const turn = turns.get(turnId);
+          if (!turn) return;
+          push(turn, message);
+          // The iterator closes over `turn`, so the active drain can consume its
+          // terminal frame after this entry is gone. Retaining it in the lookup
+          // would leak one buffer for every completed SDK turn in a long-lived
+          // webchat session.
+          if (message.type === "turn_end") turns.delete(turnId);
+        },
+        { replayModelTurns: true },
+      );
+      const unsubscribeTurns = agentSess.onModelTurnStart(
+        (turnId) => {
+          // A provider-owned boundary wins over the provisional caller handle.
+          // If the caller later ends, its buffer must not open a duplicate stream.
+          dropCallerFallback(turnId);
+          if (turns.has(turnId) || streamsByTurnId.has(turnId)) return;
+          const turn: BufferedModelTurn = { values: [], resolvers: [], ended: false };
+          turns.set(turnId, turn);
+          const handle: AgentTurnHandle = {
             turnId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-        // Session callers emit their provisional turn_start before the SDK
-        // declares ownership. The public stream starts here instead, at the
-        // model boundary, and keeps the same real session turn id.
-        push(turn, {
-          type: "turn_start",
-          turnId,
-          sessionId: agentSess.sessionId,
-          userPrompt: "",
-          agent: agentName,
-        });
-      });
-      const unsubscribeAnswers = agentSess.onModelTurnAnswers?.((_turnId, answers) => {
-        suppressCallerFallbacks(answers);
-      });
+            turnContext: otelContext.active(),
+            events: {
+              [Symbol.asyncIterator]: () => ({ next: () => next(turn) }),
+            },
+            // Stop always reaches the model-session Query.interrupt path. The
+            // expected id prevents this stream from cancelling a later SDK turn.
+            interrupt: (reason) => agentSess.interrupt(reason, turnId),
+          };
+          void attachTurn(handle).catch((error) =>
+            log.error("failed to attach SDK model turn", {
+              turnId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+          // Session callers emit their provisional turn_start before the SDK
+          // declares ownership. The public stream starts here instead, at the
+          // model boundary, and keeps the same real session turn id.
+          push(turn, {
+            type: "turn_start",
+            turnId,
+            sessionId: agentSess.sessionId,
+            userPrompt: "",
+            agent: agentName,
+          });
+        },
+        { replayModelTurns: true },
+      );
+      const unsubscribeAnswers = agentSess.onModelTurnAnswers?.(
+        (_turnId, answers) => {
+          suppressCallerFallbacks(answers);
+        },
+        { replayModelTurns: true },
+      );
       modelTurnSubscriptions.set(agentSess, {
         deferCaller,
         unsubscribe: () => {

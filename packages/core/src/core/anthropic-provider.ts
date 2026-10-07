@@ -617,9 +617,33 @@ export class AnthropicProvider implements ModelProvider {
     let activeTurnLastAssistantMessageId: string | undefined;
     let lastCompletedTurnCheckpoint: string | undefined;
 
+    // Middleware-only replies still use the shared ModelSession turn stream;
+    // they never need to manufacture a provider request.
+    const localTurnEvents = new AsyncMessageQueue<ModelSessionEvent>();
+    const providerBoundaryWaiters = new Set<{
+      resolve: () => void;
+      reject: (error: Error) => void;
+    }>();
+    let localCompletionTail = Promise.resolve();
+    const settleProviderBoundaryWaiters = (error?: Error): void => {
+      for (const waiter of providerBoundaryWaiters) {
+        if (error) waiter.reject(error);
+        else waiter.resolve();
+      }
+      providerBoundaryWaiters.clear();
+    };
+    const waitForProviderBoundary = async (): Promise<void> => {
+      while (projection.isOpen) {
+        if (closed) throw new Error("ModelSession is closed");
+        await new Promise<void>((resolve, reject) => {
+          providerBoundaryWaiters.add({ resolve, reject });
+        });
+      }
+      if (closed) throw new Error("ModelSession is closed");
+    };
     // Translate the SDK's lifetime stream into AgentMessages. Runs once for
     // the whole session; turn boundaries live one layer up (AgentSession §6).
-    const events: AsyncIterable<ModelSessionEvent> = (async function* () {
+    const providerEvents: AsyncIterable<ModelSessionEvent> = (async function* () {
       // In-turn narration vs. closing answer. The agent SDK never sets
       // `stop_reason` on its streamed assistant messages (always null) and splits
       // a single API message into one `assistant` message per content block, so
@@ -942,6 +966,7 @@ export class AnthropicProvider implements ModelProvider {
             }
             yield* projection.end(message, settles);
           }
+          if (!projection.isOpen) settleProviderBoundaryWaiters();
         }
         // A Query that ends without its result has lost the SDK's turn
         // correlation. Do not invent one: the session layer fails any caller
@@ -978,9 +1003,13 @@ export class AnthropicProvider implements ModelProvider {
               : undefined,
         );
       } finally {
+        const error = new Error("ModelSession is closed");
+        settleProviderBoundaryWaiters(error);
+        localTurnEvents.end();
         closed = true;
       }
     })();
+    const events = mergeModelSessionEvents(providerEvents, localTurnEvents.iter());
 
     const session: ModelSession = {
       providerId,
@@ -1057,6 +1086,26 @@ export class AnthropicProvider implements ModelProvider {
         });
         return "accepted";
       },
+      async completeTurn(input: ModelUserInput, messages: readonly AgentMessage[]): Promise<void> {
+        if (closed) throw new Error("ModelSession is closed");
+        const previous = localCompletionTail;
+        let release!: () => void;
+        localCompletionTail = new Promise<void>((resolve) => (release = resolve));
+        await previous;
+        try {
+          // Do not splice a middleware turn inside an SDK turn: the session
+          // projection has exactly one active model-turn owner at a time.
+          await waitForProviderBoundary();
+          const turnId = randomUUID();
+          const answers = input.inputId ? [input.inputId] : [];
+          localTurnEvents.push({ type: "model_turn_start", turnId, answers });
+          localTurnEvents.push({ type: "model_turn_answers", turnId, added: [] });
+          for (const message of messages) localTurnEvents.push(message);
+          localTurnEvents.push({ type: "model_turn_end", turnId, answers });
+        } finally {
+          release();
+        }
+      },
       async fork(forkParams: ModelSessionForkParams): Promise<ModelSessionFork> {
         if (closed) {
           throw new Error("Cannot fork a closed ModelSession");
@@ -1117,6 +1166,8 @@ export class AnthropicProvider implements ModelProvider {
         } catch {
           // ignore
         }
+        settleProviderBoundaryWaiters(new Error("ModelSession is closed"));
+        localTurnEvents.end();
         closed = true;
       },
     };
@@ -1172,6 +1223,118 @@ class AsyncMessageQueue<T> {
         return { next };
       },
     };
+  }
+}
+
+async function* mergeModelSessionEvents(
+  provider: AsyncIterable<ModelSessionEvent>,
+  local: AsyncIterable<ModelSessionEvent>,
+): AsyncGenerator<ModelSessionEvent> {
+  const turns = new ModelSessionEventTurnQueue(provider, local);
+  while (true) {
+    const source = await turns.nextSource();
+    if (!source) return;
+    let next = await turns.next(source);
+    if (next.done) continue;
+
+    // Both sources speak the same ModelSession contract. Once either starts
+    // a turn, retain its stream ownership until the corresponding end. This
+    // keeps AgentSession's active SDK turn aligned with every event it sees.
+    while (true) {
+      yield next.value;
+      if (next.value.type === "model_turn_end") break;
+      next = await turns.next(source);
+      if (next.done) break;
+    }
+  }
+}
+
+type ModelSessionEventSource = "provider" | "local";
+
+/**
+ * A bounded two-source coordinator. Each iterator has at most one completed
+ * read buffered, so an idle local iterator cannot accumulate Promise.race
+ * reactions while the provider streams a long native turn.
+ */
+class ModelSessionEventTurnQueue {
+  private readonly sources: Record<
+    ModelSessionEventSource,
+    {
+      iterator: AsyncIterator<ModelSessionEvent>;
+      ready?: IteratorResult<ModelSessionEvent>;
+      error?: unknown;
+      done: boolean;
+      waiting?: () => void;
+    }
+  >;
+  private readySources: ModelSessionEventSource[] = [];
+  private waitingForSource?: () => void;
+
+  constructor(provider: AsyncIterable<ModelSessionEvent>, local: AsyncIterable<ModelSessionEvent>) {
+    this.sources = {
+      provider: { iterator: provider[Symbol.asyncIterator](), done: false },
+      local: { iterator: local[Symbol.asyncIterator](), done: false },
+    };
+    this.pull("provider");
+    this.pull("local");
+  }
+
+  async nextSource(): Promise<ModelSessionEventSource | undefined> {
+    while (true) {
+      while (this.readySources.length > 0) {
+        const source = this.readySources.shift()!;
+        if (this.sources[source].ready || this.sources[source].error !== undefined) return source;
+      }
+      if (Object.values(this.sources).every((source) => source.done)) return undefined;
+      await new Promise<void>((resolve) => {
+        this.waitingForSource = resolve;
+      });
+    }
+  }
+
+  async next(sourceName: ModelSessionEventSource): Promise<IteratorResult<ModelSessionEvent>> {
+    const source = this.sources[sourceName];
+    while (!source.ready && source.error === undefined) {
+      if (source.done) return { value: undefined as never, done: true };
+      await new Promise<void>((resolve) => {
+        source.waiting = resolve;
+      });
+    }
+    if (source.error !== undefined) {
+      const error = source.error;
+      source.error = undefined;
+      throw error;
+    }
+    const next = source.ready!;
+    source.ready = undefined;
+    if (next.done) source.done = true;
+    else this.pull(sourceName);
+    return next;
+  }
+
+  private pull(sourceName: ModelSessionEventSource): void {
+    const source = this.sources[sourceName];
+    void source.iterator.next().then(
+      (next) => {
+        source.ready = next;
+        if (next.done) source.done = true;
+        this.signal(sourceName);
+      },
+      (error: unknown) => {
+        source.error = error;
+        source.done = true;
+        this.signal(sourceName);
+      },
+    );
+  }
+
+  private signal(sourceName: ModelSessionEventSource): void {
+    const source = this.sources[sourceName];
+    this.readySources.push(sourceName);
+    source.waiting?.();
+    source.waiting = undefined;
+    this.waitingForSource?.();
+    this.waitingForSource = undefined;
   }
 }
 

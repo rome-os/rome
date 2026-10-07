@@ -353,6 +353,9 @@ export interface AgentSessionStatusEvent {
 
 export type AgentSessionSubscriber = (msg: StreamAgentMessage, turnId: string) => void;
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
+export interface AgentSessionSubscriptionOptions {
+  replayModelTurns?: boolean;
+}
 /** Fires only when the provider has opened an SDK model turn. */
 export type AgentSessionModelTurnListener = (turnId: string) => void;
 /** Reports caller input ids newly echoed by an SDK model turn. */
@@ -378,11 +381,17 @@ export interface AgentSession {
     options: SubmitInputOptions,
   ): AgentInputReceipt;
   runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentMessage>;
-  subscribe(handler: AgentSessionSubscriber): () => void;
+  subscribe(handler: AgentSessionSubscriber, options?: AgentSessionSubscriptionOptions): () => void;
   /** Model-turn boundary for consumers that render one stream per SDK turn. */
-  onModelTurnStart?(listener: AgentSessionModelTurnListener): () => void;
+  onModelTurnStart?(
+    listener: AgentSessionModelTurnListener,
+    options?: AgentSessionSubscriptionOptions,
+  ): () => void;
   /** Caller echoes newly claimed by a provider-owned model turn. */
-  onModelTurnAnswers?(listener: AgentSessionModelTurnAnswersListener): () => void;
+  onModelTurnAnswers?(
+    listener: AgentSessionModelTurnAnswersListener,
+    options?: AgentSessionSubscriptionOptions,
+  ): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
@@ -1977,6 +1986,13 @@ class AgentSessionImpl implements AgentSession {
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private modelTurnListeners = new Map<string, AgentSessionModelTurnListener>();
   private modelTurnAnswersListeners = new Map<string, AgentSessionModelTurnAnswersListener>();
+  // Only WebChat attaches after acquisition and needs the short replay window.
+  // Other channels consume their caller handle or a live subscription, so
+  // retaining their completed output would leak the session's whole history.
+  private replayingModelTurns: boolean;
+  private readonly replayedModelTurnIds: string[] = [];
+  private readonly replayedModelTurnMessages = new Map<string, StreamAgentMessage[]>();
+  private readonly replayedModelTurnAnswers: Array<{ turnId: string; answers: string[] }> = [];
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
   /** Callers waiting for the SDK turn whose result names their message id. */
@@ -2038,6 +2054,7 @@ class AgentSessionImpl implements AgentSession {
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
+    this.replayingModelTurns = this.key.channelThreadKey.startsWith("webchat:");
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
     this.openModelSession = args.openModelSession;
@@ -2920,6 +2937,11 @@ class AgentSessionImpl implements AgentSession {
 
   private publishToSink(sink: TurnSink, msg: StreamAgentMessage): void {
     if (sink.done) return;
+    if (this.replayingModelTurns && this.replayedModelTurnIds.includes(sink.turnId)) {
+      const messages = this.replayedModelTurnMessages.get(sink.turnId) ?? [];
+      messages.push(msg);
+      this.replayedModelTurnMessages.set(sink.turnId, messages);
+    }
     if (sink.detached) {
       // SDK-started turns are broadcast to session subscribers; their own
       // stream is introduced by the webchat migration in PR 3.
@@ -3913,23 +3935,49 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  subscribe(handler: AgentSessionSubscriber): () => void {
+  subscribe(
+    handler: AgentSessionSubscriber,
+    options?: AgentSessionSubscriptionOptions,
+  ): () => void {
     const id = uuidv4();
-    this.subscribers.set(id, handler);
+    let active = true;
+    if (options?.replayModelTurns && this.replayingModelTurns) {
+      // Do not make this listener live until its snapshot drains. New output
+      // remains in the acquisition journal, so it is delivered once and in order.
+      queueMicrotask(() => {
+        if (!active || !this.replayingModelTurns) return;
+        for (const [turnId, messages] of this.replayedModelTurnMessages)
+          for (const message of messages) handler(message, turnId);
+        this.replayingModelTurns = false;
+        this.replayedModelTurnIds.length = 0;
+        this.replayedModelTurnMessages.clear();
+        this.replayedModelTurnAnswers.length = 0;
+        if (active) this.subscribers.set(id, handler);
+      });
+    } else {
+      this.subscribers.set(id, handler);
+    }
     return () => {
+      active = false;
       this.subscribers.delete(id);
     };
   }
 
-  onModelTurnStart(listener: AgentSessionModelTurnListener): () => void {
+  onModelTurnStart(
+    listener: AgentSessionModelTurnListener,
+    options?: AgentSessionSubscriptionOptions,
+  ): () => void {
     const id = uuidv4();
     this.modelTurnListeners.set(id, listener);
+    if (options?.replayModelTurns && this.replayingModelTurns)
+      for (const turnId of this.replayedModelTurnIds) listener(turnId);
     return () => this.modelTurnListeners.delete(id);
   }
 
   private announceModelTurn(turn: SdkTurnState, turnId: string): void {
     if (turn.streamAnnounced) return;
     turn.streamAnnounced = true;
+    if (this.replayingModelTurns) this.replayedModelTurnIds.push(turnId);
     for (const listener of this.modelTurnListeners.values()) {
       try {
         listener(turnId);
@@ -3942,14 +3990,21 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  onModelTurnAnswers(listener: AgentSessionModelTurnAnswersListener): () => void {
+  onModelTurnAnswers(
+    listener: AgentSessionModelTurnAnswersListener,
+    options?: AgentSessionSubscriptionOptions,
+  ): () => void {
     const id = uuidv4();
     this.modelTurnAnswersListeners.set(id, listener);
+    if (options?.replayModelTurns && this.replayingModelTurns)
+      for (const { turnId, answers } of this.replayedModelTurnAnswers) listener(turnId, answers);
     return () => this.modelTurnAnswersListeners.delete(id);
   }
 
   private announceModelTurnAnswers(turnId: string, answers: readonly string[]): void {
     if (answers.length === 0) return;
+    if (this.replayingModelTurns)
+      this.replayedModelTurnAnswers.push({ turnId, answers: [...answers] });
     for (const listener of this.modelTurnAnswersListeners.values()) {
       try {
         listener(turnId, answers);
