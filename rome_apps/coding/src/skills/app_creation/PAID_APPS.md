@@ -44,7 +44,7 @@ favorRequirement:
       from: $.pack            # JSONPath into the action args; a bare key is rejected
 ```
 
-- The `Action` returned by `createAction()` must include an `inputSchema` that covers every arg the API sends (`purchaseId`, `pack`). See [`REFERENCE.md` → Actions](./REFERENCE.md#actions-createactionconfig-deps). A separate `export const inputSchema` is not read. Without the schema the price never registers with Rome Cloud (the sync error is only logged), and checkout fails.
+- The `Action` returned by `createAction()` must include an `inputSchema` that covers every arg the API sends (`purchaseId`, `pack`). See [`REFERENCE.md` → Actions](./REFERENCE.md#actions-createactionconfig-deps). A separate `export const inputSchema` is not read. If any paid action lacks it, none of the app's prices register with Rome Cloud (the sync error is only logged at debug level), and every checkout fails.
 - **One action per price.** Use a separate action for each tier or promotional price. Never let the browser send a price or a quantity. Keep the pack definitions on the server.
 - **Create the purchase row first.** The API handler stores `{ id, owner, pack, status: "awaiting_payment" }`, then calls:
 
@@ -80,7 +80,7 @@ favorRequirement:
 
 ### Promo prices
 
-Add a cheaper action, such as `buy_pack_promo`. The server validates the code (normalized, never shipped in the bundle) and creates a promo order. The cheap action settles **only** pre-authorized promo orders. Rome Cloud collects favors before the action runs, so reserve a one-time code atomically against the order *before* `requestAction`. Release it only when that request is declined or expired. Then two concurrent checkouts can't both pay for one code.
+Add a cheaper action, such as `buy_pack_promo`. The server validates the code (normalized, never shipped in the bundle) and creates a promo order. The cheap action settles **only** pre-authorized promo orders. Rome Cloud collects favors before the action runs, so reserve a one-time code atomically against the order *before* `requestAction`. Release it only when that request is declined or expired. Apps get no expiry callback, so store `request.expiresAt` with the reservation and treat an unsettled order as released after that time. Then two concurrent checkouts can't both pay for one code.
 
 ## 4. Verify before shipping
 
