@@ -1,4 +1,10 @@
-import type { RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { sign } from "@octokit/webhooks-methods";
+import type { AppDbContext, RomeAppApiRequest, RomeAppContext } from "@rome-os/app-runtime";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as composioClientModule from "./composio-client.js" with { rstest: "importActual" };
 import * as composioLoginModule from "./composio-login.js" with { rstest: "importActual" };
@@ -211,5 +217,109 @@ describe("connector API webhook self-healing", () => {
       "connectors.start: webhook registration failed; continuing OAuth",
       expect.objectContaining({ provider: "notion", error: "relay unavailable" }),
     );
+  });
+});
+
+describe("connector API GitHub webhook outbox", () => {
+  const secret = "github-hook-secret";
+
+  function migratedDb(): { db: AppDbContext; sqlite: Database.Database } {
+    const sqlite = new Database(":memory:");
+    const connection = drizzle(sqlite) as unknown as BetterSQLite3Database<Record<string, never>>;
+    migrate(connection, {
+      migrationsFolder: resolve(dirname(fileURLToPath(import.meta.url)), "../db/migrations"),
+      migrationsTable: "__drizzle_migrations_app_connector",
+    });
+    const db: AppDbContext = {
+      connection,
+      tablePrefix: "connector",
+      tableName: (name: string) => `connector__${name}`,
+    };
+    return { db, sqlite };
+  }
+
+  async function githubDelivery(deliveryId: string): Promise<RomeAppApiRequest> {
+    const body = JSON.stringify({ action: "created", issue: { number: 7 } });
+    return {
+      path: ["webhook"],
+      method: "POST",
+      headers: {
+        host: "rome.test",
+        "x-github-event": "issue_comment",
+        "x-github-delivery": deliveryId,
+        "x-hub-signature-256": await sign(secret, body),
+      },
+      body: new TextEncoder().encode(body),
+    } as unknown as RomeAppApiRequest;
+  }
+
+  beforeEach(() => {
+    rs.resetAllMocks();
+    mocks.settings.get.mockImplementation(async (key: string) =>
+      key === "githubWebhookSecret" ? secret : undefined,
+    );
+  });
+
+  it("acks a delivery while its publish still waits for a worker, then publishes it", async () => {
+    const { db, sqlite } = migratedDb();
+    let finishPublish!: () => void;
+    const runAction = rs.fn(
+      () =>
+        new Promise((resolvePublish) => {
+          finishPublish = () => resolvePublish({ status: "ok" });
+        }),
+    );
+    const ctx = {
+      db,
+      repositories: { settings: {} },
+      runAction,
+      log: { debug: rs.fn(), warn: rs.fn(), error: rs.fn(), info: rs.fn() },
+    } as unknown as RomeAppContext;
+
+    const response = await createApiHandler(ctx).handle(await githubDelivery("delivery-1"));
+
+    expect(response.status).toBe(200);
+    await rs.waitFor(() => expect(runAction).toHaveBeenCalledOnce());
+    expect(runAction).toHaveBeenCalledWith("publish_event", {
+      name: "provider:event:github.issue_comment",
+      source: "connector",
+      payload: { action: "created", issue: { number: 7 } },
+    });
+
+    finishPublish();
+    await rs.waitFor(() =>
+      expect(
+        sqlite.prepare("SELECT published_at FROM connector__emitted_events").get(),
+      ).toMatchObject({ published_at: expect.any(Number) }),
+    );
+    sqlite.close();
+  });
+
+  it("retries an event left unpublished when the next delivery arrives", async () => {
+    const { db, sqlite } = migratedDb();
+    const runAction = rs
+      .fn()
+      .mockRejectedValueOnce(new Error("Action worker capacity reached (max 8 live workers)"))
+      .mockResolvedValue({ status: "ok" });
+    const log = { debug: rs.fn(), warn: rs.fn(), error: rs.fn(), info: rs.fn() };
+    const ctx = {
+      db,
+      repositories: { settings: {} },
+      runAction,
+      log,
+    } as unknown as RomeAppContext;
+
+    await createApiHandler(ctx).handle(await githubDelivery("delivery-1"));
+    // The failure is logged after its claim is released.
+    await rs.waitFor(() => expect(log.warn).toHaveBeenCalledOnce());
+    await createApiHandler(ctx).handle(await githubDelivery("delivery-2"));
+
+    await rs.waitFor(() => expect(runAction).toHaveBeenCalledTimes(3));
+    expect(
+      sqlite
+        .prepare("SELECT count(*) AS n FROM connector__emitted_events WHERE published_at IS NULL")
+        .get(),
+    ).toEqual({ n: 0 });
+    sqlite.close();
   });
 });

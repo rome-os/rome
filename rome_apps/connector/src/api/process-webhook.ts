@@ -1,4 +1,5 @@
-import { EventsRepo } from "./events-repo.js";
+import type { Logger } from "@rome-os/app-runtime";
+import { EventsRepo, MAX_PUBLISH_ATTEMPTS } from "./events-repo.js";
 import { normalizeGithubPayload } from "./github-webhook.js";
 import {
   extractEventType,
@@ -29,26 +30,56 @@ const EVENT_SOURCE = "connector";
 export type RunAction = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 
 /**
- * Forward a freshly-emitted Composio trigger event onto Rome's central event
- * bus (via the system `publish_event` action) so routines with a matching
- * `event-bus` trigger fire.
+ * Drains the outbox: publishes each stored event still owed a publish onto
+ * Rome's central bus through the system `publish_event` action, oldest first,
+ * so routines with a matching `event-bus` trigger fire. The bus event's `name`
+ * is the event's topic, the same string `POST /feeds` returned to the feed
+ * creator.
  *
- * Gated on `kind === "emitted"`: a `deduped` result is a Composio retry of an
- * event we already recorded, and republishing it would fire the routine again
- * for the same PR update on every retry. `ignored` carries no event at all.
- * The bus event's `name` is the same `topic` returned by `POST /feeds`, so a
- * routine's `eventName` is the exact string the feed creator already holds.
+ * Stops at the first failed publish and leaves that event for the next drain.
+ * After MAX_PUBLISH_ATTEMPTS failures an event is abandoned. Delivery is
+ * at-least-once: a process that dies between publishing and recording it
+ * publishes the event again once its claim lapses. Safe to run concurrently.
+ * A deduped webhook retry never republishes, because the stored row is
+ * already published or claimed.
  */
-export async function publishEmittedEvent(
+export async function publishPendingEvents(
+  repo: EventsRepo,
   runAction: RunAction,
-  result: ProcessResult,
+  log: Logger,
+  now: () => Date = () => new Date(),
 ): Promise<void> {
-  if (result.kind !== "emitted") return;
-  await runAction(PUBLISH_EVENT_ACTION, {
-    name: result.topic,
-    source: EVENT_SOURCE,
-    payload: result.event.data,
-  });
+  for (;;) {
+    const event = await repo.claimNextUnpublished(now());
+    if (!event) return;
+    const fields = { eventId: event.eventId, topic: event.topic, provider: event.provider };
+    try {
+      await runAction(PUBLISH_EVENT_ACTION, {
+        name: event.topic,
+        source: EVENT_SOURCE,
+        payload: JSON.parse(event.payloadJson) as unknown,
+      });
+    } catch (err) {
+      await repo.releaseClaim(event.eventId);
+      const error = err instanceof Error ? err.message : String(err);
+      if (event.publishAttempts >= MAX_PUBLISH_ATTEMPTS) {
+        log.error("gave up publishing event to bus", {
+          ...fields,
+          attempts: event.publishAttempts,
+          error,
+        });
+      } else {
+        log.warn("event publish failed, will retry on the next webhook", {
+          ...fields,
+          attempts: event.publishAttempts,
+          error,
+        });
+      }
+      return;
+    }
+    await repo.markPublished(event.eventId, now());
+    log.info("published event to bus", fields);
+  }
 }
 
 /**
@@ -118,7 +149,8 @@ export async function processVerifiedWebhook(
  * `github` and the event type comes from the trusted `X-GitHub-Event` header, so
  * there is no trigger-slug → toolkit lookup: the topic is `github.<event>`
  * directly. `deliveryId` is GitHub's `X-GitHub-Delivery` GUID, which dedups
- * retries (GitHub redelivers on a non-2xx) exactly like the Composio webhook id.
+ * redeliveries (a manual redelivery or a relay replay reuses it) exactly like
+ * the Composio webhook id.
  */
 export async function processGithubWebhook(
   repo: EventsRepo,
