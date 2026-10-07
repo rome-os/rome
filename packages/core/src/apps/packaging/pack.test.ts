@@ -797,6 +797,8 @@ describe("runPnpm", () => {
       [
         "echo 'GET https://user:s3cret@registry.example.com/x: 401'",
         "echo '//registry.example.com/:_authToken=npm_abc123'",
+        "echo '//registry.example.com/:_password=cGFzcw=='",
+        "echo 'Authorization: Bearer tok_xyz'",
         "exit 1",
       ].join("\n"),
     );
@@ -806,6 +808,8 @@ describe("runPnpm", () => {
     expect(message).toContain("_authToken=***");
     expect(message).not.toContain("s3cret");
     expect(message).not.toContain("npm_abc123");
+    expect(message).not.toContain("cGFzcw==");
+    expect(message).not.toContain("tok_xyz");
   });
 
   it("leaves the message unchanged when pnpm printed nothing", async () => {

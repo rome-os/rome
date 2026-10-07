@@ -127,7 +127,11 @@ describe("installFirstPartyAppsAtBoot", () => {
   }
 
   /** Wraps the real manager so the first `failures` installs of `appId` report failed. */
-  function failingInstalls(appId: string, failures: number) {
+  function failingInstalls(
+    appId: string,
+    failures: number,
+    message = "Command failed: pnpm install (exit 1)",
+  ) {
     const attempts: string[] = [];
     let remaining = failures;
     const appManager: Pick<AppManager, "install" | "uninstall"> = {
@@ -141,7 +145,7 @@ describe("installFirstPartyAppsAtBoot", () => {
           state: "failed",
           installedHash: null,
           installedVersion: null,
-          error: { code: "INSTALLER_ERROR", message: "Command failed: pnpm install (exit 1)" },
+          error: { code: "INSTALLER_ERROR", message },
         };
         return failed;
       },
@@ -270,6 +274,17 @@ describe("installFirstPartyAppsAtBoot", () => {
     expect(result.failed).toEqual([
       { appId: "alpha", error: "Command failed: pnpm install (exit 1)", priorHash: null },
     ]);
+  });
+
+  it("does not retry an install that timed out", async () => {
+    await packFirstParty("alpha", "0.1.0");
+    const message = "Command timed out after 300000ms: pnpm install --prod (cwd: /x)";
+    const { appManager, attempts } = failingInstalls("alpha", 1, message);
+
+    const result = await bootInstall(appManager);
+
+    expect(attempts).toEqual(["alpha"]);
+    expect(result.failed).toEqual([{ appId: "alpha", error: message, priorHash: null }]);
   });
 
   describe("when pnpm fails", () => {

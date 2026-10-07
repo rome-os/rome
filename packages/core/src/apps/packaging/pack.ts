@@ -272,6 +272,9 @@ export async function readPackageManifest(appRoot: string): Promise<PackageJsonM
  */
 const PNPM_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** Prefix of the message runPnpm rejects with when pnpm hits PNPM_TIMEOUT_MS. */
+export const PNPM_TIMEOUT_MESSAGE_PREFIX = "Command timed out after";
+
 // Bounds on the pnpm output a failure carries. The error message lands in the
 // lockfile's `lastError` and in telemetry, so it stays small.
 const PNPM_OUTPUT_BUFFER_CHARS = 16 * 1024;
@@ -348,7 +351,7 @@ export function runPnpm(
           if (timedOut) {
             rejectPromise(
               new Error(
-                `Command timed out after ${timeoutMs}ms: ${command} (cwd: ${options.cwd})` +
+                `${PNPM_TIMEOUT_MESSAGE_PREFIX} ${timeoutMs}ms: ${command} (cwd: ${options.cwd})` +
                   formatOutputTail(output),
               ),
             );
@@ -395,7 +398,8 @@ export function runPnpm(
 function redactSecrets(text: string): string {
   return text
     .replace(/(\/\/)[^/@\s]+@/g, "$1***@")
-    .replace(/(_auth(?:Token)?\s*=\s*)\S+/gi, "$1***");
+    .replace(/(_(?:auth(?:Token)?|password)\s*=\s*)\S+/gi, "$1***")
+    .replace(/(Bearer\s+)\S+/gi, "$1***");
 }
 
 function formatOutputTail(output: string): string {

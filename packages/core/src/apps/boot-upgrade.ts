@@ -17,7 +17,11 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createLogger } from "../logger.js";
 import { getFirstPartyArtifactDir } from "../paths.js";
-import { hashArtifact, readManifestIdAndVersion } from "./packaging/index.js";
+import {
+  hashArtifact,
+  PNPM_TIMEOUT_MESSAGE_PREFIX,
+  readManifestIdAndVersion,
+} from "./packaging/index.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
 
@@ -210,7 +214,10 @@ export async function installFirstPartyAppsAtBoot(
         firstParty: true,
       });
     let result = await install();
-    if (result.state === "failed") {
+    // A timeout already spent PNPM_TIMEOUT_MS; retrying it would double the
+    // boot delay against a registry that hangs rather than refuses.
+    const timedOut = result.error?.message.includes(PNPM_TIMEOUT_MESSAGE_PREFIX) ?? false;
+    if (result.state === "failed" && !timedOut) {
       log.warn("retrying failed first-party app install at boot", {
         appId: entry.appId,
         error: result.error?.message,
