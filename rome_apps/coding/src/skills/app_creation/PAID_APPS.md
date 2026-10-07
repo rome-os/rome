@@ -27,10 +27,13 @@ The price is declared on an **action**, not chosen per request. Rome Cloud asks 
 # src/actions/buy-pack-30/action.yaml
 name: buy_pack_30
 type: custom
-visibility: explicit          # UI-started only; keeps it out of the agent catalog
+visibility: explicit          # hides it from wildcard discovery only; not a payment guard
 description: >-
   Settle a 30-credit pack after a visitor pays. Idempotent per purchase.
 entry: ./index.ts
+complexity: simple
+speed: fast
+reliability: high
 sideEffects: write
 favorRequirement:
   amount: 99
@@ -41,6 +44,7 @@ favorRequirement:
       from: $.pack            # JSONPath into the action args; a bare key is rejected
 ```
 
+- `index.ts` must export an `inputSchema` covering every arg the API sends (`purchaseId`, `pack`). Without it the price never registers with Rome Cloud (the sync error is only logged) and checkout fails.
 - **One action per price.** Use a separate action for each tier or promotional price. Never let the browser send a price or a quantity. Keep the pack definitions on the server.
 - **Create the purchase row first.** The API handler stores `{ id, owner, pack, status: "awaiting_payment" }`, then calls:
 
@@ -54,12 +58,13 @@ favorRequirement:
   });
   ```
 
-- **Handle every status.**
-  - `pending_consent`: store `requestId` and send the visitor to `authorizationUrl`.
+- **Handle every status.** Store the request id on every status that returns one (`requestId`, or `request.id` for `queued`).
+  - `pending_consent`: send the visitor to `authorizationUrl`. It is optional in the type, so treat a missing one as a retryable error.
   - `queued`: credit the purchase only if `request.status === "settled"`.
   - `declined`: mark the purchase declined.
-  - `error` with `visitor_auth_required`: return `visitorAuthRequired()`.
-- **Settle idempotently from both sides.** The paid action reads `getCurrentActionContext()?.sharedContext.favorActionRequestId` and settles the purchase with a conditional update. A `POST /purchases/:id/sync` route that the return page calls re-sends the *same* `requestAction` (same idempotency key) and settles if it finds the request settled. Whichever path runs first grants the credit, and the other does nothing. A return URL alone never grants credit.
+  - `error` with `visitor_auth_required` or `visitor_favor_auth_required`: return `visitorAuthRequired()`. Any other error leaves the purchase uncredited and retryable.
+- **The paid action settles only favor-dispatched runs.** `visibility: explicit` does not stop exact-name agent allowlists, routines, or `ctx.runAction` from running it, and those paths don't charge. Read `getCurrentActionContext()?.sharedContext.favorActionRequestId`. If it is missing, return an error and change nothing. Otherwise settle only the purchase `args.purchaseId` that is still `awaiting_payment` and whose stored request id is unset or equal to it; the dispatcher can run before the API handler stores the id.
+- **Settle idempotently from both sides.** The paid action settles with a conditional update. A `POST /purchases/:id/sync` route that the return page calls re-sends the *same* `requestAction` (same idempotency key) and settles if it finds the request settled. Whichever path runs first grants the credit, and the other does nothing. A return URL alone never grants credit.
 - After settlement, resume any work that was skipped for quota. Don't just change the number shown in the UI.
 - Owner previews of the paid UI must not create orders or charge anyone.
 
@@ -72,7 +77,7 @@ Add a cheaper action, such as `buy_pack_promo`. The server validates the code (n
 1. Signed-out requests to every data, mutation, and media route fail.
 2. Account A cannot list or open account B's root or nested records, including by direct URL.
 3. Concurrent requests over the cap: exactly the allowed number succeed. Refunds happen once.
-4. A duplicate sync or a repeated settle grants credit once. Unpaid and declined returns grant nothing.
+4. A duplicate sync or a repeated settle grants credit once. Unpaid and declined returns, and runs of the paid action without `favorActionRequestId`, grant nothing.
 5. The guardian is uncapped, and legacy rows have the intended owner.
 
 Mocked visitor states are good for screenshot review, but they prove only the presentation. Report real checkout settlement as unverified until an authorized purchase exercises it. Never make a real payment the guardian didn't ask for.
