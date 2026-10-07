@@ -162,6 +162,15 @@
           }
         }
       },
+      "agents": {
+        "bot": {
+          "title": "与你的其他 agent 互发消息",
+          "bullets": {
+            "reply": "你的 dot 通过 Rome Cloud 给你的 agent 发消息",
+            "start": "有事需要处理时，你的 agent 给 dot 发消息"
+          }
+        }
+      },
       "webchat": {
         "bot": {
           "title": "面板聊天",

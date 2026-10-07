@@ -33,6 +33,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   discord: "Discord",
   webchat: "Web chat",
   email: "Email",
+  agents: "Agents",
 };
 
 type GuardianPerson = {
@@ -376,9 +377,10 @@ export function createSendMessageAction(
             "webchat",
             "email",
             "feishu",
+            "agents",
           ],
           description:
-            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email".',
+            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages another agent in the Rome Cloud account, such as a dot; its threadId is the endpoint name, for example "atlas".',
         },
         threadId: {
           type: "string",

@@ -1,0 +1,192 @@
+// Agents connection: messages between this Rome and other agents in the same
+// Rome Cloud account, such as ChatGPT dots (amantru/rome-cloud#137).
+//
+// Rome Cloud stores each message for this instance's endpoint until the
+// instance acknowledges it, so the talker polls and acknowledges after
+// delivering. The instance token is the credential and lives outside the
+// grant; the grant only records the endpoint name Cloud assigned. A sender is
+// never mapped to a person here: an agent message arrives from an unlinked
+// sender, and the guardian decides whether Rome may answer it.
+
+import type { ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
+import { z } from "zod";
+import {
+  type AgentMessageEnvelope,
+  type AgentMessagingClient,
+  createRomeCloudAgentsClient,
+} from "../../lib/rome-cloud-agents.js";
+import { createLogger } from "../../logger.js";
+import type { SetupFn } from "../setup/types.js";
+import type {
+  AuthScheme,
+  ConnectionDescriptor,
+  Credential,
+  InboundMessage,
+  ProfileDisplay,
+  ProfileRecord,
+  Talker,
+} from "../types.js";
+
+const log = createLogger("agents-channel");
+
+export const AGENTS_SERVICE = "agents";
+const POLL_INTERVAL_MS = 10_000;
+const MAX_BACKOFF_MS = 5 * 60_000;
+/** Cloud returns at most this many messages per poll; a full page polls again at once. */
+const POLL_PAGE_SIZE = 50;
+
+export const agentsGrantProfileSchema = z.object({ endpoint: z.string().min(1) }).strict();
+
+export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
+  const { endpoint } = agentsGrantProfileSchema.parse(record);
+  return Object.freeze({
+    displayName: undefined,
+    handle: endpoint,
+    email: undefined,
+    avatarUrl: undefined,
+  });
+}
+
+/** An agent message as a channel message. The sender endpoint is the conversation. */
+export function toAgentInboundMessage(message: AgentMessageEnvelope): InboundMessage {
+  const data =
+    message.data && Object.keys(message.data).length > 0
+      ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
+      : "";
+  return {
+    messageId: message.messageId,
+    conversationId: message.from.endpoint as ConversationId,
+    senderId: message.from.endpoint,
+    senderDisplayName: `${message.from.endpoint} (${message.from.kind})`,
+    text: `${message.text}${data}`,
+    attachments: [],
+    timestamp: new Date(message.sentAt),
+    ...(message.inReplyTo ? { replyTo: { messageId: message.inReplyTo } } : {}),
+    thread: { kind: "dm" },
+    raw: message,
+  };
+}
+
+function outgoingText(message: OutgoingMessage): string {
+  if (message.text?.trim()) return message.text;
+  return (message.parts ?? [])
+    .flatMap((part) => (part.type === "text" ? [part.content] : []))
+    .join("\n\n");
+}
+
+export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
+  return async (interact, ctx) => {
+    interact.show({
+      title: "Connecting to Rome Cloud",
+      body: ["Creating this Rome's endpoint…"],
+      progress: true,
+    });
+    const { endpoint } = await ctx.step("register", () => client.endpoints());
+    return {
+      credential: { material: { endpoint }, expiresAt: "never" },
+      profile: agentsGrantProfileSchema.parse({ endpoint }),
+      summary: {
+        title: "Agents connected",
+        body: [
+          `Agents in your Rome Cloud account can message this Rome as ${endpoint}.`,
+          "Pair a dot under Settings → Agents in Rome Cloud.",
+        ],
+      },
+    };
+  };
+}
+
+function agentsScheme(client: AgentMessagingClient): AuthScheme {
+  return {
+    async confer(): Promise<Credential> {
+      throw new Error("conferral driven by the connect setup");
+    },
+    // The instance token is the real credential and Cloud renews nothing here.
+    async renew(cred: Credential): Promise<Credential> {
+      return cred;
+    },
+    setup: makeAgentsSetup(client),
+  };
+}
+
+export function createAgentsTalker(client: AgentMessagingClient): Talker {
+  let generation = 0;
+  let cancelWait: (() => void) | null = null;
+
+  const wait = (ms: number) =>
+    new Promise<void>((resolve) => {
+      const timer = setTimeout(done, ms);
+      timer.unref?.();
+      function done() {
+        clearTimeout(timer);
+        cancelWait = null;
+        resolve();
+      }
+      cancelWait = done;
+    });
+
+  async function loop(current: number, deliver: (msg: InboundMessage) => void) {
+    let failures = 0;
+    while (current === generation) {
+      let delay = POLL_INTERVAL_MS;
+      try {
+        const { messages } = await client.poll();
+        if (current !== generation) return;
+        for (const message of messages) deliver(toAgentInboundMessage(message));
+        // Delivery is at most once, as for every channel; a repeat after a
+        // failed acknowledgement keeps its messageId and the inbox drops it.
+        await client.acknowledge(messages.map((message) => message.messageId));
+        failures = 0;
+        if (messages.length >= POLL_PAGE_SIZE) delay = 0;
+      } catch (err) {
+        failures++;
+        delay = Math.min(POLL_INTERVAL_MS * 2 ** failures, MAX_BACKOFF_MS);
+        log.warn("Agent message poll failed", {
+          error: err instanceof Error ? err.message : String(err),
+          retryInMs: delay,
+        });
+      }
+      if (delay > 0) await wait(delay);
+    }
+  }
+
+  return {
+    start(deliver) {
+      const current = ++generation;
+      void loop(current, deliver);
+    },
+    stop() {
+      generation++;
+      cancelWait?.();
+    },
+    async send(conversationId, msg) {
+      const text = outgoingText(msg);
+      if (!text.trim()) throw new Error("An agent message needs text.");
+      const sent = await client.send({
+        to: conversationId,
+        text,
+        ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
+      });
+      return { conversationId, messageId: sent.messageId };
+    },
+    feature() {
+      return null;
+    },
+  };
+}
+
+export function makeAgentsDescriptor(
+  client: AgentMessagingClient = createRomeCloudAgentsClient(),
+): ConnectionDescriptor {
+  return {
+    service: AGENTS_SERVICE,
+    reviveProfile: (_grant, record) => reviveAgentsProfile(record),
+    auth: { cloud: agentsScheme(client) },
+    capabilities: {
+      talker: {
+        needs: ["cloud"] as const,
+        build: () => createAgentsTalker(client),
+      },
+    },
+  };
+}
