@@ -374,7 +374,7 @@ interface CodexAppServerProviderOptions {
   onQuotaExhausted?: () => void;
   /** Only the Rome credits payer may classify its 402 as exhausted credits. */
   isUsingRomeCredits?: () => boolean;
-  /** Who pays for a turn that ends now. Read once per turn, at turn end. */
+  /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => UsageFunding;
 }
 

@@ -76,6 +76,22 @@ describe("ModelResolver", () => {
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
   });
 
+  it("fails a tier with no usable provider when credits do not pay", async () => {
+    const state: AIToolStateValue = {
+      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      // Production returns a fresh copy on every read.
+      aiToolState: { get: () => structuredClone(state), refresh: async () => state },
+      providers: [claude, codex],
+      romeCreditsPayer: { isUsingRomeCredits: () => false },
+    });
+    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+      code: "no_model_provider_available",
+    });
+  });
+
   it("prefers a connected Claude login over spending Rome credits", async () => {
     const r = resolver(
       {

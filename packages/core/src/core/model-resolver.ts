@@ -234,9 +234,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
    * for Codex: while they pay, Codex runs every model a ChatGPT plan with Sol
    * and Luna would, so a model resolves the same way under either payer.
    */
-  const resolutionState = (): AIToolStateValue => {
-    const state = options.aiToolState.get();
-    if (options.romeCreditsPayer?.isUsingRomeCredits() !== true) return state;
+  const usingRomeCredits = (): boolean => options.romeCreditsPayer?.isUsingRomeCredits() === true;
+  const resolutionState = (state = options.aiToolState.get()): AIToolStateValue => {
+    if (!usingRomeCredits()) return state;
     return {
       ...state,
       codex: {
@@ -280,8 +280,8 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       // and provider state after the final await so this resolution sees the
       // current login-selected payer.
       const accountState = options.aiToolState.get();
-      const state = resolutionState();
-      const usingRomeCredits = state.codex !== accountState.codex;
+      const creditsPay = usingRomeCredits();
+      const state = resolutionState(accountState);
       const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
       const resolveTierModel = (provider: ModelProvider): string => {
@@ -319,7 +319,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       // Rome credits pay only when no subscription can serve the tier.
-      if (codex && usingRomeCredits) {
+      if (codex && creditsPay) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
 
