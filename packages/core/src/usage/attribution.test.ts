@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { SessionActor } from "../lib/session-actor.js";
-import { UsageAttributionResolver, type UsageAttributionSources } from "./attribution.js";
+import {
+  SKILL_REVIEW_INITIATOR,
+  UsageAttributionResolver,
+  type UsageAttributionSources,
+} from "./attribution.js";
 
 type Row = NonNullable<Awaited<ReturnType<UsageAttributionSources["getSession"]>>>;
 
@@ -175,7 +179,7 @@ describe("UsageAttributionResolver.forTurn", () => {
         triggerActionName: "news.digest",
       }),
     };
-    const r = resolver(sessions, { "exec-review": "system:skill-review" });
+    const r = resolver(sessions, { "exec-review": SKILL_REVIEW_INITIATOR });
     expect(await r.forTurn(turn("review"))).toEqual({
       kind: "app",
       appId: "@rome/news",

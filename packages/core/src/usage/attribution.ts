@@ -2,6 +2,9 @@ import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { SessionActor } from "../lib/session-actor.js";
 import type { UsageKind, UsageTrigger } from "./events.js";
 
+/** The initiator of the skill review core starts after a main-agent turn. */
+export const SKILL_REVIEW_INITIATOR = "system:skill-review";
+
 // A subagent can delegate again, and a fork can be forked. Lineage deeper than
 // this is treated as unreachable rather than walked further.
 const MAX_LINEAGE_DEPTH = 16;
@@ -156,7 +159,7 @@ export class UsageAttributionResolver {
     }
     if (initiator === "webhook") return "event";
     if (initiator?.startsWith("app:")) return "background";
-    if (initiator === "system:skill-review") return "background";
+    if (initiator === SKILL_REVIEW_INITIATOR) return "background";
     return "unknown";
   }
 

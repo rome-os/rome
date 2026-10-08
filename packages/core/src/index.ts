@@ -25,7 +25,7 @@ import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
-import { UsageAttributionResolver } from "./usage/attribution.js";
+import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
@@ -773,7 +773,7 @@ async function main() {
         // No person asked for the review, so it runs outside the finished
         // turn's request scope and carries no actor.
         withoutSessionActor(() =>
-          actionEngine.run("skill_review", {}, { initiator: "system:skill-review" }),
+          actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
         ).catch((err) => {
           log.warn("skill review failed", { error: String(err) });
         });
