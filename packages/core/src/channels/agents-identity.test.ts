@@ -348,6 +348,27 @@ describe("keeping agents' links on their endpoint", () => {
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
   });
 
+  it("lets no listing asked for before a message moved an endpoint take its address", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    let clock = Date.now();
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      now: () => clock,
+    });
+    await identity.observe([sent("ep_old", "atlas", 1)]);
+    const askedAt = clock;
+    clock += 1_000;
+    await identity.observe([sent("ep_new", "atlas", 2)]);
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+
+    await identity.observeListing([listed("ep_old", "atlas")], askedAt);
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
   it("stops waiting on Cloud for a while once a read hangs", async () => {
     let asked = 0;
     let clock = Date.now();

@@ -234,6 +234,8 @@ export function createAgentsIdentity(deps: {
   /** When a message last moved each endpoint, so a listing asked for before
    *  then does not move it back. */
   const messaged = new Map<string, number>();
+  const movedSince = (id: string, askedAt: number) =>
+    (messaged.get(id) ?? Number.NEGATIVE_INFINITY) > askedAt;
 
   const unreachable = () => {
     quietUntil = now() + RELIST_MS;
@@ -254,7 +256,9 @@ export function createAgentsIdentity(deps: {
     sightings: readonly AgentSighting[],
     how: { listing?: { askedAt: number }; withhold?: boolean } = {},
   ): Dispute[] {
-    return deps.db.transaction((tx) => {
+    // Noted only once the transaction lands, so a rollback moves nothing.
+    const moved: string[] = [];
+    const disputed = deps.db.transaction((tx) => {
       const disputed: Dispute[] = [];
       const known = settings.read<Record<string, Known>>(tx, AGENTS_ENDPOINTS_KEY) ?? {};
       const before = JSON.stringify(known);
@@ -335,10 +339,7 @@ export function createAgentsIdentity(deps: {
       for (const sighting of ordered) {
         const { endpointId, address } = sighting;
         const entry = known[endpointId];
-        if (
-          how.listing &&
-          (messaged.get(endpointId) ?? Number.NEGATIVE_INFINITY) > how.listing.askedAt
-        ) {
+        if (how.listing && movedSince(endpointId, how.listing.askedAt)) {
           // A message moved it after this listing was asked for.
           continue;
         }
@@ -378,6 +379,8 @@ export function createAgentsIdentity(deps: {
             continue;
           }
           if (staleAgainst(sighting, known[holder], false)) continue;
+          // Nor does a listing asked for before a message moved the holder.
+          if (how.listing && movedSince(holder, how.listing.askedAt)) continue;
           // Cloud gives an address to one endpoint at a time, so the one that
           // held it has left, whether removed or renamed.
           leave(holder, address);
@@ -387,7 +390,7 @@ export function createAgentsIdentity(deps: {
           leave(endpointId, entry.address);
         }
         known[endpointId] = { ...known[endpointId], address, ...seen };
-        if (sighting.by === "message") messaged.set(endpointId, now());
+        if (sighting.by === "message") moved.push(endpointId);
         holders.set(address, endpointId);
         restore(endpointId);
       }
@@ -409,6 +412,9 @@ export function createAgentsIdentity(deps: {
       if (JSON.stringify(known) !== before) settings.write(tx, AGENTS_ENDPOINTS_KEY, known);
       return disputed;
     });
+    const at = now();
+    for (const id of moved) messaged.set(id, at);
+    return disputed;
   }
 
   /** Settles a listing unless a later-asked one already has. */
