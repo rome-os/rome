@@ -1,6 +1,4 @@
 import { execFile } from "node:child_process";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { CodexPlanType } from "./codex-cli-auth.js";
 import {
@@ -9,12 +7,7 @@ import {
   type AnthropicCompatibleCredentialsSummary,
 } from "./anthropic-compatible-providers.js";
 import { isAnthropicAuthRevoked, isAnthropicCompatibleAuthRevoked } from "./anthropic-login.js";
-import {
-  type AIToolUsageStatus,
-  getErrorMessage,
-  readClaudeOAuthUsage,
-  readLiveOrCachedUsage,
-} from "./provider-usage.js";
+import { type AIToolUsageStatus, getErrorMessage, readClaudeOAuthUsage } from "./provider-usage.js";
 
 export interface AIToolStatusProbeResult {
   loggedIn: boolean;
@@ -26,10 +19,6 @@ export interface AIToolStatusProbeResult {
   needsReauth?: boolean;
   anthropicCompatible?: (AnthropicCompatibleCredentialsSummary & { needsReauth?: boolean }) | null;
 }
-
-const CLAUDE_USAGE_CACHE_PATHS = ["usage-limits.json", "rate-limits.json"].map((file) =>
-  join(homedir(), ".claude", file),
-);
 
 function readClaudeCliStatus(): Promise<AIToolStatusProbeResult> {
   return new Promise((resolve, reject) => {
@@ -86,7 +75,7 @@ export async function getClaudeStatus(
 }
 
 export async function readClaudeUsage(): Promise<AIToolUsageStatus | null> {
-  return await readLiveOrCachedUsage(readClaudeOAuthUsage, CLAUDE_USAGE_CACHE_PATHS, {
-    utilizationUnit: "percent",
-  });
+  // Claude does not maintain local usage files. A leftover snapshot cannot
+  // establish current usage after a failed live request.
+  return await readClaudeOAuthUsage();
 }

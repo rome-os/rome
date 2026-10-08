@@ -1043,17 +1043,22 @@ export function AiToolsPanel({
                 {shouldShowUsage && (
                   <>
                     <div className="my-3 border-t border-border" />
+                    {status.usage?.error && (
+                      <p role="alert" className="mb-3 text-ui text-destructive">
+                        {t("aiTools.usage.unavailable")}
+                      </p>
+                    )}
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
                       <UsageBar
                         label={t("aiTools.usage.fiveHour")}
-                        window={status.usage?.fiveHour}
+                        window={status.usage?.error ? undefined : status.usage?.fiveHour}
                         windowKey="fiveHour"
                         resetsInLabel="settings:aiTools.usage.resetsIn"
                       />
                       <div className="hidden bg-border sm:block" aria-hidden />
                       <UsageBar
                         label={t("aiTools.usage.sevenDay")}
-                        window={status.usage?.sevenDay}
+                        window={status.usage?.error ? undefined : status.usage?.sevenDay}
                         windowKey="sevenDay"
                         resetsInLabel="settings:aiTools.usage.resetsIn"
                       />

@@ -75,6 +75,50 @@ describe("AI Tools refresh", () => {
     );
   });
 
+  it("shows a usage probe failure instead of an old percentage and recovers on refresh", async () => {
+    let refreshCount = 0;
+    const snapshot = (usedPercent: number) => ({
+      checkedAt: "2026-09-28T17:00:00.000Z",
+      source: "test",
+      sevenDay: { usedPercent },
+    });
+    const codex = { loggedIn: true, usage: snapshot(29) };
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: true, usage: snapshot(100) }, codex });
+      }
+      if (url === "/api/ai-tools/refresh") {
+        refreshCount += 1;
+        return ok({
+          claude: {
+            loggedIn: true,
+            usage:
+              refreshCount === 1
+                ? { ...snapshot(100), error: "Claude usage request failed with HTTP 429" }
+                : snapshot(2),
+          },
+          codex,
+        });
+      }
+      return ok({});
+    }) as typeof fetch);
+
+    render(<AiToolsPanel showUsage />);
+    const user = userEvent.setup();
+    expect(await screen.findByText("100")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Usage is unavailable. Try Refresh again.",
+    );
+    expect(screen.queryByText("100")).toBeNull();
+    expect(screen.getByText("29")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("2")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("keeps a refresh failure visible", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);

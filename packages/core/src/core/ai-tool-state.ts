@@ -6,7 +6,7 @@ import {
   type AIToolStatusProbeResult,
 } from "../lib/ai-tool-probes.js";
 import type { CodexPlanType } from "../lib/codex-cli-auth.js";
-import type { AIToolUsageStatus } from "../lib/provider-usage.js";
+import { getErrorMessage, type AIToolUsageStatus } from "../lib/provider-usage.js";
 
 const log = createLogger("ai-tool-state");
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -60,6 +60,30 @@ function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
       window?.remainingPercent === 0 ||
       (typeof window?.usedPercent === "number" && window.usedPercent >= 100),
   );
+}
+
+function applyUsage(
+  target: ProviderState,
+  result: PromiseSettledResult<AIToolUsageStatus | null>,
+): void {
+  if (result.status === "fulfilled" && result.value && !result.value.error) {
+    target.usage = result.value;
+    target.quotaExhausted = usageShowsExhaustion(result.value);
+    return;
+  }
+
+  const usage = result.status === "fulfilled" ? result.value : null;
+  // A failed probe is unknown usage, not fresh capacity or proof of exhaustion.
+  // Keep the quota signal until a successful probe, but never present old bars.
+  target.usage = {
+    checkedAt: usage?.checkedAt ?? new Date().toISOString(),
+    source: usage?.source ?? "usage probe",
+    error:
+      usage?.error ??
+      (result.status === "rejected"
+        ? getErrorMessage(result.reason)
+        : "Usage probe returned no data"),
+  };
 }
 
 const CODEX_FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
@@ -122,9 +146,8 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         // Do not leak a stale Claude OAuth usage cache into API-key auth.
         value.claude.quotaExhausted = false;
         delete value.claude.usage;
-      } else if (usage.status === "fulfilled" && usage.value && !usage.value.error) {
-        value.claude.usage = usage.value;
-        value.claude.quotaExhausted = usageShowsExhaustion(usage.value);
+      } else {
+        applyUsage(value.claude, usage);
       }
       return;
     }
@@ -134,10 +157,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
     }
-    if (usage.status === "fulfilled" && usage.value && !usage.value.error) {
-      value.codex.usage = usage.value;
-      value.codex.quotaExhausted = usageShowsExhaustion(usage.value);
-    }
+    applyUsage(value.codex, usage);
   };
 
   // Deduplicate refreshes per provider. A single global lock would incorrectly

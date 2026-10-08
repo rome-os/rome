@@ -576,6 +576,7 @@
       "environmentApiKey": "Environment API key"
     },
     "usage": {
+      "unavailable": "Usage is unavailable. Try Refresh again.",
       "fiveHour": "5H USED",
       "sevenDay": "7D USED",
       "resetsIn": "Resets in <1>{{time}}</1>"
