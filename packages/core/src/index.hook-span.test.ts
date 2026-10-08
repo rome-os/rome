@@ -8,7 +8,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { wrapHookSpan } from "./telemetry.js";
 import { MockProviderAdapter, buildMessage } from "./test/helpers.js";
-import type { NormalizedMessage } from "./channels/types.js";
+import type { NormalizedMessage } from "./types.js";
 
 /**
  * Apply the same handler wrapping `packages/core/src/index.ts` performs at

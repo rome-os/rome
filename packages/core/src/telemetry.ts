@@ -196,9 +196,10 @@ const channelInboundLog = createLogger("channels");
  * Emit the one "channel message received" log record for an inbound channel
  * message, carrying its content. `createLogger` mirrors it to `otel_logs`,
  * and the OTEL logger stamps the active span context, so call this inside
- * whatever span covers the delivery. Two boundaries emit it: the
- * `onMessage` wrapper below, and the webchat accepted-turn boundary in
- * `api/routes/webchat.ts`, which logs where turns are actually accepted.
+ * whatever span covers the delivery. In production only the webchat
+ * accepted-turn boundary in `api/routes/webchat.ts` emits it, so other
+ * channels' inbound content does not reach `otel_logs`. The `onMessage`
+ * wrapper below emits it for the golden-trace rig's mock adapters.
  */
 export function logInboundChannelMessage(msg: {
   channel: string;

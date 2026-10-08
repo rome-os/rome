@@ -6,7 +6,7 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import type { NormalizedMessage } from "./types.js";
+import type { NormalizedMessage } from "../types.js";
 import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
 import {
   buildMessage,
