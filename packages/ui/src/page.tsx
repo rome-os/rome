@@ -1,7 +1,7 @@
 import { type ComponentProps, useEffect, useRef } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
-import { ScrollEdgeButtons, scrollEdgeMask, useScrollEdges } from "./scroll-edges.js";
+import { revealInRow, ScrollEdgeButtons, scrollEdgeMask, useScrollEdges } from "./scroll-edges.js";
 
 /*
  * The page frame and the section rhythm every layout in the catalogue composes.
@@ -156,15 +156,7 @@ export function PageNav({ className, children, ...props }: PageNavProps) {
     const active = list?.querySelector('[aria-current="page"]');
     if (!list || !active || active === shownActive.current) return;
     shownActive.current = active;
-    // Only the row's scrollLeft moves. scrollIntoView would also scroll the
-    // page vertically.
-    const row = list.getBoundingClientRect();
-    const item = active.getBoundingClientRect();
-    if (item.right > row.right - EDGE_CLEARANCE) {
-      list.scrollLeft += item.right - row.right + EDGE_CLEARANCE;
-    } else if (item.left < row.left + EDGE_CLEARANCE) {
-      list.scrollLeft -= row.left + EDGE_CLEARANCE - item.left;
-    }
+    revealInRow(list, active);
   });
 
   return (
@@ -180,10 +172,6 @@ export function PageNav({ className, children, ...props }: PageNavProps) {
     </nav>
   );
 }
-
-// Room kept between the active entry and the row's edge, so the fade and the
-// chevron never sit on top of it.
-const EDGE_CLEARANCE = 40;
 
 export interface PageNavLinkProps extends ComponentProps<"a"> {
   /** Marks the entry the page is currently showing, as `aria-current="page"`. */
