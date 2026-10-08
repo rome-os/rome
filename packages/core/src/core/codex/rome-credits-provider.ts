@@ -9,9 +9,6 @@
 /** Codex provider id for Rome credits. */
 export const ROME_CREDITS_MODEL_PROVIDER_ID = "rome_credits";
 
-/** A turn whose payer changed between its model resolution and dispatch. */
-export const PAYER_CHANGED_MESSAGE = "Model payer changed while preparing this turn; please retry.";
-
 /** Env var the app-server reads the instance credential from on each request. */
 export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
 

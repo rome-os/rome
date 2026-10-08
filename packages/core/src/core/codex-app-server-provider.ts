@@ -41,7 +41,11 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./codex/image-trace.js";
-import { CodexAppServerManager, type CodexThreadBinding } from "./codex/app-server-manager.js";
+import {
+  CodexAppServerManager,
+  PayerChangedError,
+  type CodexThreadBinding,
+} from "./codex/app-server-manager.js";
 import {
   Method,
   Notify,
@@ -82,7 +86,6 @@ import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
 import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
-import { PAYER_CHANGED_MESSAGE } from "./codex/rome-credits-provider.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -431,7 +434,7 @@ function classifyCodexFailure(
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
   // The turn never started; a retry runs under the new payer.
-  if (turnError instanceof Error && turnError.message === PAYER_CHANGED_MESSAGE) {
+  if (turnError instanceof PayerChangedError) {
     return { code: "transient" };
   }
   if (isCodexUsageLimitError(turnError)) {
@@ -1012,7 +1015,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const payers = new Set(
           inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
         );
-        if (payers.size > 1) throw new Error(PAYER_CHANGED_MESSAGE);
+        if (payers.size > 1) throw new PayerChangedError();
         const [expectedProvider] = payers;
         const started = (await this.appServerManager.requestForThread(
           tid,

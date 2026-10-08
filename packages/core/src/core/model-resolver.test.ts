@@ -69,11 +69,26 @@ describe("ModelResolver", () => {
       model: "gpt-6-astra",
     });
     await expect(
-      r.getModelProvider({ tier: "small", providerId: "openai" }),
-    ).resolves.toMatchObject({ model: "gpt-6-luna" });
-    await expect(
       r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol" } }),
     ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+  });
+
+  it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "small", providerId: "openai" })).rejects.toMatchObject(
+      {
+        code: "model_provider_unavailable",
+        provider: "openai",
+        reason: "not_logged_in",
+      },
+    );
   });
 
   it("fails a tier with no usable provider when credits do not pay", async () => {

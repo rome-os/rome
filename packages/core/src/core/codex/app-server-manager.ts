@@ -3,7 +3,6 @@ import { getInstanceToken } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
 import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
-import { PAYER_CHANGED_MESSAGE } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -15,6 +14,14 @@ import {
   type ThreadResumeParams,
   type ThreadStartParams,
 } from "./app-server-protocol.js";
+
+/** A turn whose payer changed between its model resolution and dispatch. */
+export class PayerChangedError extends Error {
+  constructor() {
+    super("Model payer changed while preparing this turn; please retry.");
+    this.name = "PayerChangedError";
+  }
+}
 
 const log = createLogger("codex-app-server-manager");
 
@@ -259,7 +266,7 @@ export class CodexAppServerManager {
       options.expectedProvider !== undefined &&
       connection.defaultProvider !== options.expectedProvider
     ) {
-      throw new Error(PAYER_CHANGED_MESSAGE);
+      throw new PayerChangedError();
     }
     return (await connection.client.request(method, params)) as T;
   }

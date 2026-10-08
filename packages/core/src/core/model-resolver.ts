@@ -284,27 +284,30 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const state = resolutionState(accountState);
       const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
-      const resolveTierModel = (provider: ModelProvider): string => {
+      const resolveTierModel = (provider: ModelProvider, providerState = state): string => {
         const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
         const model =
           configured ??
           (provider.id === "openai"
-            ? codexModel(request.tier, state.codex)
+            ? codexModel(request.tier, providerState.codex)
             : provider.id === "anthropic"
               ? claudeModel(request.tier, useFable)
               : TEST_TIER_TO_MODEL[request.tier]);
         // A configured model is intentional, but known Codex entitlement
         // restrictions still fail with the same recoverable error as an exact
         // model selection instead of reaching the provider with a bad request.
-        requireModelAccess(provider.id, model, state.codex);
+        requireModelAccess(provider.id, model, providerState.codex);
         return model;
       };
 
       if (request.providerId) {
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
-        requireUsableProvider(provider, state);
-        return { modelProvider: provider, model: resolveTierModel(provider) };
+        // A provider pin by tier asks for that provider's own login. The one
+        // Codex pin, image_gen, needs ChatGPT's hosted image tool, which the
+        // Rome credits gateway rejects.
+        requireUsableProvider(provider, accountState);
+        return { modelProvider: provider, model: resolveTierModel(provider, accountState) };
       }
 
       const claude = providers.get("anthropic");
