@@ -289,12 +289,16 @@ const PNPM_OUTPUT_DRAIN_MS = 250;
 /**
  * Environment for a pnpm child. When ROME_PNPM_COREPACK_HOME is set (the
  * production image sets it), corepack resolves pnpm from that cache, so every
- * instance installs apps with the image's pnpm. Otherwise the child inherits
- * this process's environment unchanged.
+ * instance installs apps with the image's pnpm. COREPACK_DEFAULT_TO_LATEST=0
+ * stops an app that declares a newer same-major pnpm from promoting that
+ * version to the cache's default for every later install. Otherwise the child
+ * inherits this process's environment unchanged.
  */
 function pnpmEnv(): NodeJS.ProcessEnv {
   const pinned = process.env.ROME_PNPM_COREPACK_HOME;
-  return pinned ? { ...process.env, COREPACK_HOME: pinned } : process.env;
+  return pinned
+    ? { ...process.env, COREPACK_HOME: pinned, COREPACK_DEFAULT_TO_LATEST: "0" }
+    : process.env;
 }
 
 /**

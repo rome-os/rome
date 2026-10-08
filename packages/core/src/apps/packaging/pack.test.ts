@@ -753,12 +753,15 @@ describe("runPnpm", () => {
       restoreEnv("COREPACK_HOME", originalCorepackHome);
     });
 
-    it("runs pnpm with COREPACK_HOME pointed at the pinned cache", async () => {
+    it("runs pnpm against the pinned cache without promoting app-declared versions", async () => {
       process.env.ROME_PNPM_COREPACK_HOME = "/opt/rome-corepack";
-      fakePnpm('echo "COREPACK_HOME=$COREPACK_HOME"\nexit 1');
+      fakePnpm(
+        'echo "COREPACK_HOME=$COREPACK_HOME"\necho "DEFAULT_TO_LATEST=$COREPACK_DEFAULT_TO_LATEST"\nexit 1',
+      );
       const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
         .message;
       expect(message).toContain("COREPACK_HOME=/opt/rome-corepack");
+      expect(message).toContain("DEFAULT_TO_LATEST=0");
     });
 
     it("leaves COREPACK_HOME alone when unset", async () => {

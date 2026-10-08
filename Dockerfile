@@ -296,6 +296,8 @@ RUN groupadd --system rome && \
 # pnpm. App installs run pnpm against this cache instead (runPnpm in
 # packages/core/src/apps/packaging/pack.ts). rome owns it so an app that
 # declares another packageManager version can still download that version.
+# Such downloads live in the image layer, not the volume, so they repeat after
+# each container recreate (first-party apps all declare this version).
 ENV ROME_PNPM_COREPACK_HOME=/opt/rome-corepack
 RUN mkdir -p /opt/rome-corepack && \
     COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
