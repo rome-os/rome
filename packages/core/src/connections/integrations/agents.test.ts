@@ -21,7 +21,7 @@ import {
 function envelope(overrides: Partial<AgentMessageEnvelope> = {}): AgentMessageEnvelope {
   return {
     messageId: "msg_1",
-    from: { endpoint: "atlas", kind: "dot" },
+    from: { endpoint: "atlas", endpointId: "ep_atlas", kind: "dot" },
     to: { endpoint: "home-rome" },
     sentAt: "2026-10-07T07:35:36.000Z",
     text: "Refund requested on order #41",
@@ -103,7 +103,13 @@ describe("agents channel", () => {
       senderDisplayName: "@friend/atlas (external dot)",
     });
     const own = envelope({
-      from: { endpoint: "atlas", kind: "dot", sameAccount: true, account: "ouou" },
+      from: {
+        endpoint: "atlas",
+        endpointId: "ep_atlas",
+        kind: "dot",
+        sameAccount: true,
+        account: "ouou",
+      },
     });
     expect(toAgentInboundMessage(own)).toMatchObject({
       conversationId: "atlas",
@@ -113,13 +119,21 @@ describe("agents channel", () => {
 
   it("never takes an agent carrying another account's fields for an own one, even without sameAccount", () => {
     const qualified = envelope({
-      from: { endpoint: "@friend/atlas", kind: "dot", account: "friend", address: "@friend/atlas" },
+      from: {
+        endpoint: "@friend/atlas",
+        endpointId: "ep_atlas",
+        kind: "dot",
+        account: "friend",
+        address: "@friend/atlas",
+      },
     });
     expect(toAgentInboundMessage(qualified)).toMatchObject({
       senderId: "@friend/atlas",
       senderDisplayName: "@friend/atlas (external dot)",
     });
-    const bare = envelope({ from: { endpoint: "atlas", kind: "dot", account: "friend" } });
+    const bare = envelope({
+      from: { endpoint: "atlas", endpointId: "ep_atlas", kind: "dot", account: "friend" },
+    });
     expect(toAgentInboundMessage(bare)).toBeNull();
     // An older Cloud sends none of them, and its agents are this Rome's own.
     expect(toAgentInboundMessage(envelope())?.senderId).toBe("atlas");
@@ -128,7 +142,7 @@ describe("agents channel", () => {
   it("drops a cross-account message that names no sender account, and still acknowledges it", async () => {
     const nameless = envelope({
       messageId: "msg_nameless",
-      from: { endpoint: "atlas", kind: "dot", sameAccount: false },
+      from: { endpoint: "atlas", endpointId: "ep_atlas", kind: "dot", sameAccount: false },
     });
     expect(toAgentInboundMessage(nameless)).toBeNull();
     const client = fakeClient([[nameless, envelope({ messageId: "msg_2" })]]);

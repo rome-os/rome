@@ -10,10 +10,13 @@ import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
-function message(from: AgentMessageEnvelope["from"]): ChannelMessage {
+/** A message whose endpoint id follows its name unless the test sets one. */
+function message(
+  from: Omit<AgentMessageEnvelope["from"], "endpointId"> & { endpointId?: string | null },
+): ChannelMessage {
   const inbound = toAgentInboundMessage({
     messageId: "msg_1",
-    from,
+    from: { endpointId: `ep_${from.endpoint.split("/").pop()}`, ...from },
     to: { endpoint: "home-rome" },
     sentAt: "2026-10-07T09:28:38.000Z",
     text: "17 + 25 = 42.",
@@ -82,7 +85,7 @@ describe("linking same-account agents to the guardian", () => {
 
     expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
-    expect(await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["atlas"]);
+    expect(await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["ep_atlas"]);
   });
 
   it("keeps a dismissal", async () => {
@@ -123,9 +126,9 @@ describe("linking same-account agents to the guardian", () => {
     );
 
     expect([...((await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [])].sort()).toEqual([
-      "atlas",
-      "muse",
-      "nova",
+      "ep_atlas",
+      "ep_muse",
+      "ep_nova",
     ]);
   });
 });

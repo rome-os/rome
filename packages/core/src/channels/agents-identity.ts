@@ -38,8 +38,8 @@
  * endpoint's messages against the listing that last named it.
  *
  * Conversation history stays under the address it was written to. An endpoint
- * first seen here takes over whatever its address already holds, since Rome
- * cannot tell which endpoint held it before Cloud named endpoints.
+ * first seen here takes over whatever its address already holds, such as a
+ * link the guardian made on the People page before any message came.
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -54,7 +54,6 @@ import {
   agentAddressAccount,
 } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
-import { AGENTS_GUARDIAN_LINKED_KEY } from "./agents-guardian.js";
 
 const log = createLogger("agents-identity");
 
@@ -108,11 +107,11 @@ export function agentSightings(message: ChannelMessage): AgentSighting[] {
     : [];
 }
 
-/** The endpoints a listing names by id. */
+/** The endpoints a listing names. */
 export function listingSightings(endpoints: readonly AgentEndpointSummary[]): AgentSighting[] {
   return endpoints.flatMap((endpoint) => {
     const address = agentAddress(endpoint);
-    return endpoint.endpointId && address !== null
+    return address !== null
       ? [{ endpointId: endpoint.endpointId, address, by: "listing" as const }]
       : [];
   });
@@ -142,7 +141,8 @@ export interface AgentsIdentity {
    *  does it too, if this has not. Never throws. */
   prime(): Promise<void>;
   /** Runs `fn` after every earlier settlement, and before any later one. The
-   *  guardian link runs here, because both rewrite the guardian's record. */
+   *  guardian link runs here, so no settlement moves a link onto the address
+   *  between its check that nobody holds it and its link. */
   serial<T>(fn: () => Promise<T>): Promise<T>;
 }
 
@@ -251,7 +251,6 @@ export function createAgentsIdentity(deps: {
       const disputed: Dispute[] = [];
       const known = settings.read<Record<string, Known>>(tx, AGENTS_ENDPOINTS_KEY) ?? {};
       const before = JSON.stringify(known);
-      let guardianRecord = settings.read<string[]>(tx, AGENTS_GUARDIAN_LINKED_KEY) ?? [];
       const holders = new Map<string, string>();
       for (const [id, entry] of Object.entries(known)) {
         if (entry.address !== null) holders.set(entry.address, id);
@@ -374,12 +373,6 @@ export function createAgentsIdentity(deps: {
 
         if (entry?.address && entry.address !== address) {
           leave(endpointId, entry.address);
-        } else if (!entry && guardianRecord.includes(address)) {
-          // Recorded by address before Cloud named endpoints. The record now
-          // names the endpoint, so it stays with it through a rename and does
-          // not hold back a new endpoint that reuses the name.
-          guardianRecord = guardianRecord.map((name) => (name === address ? endpointId : name));
-          settings.write(tx, AGENTS_GUARDIAN_LINKED_KEY, guardianRecord);
         }
         known[endpointId] = { ...known[endpointId], address, ...seen };
         if (sighting.by === "message") messaged.set(endpointId, now());

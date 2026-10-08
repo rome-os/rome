@@ -605,11 +605,10 @@ describe("keeping agents' links on their endpoint", () => {
     expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
   });
 
-  it("takes the endpoint id from an inbound message, and none from an older Cloud", () => {
+  it("takes the endpoint id from an inbound message, and none from a removed endpoint", () => {
     expect(
       agentSightings(message({ endpoint: "atlas", endpointId: "ep_atlas", kind: "dot" })),
     ).toEqual([{ endpointId: "ep_atlas", address: "atlas", by: "message", at: SENT }]);
-    expect(agentSightings(message({ endpoint: "atlas", kind: "dot" }))).toEqual([]);
     expect(agentSightings(message({ endpoint: "atlas", endpointId: null, kind: "dot" }))).toEqual(
       [],
     );
@@ -645,23 +644,6 @@ describe("keeping agents' links on their endpoint", () => {
       expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
       await admit(own("ep_new", SENT + 2));
       expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
-    });
-
-    it("moves a record made by name onto the endpoint first seen under it", async () => {
-      await settings.set(AGENTS_GUARDIAN_LINKED_KEY, ["atlas"]);
-
-      await admit(own("ep_atlas"));
-
-      expect(await settings.get(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["ep_atlas"]);
-      expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
-    });
-
-    it("keeps an unlink recorded by name even when the endpoint was never settled", async () => {
-      await settings.set(AGENTS_GUARDIAN_LINKED_KEY, ["atlas"]);
-
-      await link(own("ep_atlas"));
-
-      expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
     });
 
     it("never links another account's agent that takes a name this Rome knew", async () => {

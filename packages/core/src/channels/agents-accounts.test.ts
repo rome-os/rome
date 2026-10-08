@@ -7,7 +7,12 @@ import { createAccountNames } from "./account-names.js";
 import { agentsAccounts } from "./agents-accounts.js";
 import type { Channels } from "./channel.js";
 
-const atlas: AgentEndpointSummary = { endpoint: "atlas", kind: "dot", ready: true };
+const atlas: AgentEndpointSummary = {
+  endpoint: "atlas",
+  endpointId: "ep_atlas",
+  kind: "dot",
+  ready: true,
+};
 
 function cloud(endpoints: AgentEndpointSummary[]) {
   const client = {
@@ -19,7 +24,10 @@ function cloud(endpoints: AgentEndpointSummary[]) {
       return {
         endpoint: "home-rome",
         address: "@ouou/home-rome",
-        endpoints: [{ endpoint: "home-rome", kind: "rome" as const, ready: true }, ...endpoints],
+        endpoints: [
+          { endpoint: "home-rome", endpointId: "ep_home-rome", kind: "rome" as const, ready: true },
+          ...endpoints,
+        ],
       };
     },
   } satisfies Pick<AgentMessagingClient, "endpoints"> & { calls: number; fail: boolean };
@@ -29,7 +37,10 @@ function cloud(endpoints: AgentEndpointSummary[]) {
 describe("the agents address book", () => {
   it("lists the account's other ready endpoints", async () => {
     const book = agentsAccounts({
-      client: cloud([atlas, { endpoint: "pending", kind: "dot", ready: false }]),
+      client: cloud([
+        atlas,
+        { endpoint: "pending", endpointId: "ep_pending", kind: "dot", ready: false },
+      ]),
       isConnected: () => true,
     });
     const { accounts } = await book.listAccounts({ limit: 100 });
@@ -51,6 +62,7 @@ describe("the agents address book", () => {
         atlas,
         {
           endpoint: "@friend/atlas",
+          endpointId: "ep_atlas",
           kind: "dot",
           ready: true,
           sameAccount: false,
@@ -58,6 +70,7 @@ describe("the agents address book", () => {
         },
         {
           endpoint: "@friend/home-rome",
+          endpointId: "ep_home-rome",
           kind: "rome",
           ready: true,
           sameAccount: false,
@@ -134,15 +147,14 @@ describe("the agents address book", () => {
     const told: unknown[] = [];
     const book = agentsAccounts({
       client: cloud([
-        { ...atlas, endpointId: "ep_atlas" },
+        atlas,
         {
           endpoint: "@friend/atlas",
+          endpointId: "ep_friend",
           kind: "dot",
           ready: true,
           sameAccount: false,
-          endpointId: "ep_friend",
         },
-        { endpoint: "nova", kind: "dot", ready: true },
       ]),
       isConnected: () => true,
       onListed: (sightings) => told.push(sightings),
@@ -150,6 +162,7 @@ describe("the agents address book", () => {
     await book.listAccounts({ limit: 100 });
     expect(told).toEqual([
       [
+        { endpointId: "ep_home-rome", address: "home-rome", by: "listing" },
         { endpointId: "ep_atlas", address: "atlas", by: "listing" },
         { endpointId: "ep_friend", address: "@friend/atlas", by: "listing" },
       ],
@@ -262,6 +275,7 @@ describe("another account's agent on the People page", () => {
           client: cloud([
             {
               endpoint: "@friend/atlas",
+              endpointId: "ep_atlas",
               kind: "dot",
               ready: true,
               sameAccount: false,

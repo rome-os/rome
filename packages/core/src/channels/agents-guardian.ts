@@ -10,8 +10,8 @@
  * dismissal, or an earlier automatic link the guardian has since removed all
  * stand. Unlinking leaves no row behind, so Rome records each endpoint it
  * linked here and never links it again. The record names an endpoint by its
- * `endpointId` when Cloud gives one, so a new endpoint reusing a removed
- * one's name is still linked (agents-identity.ts).
+ * `endpointId`, so a new endpoint reusing a removed one's name is still
+ * linked (agents-identity.ts).
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -59,21 +59,17 @@ export function createAgentsGuardianLink(deps: {
   async function link(message: ChannelMessage): Promise<void> {
     const endpoint = message.senderId;
     if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
-    const endpointId = envelopeFrom(message)?.endpointId;
     // Null names an endpoint Cloud has since removed, which nothing links.
-    // Only a Cloud that does not name endpoints leaves it out.
-    if (endpointId === null) return;
-    const recorded = endpointId ?? endpoint;
+    const endpointId = envelopeFrom(message)?.endpointId;
+    if (!endpointId) return;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
-    // The name too: a record made by name stays there until the endpoint is
-    // first settled, and an unlink must hold even if that settling failed.
-    if (linked.includes(recorded) || linked.includes(endpoint)) return;
+    if (linked.includes(endpointId)) return;
     const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
     if (!guardian) return;
     // The record goes first. If the link then fails, the endpoint stays
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
-    await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, recorded]);
+    await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, endpointId]);
     await deps.personMappingRepo.addChannelMapping(
       guardian.id,
       deps.channel,

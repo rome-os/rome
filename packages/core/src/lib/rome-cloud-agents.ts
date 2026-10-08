@@ -19,10 +19,10 @@ export interface AgentMessageEnvelope {
    *  whether they are present, as a sign the sender is in another account.
    *  `endpointId` never changes for an endpoint, and keeps its links on it
    *  through a rename (agents-identity.ts). It is null once the endpoint is
-   *  removed, and an older Cloud omits it. */
+   *  removed. */
   from: {
     endpoint: string;
-    endpointId?: string | null;
+    endpointId: string | null;
     kind: "dot" | "rome";
     sameAccount?: boolean;
     account?: string;
@@ -46,8 +46,8 @@ export interface AgentEndpointSummary {
   /** False for an endpoint of a linked account. Omitted by an older Cloud,
    *  which lists this Rome's own account only. */
   sameAccount?: boolean;
-  /** Cloud's stable id for the endpoint. Omitted by an older Cloud. */
-  endpointId?: string;
+  /** Cloud's stable id for the endpoint. */
+  endpointId: string;
 }
 
 /**
