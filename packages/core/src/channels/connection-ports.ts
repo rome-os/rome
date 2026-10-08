@@ -66,9 +66,9 @@ export function connectionPorts(
 }
 
 /**
- * The conversations a channel's Connections can see. A talker says at runtime
+ * The conversations a channel's Connection can see. A talker says at runtime
  * whether it lists conversations, so the port is present for every channel a
- * Talk backs, and one whose Connections list none answers empty.
+ * Talk backs, and one whose Connection lists none answers empty.
  */
 function connectionDirectory(deps: ConnectionPortsDeps, service: string): ChannelDirectory {
   return {
@@ -130,9 +130,8 @@ function connectionDirectory(deps: ConnectionPortsDeps, service: string): Channe
  * A reused read answers what a fresh one would, older by at most that long,
  * and `fetch_channel_history` reads through it like any other caller.
  *
- * The port reads the first Connection backing the channel. A channel several
- * Connections back (two Telegram accounts) reads one of them; `send` names
- * the one it means.
+ * The port reads the channel's one Connection: a service holds at most one,
+ * and a second presence on a platform is a second channel.
  */
 export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
 
