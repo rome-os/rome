@@ -312,7 +312,7 @@ export class TelegramAdapter {
         });
       }
     }
-    return saveIncomingAttachmentPayloads(message, payloads);
+    return saveIncomingAttachmentPayloads({ ...message, channel: "telegram" }, payloads);
   }
 
   private extractAttachments(ctx: Context): Attachment[] {

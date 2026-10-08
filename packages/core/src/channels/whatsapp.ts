@@ -561,7 +561,7 @@ export class WhatsAppAdapter {
       return message.attachments;
     }
 
-    return saveIncomingAttachmentPayloads(message, [
+    return saveIncomingAttachmentPayloads({ ...message, channel: "whatsapp" }, [
       {
         attachment,
         data,

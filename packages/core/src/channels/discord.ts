@@ -1445,7 +1445,7 @@ export class DiscordAdapter {
   /** Download a message's files into the profile. Each attachment's `url` is
    *  its Discord CDN link, so the message needs no provider event. */
   async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
-    return saveUrlAttachments(message);
+    return saveUrlAttachments({ ...message, channel: "discord" });
   }
 
   /**

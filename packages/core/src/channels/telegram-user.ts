@@ -275,7 +275,7 @@ export class TelegramUserAdapter {
       });
     }
 
-    return saveIncomingAttachmentPayloads(message, [
+    return saveIncomingAttachmentPayloads({ ...message, channel: "telegram_user" }, [
       {
         attachment,
         data,

@@ -1238,7 +1238,7 @@ export class WechatAdapter {
     }
 
     if (payloads.length === 0) return attachments;
-    return saveIncomingAttachmentPayloads({ ...message, attachments }, payloads);
+    return saveIncomingAttachmentPayloads({ ...message, channel: "wechat", attachments }, payloads);
   }
 
   async notifyTyping(threadId: string): Promise<void> {
