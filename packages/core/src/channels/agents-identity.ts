@@ -70,7 +70,8 @@ export const AGENTS_ENDPOINTS_KEY = "agentsEndpoints";
 interface Known {
   /** The address it holds, or null after it left one and none is known yet. */
   address: string | null;
-  /** Where that came from, and for a message, when it was sent. */
+  /** Where that came from, and the newest message from it Rome has read,
+   *  or the listing that put it there if that is newer. */
   by: "listing" | "message";
   at?: number;
   /** The person whose link it took off `parkedFrom`, waiting to go back. */
@@ -82,7 +83,8 @@ interface Known {
   parkedAt?: number;
   /** Set when a listing put it at its address and a later one left it out,
    *  so the listing no longer vouches for that address against another
-   *  endpoint. Its own messages are still ordered against the listing. */
+   *  endpoint. Its messages are then ordered by when they were sent, so it is
+   *  followed through a rename the listing can no longer say. */
   unlisted?: true;
 }
 
@@ -145,7 +147,7 @@ const isOwn = (address: string) => agentAddressAccount(address) === null;
 /** Whether a message's sighting is older than what Rome knows of `entry`. */
 function staleAgainst(sighting: AgentSighting, entry: Known | undefined): boolean {
   if (sighting.by === "listing" || !entry) return false;
-  if (entry.by === "listing") return entry.address !== sighting.address;
+  if (entry.by === "listing" && !entry.unlisted) return entry.address !== sighting.address;
   return (entry.at ?? 0) > sighting.at;
 }
 
@@ -164,11 +166,17 @@ function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
 /** Names one disagreement, so the same one is listed again only so often. */
 const disputeKey = (sighting: AgentSighting) => `${sighting.endpointId} ${sighting.address}`;
 
-/** The part of an endpoint's record a sighting sets. */
-function seenBy(sighting: AgentSighting): Pick<Known, "by" | "at" | "unlisted"> {
+/** The part of an endpoint's record a sighting sets. A listing's time is
+ *  Rome's clock standing in for Cloud's, close enough to order a message sent
+ *  well before it. */
+function seenBy(
+  sighting: AgentSighting,
+  entry: Known | undefined,
+  askedAt: number,
+): Pick<Known, "by" | "at" | "unlisted"> {
   return sighting.by === "message"
-    ? { by: "message", at: sighting.at }
-    : { by: "listing", unlisted: undefined };
+    ? { by: "message", at: Math.max(entry?.at ?? 0, sighting.at) }
+    : { by: "listing", at: Math.max(entry?.at ?? 0, askedAt), unlisted: undefined };
 }
 
 /** A message's disagreement with a listing, and whether it is about another
@@ -209,6 +217,17 @@ export function createAgentsIdentity(deps: {
   /** The first listing read since boot, before which Rome may not know an
    *  endpoint's earlier address. */
   let priming: Promise<void> | null = null;
+  /** Until when a listing that failed or hung is not read or waited for
+   *  again, so a Cloud outage does not slow every message. */
+  let quietUntil = Number.NEGATIVE_INFINITY;
+  /** When a message last moved each endpoint, so a listing asked for before
+   *  then does not move it back. */
+  const messaged = new Map<string, number>();
+
+  const unreachable = () => {
+    quietUntil = now() + RELIST_MS;
+  };
+  const quiet = () => now() < quietUntil;
 
   function serial<T>(fn: () => Promise<T>): Promise<T> {
     const run = queue.then(fn);
@@ -222,7 +241,7 @@ export function createAgentsIdentity(deps: {
    *  message no listing could answer. */
   function settle(
     sightings: readonly AgentSighting[],
-    how: { listing?: boolean; withhold?: boolean } = {},
+    how: { listing?: { askedAt: number }; withhold?: boolean } = {},
   ): Dispute[] {
     return deps.db.transaction((tx) => {
       const disputed: Dispute[] = [];
@@ -272,9 +291,13 @@ export function createAgentsIdentity(deps: {
             from: entry.parkedFrom,
             to: entry.address,
           });
-        } else if (!createdAt || createdAt.getTime() > (parkedAt ?? Number.POSITIVE_INFINITY)) {
+        } else if (
+          !createdAt ||
+          createdAt.getTime() >= Math.floor((parkedAt ?? Number.POSITIVE_INFINITY) / 1000) * 1000
+        ) {
           // Merged into someone else since, and gone with the merge, even if
-          // a new person has taken the id since.
+          // a new person has taken the id since. A person's creation is kept
+          // to the second, so one made in the second it left counts as new.
           log.warn("an agent's waiting link was to a person who is gone; it is dropped", {
             to: entry.address,
           });
@@ -297,16 +320,27 @@ export function createAgentsIdentity(deps: {
       for (const sighting of ordered) {
         const { endpointId, address } = sighting;
         const entry = known[endpointId];
+        if (
+          how.listing &&
+          (messaged.get(endpointId) ?? Number.NEGATIVE_INFINITY) > how.listing.askedAt
+        ) {
+          // A message moved it after this listing was asked for.
+          continue;
+        }
         if (staleAgainst(sighting, entry)) {
           if (disputes(sighting, entry)) {
             disputed.push({ key: disputeKey(sighting), sighting, held: false });
           }
           continue;
         }
+        const seen = seenBy(sighting, entry, how.listing?.askedAt ?? 0);
         if (entry?.address === address) {
-          if (sighting.by === "listing" || entry.by === "message") {
-            known[endpointId] = { ...entry, ...seenBy(sighting) };
-          }
+          // A message agreeing with a listing leaves it the listing's, and
+          // only notes when it was sent.
+          known[endpointId] =
+            sighting.by === "listing" || entry.by === "message"
+              ? { ...entry, ...seen }
+              : { ...entry, at: seen.at };
           restore(endpointId);
           continue;
         }
@@ -343,7 +377,8 @@ export function createAgentsIdentity(deps: {
           guardianRecord = guardianRecord.map((name) => (name === address ? endpointId : name));
           settings.write(tx, AGENTS_GUARDIAN_LINKED_KEY, guardianRecord);
         }
-        known[endpointId] = { ...known[endpointId], address, ...seenBy(sighting) };
+        known[endpointId] = { ...known[endpointId], address, ...seen };
+        if (sighting.by === "message") messaged.set(endpointId, now());
         holders.set(address, endpointId);
         restore(endpointId);
       }
@@ -370,8 +405,9 @@ export function createAgentsIdentity(deps: {
   /** Settles a listing unless a later-asked one already has. */
   function settleListing(listing: readonly AgentSighting[], askedAt: number): void {
     if (askedAt < listedAt) return;
-    settle(listing, { listing: true });
+    settle(listing, { listing: { askedAt } });
     listedAt = askedAt;
+    quietUntil = Number.NEGATIVE_INFINITY;
   }
 
   /** Lists Cloud again for these disagreements and settles what it says.
@@ -382,7 +418,10 @@ export function createAgentsIdentity(deps: {
     askedAt: number,
   ): Promise<boolean> {
     const listing = await list();
-    if (!listing) return false;
+    if (!listing) {
+      unreachable();
+      return false;
+    }
     await serial(async () => settleListing(listing, askedAt));
     for (const { key } of disputed) relisted.set(key, askedAt);
     return true;
@@ -394,7 +433,10 @@ export function createAgentsIdentity(deps: {
     return Promise.race([
       read,
       new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), deps.relistWaitMs ?? RELIST_WAIT_MS);
+        timer = setTimeout(() => {
+          unreachable();
+          resolve(false);
+        }, deps.relistWaitMs ?? RELIST_WAIT_MS);
       }),
     ]).finally(() => clearTimeout(timer));
   }
@@ -408,12 +450,13 @@ export function createAgentsIdentity(deps: {
     disputed: readonly Dispute[],
     askedAt: number,
   ): Promise<void> {
-    const fresh = disputed.filter(({ key }) => !reading.has(key));
+    const fresh = quiet() ? [] : disputed.filter(({ key }) => !reading.has(key));
     if (fresh.length > 0) {
       const read = relistNow(list, fresh, askedAt).catch((err: unknown) => {
         log.warn("Could not settle a fresh agent listing", {
           error: err instanceof Error ? err.message : String(err),
         });
+        unreachable();
         return false;
       });
       for (const { key } of fresh) reading.set(key, read);
@@ -422,7 +465,10 @@ export function createAgentsIdentity(deps: {
       });
     }
     const reads = [...new Set(disputed.map(({ key }) => reading.get(key)))];
-    const answered = await waited(Promise.all(reads).then((all) => all.every(Boolean)));
+    const answered =
+      !quiet() &&
+      !reads.includes(undefined) &&
+      (await waited(Promise.all(reads).then((all) => all.every(Boolean))));
     const held = disputed.filter((dispute) => dispute.held).map((dispute) => dispute.sighting);
     if (held.length === 0) return;
     await serial(async () => {
@@ -440,7 +486,10 @@ export function createAgentsIdentity(deps: {
     priming ??= (async () => {
       const askedAt = now();
       const listing = await list().catch(() => null);
-      if (!listing) throw new Error("Cloud's listing could not be read");
+      if (!listing) {
+        unreachable();
+        throw new Error("Cloud's listing could not be read");
+      }
       await serial(async () => settleListing(listing, askedAt));
     })().catch((err: unknown) => {
       priming = null;
@@ -462,7 +511,7 @@ export function createAgentsIdentity(deps: {
       if (sightings.length === 0) return Promise.resolve();
       return guarded(
         (async () => {
-          if (deps.list && listedAt === Number.NEGATIVE_INFINITY) {
+          if (deps.list && listedAt === Number.NEGATIVE_INFINITY && !quiet()) {
             await waited(prime(deps.list).catch(() => {}));
           }
           const disputed = await serial(async () => settle(sightings));

@@ -33,6 +33,10 @@ function message(from: AgentMessageEnvelope["from"], sentAt = SENT): ChannelMess
   return inbound;
 }
 
+/** A creation time before any link the test sets aside, since Rome keeps it to
+ *  the second. */
+const earlier = () => new Date(Date.now() - 60_000);
+
 describe("keeping agents' links on their endpoint", () => {
   let testDb: TestDb;
   let people: PersonMappingRepository;
@@ -47,8 +51,8 @@ describe("keeping agents' links on their endpoint", () => {
     testDb.db
       .insert(persons)
       .values([
-        { id: "owner", displayName: "Owner", bondLevel: "guardian", createdAt: new Date() },
-        { id: "ada", displayName: "Ada", bondLevel: "acquaintance", createdAt: new Date() },
+        { id: "owner", displayName: "Owner", bondLevel: "guardian", createdAt: earlier() },
+        { id: "ada", displayName: "Ada", bondLevel: "acquaintance", createdAt: earlier() },
       ])
       .run();
     identity = createAgentsIdentity({
@@ -84,7 +88,7 @@ describe("keeping agents' links on their endpoint", () => {
     });
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@newfriend/atlas", by: "listing" },
+      ep_atlas: { address: "@newfriend/atlas", by: "listing", at: 0 },
     });
   });
 
@@ -223,12 +227,14 @@ describe("keeping agents' links on their endpoint", () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     let answer: (listing: AgentSighting[] | null) => void = () => {};
     let asked = 0;
+    let clock = Date.now();
     identity = createAgentsIdentity({
       db: testDb.db,
       personMappingRepo: people,
       settingsRepo: settings,
       channel: "agents",
       relistWaitMs: 10,
+      now: () => clock,
       list: () => {
         asked++;
         return new Promise((resolve) => {
@@ -241,10 +247,14 @@ describe("keeping agents' links on their endpoint", () => {
     await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
     expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
 
-    // A read that fails leaves the disagreement free to be listed again.
+    // A read that fails leaves the disagreement free to be listed again, once
+    // Cloud has had a while to come back.
     answer(null);
     await new Promise((resolve) => setTimeout(resolve, 0));
     await identity.observe([sent("ep_atlas", "@newfriend/atlas", 2)]);
+    expect(asked).toBe(1);
+    clock += 30_000;
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 3)]);
     expect(asked).toBe(2);
     answer([listed("ep_atlas", "@newfriend/atlas")]);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -286,6 +296,74 @@ describe("keeping agents' links on their endpoint", () => {
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
+  it("follows an unlisted endpoint through a rename its newer messages say", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => [],
+    });
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 1);
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 5)]);
+    await identity.observeListing([listed("ep_else", "nova")], 2);
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 4)]);
+    expect((await people.findByChannelUser("agents", "@friend/atlas"))?.id).toBe("ada");
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 6)]);
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
+  it("lets no listing asked for before a message moved an endpoint move it back", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    let clock = Date.now();
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      now: () => clock,
+    });
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
+    const askedAt = clock;
+    clock += 1_000;
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 2)]);
+
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], askedAt);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
+  it("stops waiting on Cloud for a while once a read hangs", async () => {
+    let asked = 0;
+    let clock = Date.now();
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      relistWaitMs: 10,
+      now: () => clock,
+      list: () => {
+        asked++;
+        return new Promise(() => {});
+      },
+    });
+
+    await identity.observe([sent("ep_atlas", "atlas", 1)]);
+    await identity.observe([sent("ep_atlas", "atlas", 2)]);
+    expect(asked).toBe(1);
+
+    clock += 30_000;
+    await identity.observe([sent("ep_atlas", "atlas", 3)]);
+    expect(asked).toBe(1);
+    expect(settings.read(testDb.db, AGENTS_ENDPOINTS_KEY)).toMatchObject({
+      ep_atlas: { address: "atlas", at: 3 },
+    });
   });
 
   it("reads Cloud once at boot, so a rename before the next message still moves the link", async () => {
@@ -412,7 +490,7 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
     // It stops waiting, since it can never go back.
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@other/atlas", by: "listing" },
+      ep_atlas: { address: "@other/atlas", by: "listing", at: 0 },
     });
     // Nor does it stay behind for the next endpoint to take the name.
     await identity.observe([listed("ep_new", "atlas")]);
@@ -465,8 +543,8 @@ describe("keeping agents' links on their endpoint", () => {
 
     expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@newfriend/atlas", by: "listing" },
-      ep_other: { address: "@friend/atlas", by: "listing" },
+      ep_atlas: { address: "@newfriend/atlas", by: "listing", at: 3 },
+      ep_other: { address: "@friend/atlas", by: "listing", at: 3 },
     });
   });
 
