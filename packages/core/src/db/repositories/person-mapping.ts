@@ -116,12 +116,12 @@ export class PersonMappingRepository {
     return nextAvailablePersonId(base, [base, ...conflicts.map((row) => row.id)]);
   }
 
-  /** Who holds an account, the stranger sentinel included, read through a
-   *  caller's transaction. */
+  /** Who holds an account, the stranger sentinel included, and the name it
+   *  carries there, read through a caller's transaction. */
   readChannelHolder(exec: DrizzleDb | DrizzleTx, channel: string, channelUserId: string) {
     return (
       exec
-        .select({ personId: channelMappings.personId })
+        .select({ personId: channelMappings.personId, displayName: channelMappings.displayName })
         .from(channelMappings)
         .where(
           and(
@@ -129,7 +129,7 @@ export class PersonMappingRepository {
             eq(channelMappings.channelUserId, channelUserId),
           ),
         )
-        .get()?.personId ?? null
+        .get() ?? null
     );
   }
 

@@ -54,6 +54,10 @@ const log = createLogger("agents-identity");
  *  how long the People page keeps one read. */
 const RELIST_MS = 30_000;
 
+/** How long a message waits for that listing before it is read unsettled.
+ *  Well inside the admission limit, which the message would otherwise miss. */
+const RELIST_WAIT_MS = 3_000;
+
 /** The settings key holding what Rome last knew of each endpoint. */
 export const AGENTS_ENDPOINTS_KEY = "agentsEndpoints";
 
@@ -67,6 +71,8 @@ interface Known {
   /** The person whose link it took off `parkedFrom`, waiting to go back. */
   parked?: string;
   parkedFrom?: string;
+  /** The name the link carried there. */
+  parkedName?: string;
 }
 
 /** One endpoint as Cloud names it. A message's sighting carries when it was
@@ -155,6 +161,8 @@ export function createAgentsIdentity(deps: {
    *  one. Null when Cloud cannot be read. */
   list?: () => Promise<AgentSighting[] | null>;
   now?: () => number;
+  /** How long a message waits for that listing. */
+  relistWaitMs?: number;
 }): AgentsIdentity {
   const now = deps.now ?? Date.now;
   const repo = deps.personMappingRepo;
@@ -189,11 +197,18 @@ export function createAgentsIdentity(deps: {
       /** Takes an endpoint's link off the address it is leaving, keeping it on
        *  the endpoint's record. */
       function leave(id: string, from: string): void {
-        const person = holderOf(from);
+        const holder = holderOf(from);
+        const person = holder?.personId;
         known[id] = {
           ...known[id],
           address: null,
-          ...(person ? { parked: person, parkedFrom: from } : {}),
+          ...(person
+            ? {
+                parked: person,
+                parkedFrom: from,
+                ...(holder?.displayName ? { parkedName: holder.displayName } : {}),
+              }
+            : {}),
         };
         holders.delete(from);
         if (person) {
@@ -206,7 +221,7 @@ export function createAgentsIdentity(deps: {
       function restore(id: string): void {
         const entry = known[id];
         if (!entry?.parked || !entry.parkedFrom || entry.address === null) return;
-        const { parked, parkedFrom: _from, ...rest } = entry;
+        const { parked, parkedFrom: _from, parkedName, ...rest } = entry;
         known[id] = rest;
         if (isOwn(entry.parkedFrom) !== isOwn(entry.address)) {
           // It can never go back, so it stops waiting.
@@ -218,7 +233,7 @@ export function createAgentsIdentity(deps: {
           // Merged into someone else since, and gone with the merge.
           log.info("an agent's waiting link was to a person who is gone", { to: entry.address });
         } else if (holderOf(entry.address) === null) {
-          repo.writeChannelMapping(tx, parked, channel, entry.address);
+          repo.writeChannelMapping(tx, parked, channel, entry.address, parkedName);
           log.info("an agent's link followed it to its new address", { to: entry.address });
         }
       }
@@ -306,6 +321,18 @@ export function createAgentsIdentity(deps: {
     return true;
   }
 
+  /** Lists Cloud again for these disagreements and settles what it says. A
+   *  read that fails leaves them free to be listed again. */
+  async function relistNow(
+    list: () => Promise<AgentSighting[] | null>,
+    disputed: readonly string[],
+    askedAt: number,
+  ): Promise<void> {
+    const listing = await list();
+    if (listing) return serial(async () => settleListing(listing, askedAt));
+    for (const key of disputed) if (relisted.get(key) === askedAt) relisted.delete(key);
+  }
+
   function guarded(run: Promise<void>): Promise<void> {
     return run.catch((err: unknown) => {
       log.warn("Could not settle agent addresses", {
@@ -326,8 +353,17 @@ export function createAgentsIdentity(deps: {
           if (disputed.length === 0 || !deps.list) return;
           const askedAt = now();
           if (!relist(disputed, askedAt)) return;
-          const listing = await deps.list();
-          if (listing) await serial(async () => settleListing(listing, askedAt));
+          // A slow Cloud lets the message go on unsettled; the listing still
+          // settles when it comes.
+          const relisting = guarded(relistNow(deps.list, disputed, askedAt));
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            relisting,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, deps.relistWaitMs ?? RELIST_WAIT_MS);
+            }),
+          ]);
+          clearTimeout(timer);
         })(),
       );
     },

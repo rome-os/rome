@@ -73,12 +73,15 @@ describe("keeping agents' links on their endpoint", () => {
   });
 
   it("moves a linked agent's link to its new address when its owner renames their handle", async () => {
-    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    await people.addChannelMapping("ada", "agents", "@friend/atlas", "Atlas");
     await identity.observe([listed("ep_atlas", "@friend/atlas")]);
 
     await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
-    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+    expect(people.readChannelHolder(testDb.db, "agents", "@newfriend/atlas")).toEqual({
+      personId: "ada",
+      displayName: "Atlas",
+    });
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
       ep_atlas: { address: "@newfriend/atlas", by: "listing" },
@@ -214,6 +217,39 @@ describe("keeping agents' links on their endpoint", () => {
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
+  });
+
+  it("lets a message wait only so long for Cloud, and settles the listing when it comes", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    let answer: (listing: AgentSighting[] | null) => void = () => {};
+    let asked = 0;
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      relistWaitMs: 10,
+      list: () => {
+        asked++;
+        return new Promise((resolve) => {
+          answer = resolve;
+        });
+      },
+    });
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
+    expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
+
+    // A read that fails leaves the disagreement free to be listed again.
+    answer(null);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 2)]);
+    expect(asked).toBe(2);
+    answer([listed("ep_atlas", "@newfriend/atlas")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await identity.serial(async () => {});
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
   });
 
   it("orders messages by when they were sent", async () => {
