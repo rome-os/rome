@@ -63,3 +63,13 @@ A Connection's Talk may back a channel's `send` and `inbound`. The correspondenc
 App actions reach channels by name through one service, not through Connections. It picks the Connection a send or a history read goes to, and it answers the same way in the main process and in a worker ([Channels for app actions](../architecture/channels.md#channels-for-app-actions)). A Connection's Talk is internal to core, and the app SDK does not export it.
 
 This amends one "future diffs must respect" rule: a new conversational surface does not have to be a Connection. A new credentialed API or webhook stream still does.
+
+## Amendment (2026-10-08): a channel is one presence on a platform
+
+A channel is one of Rome's presences on a platform: one bot, one signed-in user, one mailbox. The platform is the service a Connection names, such as `telegram`, and it is a key rather than an object. Nothing sits above the channels of one platform to merge them.
+
+The platform stays a key because a person's address belongs to the platform, not to Rome's presence on it. Links and stored rows name the platform, and person resolution keys on it, as the consequences above already say.
+
+While a service holds at most one Connection, a platform has one channel, and the channel's name is the platform's. Widening that is still its own decision. When it is taken, a second presence on a platform is a second channel with its own name, never a second backer merged into the first. A send that names only the platform resolves the one channel on it, or is refused when there are several.
+
+This narrows the amendment above without withdrawing it. A channel's ports may still have several backers, such as synced tables and a Connection's Talk. "One presence" says whose channel it is, not how many things answer for it.
