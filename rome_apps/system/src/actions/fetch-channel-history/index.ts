@@ -182,13 +182,13 @@ export function createAction(
           })
         ).reverse();
       } catch (err) {
-        // A channel with no store reads through its Connection, so with none
-        // connected the read fails for the reason this tool has always given.
-        if (summary.connectionIds.length === 0) return notConfigured;
         log.error("fetchHistory failed", {
           channel,
           error: err instanceof Error ? err.message : String(err),
         });
+        // A channel with no store reads through its Connection, so with none
+        // connected the read fails for the reason this tool has always given.
+        if (summary.connectionIds.length === 0) return notConfigured;
         return {
           status: "error",
           error: `Failed to fetch history from "${channel}": ${err instanceof Error ? err.message : String(err)}`,
