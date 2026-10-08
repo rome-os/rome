@@ -191,6 +191,12 @@ describe("agents channel", () => {
     await expect(talker.send("atlas" as ConversationId, { text: " " })).rejects.toThrow(/text/);
   });
 
+  it("reaches a dot directly at its endpoint, so People can write to it first", async () => {
+    const direct = createAgentsTalker(fakeClient([])).feature("directMessaging");
+    expect(await direct?.conversationFor("atlas")).toBe("atlas");
+    expect(await direct?.conversationFor(" ")).toBeNull();
+  });
+
   it("records the endpoint Cloud assigned when the guardian connects", async () => {
     const setup = makeAgentsSetup(fakeClient([]));
     const conferral = await setup(

@@ -21,6 +21,7 @@ import {
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
+import { addressIsConversationFeature } from "./talk-features.js";
 import type {
   AuthScheme,
   ConnectionDescriptor,
@@ -29,6 +30,8 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   StreamFault,
+  TalkFeatureMap,
+  TalkFeatureName,
   Talker,
 } from "../types.js";
 
@@ -202,8 +205,14 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       });
       return { conversationId, messageId: sent.messageId };
     },
-    feature() {
-      return null;
+    feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
+      // An agent's endpoint name is both its address and the conversation its
+      // messages arrive in, so Rome can write to a dot first, from the People
+      // page, as well as answer one.
+      const features: Partial<TalkFeatureMap> = {
+        directMessaging: addressIsConversationFeature(),
+      };
+      return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
     },
   };
 }
