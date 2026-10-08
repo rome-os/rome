@@ -212,7 +212,7 @@ describe("telegram descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    void talker.feature("inboundMedia")?.materialize(message);
+    void talker.inboundMedia?.materialize(message);
     return stopped as Promise<void>;
   });
 

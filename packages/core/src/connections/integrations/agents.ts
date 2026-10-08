@@ -29,8 +29,7 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   StreamFault,
-  TalkFeatureMap,
-  TalkFeatureName,
+  TalkFeatures,
   Talker,
 } from "../types.js";
 
@@ -182,6 +181,12 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
     }
   }
 
+  // An agent's endpoint name is both its address and the conversation its
+  // messages arrive in, so Rome can write to a dot first, from the People
+  // page, as well as answer one.
+  const features: TalkFeatures = {
+    directMessaging: addressIsConversationFeature(),
+  };
   return {
     start(deliver, fault) {
       const current = ++generation;
@@ -206,15 +211,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       });
       return { conversationId, messageId: sent.messageId };
     },
-    feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-      // An agent's endpoint name is both its address and the conversation its
-      // messages arrive in, so Rome can write to a dot first, from the People
-      // page, as well as answer one.
-      const features: Partial<TalkFeatureMap> = {
-        directMessaging: addressIsConversationFeature(),
-      };
-      return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-    },
+    ...features,
   };
 }
 

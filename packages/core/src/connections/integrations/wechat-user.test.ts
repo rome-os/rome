@@ -556,7 +556,7 @@ describe("the WeChat personal Talker", () => {
     await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
       /read-only/,
     );
-    expect(talker.feature("directMessaging")).toBeNull();
+    expect(talker.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 
     await talker.stop();
@@ -586,7 +586,7 @@ describe("the WeChat personal Talker", () => {
     });
     const { talker } = buildTalker(runtime);
 
-    const page = await talker.feature("directory")!.listConversations({ limit: 10 });
+    const page = await talker.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
         ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
@@ -609,7 +609,7 @@ describe("the WeChat personal Talker", () => {
   // (wechat-user-messages.ts). The Talk offers only the directory.
   it("leaves history to the channel", async () => {
     const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
-    expect(talker.feature("history")).toBeNull();
+    expect(talker.history).toBeUndefined();
     expect(
       createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
         .talker?.history,

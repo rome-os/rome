@@ -30,7 +30,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
@@ -258,6 +258,20 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let unregisterIngress: (() => void) | null = null;
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            history: {
+              async query(input) {
+                const messages = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return messages.slice(0, historyQueryLimit(input.limit));
+              },
+            },
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
@@ -290,23 +304,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             send(conversationId, msg) {
               return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: {
-                  materialize: (message) => adapter.saveIncomingAttachments(message),
-                },
-                history: {
-                  async query(input) {
-                    const messages = await adapter.fetchHistory(
-                      input.conversationId ?? null,
-                      historyWindowHours(input.since),
-                    );
-                    return messages.slice(0, historyQueryLimit(input.limit));
-                  },
-                },
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

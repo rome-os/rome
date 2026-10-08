@@ -43,7 +43,7 @@ describe("registerBuiltinConnections", () => {
         { session: { material: { wxid: "wxid_guardian" }, expiresAt: "never" } },
         kit,
       );
-    const page = await talker.feature("directory")!.listConversations({ limit: 10 });
+    const page = await talker.directory!.listConversations({ limit: 10 });
 
     expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
     expect(bridgeCommand).toHaveBeenCalled();

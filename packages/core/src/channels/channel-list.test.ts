@@ -65,16 +65,10 @@ function talkService(
               async send(conversationId) {
                 return { conversationId, messageId: `sent-${epochs.length}` };
               },
-              feature: ((name: string) =>
-                name === "directMessaging"
-                  ? direct
-                  : name === "activity"
-                    ? activity
-                    : name === "history"
-                      ? history
-                      : name === "directory"
-                        ? directory
-                        : null) as Talker["feature"],
+              ...(direct && { directMessaging: direct }),
+              ...(activity && { activity }),
+              ...(history && { history }),
+              ...(directory && { directory }),
             };
           },
         },
@@ -251,7 +245,7 @@ describe("channelList", () => {
     const build = service.descriptor.capabilities.talker!.build;
     service.descriptor.capabilities.talker!.build = (creds, kit) => ({
       ...build(creds, kit),
-      feature: () => {
+      get history(): never {
         throw new Error("not started");
       },
     });

@@ -139,7 +139,6 @@ export function makeFakeTalker(
         conversationId: address,
       } satisfies MessageReceipt;
     },
-    feature: () => null,
   };
 
   return talker;

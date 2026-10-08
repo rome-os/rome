@@ -192,7 +192,7 @@ describe("agents channel", () => {
   });
 
   it("reaches a dot directly at its endpoint, so People can write to it first", async () => {
-    const direct = createAgentsTalker(fakeClient([])).feature("directMessaging");
+    const direct = createAgentsTalker(fakeClient([])).directMessaging;
     expect(await direct?.conversationFor("atlas")).toBe("atlas");
     expect(await direct?.conversationFor(" ")).toBeNull();
   });

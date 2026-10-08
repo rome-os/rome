@@ -23,7 +23,7 @@
 
 import { z } from "zod";
 import type { ConversationDescriptor, ConversationId } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
@@ -441,6 +441,9 @@ export function createWechatUserDescriptor(
             },
           };
 
+          // `directMessaging` is absent on purpose: answering null is the
+          // whole declaration that this channel cannot be written to.
+          const features: TalkFeatures = { directory };
           const talker: WechatUserTalker = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
@@ -539,12 +542,7 @@ export function createWechatUserDescriptor(
             async send(): Promise<never> {
               throw new Error("The WeChat personal connection is read-only");
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              // `directMessaging` is absent on purpose: answering null is the
-              // whole declaration that this channel cannot be written to.
-              const features: Partial<TalkFeatureMap> = { directory };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return degradation;
             },

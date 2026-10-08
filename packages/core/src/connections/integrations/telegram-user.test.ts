@@ -221,7 +221,7 @@ describe("telegram_user descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    await expect(h.talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
+    await expect(h.talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
     // The ChannelMessage reaches the transport as it is, with no `raw` to unwrap.
     expect(fakeState.materialized).toStrictEqual([message]);
     const stopped = h.talker.stop();
@@ -240,7 +240,7 @@ describe("telegram_user descriptor shape", () => {
     const h = buildTalker();
     h.start();
     await expect(
-      h.talker.feature("history")?.query({
+      h.talker.history?.query({
         conversationId: "dialog-1" as ConversationId,
         limit: 20,
       }),
@@ -265,7 +265,7 @@ describe("telegram_user descriptor shape", () => {
     fakeState.historyLines = [line("1", false), line("2", true), line("3", false)];
     const h = buildTalker();
     h.start();
-    const lines = await h.talker.feature("history")?.query({ limit: 2 });
+    const lines = await h.talker.history?.query({ limit: 2 });
     expect(lines).toStrictEqual([line("1", false), { ...line("2", true), direction: "outbound" }]);
     expect(fakeState.historyCalls).toEqual([{ threadId: null, windowHours: 24 }]);
   });
