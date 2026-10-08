@@ -26,7 +26,8 @@
  * rename still reaches the person on its first message. The same disagreement
  * is listed again at most once a half minute, so a run of held-back messages
  * reads Cloud once. A message waits for that read only briefly, outside the
- * settlement queue. When no listing answers in time, a link stops answering
+ * settlement queue. An endpoint the listing has left out is not listed again
+ * for, and its own messages cannot move it, so its rename is not followed. When no listing answers in time, a link stops answering
  * for an address a listing gave another endpoint, so a reused name never
  * speaks as the old endpoint's person; the next listing gives the link back
  * if it still holds. A listing that leaves an endpoint out stops vouching for
@@ -57,7 +58,8 @@ const log = createLogger("agents-identity");
  *  how long the People page keeps one read. */
 const RELIST_MS = 30_000;
 
-/** How long a message waits for that listing. Well inside the admission
+/** How long a message waits for each listing read: the first since boot, and
+ *  one for its disagreement. Both together stay well inside the admission
  *  limit, which the message would otherwise miss. */
 const RELIST_WAIT_MS = 3_000;
 
@@ -150,7 +152,13 @@ function staleAgainst(sighting: AgentSighting, entry: Known | undefined): boolea
 /** Whether a message disagrees with what a listing recorded, which only a
  *  fresh listing can settle. */
 function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
-  return sighting.by === "message" && entry?.by === "listing" && entry.address !== sighting.address;
+  // A listing that leaves the endpoint out cannot settle where it went.
+  return (
+    sighting.by === "message" &&
+    entry?.by === "listing" &&
+    !entry.unlisted &&
+    entry.address !== sighting.address
+  );
 }
 
 /** Names one disagreement, so the same one is listed again only so often. */
@@ -418,13 +426,10 @@ export function createAgentsIdentity(deps: {
     const held = disputed.filter((dispute) => dispute.held).map((dispute) => dispute.sighting);
     if (held.length === 0) return;
     await serial(async () => {
-      if (answered) {
-        // Read again against what the listing settled, which may have
-        // stopped vouching for the address.
-        settle(held);
-      } else if (listedAt < askedAt) {
-        settle(held, { withhold: true });
-      }
+      // Read again against whatever listing settled meanwhile, which may
+      // have stopped vouching for the address. With none as fresh as this
+      // read, the old link stops answering for it.
+      settle(held, { withhold: !answered && listedAt < askedAt });
     });
   }
 

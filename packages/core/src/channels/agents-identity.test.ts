@@ -351,6 +351,48 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
   });
 
+  it("reads a held message again against a newer listing that settled while it waited", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    let clock = 10;
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      now: () => clock,
+      relistWaitMs: 20,
+      list: () => new Promise(() => {}),
+    });
+    await identity.observeListing([listed("ep_old", "atlas")], 0);
+
+    const message = identity.observe([sent("ep_new", "atlas", 5)]);
+    clock = 20;
+    await identity.observeListing([listed("ep_else", "nova")], 20);
+    await message;
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
+  it("lists Cloud again for no message from an endpoint the listing left out", async () => {
+    let asked = 0;
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => {
+        asked++;
+        return [];
+      },
+    });
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 0);
+    await identity.observeListing([listed("ep_else", "nova")], 1);
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
+
+    expect(asked).toBe(0);
+  });
+
   it("orders messages by when they were sent", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
