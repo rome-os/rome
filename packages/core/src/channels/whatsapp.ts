@@ -12,8 +12,8 @@ import makeWASocket, {
   type Chat,
 } from "@whiskeysockets/baileys";
 
-import type { ProviderAdapter } from "./adapter.js";
-import type { NormalizedMessage, Attachment, OutgoingMessage } from "./types.js";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, OutgoingMessage } from "./types.js";
 import type {
   WhatsAppSyncSink,
   WaContactInput,
@@ -67,10 +67,14 @@ export type WhatsAppAuthProvider = () => Promise<{
  * setup coroutine, HTTP routes, and setup runtime real. */
 export type WhatsAppSocketFactory = typeof makeWASocket;
 
-export class WhatsAppAdapter implements ProviderAdapter {
-  readonly channelName = "whatsapp";
+/**
+ * The WhatsApp transport over a Baileys linked-device socket. Inbound messages
+ * arrive as the channel's own record, a `ChannelMessage` whose `raw` is the
+ * Baileys `WAMessage`, so the Connection integration delivers them as they are.
+ */
+export class WhatsAppAdapter {
   private sock: WASocket | null = null;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
   private connectedCallback?: (userId: string) => void;
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private syncSink?: WhatsAppSyncSink;
@@ -239,22 +243,22 @@ export class WhatsAppAdapter implements ProviderAdapter {
         // it is mirrored into the store above, but the agent should not answer it.
         if (waMsg.message.reactionMessage) continue;
 
-        const msg = this.normalizeMessage(waMsg);
+        const msg = this.toChannelMessage(waMsg);
         // Protocol/system frames (sender-key distribution, app-state sync,
         // history-sync notifications) carry no text or attachments — they are
         // mirrored above for completeness but are not an inbound turn.
         if (!msg.text && msg.attachments.length === 0) continue;
         log.info("message received", {
-          from: msg.channelUserId,
-          threadId: msg.threadId,
-          threadType: msg.threadType,
+          from: msg.senderId,
+          conversationId: msg.conversationId,
+          threadKind: msg.thread?.kind,
         });
 
         try {
           await this.handler!(msg);
         } catch (err) {
           log.error("message handler error", {
-            messageId: msg.id,
+            messageId: msg.messageId,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -467,8 +471,9 @@ export class WhatsAppAdapter implements ProviderAdapter {
     return normalized;
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     if (!this.sock) throw new Error("WhatsApp not connected");
+    const threadId: string = conversationId;
     const jid = this.canonicalJid(threadId);
 
     try {
@@ -508,7 +513,7 @@ export class WhatsAppAdapter implements ProviderAdapter {
       }
 
       log.info("message sent", { threadId, jid });
-      return { messageId, threadId };
+      return { conversationId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -519,20 +524,23 @@ export class WhatsAppAdapter implements ProviderAdapter {
     }
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
+  /** Download a message's media into the profile. Baileys decrypts it from the
+   *  `WAMessage` in `raw`, so a message without one keeps its attachments
+   *  unsaved. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
     if (message.attachments.length === 0) return message.attachments;
-    const raw = message.rawEvent as WAMessage | undefined;
-    if (!raw?.message) return message.attachments;
+    const raw = message.raw;
+    if (!isWAMessage(raw)) return message.attachments;
 
     const attachment = message.attachments[0];
     if (!attachment) return message.attachments;
     if (message.attachments.length > 1) {
       log.warn("whatsapp message has additional attachments without separate media payloads", {
-        messageId: message.id,
+        messageId: message.messageId,
         savedAttachments: 1,
         skippedAttachments: message.attachments.length - 1,
       });
@@ -545,7 +553,7 @@ export class WhatsAppAdapter implements ProviderAdapter {
     } catch (err) {
       if (!isAttachmentTooLargeError(err)) throw err;
       log.warn("whatsapp attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: err.bytes,
         type: attachment.type,
         fileName: attachment.fileName ?? null,
@@ -553,14 +561,22 @@ export class WhatsAppAdapter implements ProviderAdapter {
       return message.attachments;
     }
 
-    return saveIncomingAttachmentPayloads(message, [
+    return saveIncomingAttachmentPayloads(
       {
-        attachment,
-        data,
-        mimeType: attachment.mimeType,
-        fileName: attachment.fileName,
+        channel: "whatsapp",
+        threadId: message.conversationId,
+        id: message.messageId,
+        attachments: message.attachments,
       },
-    ]);
+      [
+        {
+          attachment,
+          data,
+          mimeType: attachment.mimeType,
+          fileName: attachment.fileName,
+        },
+      ],
+    );
   }
 
   onConnected(callback: (userId: string) => void): void {
@@ -582,23 +598,24 @@ export class WhatsAppAdapter implements ProviderAdapter {
     this.syncSink = sink;
   }
 
-  private normalizeMessage(waMsg: WAMessage): NormalizedMessage {
+  private toChannelMessage(waMsg: WAMessage): ChannelMessage {
     const remoteJid = waMsg.key.remoteJid!;
     const isGroup = remoteJid.endsWith("@g.us");
-    const threadId = this.canonicalJid(remoteJid);
+    const conversationId = this.canonicalJid(remoteJid);
     const content = describeContent(waMsg.message);
 
     return {
-      id: waMsg.key.id!,
       channel: "whatsapp",
-      channelUserId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : threadId,
-      displayName: waMsg.pushName ?? "Unknown",
-      threadId,
-      threadType: isGroup ? "group" : "private",
-      timestamp: new Date((waMsg.messageTimestamp as number) * 1000),
+      direction: "inbound",
+      messageId: waMsg.key.id!,
+      conversationId: conversationId as ConversationId,
+      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : conversationId,
+      senderDisplayName: waMsg.pushName ?? "Unknown",
       text: content.text ?? "",
       attachments: this.extractAttachments(waMsg),
-      rawEvent: waMsg,
+      timestamp: new Date((waMsg.messageTimestamp as number) * 1000),
+      thread: { kind: isGroup ? "group" : "dm" },
+      raw: waMsg,
     };
   }
 
@@ -683,6 +700,14 @@ export class WhatsAppAdapter implements ProviderAdapter {
       return null;
     }
   }
+}
+
+/** A Baileys message with content to download from, as `raw` carries it on an
+ *  inbound message this transport emitted. */
+function isWAMessage(value: unknown): value is WAMessage {
+  if (!value || typeof value !== "object") return false;
+  const { key, message } = value as { key?: unknown; message?: unknown };
+  return !!key && typeof key === "object" && !!message && typeof message === "object";
 }
 
 function errMsg(err: unknown): string {

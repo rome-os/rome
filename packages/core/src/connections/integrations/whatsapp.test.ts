@@ -4,8 +4,12 @@
 // threading, migration — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, NormalizedMessage, ChannelMessage } from "@rome-os/app-runtime";
-import type { WhatsAppAdapter, WhatsAppAuthProvider } from "../../channels/whatsapp.js";
+import type { ConversationId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
+import {
+  WhatsAppAdapter,
+  type WhatsAppAuthProvider,
+  type WhatsAppSocketFactory,
+} from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -40,11 +44,11 @@ class FakeWhatsAppAdapter {
   sync: WhatsAppSyncSink | null = null;
   connectedCb: ((jid: string) => void) | null = null;
   faultCb: ((f: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void) | null = null;
-  messageCb: ((m: NormalizedMessage) => Promise<void>) | null = null;
+  messageCb: ((m: ChannelMessage) => Promise<void>) | null = null;
   started = false;
   stopped = false;
   startError: unknown = null;
-  readonly sent: Array<{ channelUserId: string; threadId: string; msg: unknown }> = [];
+  readonly sent: Array<{ conversationId: ConversationId; msg: unknown }> = [];
 
   onSync(sink: WhatsAppSyncSink): void {
     this.sync = sink;
@@ -55,7 +59,7 @@ class FakeWhatsAppAdapter {
   onFault(cb: (f: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void): void {
     this.faultCb = cb;
   }
-  onMessage(cb: (m: NormalizedMessage) => Promise<void>): void {
+  onInbound(cb: (m: ChannelMessage) => Promise<void>): void {
     this.messageCb = cb;
   }
   async start(): Promise<void> {
@@ -65,10 +69,11 @@ class FakeWhatsAppAdapter {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async sendMessage(channelUserId: string, threadId: string, msg: unknown): Promise<void> {
-    this.sent.push({ channelUserId, threadId, msg });
+  async send(conversationId: ConversationId, msg: unknown): Promise<MessageReceipt> {
+    this.sent.push({ conversationId, msg });
+    return { conversationId, messageId: "sent-1" };
   }
-  async saveIncomingAttachments(m: NormalizedMessage) {
+  async saveIncomingAttachments(m: ChannelMessage) {
     return m.attachments;
   }
 }
@@ -155,7 +160,6 @@ describe("whatsapp descriptor shape", () => {
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "whatsapp", rawEvent: null, attachments: [] },
     } satisfies ChannelMessage;
     await expect(talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
     await talker.stop();
@@ -291,12 +295,112 @@ describe("whatsapp descriptor over a real registry", () => {
     await registry.importCredential(conn.id, "session", sessionCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    // WhatsAppAdapter.sendMessage addresses by threadId (the chat JID);
-    // channelUserId is the sender's address round-tripped from the inbound message.
-    await conn.talk!.send("120@g.us" as ConversationId, { text: "hi" });
-    expect(fake.sent).toEqual([
-      { channelUserId: "120@g.us", threadId: "120@g.us", msg: { text: "hi" } },
+    // WhatsAppAdapter.send addresses by the conversation (the chat JID), and
+    // its receipt is the Talk's as it is.
+    const receipt = await conn.talk!.send("120@g.us" as ConversationId, { text: "hi" });
+    expect(fake.sent).toEqual([{ conversationId: "120@g.us", msg: { text: "hi" } }]);
+    expect(receipt).toStrictEqual({ conversationId: "120@g.us", messageId: "sent-1" });
+  });
+});
+
+// A real WhatsAppAdapter over a fake Baileys socket, so the delivered message
+// is the transport's own record rather than a fake's.
+describe("whatsapp inbound delivery", () => {
+  function realTalker() {
+    const handlers = new Map<string, (payload: unknown) => unknown>();
+    const socketFactory = (() => ({
+      ev: {
+        on(event: string, handler: (payload: unknown) => unknown) {
+          handlers.set(event, handler);
+        },
+      },
+      end: () => {},
+      sendMessage: async () => undefined,
+      user: undefined,
+    })) as unknown as WhatsAppSocketFactory;
+    const talker = createWhatsAppDescriptor({
+      syncSink: {
+        async upsertContacts() {},
+        async upsertChats() {},
+        async upsertMessages() {},
+      },
+      onGuardianConnected: () => {},
+      createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
+    }).capabilities.talker!.build({ session: sessionCred() }, runtimeKit());
+    return { talker, handlers };
+  }
+
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const { talker, handlers } = realTalker();
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    await rs.waitFor(() => expect(handlers.has("messages.upsert")).toBe(true));
+
+    // A group message from a device-suffixed participant carrying a document,
+    // so the sender is canonicalized and an attachment is extracted.
+    const waMsg = {
+      key: {
+        remoteJid: "120363000000@g.us",
+        id: "wa-7",
+        fromMe: false,
+        participant: "15550001111:3@s.whatsapp.net",
+      },
+      pushName: "Alice",
+      messageTimestamp: 1700000000,
+      message: {
+        documentMessage: {
+          mimetype: "application/pdf",
+          fileName: "a.pdf",
+          caption: "see this",
+        },
+      },
+    };
+    await handlers.get("messages.upsert")!({ messages: [waMsg] });
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "whatsapp",
+        direction: "inbound",
+        messageId: "wa-7",
+        conversationId: "120363000000@g.us",
+        senderId: "15550001111@s.whatsapp.net",
+        senderDisplayName: "Alice",
+        text: "see this",
+        attachments: [
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            fileName: "a.pdf",
+            caption: "see this",
+          },
+        ],
+        timestamp: new Date(1700000000 * 1000),
+        thread: { kind: "group" },
+        raw: waMsg,
+      },
     ]);
+    await talker.stop();
+  });
+
+  it("materialize keeps the attachments unsaved when the message carries no raw", async () => {
+    const { talker } = realTalker();
+    const message = {
+      channel: "whatsapp",
+      direction: "inbound",
+      messageId: "wa-8",
+      conversationId: "15550001111@s.whatsapp.net" as ConversationId,
+      senderId: "15550001111@s.whatsapp.net",
+      text: "",
+      attachments: [{ type: "image", mimeType: "image/jpeg" }],
+      timestamp: new Date(),
+    } satisfies ChannelMessage;
+
+    await expect(talker.feature("inboundMedia")?.materialize(message)).resolves.toBe(
+      message.attachments,
+    );
   });
 });
 
