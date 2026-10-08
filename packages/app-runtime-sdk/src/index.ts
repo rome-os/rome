@@ -985,6 +985,8 @@ export interface TurnErrorEvent {
    * human-readable `error`.
    *
    * - `usage_limit`: the provider's quota or rate limit is exhausted.
+   * - `credits_used_up`: the instance's Rome credits are used up. Retrying
+   *   fails until credits are added or ChatGPT is connected.
    * - `auth_revoked`: the stored credentials are no longer valid server-side
    *   (for example, Codex's refresh token was revoked) and need a re-login.
    * - `context_window_exceeded`: the conversation no longer fits the model's
