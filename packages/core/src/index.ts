@@ -2,7 +2,11 @@ import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
-import { agentSightings, createAgentsIdentity } from "./channels/agents-identity.js";
+import {
+  agentSightings,
+  createAgentsIdentity,
+  listAgentSightings,
+} from "./channels/agents-identity.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -332,10 +336,12 @@ async function main() {
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
   });
+  const agentsClient = createRomeCloudAgentsClient();
   const agentsIdentity = createAgentsIdentity({
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_SERVICE,
+    list: () => listAgentSightings(agentsClient),
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,
@@ -1130,7 +1136,7 @@ async function main() {
     connections: { registry: connectionRegistry, admit },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts({
-        client: createRomeCloudAgentsClient(),
+        client: agentsClient,
         isConnected: () =>
           connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
         onListed: (sightings) => void agentsIdentity.observe(sightings),

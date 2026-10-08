@@ -132,6 +132,31 @@ describe("keeping agents' links on their endpoint", () => {
     expect((await people.findByChannelUser("agents", "@friend/atlas"))?.id).toBe("owner");
   });
 
+  it("asks Cloud again when a message disagrees with a listing, so a rename reaches its person at once", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    let listing = [listed("ep_atlas", "@friend/atlas")];
+    const asked = { count: 0 };
+    identity = createAgentsIdentity({
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => {
+        asked.count++;
+        return listing;
+      },
+    });
+    await identity.observe(listing);
+    listing = [listed("ep_atlas", "@newfriend/atlas")];
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
+
+    expect(asked.count).toBe(1);
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+    // A message that agrees with what the listing says asks nothing.
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 2)]);
+    expect(asked.count).toBe(1);
+  });
+
   it("orders messages by when they were sent", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);

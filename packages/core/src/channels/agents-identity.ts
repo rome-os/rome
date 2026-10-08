@@ -21,8 +21,10 @@
  * Cloud's listing is its current state and always settles. A message is as old
  * as when it was sent, and settles an endpoint only against what earlier
  * messages said of it, never against a listing, so a message Cloud held while
- * Rome was offline cannot undo a rename the listing already settled. The two
- * clocks are never compared.
+ * Rome was offline cannot undo a rename the listing already settled. A message
+ * that disagrees with a listing has Cloud listed again before it is read, so a
+ * rename still reaches the person on its first message. Rome's clock and
+ * Cloud's are never compared.
  *
  * Conversation history stays under the address it was written to. An endpoint
  * first seen here takes over whatever its address already holds, since Rome
@@ -32,7 +34,13 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import { type AgentMessageEnvelope, agentAddressAccount } from "../lib/rome-cloud-agents.js";
+import {
+  type AgentEndpointSummary,
+  type AgentMessageEnvelope,
+  type AgentMessagingClient,
+  agentAddress,
+  agentAddressAccount,
+} from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
 import { AGENTS_GUARDIAN_LINKED_KEY } from "./agents-guardian.js";
 
@@ -69,6 +77,30 @@ export function agentSightings(message: ChannelMessage): AgentSighting[] {
     : [];
 }
 
+/** The endpoints a listing names by id. */
+export function listingSightings(endpoints: readonly AgentEndpointSummary[]): AgentSighting[] {
+  return endpoints.flatMap((endpoint) => {
+    const address = agentAddress(endpoint);
+    return endpoint.endpointId && address !== null
+      ? [{ endpointId: endpoint.endpointId, address, by: "listing" as const }]
+      : [];
+  });
+}
+
+/** Reads Cloud's listing now, or null when Cloud cannot be read. */
+export async function listAgentSightings(
+  client: Pick<AgentMessagingClient, "endpoints">,
+): Promise<AgentSighting[] | null> {
+  try {
+    return listingSightings((await client.endpoints()).endpoints);
+  } catch (err) {
+    log.warn("Could not list agent endpoints to settle a message", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 export interface AgentsIdentity {
   /** Settles what the sightings change. Never throws. */
   observe(sightings: readonly AgentSighting[]): Promise<void>;
@@ -86,6 +118,12 @@ function staleAgainst(sighting: AgentSighting, entry: Known | undefined): boolea
   return (entry.at ?? 0) > sighting.at;
 }
 
+/** Whether a message disagrees with what a listing recorded, which only a
+ *  fresh listing can settle. */
+function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
+  return sighting.by === "message" && entry?.by === "listing" && entry.address !== sighting.address;
+}
+
 /** The part of an endpoint's record a sighting sets. */
 function seenBy(sighting: AgentSighting): Pick<Known, "by" | "at"> {
   return sighting.by === "message" ? { by: "message", at: sighting.at } : { by: "listing" };
@@ -98,6 +136,9 @@ export function createAgentsIdentity(deps: {
   >;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
+  /** Reads Cloud's listing now, for a message that disagrees with an earlier
+   *  one. Null when Cloud cannot be read. */
+  list?: () => Promise<AgentSighting[] | null>;
 }): AgentsIdentity {
   let queue: Promise<unknown> = Promise.resolve();
   const repo = deps.personMappingRepo;
@@ -109,7 +150,10 @@ export function createAgentsIdentity(deps: {
     return run;
   }
 
-  async function settle(sightings: readonly AgentSighting[]): Promise<void> {
+  /** Settles the sightings, and says whether a message disagreed with a
+   *  listing. */
+  async function settle(sightings: readonly AgentSighting[]): Promise<boolean> {
+    let disputed = false;
     const known: Record<string, Known> =
       (await deps.settingsRepo.get<Record<string, Known>>(AGENTS_ENDPOINTS_KEY)) ?? {};
     let saved = JSON.stringify(known);
@@ -149,13 +193,13 @@ export function createAgentsIdentity(deps: {
     /** Removes a link an endpoint left behind when a settlement stopped
      *  between recording its leaving and taking the link off. */
     async function clearLeftover(address: string): Promise<void> {
+      const left = (entry: Known) => entry.parkedFrom === address && entry.address !== address;
+      if (!Object.values(known).some(left)) return;
       const person = await repo.findByChannelUser(channel, address);
       if (!person) return;
-      const left = Object.values(known).some(
-        (entry) =>
-          entry.parkedFrom === address && entry.parked === person.id && entry.address !== address,
-      );
-      if (left) await repo.deleteChannelMapping(channel, address);
+      if (Object.values(known).some((entry) => left(entry) && entry.parked === person.id)) {
+        await repo.deleteChannelMapping(channel, address);
+      }
     }
 
     /** Gives an endpoint's waiting link back at its current address. */
@@ -189,7 +233,10 @@ export function createAgentsIdentity(deps: {
     for (const sighting of ordered) {
       const { endpointId, address } = sighting;
       const entry = known[endpointId];
-      if (staleAgainst(sighting, entry)) continue;
+      if (staleAgainst(sighting, entry)) {
+        disputed ||= disputes(sighting, entry);
+        continue;
+      }
       if (entry?.address === address) {
         if (sighting.by === "listing" || entry.by === "message") {
           known[endpointId] = { ...entry, ...seenBy(sighting) };
@@ -201,7 +248,10 @@ export function createAgentsIdentity(deps: {
       }
       const holder = holders.get(address);
       if (holder !== undefined && holder !== endpointId) {
-        if (staleAgainst(sighting, known[holder])) continue;
+        if (staleAgainst(sighting, known[holder])) {
+          disputed ||= disputes(sighting, known[holder]);
+          continue;
+        }
         // Cloud gives an address to one endpoint at a time, so the one that
         // held it has left, whether removed or renamed.
         await leave(holder, address);
@@ -222,12 +272,20 @@ export function createAgentsIdentity(deps: {
       await save();
       await restore(endpointId);
     }
+    return disputed;
   }
 
   return {
     observe(sightings) {
       if (sightings.length === 0) return Promise.resolve();
-      return serial(() => settle(sightings)).catch((err: unknown) => {
+      return serial(async () => {
+        // A message never outranks a listing, so when one disagrees with what
+        // a listing recorded, as after a rename, Cloud is asked again before
+        // the message is read.
+        if (!(await settle(sightings)) || !deps.list) return;
+        const listing = await deps.list();
+        if (listing) await settle(listing);
+      }).catch((err: unknown) => {
         log.warn("Could not settle agent addresses", {
           error: err instanceof Error ? err.message : String(err),
         });

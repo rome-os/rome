@@ -30,7 +30,7 @@ import {
   canonicalAgentAddress,
 } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
-import type { AgentSighting } from "./agents-identity.js";
+import { type AgentSighting, listingSightings } from "./agents-identity.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
 
@@ -95,14 +95,7 @@ export function agentsAccounts(deps: {
     const book = deps.client.endpoints().then(
       ({ endpoint: own, address, endpoints }) => {
         lastOwnHandle = address ? agentAddressAccount(address) : null;
-        deps.onListed?.(
-          endpoints.flatMap((endpoint) => {
-            const listed = agentAddress(endpoint);
-            return endpoint.endpointId && listed !== null
-              ? [{ endpointId: endpoint.endpointId, address: listed, by: "listing" as const }]
-              : [];
-          }),
-        );
+        deps.onListed?.(listingSightings(endpoints));
         return {
           accounts: endpoints
             // A dot still waiting on its pairing confirmation cannot be reached.
