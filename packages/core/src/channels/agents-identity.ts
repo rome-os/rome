@@ -25,9 +25,12 @@
  * that disagrees with a listing has Cloud listed again before it is read, so a
  * rename still reaches the person on its first message. The same disagreement
  * is listed again at most once a half minute, so a run of held-back messages
- * reads Cloud once. Rome waits for Cloud outside the settlement queue, so other
- * agents' messages are not held up. Rome's clock and Cloud's are never
- * compared.
+ * reads Cloud once. A message waits for that read only briefly, outside the
+ * settlement queue. When no listing answers in time, a link stops answering
+ * for an address a listing gave another endpoint, so a reused name never
+ * speaks as the old endpoint's person; the next listing gives the link back
+ * if it still holds. A listing that leaves an endpoint out stops vouching for
+ * its address. Rome's clock and Cloud's are never compared.
  *
  * Conversation history stays under the address it was written to. An endpoint
  * first seen here takes over whatever its address already holds, since Rome
@@ -54,8 +57,8 @@ const log = createLogger("agents-identity");
  *  how long the People page keeps one read. */
 const RELIST_MS = 30_000;
 
-/** How long a message waits for that listing before it is read unsettled.
- *  Well inside the admission limit, which the message would otherwise miss. */
+/** How long a message waits for that listing. Well inside the admission
+ *  limit, which the message would otherwise miss. */
 const RELIST_WAIT_MS = 3_000;
 
 /** The settings key holding what Rome last knew of each endpoint. */
@@ -73,6 +76,10 @@ interface Known {
   parkedFrom?: string;
   /** The name the link carried there. */
   parkedName?: string;
+  /** Set when a listing put it at its address and a later one left it out,
+   *  so the listing no longer vouches for that address against another
+   *  endpoint. Its own messages are still ordered against the listing. */
+  unlisted?: true;
 }
 
 /** One endpoint as Cloud names it. A message's sighting carries when it was
@@ -145,8 +152,18 @@ function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
 const disputeKey = (sighting: AgentSighting) => `${sighting.endpointId} ${sighting.address}`;
 
 /** The part of an endpoint's record a sighting sets. */
-function seenBy(sighting: AgentSighting): Pick<Known, "by" | "at"> {
-  return sighting.by === "message" ? { by: "message", at: sighting.at } : { by: "listing" };
+function seenBy(sighting: AgentSighting): Pick<Known, "by" | "at" | "unlisted"> {
+  return sighting.by === "message"
+    ? { by: "message", at: sighting.at }
+    : { by: "listing", unlisted: undefined };
+}
+
+/** A message's disagreement with a listing, and whether it is about another
+ *  endpoint holding the address, which a link must not go on vouching for. */
+interface Dispute {
+  key: string;
+  sighting: AgentSighting;
+  held: boolean;
 }
 
 export function createAgentsIdentity(deps: {
@@ -171,8 +188,11 @@ export function createAgentsIdentity(deps: {
   let queue: Promise<unknown> = Promise.resolve();
   /** When the newest listing settled so far was asked for. */
   let listedAt = Number.NEGATIVE_INFINITY;
-  /** When each disagreement last had Cloud listed again. */
+  /** When each disagreement last had a listing answer it. */
   const relisted = new Map<string, number>();
+  /** The disagreements a listing is being read for now, and when that read
+   *  has been decided. */
+  const relisting = new Map<string, Promise<void>>();
 
   function serial<T>(fn: () => Promise<T>): Promise<T> {
     const run = queue.then(fn);
@@ -181,10 +201,15 @@ export function createAgentsIdentity(deps: {
   }
 
   /** Settles the sightings, and returns the disagreements between a message
-   *  and a listing. */
-  function settle(sightings: readonly AgentSighting[], listing = false): string[] {
+   *  and a listing. A listing names every endpoint Cloud has. Withholding
+   *  takes the link off an address a listing gave another endpoint, for a
+   *  message no listing could answer. */
+  function settle(
+    sightings: readonly AgentSighting[],
+    how: { listing?: boolean; withhold?: boolean } = {},
+  ): Dispute[] {
     return deps.db.transaction((tx) => {
-      const disputed: string[] = [];
+      const disputed: Dispute[] = [];
       const known = settings.read<Record<string, Known>>(tx, AGENTS_ENDPOINTS_KEY) ?? {};
       const before = JSON.stringify(known);
       let guardianRecord = settings.read<string[]>(tx, AGENTS_GUARDIAN_LINKED_KEY) ?? [];
@@ -248,7 +273,9 @@ export function createAgentsIdentity(deps: {
         const { endpointId, address } = sighting;
         const entry = known[endpointId];
         if (staleAgainst(sighting, entry)) {
-          if (disputes(sighting, entry)) disputed.push(disputeKey(sighting));
+          if (disputes(sighting, entry)) {
+            disputed.push({ key: disputeKey(sighting), sighting, held: false });
+          }
           continue;
         }
         if (entry?.address === address) {
@@ -262,8 +289,18 @@ export function createAgentsIdentity(deps: {
         if (holder !== undefined && holder !== endpointId) {
           // A message never takes an address from an endpoint a listing put
           // there; only a fresh listing can say it moved.
-          if (sighting.by === "message" && known[holder]?.by === "listing") {
-            disputed.push(disputeKey(sighting));
+          if (
+            sighting.by === "message" &&
+            known[holder]?.by === "listing" &&
+            !known[holder]?.unlisted
+          ) {
+            if (how.withhold) {
+              // The listing that put it there may be out of date, so its link
+              // stops answering for the address until a listing says again.
+              leave(holder, address);
+            } else {
+              disputed.push({ key: disputeKey(sighting), sighting, held: true });
+            }
             continue;
           }
           if (staleAgainst(sighting, known[holder])) continue;
@@ -286,14 +323,14 @@ export function createAgentsIdentity(deps: {
         restore(endpointId);
       }
 
-      if (listing) {
+      if (how.listing) {
         // Cloud's listing names every endpoint it still has, so one a listing
         // put at an address and this one leaves out no longer holds it on a
         // listing's word: a message from another endpoint there can take it.
         const listed = new Set(sightings.map((sighting) => sighting.endpointId));
         for (const [id, entry] of Object.entries(known)) {
           if (entry.by === "listing" && entry.address !== null && !listed.has(id)) {
-            known[id] = { ...entry, by: "message", at: 0 };
+            known[id] = { ...entry, unlisted: true };
           }
         }
       }
@@ -309,28 +346,50 @@ export function createAgentsIdentity(deps: {
   function settleListing(listing: readonly AgentSighting[], askedAt: number): void {
     if (askedAt < listedAt) return;
     listedAt = askedAt;
-    settle(listing, true);
+    settle(listing, { listing: true });
   }
 
-  /** Whether any of these disagreements has not had Cloud listed again lately,
-   *  marking them all as listed now when one has not. */
-  function relist(disputed: readonly string[], askedAt: number): boolean {
-    for (const [key, at] of relisted) if (askedAt - at >= RELIST_MS) relisted.delete(key);
-    if (disputed.every((key) => relisted.has(key))) return false;
-    for (const key of disputed) relisted.set(key, askedAt);
+  /** Lists Cloud again for these disagreements and settles what it says.
+   *  Says whether a listing came back. */
+  async function relistNow(
+    list: () => Promise<AgentSighting[] | null>,
+    disputed: readonly Dispute[],
+    askedAt: number,
+  ): Promise<boolean> {
+    const listing = await list();
+    if (!listing) return false;
+    await serial(async () => settleListing(listing, askedAt));
+    for (const { key } of disputed) relisted.set(key, askedAt);
     return true;
   }
 
-  /** Lists Cloud again for these disagreements and settles what it says. A
-   *  read that fails leaves them free to be listed again. */
-  async function relistNow(
+  /** Has a listing answer these disagreements, waiting for it only so long.
+   *  Unanswered, a link stops answering for an address a listing gave
+   *  another endpoint, and the listing gives it back if it still says so. */
+  async function decide(
     list: () => Promise<AgentSighting[] | null>,
-    disputed: readonly string[],
+    disputed: readonly Dispute[],
     askedAt: number,
   ): Promise<void> {
-    const listing = await list();
-    if (listing) return serial(async () => settleListing(listing, askedAt));
-    for (const key of disputed) if (relisted.get(key) === askedAt) relisted.delete(key);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const answered = await Promise.race([
+      relistNow(list, disputed, askedAt).catch((err: unknown) => {
+        log.warn("Could not settle a fresh agent listing", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), deps.relistWaitMs ?? RELIST_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    const held = disputed.filter((dispute) => dispute.held).map((dispute) => dispute.sighting);
+    if (!answered && held.length > 0) {
+      await serial(async () => {
+        settle(held, { withhold: true });
+      });
+    }
   }
 
   function guarded(run: Promise<void>): Promise<void> {
@@ -349,21 +408,24 @@ export function createAgentsIdentity(deps: {
           const disputed = await serial(async () => settle(sightings));
           // A message never outranks a listing, so when one disagrees with
           // what a listing recorded, as after a rename, Cloud is asked again
-          // before the message is read.
+          // before the message is read. One read answers each disagreement
+          // for a while, and a message whose disagreement is being read waits
+          // for that read.
           if (disputed.length === 0 || !deps.list) return;
+          await Promise.all(disputed.map(({ key }) => relisting.get(key)));
           const askedAt = now();
-          if (!relist(disputed, askedAt)) return;
-          // A slow Cloud lets the message go on unsettled; the listing still
-          // settles when it comes.
-          const relisting = guarded(relistNow(deps.list, disputed, askedAt));
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([
-            relisting,
-            new Promise<void>((resolve) => {
-              timer = setTimeout(resolve, deps.relistWaitMs ?? RELIST_WAIT_MS);
-            }),
-          ]);
-          clearTimeout(timer);
+          for (const [key, at] of relisted) if (askedAt - at >= RELIST_MS) relisted.delete(key);
+          const fresh = disputed.filter(({ key }) => !relisted.has(key) && !relisting.has(key));
+          if (fresh.length === 0) return;
+          const decided = decide(deps.list, fresh, askedAt);
+          for (const { key } of fresh) relisting.set(key, decided);
+          try {
+            await decided;
+          } finally {
+            for (const { key } of fresh) {
+              if (relisting.get(key) === decided) relisting.delete(key);
+            }
+          }
         })(),
       );
     },

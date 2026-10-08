@@ -252,6 +252,42 @@ describe("keeping agents' links on their endpoint", () => {
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
   });
 
+  it("takes a link off a reused name while no listing can answer, and gives it back if it still holds", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => null,
+    });
+    await identity.observeListing([listed("ep_old", "atlas")], 1);
+
+    await identity.observe([sent("ep_new", "atlas", 5)]);
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+
+    await identity.observeListing([listed("ep_old", "atlas")], 2);
+    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
+  });
+
+  it("keeps an unlisted endpoint's own messages ordered against the listing", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => [],
+    });
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 1);
+    await identity.observeListing([listed("ep_atlas", "@newfriend/atlas")], 2);
+    await identity.observeListing([listed("ep_else", "nova")], 3);
+
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
   it("orders messages by when they were sent", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);

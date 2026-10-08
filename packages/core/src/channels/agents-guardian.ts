@@ -59,7 +59,11 @@ export function createAgentsGuardianLink(deps: {
   async function link(message: ChannelMessage): Promise<void> {
     const endpoint = message.senderId;
     if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
-    const recorded = envelopeFrom(message)?.endpointId ?? endpoint;
+    const endpointId = envelopeFrom(message)?.endpointId;
+    // Null names an endpoint Cloud has since removed, which nothing links.
+    // Only a Cloud that does not name endpoints leaves it out.
+    if (endpointId === null) return;
+    const recorded = endpointId ?? endpoint;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
     // The name too: a record made by name stays there until the endpoint is
     // first settled, and an unlink must hold even if that settling failed.

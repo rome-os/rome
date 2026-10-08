@@ -56,6 +56,13 @@ describe("linking same-account agents to the guardian", () => {
     expect(person?.bondLevel).toBe("guardian");
   });
 
+  it("never links an endpoint Cloud has since removed", async () => {
+    await link(message({ endpoint: "atlas", endpointId: null, kind: "dot", sameAccount: true }));
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+    expect(await settings.get(AGENTS_GUARDIAN_LINKED_KEY)).toBeNull();
+  });
+
   it("leaves a sender unlinked when Cloud does not say it is in this account", async () => {
     await link(message({ endpoint: "atlas", kind: "dot" }));
     await link(
