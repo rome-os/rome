@@ -5,8 +5,9 @@ import { expect, type Page, test } from "@playwright/test";
  * each clipped end and lays a chevron over it. Keyboard focus moved onto an
  * entry must scroll that entry clear of the strip, or the focused entry and its
  * outline sit under the mask. A browser scrolls a focused element only until it
- * is inside the scrollport, so this holds only through the rows' scroll padding.
- * jsdom lays nothing out, so only a browser can show it.
+ * is inside the scrollport, so the row's own focus handler does the rest. That
+ * handler must leave a click alone: scrolling on pointer focus moves the target
+ * out from under the click. jsdom lays nothing out, so only a browser can show it.
  */
 
 const CLEARANCE = 40;
@@ -73,4 +74,20 @@ test("arrowing through Activity's filters keeps each focused chip clear of the m
     expect(position!.start, `${position!.label} start`).toBeGreaterThanOrEqual(0);
     expect(position!.end, `${position!.label} end`).toBeGreaterThanOrEqual(0);
   }
+});
+
+test.describe("on a touch screen", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test("tapping a partly shown filter chip selects it", async ({ page }) => {
+    await page.goto("/people");
+    const other = page.getByRole("radio", { name: /^Other/ });
+    await expect(other).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(() => document.fonts.ready);
+    // "Other" is cut by the row's right edge at 390px. Tap its shown left part
+    // by coordinates: locator.tap() would first scroll it fully into view.
+    const box = (await other.boundingBox())!;
+    await page.touchscreen.tap(box.x + 12, box.y + box.height / 2);
+    await expect(other).toHaveAttribute("data-state", "checked");
+  });
 });

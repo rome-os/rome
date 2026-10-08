@@ -43,8 +43,10 @@ export function revealInRow(row: HTMLElement, item: Element) {
  * complete. Re-measures on scroll, on resize, and after every render, since new
  * content widens the row without resizing its box.
  *
- * Also reveals whatever takes focus inside the row. A browser scrolls a focused
- * element only until it is inside the row, which can leave it under the mask.
+ * Also reveals whatever takes keyboard focus inside the row. A browser scrolls a
+ * focused element only until it is inside the row, which can leave it under the
+ * mask. Pointer focus is left alone: it lands on press, and scrolling then
+ * would move the target out from under the release, so the click misses.
  */
 export function useScrollEdges(ref: RefObject<HTMLElement | null>): ScrollEdges {
   const [edges, setEdges] = useState<ScrollEdges>({ start: false, end: false });
@@ -69,7 +71,8 @@ export function useScrollEdges(ref: RefObject<HTMLElement | null>): ScrollEdges 
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(row);
     const reveal = (event: FocusEvent) => {
-      if (event.target instanceof Element) revealInRow(row, event.target);
+      const target = event.target;
+      if (target instanceof Element && target.matches(":focus-visible")) revealInRow(row, target);
     };
     row.addEventListener("scroll", update, { passive: true });
     row.addEventListener("focusin", reveal);
