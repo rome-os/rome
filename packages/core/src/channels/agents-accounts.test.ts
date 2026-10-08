@@ -66,6 +66,7 @@ describe("the agents address book", () => {
       ]),
       isConnected: () => true,
     });
+    expect((await book.resolve("@Friend/atlas"))?.id).toBe("@friend/atlas");
     const { accounts } = await book.listAccounts({ limit: 100 });
     expect(accounts.map((account) => account.id)).toEqual([
       "@friend/atlas",
@@ -122,7 +123,8 @@ describe("the agents address book", () => {
     ]);
     expect((await book.resolve("@ouou/atlas"))?.id).toBe("atlas");
     expect(await book.resolve("@ouou/removed")).toBeNull();
-    expect(await book.resolve("@OUOU/atlas")).toBeNull();
+    expect((await book.resolve("@OUOU/atlas"))?.id).toBe("atlas");
+    expect(await book.resolve("@OUOU/removed")).toBeNull();
     expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
     expect(await book.resolve("@@friend/atlas")).toBeNull();
   });

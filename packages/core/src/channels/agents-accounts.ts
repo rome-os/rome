@@ -11,7 +11,9 @@
  * new one and carry the old link (I2 holds only while the endpoint lives).
  * Another account's address also carries its handle, which its owner can
  * change: after a rename, its agents arrive under a new address, and the old
- * one resolves at Cloud only through the 30-day hold.
+ * one resolves at Cloud only through the 30-day hold. The same hold covers
+ * this Rome's own old handle, which resolves here as another account's until
+ * agents are keyed by Cloud's endpoint id.
  *
  * Any other account's `@handle/endpoint` resolves, listed or not: an agent
  * Rome wrote to can answer without a link, and such a sender still has to be an
@@ -36,6 +38,13 @@ const log = createLogger("agents-accounts");
  *  whole listing and resolves every stored address at once, so this keeps that
  *  to one request. */
 const READ_TTL_MS = 30_000;
+
+/** An address as Cloud matches it: a handle ignores case, so `@Friend/atlas`
+ *  is the listed `@friend/atlas`, not a second account. */
+function addressKey(address: string): string {
+  const handle = agentAddressAccount(address);
+  return handle === null ? address : `@${handle.toLowerCase()}${address.slice(handle.length + 1)}`;
+}
 
 /** One read of Cloud's listing, with the handle of this Rome's own account. */
 interface Book {
@@ -116,13 +125,15 @@ export function agentsAccounts(deps: {
     },
     async resolve(address) {
       const { accounts, ownHandle } = await endpoints();
-      const listed = accounts.find((account) => account.addresses.includes(address));
+      const key = addressKey(address);
+      const listed = accounts.find((account) =>
+        account.addresses.some((known) => addressKey(known) === key),
+      );
       if (listed) return listed;
       // An address in this Rome's own account names one of its own agents,
       // which the listing holds by its bare name or not at all. Until Cloud
       // has named this account's handle, no address can be told apart from
-      // an own agent's, so none resolves as another account's. Handles
-      // compare without case, so `@OUOU/atlas` is still this account's.
+      // an own agent's, so none resolves as another account's.
       const handle = agentAddressAccount(address);
       return handle && ownHandle && handle.toLowerCase() !== ownHandle.toLowerCase()
         ? agentAccount(address, {})
