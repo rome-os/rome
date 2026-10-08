@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useEffect, useRef } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
+import { ScrollEdgeButtons, scrollEdgeMask, useScrollEdges } from "./scroll-edges.js";
 
 /*
  * The page frame and the section rhythm every layout in the catalogue composes.
@@ -141,16 +142,48 @@ export interface PageNavProps extends ComponentProps<"nav"> {
  * Renders its own `ul`, because a strip of links is a list and every entry is a
  * `PageNavLink`. The row scrolls sideways rather than wrapping: a second line of
  * entries reads as two strips, and the underline no longer marks one row.
+ *
+ * A clipped end fades and carries a chevron that scrolls the row. The active
+ * entry is scrolled into view, so a deep link shows where the reader is.
  */
 export function PageNav({ className, children, ...props }: PageNavProps) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const edges = useScrollEdges(listRef);
+  const shownActive = useRef<Element | null>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    const active = list?.querySelector('[aria-current="page"]');
+    if (!list || !active || active === shownActive.current) return;
+    shownActive.current = active;
+    // Only the row's scrollLeft moves. scrollIntoView would also scroll the
+    // page vertically.
+    const row = list.getBoundingClientRect();
+    const item = active.getBoundingClientRect();
+    if (item.right > row.right - EDGE_CLEARANCE) {
+      list.scrollLeft += item.right - row.right + EDGE_CLEARANCE;
+    } else if (item.left < row.left + EDGE_CLEARANCE) {
+      list.scrollLeft -= row.left + EDGE_CLEARANCE - item.left;
+    }
+  });
+
   return (
-    <nav data-slot="page-nav" className={className} {...props}>
-      <ul className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border">
+    <nav data-slot="page-nav" className={cn("relative", className)} {...props}>
+      <ul
+        ref={listRef}
+        style={scrollEdgeMask(edges)}
+        className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border"
+      >
         {children}
       </ul>
+      <ScrollEdgeButtons edges={edges} rowRef={listRef} />
     </nav>
   );
 }
+
+// Room kept between the active entry and the row's edge, so the fade and the
+// chevron never sit on top of it.
+const EDGE_CLEARANCE = 40;
 
 export interface PageNavLinkProps extends ComponentProps<"a"> {
   /** Marks the entry the page is currently showing, as `aria-current="page"`. */
