@@ -2,10 +2,12 @@
 //
 // Feishu is a Talker with a single `app` grant: the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
-// the SDK long connection, inbound normalization, markdown send, and the
+// the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
 // `FeishuAdapter` (packages/core/src/channels/feishu.ts), wrapped here so the
-// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it.
+// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The
+// transport already speaks the channel's record, so inbound and send pass
+// through without a projection.
 //
 // The `app` grant is conferred by pasting the two fields (`credentialsPaste`);
 // `validate` mints a tenant-access-token via a transient connect so a bad
@@ -46,12 +48,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  addressIsConversationFeature,
-  directoryPage,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -471,7 +468,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() awaits channel.connect(), which rejects on bad
               // credentials, so a refused `app` grant surfaces here; ongoing
               // long-connection errors route through the adapter's onFault seam.
@@ -482,10 +479,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             },
             async send(conversationId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(conversationId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {
