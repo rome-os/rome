@@ -62,8 +62,15 @@ export function anthropicStop(result: AnthropicResultStopInput, aborted: boolean
  * Stop for a Codex app-server turn from its `turn/completed` status
  * (`completed`, `interrupted`, `failed`, or `inProgress`). Codex reports no
  * output-limit status at turn level, so it never yields `max_tokens`.
+ *
+ * `failed` is true when the turn ends in an error. The stop is then `error`
+ * whatever the status, and the status stays as `raw`, the way `anthropicStop`
+ * reports a failed Claude result. `isInterruptedAccounting` reads an
+ * `interrupted` stop as an interrupted turn, so the accounting on an error
+ * never carries one.
  */
-export function codexStop(status: string | undefined): AgentStop {
+export function codexStop(status: string | undefined, failed = false): AgentStop {
+  if (failed) return status ? { reason: "error", raw: status } : { reason: "error" };
   switch (status) {
     case "completed":
       return { reason: "completed", raw: status };

@@ -1071,6 +1071,11 @@ describe("CodexAppServerProvider", () => {
           turnId: "fork-turn",
           completedAtMs: 0,
         });
+        n("thread/tokenUsage/updated", {
+          threadId: "source-thread",
+          turnId: "fork-turn",
+          tokenUsage: usage(),
+        });
         n("turn/completed", {
           threadId: "source-thread",
           turn: { id: "fork-turn", status: "completed" },
@@ -1098,10 +1103,15 @@ describe("CodexAppServerProvider", () => {
     // The stable turn-id boundary makes one retry safe: it can never remove an
     // earlier source turn if the first request already applied the revert.
     expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
-    // The fork never observes success while its turn is still in the source.
+    // The fork never observes success while its turn is still in the source,
+    // but its error still carries the usage the turn spent.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
       error: expect.stringContaining("revert failed"),
+      accounting: {
+        usage: { inputTokens: 5, outputTokens: 4 },
+        stop: { reason: "error", raw: "completed" },
+      },
     });
     // The source stream carries the contamination error…
     await expect(sourceEvents.next()).resolves.toMatchObject({
@@ -1744,6 +1754,11 @@ describe("CodexAppServerProvider", () => {
           threadId: "thr-interrupted",
           turn: { id: "turn-interrupted" },
         });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-interrupted",
+          turnId: "turn-interrupted",
+          tokenUsage: usage(),
+        });
         n("turn/completed", {
           threadId: "thr-interrupted",
           turn: { id: "turn-interrupted", status: "interrupted" },
@@ -1764,10 +1779,16 @@ describe("CodexAppServerProvider", () => {
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "return seven" });
 
+    // The error keeps the turn's usage under an `error` stop. An
+    // `interrupted` stop would report this failure as an interrupted turn.
     expect(await collected).toContainEqual(
       expect.objectContaining({
         type: "error",
         error: expect.stringContaining("status interrupted"),
+        accounting: expect.objectContaining({
+          usage: expect.objectContaining({ inputTokens: 5, outputTokens: 4 }),
+          stop: { reason: "error", raw: "interrupted" },
+        }),
       }),
     );
     await session.close();
@@ -2359,6 +2380,52 @@ describe("CodexAppServerProvider", () => {
     expect(session.funding).toBe("byok");
     funding = "rome_credits";
     expect(session.funding).toBe("rome_credits");
+    await session.close();
+  });
+
+  it("keeps a failed turn's usage on its error, and prices no failure that used none", async () => {
+    const provider = new CodexAppServerProvider();
+    let turnNumber = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        turnNumber += 1;
+        const turnId = `turn-${turnNumber}`;
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: turnId } });
+        if (turnNumber === 1) {
+          n("thread/tokenUsage/updated", { threadId: "thr-1", turnId, tokenUsage: usage() });
+        }
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: { id: turnId, status: "failed", error: { message: "upstream failed" } },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams({ model: "gpt-5.6-sol" }));
+    let collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "first" });
+    const first = (await collected).find((m) => m.type === "error");
+    expect(first).toMatchObject({
+      type: "error",
+      error: "upstream failed",
+      accounting: {
+        usage: { inputTokens: 5, outputTokens: 4, cacheReadTokens: 1, cacheWriteTokens: 0 },
+        stop: { reason: "error", raw: "failed" },
+        stopReason: "error",
+      },
+    });
+    expect((first as { accounting?: { costUsd?: number } }).accounting?.costUsd).toBeGreaterThan(0);
+
+    collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "second" });
+    const second = (await collected).find((m) => m.type === "error");
+    expect(second).toMatchObject({ type: "error", error: "upstream failed" });
+    expect(second).not.toHaveProperty("accounting");
     await session.close();
   });
 
