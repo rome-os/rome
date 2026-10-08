@@ -218,8 +218,9 @@ describe("TelegramUserAdapter", () => {
       expect(attachments[0]?.mimeType).toBe("application/pdf");
       expect(attachments[0]?.fileName).toBe("a.pdf");
       expect(attachments[0]?.localPath).toContain(sandboxHome);
+      // safePathSegment drops the leading "-" from the chat id.
       expect(attachments[0]?.localPath).toContain(
-        join("channel-attachments", "telegram_user", "-100555", "7"),
+        join("channel-attachments", "telegram_user", "100555", "7"),
       );
       await expect(readFile(attachments[0]!.localPath!)).resolves.toEqual(body);
     });
