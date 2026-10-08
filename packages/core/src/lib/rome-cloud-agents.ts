@@ -14,8 +14,10 @@ export interface AgentMessageEnvelope {
   /** `sameAccount` is Cloud's statement that the sender is in this Rome's
    *  account. An older Cloud omits it, and Rome then trusts no sender.
    *  `endpoint` is what a reply goes to: the bare name in this Rome's own
-   *  account, the full `@handle/endpoint` in a linked one. `account` is the
-   *  sender account's handle and `address` its full address. */
+   *  account, the full `@handle/endpoint` in a linked one, and the only field
+   *  Rome keys a sender by. `account` and `address` are read only for
+   *  whether they are present, as a sign the sender is in another account.
+   *  `endpointId` follows Cloud's contract and nothing reads it yet. */
   from: {
     endpoint: string;
     endpointId?: string;

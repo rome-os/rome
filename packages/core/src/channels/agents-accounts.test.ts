@@ -122,6 +122,7 @@ describe("the agents address book", () => {
     ]);
     expect((await book.resolve("@ouou/atlas"))?.id).toBe("atlas");
     expect(await book.resolve("@ouou/removed")).toBeNull();
+    expect(await book.resolve("@OUOU/atlas")).toBeNull();
     expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
     expect(await book.resolve("@@friend/atlas")).toBeNull();
   });

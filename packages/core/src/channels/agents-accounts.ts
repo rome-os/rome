@@ -121,9 +121,12 @@ export function agentsAccounts(deps: {
       // An address in this Rome's own account names one of its own agents,
       // which the listing holds by its bare name or not at all. Until Cloud
       // has named this account's handle, no address can be told apart from
-      // an own agent's, so none resolves as another account's.
+      // an own agent's, so none resolves as another account's. Handles
+      // compare without case, so `@OUOU/atlas` is still this account's.
       const handle = agentAddressAccount(address);
-      return handle && ownHandle && handle !== ownHandle ? agentAccount(address, {}) : null;
+      return handle && ownHandle && handle.toLowerCase() !== ownHandle.toLowerCase()
+        ? agentAccount(address, {})
+        : null;
     },
   };
 }
