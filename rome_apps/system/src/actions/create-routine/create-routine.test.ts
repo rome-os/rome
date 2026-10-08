@@ -383,6 +383,9 @@ describe("create_routine — validation and fail-closed", () => {
       async has(name: string) {
         return name === "summon";
       },
+      async isExplicit() {
+        return false;
+      },
     };
 
     const result = await createRoutine(
@@ -1205,7 +1208,29 @@ describe("create_routine — explicit action targets (#679)", () => {
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toMatch(/not available to agent "inbox:sentinel"/);
+    expect(result.error).toMatch(/is explicit/);
+    expect(await repo.findAll()).toHaveLength(0);
+    expect(engine.activated).toHaveLength(0);
+  });
+
+  it("rejects an explicit target from a routine-fired call (two-stage scheduling)", async () => {
+    // Stage 1: an agent schedules create_routine itself (a public target).
+    // Stage 2: that routine fires with no agent principal and asks for the
+    // explicit action; it must fail closed even though no agent is named.
+    const engine = makeFakeEngine();
+    const result = await actionExecutionContext.run(
+      { executionId: "exec", rootExecutionId: "root", initiator: "routine:stage-1" },
+      () =>
+        createRoutine(input, {
+          routinesRepo: repo,
+          actionRegistry: explicitRoot,
+          agentRunner: { hasAction: () => true },
+          routineEngine: engine,
+        }),
+    );
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/is explicit/);
     expect(await repo.findAll()).toHaveLength(0);
     expect(engine.activated).toHaveLength(0);
   });

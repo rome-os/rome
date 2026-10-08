@@ -324,6 +324,8 @@ export class WorkerRpcServer {
         return await this.handleEmailIngestInbound(params);
       case "actions.has":
         return this.handleActionsHas(params);
+      case "actions.isExplicit":
+        return this.handleActionsIsExplicit(params);
       case "agent.hasAgent":
         return this.handleAgentHasAgent(params);
       case "agent.hasAction":
@@ -490,12 +492,15 @@ export class WorkerRpcServer {
    * is deliberately separate from `agent.hasAction`, which applies a named
    * agent's allow-list.
    */
-  private handleActionsHas(params: unknown): { hasAction: boolean; explicit: boolean } {
+  private handleActionsHas(params: unknown): { hasAction: boolean } {
     const { actionName } = parseParams("actions.has", ActionHasParams, params);
-    return {
-      hasAction: this.services.hasRegisteredAction(actionName),
-      explicit: this.services.isExplicitAction(actionName),
-    };
+    return { hasAction: this.services.hasRegisteredAction(actionName) };
+  }
+
+  /** Visibility check for the worker-side create_routine explicit-target gate. */
+  private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
+    const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
+    return { explicit: this.services.isExplicitAction(actionName) };
   }
 
   /**

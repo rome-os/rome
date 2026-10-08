@@ -407,20 +407,19 @@ export async function createRoutine(
   if (!(await deps.actionRegistry.has(actionName))) {
     return { status: "error", error: unknownActionError(actionName) };
   }
-  // A routine fires its action outside the agent tool gate, so an agent may only
-  // schedule an explicit action it could call itself. App code (callerAppId) is
-  // trusted to bind its own actions.
+  // A routine fires its action outside the agent tool gate, so an explicit
+  // target needs a principal that may call it: the app code that owns the call
+  // (callerAppId), or an agent that holds the action. Unattributed calls, such
+  // as one fired by another routine, a webhook or a favor, fail closed.
   const context = getCurrentActionContext();
-  if (
-    context?.agentName &&
-    !context.callerAppId &&
-    (await deps.actionRegistry.isExplicit(actionName)) &&
-    (await deps.agentRunner?.hasAction?.(context.agentName, actionName)) !== true
-  ) {
-    return {
-      status: "error",
-      error: `actionName "${actionName}" is not available to agent "${context.agentName}"`,
-    };
+  if (!context?.callerAppId && (await deps.actionRegistry.isExplicit(actionName))) {
+    const agentName = context?.agentName;
+    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
+      return {
+        status: "error",
+        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
+      };
+    }
   }
 
   // `name` is the human-readable display label; trim and reject blank so a

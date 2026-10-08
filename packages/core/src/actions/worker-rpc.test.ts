@@ -451,8 +451,19 @@ describe("WorkerRpcServer param validation", () => {
     const response = await rpc(fake, "actions.has", { actionName: "send_message" });
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ hasAction: true, explicit: false });
+    expect(response.result).toEqual({ hasAction: true });
     expect(hasRegisteredAction).toHaveBeenCalledWith("send_message");
+  });
+
+  it("answers actions.isExplicit from the main action registry", async () => {
+    const { server } = makeServer({});
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+
+    const response = await rpc(fake, "actions.isExplicit", { actionName: "execute_root_script" });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({ explicit: false });
   });
 
   it("forwards appStore.listListings when params are valid", async () => {
