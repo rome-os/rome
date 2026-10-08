@@ -133,13 +133,18 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       return;
     }
 
-    const [status, usage] = await Promise.allSettled([probes.codexStatus(), probes.codexUsage()]);
+    // Login drives the Codex payer, so apply it as soon as the status probe
+    // settles rather than waiting on a possibly stalled quota probe.
+    const statusProbe = Promise.allSettled([probes.codexStatus()]);
+    const usageProbe = Promise.allSettled([probes.codexUsage()]);
+    const [status] = await statusProbe;
     if (status.status === "fulfilled") {
       const previousCodexLogin = value.codex.loggedIn;
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
       notifyCodexLoginChanged(previousCodexLogin);
     }
+    const [usage] = await usageProbe;
     if (usage.status === "fulfilled" && usage.value && !usage.value.error) {
       value.codex.usage = usage.value;
       value.codex.quotaExhausted = usageShowsExhaustion(usage.value);

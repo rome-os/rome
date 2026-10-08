@@ -282,6 +282,7 @@ describe("AgentSession turn usage", () => {
         restart: () => {},
       },
       getInstanceToken: () => "romeinst_123",
+      hasRomeCloud: () => true,
     });
 
     const session = await manager.acquire(key);

@@ -34,6 +34,10 @@ interface StoredThreadBinding {
   resumePromise: Promise<void> | null;
 }
 
+/** A turn whose payer changed between its resolution and `turn/start`. */
+export const CODEX_PAYER_CHANGED_MESSAGE =
+  "Model payer changed while preparing this turn; please retry.";
+
 interface Connection {
   client: CodexAppServerConnection;
   generation: number;
@@ -242,8 +246,24 @@ export class CodexAppServerManager {
     return handle;
   }
 
-  async requestForThread<T>(threadId: string, method: string, params: unknown): Promise<T> {
+  /**
+   * `expectedProvider` refuses the request when the process that would serve
+   * it runs on a different payer, so a queued turn cannot start on a process
+   * that replaced the one its caller resolved against.
+   */
+  async requestForThread<T>(
+    threadId: string,
+    method: string,
+    params: unknown,
+    options: { expectedProvider?: string | null } = {},
+  ): Promise<T> {
     const connection = await this.ensureThreadSubscribed(threadId);
+    if (
+      options.expectedProvider !== undefined &&
+      connection.defaultProvider !== options.expectedProvider
+    ) {
+      throw new Error(CODEX_PAYER_CHANGED_MESSAGE);
+    }
     return (await connection.client.request(method, params)) as T;
   }
 

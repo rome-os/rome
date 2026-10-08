@@ -139,6 +139,36 @@ describe("AIToolState", () => {
     }
   });
 
+  it("notifies a Codex login change while the quota probe is still pending", async () => {
+    let releaseUsage!: () => void;
+    const usageGate = new Promise<void>((resolve) => {
+      releaseUsage = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        codexUsage: async () => {
+          await usageGate;
+          return null;
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh("openai");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseUsage();
+      await refresh;
+    }
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {

@@ -41,7 +41,11 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./codex/image-trace.js";
-import { CodexAppServerManager, type CodexThreadBinding } from "./codex/app-server-manager.js";
+import {
+  CODEX_PAYER_CHANGED_MESSAGE,
+  CodexAppServerManager,
+  type CodexThreadBinding,
+} from "./codex/app-server-manager.js";
 import {
   Method,
   Notify,
@@ -941,6 +945,10 @@ export class CodexAppServerProvider implements ModelProvider {
     // normal source turn while its dynamic callbacks and event sink are borrowed.
     const turnCoordinator = new SerialTurnCoordinator();
 
+    // The payer each source input was sent under. Codex may replace its
+    // process while an input waits in the turn lane or in buildTurnInput.
+    const payerAtSend = new WeakMap<ModelUserInput, string | null>();
+
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
         .map((i) => i.text)
@@ -1000,13 +1008,23 @@ export class CodexAppServerProvider implements ModelProvider {
       // A borrowed exact fork runs here too; only the session's own turns report.
       if (runtime === sourceRuntime) appliedReasoningEffort = effort;
       try {
-        const started = (await this.appServerManager.requestForThread(tid, Method.turnStart, {
-          threadId: tid,
-          input: turnInput,
-          effort,
-          ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
-          ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
-        })) as { turn?: { id?: string } } | undefined;
+        const payers = new Set(
+          inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
+        );
+        if (payers.size > 1) throw new Error(CODEX_PAYER_CHANGED_MESSAGE);
+        const [expectedProvider] = payers;
+        const started = (await this.appServerManager.requestForThread(
+          tid,
+          Method.turnStart,
+          {
+            threadId: tid,
+            input: turnInput,
+            effort,
+            ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
+            ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
+          },
+          { expectedProvider },
+        )) as { turn?: { id?: string } } | undefined;
         turn.turnId ??= started?.turn?.id ?? null;
         if (turn.turnId) runtime.onProviderTurn?.(turn.turnId);
         // turn/start can acknowledge before the native input becomes steerable.
@@ -1115,6 +1133,7 @@ export class CodexAppServerProvider implements ModelProvider {
         sourceStarted = new Promise<void>((resolve) => {
           resolveSourceStarted = resolve;
         });
+        payerAtSend.set(input, this.appServerManager.getDefaultProvider());
         dispatcher.enqueue(input);
       }
     };

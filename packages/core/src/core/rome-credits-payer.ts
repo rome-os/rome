@@ -1,6 +1,7 @@
 import type { AIToolState } from "./ai-tool-state.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
 import { getInstanceToken } from "../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 
 export interface CodexPayerManager {
   setDefaultProvider(provider: string | null): void;
@@ -16,15 +17,17 @@ export interface RomeCreditsPayer {
 /**
  * Selects Codex's process-wide payer from login state. The guardian's ChatGPT
  * login wins; Rome credits are only used when ChatGPT is disconnected and this
- * instance holds a Rome Cloud credential. `setDefaultProvider` deliberately
- * hard-restarts Codex when this selection changes.
+ * instance has a Rome Cloud origin and credential. `setDefaultProvider`
+ * deliberately hard-restarts Codex when this selection changes.
  */
 export function createRomeCreditsPayer(options: {
   aiToolState: Pick<AIToolState, "get">;
   appServerManager: CodexPayerManager;
   getInstanceToken?: () => string | null;
+  hasRomeCloud?: () => boolean;
 }): RomeCreditsPayer {
   const token = options.getInstanceToken ?? getInstanceToken;
+  const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
   let provider: string | null = null;
   let instanceToken = token();
   let closed = false;
@@ -37,9 +40,13 @@ export function createRomeCreditsPayer(options: {
       const nextToken = token();
       const tokenChanged = nextToken !== instanceToken;
       instanceToken = nextToken;
-      const next = !hasChatGptLogin && nextToken ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
+      const next =
+        !hasChatGptLogin && nextToken && hasRomeCloud() ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
       if (next === provider) {
-        if (tokenChanged) options.appServerManager.restart();
+        // Only the credits provider reads the token, and each spawn re-reads it.
+        if (tokenChanged && provider === ROME_CREDITS_MODEL_PROVIDER_ID) {
+          options.appServerManager.restart();
+        }
         return;
       }
       provider = next;

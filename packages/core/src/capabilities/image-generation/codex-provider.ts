@@ -73,6 +73,7 @@ const PROVIDER_UNAVAILABLE_CODES = new Set([
   "no_model_provider_available",
   "auth_revoked",
   "usage_limit",
+  "credits_used_up",
 ]);
 
 function isProviderUnavailableFailure(message: string, code?: string): boolean {

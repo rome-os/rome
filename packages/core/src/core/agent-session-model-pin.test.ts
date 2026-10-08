@@ -183,7 +183,7 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("persists the ChatGPT pin after connecting it to a credit session", async () => {
-    await writeConfig({ provider: undefined, modelId: undefined, tier: "medium" });
+    await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
     state.codex.loggedIn = false;
     state.claude.loggedIn = false;
     let usingRomeCredits = true;
@@ -196,16 +196,16 @@ describe("agent model pins through AgentSessionManager", () => {
       model: null,
     });
 
-    // Both payers use Terra for medium, so reusing this ModelSession must still
+    // Both payers use Luna for small, so reusing this ModelSession must still
     // reset persistence when the guardian connects ChatGPT.
     state.codex.loggedIn = true;
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);
 
-    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-5.6-terra", "gpt-5.6-terra"]);
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
     expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
       provider: "openai",
-      model: "gpt-5.6-terra",
+      model: "gpt-6-luna",
     });
   });
 

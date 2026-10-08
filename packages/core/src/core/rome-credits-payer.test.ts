@@ -20,6 +20,7 @@ describe("Rome credits payer", () => {
         restart: () => restarts++,
       },
       getInstanceToken: () => token,
+      hasRomeCloud: () => true,
     });
     payer.sync();
     expect(calls).toEqual([]);
@@ -38,6 +39,38 @@ describe("Rome credits payer", () => {
     token = "romeinst_456";
     payer.sync();
     expect(calls).toEqual(["rome_credits", null]);
+    expect(restarts).toBe(0);
+  });
+
+  it("restarts on a token change only while credits pay", () => {
+    let restarts = 0;
+    const value = structuredClone(base);
+    value.codex.loggedIn = false;
+    let token: string | null = "romeinst_123";
+    const payer = createRomeCreditsPayer({
+      aiToolState: { get: () => value },
+      appServerManager: { setDefaultProvider: () => {}, restart: () => restarts++ },
+      getInstanceToken: () => token,
+      hasRomeCloud: () => true,
+    });
+    payer.sync();
+    token = "romeinst_456";
+    payer.sync();
     expect(restarts).toBe(1);
+  });
+
+  it("keeps the ChatGPT default without a Rome Cloud origin", () => {
+    const calls: Array<string | null> = [];
+    const value = structuredClone(base);
+    value.codex.loggedIn = false;
+    const payer = createRomeCreditsPayer({
+      aiToolState: { get: () => value },
+      appServerManager: { setDefaultProvider: (p) => calls.push(p), restart: () => {} },
+      getInstanceToken: () => "romeinst_123",
+      hasRomeCloud: () => false,
+    });
+    payer.sync();
+    expect(calls).toEqual([]);
+    expect(payer.isUsingRomeCredits()).toBe(false);
   });
 });
