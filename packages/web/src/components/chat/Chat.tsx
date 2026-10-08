@@ -315,6 +315,8 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     start: startSessionStream,
     update: updateSessionSnapshot,
     updateText: updateSessionAssistantText,
+    updateThinking: updateSessionThinkingText,
+    updateToolOutput: updateSessionToolOutputText,
     end: endSessionStream,
   } = useStreamingSessions();
   const [streamError, setStreamError] = useState<string | ChatErrorNotice | null>(null);
@@ -555,7 +557,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   const liveAssistantText = useSmoothText(
     floorSessionStream?.assistantText ?? "",
     floorSessionStream
-      ? `${floorSessionStream.turnId}:${floorSessionStream.assistantBlockIx}`
+      ? `${floorSessionStream.turnId}:${floorSessionStream.assistantBlockId ?? floorSessionStream.assistantBlockIx}`
       : "idle",
   );
 
@@ -918,15 +920,37 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           }
           if (evt.event === "assistant_text") {
             // Live preview of the latest assistant text block. The server
-            // sends the block's accumulated text (not a delta) plus the
-            // block's index within the turn; each event replaces the
-            // previous one, and a higher blockIx replaces the block.
+            // sends the block's accumulated text (not a delta) plus its
+            // provider id when available, or the legacy index within the
+            // turn; each event replaces the previous preview for that block.
             try {
-              const { blockIx, text } = JSON.parse(evt.data) as {
+              const { blockId, blockIx, text } = JSON.parse(evt.data) as {
+                blockId?: string;
                 blockIx?: number;
                 text?: string;
               };
-              updateSessionAssistantText(sessionId, turnId, blockIx ?? 0, text ?? "");
+              updateSessionAssistantText(sessionId, turnId, blockIx, text ?? "", blockId);
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
+          if (evt.event === "thinking_text") {
+            try {
+              const { blockId, text } = JSON.parse(evt.data) as { blockId?: string; text?: string };
+              if (blockId) updateSessionThinkingText(sessionId, turnId, blockId, text ?? "");
+            } catch {
+              // ignore parse errors
+            }
+            continue;
+          }
+          if (evt.event === "tool_output_text") {
+            try {
+              const { toolUseId, text } = JSON.parse(evt.data) as {
+                toolUseId?: string;
+                text?: string;
+              };
+              if (toolUseId) updateSessionToolOutputText(sessionId, turnId, toolUseId, text ?? "");
             } catch {
               // ignore parse errors
             }
@@ -987,7 +1011,14 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
 
       return shouldStop;
     },
-    [t, updateSessionSnapshot, updateSessionAssistantText, isReadVisibleSession],
+    [
+      t,
+      updateSessionSnapshot,
+      updateSessionAssistantText,
+      updateSessionThinkingText,
+      updateSessionToolOutputText,
+      isReadVisibleSession,
+    ],
   );
 
   // Follow one turn to its end. A dropped SSE connection (mobile background,
@@ -1797,7 +1828,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                   runningTurnId,
                   snapshot: currentSnapshot,
                   text: liveAssistantText,
+                  blockId: floorSessionStream?.assistantBlockId,
                   blockIx: floorSessionStream?.assistantBlockIx,
+                  thinkingTextByBlockId: floorSessionStream?.thinkingTextByBlockId,
+                  toolOutputTextByToolUseId: floorSessionStream?.toolOutputTextByToolUseId,
                   sourceText: floorSessionStream?.assistantText,
                   textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
                   identity: floorIdentity,

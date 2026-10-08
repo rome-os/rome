@@ -23,6 +23,17 @@ describe("toTraceEvent", () => {
     ).not.toHaveProperty("isError");
   });
 
+  it("preserves provider block ids on durable text and thinking blocks", () => {
+    expect(toTraceEvent({ type: "text", content: "hello", blockId: "text-1" })).toMatchObject({
+      type: "text",
+      blockId: "text-1",
+    });
+    expect(toTraceEvent({ type: "thinking", content: "plan", blockId: "think-1" })).toMatchObject({
+      type: "thinking",
+      blockId: "think-1",
+    });
+  });
+
   it("preserves an opaque Rome session reference on session_init", () => {
     expect(
       toTraceEvent({

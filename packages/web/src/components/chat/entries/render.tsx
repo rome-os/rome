@@ -118,8 +118,19 @@ export function renderSingleEntry(
       );
     case "text": {
       const disclosureStateKey =
-        turnId !== undefined && block.blockIx !== undefined
-          ? `${turnId}:${block.blockIx}`
+        turnId !== undefined
+          ? block.blockId
+            ? `${turnId}:id:${block.blockId}`
+            : block.blockIx !== undefined
+              ? `${turnId}:ix:${block.blockIx}`
+              : undefined
+          : undefined;
+      // A persisted block can gain its provider id after an index-only live
+      // preview has already been rendered. Keep that legacy index as an alias
+      // so collapsing a fence during streaming survives the handoff.
+      const disclosureStateKeyAliases =
+        turnId !== undefined && block.blockId && block.blockIx !== undefined
+          ? [`${turnId}:ix:${block.blockIx}`]
           : undefined;
       // In-turn narration: give each commentary its own gap so consecutive
       // narration reads as separate utterances under one speaker (not a run-on
@@ -131,6 +142,7 @@ export function renderSingleEntry(
             content={block.content ?? ""}
             compact={compact}
             disclosureStateKey={disclosureStateKey}
+            disclosureStateKeyAliases={disclosureStateKeyAliases}
           />
         </div>
       ) : (
@@ -139,6 +151,7 @@ export function renderSingleEntry(
           content={block.content ?? ""}
           compact={compact}
           disclosureStateKey={disclosureStateKey}
+          disclosureStateKeyAliases={disclosureStateKeyAliases}
         />
       );
     }

@@ -5,13 +5,17 @@ export type SessionStreamState = {
   turnId: string;
   snapshot: TraceSnapshot | null;
   // Live preview of the CURRENT in-flight assistant text block (server
-  // `assistant_text` SSE events, `{blockIx, text}`). Each completed block
+  // `assistant_text` SSE events, `{blockId?, blockIx, text}`). Each completed block
   // becomes its own persisted message in the transcript, so the live tail only
   // ever holds the block being typed right now; the server clears it (emits an
   // empty text at the next blockIx) once a block commits. Empty until the first
   // block streams.
   assistantText: string;
+  /** Provider block identity when the stream supplies one. */
+  assistantBlockId?: string;
   assistantBlockIx: number;
+  thinkingTextByBlockId: ReadonlyMap<string, string>;
+  toolOutputTextByToolUseId: ReadonlyMap<string, string>;
   /** Trace activity at or before this ordinal was superseded by text. */
   textThroughOrdinal: number;
 };
@@ -30,6 +34,8 @@ export function startStream(
     snapshot: null,
     assistantText: "",
     assistantBlockIx: 0,
+    thinkingTextByBlockId: new Map(),
+    toolOutputTextByToolUseId: new Map(),
     textThroughOrdinal: -1,
   });
   return next;
@@ -51,7 +57,7 @@ export function updateSnapshot(
 }
 
 // Turn-guarded like updateSnapshot. Block-guarded too: SSE events arrive in
-// order, so a lower blockIx than the one on screen is a stale frame — never
+// order, so a lower blockIx than the one on screen is a stale legacy frame — never
 // regress to an earlier block. A higher blockIx replaces the current block: the
 // completed block is now its own persisted message, and the server has already
 // cleared the live tail (empty text at the new blockIx), so the tail only holds
@@ -60,20 +66,28 @@ export function updateAssistantText(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
-  blockIx: number,
+  blockIx: number | undefined,
   assistantText: string,
+  blockId?: string,
 ): StreamingSessionMap {
   const existing = prev.get(sessionId);
   if (!existing || existing.turnId !== turnId) return prev;
-  if (blockIx < existing.assistantBlockIx) return prev;
-  if (blockIx === existing.assistantBlockIx && existing.assistantText === assistantText) {
+  // A provider id is the primary identity. The index remains only for old
+  // rows/streams with no id, where its monotonic ordering rejects stale frames.
+  if (!blockId && (blockIx ?? 0) < existing.assistantBlockIx) return prev;
+  if (
+    blockId === existing.assistantBlockId &&
+    (blockId !== undefined || blockIx === existing.assistantBlockIx) &&
+    existing.assistantText === assistantText
+  ) {
     return prev;
   }
   const next = new Map(prev);
   next.set(sessionId, {
     ...existing,
     assistantText,
-    assistantBlockIx: blockIx,
+    ...(blockId ? { assistantBlockId: blockId } : { assistantBlockId: undefined }),
+    assistantBlockIx: blockIx ?? existing.assistantBlockIx,
     // Empty block-boundary events must not erase newer thinking. Retain the
     // watermark after text commits so summary updates cannot revive it.
     textThroughOrdinal: assistantText.trim()
@@ -81,6 +95,44 @@ export function updateAssistantText(
       : existing.textThroughOrdinal,
   });
   return next;
+}
+
+function updatePreviewText(
+  prev: StreamingSessionMap,
+  sessionId: string,
+  turnId: string,
+  field: "thinkingTextByBlockId" | "toolOutputTextByToolUseId",
+  id: string,
+  text: string,
+): StreamingSessionMap {
+  const existing = prev.get(sessionId);
+  if (!existing || existing.turnId !== turnId) return prev;
+  const nextValues = new Map(existing[field]);
+  if (text) nextValues.set(id, text);
+  else nextValues.delete(id);
+  const next = new Map(prev);
+  next.set(sessionId, { ...existing, [field]: nextValues });
+  return next;
+}
+
+export function updateThinkingText(
+  prev: StreamingSessionMap,
+  sessionId: string,
+  turnId: string,
+  blockId: string,
+  text: string,
+): StreamingSessionMap {
+  return updatePreviewText(prev, sessionId, turnId, "thinkingTextByBlockId", blockId, text);
+}
+
+export function updateToolOutputText(
+  prev: StreamingSessionMap,
+  sessionId: string,
+  turnId: string,
+  toolUseId: string,
+  text: string,
+): StreamingSessionMap {
+  return updatePreviewText(prev, sessionId, turnId, "toolOutputTextByToolUseId", toolUseId, text);
 }
 
 // Turn-guarded: a stale reattach finalizer must not evict an entry that a
@@ -111,8 +163,28 @@ export function useStreamingSessions() {
     setStreams((prev) => updateSnapshot(prev, sessionId, turnId, snapshot));
   }, []);
   const updateText = useCallback(
-    (sessionId: string, turnId: string, blockIx: number, assistantText: string) => {
-      setStreams((prev) => updateAssistantText(prev, sessionId, turnId, blockIx, assistantText));
+    (
+      sessionId: string,
+      turnId: string,
+      blockIx: number | undefined,
+      assistantText: string,
+      blockId?: string,
+    ) => {
+      setStreams((prev) =>
+        updateAssistantText(prev, sessionId, turnId, blockIx, assistantText, blockId),
+      );
+    },
+    [],
+  );
+  const updateThinking = useCallback(
+    (sessionId: string, turnId: string, blockId: string, text: string) => {
+      setStreams((prev) => updateThinkingText(prev, sessionId, turnId, blockId, text));
+    },
+    [],
+  );
+  const updateToolOutput = useCallback(
+    (sessionId: string, turnId: string, toolUseId: string, text: string) => {
+      setStreams((prev) => updateToolOutputText(prev, sessionId, turnId, toolUseId, text));
     },
     [],
   );
@@ -120,5 +192,5 @@ export function useStreamingSessions() {
     setStreams((prev) => endStream(prev, sessionId, turnId));
   }, []);
 
-  return { streams, streamsRef, start, update, updateText, end };
+  return { streams, streamsRef, start, update, updateText, updateThinking, updateToolOutput, end };
 }

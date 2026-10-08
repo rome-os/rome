@@ -4,6 +4,8 @@ import {
   endStream,
   startStream,
   updateAssistantText,
+  updateThinkingText,
+  updateToolOutputText,
   updateSnapshot,
   type StreamingSessionMap,
 } from "./use-streaming-sessions";
@@ -91,16 +93,17 @@ describe("streaming-sessions state", () => {
 
   it("updateAssistantText accumulates within a block and replaces on a higher blockIx", () => {
     let state: StreamingSessionMap = startStream(new Map(), "A", "turn-1");
-    state = updateAssistantText(state, "A", "turn-1", 0, "Hel");
-    state = updateAssistantText(state, "A", "turn-1", 0, "Hello");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hel", "block-0");
+    state = updateAssistantText(state, "A", "turn-1", 0, "Hello", "block-0");
     expect(state.get("A")?.assistantText).toBe("Hello");
+    expect(state.get("A")?.assistantBlockId).toBe("block-0");
     expect(state.get("A")?.assistantBlockIx).toBe(0);
     // Higher blockIx: the completed block is now its own message; the live tail
     // moves to the new block (the server clears it with an empty text first).
-    state = updateAssistantText(state, "A", "turn-1", 1, "");
+    state = updateAssistantText(state, "A", "turn-1", 1, "", "block-1");
     expect(state.get("A")?.assistantText).toBe("");
     expect(state.get("A")?.assistantBlockIx).toBe(1);
-    state = updateAssistantText(state, "A", "turn-1", 1, "Final answer");
+    state = updateAssistantText(state, "A", "turn-1", 1, "Final answer", "block-1");
     expect(state.get("A")?.assistantText).toBe("Final answer");
   });
 
@@ -118,5 +121,16 @@ describe("streaming-sessions state", () => {
     const after = updateAssistantText(state, "A", "turn-1", 0, "stale");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("");
+  });
+
+  it("keeps live reasoning and command-output previews separate by their block identity", () => {
+    let state = startStream(new Map(), "A", "turn-1");
+    state = updateThinkingText(state, "A", "turn-1", "thinking-1", "Planning");
+    state = updateToolOutputText(state, "A", "turn-1", "tool-1", "first line\n");
+    state = updateToolOutputText(state, "A", "turn-1", "tool-1", "first line\nsecond line");
+    expect(state.get("A")?.thinkingTextByBlockId.get("thinking-1")).toBe("Planning");
+    expect(state.get("A")?.toolOutputTextByToolUseId.get("tool-1")).toBe("first line\nsecond line");
+    state = updateThinkingText(state, "A", "turn-1", "thinking-1", "");
+    expect(state.get("A")?.thinkingTextByBlockId.has("thinking-1")).toBe(false);
   });
 });

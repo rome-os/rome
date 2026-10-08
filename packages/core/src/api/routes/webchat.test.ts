@@ -10,8 +10,9 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createWebchatRuntime } from "./webchat.js";
+import { createSseWriteQueue, createWebchatRuntime } from "./webchat.js";
 import { AgentInputQueue } from "../../core/agent-input-queue.js";
+import { MAX_BUFFERED_TOOL_OUTPUT_CHARS } from "../../core/agent-turn-stream-registry.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
@@ -27,6 +28,52 @@ import { ModelResolutionError } from "../../core/model-resolver.js";
 import { webchatProjects } from "../../db/schema.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+
+describe("SSE write queue", () => {
+  it("coalesces command previews behind a slow write", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const written: string[] = [];
+    const writer = createSseWriteQueue(async (event) => {
+      written.push(event.data);
+      if (written.length === 1) await firstWrite;
+    });
+
+    writer.enqueue({ event: "tool_output_text", data: "first" }, "tool-output:command");
+    await Promise.resolve();
+    for (let i = 0; i < 1_024; i += 1) {
+      writer.enqueue({ event: "tool_output_text", data: `snapshot-${i}` }, "tool-output:command");
+    }
+    writer.enqueue({ event: "done", data: "done" });
+
+    expect(written).toEqual(["first"]);
+    releaseFirst();
+    await writer.queue;
+    expect(written).toEqual(["first", "snapshot-1023", "done"]);
+  });
+
+  it("coalesces reasoning previews behind a slow write", async () => {
+    let releaseFirst!: () => void;
+    const firstWrite = new Promise<void>((resolve) => (releaseFirst = resolve));
+    const written: string[] = [];
+    const writer = createSseWriteQueue(async (event) => {
+      written.push(event.data);
+      if (written.length === 1) await firstWrite;
+    });
+
+    writer.enqueue({ event: "thinking_text", data: "first" }, "thinking:block");
+    await Promise.resolve();
+    for (let i = 0; i < 2_048; i += 1) {
+      writer.enqueue({ event: "thinking_text", data: `snapshot-${i}` }, "thinking:block");
+    }
+    writer.enqueue({ event: "done", data: "done" });
+
+    expect(written).toEqual(["first"]);
+    releaseFirst();
+    await writer.queue;
+    expect(written).toEqual(["first", "snapshot-2047", "done"]);
+  });
+});
 
 describe("Webchat API", () => {
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -1797,16 +1844,33 @@ describe("Webchat API", () => {
     const runScriptedStream = async (
       script: () => AsyncGenerator<never>,
       onEvent?: (evt: { event: string; data: string }) => void,
+      providerId: "openai" | "anthropic" = "openai",
+      providerIdForTurn: "openai" | "anthropic" = providerId,
     ) => {
+      let activeProviderId = providerId;
       deps.agentSessionManager = {
         acquire: rs.fn(async (key) => ({
           key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
           sessionId: "agent-session",
+          get providerId() {
+            return activeProviderId;
+          },
           status: "idle",
           sendTurn() {
             return {
               turnId: "turn-stream-1",
-              events: script(),
+              events: (async function* () {
+                // Model resolution happens after WebChat attaches the turn but
+                // before AgentSession publishes its turn boundary.
+                activeProviderId = providerIdForTurn;
+                yield {
+                  type: "turn_start" as const,
+                  turnId: "turn-stream-1",
+                  sessionId: "agent-session",
+                  userPrompt: "hi",
+                };
+                yield* script();
+              })(),
               turnContext: otelContext.active(),
             };
           },
@@ -1874,7 +1938,7 @@ describe("Webchat API", () => {
           return { blockIx, text };
         });
 
-    it("emits block-scoped accumulated text, survives tool_use, and keeps deltas out of the trace", async () => {
+    it("projects live reasoning and command output while keeping deltas out of the trace", async () => {
       // Gate the scripted stream so the tail runs only after the reader has
       // seen the first block — exercising live emission, not just replay.
       let releaseTail!: () => void;
@@ -1889,7 +1953,6 @@ describe("Webchat API", () => {
             // The complete block closes the preview and advances blockIx.
             yield { type: "text", content: "Hello" };
             await tailGate;
-            // Tool previews have no webchat consumer yet: they change nothing.
             yield { type: "tool_input_delta", toolUseId: "tu-1", tool: "some_tool", content: "{" };
             yield { type: "tool_use", id: "tu-1", tool: "some_tool", input: {} };
             yield { type: "tool_output_delta", toolUseId: "tu-1", content: "partial output" };
@@ -1921,6 +1984,23 @@ describe("Webchat API", () => {
       // The post-tool deltas accumulate under the next block index.
       expect(texts[texts.length - 1]).toEqual({ blockIx: 1, text: "Final answer" });
 
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "thinking_text",
+          data: JSON.stringify({ turnId: "turn-stream-1", blockId: "b0", text: "Planning" }),
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "tool_output_text",
+          data: JSON.stringify({
+            turnId: "turn-stream-1",
+            toolUseId: "tu-1",
+            text: "partial output",
+          }),
+        }),
+      );
+
       // The final reply goes through send_message with the result content.
       expect(sendMessageRun).toHaveBeenCalledWith(
         "send_message",
@@ -1937,6 +2017,83 @@ describe("Webchat API", () => {
         expect(trace!.content).not.toContain(type);
         expect(events.some((e) => e.data.includes(type))).toBe(false);
       }
+    });
+
+    it("keeps a capped command preview advancing for attached subscribers", async () => {
+      let releaseTail!: () => void;
+      const tailGate = new Promise<void>((resolve) => (releaseTail = resolve));
+      let released = false;
+      const { events } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield {
+              type: "tool_output_delta",
+              toolUseId: "tu-1",
+              content: "x".repeat(MAX_BUFFERED_TOOL_OUTPUT_CHARS),
+            };
+            await tailGate;
+            yield { type: "tool_output_delta", toolUseId: "tu-1", content: "later" };
+            yield { type: "tool_result", toolUseId: "tu-1", tool: "some_tool", output: {} };
+            yield { type: "result", content: "Done" };
+          })() as AsyncGenerator<never>,
+        (evt) => {
+          if (
+            !released &&
+            evt.event === "tool_output_text" &&
+            (JSON.parse(evt.data) as { text: string }).text.length ===
+              MAX_BUFFERED_TOOL_OUTPUT_CHARS
+          ) {
+            released = true;
+            releaseTail();
+          }
+        },
+      );
+
+      const previews = events
+        .filter((event) => event.event === "tool_output_text")
+        .map((event) => JSON.parse(event.data) as { text: string });
+      expect(previews.some(({ text }) => text.length === MAX_BUFFERED_TOOL_OUTPUT_CHARS)).toBe(
+        true,
+      );
+      expect(previews.some(({ text }) => text.endsWith("later"))).toBe(true);
+    });
+
+    it("keeps Claude reasoning on the completed-block path", async () => {
+      const { events } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "thinking_delta", blockId: "thinking-1", content: "Private thought" };
+            yield { type: "thinking", blockId: "thinking-1", content: "Private thought" };
+            yield { type: "result", content: "Done" };
+          })() as AsyncGenerator<never>,
+        undefined,
+        "anthropic",
+      );
+
+      expect(events.some((event) => event.event === "thinking_text")).toBe(false);
+    });
+
+    it("uses the provider resolved at the turn boundary for live reasoning", async () => {
+      const thinking = () =>
+        (async function* () {
+          yield { type: "thinking_delta", blockId: "thinking-1", content: "Planning" };
+          yield { type: "result", content: "Done" };
+        })() as AsyncGenerator<never>;
+
+      const switchedToClaude = await runScriptedStream(thinking, undefined, "openai", "anthropic");
+      expect(switchedToClaude.events.some((event) => event.event === "thinking_text")).toBe(false);
+
+      const switchedToCodex = await runScriptedStream(thinking, undefined, "anthropic", "openai");
+      expect(switchedToCodex.events).toContainEqual(
+        expect.objectContaining({
+          event: "thinking_text",
+          data: JSON.stringify({
+            turnId: "turn-stream-1",
+            blockId: "thinking-1",
+            text: "Planning",
+          }),
+        }),
+      );
     });
 
     it("persists each commentary block as its own live message; send_message carries only the final", async () => {

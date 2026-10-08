@@ -79,6 +79,7 @@ import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
+import { appendBufferedToolOutput } from "../../core/agent-turn-stream-registry.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -189,6 +190,8 @@ type WebchatEventName =
   | "summary_update"
   | "session_status"
   | "assistant_text"
+  | "thinking_text"
+  | "tool_output_text"
   | "widget_placement"
   | "done"
   | "stream_error"
@@ -574,9 +577,50 @@ function getWebchatProjectErrorStatus(message: string): 400 | 500 {
     : 500;
 }
 
-interface WebchatSseEvent {
+export interface WebchatSseEvent {
   event: WebchatEventName;
   data: string;
+}
+
+export interface SseWriteQueue {
+  readonly queue: Promise<void>;
+  enqueue(event: WebchatSseEvent, coalesceKey?: string): void;
+}
+
+/**
+ * Serializes SSE writes while retaining only the latest pending replacement
+ * for a coalesced key. A slow reader can therefore hold one in-flight and one
+ * pending preview rather than every intermediate snapshot.
+ */
+export function createSseWriteQueue(
+  write: (event: WebchatSseEvent) => Promise<void>,
+): SseWriteQueue {
+  let queue = Promise.resolve();
+  const pendingByKey = new Map<string, WebchatSseEvent>();
+  const enqueue = (task: () => Promise<void>) => {
+    queue = queue.then(task);
+  };
+  return {
+    get queue() {
+      return queue;
+    },
+    enqueue(event, coalesceKey) {
+      if (!coalesceKey) {
+        enqueue(async () => await write(event));
+        return;
+      }
+      if (pendingByKey.has(coalesceKey)) {
+        pendingByKey.set(coalesceKey, event);
+        return;
+      }
+      pendingByKey.set(coalesceKey, event);
+      enqueue(async () => {
+        const latest = pendingByKey.get(coalesceKey);
+        pendingByKey.delete(coalesceKey);
+        if (latest) await write(latest);
+      });
+    },
+  };
 }
 
 /**
@@ -587,10 +631,7 @@ interface WebchatSseEvent {
  * live `done` can overtake a still-replaying earlier event, so a client that
  * stops at `done` silently loses frames.
  */
-interface StreamSubscriber {
-  sse: SSEStreamingApi;
-  queue: Promise<void>;
-}
+interface StreamSubscriber extends SseWriteQueue {}
 
 interface ActiveWebchatStream {
   streamId: string;
@@ -618,7 +659,10 @@ interface ActiveWebchatStream {
    * the durable reply is still persisted via `send_message` on `result`.
    */
   assistantText: string;
+  assistantBlockId?: string;
   assistantBlockIx: number;
+  thinkingTextByBlockId: Map<string, string>;
+  toolOutputTextByToolUseId: Map<string, string>;
   persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
@@ -628,6 +672,8 @@ interface ActiveWebchatStream {
   resolveFinish: () => void;
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
+  /** Only Codex reasoning deltas are a new WebChat surface, resolved at turn start. */
+  showLiveReasoning: boolean;
   channelThreadKey: string | null;
 }
 
@@ -1647,35 +1693,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await stream.tracePersistPromise;
   };
 
-  // Append a frame to one subscriber's serialized write chain. A failed write
-  // drops the subscriber; frames already chained behind it become no-ops via
-  // the same guard.
-  const enqueueSubscriberWrite = (
-    stream: ActiveWebchatStream,
-    subscriberId: string,
-    entry: StreamSubscriber,
-    evt: WebchatSseEvent,
-  ): void => {
-    entry.queue = entry.queue.then(async () => {
-      if (!stream.subscribers.has(subscriberId)) return;
-      try {
-        await entry.sse.writeSSE(evt);
-      } catch {
-        stream.subscribers.delete(subscriberId);
-      }
-    });
-  };
-
   const emitToStream = (
     stream: ActiveWebchatStream,
     event: WebchatEventName,
     data: unknown,
     replayKey: string,
+    coalesceKey?: string,
   ): void => {
     const evt: WebchatSseEvent = { event, data: JSON.stringify(data) };
     stream.events.set(replayKey, evt);
-    for (const [subscriberId, entry] of stream.subscribers.entries()) {
-      enqueueSubscriberWrite(stream, subscriberId, entry, evt);
+    for (const entry of stream.subscribers.values()) {
+      entry.enqueue(evt, coalesceKey);
     }
   };
 
@@ -1737,6 +1765,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     turnId: string,
     channelThreadKey: string | null = null,
     agentName: string = "main",
+    showLiveReasoning = false,
   ): Promise<ActiveWebchatStream> => {
     let resolveFinish!: () => void;
     const onFinish = new Promise<void>((resolve) => {
@@ -1763,7 +1792,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         traceMessageId: randomUUID(),
       }),
       assistantText: "",
+      assistantBlockId: undefined,
       assistantBlockIx: 0,
+      thinkingTextByBlockId: new Map(),
+      toolOutputTextByToolUseId: new Map(),
       persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
@@ -1772,6 +1804,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       onFinish,
       resolveFinish,
       agentName,
+      showLiveReasoning,
       channelThreadKey,
     };
   };
@@ -1864,10 +1897,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   ): { subscriberId: string; entry: StreamSubscriber } => {
     const subscriberId = randomUUID();
     const replay = [...stream.events.values()];
-    const entry: StreamSubscriber = { sse, queue: Promise.resolve() };
+    const entry = createSseWriteQueue(async (evt) => {
+      if (!stream.subscribers.has(subscriberId)) return;
+      try {
+        await sse.writeSSE(evt);
+      } catch {
+        stream.subscribers.delete(subscriberId);
+      }
+    });
     stream.subscribers.set(subscriberId, entry);
     for (const evt of replay) {
-      enqueueSubscriberWrite(stream, subscriberId, entry, evt);
+      entry.enqueue(evt);
     }
     return { subscriberId, entry };
   };
@@ -2788,32 +2828,62 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           idPrefix: turnId,
           resolver: appResolver,
         });
-        let queue = Promise.resolve();
+        const writer = createSseWriteQueue((event) => sse.writeSSE(event));
         let assistantText = "";
+        let assistantBlockId: string | undefined;
         let assistantBlockIx = 0;
+        const toolOutputTextByToolUseId = new Map<string, string>();
         let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
-        const write = (event: WebchatEventName, data: unknown) => {
-          queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
+        const write = (event: WebchatEventName, data: unknown, coalesceKey?: string) => {
+          writer.enqueue({ event, data: JSON.stringify(data) }, coalesceKey);
         };
         const project = (message: StreamAgentEvent) => {
           if (message.type === "input_status") {
             write("input_status", message);
             return;
           }
+          // The detached-stream path cannot recover a provider identity. Keep
+          // Claude reasoning on its established completed-block path rather
+          // than risking a new live display here.
+          if (message.type === "thinking_delta") return;
+          if (message.type === "tool_output_delta") {
+            const text = appendBufferedToolOutput(
+              toolOutputTextByToolUseId.get(message.toolUseId) ?? "",
+              message.content,
+            );
+            toolOutputTextByToolUseId.set(message.toolUseId, text);
+            write(
+              "tool_output_text",
+              { turnId, toolUseId: message.toolUseId, text },
+              `tool-output:${message.toolUseId}`,
+            );
+            return;
+          }
           if (isTransientDelta(message) && message.type !== "text_delta") return;
           if (message.type === "text_delta") {
             assistantText += message.content;
-            write("assistant_text", {
-              turnId,
-              blockIx: assistantBlockIx,
-              text: assistantText,
-            });
+            if (message.blockId) assistantBlockId = message.blockId;
+            write(
+              "assistant_text",
+              {
+                turnId,
+                ...(assistantBlockId ? { blockId: assistantBlockId } : {}),
+                blockIx: assistantBlockIx,
+                text: assistantText,
+              },
+              "assistant_text",
+            );
             return;
           }
           if (message.type === "text") {
             assistantText = "";
+            assistantBlockId = undefined;
             assistantBlockIx += 1;
+          }
+          if (message.type === "tool_result") {
+            toolOutputTextByToolUseId.delete(message.toolUseId);
+            write("tool_output_text", { turnId, toolUseId: message.toolUseId, text: "" });
           }
           if (message.type === "error") terminalError = message;
           if (message.type === "turn_end" && message.status === "interrupted") interrupted = true;
@@ -2833,7 +2903,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         const unsubscribe = agentTurnStream.subscribe(project);
         for (const message of replay) project(message);
         const keepalive = setInterval(() => {
-          queue = queue.then(() => sse.writeSSE({ event: "keepalive", data: "" }));
+          writer.enqueue({ event: "keepalive", data: "" });
         }, TURN_STREAM_KEEPALIVE_INTERVAL_MS);
         sse.onAbort(unsubscribe);
         try {
@@ -2843,7 +2913,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             ...(interrupted ? { stopped: true } : {}),
             ...(terminalError ? { error: terminalError.error, code: terminalError.code } : {}),
           });
-          await queue;
+          await writer.queue;
         } finally {
           clearInterval(keepalive);
           unsubscribe();
@@ -2855,9 +2925,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const { subscriberId, entry } = attachSubscriber(stream, sse);
       // Keepalive rides each subscriber's own write chain (not emitToStream:
       // it must never enter the replay buffer). A write to a dead connection
-      // rejects and drops the subscriber via enqueueSubscriberWrite's guard.
+      // rejects and drops the subscriber in the queue's write guard.
       const keepalive = setInterval(() => {
-        enqueueSubscriberWrite(stream, subscriberId, entry, { event: "keepalive", data: "" });
+        entry.enqueue({ event: "keepalive", data: "" });
       }, TURN_STREAM_KEEPALIVE_INTERVAL_MS);
       sse.onAbort(() => {
         stream.subscribers.delete(subscriberId);
@@ -3347,7 +3417,41 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              // Deltas other than text have no webchat consumer yet.
+              // AgentSession resolves an unpinned model at its mutex boundary,
+              // immediately before emitting turn_start. Read the provider here
+              // rather than when this stream was attached: a failed prior turn
+              // may have rotated the session to another provider in between.
+              if (msg.type === "turn_start") {
+                stream.showLiveReasoning = agentSess.providerId === "openai";
+              }
+              if (msg.type === "thinking_delta" && stream.showLiveReasoning) {
+                const text = (stream.thinkingTextByBlockId.get(msg.blockId) ?? "") + msg.content;
+                stream.thinkingTextByBlockId.set(msg.blockId, text);
+                emitToStream(
+                  stream,
+                  "thinking_text",
+                  { turnId, blockId: msg.blockId, text },
+                  `thinking:${msg.blockId}`,
+                  `thinking:${msg.blockId}`,
+                );
+                continue;
+              }
+              if (msg.type === "tool_output_delta") {
+                const text = appendBufferedToolOutput(
+                  stream.toolOutputTextByToolUseId.get(msg.toolUseId) ?? "",
+                  msg.content,
+                );
+                stream.toolOutputTextByToolUseId.set(msg.toolUseId, text);
+                emitToStream(
+                  stream,
+                  "tool_output_text",
+                  { turnId, toolUseId: msg.toolUseId, text },
+                  `tool-output:${msg.toolUseId}`,
+                  `tool-output:${msg.toolUseId}`,
+                );
+                continue;
+              }
+              // Tool-input deltas are intentionally not a WebChat surface.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -3355,11 +3459,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // accumulated text.
               if (msg.type === "text_delta") {
                 stream.assistantText += msg.content;
-                if (msg.blockId) inFlightTextBlockId = msg.blockId;
+                if (msg.blockId) {
+                  inFlightTextBlockId = msg.blockId;
+                  stream.assistantBlockId = msg.blockId;
+                }
                 emitToStream(
                   stream,
                   "assistant_text",
-                  { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                  {
+                    turnId,
+                    ...(stream.assistantBlockId ? { blockId: stream.assistantBlockId } : {}),
+                    blockIx: stream.assistantBlockIx,
+                    text: stream.assistantText,
+                  },
+                  "assistant_text",
                   "assistant_text",
                 );
                 continue;
@@ -3373,6 +3486,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // block's first delta arrives (delayed fold).
               if (msg.type === "text") {
                 const blockIx = stream.assistantBlockIx;
+                if (msg.blockId) stream.assistantBlockId = msg.blockId;
                 // Keeps the live preview and its persisted replacement on the
                 // same complete block content during their handoff.
                 if (stream.assistantText !== msg.content) {
@@ -3380,7 +3494,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   emitToStream(
                     stream,
                     "assistant_text",
-                    { turnId, blockIx: stream.assistantBlockIx, text: stream.assistantText },
+                    {
+                      turnId,
+                      ...(stream.assistantBlockId ? { blockId: stream.assistantBlockId } : {}),
+                      blockIx: stream.assistantBlockIx,
+                      text: stream.assistantText,
+                    },
+                    "assistant_text",
                     "assistant_text",
                   );
                 }
@@ -3421,6 +3541,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                stream.assistantBlockId = undefined;
                 inFlightTextBlockId = undefined;
               }
               if (msg.type === "turn_end" && stream.assistantText) {
@@ -3445,6 +3566,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                stream.assistantBlockId = undefined;
+              }
+              if (msg.type === "thinking" && msg.blockId && stream.showLiveReasoning) {
+                stream.thinkingTextByBlockId.delete(msg.blockId);
+                emitToStream(
+                  stream,
+                  "thinking_text",
+                  { turnId, blockId: msg.blockId, text: "" },
+                  `thinking:${msg.blockId}`,
+                );
+              }
+              if (msg.type === "tool_result") {
+                stream.toolOutputTextByToolUseId.delete(msg.toolUseId);
+                emitToStream(
+                  stream,
+                  "tool_output_text",
+                  { turnId, toolUseId: msg.toolUseId, text: "" },
+                  `tool-output:${msg.toolUseId}`,
+                );
               }
               stream.traceEvents.push(msg);
               emitTraceEvent(stream, msg);

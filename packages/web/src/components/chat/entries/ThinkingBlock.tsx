@@ -26,9 +26,9 @@ export function getThinkingBlockPreview(content: string, fallback: string): stri
   return stripped || fallback;
 }
 
-export function ThinkingBlock({ content }: { content: string }) {
+export function ThinkingBlock({ content, live = false }: { content: string; live?: boolean }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(live);
   const body = content?.trim() ?? "";
   const label = getThinkingBlockPreview(content, t("blocks.thinking"));
   const hasBody = body.length > 0;

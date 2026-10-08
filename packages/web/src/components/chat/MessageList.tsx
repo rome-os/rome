@@ -3,7 +3,7 @@ import { Check } from "lucide-react";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatEntries } from "@/components/chat/entries";
+import { renderFlatEntries, ThinkingBlock, ToolUseBlock } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
@@ -45,7 +45,10 @@ export interface LivePreview {
   runningTurnId: string | null;
   snapshot: TraceSnapshot | null;
   text: string;
+  blockId?: string;
   blockIx?: number;
+  thinkingTextByBlockId?: ReadonlyMap<string, string>;
+  toolOutputTextByToolUseId?: ReadonlyMap<string, string>;
   /** The full SSE text, which may be ahead of the typewriter preview. */
   sourceText?: string;
   textThroughOrdinal?: number;
@@ -175,8 +178,8 @@ function renderSubagents(
 }
 
 // Persisted WebChat text blocks retain the same identity as their live SSE
-// preview. Build the lookup once per transcript change; token frames then use
-// a direct `(turnId, blockIx)` lookup instead of reconstructing block order.
+// preview. Provider ids are primary; the projection index also remains for
+// legacy live consumers that do not yet receive block ids.
 function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
   const index = new Map<string, ChatRow>();
   for (const row of rows) {
@@ -184,12 +187,44 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
     for (const message of row.messages) {
       if (!message.turnId) continue;
       for (const part of parseMessageEntries(message)) {
-        if (part.type !== "text" || part.blockIx === undefined) continue;
-        index.set(`${message.turnId}:${part.blockIx}`, row);
+        if (part.type !== "text") continue;
+        if (part.blockId) index.set(`${message.turnId}:id:${part.blockId}`, row);
+        if (part.blockIx !== undefined) index.set(`${message.turnId}:ix:${part.blockIx}`, row);
       }
     }
   }
   return index;
+}
+
+function liveBashCalls(live: LivePreview): Array<{ id: string; input: unknown; output: string }> {
+  const outputByUseId = live.toolOutputTextByToolUseId;
+  if (!outputByUseId?.size || !live.snapshot) return [];
+  const calls: Array<{ id: string; input: unknown; output: string }> = [];
+  for (const segment of live.snapshot.segments) {
+    if (segment.kind !== "run") continue;
+    for (const block of segment.blocks) {
+      if (block.type !== "tool_use" || block.tool !== "Bash" || !block.id) continue;
+      const output = outputByUseId.get(block.id);
+      if (output) calls.push({ id: block.id, input: block.input, output });
+    }
+  }
+  return calls;
+}
+
+function LiveBlockPreviews({ live }: { live: LivePreview }) {
+  const thinking = [...(live.thinkingTextByBlockId?.entries() ?? [])].filter(([, text]) => text);
+  const bashCalls = liveBashCalls(live);
+  if (!thinking.length && !bashCalls.length) return null;
+  return (
+    <div className="space-y-2">
+      {thinking.map(([blockId, text]) => (
+        <ThinkingBlock key={blockId} content={text} live />
+      ))}
+      {bashCalls.map((call) => (
+        <ToolUseBlock key={call.id} tool="Bash" input={call.input} liveOutput={call.output} />
+      ))}
+    </div>
+  );
 }
 
 // The raw text a copy button puts on the clipboard for an agent turn: every
@@ -336,12 +371,20 @@ const RowView = memo(function RowView({
         // rome-live-caret appends the pulsing live dot after the last rendered
         // character (see globals.css).
         <div className="rome-live-caret">
-          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-            ...actions,
-            turnId: live.runningTurnId ?? undefined,
-          })}
+          {renderFlatEntries(
+            [
+              {
+                type: "text",
+                content: live.text,
+                ...(live.blockId ? { blockId: live.blockId } : {}),
+                blockIx: live.blockIx ?? 0,
+              },
+            ],
+            { ...actions, turnId: live.runningTurnId ?? undefined },
+          )}
         </div>
       ) : null}
+      {live ? <LiveBlockPreviews live={live} /> : null}
       {live ? (
         <LiveTurnActivity
           snapshot={live.snapshot}
@@ -421,12 +464,20 @@ function StandaloneLiveTail({
     >
       {live.text ? (
         <div className="rome-live-caret">
-          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-            ...actions,
-            turnId: live.runningTurnId ?? undefined,
-          })}
+          {renderFlatEntries(
+            [
+              {
+                type: "text",
+                content: live.text,
+                ...(live.blockId ? { blockId: live.blockId } : {}),
+                blockIx: live.blockIx ?? 0,
+              },
+            ],
+            { ...actions, turnId: live.runningTurnId ?? undefined },
+          )}
         </div>
       ) : null}
+      <LiveBlockPreviews live={live} />
       <LiveTurnActivity
         snapshot={live.snapshot}
         textThroughOrdinal={live.textThroughOrdinal}
@@ -504,7 +555,11 @@ export function MessageList({
 }: MessageListProps) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
+  const blockKey = runningTurnId
+    ? live.blockId
+      ? `${runningTurnId}:id:${live.blockId}`
+      : `${runningTurnId}:ix:${live.blockIx ?? 0}`
+    : null;
   const sourceText = live.sourceText ?? live.text;
   const persistedTextRows = useMemo(() => indexPersistedTextRows(rows), [rows]);
   const persistedRow = blockKey ? persistedTextRows.get(blockKey) : undefined;

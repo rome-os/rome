@@ -1460,11 +1460,10 @@ export type MessagePart =
        *  identifies the block. Prefer it when present. Absent when the provider
        *  gave the block no id, and on rows written without it. */
       blockId?: string;
-      /** Zero-based position of this WebChat assistant text block within its
+      /** @deprecated Prefer `blockId` when present. Zero-based position of this WebChat assistant text block within its
        *  turn, assigned by the WebChat projection and written on every text
-       *  part it persists. `(turnId, blockIx)` is the key WebChat's live
-       *  stream and transcript share, and the fallback when `blockId` is
-       *  absent. */
+       *  part it persists. `(turnId, blockIx)` remains the fallback key for
+       *  WebChat's live stream and transcript when `blockId` is absent. */
       blockIx?: number;
     }
   | {

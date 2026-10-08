@@ -309,7 +309,12 @@ describe("MessageList side-chat eligibility", () => {
   });
 });
 
-function commentary(text: string, id = "a-text", blockIx: number | null = 0): ChatMessage {
+function commentary(
+  text: string,
+  id = "a-text",
+  blockIx: number | null = 0,
+  blockId?: string,
+): ChatMessage {
   return {
     id,
     sessionId: "s-1",
@@ -321,6 +326,7 @@ function commentary(text: string, id = "a-text", blockIx: number | null = 0): Ch
         content: text,
         turnPhase: "commentary",
         ...(blockIx !== null ? { blockIx } : {}),
+        ...(blockId ? { blockId } : {}),
       },
     ]),
     createdAt: "2026-06-13T00:00:01.000Z",
@@ -351,6 +357,41 @@ function expectBefore(earlier: HTMLElement, later: HTMLElement) {
 }
 
 describe("MessageList streaming input", () => {
+  it("shows live reasoning and Bash output before their completed blocks arrive", () => {
+    const { live, actions } = renderList(true);
+    live.snapshot = {
+      segments: [
+        {
+          kind: "run",
+          id: "run-1",
+          ordinal: 0,
+          app: { id: "terminal", name: "Terminal", iconUrl: "/terminal.svg" },
+          count: 1,
+          blocks: [{ type: "tool_use", id: "bash-1", tool: "Bash", input: { command: "pwd" } }],
+        },
+      ],
+      summary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+    };
+    live.thinkingTextByBlockId = new Map([["thinking-1", "Planning the command"]]);
+    live.toolOutputTextByToolUseId = new Map([["bash-1", "/workspace\n"]]);
+
+    render(
+      <ThemeProvider>
+        <MessageList
+          rows={[]}
+          live={live}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={actions}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getAllByText("Planning the command")).toHaveLength(2);
+    expect(screen.getByText("/workspace")).toBeTruthy();
+  });
+
   it("keeps a code fence collapsed when its live block becomes persisted", () => {
     const text = "```\nlong code\n```";
     const { rerender } = render(streamingList([], text));
@@ -359,6 +400,20 @@ describe("MessageList streaming input", () => {
     expect(liveToggle.getAttribute("aria-expanded")).toBe("false");
 
     rerender(streamingList([commentary(text)], text));
+
+    expect(screen.getByRole("button", { name: "Code" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
+  it("keeps a code fence collapsed when a legacy live block gains a provider id", () => {
+    const text = "```\nlong code\n```";
+    const { rerender } = render(streamingList([], text));
+    const liveToggle = screen.getByRole("button", { name: "Code" });
+    fireEvent.click(liveToggle);
+    expect(liveToggle.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(streamingList([commentary(text, "a-text", 0, "provider-text-1")], text));
 
     expect(screen.getByRole("button", { name: "Code" }).getAttribute("aria-expanded")).toBe(
       "false",
@@ -427,6 +482,20 @@ describe("MessageList streaming input", () => {
 
     expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
     expectBefore(screen.getByLabelText("Working"), screen.getByText("Please include pseudocode."));
+  });
+
+  it("deduplicates an id-bearing persisted block for a legacy index-only preview", () => {
+    render(
+      streamingList(
+        [
+          commentary("I am checking the implementation.", "provider-id", 0, "msg-1"),
+          humanReply("Please include pseudocode."),
+        ],
+        "I am checking the implementation.",
+      ),
+    );
+
+    expect(screen.getAllByText("I am checking the implementation.")).toHaveLength(1);
   });
 
   it("uses the source text to suppress a persisted block while typing catches up", () => {
