@@ -77,6 +77,11 @@ interface AppTileProps {
   caption?: string | null;
 }
 
+// On a phone the grid reads like a home screen: four tiles a row, each name one
+// small line cut with an ellipsis. Wider screens wrap the name to two lines.
+const TILE_NAME_CLASS =
+  "mt-2 w-full truncate text-center text-[length:var(--rome-font-size-13)] text-foreground sm:line-clamp-2 sm:whitespace-normal sm:break-words sm:text-ui";
+
 function AppTile({
   ariaLabel,
   clickTarget,
@@ -106,12 +111,14 @@ function AppTile({
 
   const syncNameClipped = () => {
     const el = nameRef.current;
-    setNameClipped(el !== null && el.scrollHeight > el.clientHeight);
+    setNameClipped(
+      el !== null && (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth),
+    );
   };
 
   return (
     <div
-      className="group relative flex select-none flex-col items-center rounded-12 p-3 transition-colors [-webkit-touch-callout:none] hover:bg-surface-muted has-[a:focus-visible]:bg-surface-muted has-[button:focus-visible]:bg-surface-muted"
+      className="group relative flex select-none flex-col items-center rounded-12 px-0 py-3 transition-colors [-webkit-touch-callout:none] sm:p-3 hover:bg-surface-muted has-[a:focus-visible]:bg-surface-muted has-[button:focus-visible]:bg-surface-muted"
       {...longPress.triggerProps}
     >
       {/* A clipped name reveals its full text in a tooltip on hover/focus.
@@ -151,10 +158,7 @@ function AppTile({
       </Tooltip>
 
       <div className="relative">{icon}</div>
-      <span
-        ref={nameRef}
-        className="mt-2 line-clamp-2 w-full break-words text-center text-ui text-foreground"
-      >
+      <span ref={nameRef} className={TILE_NAME_CLASS}>
         {name}
       </span>
       {caption ? (
@@ -242,7 +246,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
     <button
       type="button"
       onClick={onClick}
-      className="flex select-none flex-col items-center rounded-12 p-3 transition-colors hover:bg-surface-muted outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="flex select-none flex-col items-center rounded-12 px-0 py-3 transition-colors sm:p-3 hover:bg-surface-muted outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       <span
         aria-hidden
@@ -250,9 +254,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
       >
         {icon}
       </span>
-      <span className="mt-2 line-clamp-2 w-full break-words text-center text-ui font-medium text-primary">
-        {label}
-      </span>
+      <span className={cn(TILE_NAME_CLASS, "font-medium text-primary")}>{label}</span>
     </button>
   );
 }
@@ -456,13 +458,13 @@ export default function AppsIndexPage() {
     navigate("/chat", { state: { draft: t("sections.my.newAppDraft") } });
 
   const tileGridClass =
-    "grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-x-2 gap-y-4 sm:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]";
+    "grid grid-cols-4 gap-x-2 gap-y-4 sm:grid-cols-[repeat(auto-fill,minmax(7rem,1fr))]";
 
   const renderSkeletonTiles = (prefix: string, count: number) =>
     Array.from({ length: count }).map((_, index) => (
       <div
         key={`skeleton:${prefix}:${index}`}
-        className="flex flex-col items-center gap-2 p-3"
+        className="flex flex-col items-center gap-2 px-0 py-3 sm:p-3"
         aria-hidden
       >
         <Skeleton className="h-14 w-14 rounded-16 sm:h-16 sm:w-16" />
