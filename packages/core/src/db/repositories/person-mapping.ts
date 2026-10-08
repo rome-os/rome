@@ -133,11 +133,15 @@ export class PersonMappingRepository {
     );
   }
 
-  /** Whether a person is still there, read through a caller's transaction. */
-  readPersonExists(exec: DrizzleDb | DrizzleTx, personId: string): boolean {
+  /** When a person was created, or null when there is no such person, read
+   *  through a caller's transaction. */
+  readPersonCreatedAt(exec: DrizzleDb | DrizzleTx, personId: string): Date | null {
     return (
-      exec.select({ id: persons.id }).from(persons).where(eq(persons.id, personId)).get() !==
-      undefined
+      exec
+        .select({ createdAt: persons.createdAt })
+        .from(persons)
+        .where(eq(persons.id, personId))
+        .get()?.createdAt ?? null
     );
   }
 

@@ -73,14 +73,14 @@ describe("keeping agents' links on their endpoint", () => {
   });
 
   it("moves a linked agent's link to its new address when its owner renames their handle", async () => {
-    await people.addChannelMapping("ada", "agents", "@friend/atlas", "@friend/atlas (dot)");
+    await people.addChannelMapping("ada", "agents", "@friend/atlas", "@friend/atlas (atlas dot)");
     await identity.observe([listed("ep_atlas", "@friend/atlas")]);
 
     await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
     expect(people.readChannelHolder(testDb.db, "agents", "@newfriend/atlas")).toEqual({
       personId: "ada",
-      displayName: "@newfriend/atlas (dot)",
+      displayName: "@newfriend/atlas (atlas dot)",
     });
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
@@ -426,6 +426,33 @@ describe("keeping agents' links on their endpoint", () => {
       ep_atlas: { address: "@newfriend/atlas", by: "listing" },
       ep_other: { address: "@friend/atlas", by: "listing" },
     });
+  });
+
+  it("never gives a waiting link to a new person who took a merged person's id", async () => {
+    testDb.db
+      .insert(persons)
+      .values({ id: "ada2", displayName: "Ada", bondLevel: "acquaintance", createdAt: new Date() })
+      .run();
+    await people.addChannelMapping("ada2", "agents", "@friend/atlas");
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 1);
+    await identity.observeListing([listed("ep_other", "@friend/atlas")], 2);
+    await people.mergePersons("ada", "ada2");
+    testDb.db
+      .insert(persons)
+      .values({
+        id: "ada2",
+        displayName: "Another Ada",
+        bondLevel: "inner-circle",
+        createdAt: new Date(Date.now() + 60_000),
+      })
+      .run();
+
+    await identity.observeListing(
+      [listed("ep_other", "@friend/atlas"), listed("ep_atlas", "@newfriend/atlas")],
+      3,
+    );
+
+    expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
   });
 
   it("lets a message take an address from an endpoint the listing no longer names", async () => {

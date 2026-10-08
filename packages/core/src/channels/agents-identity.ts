@@ -76,6 +76,8 @@ interface Known {
   parkedFrom?: string;
   /** The name the link carried there. */
   parkedName?: string;
+  /** When it was taken off, by Rome's clock. */
+  parkedAt?: number;
   /** Set when a listing put it at its address and a later one left it out,
    *  so the listing no longer vouches for that address against another
    *  endpoint. Its own messages are still ordered against the listing. */
@@ -173,7 +175,7 @@ export function createAgentsIdentity(deps: {
   db: Pick<DrizzleDb, "transaction">;
   personMappingRepo: Pick<
     PersonMappingRepository,
-    "readChannelHolder" | "readPersonExists" | "writeChannelMapping" | "writeUnlinkAccount"
+    "readChannelHolder" | "readPersonCreatedAt" | "writeChannelMapping" | "writeUnlinkAccount"
   >;
   settingsRepo: Pick<SettingsRepository, "read" | "write">;
   channel: string;
@@ -237,6 +239,7 @@ export function createAgentsIdentity(deps: {
             ? {
                 parked: person,
                 parkedFrom: from,
+                parkedAt: now(),
                 ...(holder?.displayName ? { parkedName: holder.displayName } : {}),
               }
             : {}),
@@ -252,7 +255,8 @@ export function createAgentsIdentity(deps: {
       function restore(id: string): void {
         const entry = known[id];
         if (!entry?.parked || !entry.parkedFrom || entry.address === null) return;
-        const { parked, parkedFrom: _from, parkedName, ...rest } = entry;
+        const { parked, parkedFrom: _from, parkedName, parkedAt, ...rest } = entry;
+        const createdAt = repo.readPersonCreatedAt(tx, parked);
         known[id] = rest;
         if (isOwn(entry.parkedFrom) !== isOwn(entry.address)) {
           // It can never go back, so it stops waiting.
@@ -260,14 +264,17 @@ export function createAgentsIdentity(deps: {
             from: entry.parkedFrom,
             to: entry.address,
           });
-        } else if (!repo.readPersonExists(tx, parked)) {
-          // Merged into someone else since, and gone with the merge.
+        } else if (!createdAt || createdAt.getTime() > (parkedAt ?? Number.POSITIVE_INFINITY)) {
+          // Merged into someone else since, and gone with the merge, even if
+          // a new person has taken the id since.
           log.warn("an agent's waiting link was to a person who is gone; it is dropped", {
             to: entry.address,
           });
         } else if (holderOf(entry.address) === null) {
           // A name built from the old address names the new one now.
-          const name = parkedName?.split(entry.parkedFrom).join(entry.address);
+          const name = parkedName?.startsWith(entry.parkedFrom)
+            ? entry.address + parkedName.slice(entry.parkedFrom.length)
+            : parkedName;
           repo.writeChannelMapping(tx, parked, channel, entry.address, name);
           log.info("an agent's link followed it to its new address", { to: entry.address });
         }
@@ -355,8 +362,8 @@ export function createAgentsIdentity(deps: {
   /** Settles a listing unless a later-asked one already has. */
   function settleListing(listing: readonly AgentSighting[], askedAt: number): void {
     if (askedAt < listedAt) return;
-    listedAt = askedAt;
     settle(listing, { listing: true });
+    listedAt = askedAt;
   }
 
   /** Lists Cloud again for these disagreements and settles what it says.
@@ -428,9 +435,12 @@ export function createAgentsIdentity(deps: {
     priming ??= (async () => {
       const askedAt = now();
       const listing = await list().catch(() => null);
-      if (listing) await serial(async () => settleListing(listing, askedAt));
-      else priming = null;
-    })();
+      if (!listing) throw new Error("Cloud's listing could not be read");
+      await serial(async () => settleListing(listing, askedAt));
+    })().catch((err: unknown) => {
+      priming = null;
+      throw err;
+    });
     return priming;
   }
 
@@ -448,7 +458,7 @@ export function createAgentsIdentity(deps: {
       return guarded(
         (async () => {
           if (deps.list && listedAt === Number.NEGATIVE_INFINITY) {
-            await waited(prime(deps.list));
+            await waited(prime(deps.list).catch(() => {}));
           }
           const disputed = await serial(async () => settle(sightings));
           // A message never outranks a listing, so when one disagrees with
