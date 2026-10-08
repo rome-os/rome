@@ -6,11 +6,11 @@
  * (accounts.ts).
  *
  * An endpoint's address is its name in this Rome's own account and
- * `@slug/endpoint` in another (agentAddress). Cloud keeps a name unique only
+ * `@handle/endpoint` in another (agentAddress). Cloud keeps a name unique only
  * among current endpoints, so a name freed by a removed dot can return under a
  * new one and carry the old link (I2 holds only while the endpoint lives).
  *
- * Any `@slug/endpoint` address resolves, listed or not: an agent Rome wrote to
+ * Any `@handle/endpoint` address resolves, listed or not: an agent Rome wrote to
  * can answer without a link, and such a sender still has to be an account the
  * guardian can find and place (I4).
  */
@@ -44,8 +44,8 @@ function toAccount(endpoint: AgentEndpointSummary): Account | null {
     identifiers: {
       username: address,
       "agents:kind": endpoint.kind,
-      ...(endpoint.sameAccount === false && endpoint.account
-        ? { "agents:account": endpoint.account }
+      ...(endpoint.sameAccount === false
+        ? { "agents:account": agentAddressAccount(address) as string }
         : {}),
     },
   };

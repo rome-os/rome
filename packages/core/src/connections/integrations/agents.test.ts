@@ -84,7 +84,14 @@ describe("agents channel", () => {
 
   it("addresses another account's agent by its account, so two accounts' names never meet", () => {
     const external = envelope({
-      from: { endpoint: "atlas", kind: "dot", sameAccount: false, account: "friend" },
+      from: {
+        endpoint: "atlas",
+        endpointId: "6f1c",
+        kind: "dot",
+        sameAccount: false,
+        account: "friend",
+        address: "@friend/atlas",
+      },
     });
     expect(toAgentInboundMessage(external)).toMatchObject({
       conversationId: "@friend/atlas",

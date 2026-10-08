@@ -48,8 +48,20 @@ describe("the agents address book", () => {
     const book = agentsAccounts({
       client: cloud([
         atlas,
-        { endpoint: "atlas", kind: "dot", ready: true, sameAccount: false, account: "friend" },
-        { endpoint: "home-rome", kind: "rome", ready: true, sameAccount: false, account: "friend" },
+        {
+          endpoint: "atlas",
+          kind: "dot",
+          ready: true,
+          sameAccount: false,
+          address: "@friend/atlas",
+        },
+        {
+          endpoint: "home-rome",
+          kind: "rome",
+          ready: true,
+          sameAccount: false,
+          address: "@friend/home-rome",
+        },
       ]),
       isConnected: () => true,
     });
@@ -172,7 +184,13 @@ describe("another account's agent on the People page", () => {
         name: "agents",
         accounts: agentsAccounts({
           client: cloud([
-            { endpoint: "atlas", kind: "dot", ready: true, sameAccount: false, account: "friend" },
+            {
+              endpoint: "atlas",
+              kind: "dot",
+              ready: true,
+              sameAccount: false,
+              address: "@friend/atlas",
+            },
           ]),
           isConnected: () => true,
         }),

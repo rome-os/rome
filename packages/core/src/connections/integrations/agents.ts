@@ -10,7 +10,7 @@
 // account is linked to the guardian when its message is admitted
 // (channels/agents-guardian.ts); any other sender stays unlinked, and the
 // guardian decides whether Rome may answer it. A sender in another account is
-// addressed as `@slug/endpoint`, and Cloud refuses a send to an agent whose
+// addressed as `@handle/endpoint`, and Cloud refuses a send to an agent whose
 // owner has not linked with this Rome's account as `not_reachable`.
 
 import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
