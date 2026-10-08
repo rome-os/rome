@@ -175,6 +175,8 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       );
       return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
+        // Reversed first, so lines sharing a timestamp come newest first too.
+        .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, queryLimit(limit))
         .map(copyOf);
