@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface MessageRowProps {
-  /** Avatar (AgentAvatar), beside the last bubble. */
+  /** Avatar (AgentAvatar), at the top of the gutter beside the name line. */
   avatar: ReactNode;
   /** Display name, in small type above the first bubble. */
   name: string;
@@ -17,9 +17,9 @@ interface MessageRowProps {
   className?: string;
 }
 
-/** One agent turn in the transcript, laid out like a group chat: the name and
- * trace on a small line above the first bubble, the avatar at the bottom of
- * the gutter beside the last bubble, and the turn actions below both. */
+/** One agent turn in the transcript, laid out like a group chat: the avatar at
+ * the top of the gutter, the name and trace on a small line beside it above the
+ * first bubble, and the turn actions below both. */
 export function MessageRow({
   avatar,
   name,
@@ -31,7 +31,7 @@ export function MessageRow({
 }: MessageRowProps) {
   return (
     <div className={cn("mb-4", className)}>
-      <div className="flex items-end gap-2">
+      <div className="flex items-start gap-2">
         <div className="shrink-0">{avatar}</div>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2 pl-3">
