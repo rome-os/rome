@@ -1619,6 +1619,7 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
+/** @deprecated Use {@link ChannelMessage}. */
 export interface NormalizedMessage {
   id: string;
   channel:
@@ -1851,21 +1852,30 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-export interface TalkInboundMedia {
+export interface ChannelInboundMedia {
   materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
-export interface TalkActivitySession {
+/** @deprecated Use {@link ChannelInboundMedia}. */
+export type TalkInboundMedia = ChannelInboundMedia;
+
+export interface ChannelActivitySession {
   update(state: "thinking" | "working"): Promise<void>;
   finish(result: "done" | "error"): Promise<void>;
 }
 
-export interface TalkActivity {
+/** @deprecated Use {@link ChannelActivitySession}. */
+export type TalkActivitySession = ChannelActivitySession;
+
+export interface ChannelActivity {
   begin(input: {
     conversationId: ConversationId;
     messageId?: string;
-  }): Promise<TalkActivitySession | null>;
+  }): Promise<ChannelActivitySession | null>;
 }
+
+/** @deprecated Use {@link ChannelActivity}. */
+export type TalkActivity = ChannelActivity;
 
 /**
  * Reaching one account directly, rather than replying inside a conversation
@@ -1889,7 +1899,7 @@ export interface TalkActivity {
  * both spellings of that entry share. A send accepted anonymously cannot be
  * followed, and is reported as delivered the moment the channel takes it.
  */
-export interface TalkDirectMessaging {
+export interface ChannelDirectMessaging {
   /**
    * The conversation that reaches `channelUserId` directly, or null when the
    * channel cannot produce one.
@@ -1902,13 +1912,16 @@ export interface TalkDirectMessaging {
   conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
 
+/** @deprecated Use {@link ChannelDirectMessaging}. */
+export type TalkDirectMessaging = ChannelDirectMessaging;
+
 /** Sending on a channel. */
 export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
-  readonly activity?: TalkActivity | null;
+  readonly activity?: ChannelActivity | null;
 }
 
 /**
@@ -1959,7 +1972,7 @@ export interface ChannelInbound {
   subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
   /** Materializes a message's attachments, or null when the channel cannot
    *  now. A consumer without it uses the attachments as delivered. */
-  readonly media: TalkInboundMedia | null;
+  readonly media: ChannelInboundMedia | null;
 }
 
 /**
@@ -2800,7 +2813,8 @@ export interface BackendTurnParams {
   /** Exact runtime session resume handle. */
   sessionId: string;
   /** Connection that owns the provider conversation, passed to the resumed
-   * turn's thread context. Delivery finds the channel by `channel`, not by this. */
+   * turn's thread context. Delivery finds the channel by `channel`, not by this.
+   * @deprecated Delivery does not read it. */
   connectionId?: string;
   channel: string;
   threadId: string;
