@@ -806,12 +806,12 @@ describe("AppsIndexPage tile interactions", () => {
 });
 
 describe("AppsIndexPage tile name tooltip", () => {
-  // jsdom performs no layout, so scrollWidth/clientWidth are both 0 and the
+  // jsdom performs no layout, so scrollHeight/clientHeight are both 0 and the
   // page's "is the label clipped?" probe reads false. Fake the geometry of a
   // clipped label on the name span to exercise the tooltip path.
   function fakeClippedLabel(el: HTMLElement) {
-    Object.defineProperty(el, "scrollWidth", { configurable: true, value: 180 });
-    Object.defineProperty(el, "clientWidth", { configurable: true, value: 84 });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 60 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 40 });
   }
 
   it("reveals the full name in a tooltip when hovering a tile whose name is clipped", async () => {
