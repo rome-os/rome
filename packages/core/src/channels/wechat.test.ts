@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { ConversationId } from "@rome-os/app-runtime";
 import {
   isWechatAuthError,
   normalizeWechatBaseUrl,
@@ -41,22 +42,23 @@ function makeWechatMessage(overrides: Partial<WechatMessage> = {}): WechatMessag
 }
 
 describe("normalizeWechatMessage", () => {
-  it("normalizes a private text message", () => {
-    const msg = normalizeWechatMessage(makeWechatMessage());
+  it("builds the channel's record of a private text message, with the iLink event as raw", () => {
+    const event = makeWechatMessage();
+    const msg = normalizeWechatMessage(event);
 
-    expect(msg).toEqual({
-      id: "msg-1",
+    expect(msg).toStrictEqual({
       channel: "wechat",
-      channelUserId: "alice@im.wechat",
-      displayName: "alice",
-      threadId: "alice@im.wechat",
-      threadName: undefined,
-      threadType: "private",
-      timestamp: new Date(1700000000000),
+      direction: "inbound",
+      messageId: "msg-1",
+      conversationId: "alice@im.wechat",
+      senderId: "alice@im.wechat",
+      senderDisplayName: "alice",
       text: "hello from wechat",
       attachments: [],
+      timestamp: new Date(1700000000000),
+      thread: { kind: "dm" },
       addressing: "direct",
-      rawEvent: expect.any(Object),
+      raw: event,
     });
   });
 
@@ -69,7 +71,7 @@ describe("normalizeWechatMessage", () => {
       }),
     );
 
-    expect(msg?.id).toBe("item-1");
+    expect(msg?.messageId).toBe("item-1");
   });
 
   it("falls back to the envelope message id when the item has no id", () => {
@@ -80,7 +82,7 @@ describe("normalizeWechatMessage", () => {
       }),
     );
 
-    expect(msg?.id).toBe("9001");
+    expect(msg?.messageId).toBe("9001");
   });
 
   it("extracts the referenced item id and content from a quoted reply", () => {
@@ -106,7 +108,7 @@ describe("normalizeWechatMessage", () => {
 
     expect(msg).toEqual(
       expect.objectContaining({
-        id: "current-item",
+        messageId: "current-item",
         text: "my reply",
         replyTo: {
           messageId: "original-item",
@@ -235,10 +237,9 @@ describe("normalizeWechatMessage", () => {
       }),
     );
 
-    expect(msg?.channelUserId).toBe("bob@im.wechat");
-    expect(msg?.threadId).toBe("bob@im.wechat");
-    expect(msg?.threadType).toBe("group");
-    expect(msg?.threadName).toBe("room-1@chatroom");
+    expect(msg?.senderId).toBe("bob@im.wechat");
+    expect(msg?.conversationId).toBe("bob@im.wechat");
+    expect(msg?.thread).toEqual({ kind: "group", name: "room-1@chatroom" });
     expect(msg?.addressing).toBe("direct");
   });
 
@@ -250,10 +251,9 @@ describe("normalizeWechatMessage", () => {
       }),
     );
 
-    expect(msg?.channelUserId).toBe("bob@im.wechat");
-    expect(msg?.threadId).toBe("bob@im.wechat");
-    expect(msg?.threadType).toBe("private");
-    expect(msg?.threadName).toBeUndefined();
+    expect(msg?.senderId).toBe("bob@im.wechat");
+    expect(msg?.conversationId).toBe("bob@im.wechat");
+    expect(msg?.thread).toStrictEqual({ kind: "dm" });
   });
 
   it("keeps media-only image attachments when only encrypted CDN metadata is present", () => {
@@ -284,6 +284,8 @@ describe("normalizeWechatMessage", () => {
       }),
     ]);
     expect(msg?.attachments[0].url).toContain("encrypted_query_param=encrypted-param");
+    // The AES key stays in the iLink event, out of the record's attachments.
+    expect(msg?.attachments[0]).not.toHaveProperty("wechatMedia");
   });
 
   it("normalizes voice transcripts as text plus audio attachment metadata", () => {
@@ -448,11 +450,49 @@ describe("WechatAdapter inbound attachments", () => {
       }),
     );
     expect((attachments[0] as { wechatMedia?: unknown }).wechatMedia).toBeUndefined();
+    // Saved under the same channel/conversation/message path as before.
+    expect(attachments[0].localPath).toContain(
+      join("channel-attachments", "wechat", "alice@im.wechat", "msg-1"),
+    );
     await expect(readFile(attachments[0].localPath!)).resolves.toEqual(plaintext);
+  });
+
+  it("keeps the record's attachments when the message carries no iLink event", async () => {
+    profileDirs.profileDir = await mkdtemp(join(tmpdir(), "rome-wechat-profile-"));
+    profileDirs.memoryDir = await mkdtemp(join(tmpdir(), "rome-wechat-memory-"));
+    const fetchMock = rs.fn(async () => new Response("unexpected", { status: 500 }));
+    rs.stubGlobal("fetch", fetchMock);
+
+    const message = normalizeWechatMessage(
+      makeWechatMessage({
+        item_list: [
+          {
+            type: 2,
+            image_item: {
+              media: { encrypt_query_param: "encrypted-param", aes_key: "a".repeat(32) },
+            },
+          },
+        ],
+      }),
+    );
+    expect(message).not.toBeNull();
+    const { raw: _raw, ...withoutRaw } = message!;
+
+    const adapter = new WechatAdapter({
+      token: "token",
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      accountId: "account",
+      connectedAt: "2026-05-09T00:00:00.000Z",
+    });
+
+    for (const unusable of [withoutRaw, { ...withoutRaw, raw: { channel: "wechat" } }]) {
+      await expect(adapter.saveIncomingAttachments(unusable)).resolves.toBe(unusable.attachments);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-describe("WechatAdapter sendMessage", () => {
+describe("WechatAdapter send", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -470,18 +510,16 @@ describe("WechatAdapter sendMessage", () => {
       accountId: "account",
       connectedAt: "2026-05-09T00:00:00.000Z",
     }) as unknown as {
-      sendMessage(
-        channelUserId: string,
-        threadId: string,
-        message: { text: string },
-      ): Promise<void>;
+      send(conversationId: ConversationId, message: { text: string }): Promise<unknown>;
       rememberContextToken(key: string, contextToken: string, typingTarget: string): void;
     };
 
     adapter.rememberContextToken("room-1@chatroom", "ctx-room", "alice@im.wechat");
     adapter.rememberContextToken("alice@im.wechat", "ctx-alice", "alice@im.wechat");
 
-    await adapter.sendMessage("alice@im.wechat", "room-1@chatroom", { text: "hello" });
+    const receipt = await adapter.send("alice@im.wechat" as ConversationId, { text: "hello" });
+
+    expect(receipt).toStrictEqual({ conversationId: "alice@im.wechat" });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -605,7 +643,7 @@ describe("WechatAdapter fault surfacing", () => {
       }),
     );
     await expect(
-      adapter.sendMessage("alice@im.wechat", "alice@im.wechat", { text: "hello" }),
+      adapter.send("alice@im.wechat" as ConversationId, { text: "hello" }),
     ).rejects.toThrow("WeChat session paused after errcode -14; retry in 60 min");
 
     const pauseData = loggerMocks.warn.mock.calls[0]?.[1] as { retryAt: string };
