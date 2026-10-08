@@ -173,9 +173,10 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
           limit: MAX_QUERY_LIMIT,
         }),
       );
+      // Reversed before the sort, so lines sharing a timestamp come newest
+      // first too.
       return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
-        // Reversed first, so lines sharing a timestamp come newest first too.
         .reverse()
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, queryLimit(limit))
