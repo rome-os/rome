@@ -1015,6 +1015,8 @@ export class CodexAppServerProvider implements ModelProvider {
         const payers = new Set(
           inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
         );
+        // A batch that spans a payer change fails whole, including inputs sent
+        // under the current payer, and surfaces as a transient failure to retry.
         if (payers.size > 1) throw new PayerChangedError();
         const [expectedProvider] = payers;
         const started = (await this.appServerManager.requestForThread(

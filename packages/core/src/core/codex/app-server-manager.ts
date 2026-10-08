@@ -15,7 +15,7 @@ import {
   type ThreadStartParams,
 } from "./app-server-protocol.js";
 
-/** A turn whose payer changed between its model resolution and dispatch. */
+/** A queued turn whose payer changed between send and dispatch. */
 export class PayerChangedError extends Error {
   constructor() {
     super("Model payer changed while preparing this turn; please retry.");
