@@ -77,6 +77,7 @@ function makeServer(
       getListing: ReturnType<typeof rs.fn>;
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
+    isExplicitAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
     connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
@@ -106,7 +107,7 @@ function makeServer(
     appStore,
     hasAgent: () => false,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
-    isExplicitAction: rs.fn(() => false),
+    isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
     hasAction: () => false,
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
@@ -456,14 +457,16 @@ describe("WorkerRpcServer param validation", () => {
   });
 
   it("answers actions.isExplicit from the main action registry", async () => {
-    const { server } = makeServer({});
+    const isExplicitAction = rs.fn((name: string) => name === "execute_root_script");
+    const { server } = makeServer({ isExplicitAction });
     const fake = makeFakeWorker();
     server.attach(fake.worker);
 
     const response = await rpc(fake, "actions.isExplicit", { actionName: "execute_root_script" });
 
     expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ explicit: false });
+    expect(response.result).toEqual({ explicit: true });
+    expect(isExplicitAction).toHaveBeenCalledWith("execute_root_script");
   });
 
   it("forwards appStore.listListings when params are valid", async () => {
