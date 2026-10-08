@@ -1273,6 +1273,8 @@ export class CodexAppServerProvider implements ModelProvider {
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),
+              // The fork turn queues behind the source's turns like any other.
+              onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
               revertTurn: async (threadIdToRevert, beforeTurnId) => {
                 // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain
