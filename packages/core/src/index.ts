@@ -33,7 +33,12 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import type { SessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
-import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
+import {
+  initTelemetry,
+  getTracer,
+  shutdown as shutdownTelemetry,
+  withInboundSpans,
+} from "./telemetry.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
@@ -1128,6 +1133,9 @@ async function main() {
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
+  // The channel-message hook hears every channel through these, so each
+  // inbound message it handles is traced and logged once.
+  const hookChannels = withInboundSpans(channels, "channel-message");
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1138,7 +1146,7 @@ async function main() {
         actionEngine,
         conversationSettings,
         chatStop,
-        channels,
+        channels: hookChannels,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1171,7 +1179,7 @@ async function main() {
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: { actionEngine, conversationSettings, chatStop, channels },
+        deps: { actionEngine, conversationSettings, chatStop, channels: hookChannels },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;

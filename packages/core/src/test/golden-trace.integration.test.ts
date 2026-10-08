@@ -8,18 +8,18 @@
  *                   ├── model.turn
  *                   └── action:<name>
  *
- * The `channel:<channel>.handle` span comes from wrapping the rig's mock
- * adapters (`wrapProviderAdaptersWithSpans`). Production transports are not
- * wrapped, so this test does not guard production channel spans. The
- * EXPECT_*_SPAN gates remain as dials in case a future migration wants to
- * soften an assertion.
+ * The `channel:<channel>.handle` and `hook:channel-message` spans come from
+ * `withInboundSpans`, the instrumentation the production channel-message hook
+ * hears every channel through. The EXPECT_*_SPAN gates remain as dials in case
+ * a future migration wants to soften an assertion.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { trace } from "@opentelemetry/api";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 
-import { buildMessage, installTestSpanHarness, type SpanHarness } from "./helpers.js";
+import type { ConversationId } from "@rome-os/app-runtime";
+import { installTestSpanHarness, type SpanHarness } from "./helpers.js";
 import {
   buildGoldenTraceRig,
   makeSingleActionProvider,
@@ -89,10 +89,10 @@ describe("golden-trace integration", () => {
   });
 
   it("emits the expected span hierarchy for one inbound message", async () => {
-    await rig.simulateInbound(
-      "telegram",
-      buildMessage({ channel: "telegram", threadId: "thread-golden", text: "hi" }),
-    );
+    await rig.simulateInbound("telegram", {
+      conversationId: "thread-golden" as ConversationId,
+      text: "hi",
+    });
 
     const spans = await harness.finishedSpans();
 
@@ -129,7 +129,7 @@ describe("golden-trace integration", () => {
   });
 
   it("stamps model.turn with accounting attrs from the terminal result message", async () => {
-    await rig.simulateInbound("telegram", buildMessage({ channel: "telegram", text: "hi" }));
+    await rig.simulateInbound("telegram", { text: "hi" });
 
     const spans = await harness.finishedSpans();
     const modelSpan = spans.find((s) => s.name === "model.turn");

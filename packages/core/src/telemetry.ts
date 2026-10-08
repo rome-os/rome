@@ -21,7 +21,7 @@ import {
   DiagLogLevel,
   SpanStatusCode,
 } from "@opentelemetry/api";
-import { setTelemetryBridge } from "@rome-os/app-runtime";
+import { setTelemetryBridge, type ChannelInbound } from "@rome-os/app-runtime";
 import { currentSessionId, runWithSession } from "./telemetry-context.js";
 import { resolveInstanceSlug, runningInsideDocker } from "./lib/runtime.js";
 import { createLogger } from "./logger.js";
@@ -196,10 +196,9 @@ const channelInboundLog = createLogger("channels");
  * Emit the one "channel message received" log record for an inbound channel
  * message, carrying its content. `createLogger` mirrors it to `otel_logs`,
  * and the OTEL logger stamps the active span context, so call this inside
- * whatever span covers the delivery. In production only the webchat
- * accepted-turn boundary in `api/routes/webchat.ts` emits it, so other
- * channels' inbound content does not reach `otel_logs`. The `onMessage`
- * wrapper below emits it for the golden-trace rig's mock adapters.
+ * whatever span covers the delivery. Two boundaries emit it: the webchat
+ * accepted-turn boundary in `api/routes/webchat.ts`, and
+ * `withInboundSpans` for every channel the channel-message hook hears.
  */
 export function logInboundChannelMessage(msg: {
   channel: string;
@@ -218,44 +217,53 @@ export function logInboundChannelMessage(msg: {
 }
 
 /**
- * Wrap each adapter's `onMessage` so every handler invocation produces a
- * `channel:{name}.handle` → `hook:channel-message` span pair, plus one
+ * `channels` with each inbound port instrumented for the hook named
+ * `hookName`. Every event a subscriber handles runs in a
+ * `channel:{name}.handle` → `hook:{hookName}` span pair, and emits one
  * inbound-message log record (see `logInboundChannelMessage`) linked to the
- * channel span. Wrapping at the adapter boundary (before the hook registers)
- * gives one span per fire, not per register.
+ * channel span. A handler that throws marks both spans as errors and still
+ * throws to the channel.
  *
- * Structurally typed so telemetry doesn't depend on the channels module. Only
- * the golden-trace test rig and its mock adapters still use it.
+ * Only the subscriptions taken through the returned channels are
+ * instrumented, so hand them to the one subscriber whose handling the spans
+ * describe. A second instrumented subscriber logs each message a second time.
  */
-export function wrapProviderAdaptersWithSpans<
-  M extends { id: string; channel: string; threadId: string; channelUserId: string; text: string },
-  A extends { onMessage(handler: (msg: M) => Promise<void>): void },
->(adapters: Map<string, A>): void {
-  for (const [name, adapter] of adapters) {
-    const originalOnMessage = adapter.onMessage.bind(adapter);
-    adapter.onMessage = (handler) => {
-      originalOnMessage((msg) =>
-        withRomeSpan(
-          `channel:${name}.handle`,
-          {
-            "channel.name": msg.channel,
-            "channel.thread_id": msg.threadId,
-            "channel.user_id": msg.channelUserId,
-          },
-          () => {
-            logInboundChannelMessage({
-              channel: msg.channel,
-              threadId: msg.threadId,
-              channelUserId: msg.channelUserId,
-              messageId: msg.id,
-              text: msg.text,
-            });
-            return wrapHookSpan("channel-message", { "channel.name": name }, () => handler(msg));
-          },
-        ),
-      );
+export function withInboundSpans<
+  C extends { readonly name: string; readonly inbound: ChannelInbound | null },
+>(channels: readonly C[], hookName: string): C[] {
+  return channels.map((channel) => {
+    const inbound = channel.inbound;
+    if (!inbound) return channel;
+    const name = channel.name;
+    const instrumented: ChannelInbound = {
+      subscribe: (handler) =>
+        inbound.subscribe((event) => {
+          const { message } = event;
+          return withRomeSpan(
+            `channel:${name}.handle`,
+            {
+              "channel.name": name,
+              "channel.thread_id": message.conversationId,
+              "channel.user_id": message.senderId,
+            },
+            () => {
+              logInboundChannelMessage({
+                channel: name,
+                threadId: message.conversationId,
+                channelUserId: message.senderId,
+                messageId: message.messageId,
+                text: message.text,
+              });
+              return wrapHookSpan(hookName, { "channel.name": name }, () => handler(event));
+            },
+          );
+        }),
+      get media() {
+        return inbound.media;
+      },
     };
-  }
+    return { ...channel, inbound: instrumented } as C;
+  });
 }
 
 export async function shutdown(): Promise<void> {
