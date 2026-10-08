@@ -59,7 +59,6 @@ describe("send_message attachments", () => {
         replyToMessageId: undefined,
         turnId: undefined,
       },
-      undefined,
     );
   });
 
@@ -187,7 +186,6 @@ describe("send_message chat recipient aliases", () => {
         replyToMessageId: undefined,
         turnId: "turn-1",
       },
-      undefined,
     );
   });
 
@@ -225,7 +223,6 @@ describe("send_message chat recipient aliases", () => {
         replyToMessageId: undefined,
         turnId: undefined,
       },
-      undefined,
     );
   });
 
