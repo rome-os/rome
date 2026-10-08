@@ -85,4 +85,21 @@ describe("Rome credits payer", () => {
     expect(calls).toEqual([]);
     expect(payer.isUsingRomeCredits()).toBe(false);
   });
+
+  it("selects credits when a revoked ChatGPT login needs re-authentication", () => {
+    const calls: Array<string | null> = [];
+    const value = structuredClone(base);
+    const payer = createRomeCreditsPayer({
+      aiToolState: { get: () => value },
+      appServerManager: fakeManager((p) => calls.push(p)),
+      getInstanceToken: () => "romeinst_123",
+      hasRomeCloud: () => true,
+    });
+    payer.sync();
+    // markAuthRevoked's view of a revoked ChatGPT token.
+    value.codex.loggedIn = false;
+    value.codex.needsReauth = true;
+    payer.sync();
+    expect(calls).toEqual(["rome_credits"]);
+  });
 });

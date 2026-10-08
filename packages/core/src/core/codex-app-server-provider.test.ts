@@ -996,6 +996,7 @@ describe("CodexAppServerProvider", () => {
         expect.objectContaining({
           type: "error",
           error: "Model payer changed while preparing this turn; please retry.",
+          code: "transient",
         }),
       ]);
       expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);

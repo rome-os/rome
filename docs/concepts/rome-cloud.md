@@ -66,7 +66,7 @@ Rome credits are an account-wide allowance that Rome Cloud serves through its in
 
 **Contracts:**
 
-- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login alone. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential. Usage limits and quota probes never change the payer.
+- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login alone. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential. A login whose token was revoked counts as disconnected, so credits pay until the guardian signs in to ChatGPT again. Usage limits and quota probes never change the payer.
 - A payer change restarts Codex, which fails the turns running at that moment. A credential change restarts Codex only while Rome credits pay.
 - A Codex turn waiting to start fails if Codex restarts under another payer first.
 - Rome credits and a ChatGPT plan are two ways to pay for the same Codex models. A tier, a custom tier mapping, and a [model pin](sessions.md#model-pin) resolve to the same model under either payer, and credits run Sol and Luna without a plan entitlement. A tier prefers a connected Claude login over Rome credits.

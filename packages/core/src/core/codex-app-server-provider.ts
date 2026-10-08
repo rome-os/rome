@@ -430,6 +430,10 @@ function classifyCodexFailure(
   if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
+  // The turn never started; a retry runs under the new payer.
+  if (turnError instanceof Error && turnError.message === PAYER_CHANGED_MESSAGE) {
+    return { code: "transient" };
+  }
   if (isCodexUsageLimitError(turnError)) {
     options.onQuotaExhausted?.();
     return { code: "usage_limit" };
