@@ -73,10 +73,12 @@ export const AGENTS_ENDPOINTS_KEY = "agentsEndpoints";
 interface Known {
   /** The address it holds, or null after it left one and none is known yet. */
   address: string | null;
-  /** Where that came from, and the newest message from it Rome has read,
-   *  or the listing that put it there if that is newer. */
+  /** Where that came from, and when the newest message from it Rome has
+   *  read was sent, by Cloud's clock. */
   by: "listing" | "message";
   at?: number;
+  /** When the newest listing that named it was asked for, by Rome's clock. */
+  listedAt?: number;
   /** The person whose link it took off `parkedFrom`, waiting to go back. */
   parked?: string;
   parkedFrom?: string;
@@ -148,11 +150,14 @@ export interface AgentsIdentity {
 
 const isOwn = (address: string) => agentAddressAccount(address) === null;
 
-/** Whether a message's sighting is older than what Rome knows of `entry`. */
-function staleAgainst(sighting: AgentSighting, entry: Known | undefined): boolean {
+/** Whether a message's sighting is older than what Rome knows of `entry`.
+ *  Only for the endpoint's own record is a message ordered against a listing,
+ *  with Rome's clock standing in for Cloud's: a skew there delays a rename
+ *  by a message, but never lets another endpoint's link answer for it. */
+function staleAgainst(sighting: AgentSighting, entry: Known | undefined, own: boolean): boolean {
   if (sighting.by === "listing" || !entry) return false;
   if (entry.by === "listing" && !entry.unlisted) return entry.address !== sighting.address;
-  return (entry.at ?? 0) > sighting.at;
+  return (entry.at ?? 0) > sighting.at || (own && (entry.listedAt ?? 0) > sighting.at);
 }
 
 /** Whether a message disagrees with what a listing recorded, which only a
@@ -170,17 +175,15 @@ function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
 /** Names one disagreement, so the same one is listed again only so often. */
 const disputeKey = (sighting: AgentSighting) => `${sighting.endpointId} ${sighting.address}`;
 
-/** The part of an endpoint's record a sighting sets. A listing's time is
- *  Rome's clock standing in for Cloud's, close enough to order a message sent
- *  well before it. */
+/** The part of an endpoint's record a sighting sets. */
 function seenBy(
   sighting: AgentSighting,
   entry: Known | undefined,
   askedAt: number,
-): Pick<Known, "by" | "at" | "unlisted"> {
+): Pick<Known, "by" | "at" | "listedAt" | "unlisted"> {
   return sighting.by === "message"
     ? { by: "message", at: Math.max(entry?.at ?? 0, sighting.at) }
-    : { by: "listing", at: Math.max(entry?.at ?? 0, askedAt), unlisted: undefined };
+    : { by: "listing", listedAt: Math.max(entry?.listedAt ?? 0, askedAt), unlisted: undefined };
 }
 
 /** A message's disagreement with a listing, and whether it is about another
@@ -306,11 +309,16 @@ export function createAgentsIdentity(deps: {
           });
         } else if (holderOf(entry.address) === null) {
           // A name built from the old address names the new one now.
-          const name = parkedName?.startsWith(entry.parkedFrom)
-            ? entry.address + parkedName.slice(entry.parkedFrom.length)
-            : parkedName;
+          const name =
+            parkedName === entry.parkedFrom || parkedName?.startsWith(`${entry.parkedFrom} `)
+              ? entry.address + parkedName.slice(entry.parkedFrom.length)
+              : parkedName;
           repo.writeChannelMapping(tx, parked, channel, entry.address, name);
           log.info("an agent's link followed it to its new address", { to: entry.address });
+        } else {
+          log.info("an agent's waiting link is dropped; its new address is already decided", {
+            to: entry.address,
+          });
         }
       }
 
@@ -330,7 +338,7 @@ export function createAgentsIdentity(deps: {
           // A message moved it after this listing was asked for.
           continue;
         }
-        if (staleAgainst(sighting, entry)) {
+        if (staleAgainst(sighting, entry, true)) {
           if (disputes(sighting, entry)) {
             disputed.push({ key: disputeKey(sighting), sighting, held: false });
           }
@@ -365,7 +373,7 @@ export function createAgentsIdentity(deps: {
             }
             continue;
           }
-          if (staleAgainst(sighting, known[holder])) continue;
+          if (staleAgainst(sighting, known[holder], false)) continue;
           // Cloud gives an address to one endpoint at a time, so the one that
           // held it has left, whether removed or renamed.
           leave(holder, address);

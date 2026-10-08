@@ -88,7 +88,7 @@ describe("keeping agents' links on their endpoint", () => {
     });
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@newfriend/atlas", by: "listing", at: 0 },
+      ep_atlas: { address: "@newfriend/atlas", by: "listing", listedAt: 0 },
     });
   });
 
@@ -318,6 +318,16 @@ describe("keeping agents' links on their endpoint", () => {
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
   });
 
+  it("lets a reused name take an unlisted endpoint's address whatever Rome's clock says", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    await identity.observeListing([listed("ep_old", "atlas")], Date.now() + 3_600_000);
+    await identity.observeListing([listed("ep_else", "nova")], Date.now() + 3_600_001);
+
+    await identity.observe([sent("ep_new", "atlas", Date.now())]);
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
   it("lets no listing asked for before a message moved an endpoint move it back", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     let clock = Date.now();
@@ -490,7 +500,7 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
     // It stops waiting, since it can never go back.
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@other/atlas", by: "listing", at: 0 },
+      ep_atlas: { address: "@other/atlas", by: "listing", listedAt: 0 },
     });
     // Nor does it stay behind for the next endpoint to take the name.
     await identity.observe([listed("ep_new", "atlas")]);
@@ -543,8 +553,8 @@ describe("keeping agents' links on their endpoint", () => {
 
     expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@newfriend/atlas", by: "listing", at: 3 },
-      ep_other: { address: "@friend/atlas", by: "listing", at: 3 },
+      ep_atlas: { address: "@newfriend/atlas", by: "listing", listedAt: 3 },
+      ep_other: { address: "@friend/atlas", by: "listing", listedAt: 3 },
     });
   });
 
