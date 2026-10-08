@@ -20,21 +20,14 @@ import type {
   ChannelInbound,
   ChannelSend as AppChannelSend,
   ConversationDescriptor,
-  InboundEvent,
-  TalkActivity,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
 import type { AccountMessages, Messages } from "./messages.js";
 
-// The port contracts, rules R1–R5 among them, are the apps SDK's: an app hears
-// a channel through the same `ChannelInbound` core does.
-export type { InboundEvent };
-export type Inbound = ChannelInbound;
-
-/** Sending on a channel, as core's channels do it: the SDK's send port, a way
- *  to reach one account directly, and a typing indicator. */
+/** Sending on a channel, as core's channels do it: the SDK's send port, typing
+ *  indicator included, and a way to reach one account directly. */
 export interface ChannelSend extends AppChannelSend {
   /**
    * Reaching one account directly rather than replying in a conversation that
@@ -44,9 +37,6 @@ export interface ChannelSend extends AppChannelSend {
    * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
   readonly direct: TalkDirectMessaging | null;
-  /** Showing the account that a reply is on its way, or null where the
-   *  channel cannot now. */
-  readonly activity: TalkActivity | null;
 }
 
 /**
@@ -102,8 +92,10 @@ export interface Channel extends AppChannel {
   /** Sending on the channel, or null where it cannot send at all. */
   readonly send: ChannelSend | null;
 
-  /** What arrives on the channel, or null where nothing ever arrives. */
-  readonly inbound: Inbound | null;
+  /** What arrives on the channel, or null where nothing ever arrives. The port
+   *  contracts, rules R1–R5 among them, are the apps SDK's: an app hears a
+   *  channel through the same `ChannelInbound` core does. */
+  readonly inbound: ChannelInbound | null;
 
   /**
    * The channel's address book, or null where the platform gives Rome no way
@@ -136,8 +128,8 @@ export interface Channel extends AppChannel {
   readonly messages: Messages | null;
 
   /** The conversations the channel can see, or null where it cannot list
-   *  them. Absent reads as null. */
-  readonly directory?: ChannelDirectory | null;
+   *  them. */
+  readonly directory: ChannelDirectory | null;
 }
 
 /**

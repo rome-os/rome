@@ -14,6 +14,7 @@ const bare = (name: string): Channel => ({
   inbound: null,
   accounts: null,
   messages: null,
+  directory: null,
 });
 
 describe("readTalkHistory", () => {

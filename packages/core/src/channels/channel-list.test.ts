@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ChannelMessage,
   ConversationId,
+  InboundEvent,
   TalkActivity,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
@@ -13,7 +14,7 @@ import { createTalkRouter } from "../connections/talk-router.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
-import { ChannelNotConnected, type InboundEvent } from "./channel.js";
+import { ChannelNotConnected } from "./channel.js";
 import { channelList } from "./channel-list.js";
 
 const noAccounts: Accounts = {
