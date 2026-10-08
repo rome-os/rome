@@ -69,7 +69,7 @@ async function until(ready: () => boolean, fakeTime = false): Promise<void> {
 
 describe("agents channel", () => {
   it("turns an agent message into a direct message from its endpoint", () => {
-    const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }));
+    const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
     expect(inbound).toMatchObject({
       messageId: "msg_1",
       conversationId: "atlas",
@@ -80,6 +80,43 @@ describe("agents channel", () => {
     });
     expect(inbound.text).toContain("Refund requested on order #41");
     expect(inbound.text).toContain('"order": 41');
+  });
+
+  it("addresses another account's agent by its account, so two accounts' names never meet", () => {
+    const external = envelope({
+      from: { endpoint: "atlas", kind: "dot", sameAccount: false, account: "friend" },
+    });
+    expect(toAgentInboundMessage(external)).toMatchObject({
+      conversationId: "@friend/atlas",
+      senderId: "@friend/atlas",
+      senderDisplayName: "@friend/atlas (external dot)",
+    });
+    const own = envelope({
+      from: { endpoint: "atlas", kind: "dot", sameAccount: true, account: "ouou" },
+    });
+    expect(toAgentInboundMessage(own)).toMatchObject({
+      conversationId: "atlas",
+      senderId: "atlas",
+    });
+  });
+
+  it("drops a cross-account message that names no sender account, and still acknowledges it", async () => {
+    const nameless = envelope({
+      messageId: "msg_nameless",
+      from: { endpoint: "atlas", kind: "dot", sameAccount: false },
+    });
+    expect(toAgentInboundMessage(nameless)).toBeNull();
+    const client = fakeClient([[nameless, envelope({ messageId: "msg_2" })]]);
+    const talker = createAgentsTalker(client);
+    const delivered: ChannelMessage[] = [];
+    talker.start(
+      (message) => delivered.push(message),
+      () => {},
+    );
+    await until(() => client.acknowledged.length > 0);
+    expect(client.acknowledged).toEqual([["msg_nameless", "msg_2"]]);
+    expect(delivered.map((message) => message.messageId)).toEqual(["msg_2"]);
+    await talker.stop();
   });
 
   it("delivers polled messages, then acknowledges them", async () => {
@@ -189,6 +226,24 @@ describe("agents channel", () => {
     expect(client.sent).toEqual([{ to: "atlas", text: "On it", inReplyTo: "msg_1" }]);
     expect(receipt).toEqual({ conversationId: "atlas", messageId: "msg_sent" });
     await expect(talker.send("atlas" as ConversationId, { text: " " })).rejects.toThrow(/text/);
+  });
+
+  it("sends to another account's agent by its full address", async () => {
+    const client = fakeClient([]);
+    const talker = createAgentsTalker(client);
+    await talker.send("@friend/atlas" as ConversationId, { text: "Hi" });
+    expect(client.sent).toEqual([{ to: "@friend/atlas", text: "Hi" }]);
+  });
+
+  it("says plainly when Cloud will not deliver to an address", async () => {
+    const client = fakeClient([]);
+    client.send = async () => {
+      throw new AgentMessagingError("Not reachable", 404, "not_reachable");
+    };
+    const talker = createAgentsTalker(client);
+    await expect(talker.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
+      "Rome Cloud can't deliver to @friend/atlas. The agent may not exist, or its owner hasn't linked their account with yours.",
+    );
   });
 
   it("reaches a dot directly at its endpoint, so People can write to it first", async () => {

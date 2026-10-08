@@ -44,6 +44,41 @@ describe("the agents address book", () => {
     expect(await book.resolve("pending")).toBeNull();
   });
 
+  it("lists a linked account's endpoints by their full address, even one sharing this Rome's name", async () => {
+    const book = agentsAccounts({
+      client: cloud([
+        atlas,
+        { endpoint: "atlas", kind: "dot", ready: true, sameAccount: false, account: "friend" },
+        { endpoint: "home-rome", kind: "rome", ready: true, sameAccount: false, account: "friend" },
+      ]),
+      isConnected: () => true,
+    });
+    const { accounts } = await book.listAccounts({ limit: 100 });
+    expect(accounts.map((account) => account.id)).toEqual([
+      "@friend/atlas",
+      "@friend/home-rome",
+      "atlas",
+    ]);
+    expect(accounts[0]).toEqual({
+      id: "@friend/atlas",
+      addresses: ["@friend/atlas"],
+      name: null,
+      identifiers: { username: "@friend/atlas", "agents:kind": "dot", "agents:account": "friend" },
+    });
+  });
+
+  it("resolves another account's agent it does not list, such as one answering Rome", async () => {
+    const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
+    expect(await book.resolve("@friend/atlas")).toEqual({
+      id: "@friend/atlas",
+      addresses: ["@friend/atlas"],
+      name: null,
+      identifiers: { username: "@friend/atlas", "agents:account": "friend" },
+    });
+    expect(await book.resolve("muse")).toBeNull();
+    expect(await book.resolve("@friend")).toBeNull();
+  });
+
   it("asks Cloud nothing until Agents is connected", async () => {
     const client = cloud([atlas]);
     const book = agentsAccounts({ client, isConnected: () => false });
@@ -116,5 +151,47 @@ describe("a dot on the People page", () => {
       channelMappings: [{ channel: "agents", channelUserId: "atlas" }],
     });
     expect(await find()).toMatchObject({ personId, state: "linked" });
+  });
+});
+
+describe("another account's agent on the People page", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+  });
+
+  afterEach(() => testDb.close());
+
+  it("is listed unlinked under its full address", async () => {
+    const channels: Channels = [
+      {
+        name: "agents",
+        accounts: agentsAccounts({
+          client: cloud([
+            { endpoint: "atlas", kind: "dot", ready: true, sameAccount: false, account: "friend" },
+          ]),
+          isConnected: () => true,
+        }),
+        send: null,
+        inbound: null,
+        messages: null,
+        directory: null,
+      },
+    ];
+    const accounts = await readAccountDirectory({
+      ...deps,
+      channels,
+      accountNames: createAccountNames({ channels, sentinelLogRepo: deps.sentinelLogRepo }),
+    });
+    expect(accounts.find((a) => a.channel === "agents")).toMatchObject({
+      channelUserId: "@friend/atlas",
+      displayName: "@friend/atlas",
+      state: "unlinked",
+      personId: null,
+    });
   });
 });

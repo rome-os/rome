@@ -1,16 +1,27 @@
 /**
  * The Agents channel's address book: the other endpoints in this Rome's Cloud
- * account, such as the guardian's dots. Read live from Rome Cloud, so a dot is
- * on the People page, and can be linked at a bond level, before it ever
- * messages Rome. Contract: `Accounts` (accounts.ts).
+ * account, such as the guardian's dots, and the endpoints of accounts linked
+ * to it. Read live from Rome Cloud, so a dot is on the People page, and can be
+ * linked at a bond level, before it ever messages Rome. Contract: `Accounts`
+ * (accounts.ts).
  *
- * An endpoint's name is its address. Cloud keeps it unique only among current
- * endpoints, so a name freed by a removed dot can return under a new one and
- * carry the old link (I2 holds only while the endpoint lives).
+ * An endpoint's address is its name in this Rome's own account and
+ * `@slug/endpoint` in another (agentAddress). Cloud keeps a name unique only
+ * among current endpoints, so a name freed by a removed dot can return under a
+ * new one and carry the old link (I2 holds only while the endpoint lives).
+ *
+ * Any `@slug/endpoint` address resolves, listed or not: an agent Rome wrote to
+ * can answer without a link, and such a sender still has to be an account the
+ * guardian can find and place (I4).
  */
 
 import { compareCodePoints } from "@rome/api-types/people";
-import type { AgentEndpointSummary, AgentMessagingClient } from "../lib/rome-cloud-agents.js";
+import {
+  type AgentEndpointSummary,
+  type AgentMessagingClient,
+  agentAddress,
+  agentAddressAccount,
+} from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
@@ -22,13 +33,31 @@ const log = createLogger("agents-accounts");
  *  to one request. */
 const READ_TTL_MS = 30_000;
 
-function toAccount(endpoint: AgentEndpointSummary): Account {
+function toAccount(endpoint: AgentEndpointSummary): Account | null {
+  const address = agentAddress(endpoint);
+  if (address === null) return null;
   return {
-    id: endpoint.endpoint as AccountId,
-    addresses: [endpoint.endpoint],
-    // The endpoint name is the address, so it is not repeated as a name.
+    id: address as AccountId,
+    addresses: [address],
+    // The address names the endpoint, so it is not repeated as a name.
     name: null,
-    identifiers: { username: endpoint.endpoint, "agents:kind": endpoint.kind },
+    identifiers: {
+      username: address,
+      "agents:kind": endpoint.kind,
+      ...(endpoint.sameAccount === false && endpoint.account
+        ? { "agents:account": endpoint.account }
+        : {}),
+    },
+  };
+}
+
+/** An agent in another account that the listing does not hold. */
+function externalAccount(address: string, account: string): Account {
+  return {
+    id: address as AccountId,
+    addresses: [address],
+    name: null,
+    identifiers: { username: address, "agents:account": account },
   };
 }
 
@@ -49,8 +78,11 @@ export function agentsAccounts(deps: {
       ({ endpoint: own, endpoints }) =>
         endpoints
           // A dot still waiting on its pairing confirmation cannot be reached.
-          .filter((endpoint) => endpoint.ready && endpoint.endpoint !== own)
-          .map(toAccount)
+          .filter(
+            (endpoint) =>
+              endpoint.ready && (endpoint.sameAccount === false || endpoint.endpoint !== own),
+          )
+          .flatMap((endpoint) => toAccount(endpoint) ?? [])
           .sort((a, b) => compareCodePoints(a.id, b.id)),
       // Every address book is read for every People page, so an unreachable
       // Cloud lists no agents rather than failing the page. The empty answer
@@ -72,7 +104,10 @@ export function agentsAccounts(deps: {
       return pageAccounts(await endpoints(), input);
     },
     async resolve(address) {
-      return (await endpoints()).find((account) => account.id === address) ?? null;
+      const listed = (await endpoints()).find((account) => account.id === address);
+      if (listed) return listed;
+      const account = deps.isConnected() ? agentAddressAccount(address) : null;
+      return account ? externalAccount(address, account) : null;
     },
   };
 }

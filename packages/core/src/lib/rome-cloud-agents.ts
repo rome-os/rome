@@ -2,16 +2,20 @@ import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 // Rome Cloud agent messaging (amantru/rome-cloud#137). Cloud gives this
-// instance an endpoint that dots and other agents in the same account can
-// address, stores messages for it until the instance acknowledges them, and
-// sends as it. The instance token decides the account and endpoint.
+// instance an endpoint that dots and other agents can address, stores messages
+// for it until the instance acknowledges them, and sends as it. The instance
+// token decides the account and endpoint. Agents in this Rome's own account go
+// by their bare endpoint name; an agent in a linked account goes by
+// `@slug/endpoint`, so two accounts' `atlas` endpoints never meet.
 
 /** A message as Cloud delivers it. Cloud sets `messageId`, `from`, and `sentAt`. */
 export interface AgentMessageEnvelope {
   messageId: string;
   /** `sameAccount` is Cloud's statement that the sender is in this Rome's
-   *  account. An older Cloud omits it, and Rome then trusts no sender. */
-  from: { endpoint: string; kind: "dot" | "rome"; sameAccount?: boolean };
+   *  account. An older Cloud omits it, and Rome then trusts no sender.
+   *  `account` is the sender account's slug; `endpoint` is always the bare
+   *  name within it. */
+  from: { endpoint: string; kind: "dot" | "rome"; sameAccount?: boolean; account?: string };
   to: { endpoint: string };
   sentAt: string;
   text: string;
@@ -25,6 +29,38 @@ export interface AgentEndpointSummary {
   kind: "dot" | "rome";
   /** False while a dot's pairing waits for the person's confirmation. */
   ready: boolean;
+  /** Set to false, with the owner's slug in `account`, for an endpoint of a
+   *  linked account. Omitted or true for this Rome's own account. */
+  sameAccount?: boolean;
+  account?: string;
+}
+
+/**
+ * The address Rome knows an agent by: the bare endpoint name in this Rome's own
+ * account, `@slug/endpoint` in any other. Null for a cross-account agent Cloud
+ * named no account for, which Rome can neither tell apart from its own agents
+ * nor answer.
+ */
+export function agentAddress(agent: {
+  endpoint: string;
+  sameAccount?: boolean;
+  account?: string;
+}): string | null {
+  if (agent.sameAccount !== false) return agent.endpoint;
+  if (!agent.account) return null;
+  return `@${agent.account}/${agent.endpoint}`;
+}
+
+/** The slug of a `@slug/endpoint` address, or null for a bare name. */
+export function agentAddressAccount(address: string): string | null {
+  return /^@([^/\s]+)\/[^/\s]+$/.exec(address)?.[1] ?? null;
+}
+
+/** Cloud's refusal for an address it will not deliver to. It answers the same
+ *  for an agent that does not exist and one whose owner has not allowed this
+ *  Rome, so a stranger cannot learn which agents exist. */
+export function isNotReachable(err: unknown): boolean {
+  return err instanceof AgentMessagingError && err.code === "not_reachable";
 }
 
 export class AgentMessagingError extends Error {
