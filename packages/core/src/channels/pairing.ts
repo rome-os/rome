@@ -1,5 +1,5 @@
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../connections/registry.js";
+import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -196,7 +196,5 @@ async function sendOn(
   conversationId: ConversationId,
   text: string,
 ): Promise<void> {
-  const talk = registry.get(connectionId).talk;
-  if (!talk) throw new Error(`Talk is unavailable for connection "${connectionId}"`);
-  await talk.send(conversationId, { text });
+  await requireTalk(registry.get(connectionId)).send(conversationId, { text });
 }

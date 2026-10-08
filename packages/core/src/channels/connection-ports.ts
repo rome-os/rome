@@ -13,9 +13,9 @@ import type {
   InboundEvent,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { Connection, Talk } from "../connections/types.js";
+import type { Connection } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
-import type { ConnectionRegistry } from "../connections/registry.js";
+import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { ChannelNotConnected, type ChannelDirectory, type ChannelSend } from "./channel.js";
@@ -43,7 +43,14 @@ export interface ConnectionPorts {
   directory: ChannelDirectory;
 }
 
-/** The ports a service's Talk backs, or null when the service has no Talk. */
+/**
+ * The ports a service's Talk backs, or null when the service has no Talk.
+ *
+ * Building the ports subscribes the inbound port to the service's Talks for
+ * the registry's lifetime, and admission runs once per message for each
+ * subscription. So build one set per registry and service, as `channelList`
+ * does: a second set would run admission (pairing replies included) twice.
+ */
 export function connectionPorts(
   deps: ConnectionPortsDeps,
   service: string,
@@ -209,13 +216,6 @@ function connectionFor(deps: ConnectionPortsDeps, service: string): Connection |
   return deps.registry.find(service)[0] ?? null;
 }
 
-/** The Connection's Talk, which a send needs: one whose credentials are locked
- *  or degraded has none. */
-function requireTalk(connection: Connection): Talk {
-  const talk = connection.talk;
-  if (!talk) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
-  return talk;
-}
 
 function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend {
   // What `direct` answers while no Connection exists for the channel: the
@@ -299,10 +299,10 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
     );
   };
 
+  // Fires now for each Connection already unlocked, then at every unlock.
   deps.registry.onUnlocked("talk", (connection) => {
     if (connection.service === service) attach(connection);
   });
-  for (const connection of deps.registry.find(service)) attach(connection);
 
   return {
     subscribe(handler) {

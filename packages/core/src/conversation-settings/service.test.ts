@@ -47,11 +47,14 @@ function directoryDescriptor(
   };
 }
 
-/** The channels the registry's Talks back, built by the production ports. */
+/** The channels the registry's Talks back, built by the production ports,
+ *  once per service as `channelList` builds them. */
 function channelsOver(registry: ConnectionRegistry): () => Channels {
+  const built = new Map<string, ReturnType<typeof connectionPorts>>();
   return () =>
     registry.registeredServices().flatMap((name) => {
-      const ports = connectionPorts({ registry }, name);
+      if (!built.has(name)) built.set(name, connectionPorts({ registry }, name));
+      const ports = built.get(name);
       return ports ? [{ name, accounts: null, ...ports }] : [];
     });
 }

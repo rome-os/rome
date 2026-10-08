@@ -59,6 +59,14 @@ const TALK_FEATURES: { [K in TalkFeatureName]: true } = {
 };
 const TALK_FEATURE_NAMES = Object.keys(TALK_FEATURES) as TalkFeatureName[];
 
+/** A Connection's Talk, which sending needs. A Connection whose credentials
+ *  are locked or degraded has none, and sending on it refuses. */
+export function requireTalk(connection: Connection): Talk {
+  const talk = connection.talk;
+  if (!talk) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
+  return talk;
+}
+
 export interface ConnectionRegistryDeps {
   ledger: GrantLedger;
   logger?: Logger;

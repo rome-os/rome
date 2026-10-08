@@ -281,7 +281,11 @@ export function createTestConnections(
       find(service)
         ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
         : null,
-    onUnlocked: () => {},
+    // Every test Connection is unlocked from the start, so a handler hears
+    // each of them at once, as the registry's replay does.
+    onUnlocked: (_capability, handler) => {
+      for (const connection of connections.values()) handler(connection);
+    },
     registeredServices: () => [...adapters.keys()],
   };
 }

@@ -19,7 +19,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { chooseConnection, connectionRefusalMessage } from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../connections/registry.js";
+import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "./channel.js";
 
 export interface ChannelsServiceDeps {
@@ -91,9 +91,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       options?: { connectionId?: string },
     ): Promise<MessageReceipt> {
       const connectionId = await connectionFor(channel, options?.connectionId);
-      const talk = deps.registry.get(connectionId).talk;
-      if (!talk) throw new Error(`Talk is unavailable for connection "${connectionId}"`);
-      return talk.send(conversationId, message);
+      return requireTalk(deps.registry.get(connectionId)).send(conversationId, message);
     },
 
     query,

@@ -35,6 +35,9 @@ import { whatsAppMessages } from "./whatsapp-messages.js";
  * The address books arrive built rather than made here: a channel that folds
  * its whole address book per call serves every caller from one read of it, and
  * two instances of one book is two folds of it.
+ *
+ * Build it once per registry: each build's inbound ports admit every message
+ * the registry's Talks deliver (`connectionPorts`).
  */
 export function channelList(deps: {
   db: DrizzleDb;
