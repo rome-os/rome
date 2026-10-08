@@ -1118,7 +1118,7 @@ describe("Webchat API", () => {
     }
   });
 
-  // Routes webchat's primary chat surface around ProviderAdapter.onMessage,
+  // Routes webchat's primary chat surface around the channel's inbound,
   // so the shared inbound-message log must fire at the accepted-turn boundary —
   // this drives the real POST route, not a mock channel port.
   it("logs the inbound message content to OTLP when a webchat turn is accepted", async () => {

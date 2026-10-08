@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import type { Attachment, NormalizedMessage } from "./types.js";
+import type { ChannelMessage } from "@rome-os/app-runtime";
+import type { Attachment } from "./types.js";
 import { getProfileMemoryDir } from "../paths.js";
 import { createLogger } from "../logger.js";
 
@@ -223,11 +224,10 @@ export function isAllowedAttachmentUrl(value: string): boolean {
 }
 
 /** The message whose files are saved: which channel, conversation and message
- *  carried them. A transport that emits `ChannelMessage` passes its
- *  `conversationId` as `threadId` and its `messageId` as `id`. */
+ *  carried them. */
 export type IncomingAttachmentOwner = Pick<
-  NormalizedMessage,
-  "channel" | "threadId" | "id" | "attachments"
+  ChannelMessage,
+  "channel" | "conversationId" | "messageId" | "attachments"
 >;
 
 export function getIncomingAttachmentDirectory(message: IncomingAttachmentOwner): string {
@@ -235,8 +235,8 @@ export function getIncomingAttachmentDirectory(message: IncomingAttachmentOwner)
     getProfileMemoryDir(),
     "channel-attachments",
     safePathSegment(message.channel),
-    safePathSegment(message.threadId),
-    safePathSegment(message.id),
+    safePathSegment(message.conversationId),
+    safePathSegment(message.messageId),
   );
 }
 
@@ -274,7 +274,7 @@ export async function saveIncomingAttachmentPayloads(
   return next;
 }
 
-export async function saveUrlAttachments(message: NormalizedMessage): Promise<Attachment[]> {
+export async function saveUrlAttachments(message: IncomingAttachmentOwner): Promise<Attachment[]> {
   const payloads: IncomingAttachmentPayload[] = [];
   for (const attachment of message.attachments) {
     if (!attachment.url) continue;

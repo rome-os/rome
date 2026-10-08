@@ -9,7 +9,7 @@
  *                   ├── model.turn
  *                   └── action:<name>
  *
- * The instrumentation lives at the neutral ProviderAdapter / ModelProvider
+ * The instrumentation lives at the neutral adapter / ModelProvider
  * boundaries so any adapter or provider impl produces these spans uniformly;
  * the EXPECT_*_SPAN gates remain as dials in case a future migration wants
  * to soften an assertion.

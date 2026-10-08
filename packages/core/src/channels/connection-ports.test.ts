@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { TalkHistory } from "../connections/types.js";
-import { historyFeature } from "../connections/integrations/talk-features.js";
+import {
+  historyQueryLimit,
+  historyWindowHours,
+} from "../connections/integrations/talk-features.js";
 import {
   connectionPorts,
   LIVE_DEFAULT_WINDOW_MS,
@@ -16,18 +19,33 @@ import { testMessagesQueryContract } from "./messages-contract.js";
 
 const HOUR = 3_600_000;
 
-function said(id: string, threadId: string, hoursAgo: number): NormalizedMessage {
+function said(id: string, conversationId: string, hoursAgo: number): ChannelMessage {
   return {
-    id,
     channel: "telegram_user",
-    channelUserId: "7",
-    displayName: "Chat",
-    threadId,
-    threadType: threadId === "group-1" ? "group" : "private",
-    timestamp: new Date(Date.now() - hoursAgo * HOUR),
+    direction: "inbound",
+    messageId: id,
+    conversationId: conversationId as ConversationId,
+    senderId: "7",
+    senderDisplayName: "Chat",
     text: id,
     attachments: [],
-    rawEvent: null,
+    timestamp: new Date(Date.now() - hoursAgo * HOUR),
+    thread: { kind: conversationId === "group-1" ? "group" : "dm" },
+  };
+}
+
+/** A Connection's history over an adapter's read, as the integrations build it. */
+function historyOver(
+  fetchHistory: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>,
+): TalkHistory {
+  return {
+    async query(input) {
+      const messages = await fetchHistory(
+        input.conversationId ?? null,
+        historyWindowHours(input.since),
+      );
+      return messages.slice(0, historyQueryLimit(input.limit));
+    },
   };
 }
 
@@ -40,18 +58,15 @@ testMessagesQueryContract("connection-backed messages", () => {
     said("g3", "group-1", 1.5),
     said("d1", "dm-1", 1),
   ];
-  const history = historyFeature(
-    {
-      // An adapter's read: everything in the whole-hour window, oldest first.
-      async fetchHistory(threadId, windowHours) {
-        const cutoff = Date.now() - windowHours * HOUR;
-        return held.filter(
-          (m) => (threadId === null || m.threadId === threadId) && m.timestamp.getTime() >= cutoff,
-        );
-      },
-    },
-    { channel: "telegram_user" },
-  );
+  // An adapter's read: everything in the whole-hour window, oldest first.
+  const history = historyOver(async (conversationId, windowHours) => {
+    const cutoff = Date.now() - windowHours * HOUR;
+    return held.filter(
+      (m) =>
+        (conversationId === null || m.conversationId === conversationId) &&
+        m.timestamp.getTime() >= cutoff,
+    );
+  });
   const deps = {
     registry: {
       getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
@@ -77,15 +92,10 @@ describe("connection-backed messages", () => {
   it("reaches back the default window unless a since is named", async () => {
     const old = said("old", "dm-1", 30);
     const recent = said("recent", "dm-1", 1);
-    const history = historyFeature(
-      {
-        async fetchHistory(_threadId, windowHours) {
-          const cutoff = Date.now() - windowHours * HOUR;
-          return [old, recent].filter((m) => m.timestamp.getTime() >= cutoff);
-        },
-      },
-      { channel: "telegram_user" },
-    );
+    const history = historyOver(async (_conversationId, windowHours) => {
+      const cutoff = Date.now() - windowHours * HOUR;
+      return [old, recent].filter((m) => m.timestamp.getTime() >= cutoff);
+    });
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),

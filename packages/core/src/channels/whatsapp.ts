@@ -561,22 +561,14 @@ export class WhatsAppAdapter {
       return message.attachments;
     }
 
-    return saveIncomingAttachmentPayloads(
+    return saveIncomingAttachmentPayloads(message, [
       {
-        channel: "whatsapp",
-        threadId: message.conversationId,
-        id: message.messageId,
-        attachments: message.attachments,
+        attachment,
+        data,
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
       },
-      [
-        {
-          attachment,
-          data,
-          mimeType: attachment.mimeType,
-          fileName: attachment.fileName,
-        },
-      ],
-    );
+    ]);
   }
 
   onConnected(callback: (userId: string) => void): void {

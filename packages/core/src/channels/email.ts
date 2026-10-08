@@ -437,15 +437,7 @@ export class EmailAdapter {
     }
 
     this.pendingAttachments.delete(message.messageId);
-    return saveIncomingAttachmentPayloads(
-      {
-        channel: "email",
-        threadId: message.conversationId,
-        id: message.messageId,
-        attachments: message.attachments,
-      },
-      payloads,
-    );
+    return saveIncomingAttachmentPayloads(message, payloads);
   }
 
   /**

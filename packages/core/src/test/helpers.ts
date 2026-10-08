@@ -42,7 +42,6 @@ import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
-import type { ProviderAdapter } from "../channels/adapter.js";
 import type {
   ChannelMessage,
   ConversationId,
@@ -206,7 +205,7 @@ export class MockModelProvider implements ModelProvider {
 
 // MockProviderAdapter — captures sent messages
 
-export class MockProviderAdapter implements ProviderAdapter {
+export class MockProviderAdapter {
   readonly channelName: string;
   sentMessages: {
     channelUserId: string;

@@ -19,7 +19,6 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
-import type { ProviderAdapter } from "../channels/adapter.js";
 import type { Action } from "../actions/types.js";
 import type { NormalizedMessage, AgentEvent } from "../types.js";
 import { createTestDb, MockProviderAdapter, type TestDb } from "./helpers.js";

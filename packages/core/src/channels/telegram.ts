@@ -312,15 +312,7 @@ export class TelegramAdapter {
         });
       }
     }
-    return saveIncomingAttachmentPayloads(
-      {
-        channel: "telegram",
-        threadId: message.conversationId,
-        id: message.messageId,
-        attachments: message.attachments,
-      },
-      payloads,
-    );
+    return saveIncomingAttachmentPayloads(message, payloads);
   }
 
   private extractAttachments(ctx: Context): Attachment[] {

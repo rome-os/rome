@@ -197,10 +197,8 @@ const channelInboundLog = createLogger("channels");
  * message, carrying its content. `createLogger` mirrors it to `otel_logs`,
  * and the OTEL logger stamps the active span context, so call this inside
  * whatever span covers the delivery. Two boundaries emit it: the
- * `ProviderAdapter.onMessage` wrapper below (every adapter-delivered channel),
- * and the webchat accepted-turn boundary in `api/routes/webchat.ts`
- * routes webchat's primary chat surface around `onMessage`, so it must log
- * where turns are actually accepted.
+ * `onMessage` wrapper below, and the webchat accepted-turn boundary in
+ * `api/routes/webchat.ts`, which logs where turns are actually accepted.
  */
 export function logInboundChannelMessage(msg: {
   channel: string;
@@ -223,13 +221,10 @@ export function logInboundChannelMessage(msg: {
  * `channel:{name}.handle` → `hook:channel-message` span pair, plus one
  * inbound-message log record (see `logInboundChannelMessage`) linked to the
  * channel span. Wrapping at the adapter boundary (before the hook registers)
- * gives one span per fire, not per register, and keeps instrumentation at
- * the neutral `ProviderAdapter` contract — concrete adapter impls stay span-free.
+ * gives one span per fire, not per register.
  *
- * Structurally typed (rather than importing `ProviderAdapter`/`NormalizedMessage`)
- * so telemetry doesn't depend on the channels module. Used by both production
- * startup (`packages/core/src/index.ts`) and the golden-trace test rig so
- * divergence is impossible.
+ * Structurally typed so telemetry doesn't depend on the channels module. Only
+ * the golden-trace test rig and its mock adapters still use it.
  */
 export function wrapProviderAdaptersWithSpans<
   M extends { id: string; channel: string; threadId: string; channelUserId: string; text: string },

@@ -275,22 +275,14 @@ export class TelegramUserAdapter {
       });
     }
 
-    return saveIncomingAttachmentPayloads(
+    return saveIncomingAttachmentPayloads(message, [
       {
-        channel: "telegram_user",
-        threadId: message.conversationId,
-        id: message.messageId,
-        attachments: message.attachments,
+        attachment,
+        data,
+        mimeType: telegramUserMediaMimeType(event) ?? attachment.mimeType,
+        fileName: telegramUserMediaFileName(event),
       },
-      [
-        {
-          attachment,
-          data,
-          mimeType: telegramUserMediaMimeType(event) ?? attachment.mimeType,
-          fileName: telegramUserMediaFileName(event),
-        },
-      ],
-    );
+    ]);
   }
 
   /** Messages from the last `windowHours`, oldest first: one conversation's

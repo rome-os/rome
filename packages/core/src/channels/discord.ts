@@ -38,12 +38,7 @@ import type {
   MessageReceipt,
   PersonRecord,
 } from "@rome-os/app-runtime";
-import type {
-  NormalizedMessage,
-  Attachment,
-  OutgoingMessage,
-  OutgoingAttachment,
-} from "./types.js";
+import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import { createLogger } from "../logger.js";
 import { saveUrlAttachments } from "./attachment-files.js";
 import { createReadStream } from "node:fs";
@@ -95,12 +90,12 @@ function timestampToSnowflake(timestampMs: number): string {
   return ((BigInt(Math.floor(timestampMs)) - discordEpoch) << 22n).toString();
 }
 
-function restMessageToNormalized(
+function restMessageToChannelMessage(
   msg: DiscordRestMessage,
   guildName: string,
   channelId: string,
   channelName: string,
-): NormalizedMessage {
+): ChannelMessage {
   const attachments: Attachment[] = msg.attachments.map((a) => {
     const mime = a.content_type;
     const fileName = discordAttachmentName(a.filename, a.title);
@@ -110,19 +105,21 @@ function restMessageToNormalized(
     return { type: "document", url: a.url, mimeType: mime ?? undefined, fileName };
   });
 
+  // The read leaves bot messages out, so every line is one a person wrote and
+  // Rome was told.
   return {
-    id: msg.id,
     channel: "discord",
-    channelUserId: msg.author.id,
-    displayName: msg.author.global_name ?? msg.author.username,
-    username: msg.author.username,
-    threadId: channelId,
-    threadName: `${guildName}/#${channelName}`,
-    threadType: "group",
-    timestamp: new Date(msg.timestamp),
+    direction: "inbound",
+    messageId: msg.id,
+    conversationId: channelId as ConversationId,
+    senderId: msg.author.id,
+    senderDisplayName: msg.author.global_name ?? msg.author.username,
+    senderUsername: msg.author.username,
     text: msg.content,
     attachments,
-    rawEvent: msg,
+    timestamp: new Date(msg.timestamp),
+    thread: { kind: "group", name: `${guildName}/#${channelName}` },
+    raw: msg,
   };
 }
 
@@ -1448,20 +1445,7 @@ export class DiscordAdapter {
   /** Download a message's files into the profile. Each attachment's `url` is
    *  its Discord CDN link, so the message needs no provider event. */
   async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
-    // saveUrlAttachments still takes the transport shape. It reads only the
-    // channel, conversation, message id and attachments from it.
-    return saveUrlAttachments({
-      id: message.messageId,
-      channel: "discord",
-      channelUserId: message.senderId,
-      displayName: message.senderDisplayName ?? message.senderId,
-      threadId: message.conversationId,
-      threadType: message.thread?.kind === "dm" ? "private" : "group",
-      timestamp: message.timestamp,
-      text: message.text,
-      attachments: message.attachments,
-      rawEvent: message.raw,
-    });
+    return saveUrlAttachments(message);
   }
 
   /**
@@ -1470,7 +1454,7 @@ export class DiscordAdapter {
    * - `threadId = null`  → all text channels across all guilds
    * - `threadId = <id>`  → only that specific channel
    */
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
+  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
     const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
     const afterSnowflake = timestampToSnowflake(cutoffMs);
     const maxPerChannel = Math.min(this.maxMessagesPerChannel, 100);
@@ -1487,7 +1471,7 @@ export class DiscordAdapter {
       messages.reverse();
       return messages
         .filter((m) => !m.author.bot)
-        .map((m) => restMessageToNormalized(m, "discord", threadId, threadId));
+        .map((m) => restMessageToChannelMessage(m, "discord", threadId, threadId));
     }
 
     // All-guilds fetch — channels and messages are fetched in parallel across guilds
@@ -1528,14 +1512,14 @@ export class DiscordAdapter {
                   error: err instanceof Error ? err.message : String(err),
                 });
               }
-              return [] as NormalizedMessage[];
+              return [] as ChannelMessage[];
             }
 
             // Discord returns newest-first; reverse to chronological order
             messages.reverse();
             return messages
               .filter((m) => !m.author.bot)
-              .map((m) => restMessageToNormalized(m, guild.name, channel.id, channelName));
+              .map((m) => restMessageToChannelMessage(m, guild.name, channel.id, channelName));
           }),
         );
 

@@ -6,7 +6,6 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import type { ProviderAdapter } from "./adapter.js";
 import type { NormalizedMessage } from "./types.js";
 import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
 import {
@@ -39,7 +38,7 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
 
   it("emits a channel:{name}.handle span per handler invocation with normalized-message attrs", async () => {
     const adapter = new MockProviderAdapter("telegram");
-    const adapters = new Map<string, ProviderAdapter>([["telegram", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["telegram", adapter]]);
     wrapProviderAdaptersWithSpans(adapters);
 
     const seen: string[] = [];
@@ -68,7 +67,7 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
 
   it("parents the hook:channel-message span under channel:{name}.handle", async () => {
     const adapter = new MockProviderAdapter("webchat");
-    const adapters = new Map<string, ProviderAdapter>([["webchat", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["webchat", adapter]]);
     wrapProviderAdaptersWithSpans(adapters);
 
     adapter.onMessage(async () => {});
@@ -84,7 +83,7 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
 
   it("records handler exceptions on the channel span (status=ERROR, exception event)", async () => {
     const adapter = new MockProviderAdapter("discord");
-    const adapters = new Map<string, ProviderAdapter>([["discord", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["discord", adapter]]);
     wrapProviderAdaptersWithSpans(adapters);
 
     adapter.onMessage(async () => {
@@ -128,7 +127,7 @@ describe("inbound channel message log (composition-root wrapping)", () => {
 
   it("emits one log record per inbound message carrying the message content", async () => {
     const adapter = new MockProviderAdapter("whatsapp");
-    const adapters = new Map<string, ProviderAdapter>([["whatsapp", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["whatsapp", adapter]]);
     wrapProviderAdaptersWithSpans(adapters);
 
     adapter.onMessage(async () => {});
@@ -157,7 +156,7 @@ describe("inbound channel message log (composition-root wrapping)", () => {
 
   it("links the log record to the channel:{name}.handle span's trace", async () => {
     const adapter = new MockProviderAdapter("webchat");
-    const adapters = new Map<string, ProviderAdapter>([["webchat", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["webchat", adapter]]);
     wrapProviderAdaptersWithSpans(adapters);
 
     adapter.onMessage(async () => {});

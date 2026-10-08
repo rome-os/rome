@@ -25,12 +25,7 @@ import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import {
-  directoryPage,
-  historyQueryLimit,
-  historyWindowHours,
-  toHistoryMessage,
-} from "./talk-features.js";
+import { directoryPage, historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
 // (users/@me). Declared next to the material shape ({ token }); parse-then-store,
@@ -299,11 +294,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                     input.conversationId ?? null,
                     historyWindowHours(input.since),
                   );
-                  // The read leaves bot messages out, so every line is one a
-                  // person wrote and Rome was told.
-                  return messages
-                    .slice(0, historyQueryLimit(input.limit))
-                    .map((message) => toHistoryMessage(message, "discord"));
+                  return messages.slice(0, historyQueryLimit(input.limit));
                 },
               };
               const inboundMedia: TalkInboundMedia = {

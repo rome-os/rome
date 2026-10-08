@@ -12,12 +12,7 @@
 
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
-import type {
-  ChannelMessage,
-  ConversationId,
-  MessageReceipt,
-  NormalizedMessage,
-} from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -40,7 +35,7 @@ const fakeState: {
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ conversationId: ConversationId; message: unknown }>;
   historyCalls: Array<{ threadId: string | null; windowHours: number }>;
-  historyMessages: NormalizedMessage[];
+  historyMessages: ChannelMessage[];
   apiRequests: ChannelApiRequest[];
   apiResult: ChannelApiResult;
   stopCalls: number;
@@ -87,7 +82,7 @@ rs.mock("../../channels/discord.js", () => ({
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
     }
-    async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
+    async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
       fakeState.historyCalls.push({ threadId, windowHours });
       return fakeState.historyMessages;
     }
@@ -262,16 +257,16 @@ describe("discord descriptor shape", () => {
   it("exposes provider-neutral history", async () => {
     fakeState.historyMessages = [
       {
-        id: "message-1",
         channel: "discord",
-        channelUserId: "user-1",
-        displayName: "User",
-        threadId: "chan-1",
-        threadType: "group",
-        timestamp: new Date("2026-01-01T00:00:00.000Z"),
+        direction: "inbound",
+        messageId: "message-1",
+        conversationId: "chan-1" as ConversationId,
+        senderId: "user-1",
+        senderDisplayName: "User",
         text: "hello",
         attachments: [],
-        rawEvent: {},
+        timestamp: new Date("2026-01-01T00:00:00.000Z"),
+        thread: { kind: "group" },
       },
     ];
     const h = buildTalker();
