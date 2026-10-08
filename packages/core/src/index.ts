@@ -1552,6 +1552,12 @@ async function main() {
   // be mid-refresh: open between refreshes, never inside one.
   await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
 
+  // Records where every listed agent is now, so one renamed before its next
+  // message still finds its link.
+  if (connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null)) {
+    void agentsIdentity.prime();
+  }
+
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],

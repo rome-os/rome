@@ -73,14 +73,14 @@ describe("keeping agents' links on their endpoint", () => {
   });
 
   it("moves a linked agent's link to its new address when its owner renames their handle", async () => {
-    await people.addChannelMapping("ada", "agents", "@friend/atlas", "Atlas");
+    await people.addChannelMapping("ada", "agents", "@friend/atlas", "@friend/atlas (dot)");
     await identity.observe([listed("ep_atlas", "@friend/atlas")]);
 
     await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
     expect(people.readChannelHolder(testDb.db, "agents", "@newfriend/atlas")).toEqual({
       personId: "ada",
-      displayName: "Atlas",
+      displayName: "@newfriend/atlas (dot)",
     });
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
@@ -164,7 +164,7 @@ describe("keeping agents' links on their endpoint", () => {
         return listing;
       },
     });
-    await identity.observe(listing);
+    await identity.observeListing(listing, 0);
     listing = [listed("ep_atlas", "@newfriend/atlas")];
 
     await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
@@ -236,7 +236,7 @@ describe("keeping agents' links on their endpoint", () => {
         });
       },
     });
-    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 0);
 
     await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
     expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
@@ -286,6 +286,53 @@ describe("keeping agents' links on their endpoint", () => {
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
+  it("reads Cloud once at boot, so a rename before the next message still moves the link", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    let listing = [listed("ep_atlas", "@friend/atlas")];
+    let asked = 0;
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => {
+        asked++;
+        return listing;
+      },
+    });
+    await identity.prime();
+    listing = [listed("ep_atlas", "@newfriend/atlas")];
+
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 1)]);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+    // Primed once: the message's own read is for its disagreement.
+    expect(asked).toBe(2);
+  });
+
+  it("starts one read for a disagreement however many messages wait on it", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    let asked = 0;
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      relistWaitMs: 5,
+      list: () => {
+        asked++;
+        return new Promise(() => {});
+      },
+    });
+    await identity.observeListing([listed("ep_old", "atlas")], 0);
+
+    await identity.observe([sent("ep_new", "atlas", 1)]);
+    await identity.observe([sent("ep_new", "atlas", 2)]);
+
+    expect(asked).toBe(1);
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
   });
 
   it("orders messages by when they were sent", async () => {
