@@ -49,14 +49,14 @@ describe("the agents address book", () => {
       client: cloud([
         atlas,
         {
-          endpoint: "atlas",
+          endpoint: "@friend/atlas",
           kind: "dot",
           ready: true,
           sameAccount: false,
           address: "@friend/atlas",
         },
         {
-          endpoint: "home-rome",
+          endpoint: "@friend/home-rome",
           kind: "rome",
           ready: true,
           sameAccount: false,

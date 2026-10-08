@@ -85,7 +85,7 @@ describe("agents channel", () => {
   it("addresses another account's agent by its account, so two accounts' names never meet", () => {
     const external = envelope({
       from: {
-        endpoint: "atlas",
+        endpoint: "@friend/atlas",
         endpointId: "6f1c",
         kind: "dot",
         sameAccount: false,

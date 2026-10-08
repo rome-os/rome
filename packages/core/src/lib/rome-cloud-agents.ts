@@ -13,8 +13,9 @@ export interface AgentMessageEnvelope {
   messageId: string;
   /** `sameAccount` is Cloud's statement that the sender is in this Rome's
    *  account. An older Cloud omits it, and Rome then trusts no sender.
-   *  `endpoint` is the bare name, `account` the sender account's handle, and
-   *  `address` the full `@handle/endpoint`. */
+   *  `endpoint` is what a reply goes to: the bare name in this Rome's own
+   *  account, the full `@handle/endpoint` in a linked one. `account` is the
+   *  sender account's handle and `address` its full address. */
   from: {
     endpoint: string;
     endpointId?: string;
@@ -56,6 +57,9 @@ export function agentAddress(agent: {
   address?: string;
 }): string | null {
   if (agent.sameAccount !== false) return agent.endpoint;
+  // Cloud gives a linked account's endpoint as its full address; an earlier
+  // draft of the contract gave the bare name beside `address` and `account`.
+  if (agentAddressAccount(agent.endpoint) !== null) return agent.endpoint;
   const address =
     agent.address ?? (agent.account ? `@${agent.account}/${agent.endpoint}` : undefined);
   return address && agentAddressAccount(address) !== null ? address : null;
