@@ -335,6 +335,22 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
   });
 
+  it("reads a disputed message again once a listing stops vouching for its address", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    identity = createAgentsIdentity({
+      db: testDb.db,
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      list: async () => [listed("ep_else", "nova")],
+    });
+    await identity.observeListing([listed("ep_old", "atlas")], 0);
+
+    await identity.observe([sent("ep_new", "atlas", 5)]);
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
   it("orders messages by when they were sent", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);

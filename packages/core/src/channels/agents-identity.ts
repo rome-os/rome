@@ -262,7 +262,9 @@ export function createAgentsIdentity(deps: {
           });
         } else if (!repo.readPersonExists(tx, parked)) {
           // Merged into someone else since, and gone with the merge.
-          log.info("an agent's waiting link was to a person who is gone", { to: entry.address });
+          log.warn("an agent's waiting link was to a person who is gone; it is dropped", {
+            to: entry.address,
+          });
         } else if (holderOf(entry.address) === null) {
           // A name built from the old address names the new one now.
           const name = parkedName?.split(entry.parkedFrom).join(entry.address);
@@ -407,11 +409,16 @@ export function createAgentsIdentity(deps: {
     const reads = [...new Set(disputed.map(({ key }) => reading.get(key)))];
     const answered = await waited(Promise.all(reads).then((all) => all.every(Boolean)));
     const held = disputed.filter((dispute) => dispute.held).map((dispute) => dispute.sighting);
-    if (!answered && held.length > 0) {
-      await serial(async () => {
+    if (held.length === 0) return;
+    await serial(async () => {
+      if (answered) {
+        // Read again against what the listing settled, which may have
+        // stopped vouching for the address.
+        settle(held);
+      } else if (listedAt < askedAt) {
         settle(held, { withhold: true });
-      });
-    }
+      }
+    });
   }
 
   /** Reads Cloud's listing once after boot, so an endpoint renamed before Rome
