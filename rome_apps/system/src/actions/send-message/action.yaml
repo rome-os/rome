@@ -3,8 +3,9 @@ type: system
 description: >-
   Send a message through any registered Rome channel (telegram,
   whatsapp, discord, wechat, webchat, feishu, email, and agents). Use
-  "agents" to message another agent in the Rome Cloud account, such as
-  a dot, with its endpoint name as the threadId. Prefer this over any
+  "agents" to message an agent on Rome Cloud, such as a dot, with the
+  agent's id (a UUID, the threadId its messages arrive on) as the
+  threadId, never its name. Prefer this over any
   external Gmail tool when sending or replying to mail as Rome.
 complexity: simple
 speed: fast

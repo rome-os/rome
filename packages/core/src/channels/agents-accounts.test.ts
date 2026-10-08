@@ -110,6 +110,7 @@ describe("the agents address book", () => {
     });
     expect(await book.resolve("atlas")).toBeNull();
     expect(await book.resolve("@friend/atlas")).toBeNull();
+    expect(await book.resolve(ATLAS.toUpperCase())).toBeNull();
   });
 
   it("asks Cloud nothing until Agents is connected", async () => {

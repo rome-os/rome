@@ -6,7 +6,7 @@ import {
   AgentMessagingError,
 } from "../../lib/rome-cloud-agents.js";
 import { createTestDb } from "../../test/helpers.js";
-import { CredentialRejected } from "../errors.js";
+import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { StreamFault } from "../types.js";
@@ -123,25 +123,20 @@ describe("agents channel", () => {
     await talker.stop();
   });
 
-  it("keeps messages whose sender has no agentId unacknowledged, as from another contract", async () => {
+  it("keeps messages whose sender has no agentId, and reports the connection broken", async () => {
     const { agentId: _, ...from } = envelope().from;
     const client = fakeClient([
       [envelope({ from: from as never }), envelope({ messageId: "msg_2" })],
     ]);
-    let polls = 0;
-    const poll = client.poll;
-    client.poll = async () => {
-      polls++;
-      return poll();
-    };
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
+    const faults: unknown[] = [];
     talker.start(
       (message) => delivered.push(message),
-      () => {},
+      (fault) => faults.push(fault),
     );
-    await until(() => polls > 0);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await until(() => faults.length > 0);
+    expect(faults[0]).toBeInstanceOf(Disconnected);
     expect(delivered).toEqual([]);
     expect(client.acknowledged).toEqual([]);
     await talker.stop();

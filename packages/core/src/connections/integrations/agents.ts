@@ -24,7 +24,7 @@ import {
   isNotReachable,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
-import { CredentialRejected } from "../errors.js";
+import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import { addressIsConversationFeature } from "./talk-features.js";
 import type {
@@ -184,14 +184,19 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         const { messages } = await client.poll();
         if (current !== generation) return;
         // A sender without `agentId` is a Cloud on another contract, not a
-        // removed agent. Acknowledging would lose the messages, so the poll
-        // fails and Cloud keeps them.
+        // removed agent. Acknowledging would lose the messages, so Cloud keeps
+        // them and the connection reports itself broken.
         if (messages.some((message) => message.from?.agentId === undefined)) {
-          throw new AgentMessagingError(
+          const err = new AgentMessagingError(
             "Rome Cloud sent messages without a sender agentId; this Rome cannot read them.",
             undefined,
             "unexpected_shape",
           );
+          log.error("Agent messages arrived in a shape this Rome does not read", {
+            error: err.message,
+          });
+          fault(new Disconnected(err));
+          return;
         }
         for (const message of messages) {
           const inbound = toAgentInboundMessage(message);

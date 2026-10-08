@@ -32,8 +32,9 @@ const log = createLogger("agents-accounts");
  *  to one request. */
 const READ_TTL_MS = 30_000;
 
-/** Cloud's agent ids are UUIDs. */
-const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Cloud's agent ids are lowercase UUIDs, and only that spelling resolves, so
+ *  one agent never has two accounts. */
+const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** An agent's account, named when Cloud has listed it. Names are labels two
  *  agents can share, so each carries its kind and, for another account's
