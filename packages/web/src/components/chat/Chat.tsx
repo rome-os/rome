@@ -1151,6 +1151,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       sendingSessionId: string,
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
+      // The client-minted input id, when the row may show before the POST
+      // settles. The server keeps it as the message id, so the accepted row
+      // replaces this one in place instead of mounting a second bubble.
+      immediateInputId?: string,
     ): Promise<void> => {
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
@@ -1158,6 +1162,45 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       scrollToBottom("auto");
       const wasLocallyStreaming = locallyStreamingSessionIdsRef.current.has(sendingSessionId);
       locallyStreamingSessionIdsRef.current.add(sendingSessionId);
+      const sentAt = new Date().toISOString();
+
+      const putUserMessage = (message: ChatMessage, replacesId?: string) => {
+        const localIds =
+          localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
+        localIds.add(message.id);
+        localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
+        setMessages((prev) => {
+          const next = new Map(prev);
+          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
+          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          return next;
+        });
+      };
+      const dropImmediateMessage = () => {
+        if (!immediateInputId) return;
+        localOptimisticMessageIdsRef.current.get(sendingSessionId)?.delete(immediateInputId);
+        setMessages((prev) => {
+          const existing = prev.get(sendingSessionId);
+          if (!existing?.some((m) => m.id === immediateInputId)) return prev;
+          const next = new Map(prev);
+          next.set(
+            sendingSessionId,
+            existing.filter((m) => m.id !== immediateInputId),
+          );
+          return next;
+        });
+      };
+      if (immediateInputId) {
+        putUserMessage({
+          id: immediateInputId,
+          sessionId: sendingSessionId,
+          turnId: null,
+          inputState: "submitted",
+          role: "user",
+          content: optimisticUserContent,
+          createdAt: sentAt,
+        });
+      }
 
       // The POST result is the acceptance boundary. Whether the composer clears
       // or restores the user's input hinges on this result alone — never on the
@@ -1168,6 +1211,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
         // Transport failure posting the turn — a genuine failed submit.
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         // A cancelled attachment upload is a deliberate act, not a failure:
@@ -1177,6 +1221,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         throw err;
       });
       if (!result.ok) {
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         const message =
@@ -1198,24 +1243,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 
       const userMsg: ChatMessage = {
-        id: createResp.inputId ?? crypto.randomUUID(),
+        id: createResp.inputId ?? immediateInputId ?? crypto.randomUUID(),
         sessionId: sendingSessionId,
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
         content: optimisticUserContent,
-        createdAt: new Date().toISOString(),
+        createdAt: sentAt,
       };
-      const localIds =
-        localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
-      localIds.add(userMsg.id);
-      localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
-      setMessages((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sendingSessionId) ?? [];
-        next.set(sendingSessionId, mergeChatMessage(existing, userMsg));
-        return next;
-      });
+      putUserMessage(userMsg, immediateInputId);
 
       // Appending input does not own a second stream or replace the live tail.
       // Late follow-up turns are discovered by the existing reattach loop.
@@ -1311,6 +1347,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           });
         },
         optimisticContent,
+        // A text-only send shows its bubble at once. An upload keeps its text
+        // in the composer until the server accepts it, so its bubble waits too.
+        snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
       );
     },
     [runTurnLifecycle, workspaceContextRegistry, t],

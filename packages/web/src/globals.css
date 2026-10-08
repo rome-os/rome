@@ -239,6 +239,34 @@
   }
 }
 
+/* Pending user bubble (chat UserMessage): the normal bubble, breathing while
+   the agent has not taken the input in yet. The delay keeps an input the agent
+   picks up at once from blinking. Under reduced motion it rests dimmed, so the
+   state still reads. */
+.rome-bubble-pending {
+  animation: rome-bubble-breathe 1.8s ease-in-out 0.6s infinite;
+}
+
+@keyframes rome-bubble-breathe {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rome-bubble-pending {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
 @keyframes rome-sheet-rise {
   from {
     transform: translateY(100%);

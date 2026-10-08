@@ -59,6 +59,22 @@ function readMetrics(scroller: HTMLElement | Window) {
   return { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
 }
 
+/**
+ * Whether the view stays pinned after a scroll that follows a user gesture.
+ * Reaching the bottom pins it, and only moving up releases it. A downward
+ * nudge short of the bottom keeps the current state: the browser makes those
+ * when content grows under a gesture that was not a scroll, such as the Enter
+ * or click that sends a message.
+ */
+export function pinnedAfterUserScroll(scroll: {
+  stuck: boolean;
+  atBottom: boolean;
+  movedUp: boolean;
+}): boolean {
+  if (scroll.atBottom) return true;
+  return scroll.movedUp ? false : scroll.stuck;
+}
+
 // How long after a real user gesture (wheel/touch/pointer/key) a resulting
 // scroll still counts as "the user scrolling". Outside this window a scroll is
 // treated as programmatic (autofocus, .scrollIntoView, our own pin).
@@ -148,6 +164,7 @@ export function useStickToBottom({
   // it). We only react to the scroller that owns our content, so an unrelated
   // list scrolling elsewhere doesn't toggle our pin.
   useEffect(() => {
+    let lastScrollTop: number | null = null;
     const handleScroll = (event: Event) => {
       const scroller = resolveScroller();
       const isOurs =
@@ -157,11 +174,16 @@ export function useStickToBottom({
             event.target === document.body
           : event.target === scroller;
       if (!isOurs) return;
-      const atBottom = distanceToBottom(readMetrics(scroller)) <= thresholdPx;
+      const metrics = readMetrics(scroller);
+      const atBottom = distanceToBottom(metrics) <= thresholdPx;
+      const movedUp = lastScrollTop !== null && metrics.scrollTop < lastScrollTop - 0.5;
+      lastScrollTop = metrics.scrollTop;
       const userDriven = performance.now() - lastUserGestureRef.current <= USER_INTENT_WINDOW_MS;
       if (userDriven) {
         // The user is scrolling: they may release the pin or scroll back to re-engage.
-        setStuck(atBottom);
+        const stuck = pinnedAfterUserScroll({ stuck: stuckRef.current, atBottom, movedUp });
+        setStuck(stuck);
+        if (stuck && !atBottom) jumpToBottom("auto");
       } else if (stuckRef.current && !atBottom) {
         // Programmatic drift while stuck (e.g. a component autofocused an input,
         // or our own pin landed a hair short) — snap back instead of releasing.

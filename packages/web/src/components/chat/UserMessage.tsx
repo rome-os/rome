@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useRef } from "react";
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -6,6 +6,7 @@ import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
+import { useSendFlight } from "@/components/chat/use-chat-motion";
 
 // Isolated so that streaming-driven re-renders of ChatPage do not re-parse
 // every historical user message through ReactMarkdown on every snapshot tick.
@@ -14,6 +15,9 @@ import { cn } from "@/lib/utils";
 export const UserMessage = memo(
   function UserMessage({ msg }: { msg: ChatMessage }) {
     const { t } = useTranslation("chat");
+    const rowRef = useRef<HTMLDivElement>(null);
+    const bubbleRef = useRef<HTMLDivElement>(null);
+    useSendFlight(msg.id, rowRef, bubbleRef);
     const text = useMemo(() => {
       let blocks: ChatEntry[];
       try {
@@ -43,14 +47,17 @@ export const UserMessage = memo(
     // The guardian's own messages stay as a right-aligned bubble — no avatar or
     // name, since there's only ever one human in the conversation.
     return (
-      <div className="group mb-4 flex flex-col items-end">
+      <div ref={rowRef} className="group mb-4 flex flex-col items-end">
         {/* One inset on every side, equal to `--markdown-block-space-between`
             at this density. A rim narrower than the space the renderer puts
             between two paragraphs reads as content spilling out of the box. */}
         <div
+          ref={bubbleRef}
           className={cn(
             "flex max-w-[70%] items-start gap-2 break-words rounded-12 border border-transparent bg-surface-muted p-4 transition-colors motion-reduce:transition-none",
-            pending && "border-dashed border-border-strong bg-transparent",
+            // A pending bubble is the normal bubble, breathing until the agent
+            // takes the input in (see `.rome-bubble-pending` in globals.css).
+            pending && "rome-bubble-pending",
             msg.inputState === "cancelled" && "border-dashed border-border bg-transparent",
             msg.inputState === "failed" && "border-destructive/50",
             msg.inputState === "unknown" && "border-warning/50",

@@ -19,6 +19,7 @@ import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
+import { useArrival } from "@/components/chat/use-chat-motion";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -400,40 +401,44 @@ function StandaloneLiveTail({
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
 }) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useArrival(wrapperRef);
   return (
-    <MessageRow
-      name={live.identity.name}
-      avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
-      subtitle={
-        <CollapsedTraceButton
-          summary={live.snapshot?.summary}
-          onClick={onOpenLiveTrace}
-          live
-          compact
+    <div ref={wrapperRef}>
+      <MessageRow
+        name={live.identity.name}
+        avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
+        subtitle={
+          <CollapsedTraceButton
+            summary={live.snapshot?.summary}
+            onClick={onOpenLiveTrace}
+            live
+            compact
+          />
+        }
+        headerAccessory={renderSubagents(
+          live.snapshot?.summary.subagents,
+          onOpenSubagentTrace,
+          activeTraceTarget,
+          subagentIconByName,
+        )}
+      >
+        {live.text ? (
+          <div className="rome-live-caret">
+            {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+              ...actions,
+              turnId: live.runningTurnId ?? undefined,
+            })}
+          </div>
+        ) : null}
+        <LiveTurnActivity
+          snapshot={live.snapshot}
+          textThroughOrdinal={live.textThroughOrdinal}
+          hasText={!!live.text}
         />
-      }
-      headerAccessory={renderSubagents(
-        live.snapshot?.summary.subagents,
-        onOpenSubagentTrace,
-        activeTraceTarget,
-        subagentIconByName,
-      )}
-    >
-      {live.text ? (
-        <div className="rome-live-caret">
-          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-            ...actions,
-            turnId: live.runningTurnId ?? undefined,
-          })}
-        </div>
-      ) : null}
-      <LiveTurnActivity
-        snapshot={live.snapshot}
-        textThroughOrdinal={live.textThroughOrdinal}
-        hasText={!!live.text}
-      />
-      <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
-    </MessageRow>
+        <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
+      </MessageRow>
+    </div>
   );
 }
 
@@ -544,7 +549,7 @@ export function MessageList({
 
   const content = (
     <div className="flex-1">
-      <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
+      <div ref={contentRef} data-chat-transcript className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
         {rows.flatMap((row) => {
           const isRunning = row === runningRow;
           const view = (
