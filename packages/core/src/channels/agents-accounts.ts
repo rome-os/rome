@@ -88,22 +88,28 @@ export function agentsAccounts(deps: {
 }): Accounts {
   const now = deps.now ?? Date.now;
   let read: { at: number; book: Promise<Book> } | null = null;
+  // A handle rarely changes, so the last one Cloud named outlives a failed
+  // read, and other accounts' addresses keep resolving through an outage.
+  let lastOwnHandle: string | null = null;
 
   function endpoints(): Promise<Book> {
     if (!deps.isConnected()) return Promise.resolve({ accounts: [], ownHandle: null });
     if (read && now() - read.at < READ_TTL_MS) return read.book;
     const book = deps.client.endpoints().then(
-      ({ endpoint: own, address, endpoints }) => ({
-        accounts: endpoints
-          // A dot still waiting on its pairing confirmation cannot be reached.
-          .filter(
-            (endpoint) =>
-              endpoint.ready && (endpoint.sameAccount === false || endpoint.endpoint !== own),
-          )
-          .flatMap((endpoint) => toAccount(endpoint) ?? [])
-          .sort((a, b) => compareCodePoints(a.id, b.id)),
-        ownHandle: address ? agentAddressAccount(address) : null,
-      }),
+      ({ endpoint: own, address, endpoints }) => {
+        lastOwnHandle = address ? agentAddressAccount(address) : null;
+        return {
+          accounts: endpoints
+            // A dot still waiting on its pairing confirmation cannot be reached.
+            .filter(
+              (endpoint) =>
+                endpoint.ready && (endpoint.sameAccount === false || endpoint.endpoint !== own),
+            )
+            .flatMap((endpoint) => toAccount(endpoint) ?? [])
+            .sort((a, b) => compareCodePoints(a.id, b.id)),
+          ownHandle: lastOwnHandle,
+        };
+      },
       // Every address book is read for every People page, so an unreachable
       // Cloud lists no agents rather than failing the page. The empty answer
       // is kept like any other read, so an outage does not hold each page
@@ -112,7 +118,7 @@ export function agentsAccounts(deps: {
         log.warn("Could not list agent endpoints", {
           error: err instanceof Error ? err.message : String(err),
         });
-        return { accounts: [], ownHandle: null };
+        return { accounts: [], ownHandle: lastOwnHandle };
       },
     );
     read = { at: now(), book };

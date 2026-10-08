@@ -160,6 +160,17 @@ describe("the agents address book", () => {
     now = 60_000;
     expect((await book.listAccounts({ limit: 100 })).accounts).toHaveLength(1);
   });
+
+  it("keeps resolving other accounts' agents through an outage after Cloud has named the handle", async () => {
+    let now = 0;
+    const client = cloud([atlas]);
+    const book = agentsAccounts({ client, isConnected: () => true, now: () => now });
+    await book.listAccounts({ limit: 100 });
+    client.fail = true;
+    now = 60_000;
+    expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
+    expect(await book.resolve("@ouou/atlas")).toBeNull();
+  });
 });
 
 describe("a dot on the People page", () => {

@@ -177,6 +177,13 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         if (current !== generation) return;
         for (const message of messages) {
           const inbound = toAgentInboundMessage(message);
+          // Only a Cloud from before cross-account links omits sameAccount;
+          // logged so a newer Cloud dropping it shows up.
+          if (inbound && message.from.sameAccount === undefined) {
+            log.warn("Agent message did not say whether its sender is in this account", {
+              messageId: message.messageId,
+            });
+          }
           if (inbound) {
             deliver(inbound);
           } else {
