@@ -1704,7 +1704,7 @@ export interface ChannelSummary {
  * it subscribes through.
  */
 export interface ChannelsService {
-  /** Every channel this Rome has, and whether each can send now. */
+  /** Every channel this Rome has, and whether a Connection backs each. */
   list(): Promise<ChannelSummary[]>;
   /** Send on a channel, through the Connection backing it. Rejects when no
    *  Connection backs the channel. */
