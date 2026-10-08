@@ -155,6 +155,8 @@ describe("the agents address book", () => {
           ready: true,
           sameAccount: false,
         },
+        // A Cloud that predates endpoint ids.
+        { endpoint: "nova", kind: "dot", ready: true } as AgentEndpointSummary,
       ]),
       isConnected: () => true,
       onListed: (sightings) => told.push(sightings),

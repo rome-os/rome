@@ -109,11 +109,12 @@ export function agentSightings(message: ChannelMessage): AgentSighting[] {
     : [];
 }
 
-/** The endpoints a listing names. */
+/** The endpoints a listing names. A Cloud that predates endpoint ids names
+ *  none, and settles nothing. */
 export function listingSightings(endpoints: readonly AgentEndpointSummary[]): AgentSighting[] {
   return endpoints.flatMap((endpoint) => {
     const address = agentAddress(endpoint);
-    return address !== null
+    return address !== null && endpoint.endpointId
       ? [{ endpointId: endpoint.endpointId, address, by: "listing" as const }]
       : [];
   });
