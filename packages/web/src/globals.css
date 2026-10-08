@@ -281,9 +281,25 @@
   }
 }
 
+/* The status line in the typing bubble fades in each time it changes. */
+.rome-status-fade {
+  animation: rome-status-fade 0.2s ease-out;
+}
+
+@keyframes rome-status-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
 
-  .rome-typing-dot {
+  .rome-typing-dot,
+  .rome-status-fade {
     animation: none;
   }
 }
