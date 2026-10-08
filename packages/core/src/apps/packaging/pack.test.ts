@@ -738,6 +738,38 @@ describe("runPnpm", () => {
     await expect(runPnpm(["install"], { cwd })).resolves.toBeUndefined();
   });
 
+  describe("with ROME_PNPM_COREPACK_HOME", () => {
+    let originalPinned: string | undefined;
+    let originalCorepackHome: string | undefined;
+
+    beforeEach(() => {
+      originalPinned = process.env.ROME_PNPM_COREPACK_HOME;
+      originalCorepackHome = process.env.COREPACK_HOME;
+      process.env.COREPACK_HOME = "/home/rome/.cache/node/corepack";
+    });
+
+    afterEach(() => {
+      restoreEnv("ROME_PNPM_COREPACK_HOME", originalPinned);
+      restoreEnv("COREPACK_HOME", originalCorepackHome);
+    });
+
+    it("runs pnpm with COREPACK_HOME pointed at the pinned cache", async () => {
+      process.env.ROME_PNPM_COREPACK_HOME = "/opt/rome-corepack";
+      fakePnpm('echo "COREPACK_HOME=$COREPACK_HOME"\nexit 1');
+      const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+        .message;
+      expect(message).toContain("COREPACK_HOME=/opt/rome-corepack");
+    });
+
+    it("leaves COREPACK_HOME alone when unset", async () => {
+      delete process.env.ROME_PNPM_COREPACK_HOME;
+      fakePnpm('echo "COREPACK_HOME=$COREPACK_HOME"\nexit 1');
+      const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+        .message;
+      expect(message).toContain("COREPACK_HOME=/home/rome/.cache/node/corepack");
+    });
+  });
+
   it("carries the tail of pnpm's stdout and stderr on a non-zero exit", async () => {
     fakePnpm(
       [
@@ -819,3 +851,8 @@ describe("runPnpm", () => {
     expect(message).toBe(`Command failed: pnpm install (cwd: ${cwd}, exit 2)`);
   });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
