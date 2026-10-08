@@ -61,7 +61,9 @@ export function createAgentsGuardianLink(deps: {
     if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
     const recorded = envelopeFrom(message)?.endpointId ?? endpoint;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
-    if (linked.includes(recorded)) return;
+    // The name too: a record made by name stays there until the endpoint is
+    // first settled, and an unlink must hold even if that settling failed.
+    if (linked.includes(recorded) || linked.includes(endpoint)) return;
     const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
     if (!guardian) return;
     // The record goes first. If the link then fails, the endpoint stays

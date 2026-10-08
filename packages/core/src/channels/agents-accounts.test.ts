@@ -146,12 +146,13 @@ describe("the agents address book", () => {
       ]),
       isConnected: () => true,
       onListed: (sightings) => told.push(sightings),
+      now: () => 5,
     });
     await book.listAccounts({ limit: 100 });
     expect(told).toEqual([
       [
-        { endpointId: "ep_atlas", address: "atlas" },
-        { endpointId: "ep_friend", address: "@friend/atlas" },
+        { endpointId: "ep_atlas", address: "atlas", at: 5 },
+        { endpointId: "ep_friend", address: "@friend/atlas", at: 5 },
       ],
     ]);
   });
