@@ -144,7 +144,7 @@ describe("importChannelSettings — telegram", () => {
     const conn = registry.all()[0];
     expect(conn.service).toBe("telegram");
     expect(conn.auth.grants().bot).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(talkerFactory.instances).toHaveLength(1);
     expect(talkerFactory.instances[0].state.starts[0].creds.bot.material).toEqual({
       token: "tok-1",
@@ -248,7 +248,7 @@ describe("importChannelSettings — telegram", () => {
     const settingsWithToken = makeSettingsSource({ telegram: { botToken: "boot1-token" } });
     await importChannelSettings(registry1, settingsWithToken);
     const connId = registry1.all()[0].id;
-    expect(registry1.get(connId).talk).not.toBeNull();
+    expect(registry1.get(connId).isUnlocked("talk")).toBe(true);
 
     // "Boot 2": a fresh registry over the SAME ledger (simulates a reboot);
     // the settings row was deleted at some point after boot 1's import (e.g.
@@ -260,7 +260,7 @@ describe("importChannelSettings — telegram", () => {
 
     expect(registry2.all()).toHaveLength(1);
     expect(registry2.get(connId).auth.grants().bot).toBe("authorized");
-    expect(registry2.get(connId).talk).not.toBeNull();
+    expect(registry2.get(connId).isUnlocked("talk")).toBe(true);
 
     const emptySettings = makeSettingsSource(); // no "telegram" key
     await importChannelSettings(registry2, emptySettings);
@@ -270,7 +270,7 @@ describe("importChannelSettings — telegram", () => {
     // just because the settings row went away.
     expect(registry2.all()).toHaveLength(1);
     expect(registry2.get(connId).auth.grants().bot).toBe("authorized");
-    expect(registry2.get(connId).talk).not.toBeNull();
+    expect(registry2.get(connId).isUnlocked("talk")).toBe(true);
   });
 });
 
@@ -393,7 +393,7 @@ describe("importChannelSettings — three-way guard", () => {
     });
     await conn.auth.revoke("bot");
     expect(conn.auth.grants().bot).toBe("unauthorized");
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     const epochsAfterRevoke = talkerFactory.instances.length;
 
     // Next boot: the sweep sees the revoke tombstone (unauthorized WITH a prior
@@ -406,14 +406,14 @@ describe("importChannelSettings — three-way guard", () => {
     const grant = await ledger.getGrant(conn.id, "bot");
     expect(grant?.state).toBe("unauthorized");
     expect(grant?.credential).toBeUndefined();
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(talkerFactory.instances).toHaveLength(epochsAfterRevoke);
 
     // A NEW connect ceremony (route full-import) still confers normally — the
     // tombstone only blocks the boot sweep.
     await importOneChannel(registry, settings, TELEGRAM_SETTINGS_IMPORT_ROW);
     expect(conn.auth.grants().bot).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
   });
 });
 
@@ -466,7 +466,7 @@ describe("importChannelSettings — email (boot bridge)", () => {
 
     const conn = registry.find("email")[0];
     expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     // Material is the NEW shape — coords only; guardianEmail stays settings config.
     expect(talkerFactory.instances[0].state.starts[0].creds.inbox.material).toEqual({
       address: "slug@mail.romeos.cc",
@@ -854,7 +854,7 @@ describe("ensureZeroGrantConnections", () => {
     await ensureZeroGrantConnections(registry);
     expect(registry.find("webchat")).toHaveLength(1);
     // webchat is zero-grant → unlocked at birth
-    expect(registry.find("webchat")[0].talk).not.toBeNull();
+    expect(registry.find("webchat")[0].isUnlocked("talk")).toBe(true);
 
     // Idempotent: a second run does not create a duplicate connection.
     await ensureZeroGrantConnections(registry);

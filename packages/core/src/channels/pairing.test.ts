@@ -31,12 +31,13 @@ function registryOf(
   return {
     get: (connectionId) =>
       ({
-        talk: {
-          send: (...args: Parameters<ChannelSend["send"]>) => send(connectionId, ...args),
-          get directMessaging() {
-            return feature(connectionId, "directMessaging") ?? undefined;
-          },
-        },
+        withTalker: (call: (talker: object) => unknown) =>
+          call({
+            send: (...args: Parameters<ChannelSend["send"]>) => send(connectionId, ...args),
+            get directMessaging() {
+              return feature(connectionId, "directMessaging") ?? undefined;
+            },
+          }),
       }) as never,
   };
 }

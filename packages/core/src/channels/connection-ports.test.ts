@@ -70,7 +70,13 @@ testMessagesQueryContract("connection-backed messages", () => {
   const deps = {
     registry: {
       getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-      find: () => [{ id: "conn-1", talk: { history, subscribe: () => () => {} } }],
+      find: () => [
+        {
+          id: "conn-1",
+          withTalker: (call: (talker: object) => unknown) => call({ history }),
+          hearTalker: () => () => {},
+        },
+      ],
       onUnlocked: () => {},
       registeredServices: () => ["telegram_user"],
     },
@@ -98,7 +104,13 @@ describe("connection-backed messages", () => {
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-        find: () => [{ id: "conn-1", talk: { history, subscribe: () => () => {} } }],
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history }),
+            hearTalker: () => () => {},
+          },
+        ],
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
@@ -124,7 +136,13 @@ describe("connection-backed messages, across conversations", () => {
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-        find: () => [{ id: "conn-1", talk: { history, subscribe: () => () => {} } }],
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history }),
+            hearTalker: () => () => {},
+          },
+        ],
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
@@ -165,7 +183,13 @@ describe("connection-backed messages, shared reads", () => {
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-        find: () => [{ id: "conn-1", talk: { history: { query }, subscribe: () => () => {} } }],
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history: { query } }),
+            hearTalker: () => () => {},
+          },
+        ],
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },

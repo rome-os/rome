@@ -502,7 +502,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     registry.register(makeEmailDescriptor(makeDeps(makeProvider())));
     const conn = await registry.connect("email");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk once the inbox grant is imported and delivers inbound", async () => {
@@ -513,10 +513,8 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     await registry.importCredential(conn.id, "inbox", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk!;
-
     const received: ChannelMessage[] = [];
-    talk.subscribe(async (msg) => {
+    conn.hearTalker(async (msg) => {
       received.push(msg);
       return;
     });
@@ -545,7 +543,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
     await flush();
 
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
     expect(conn.auth.grants().inbox).toBe("degraded");
   });

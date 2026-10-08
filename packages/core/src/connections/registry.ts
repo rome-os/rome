@@ -31,9 +31,6 @@ import type {
   RuntimeKit,
   SecretRecord,
   StreamFault,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
   Talker,
   Watch,
   WatchEvent,
@@ -47,25 +44,6 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
   act: "actor",
   watch: "watcher",
 };
-
-/** Every feature a Talk can carry. Keyed by name, so a feature added to
- *  `TalkFeatureMap` fails to compile here until a Talk carries it too. */
-const TALK_FEATURES: { [K in TalkFeatureName]: true } = {
-  history: true,
-  inboundMedia: true,
-  activity: true,
-  directory: true,
-  directMessaging: true,
-};
-const TALK_FEATURE_NAMES = Object.keys(TALK_FEATURES) as TalkFeatureName[];
-
-/** A Connection's Talk, which sending needs. A Connection whose credentials
- *  are locked or degraded has none, and sending on it refuses. */
-export function requireTalk(connection: Connection): Talk {
-  const talk = connection.talk;
-  if (!talk) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
-  return talk;
-}
 
 export interface ConnectionRegistryDeps {
   ledger: GrantLedger;
@@ -619,14 +597,14 @@ export class ConnectionRegistry {
    *  importCredential, re-import after degrade, subscription arrival).
    *
    *  Delivery guarantee: only handlers a caller registers SYNCHRONOUSLY inside
-   *  the onUnlocked callback (via `conn.talk.onMessage` / `conn.watch.onEvent`)
+   *  the onUnlocked callback (via `conn.hearTalker` / `conn.watch.onEvent`)
    *  are guaranteed to see the epoch's FIRST deliveries. For a fresh unlock epoch
    *  the registry fires onUnlocked before the capability's stream starts, so a
    *  synchronous registration is wired before start() runs; a handler attached
    *  later (after an await, or on an already-unlocked connection whose stream is
    *  already running) may miss deliveries the stream emitted synchronously from
-   *  start(). Send-before-start is permitted: the wrapper and instance exist when
-   *  the callback runs, so `conn.talk.send(...)` inside it works. */
+   *  start(). Send-before-start is permitted: the instance exists when the
+   *  callback runs, so a send through `conn.withTalker` inside it works. */
   onUnlocked(cap: Capability, handler: (conn: Connection) => void): void {
     this.unlockHandlers[cap].push(handler);
     for (const conn of this.connections.values()) {
@@ -889,11 +867,33 @@ class ConnectionImpl implements Connection {
     return { state: "unlocked" };
   }
 
-  get talk(): Talk | null {
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined {
+    const slot = this.slots.get("talk");
+    const epoch = slot?.epoch;
+    if (!slot || !epoch) return undefined;
+    let answer: T;
+    try {
+      answer = call(epoch.instance as Talker);
+    } catch (err) {
+      this.handleThrownFault(slot, err, epoch);
+      throw err;
+    }
+    if (answer instanceof Promise) {
+      answer.catch((err: unknown) => this.handleThrownFault(slot, err, epoch));
+    }
+    return answer;
+  }
+
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
     const slot = this.slots.get("talk");
     if (!slot || !slot.epoch) return null;
-    return this.talkWrapper(slot, slot.epoch);
+    slot.messageHandlers.push(handler);
+    return () => {
+      const index = slot.messageHandlers.indexOf(handler);
+      if (index >= 0) slot.messageHandlers.splice(index, 1);
+    };
   }
+
   get act(): Act | null {
     const slot = this.slots.get("act");
     if (!slot || !slot.epoch) return null;
@@ -903,67 +903,6 @@ class ConnectionImpl implements Connection {
     const slot = this.slots.get("watch");
     if (!slot || !slot.epoch) return null;
     return this.watchWrapper(slot, slot.epoch);
-  }
-
-  private talkWrapper(slot: CapabilitySlot, epoch: Epoch): Talk {
-    const talk: Talk = {
-      subscribe: (handler) => {
-        this.assertLive(epoch);
-        slot.messageHandlers.push(handler);
-        return () => {
-          const index = slot.messageHandlers.indexOf(handler);
-          if (index >= 0) slot.messageHandlers.splice(index, 1);
-        };
-      },
-      send: async (conversationId, msg) => {
-        this.assertLive(epoch);
-        try {
-          return await (epoch.instance as Talker).send(conversationId, msg);
-        } catch (err) {
-          this.handleThrownFault(slot, err, epoch);
-          throw err;
-        }
-      },
-    };
-    for (const name of TALK_FEATURE_NAMES) {
-      Object.defineProperty(talk, name, {
-        enumerable: true,
-        get: () => {
-          this.assertLive(epoch);
-          if (!(epoch.instance as Talker)[name]) return undefined;
-          return this.epochFeatureProxy(slot, epoch, name);
-        },
-      });
-    }
-    return talk;
-  }
-
-  private epochFeatureProxy<K extends TalkFeatureName>(
-    slot: CapabilitySlot,
-    epoch: Epoch,
-    name: K,
-  ): TalkFeatureMap[K] {
-    return new Proxy({} as TalkFeatureMap[K] & object, {
-      get: (_target, property) => {
-        return (...args: unknown[]) => {
-          this.assertLive(epoch);
-          const feature = (epoch.instance as Talker)[name] as
-            | (TalkFeatureMap[K] & Record<PropertyKey, unknown>)
-            | undefined;
-          if (!feature) throw new Error(`talk feature "${name}" is unavailable`);
-          const method = feature[property];
-          if (typeof method !== "function") {
-            throw new Error(`talk feature "${name}" has no operation "${String(property)}"`);
-          }
-          try {
-            return method.apply(feature, args);
-          } catch (err) {
-            this.handleThrownFault(slot, err, epoch);
-            throw err;
-          }
-        };
-      },
-    });
   }
 
   private actWrapper(slot: CapabilitySlot, epoch: Epoch): Act {
@@ -1007,9 +946,9 @@ class ConnectionImpl implements Connection {
    *  caller registers SYNCHRONOUSLY inside its onUnlocked callback are wired
    *  into the slot before the stream starts. A Talker/Watcher whose start()
    *  delivers synchronously (e.g. flushing buffered inbound) would otherwise send
-   *  into empty handler arrays and drop its first delivery. The wrapper and
-   *  instance already exist when onUnlocked fires, so an onUnlocked handler may
-   *  call talk.send() before start() has run — send-before-start is permitted. */
+   *  into empty handler arrays and drop its first delivery. The instance already
+   *  exists when onUnlocked fires, so an onUnlocked handler may send through
+   *  `withTalker` before start() has run — send-before-start is permitted. */
   private buildEpoch(slot: CapabilitySlot, fire: boolean): void {
     const creds: Record<GrantName, Credential> = {};
     for (const grant of slot.needs) {
@@ -1052,8 +991,8 @@ class ConnectionImpl implements Connection {
     slot.eventHandlers = [];
     // Fire onUnlocked BEFORE starting the instance so handlers registered
     // synchronously in the callback are wired when the stream starts (see the
-    // method doc). A handler may also call talk.send() here — the wrapper and
-    // instance exist, so send-before-start works.
+    // method doc). A handler may also send through withTalker here — the
+    // instance exists, so send-before-start works.
     if (fire) this.registry.fireUnlock(slot.cap, this);
     this.startInstance(slot, epoch);
   }
@@ -1450,8 +1389,8 @@ class ConnectionImpl implements Connection {
     this.runFaultFlow(slot, "CredentialRejected", this.handleCredentialRejected(slot, err, source));
   }
 
-  /** Faults thrown synchronously from act.invoke / talk.send. The wrapper
-   *  rethrows the original error to the caller; the grant flow runs async. */
+  /** Faults thrown from act.invoke or inside withTalker. The caller still gets
+   *  the original error; the grant flow runs async. */
   private handleThrownFault(slot: CapabilitySlot, err: unknown, source: Epoch): void {
     if (source.dead || slot.epoch !== source) return; // see handleFault
     if (err instanceof CredentialRejected) {

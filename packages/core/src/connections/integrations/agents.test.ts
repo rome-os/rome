@@ -226,7 +226,7 @@ describe("agents channel", () => {
       { endpoint: "home-rome" },
     );
     await until(() => conn.auth.grants().cloud === "degraded");
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("refuses attachments rather than sending only the text", async () => {

@@ -61,7 +61,10 @@ describe("Approvals API", () => {
       notifyPairingResolution: (resolved: ResolvedApproval) =>
         notifyPairingResolution(
           {
-            get: () => ({ talk: { send, directMessaging: { conversationFor } } }),
+            get: () => ({
+              withTalker: (call: (talker: object) => unknown) =>
+                call({ send, directMessaging: { conversationFor } }),
+            }),
           } as unknown as Pick<ConnectionRegistry, "get">,
           resolved,
         ),

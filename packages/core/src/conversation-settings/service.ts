@@ -655,7 +655,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     } catch {
       return "not-connected";
     }
-    return connection.talk ? "online" : "offline";
+    return connection.isUnlocked("talk") ? "online" : "offline";
   }
 
   private isThread(descriptor: ConversationDescriptor): boolean {

@@ -454,7 +454,7 @@ describe("ConversationSettingsService", () => {
     ).toBe("configured");
 
     await registry.stopAll();
-    expect(discord.talk).toBeNull();
+    expect(discord.isUnlocked("talk")).toBe(false);
     await expect(
       service.update({
         ref: parent,

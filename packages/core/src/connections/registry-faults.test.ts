@@ -1,10 +1,10 @@
 // Fault-handling contract suite. The subtlest semantics:
 // degrade relocking only dependents (scenario 5), renew-once-then-degrade
 // (scenario 6), re-authorize clearing the renewed flag (scenario 7), epoch
-// handle death + fresh wrapper (scenario 8), stop-before-build ordering
+// handle death + fresh talker (scenario 8), stop-before-build ordering
 // (scenario 9), and Disconnected backoff (scenario 10).
 //
-// Fault handling in the registry is asynchronous: the wrapper triggers the flow
+// Fault handling in the registry is asynchronous: the registry triggers the flow
 // with `void this.handle…` then rethrows the original error to the caller. Tests
 // therefore push the fault, then `await flush()` (a macrotask) so the renewal /
 // backoff flow settles before asserting.
@@ -15,7 +15,7 @@ import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import type { GrantLedger } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
-import type { Act, Connection, ConnectionDescriptor, Credential, Talk } from "./types.js";
+import type { Act, Connection, ConnectionDescriptor, Credential } from "./types.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -57,8 +57,7 @@ describe("registry faults", () => {
       await registry.importCredential(conn.id, "user", fx.userCredential());
 
       expect(conn.act).not.toBeNull();
-      expect(conn.talk).not.toBeNull();
-      const talk = conn.talk as Talk;
+      expect(conn.isUnlocked("talk")).toBe(true);
 
       // Trigger CredentialRejected from act.invoke → renew re-confers → degrade.
       const act = conn.act as Act;
@@ -72,12 +71,14 @@ describe("registry faults", () => {
       expect(conn.act).toBeNull();
       expect(conn.status().act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
       expect(conn.status().talk).toEqual({ state: "unlocked" });
-      expect(conn.talk).not.toBeNull();
+      expect(conn.isUnlocked("talk")).toBe(true);
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.auth.grants().bot).toBe("authorized");
 
-      // The talk handle captured before the degrade still works — send is recorded.
-      await talk.send("thread-1" as ConversationId, { text: "still alive" });
+      // Talk still works after the degrade — send is recorded.
+      await conn.withTalker((talker) =>
+        talker.send("thread-1" as ConversationId, { text: "still alive" }),
+      );
       const talker = fx.talkerFactory.instances.at(-1);
       if (!talker) throw new Error("talker not built");
       expect(talker.state.sends.map((s) => s.msg)).toContainEqual({ text: "still alive" });
@@ -265,7 +266,7 @@ describe("registry faults", () => {
 
       // Prior state: unauthorized, no talk handle.
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.talk).toBeNull();
+      expect(conn.isUnlocked("talk")).toBe(false);
       const buildsBefore = fx.talkerFactory.instances.length;
 
       // The import's authorize write throws → the call rejects.
@@ -277,7 +278,7 @@ describe("registry faults", () => {
       // Mirror untouched: grant still unauthorized, no epoch built, status agrees,
       // and the ledger row is unchanged (still unauthorized).
       expect(conn.auth.grants().bot).toBe("unauthorized");
-      expect(conn.talk).toBeNull();
+      expect(conn.isUnlocked("talk")).toBe(false);
       expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
       expect(fx.talkerFactory.instances.length).toBe(buildsBefore);
       const rec = await base.getGrant(conn.id, "bot");
@@ -288,7 +289,7 @@ describe("registry faults", () => {
       failImport = false;
       await registry.importCredential(conn.id, "bot", fx.validCredential());
       expect(conn.auth.grants().bot).toBe("authorized");
-      expect(conn.talk).not.toBeNull();
+      expect(conn.isUnlocked("talk")).toBe(true);
     });
   });
 
@@ -355,9 +356,9 @@ describe("registry faults", () => {
     });
   });
 
-  // Scenario 8 — epoch handle death + fresh wrapper
-  describe("scenario 8: epoch handle death + fresh wrapper", () => {
-    it("revoke kills the captured wrapper; conn.talk is null; re-import yields a NEW wrapper; the OLD wrapper still throws", async () => {
+  // Scenario 8 — epoch handle death + fresh talker
+  describe("scenario 8: epoch handle death + fresh talker", () => {
+    it("revoke ends the talker's epoch and its listeners; re-import reaches a NEW talker", async () => {
       const ledger = makeLedger();
       const registry = new ConnectionRegistry({ ledger });
       const fx = makePasteTalk();
@@ -365,34 +366,35 @@ describe("registry faults", () => {
       const conn = await registry.connect("fake-telegram");
       await registry.importCredential(conn.id, "bot", fx.validCredential());
 
-      expect(conn.talk).not.toBeNull();
-      const oldWrapper = conn.talk as Talk;
-      // The wrapper works while its epoch is live.
-      await oldWrapper.send("thread-1" as ConversationId, { text: "before revoke" });
-
-      // Revoke the grant → epoch dies.
-      await conn.auth.revoke("bot");
-      expect(conn.talk).toBeNull();
-      expect(conn.auth.grants().bot).toBe("unauthorized");
-
-      // The captured wrapper now throws the relock error.
-      await expect(
-        oldWrapper.send("thread-1" as ConversationId, { text: "after revoke" }),
-      ).rejects.toThrow(/relocked; re-acquire via onUnlocked/);
-      expect(() => oldWrapper.subscribe(async () => {})).toThrow(
-        /relocked; re-acquire via onUnlocked/,
+      expect(conn.isUnlocked("talk")).toBe(true);
+      const heard: ChannelMessage[] = [];
+      expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
+      await conn.withTalker((talker) =>
+        talker.send("thread-1" as ConversationId, { text: "before revoke" }),
       );
+      const oldTalker = fx.talkerFactory.instances.at(-1);
+      if (!oldTalker) throw new Error("talker not built");
 
-      // Re-import → conn.talk is a NEW live wrapper.
+      // Revoke the grant → epoch dies, and nothing reaches a talker.
+      await conn.auth.revoke("bot");
+      expect(conn.isUnlocked("talk")).toBe(false);
+      expect(conn.auth.grants().bot).toBe("unauthorized");
+      expect(conn.withTalker(() => "reached")).toBeUndefined();
+      expect(conn.hearTalker(async () => {})).toBeNull();
+
+      // Re-import → a NEW talker, which the old epoch's listener does not hear.
       await registry.importCredential(conn.id, "bot", fx.validCredential());
-      expect(conn.talk).not.toBeNull();
-      const newWrapper = conn.talk as Talk;
-      await newWrapper.send("thread-1" as ConversationId, { text: "after reimport" });
-
-      // The OLD wrapper still throws even though a new epoch exists.
-      await expect(
-        oldWrapper.send("thread-1" as ConversationId, { text: "still dead" }),
-      ).rejects.toThrow(/relocked; re-acquire via onUnlocked/);
+      expect(conn.isUnlocked("talk")).toBe(true);
+      const newTalker = fx.talkerFactory.instances.at(-1);
+      if (!newTalker) throw new Error("talker not rebuilt");
+      expect(newTalker).not.toBe(oldTalker);
+      await conn.withTalker((talker) =>
+        talker.send("thread-1" as ConversationId, { text: "after reimport" }),
+      );
+      expect(newTalker.state.sends.map((s) => s.msg)).toEqual([{ text: "after reimport" }]);
+      newTalker.state.deliver?.(makeInboundMessage({ messageId: "after-reimport" }));
+      await flush();
+      expect(heard).toEqual([]);
     });
   });
 
@@ -495,7 +497,7 @@ describe("registry faults", () => {
 
   // Scenario 10 — Disconnected backoff
   describe("scenario 10: Disconnected backoff", () => {
-    it("faults rebuild the SAME epoch with SAME material, wrapper survives, durations grow exponentially, grant untouched, no onUnlocked re-fire", async () => {
+    it("faults rebuild the SAME epoch with SAME material, durations grow exponentially, grant untouched, no onUnlocked re-fire", async () => {
       const ledger = makeLedger();
       const sleep = makeRecordingSleep();
       const registry = new ConnectionRegistry({
@@ -513,7 +515,6 @@ describe("registry faults", () => {
       await registry.importCredential(conn.id, "bot", fx.validCredential());
       expect(unlocks.length).toBe(1); // initial unlock only
 
-      const wrapper = conn.talk as Talk;
       const instance0 = fx.talkerFactory.instances.at(-1);
       if (!instance0) throw new Error("instance0 not built");
       const grantsBefore = { ...conn.auth.grants() };
@@ -532,9 +533,11 @@ describe("registry faults", () => {
       expect(instance1.state.starts[0]?.creds.bot.material).toEqual(
         instance0.state.starts[0]?.creds.bot.material,
       );
-      // The public wrapper survives the backoff rebuild — send routes to the NEW
-      // instance.
-      await wrapper.send("thread-1" as ConversationId, { text: "after reconnect" });
+      // A send through the Connection after the backoff rebuild routes to the
+      // NEW instance.
+      await conn.withTalker((talker) =>
+        talker.send("thread-1" as ConversationId, { text: "after reconnect" }),
+      );
       expect(instance1.state.sends.map((s) => s.msg)).toContainEqual({ text: "after reconnect" });
 
       // Second CONSECUTIVE Disconnected (no successful delivery between) → base*2.
@@ -558,7 +561,9 @@ describe("registry faults", () => {
       // Wrapper still usable after the whole backoff run.
       const instance3 = fx.talkerFactory.instances.at(-1);
       if (!instance3) throw new Error("instance3 not built");
-      await wrapper.send("thread-1" as ConversationId, { text: "final" });
+      await conn.withTalker((talker) =>
+        talker.send("thread-1" as ConversationId, { text: "final" }),
+      );
       expect(instance3.state.sends.map((s) => s.msg)).toContainEqual({ text: "final" });
     });
 
@@ -681,7 +686,7 @@ describe("registry faults", () => {
       // wired before start() runs, or the buffered flush is lost.
       const received: ChannelMessage[] = [];
       registry.onUnlocked("talk", (c) => {
-        c.talk?.subscribe(async (msg) => {
+        c.hearTalker(async (msg) => {
           received.push(msg);
         });
       });
@@ -768,7 +773,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     const grant = await ledger.getGrant(conn.id, "session");
     expect(grant?.state).toBe("authorized");
     expect(grant?.degraded).toBeUndefined();
@@ -870,7 +875,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
     const grant = await ledger.getGrant(conn.id, "session");
     expect(grant?.state).toBe("authorized");
@@ -923,7 +928,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
     await flush();
 
     expect(conn.auth.grants().session).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(epochBTalker?.state.stopCount).toBe(0);
     expect(talkerFactory.instances.length).toBe(buildsAfterRelogin); // no stale rebuild
     const grant = await ledger.getGrant(conn.id, "session");

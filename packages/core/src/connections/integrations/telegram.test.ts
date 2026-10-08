@@ -9,6 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { sendThrough } from "../../channels/connection-ports.js";
 import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
@@ -16,7 +17,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talk, Talker } from "../types.js";
+import type { Connection, StreamFault, Talker } from "../types.js";
 import { isTelegramAuthError, makeTelegramDescriptor } from "./telegram.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -221,7 +222,7 @@ describe("telegram descriptor shape", () => {
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk once the bot grant is imported and delivers inbound", async () => {
@@ -231,11 +232,9 @@ describe("telegram descriptor shape", () => {
     await registry.importCredential(conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk;
-    expect(talk).not.toBeNull();
-
     const received: string[] = [];
-    talk!.subscribe(async (msg) => {
+    expect(conn.isUnlocked("talk")).toBe(true);
+    conn.hearTalker(async (msg) => {
       received.push(`${msg.conversationId}:${msg.text}`);
       return;
     });
@@ -251,7 +250,7 @@ describe("telegram descriptor shape", () => {
     });
     expect(received).toEqual(["999:hi"]);
 
-    await talk!.send("999" as ConversationId, { text: "yo" });
+    await sendThrough(conn, "999" as ConversationId, { text: "yo" });
     expect(factory.sent).toEqual([
       { method: "sendMessage", payload: { chat_id: "999", text: "yo", parse_mode: "HTML" } },
     ]);
@@ -422,17 +421,15 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     await registry.importCredential(conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk as Talk;
-
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
     // the async grant flow: tokenPaste.renew() → "re-confer" → degrade "bot".
-    await expect(talk.send("999" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+    await expect(sendThrough(conn, "999" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
       CredentialRejected,
     );
     await flush();
 
     // Talk relocked; bot grant degraded (tokenPaste cannot renew headlessly).
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(conn.auth.grants().bot).toBe("degraded");
 

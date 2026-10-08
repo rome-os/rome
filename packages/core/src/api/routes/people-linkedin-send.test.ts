@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type { Talk } from "../../connections/types.js";
 import type {
   OutboxMessage,
   OutboxPage,
@@ -61,10 +60,10 @@ describe("LinkedIn replies through People", () => {
       minIntervalMs: 60_000,
       maxIntervalMs: 60_000,
     }).capabilities.talker!.build({} as Record<string, Credential>, {} as RuntimeKit);
-    // LinkedIn's Connection, whose Talk is that talker, behind the channel list.
+    // LinkedIn's Connection, live on that talker, behind the channel list.
     deps.connections = createTestConnections(
       new Map([["linkedin", new FakeTransport("linkedin")]]),
-      (): Talk => ({ ...talker, subscribe: () => () => {} }),
+      () => talker,
     );
     deps.channels = testChannels(deps, deps.connections);
     person = await deps.personMappingRepo.create({

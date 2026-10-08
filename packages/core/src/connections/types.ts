@@ -16,11 +16,12 @@ import type {
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
-// A Connection's conversational surface, as its builder implements it and the
-// channel ports (channels/connection-ports.ts) use it. Core-internal: apps reach channels through the
-// channels service (actions) or a hook's `channels`, never through a Talk.
-// A Talk delivers each message as the channel's own record: a
-// `ChannelMessage` naming the channel it backs, with direction `inbound`.
+// A Connection's conversational surface, as its builder implements it
+// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
+// through `Connection.withTalker`: apps reach channels through the channels
+// service (actions) or a hook's `channels`. A talker delivers each message as
+// the channel's own record: a `ChannelMessage` naming the channel it backs,
+// with direction `inbound`.
 
 /**
  * The platform's own history of a Connection's conversations: at most `limit`
@@ -64,13 +65,6 @@ export type TalkFeatureName = keyof TalkFeatureMap;
  * talker reads its getters once.
  */
 export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
-
-/** A Connection's live Talk. Its features are the talker's, each one usable
- *  only while the epoch that built it lasts. */
-export interface Talk extends TalkFeatures {
-  subscribe(handler: (message: ChannelMessage) => Promise<void>): () => void;
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-}
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
@@ -218,8 +212,22 @@ export interface Connection {
   readonly auth: AuthState;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
+  /** Whether `cap` is built and live now. `status()` reads the grants; this
+   *  reads whether the capability's instance exists. */
+  isUnlocked(cap: Capability): boolean;
+  /**
+   * Calls `call` with the talker of the live epoch and answers what it
+   * returns, or undefined while talk is locked. Starting and stopping the
+   * talker are the registry's. A `CredentialRejected` that
+   * `call` throws, or that the promise it returns rejects with, runs the
+   * grant's fault flow before it reaches the caller. Read the talker inside
+   * `call` only: a talker held past it outlives a relock unguarded.
+   */
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
+  /** Hears each message the live talker delivers until talk relocks, or null
+   *  while talk is locked. */
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
-  get talk(): Talk | null;
   get act(): Act | null;
   get watch(): Watch | null;
 }

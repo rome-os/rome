@@ -48,7 +48,7 @@ import type {
   ConversationSettingsControl,
   MessageReceipt,
 } from "@rome-os/app-runtime";
-import type { Talk } from "../connections/types.js";
+import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -239,7 +239,7 @@ export class FakeTransport {
     return { conversationId, messageId: `sent-${++sentCount}` };
   }
 
-  /** What the Connection's Talk subscribes with. */
+  /** What the Connection's talker delivers through. */
   listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -258,27 +258,35 @@ export class FakeTransport {
   }
 }
 
+/** What a test Connection's live talker offers: sending and its features. */
+export type TestTalker = Omit<Talker, "start" | "stop">;
+
 /** The Connections a test channel list reads: one `test:<name>` Connection per
- *  fake transport, each with a live Talk over its transport. */
+ *  fake transport, each with a live talker over its transport. */
 export type TestConnections = ConnectionPortsDeps["registry"] &
   Pick<ConnectionRegistry, "get" | "all">;
 
 /**
- * Builds the test Connections. `talk` edits one service's Talk, for a test
- * that fakes what a Connection offers; the default Talk addresses a direct
- * chat by the contact, like the two channels that ship with sending.
+ * Builds the test Connections. `talker` edits one service's talker, for a test
+ * that fakes what a Connection offers; the default talker addresses a direct
+ * chat by the contact, like the two channels that ship with sending. Every
+ * Connection hears its transport's deliveries.
  */
 export function createTestConnections(
   transports: ReadonlyMap<string, FakeTransport>,
-  talk: (service: string, talk: Talk) => Talk = (_service, talk) => talk,
+  talker: (service: string, talker: TestTalker) => TestTalker = (_service, talker) => talker,
 ): TestConnections {
   const connections = new Map<string, Connection>();
   for (const [service, transport] of transports) {
     const id = `test:${service}`;
+    const live = talker(service, talkerOver(transport));
     connections.set(id, {
       id,
       service,
-      talk: talk(service, talkOver(transport)),
+      withTalker: (call: (talker: TestTalker) => unknown) => call(live),
+      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+        transport.listen(handler),
+      isUnlocked: (capability: string) => capability === "talk",
       status: () => ({ talk: { state: "unlocked" } }),
     } as unknown as Connection);
   }
@@ -307,10 +315,9 @@ export function createTestConnections(
   };
 }
 
-/** A Talk over a fake transport. */
-function talkOver(transport: FakeTransport): Talk {
+/** A talker over a fake transport. */
+function talkerOver(transport: FakeTransport): TestTalker {
   return {
-    subscribe: (handler) => transport.listen(handler),
     send: (conversationId, message) => transport.send(conversationId, message),
     directMessaging: {
       async conversationFor(channelUserId: string) {
@@ -327,7 +334,7 @@ export const noAccounts: Accounts = {
 };
 
 /** The harness's channel list over `connections`, built by the production
- *  `channelList`. A test that fakes a Talk rebuilds the list with it. */
+ *  `channelList`. A test that fakes a talker rebuilds the list with it. */
 export function testChannels(
   deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
   connections: TestConnections,
@@ -431,7 +438,7 @@ export interface TestDeps extends ApiDeps {
   /** The platform end of each channel `connections` backs, by channel name. */
   transports: Map<string, FakeTransport>;
   /** The Connections behind `channels` and `channelsService`. A test that
-   *  fakes a Talk builds its own with `createTestConnections`. */
+   *  fakes a talker builds its own with `createTestConnections`. */
   connections: TestConnections;
 }
 

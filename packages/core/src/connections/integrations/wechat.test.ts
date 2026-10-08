@@ -9,6 +9,7 @@
 //      stubbed fetch.
 
 import { mkdtemp, rm } from "node:fs/promises";
+import { sendThrough } from "../../channels/connection-ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -18,7 +19,7 @@ import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.j
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talk, Talker } from "../types.js";
+import type { Connection, StreamFault, Talker } from "../types.js";
 import { createWechatDescriptor } from "./wechat.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -138,7 +139,7 @@ describe("wechat descriptor shape", () => {
     const { registry } = setup();
     const conn = await registry.connect("wechat");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
@@ -147,15 +148,14 @@ describe("wechat descriptor shape", () => {
     await registry.importCredential(conn.id, "account", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(adapters).toHaveLength(1);
     expect(adapters[0].started).toBe(true);
 
-    await expect(conn.talk!.send("addr-1" as ConversationId, { text: "hi" })).resolves.toEqual({
+    await expect(sendThrough(conn, "addr-1" as ConversationId, { text: "hi" })).resolves.toEqual({
       conversationId: "addr-1",
     });
     expect(adapters[0].sent).toEqual([{ conversationId: "addr-1", text: "hi" }]);
-    const inboundMedia = conn.talk!.inboundMedia;
     const message = {
       channel: "wechat",
       direction: "inbound",
@@ -166,7 +166,9 @@ describe("wechat descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
+    await expect(
+      conn.withTalker((talker) => talker.inboundMedia?.materialize(message)),
+    ).resolves.toEqual([]);
   });
 
   it("reports transient adapter degradation without relocking the talk capability", async () => {
@@ -186,7 +188,7 @@ describe("wechat descriptor shape", () => {
         retryAt: "2026-07-20T12:00:00.000Z",
       },
     });
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.auth.grants().account).toBe("authorized");
   });
 });
@@ -244,7 +246,7 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
     await flush();
 
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
     expect(conn.auth.grants().account).toBe("degraded");
 
@@ -256,7 +258,6 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     await registry.importCredential(conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
-    void (conn.talk as Talk | null);
   });
 });
 

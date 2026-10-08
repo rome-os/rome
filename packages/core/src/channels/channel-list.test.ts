@@ -92,26 +92,24 @@ describe("channelList", () => {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     for (const descriptor of descriptors) registry.register(descriptor);
-    // The Connection ids the channel ports hold a Talk subscription on.
+    // The Connection ids the channel ports hear a talker on.
     const subscribed: string[] = [];
     const tracked = (connection: Connection): Connection =>
       new Proxy(connection, {
         get(target, property, receiver) {
-          if (property !== "talk") return Reflect.get(target, property, receiver);
-          const talk = target.talk;
-          if (!talk) return talk;
-          return Object.create(talk, {
-            subscribe: {
-              value(handler: (message: ChannelMessage) => Promise<void>) {
-                subscribed.push(target.id);
-                const detach = talk.subscribe(handler);
-                return () => {
-                  subscribed.splice(subscribed.indexOf(target.id), 1);
-                  detach();
-                };
-              },
-            },
-          });
+          if (property !== "hearTalker") {
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return (handler: (message: ChannelMessage) => Promise<void>) => {
+            const detach = target.hearTalker(handler);
+            if (!detach) return detach;
+            subscribed.push(target.id);
+            return () => {
+              subscribed.splice(subscribed.indexOf(target.id), 1);
+              detach();
+            };
+          };
         },
       });
     const watched: ConnectionPortsDeps["registry"] = {

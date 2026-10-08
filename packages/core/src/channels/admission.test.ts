@@ -99,17 +99,16 @@ describe("a channel's Connection across epochs", () => {
     // Admission runs once per message, however many subscribe.
     if (gated) expect(admit).toHaveBeenCalledTimes(1);
 
-    const history = connection.talk?.history;
-    expect((await history?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-1");
+    const history = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
+    expect(history?.[0]?.messageId).toBe("history-1");
     await expect(
       ports.send!.send("general" as ConversationId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
-    // A feature held past its epoch refuses rather than reaching a stopped
-    // talker.
+    // Past its epoch nothing reaches the stopped talker.
     await connection.auth.revoke("bot");
-    expect(() => history?.query({ limit: 10 })).toThrow("capability relocked");
-    expect(connection.talk).toBeNull();
+    expect(connection.withTalker(() => "reached")).toBeUndefined();
+    expect(connection.isUnlocked("talk")).toBe(false);
     await registry.importCredential(connection.id, "bot", {
       material: { token: "second" },
       expiresAt: "never",
@@ -142,8 +141,8 @@ describe("a channel's Connection across epochs", () => {
       expect(received).toEqual(["inbound-1", "inbound-2"]);
     }
     unsubscribe();
-    const current = connection.talk?.history;
-    expect((await current?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-2");
+    const current = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
+    expect(current?.[0]?.messageId).toBe("history-2");
     await expect(
       ports.send!.send("general" as ConversationId, { text: "second reply" }),
     ).resolves.toMatchObject({ messageId: "sent-2" });

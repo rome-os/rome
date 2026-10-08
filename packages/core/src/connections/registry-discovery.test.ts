@@ -8,6 +8,7 @@
 // The suite runs against the drizzle-backed ledger (fresh test db per test).
 
 import { describe, it, expect } from "@rstest/core";
+import { sendThrough } from "../channels/connection-ports.js";
 import { ConnectionRegistry } from "./registry.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { createTestDb } from "../test/helpers.js";
@@ -46,7 +47,7 @@ describe("scenario 1: zero-grant talk", () => {
     const conn = await reg.connect("fake-webchat");
 
     // Zero-grant capability must be unlocked at birth.
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.act).toBeNull();
     expect(conn.watch).toBeNull();
     expect(talkerFactory.instances).toHaveLength(1);
@@ -88,10 +89,8 @@ describe("scenario 1: zero-grant talk", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
-    const talk = conn.talk!;
-
     const received: unknown[] = [];
-    talk.subscribe(async (msg) => {
+    conn.hearTalker(async (msg) => {
       received.push(msg);
     });
 
@@ -109,7 +108,7 @@ describe("scenario 1: zero-grant talk", () => {
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
-    await conn.talk!.send("thread-1" as ConversationId, { text: "reply" });
+    await sendThrough(conn, "thread-1" as ConversationId, { text: "reply" });
 
     expect(talkerFactory.instances[0].state.sends).toHaveLength(1);
     expect(talkerFactory.instances[0].state.sends[0].address).toBe("thread-1");
@@ -180,7 +179,7 @@ describe("scenario 2: needs-auth precision", () => {
     const conn = await reg.connect("fake-discord");
     await reg.importCredential(conn.id, "bot", botCredential());
 
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.watch).not.toBeNull();
     expect(conn.act).toBeNull();
   });
@@ -553,7 +552,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
 
     // Also mint a real connection through the registry (goes through ledger).
     const conn = await reg.connect("fake-webchat");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
 
     // Create a new registry over the same ledger and load.
     const reg2 = makeRegistry(ledger);
@@ -564,7 +563,7 @@ describe("scenario 18: load() with unregistered service rows", () => {
     const loaded = reg2.find("fake-webchat");
     expect(loaded).toHaveLength(1);
     expect(loaded[0].id).toBe(conn.id);
-    expect(loaded[0].talk).not.toBeNull();
+    expect(loaded[0].isUnlocked("talk")).toBe(true);
   });
 
   it("all() does not include orphaned unknown-service connections after load", async () => {
@@ -603,13 +602,13 @@ describe("startup capability activation barrier", () => {
 
     await reg.load({ deferCapabilities: true });
 
-    expect(reg.get("boot-webchat").talk).toBeNull();
+    expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(false);
     expect(talkerFactory.instances).toHaveLength(0);
     expect(unlocked).toHaveLength(0);
 
     reg.startCapabilities();
 
-    expect(reg.get("boot-webchat").talk).not.toBeNull();
+    expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(true);
     expect(talkerFactory.instances).toHaveLength(1);
     expect(unlocked).toEqual([reg.get("boot-webchat")]);
   });

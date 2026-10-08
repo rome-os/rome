@@ -4,6 +4,7 @@
 // threading, migration — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { sendThrough } from "../../channels/connection-ports.js";
 import type { ConversationId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
 import {
   WhatsAppAdapter,
@@ -285,7 +286,7 @@ describe("whatsapp descriptor over a real registry", () => {
     const registry = setup(new FakeWhatsAppAdapter());
     const conn = await registry.connect("whatsapp");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["session"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk once the session is imported and round-trips send()", async () => {
@@ -297,7 +298,7 @@ describe("whatsapp descriptor over a real registry", () => {
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     // WhatsAppAdapter.send addresses by the conversation (the chat JID), and
     // its receipt is the Talk's as it is.
-    const receipt = await conn.talk!.send("120@g.us" as ConversationId, { text: "hi" });
+    const receipt = await sendThrough(conn, "120@g.us" as ConversationId, { text: "hi" });
     expect(fake.sent).toEqual([{ conversationId: "120@g.us", msg: { text: "hi" } }]);
     expect(receipt).toStrictEqual({ conversationId: "120@g.us", messageId: "sent-1" });
   });

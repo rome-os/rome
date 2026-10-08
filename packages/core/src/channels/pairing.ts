@@ -1,5 +1,5 @@
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -7,6 +7,7 @@ import { createLogger } from "../logger.js";
 import type { Admission } from "./admission.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
+import { sendThrough } from "./connection-ports.js";
 
 const log = createLogger("channel-pairing");
 function pairingAccount(
@@ -173,7 +174,7 @@ export async function notifyPairingResolution(
       (payload.conversationId as ConversationId | undefined) ??
       (await registry
         .get(payload.connectionId)
-        .talk?.directMessaging?.conversationFor(payload.channelUserId));
+        .withTalker((talker) => talker.directMessaging?.conversationFor(payload.channelUserId)));
     if (!conversationId) throw new Error("Direct conversation unavailable");
     await sendOn(
       registry,
@@ -196,5 +197,5 @@ async function sendOn(
   conversationId: ConversationId,
   text: string,
 ): Promise<void> {
-  await requireTalk(registry.get(connectionId)).send(conversationId, { text });
+  await sendThrough(registry.get(connectionId), conversationId, { text });
 }
