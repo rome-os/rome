@@ -3,10 +3,8 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js
 import { getInstanceToken } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 
-/** A turn whose payer changed between its model resolution and dispatch. */
-export const PAYER_CHANGED_MESSAGE = "Model payer changed while preparing this turn; please retry.";
-
 export interface CodexPayerManager {
+  getDefaultProvider(): string | null;
   setDefaultProvider(provider: string | null): void;
   restart(): void;
 }
@@ -31,7 +29,7 @@ export function createRomeCreditsPayer(options: {
 }): RomeCreditsPayer {
   const token = options.getInstanceToken ?? getInstanceToken;
   const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
-  let provider: string | null = null;
+  const provider = (): string | null => options.appServerManager.getDefaultProvider();
   let instanceToken = token();
   let closed = false;
 
@@ -45,18 +43,17 @@ export function createRomeCreditsPayer(options: {
       instanceToken = nextToken;
       const next =
         !hasChatGptLogin && nextToken && hasRomeCloud() ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
-      if (next === provider) {
+      if (next === provider()) {
         // Only the credits provider reads the token, and each spawn re-reads it.
-        if (tokenChanged && provider === ROME_CREDITS_MODEL_PROVIDER_ID) {
+        if (tokenChanged && next === ROME_CREDITS_MODEL_PROVIDER_ID) {
           options.appServerManager.restart();
         }
         return;
       }
-      provider = next;
       options.appServerManager.setDefaultProvider(next);
     },
     isUsingRomeCredits() {
-      return provider === ROME_CREDITS_MODEL_PROVIDER_ID;
+      return provider() === ROME_CREDITS_MODEL_PROVIDER_ID;
     },
     close() {
       closed = true;

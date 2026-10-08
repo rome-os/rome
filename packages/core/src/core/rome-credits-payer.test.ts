@@ -2,6 +2,18 @@ import { describe, expect, it } from "@rstest/core";
 import { createRomeCreditsPayer } from "./rome-credits-payer.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 
+function fakeManager(onSet: (provider: string | null) => void = () => {}, onRestart = () => {}) {
+  let provider: string | null = null;
+  return {
+    getDefaultProvider: () => provider,
+    setDefaultProvider: (next: string | null) => {
+      provider = next;
+      onSet(next);
+    },
+    restart: onRestart,
+  };
+}
+
 const base: AIToolStateValue = {
   codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
   claude: { loggedIn: false, quotaExhausted: false },
@@ -15,10 +27,10 @@ describe("Rome credits payer", () => {
     let token: string | null = "romeinst_123";
     const payer = createRomeCreditsPayer({
       aiToolState: { get: () => value },
-      appServerManager: {
-        setDefaultProvider: (provider) => calls.push(provider),
-        restart: () => restarts++,
-      },
+      appServerManager: fakeManager(
+        (provider) => calls.push(provider),
+        () => restarts++,
+      ),
       getInstanceToken: () => token,
       hasRomeCloud: () => true,
     });
@@ -49,7 +61,7 @@ describe("Rome credits payer", () => {
     let token: string | null = "romeinst_123";
     const payer = createRomeCreditsPayer({
       aiToolState: { get: () => value },
-      appServerManager: { setDefaultProvider: () => {}, restart: () => restarts++ },
+      appServerManager: fakeManager(undefined, () => restarts++),
       getInstanceToken: () => token,
       hasRomeCloud: () => true,
     });
@@ -65,7 +77,7 @@ describe("Rome credits payer", () => {
     value.codex.loggedIn = false;
     const payer = createRomeCreditsPayer({
       aiToolState: { get: () => value },
-      appServerManager: { setDefaultProvider: (p) => calls.push(p), restart: () => {} },
+      appServerManager: fakeManager((p) => calls.push(p)),
       getInstanceToken: () => "romeinst_123",
       hasRomeCloud: () => false,
     });

@@ -3,7 +3,7 @@ import { getInstanceToken } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
 import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
-import { PAYER_CHANGED_MESSAGE } from "../rome-credits-payer.js";
+import { PAYER_CHANGED_MESSAGE } from "./rome-credits-provider.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,

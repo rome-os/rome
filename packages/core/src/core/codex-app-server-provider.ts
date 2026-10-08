@@ -82,7 +82,7 @@ import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
 import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
-import { PAYER_CHANGED_MESSAGE } from "./rome-credits-payer.js";
+import { PAYER_CHANGED_MESSAGE } from "./codex/rome-credits-provider.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
