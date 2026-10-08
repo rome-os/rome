@@ -110,17 +110,32 @@ export interface TestDb {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYSTEM_MIGRATIONS_DIR = resolve(__dirname, "../../drizzle/system");
 
+// Running the migrations costs ~11ms against ~0.15ms to deserialize their
+// result, and a core run opens well over a thousand test databases.
+let migratedImage: Buffer | undefined;
+
+function migratedSystemImage(): Buffer {
+  if (!migratedImage) {
+    const sqlite = new Database(":memory:");
+    migrate(drizzle(sqlite, { schema }), {
+      migrationsFolder: SYSTEM_MIGRATIONS_DIR,
+      migrationsTable: "__drizzle_migrations_system",
+    });
+    migratedImage = sqlite.serialize();
+    sqlite.close();
+  }
+  return migratedImage;
+}
+
+/** Opens a private in-memory database at the latest system schema. Each call
+ *  starts from the same freshly migrated state, unaffected by writes to any
+ *  other instance. */
 export function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
+  const sqlite = new Database(migratedSystemImage());
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
   const db = drizzle(sqlite, { schema }) as unknown as DrizzleDb;
-
-  migrate(db, {
-    migrationsFolder: SYSTEM_MIGRATIONS_DIR,
-    migrationsTable: "__drizzle_migrations_system",
-  });
 
   return {
     db,

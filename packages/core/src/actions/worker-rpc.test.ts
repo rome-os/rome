@@ -54,11 +54,16 @@ async function rpc(
 ): Promise<RpcResponse> {
   const id = nextId++;
   fake.emitter.emit("message", { type: "rpc_request", clientId: "client-1", id, method, params });
-  return await rs.waitFor(() => {
-    const response = fake.sent.find((m) => m.id === id);
-    if (!response) throw new Error("no response yet");
-    return response;
-  });
+  // The default 50ms poll would floor every call at 50ms, and the reply
+  // usually lands within a few microtasks of the request.
+  return await rs.waitFor(
+    () => {
+      const response = fake.sent.find((m) => m.id === id);
+      if (!response) throw new Error("no response yet");
+      return response;
+    },
+    { interval: 1 },
+  );
 }
 
 // The RPC server now only validates wire params and delegates to the

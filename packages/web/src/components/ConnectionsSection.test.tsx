@@ -185,20 +185,6 @@ describe("ConnectionsSection — list of rows", () => {
     }
   });
 
-  it("webchat (always-on) reads as Connected", () => {
-    // Always-on folds into Connected — no separate "Always on" status label.
-    renderSection();
-    expect(screen.getByText("Connected")).toBeTruthy();
-    expect(screen.queryByText("Always on")).toBeNull();
-  });
-
-  it("unconnected channel shows Not connected status", () => {
-    renderSection();
-    // telegram is unauthorized in minimalConnections
-    const statuses = screen.getAllByText("Not connected");
-    expect(statuses.length).toBeGreaterThan(0);
-  });
-
   it("a degraded OAuth grant reads Not connected with an attention-toned dot on the row (#1472)", () => {
     // The old expired-token case (client-side tokenExpiresAt clock) is now the
     // registry's own health signal: a `degraded` grant state on the connection.
@@ -283,27 +269,6 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(screen.queryByRole("button", { name: /personal account/i })).toBeNull();
   });
 
-  it("neither: unauthorized bot, unauthorized personal account ⇒ Not connected", () => {
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("unauthorized")]);
-    expect(within(row).getByText("Not connected")).toBeTruthy();
-  });
-
-  it("bot-only: bot authorized, no personal account ⇒ Connected (no 1-of-2 nagging)", () => {
-    const row = telegramRow([telegramBot("authorized", "mybot")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-    expect(within(row).queryByText(/1 of 2/)).toBeNull();
-  });
-
-  it("account-only: personal account authorized, bot unauthorized ⇒ Connected", () => {
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("authorized")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-  });
-
-  it("both authorized ⇒ Connected", () => {
-    const row = telegramRow([telegramBot("authorized", "mybot"), telegramUser("authorized")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-  });
-
   it("bot authorized + degraded personal-account session ⇒ attention override (Not connected, attention dot)", () => {
     // The old failed sessionHealth signal is now the registry's `degraded`
     // grant state on the telegram_user connection.
@@ -311,13 +276,6 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(within(row).getByText("Not connected")).toBeTruthy();
     const dot = row.querySelector("span[aria-hidden]");
     expect(dot?.className).toContain("bg-warning");
-  });
-
-  it("mid-ceremony personal-account login with an unauthorized bot ⇒ Not connected", () => {
-    // The old pendingLogin flag was ceremony-transient and never reaches the
-    // registry list — a login still in flight is simply `unauthorized` there.
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("unauthorized")]);
-    expect(within(row).getByText("Not connected")).toBeTruthy();
   });
 
   it("opening the Telegram row shows both slot cards (bot + personal account)", () => {

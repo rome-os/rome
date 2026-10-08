@@ -306,15 +306,13 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows a focused no-results state", async () => {
+  it("shows a focused no-results state with the listbox its combobox points at still mounted", async () => {
     mockSessionSearch([chatSession("one", "Planning", "rome")]);
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
-      "missing",
-    );
+    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    await user.type(input, "missing");
 
     // The no-results state waits for the debounced message search to settle.
     expect(await screen.findByText("No apps or chats found")).toBeTruthy();
@@ -322,23 +320,12 @@ describe("ChatSearchDialog", () => {
       screen.getByText("Try another app name, app id, chat title, project, or message text."),
     ).toBeTruthy();
     expect(screen.queryByRole("option")).toBeNull();
-  });
 
-  it("keeps the listbox its combobox points at mounted with no results", async () => {
     // cmdk's input emits aria-controls unconditionally, so rendering the empty
     // state instead of the list would leave the combobox pointing at nothing.
-    mockSessionSearch([chatSession("one", "Planning", "rome")]);
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
-    await user.type(input, "missing");
-    expect(await screen.findByText("No apps or chats found")).toBeTruthy();
-
     const controls = input.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     expect(document.getElementById(controls as string)).not.toBeNull();
-    expect(screen.queryByRole("option")).toBeNull();
   });
 
   it("surfaces message-content matches with role-labelled snippets", async () => {

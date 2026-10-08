@@ -2498,7 +2498,7 @@ describe("AgentRunner", () => {
       });
     });
 
-    it("ends an errored turn with turn_end status=error", async () => {
+    it("yields the model failure as one error, then ends the turn with status=error", async () => {
       const failingProvider: MockModelProvider = new MockModelProvider();
       failingProvider.run = async function* () {
         throw new Error("Model API failure");
@@ -2509,6 +2509,11 @@ describe("AgentRunner", () => {
         runner.run({ agentName: "test-main", prompt: "Fail" }),
       );
 
+      const errorMessages = messages.filter((m) => m.type === "error");
+      expect(errorMessages).toHaveLength(1);
+      expect((errorMessages[0] as { type: "error"; error: string }).error).toContain(
+        "Model API failure",
+      );
       expect(messages[messages.length - 1]).toMatchObject({
         type: "turn_end",
         status: "error",
@@ -2633,25 +2638,6 @@ describe("AgentRunner", () => {
       expect(resultMessages).toHaveLength(1);
       expect((resultMessages[0] as { type: "result"; content: string }).content).toBe(
         "Final answer",
-      );
-    });
-
-    it("yields error message on model failure", async () => {
-      const failingProvider: MockModelProvider = new MockModelProvider();
-      // Override run to throw
-      failingProvider.run = async function* () {
-        throw new Error("Model API failure");
-      };
-      const runner = createRunner(failingProvider);
-
-      const messages = await collectMessages(
-        runner.run({ agentName: "test-main", prompt: "Fail" }),
-      );
-
-      const errorMessages = messages.filter((m) => m.type === "error");
-      expect(errorMessages).toHaveLength(1);
-      expect((errorMessages[0] as { type: "error"; error: string }).error).toContain(
-        "Model API failure",
       );
     });
   });

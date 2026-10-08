@@ -286,17 +286,6 @@ describe("Approvals API", () => {
   });
 
   describe("POST /approvals/:id/approve and /reject", () => {
-    it("approves via the dedicated route", async () => {
-      const id = baseline.approvals.pendingId;
-      const res = await app.request(`/approvals/${id}/approve`, {
-        method: "POST",
-        headers: { "sec-fetch-site": "same-origin" },
-      });
-      expect(res.status).toBe(202);
-      await new Promise((r) => setTimeout(r, 5));
-      expect(approvalHandler.onApproved).toHaveBeenCalledWith(id);
-    });
-
     it("rejects via the dedicated route", async () => {
       const id = baseline.approvals.pendingId;
       const res = await app.request(`/approvals/${id}/reject`, {
@@ -363,6 +352,8 @@ describe("Approvals API", () => {
 
       const after = await repo.findById(id);
       expect(after?.status).toBe("approved");
+      await new Promise((r) => setTimeout(r, 5));
+      expect(approvalHandler.onApproved).toHaveBeenCalledWith(id);
     });
   });
 

@@ -576,7 +576,7 @@ describe("PeoplePage stream", () => {
     expect(await screen.findByText("person page")).toBeTruthy();
   });
 
-  it("sends the search term to the server rather than filtering what loaded", async () => {
+  it("sends the typed word to the server once, rather than filtering what loaded or asking per letter", async () => {
     const user = userEvent.setup();
     const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
     renderPage();
@@ -589,21 +589,8 @@ describe("PeoplePage stream", () => {
     // The account read pages, so a filter over the rows that happened to arrive
     // would answer "no such contact" for someone further down the listing.
     expect(screen.queryByText("Wei Chen")).toBeNull();
-  });
-
-  it("sends one request for a typed word rather than one per letter", async () => {
-    const user = userEvent.setup();
-    const { calls } = mockApi({ people: [FRIEND] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    await user.type(screen.getByRole("searchbox", { name: /search people/i }), "wei");
-
-    await waitFor(() => expect(calls.some((c) => c.url.includes("q=wei"))).toBe(true));
-    // "w" and "we" never reach the wire.
-    expect(
-      calls.filter((c) => /[?&]q=w(e)?(&|$)/.test(c.url) && c.url.includes("/api/people")),
-    ).toHaveLength(0);
+    // No prefix of "rachel" ever reaches the wire.
+    expect(calls.filter((c) => /[?&]q=(r|ra|rac|rach|rache)(&|$)/.test(c.url))).toHaveLength(0);
   });
 });
 

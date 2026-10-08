@@ -151,7 +151,7 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
     });
   }
 
-  it("names the guardian from the username and marks onboarding complete", async () => {
+  it("names the guardian from the username, presets the agent, and marks onboarding complete", async () => {
     expect(getRomeCloudOrigin()).toBeNull();
     const app = await buildLocalApp();
 
@@ -167,12 +167,6 @@ describe("/api/onboard/create-account — finishes setup with defaults", () => {
       .where(eq(persons.bondLevel, "guardian"))
       .all();
     expect(person).toMatchObject({ displayName: "alex", approved: true });
-  });
-
-  it("gives the agent a preset name and purpose", async () => {
-    const app = await buildLocalApp();
-
-    await createAccount(app);
 
     const stored = Object.fromEntries(
       testDb.db
