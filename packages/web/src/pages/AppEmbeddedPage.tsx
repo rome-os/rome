@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { AppActionsFab } from "@/components/app-actions-fab";
 import { RomeAppHost } from "@/components/rome-app-host";
+import { SlotContent } from "@/components/slot";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAppCatalogEvents } from "@/hooks/use-app-catalog-events";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -168,6 +169,19 @@ export default function AppEmbeddedPage() {
         bootstrap={bootstrap}
       />
       {isGuardian ? <AppActionsFab appId={manifest.appId} /> : null}
+      {/* On a phone the sidebar is a closed drawer and the tab title is out of
+          sight, so the mobile header names the app. "Rome" stays the link home
+          that the header's fallback is. */}
+      <SlotContent name="mobileHeader">
+        <Link to="/" className="flex shrink-0 items-center gap-2 min-h-[var(--control-min-h)]">
+          <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
+          <span className="text-ui text-foreground">{t("appName", { ns: "common" })}</span>
+        </Link>
+        <span aria-hidden className="text-ui text-muted-foreground">
+          ›
+        </span>
+        <span className="min-w-0 truncate text-ui text-foreground">{manifest.appName}</span>
+      </SlotContent>
     </div>
   );
 }

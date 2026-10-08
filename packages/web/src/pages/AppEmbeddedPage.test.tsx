@@ -4,6 +4,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as React from "react";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
 import i18n from "@/i18n";
 import AppEmbeddedPage from "./AppEmbeddedPage";
 
@@ -154,13 +155,17 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // The shell's mobile header outlet, which the page fills with the app's name.
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/apps/demo"]}>
-        <Routes>
-          <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
-        </Routes>
-      </MemoryRouter>
+      <SlotProvider>
+        <MemoryRouter initialEntries={["/apps/demo"]}>
+          <SlotOutlet name="mobileHeader" fallback={<span>fallback</span>} />
+          <Routes>
+            <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
+          </Routes>
+        </MemoryRouter>
+      </SlotProvider>
     </QueryClientProvider>,
   );
 }
@@ -169,6 +174,16 @@ function stream(): MockEventSource {
   expect(MockEventSource.instances).toHaveLength(1);
   return MockEventSource.instances[0];
 }
+
+describe("AppEmbeddedPage mobile header", () => {
+  it("names the app after a Rome link home", async () => {
+    renderPage();
+
+    await screen.findByText("Demo");
+    expect(screen.getByRole("link", { name: "Rome" }).getAttribute("href")).toBe("/");
+    expect(screen.queryByText("fallback")).toBeNull();
+  });
+});
 
 describe("AppEmbeddedPage catalog-change refresh", () => {
   it("opens the catalog stream only for a guardian caller", async () => {
