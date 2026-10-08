@@ -14,9 +14,9 @@
  *   never carries the guardian's trust to another account's agent or back, or
  * - someone has already decided about that address, and the decision stands.
  *
- * The record is written before the links change, and every sighting first
- * clears a link left on its address by an endpoint that has already left, so a
- * settlement that fails partway is finished by the next one.
+ * The record is written before the links change, and marks a link it is
+ * about to take off until it is off, so a settlement that fails partway is
+ * finished by the next one.
  *
  * Cloud's listing is its current state and always settles. A message is as old
  * as when it was sent, and settles an endpoint only against what earlier
@@ -59,6 +59,8 @@ interface Known {
   /** The person whose link it took off `parkedFrom`, waiting to go back. */
   parked?: string;
   parkedFrom?: string;
+  /** A link this endpoint is taking off an address, until it is off. */
+  clearing?: { from: string; person: string };
 }
 
 /** One endpoint as Cloud names it. A message's sighting carries when it was
@@ -164,7 +166,7 @@ export function createAgentsIdentity(deps: {
 
     async function save(): Promise<void> {
       for (const [id, entry] of Object.entries(known)) {
-        if (entry.address === null && !entry.parked) delete known[id];
+        if (entry.address === null && !entry.parked && !entry.clearing) delete known[id];
       }
       const next = JSON.stringify(known);
       if (next === saved) return;
@@ -180,26 +182,29 @@ export function createAgentsIdentity(deps: {
       known[id] = {
         ...entry,
         address: null,
-        ...(person ? { parked: person.id, parkedFrom: from } : {}),
+        ...(person
+          ? { parked: person.id, parkedFrom: from, clearing: { from, person: person.id } }
+          : {}),
       };
       holders.delete(from);
       await save();
       if (person) {
-        await repo.deleteChannelMapping(channel, from);
+        await clear(id);
         log.info("an agent left its address; its link waits for it", { address: from });
       }
     }
 
-    /** Removes a link an endpoint left behind when a settlement stopped
-     *  between recording its leaving and taking the link off. */
-    async function clearLeftover(address: string): Promise<void> {
-      const left = (entry: Known) => entry.parkedFrom === address && entry.address !== address;
-      if (!Object.values(known).some(left)) return;
-      const person = await repo.findByChannelUser(channel, address);
-      if (!person) return;
-      if (Object.values(known).some((entry) => left(entry) && entry.parked === person.id)) {
-        await repo.deleteChannelMapping(channel, address);
+    /** Takes off the link an endpoint is marked as clearing, if it is still
+     *  there, then drops the mark. */
+    async function clear(id: string): Promise<void> {
+      const entry = known[id];
+      if (!entry?.clearing) return;
+      const { clearing, ...rest } = entry;
+      if ((await repo.findByChannelUser(channel, clearing.from))?.id === clearing.person) {
+        await repo.deleteChannelMapping(channel, clearing.from);
       }
+      known[id] = rest;
+      await save();
     }
 
     /** Gives an endpoint's waiting link back at its current address. */
@@ -222,6 +227,9 @@ export function createAgentsIdentity(deps: {
       await save();
     }
 
+    // Finishes what a settlement that stopped partway left marked.
+    for (const id of Object.keys(known)) await clear(id);
+
     let guardianRecord = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
 
     // An endpoint Rome knows goes first, so one renamed within a listing has
@@ -241,22 +249,23 @@ export function createAgentsIdentity(deps: {
         if (sighting.by === "listing" || entry.by === "message") {
           known[endpointId] = { ...entry, ...seenBy(sighting) };
         }
-        await clearLeftover(address);
         await save();
         await restore(endpointId);
         continue;
       }
       const holder = holders.get(address);
       if (holder !== undefined && holder !== endpointId) {
-        if (staleAgainst(sighting, known[holder])) {
-          disputed ||= disputes(sighting, known[holder]);
+        // A message never takes an address from an endpoint a listing put
+        // there; only a fresh listing can say it moved.
+        if (sighting.by === "message" && known[holder]?.by === "listing") {
+          disputed = true;
           continue;
         }
+        if (staleAgainst(sighting, known[holder])) continue;
         // Cloud gives an address to one endpoint at a time, so the one that
         // held it has left, whether removed or renamed.
         await leave(holder, address);
       }
-      await clearLeftover(address);
 
       if (entry?.address && entry.address !== address) {
         await leave(endpointId, entry.address);

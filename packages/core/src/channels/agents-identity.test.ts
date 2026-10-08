@@ -88,9 +88,23 @@ describe("keeping agents' links on their endpoint", () => {
     await people.addChannelMapping("ada", "agents", "atlas");
     await identity.observe([listed("ep_old", "atlas")]);
 
-    await identity.observe([sent("ep_new", "atlas", 2)]);
+    await identity.observe([listed("ep_new", "atlas")]);
 
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+    // A link made for the new endpoint stays, whatever it is seen by next.
+    await people.addChannelMapping("ada", "agents", "atlas");
+    await identity.observe([listed("ep_new", "atlas")]);
+    await identity.observe([sent("ep_new", "atlas", 3)]);
+    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
+  });
+
+  it("lets no message take an address from the endpoint a listing put there", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    await identity.observe([listed("ep_old", "atlas")]);
+
+    await identity.observe([sent("ep_new", "atlas", Date.now() + 60_000)]);
+
+    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
   });
 
   it("gives a set-aside link back to its endpoint when it shows up renamed", async () => {
@@ -262,6 +276,8 @@ describe("keeping agents' links on their endpoint", () => {
       expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
 
       await admit(own("ep_new", SENT + 1));
+      expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
+      await admit(own("ep_new", SENT + 2));
       expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
     });
 
