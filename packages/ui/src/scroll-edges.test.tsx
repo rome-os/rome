@@ -64,10 +64,8 @@ describe("scroll edge hints", () => {
     const { container } = render(<SettingsNav active="Appearance" />);
 
     expect(chevrons(container)).toHaveLength(0);
-    expect(container.querySelector("ul")?.getAttribute("style")).toBeNull();
   });
 
-  // The fade itself is not asserted: jsdom's style parser drops `mask-image`.
   it("marks a clipped end with a chevron kept out of the tab order and the tree", () => {
     fakeOverflowingRows();
     const { container } = render(<SettingsNav active="Appearance" />);
@@ -85,8 +83,8 @@ describe("scroll edge hints", () => {
     const { container } = render(<SettingsNav active="Advanced" />);
 
     const list = container.querySelector("ul");
-    // Right edge 690, row ends at 300, plus the 40px kept clear of the chevron.
-    expect(list?.scrollLeft).toBe(430);
+    // Right edge 690, row ends at 300, plus the 32px kept clear of the chevron.
+    expect(list?.scrollLeft).toBe(422);
   });
 
   it("puts a FilterChipGroup's className on its frame and marks a clipped end there", () => {

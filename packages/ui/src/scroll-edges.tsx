@@ -1,11 +1,4 @@
-import {
-  type CSSProperties,
-  type MouseEvent,
-  type RefObject,
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
+import { type MouseEvent, type RefObject, useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "./cn.js";
 
@@ -15,25 +8,20 @@ export interface ScrollEdges {
   end: boolean;
 }
 
-/**
- * Width of each masked end, in px: the outer 16px under the chevron is fully
- * clear, so no half-shown item sits behind it, then the row fades in over the
- * next 24px. An entry brought into view keeps this far from a masked end.
- */
-const EDGE_CLEARANCE = 40;
-const CLEAR = 16;
+/** Width of a chevron, in px. An entry brought into view keeps this far from the row's ends. */
+const CHEVRON_WIDTH = 32;
 
 /**
- * Scrolls `row` just far enough to bring `item` clear of a masked end. Moves
- * only the row's scrollLeft: scrollIntoView would also scroll the page.
+ * Scrolls `row` just far enough to bring `item` clear of a chevron. Moves only
+ * the row's scrollLeft: scrollIntoView would also scroll the page.
  */
 export function revealInRow(row: HTMLElement, item: Element) {
   const bounds = row.getBoundingClientRect();
   const rect = item.getBoundingClientRect();
-  if (rect.right > bounds.right - EDGE_CLEARANCE) {
-    row.scrollLeft += rect.right - bounds.right + EDGE_CLEARANCE;
-  } else if (rect.left < bounds.left + EDGE_CLEARANCE) {
-    row.scrollLeft -= bounds.left + EDGE_CLEARANCE - rect.left;
+  if (rect.right > bounds.right - CHEVRON_WIDTH) {
+    row.scrollLeft += rect.right - bounds.right + CHEVRON_WIDTH;
+  } else if (rect.left < bounds.left + CHEVRON_WIDTH) {
+    row.scrollLeft -= bounds.left + CHEVRON_WIDTH - rect.left;
   }
 }
 
@@ -42,11 +30,6 @@ export function revealInRow(row: HTMLElement, item: Element) {
  * scrollbar, so without a cue a row clipped between two items reads as
  * complete. Re-measures on scroll, on resize, and after every render, since new
  * content widens the row without resizing its box.
- *
- * Also reveals whatever takes keyboard focus inside the row. A browser scrolls a
- * focused element only until it is inside the row, which can leave it under the
- * mask. Pointer focus is left alone: it lands on press, and scrolling then
- * would move the target out from under the release, so the click misses.
  */
 export function useScrollEdges(ref: RefObject<HTMLElement | null>): ScrollEdges {
   const [edges, setEdges] = useState<ScrollEdges>({ start: false, end: false });
@@ -70,47 +53,28 @@ export function useScrollEdges(ref: RefObject<HTMLElement | null>): ScrollEdges 
     if (!row) return;
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
     observer?.observe(row);
-    const reveal = (event: FocusEvent) => {
-      const target = event.target;
-      if (target instanceof Element && target.matches(":focus-visible")) revealInRow(row, target);
-    };
     row.addEventListener("scroll", update, { passive: true });
-    row.addEventListener("focusin", reveal);
     return () => {
       observer?.disconnect();
       row.removeEventListener("scroll", update);
-      row.removeEventListener("focusin", reveal);
     };
   }, [ref, update]);
 
   return edges;
 }
 
-/** Fades the row out toward each end that hides content, and only those ends. */
-export function scrollEdgeMask(edges: ScrollEdges): CSSProperties | undefined {
-  if (!edges.start && !edges.end) return undefined;
-  const start = edges.start
-    ? `transparent 0, transparent ${CLEAR}px, black ${EDGE_CLEARANCE}px`
-    : "black 0";
-  const end = edges.end
-    ? `black calc(100% - ${EDGE_CLEARANCE}px), transparent calc(100% - ${CLEAR}px), transparent 100%`
-    : "black 100%";
-  const mask = `linear-gradient(to right, ${start}, ${end})`;
-  return { maskImage: mask, WebkitMaskImage: mask };
-}
-
 // A click would focus the button, which is hidden from assistive tech and
 // unmounts once its end is reached, dropping focus to the body.
 const keepFocus = (event: MouseEvent) => event.preventDefault();
 
+// Solid behind the chevron, so a half-shown item under it does not read as
+// overlapping text. Stops 1px short of the bottom to leave a row's border line.
 const SCROLL_BUTTON_CLASS =
-  "absolute inset-y-0 flex w-8 items-center text-muted-foreground hover:text-foreground [&_svg]:size-4";
+  "absolute top-0 bottom-px flex w-8 items-center bg-background text-muted-foreground hover:text-foreground [&_svg]:size-4";
 
 /**
- * A chevron on each clipped end that scrolls the row most of a width. The fade
- * alone is not enough: a clip that falls in the gap between two items, or
- * shows only a sliver of one, fades to nothing and the row looks complete.
- * Renders into the row's positioned frame.
+ * A chevron on each clipped end that scrolls the row most of a width. Renders
+ * into the row's positioned frame.
  *
  * Pointer-only: a keyboard user tabs through the items, which scrolls the row,
  * so the chevrons stay out of the tab order and the accessibility tree, and a
@@ -125,11 +89,7 @@ export function ScrollEdgeButtons({
 }) {
   const scrollBy = (direction: 1 | -1) => {
     const row = rowRef.current;
-    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    row?.scrollBy({
-      left: direction * row.clientWidth * 0.75,
-      behavior: reduceMotion ? "auto" : "smooth",
-    });
+    row?.scrollBy({ left: direction * row.clientWidth * 0.75, behavior: "smooth" });
   };
   return (
     <>

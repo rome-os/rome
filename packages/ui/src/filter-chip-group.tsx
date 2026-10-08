@@ -2,7 +2,7 @@ import * as React from "react";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 
 import { cn } from "./cn.js";
-import { ScrollEdgeButtons, scrollEdgeMask, useScrollEdges } from "./scroll-edges.js";
+import { ScrollEdgeButtons, useScrollEdges } from "./scroll-edges.js";
 
 export type FilterChipOption<T extends string = string> = {
   value: T;
@@ -66,13 +66,12 @@ export function FilterChipGroup<T extends string = string>({
   className,
 }: FilterChipGroupProps<T>) {
   const rowRef = React.useRef<HTMLDivElement>(null);
-  // Fades and marks a clipped end, so the row reads as scrollable on a phone.
+  // Marks a clipped end with a chevron, so the row reads as scrollable on a phone.
   const edges = useScrollEdges(rowRef);
   return (
     <div data-slot="filter-chip-frame" className={cn("relative min-w-0", className)}>
       <RadioGroupPrimitive.Root
         ref={rowRef}
-        style={scrollEdgeMask(edges)}
         data-slot="filter-chip-group"
         aria-label={ariaLabel}
         value={value}
