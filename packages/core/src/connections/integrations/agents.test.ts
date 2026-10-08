@@ -251,6 +251,9 @@ describe("agents channel", () => {
     await expect(talker.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
       "Rome Cloud can't deliver to @friend/atlas. The agent may not exist, or its owner hasn't linked their account with yours.",
     );
+    await expect(talker.send("muse" as ConversationId, { text: "Hi" })).rejects.toThrow(
+      "Rome Cloud can't deliver to muse. The agent may no longer exist.",
+    );
   });
 
   it("reaches a dot directly at its endpoint, so People can write to it first", async () => {

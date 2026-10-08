@@ -20,6 +20,7 @@ import {
   type AgentMessagingClient,
   AgentMessagingError,
   agentAddress,
+  agentAddressAccount,
   createRomeCloudAgentsClient,
   isNotReachable,
 } from "../../lib/rome-cloud-agents.js";
@@ -237,10 +238,12 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         return { conversationId, messageId: sent.messageId };
       } catch (err) {
         if (!isNotReachable(err)) throw err;
-        throw new Error(
-          `Rome Cloud can't deliver to ${conversationId}. The agent may not exist, or its owner hasn't linked their account with yours.`,
-          { cause: err },
-        );
+        // Only another account's agent can be out of reach for want of a link.
+        const why =
+          agentAddressAccount(conversationId) === null
+            ? "The agent may no longer exist."
+            : "The agent may not exist, or its owner hasn't linked their account with yours.";
+        throw new Error(`Rome Cloud can't deliver to ${conversationId}. ${why}`, { cause: err });
       }
     },
     ...features,
