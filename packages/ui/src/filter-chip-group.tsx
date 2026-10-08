@@ -122,7 +122,7 @@ export function FilterChipGroup<T extends string = string>({
           );
         })}
       </RadioGroupPrimitive.Root>
-      <ScrollEdgeButtons edges={edges} rowRef={rowRef} />
+      <ScrollEdgeButtons edges={edges} rowRef={rowRef} outset />
     </div>
   );
 }

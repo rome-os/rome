@@ -83,9 +83,12 @@ const SCROLL_BUTTON_CLASS =
 export function ScrollEdgeButtons({
   edges,
   rowRef,
+  outset = false,
 }: {
   edges: ScrollEdges;
   rowRef: RefObject<HTMLElement | null>;
+  /** Set when the row overhangs its frame by one step (`-mx-1`), so each chevron covers the row's real edge. */
+  outset?: boolean;
 }) {
   const scrollBy = (direction: 1 | -1) => {
     const row = rowRef.current;
@@ -101,7 +104,7 @@ export function ScrollEdgeButtons({
           data-slot="scroll-edge-button"
           onMouseDown={keepFocus}
           onClick={() => scrollBy(-1)}
-          className={cn(SCROLL_BUTTON_CLASS, "left-0 justify-start")}
+          className={cn(SCROLL_BUTTON_CLASS, outset ? "-left-1" : "left-0", "justify-start")}
         >
           <ChevronLeft />
         </button>
@@ -114,7 +117,7 @@ export function ScrollEdgeButtons({
           data-slot="scroll-edge-button"
           onMouseDown={keepFocus}
           onClick={() => scrollBy(1)}
-          className={cn(SCROLL_BUTTON_CLASS, "right-0 justify-end")}
+          className={cn(SCROLL_BUTTON_CLASS, outset ? "-right-1" : "right-0", "justify-end")}
         >
           <ChevronRight />
         </button>
