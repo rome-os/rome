@@ -58,6 +58,23 @@ describe("getInstanceToken", () => {
     setInstanceTokenInMemory(TOKEN);
     expect(changes).toBe(2);
   });
+
+  it("keeps notifying and updates the token when a subscriber throws", () => {
+    let changes = 0;
+    const unsubscribeThrowing = onInstanceTokenChanged(() => {
+      throw new Error("manager closed");
+    });
+    const unsubscribe = onInstanceTokenChanged(() => changes++);
+    try {
+      expect(() => setInstanceTokenInMemory(TOKEN)).not.toThrow();
+      expect(getInstanceToken()).toBe(TOKEN);
+      expect(changes).toBe(1);
+    } finally {
+      unsubscribeThrowing();
+      unsubscribe();
+      setInstanceTokenInMemory(null);
+    }
+  });
 });
 
 describe("hydrateInstanceToken / seedInstanceTokenFromEnv", () => {

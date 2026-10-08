@@ -41,11 +41,7 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./codex/image-trace.js";
-import {
-  CODEX_PAYER_CHANGED_MESSAGE,
-  CodexAppServerManager,
-  type CodexThreadBinding,
-} from "./codex/app-server-manager.js";
+import { CodexAppServerManager, type CodexThreadBinding } from "./codex/app-server-manager.js";
 import {
   Method,
   Notify,
@@ -86,6 +82,7 @@ import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
 import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
+import { PAYER_CHANGED_MESSAGE } from "./rome-credits-payer.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -1011,7 +1008,7 @@ export class CodexAppServerProvider implements ModelProvider {
         const payers = new Set(
           inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
         );
-        if (payers.size > 1) throw new Error(CODEX_PAYER_CHANGED_MESSAGE);
+        if (payers.size > 1) throw new Error(PAYER_CHANGED_MESSAGE);
         const [expectedProvider] = payers;
         const started = (await this.appServerManager.requestForThread(
           tid,

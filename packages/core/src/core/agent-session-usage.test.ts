@@ -305,6 +305,36 @@ describe("AgentSession turn usage", () => {
     expect(providerCalls).toBe(0);
   });
 
+  it("dispatches a turn whose funding label resolves without a payer change", async () => {
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let preparationStarted!: () => void;
+    const preparationStartedPromise = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    beforeModelDispatch = async () => {
+      preparationStarted();
+      await preparationGate;
+    };
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    funding = "unknown";
+
+    const session = await manager.acquire(key);
+    const turn = session.sendTurn({ prompt: "boot-time turn" });
+    await preparationStartedPromise;
+    // The first status probe lands; Codex's payer is still ChatGPT.
+    funding = "subscription";
+    releasePreparation();
+    await drain(turn.events);
+
+    expect(providerCalls).toBe(1);
+    expect(recorded.map((facts) => facts.funding)).toEqual(["subscription"]);
+  });
+
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
     forkable = true;
     nextRun = async function* () {

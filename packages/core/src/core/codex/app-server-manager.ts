@@ -3,6 +3,7 @@ import { getInstanceToken } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
 import { codexAppServerConfigArgs, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import { PAYER_CHANGED_MESSAGE } from "../rome-credits-payer.js";
 import { AppServerClient, type AppServerClientOptions } from "./app-server-client.js";
 import {
   Method,
@@ -33,10 +34,6 @@ interface StoredThreadBinding {
   generation: number;
   resumePromise: Promise<void> | null;
 }
-
-/** A turn whose payer changed between its resolution and `turn/start`. */
-export const CODEX_PAYER_CHANGED_MESSAGE =
-  "Model payer changed while preparing this turn; please retry.";
 
 interface Connection {
   client: CodexAppServerConnection;
@@ -262,7 +259,7 @@ export class CodexAppServerManager {
       options.expectedProvider !== undefined &&
       connection.defaultProvider !== options.expectedProvider
     ) {
-      throw new Error(CODEX_PAYER_CHANGED_MESSAGE);
+      throw new Error(PAYER_CHANGED_MESSAGE);
     }
     return (await connection.client.request(method, params)) as T;
   }

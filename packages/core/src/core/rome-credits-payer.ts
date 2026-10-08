@@ -3,6 +3,9 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js
 import { getInstanceToken } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 
+/** A turn whose payer changed between its model resolution and dispatch. */
+export const PAYER_CHANGED_MESSAGE = "Model payer changed while preparing this turn; please retry.";
+
 export interface CodexPayerManager {
   setDefaultProvider(provider: string | null): void;
   restart(): void;

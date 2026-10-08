@@ -110,6 +110,7 @@ import {
 } from "./agent-lifecycle.js";
 import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { UsageFunding } from "../usage/events.js";
+import { PAYER_CHANGED_MESSAGE } from "./rome-credits-payer.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
@@ -3440,8 +3441,10 @@ class AgentSessionImpl implements AgentSession {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
             const funding = this.modelSession.funding;
-            if (sink.resolvedFunding !== funding) {
-              throw new Error("Model payer changed while preparing this turn; please retry.");
+            // Compare the payer, not the label: "unknown" becomes "subscription"
+            // once the first login probe lands, with no payer change.
+            if ((sink.resolvedFunding === "rome_credits") !== (funding === "rome_credits")) {
+              throw new Error(PAYER_CHANGED_MESSAGE);
             }
             sink.funding = funding;
             await this.modelSession.sendUserInput({

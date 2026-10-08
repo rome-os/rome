@@ -42,7 +42,16 @@ export function setInstanceTokenInMemory(token: string | null): void {
   const nextToken = isValidInstanceToken(token) ? token : null;
   if (cachedInstanceToken === nextToken) return;
   cachedInstanceToken = nextToken;
-  for (const listener of instanceTokenListeners) listener();
+  // The token is already persisted; a failing listener must not fail that write.
+  for (const listener of instanceTokenListeners) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn("instance token listener failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 /** Subscribe to minted and revoked instance credentials in this process. */
