@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isMap, isScalar, isSeq, parseDocument, YAMLSeq } from "yaml";
 
@@ -224,9 +224,13 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
  * Creates a private working copy of the carrier's skills for one review. The
  * agent edits the copy, so nothing it writes reaches the shared carrier until
  * the review publishes it, and a failed or stopped review leaves no trace.
+ *
+ * The copy sits beside the carrier, not in the OS temp dir: core accepts an
+ * app-supplied working dir only inside the projects root, which holds the
+ * carrier. The dot prefix sets it apart from the authored apps beside it.
  */
 export async function stageCarrierSkills(dir: string): Promise<string> {
-  const staging = await mkdtemp(join(tmpdir(), "dream-skill-review-"));
+  const staging = await mkdtemp(join(dirname(resolve(dir)), ".dream-skill-review-"));
   await mkdir(join(staging, "skills"), { recursive: true });
   for (const [name, content] of await snapshotCarrierSkills(dir)) {
     await mkdir(join(staging, "skills", name));
