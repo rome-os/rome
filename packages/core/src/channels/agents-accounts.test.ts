@@ -155,8 +155,6 @@ describe("the agents address book", () => {
           ready: true,
           sameAccount: false,
         },
-        // A Cloud that predates endpoint ids.
-        { endpoint: "nova", kind: "dot", ready: true } as AgentEndpointSummary,
       ]),
       isConnected: () => true,
       onListed: (sightings) => told.push(sightings),
@@ -169,6 +167,20 @@ describe("the agents address book", () => {
         { endpointId: "ep_friend", address: "@friend/atlas", by: "listing" },
       ],
     ]);
+  });
+
+  it("tells nothing from a Cloud that predates endpoint ids", async () => {
+    const told: unknown[] = [];
+    const book = agentsAccounts({
+      client: cloud([
+        atlas,
+        { endpoint: "nova", kind: "dot", ready: true } as AgentEndpointSummary,
+      ]),
+      isConnected: () => true,
+      onListed: (sightings) => told.push(sightings),
+    });
+    await book.listAccounts({ limit: 100 });
+    expect(told).toEqual([]);
   });
 
   it("asks Cloud nothing until Agents is connected", async () => {

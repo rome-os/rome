@@ -109,12 +109,15 @@ export function agentSightings(message: ChannelMessage): AgentSighting[] {
     : [];
 }
 
-/** The endpoints a listing names. A Cloud that predates endpoint ids names
- *  none, and settles nothing. */
-export function listingSightings(endpoints: readonly AgentEndpointSummary[]): AgentSighting[] {
+/** The endpoints a listing names, or null from a Cloud that predates
+ *  endpoint ids, whose listing cannot say which endpoint holds an address. */
+export function listingSightings(
+  endpoints: readonly AgentEndpointSummary[],
+): AgentSighting[] | null {
+  if (endpoints.some((endpoint) => !endpoint.endpointId)) return null;
   return endpoints.flatMap((endpoint) => {
     const address = agentAddress(endpoint);
-    return address !== null && endpoint.endpointId
+    return address !== null
       ? [{ endpointId: endpoint.endpointId, address, by: "listing" as const }]
       : [];
   });

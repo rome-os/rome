@@ -97,7 +97,8 @@ export function agentsAccounts(deps: {
     const book = deps.client.endpoints().then(
       ({ endpoint: own, address, endpoints }) => {
         lastOwnHandle = address ? agentAddressAccount(address) : null;
-        deps.onListed?.(listingSightings(endpoints), askedAt);
+        const sightings = listingSightings(endpoints);
+        if (sightings) deps.onListed?.(sightings, askedAt);
         return {
           accounts: endpoints
             // A dot still waiting on its pairing confirmation cannot be reached.
