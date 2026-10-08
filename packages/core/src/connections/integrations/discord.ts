@@ -1,12 +1,13 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, normalization, slash commands, send
-// formatting, history — is the existing `DiscordAdapter`
+// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// commands, send formatting, history — is `DiscordAdapter`
 // (packages/core/src/channels/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
-// discord.js owns transient reconnect internally (auto-resumes dropped shards);
-// only TERMINAL failures reach `fault`:
+// The transport already speaks the channel's record, so inbound and send pass
+// through without a projection. discord.js owns transient reconnect internally
+// (auto-resumes dropped shards); only TERMINAL failures reach `fault`:
 //   - login `TokenInvalid` / `DisallowedIntents`, or a live `invalidated`
 //     session revocation → CredentialRejected{ grant: "bot" } → runtime renews
 //     once, then degrades.
@@ -28,10 +29,7 @@ import {
   directoryPage,
   historyQueryLimit,
   historyWindowHours,
-  normalizedFromInbound,
   toHistoryMessage,
-  toInboundMessage,
-  toMessageReceipt,
 } from "./talk-features.js";
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
@@ -281,7 +279,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // adapter.start() awaits client.login(), which rejects with a
               // DiscordjsError { code: TokenInvalid | DisallowedIntents } on a
               // refused token; the live gateway routes terminal errors through
@@ -291,11 +289,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
             feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
               const history: TalkHistory = {
@@ -312,8 +307,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                 },
               };
               const inboundMedia: TalkInboundMedia = {
-                materialize: (message) =>
-                  adapter.saveIncomingAttachments(normalizedFromInbound(message)),
+                materialize: (message) => adapter.saveIncomingAttachments(message),
               };
               const activity: TalkActivity = {
                 async begin(input) {

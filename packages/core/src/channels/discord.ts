@@ -27,14 +27,15 @@ import {
   type ChannelApiRequest,
   type ChannelApiResult,
 } from "./api-request.js";
-import type { ProviderAdapter } from "./adapter.js";
 import type {
+  ChannelMessage,
   ConversationDescriptor,
   ConversationId,
   ConversationSettingsControl,
   ConversationSettingsSnapshot,
   ChatStopHandler,
   MessageAddressing,
+  MessageReceipt,
   PersonRecord,
 } from "@rome-os/app-runtime";
 import type {
@@ -328,10 +329,14 @@ export interface DiscordAdapterLike {
   executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
 }
 
-export class DiscordAdapter implements ProviderAdapter {
-  readonly channelName = "discord";
+/**
+ * The Discord bot transport. Inbound gateway messages arrive as the channel's
+ * own record, a `ChannelMessage` whose `raw` is the discord.js `Message`, so
+ * the Connection integration delivers them as they are.
+ */
+export class DiscordAdapter {
   private client: Client;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
   private conversationSettings?: ConversationSettingsControl & {
     observe?(descriptor: ConversationDescriptor): void;
   };
@@ -840,29 +845,33 @@ export class DiscordAdapter implements ProviderAdapter {
       isThread && message.channel.isThread() ? (message.channel.parentId ?? null) : null;
     const replyToMessageId = resolveDiscordReplyToMessageId(message);
 
-    const msg: NormalizedMessage = {
-      id: message.id,
+    const msg: ChannelMessage = {
       channel: "discord",
-      channelUserId: message.author.id,
-      displayName:
+      direction: "inbound",
+      messageId: message.id,
+      conversationId: message.channelId as ConversationId,
+      ...(parentId ? { parentConversationId: parentId as ConversationId } : {}),
+      senderId: message.author.id,
+      senderDisplayName:
         message.member?.displayName ?? message.author.displayName ?? message.author.username,
-      username: message.author.username,
-      threadId: message.channelId,
-      parentThreadId: parentId ?? undefined,
-      threadName,
-      threadType: isDm ? "private" : "group",
-      timestamp: message.createdAt,
+      ...(message.author.username ? { senderUsername: message.author.username } : {}),
       text,
       attachments: this.extractAttachments(message),
-      replyTo: replyToMessageId ? { messageId: replyToMessageId } : undefined,
+      timestamp: message.createdAt,
+      ...(replyToMessageId ? { replyTo: { messageId: replyToMessageId } } : {}),
       addressing,
-      rawEvent: message,
+      // A native thread is a topic under the channel it was opened in.
+      thread: {
+        kind: isDm ? "dm" : parentId ? "topic" : "group",
+        ...(threadName ? { name: threadName } : {}),
+      },
+      raw: message,
     };
 
     log.info("message received", {
-      from: msg.channelUserId,
-      threadId: msg.threadId,
-      threadType: msg.threadType,
+      from: msg.senderId,
+      conversationId: msg.conversationId,
+      threadKind: msg.thread?.kind,
       isDm,
       isThread,
     });
@@ -871,7 +880,7 @@ export class DiscordAdapter implements ProviderAdapter {
       await this.handler!(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.id,
+        messageId: msg.messageId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -1344,7 +1353,8 @@ export class DiscordAdapter implements ProviderAdapter {
     return (await this.client.users.createDM(channelUserId)).id;
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = conversationId;
     const channel = await this.client.channels.fetch(threadId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Channel ${threadId} is not a text channel`);
@@ -1385,7 +1395,12 @@ export class DiscordAdapter implements ProviderAdapter {
       }
 
       log.info("message sent", { threadId, targetChannelId: targetChannel.id });
-      return { messageId, threadId: targetChannel.id };
+      // A reply posted into an auto-thread lands in that thread, so the
+      // receipt names the thread, not the channel it was asked for.
+      return {
+        conversationId: targetChannel.id as ConversationId,
+        ...(messageId ? { messageId } : {}),
+      };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -1426,12 +1441,27 @@ export class DiscordAdapter implements ProviderAdapter {
     return thread;
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    return saveUrlAttachments(message);
+  /** Download a message's files into the profile. Each attachment's `url` is
+   *  its Discord CDN link, so the message needs no provider event. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    // saveUrlAttachments still takes the transport shape. It reads only the
+    // channel, conversation, message id and attachments from it.
+    return saveUrlAttachments({
+      id: message.messageId,
+      channel: "discord",
+      channelUserId: message.senderId,
+      displayName: message.senderDisplayName ?? message.senderId,
+      threadId: message.conversationId,
+      threadType: message.thread?.kind === "dm" ? "private" : "group",
+      timestamp: message.timestamp,
+      text: message.text,
+      attachments: message.attachments,
+      rawEvent: message.raw,
+    });
   }
 
   /**

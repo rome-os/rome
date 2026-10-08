@@ -12,7 +12,12 @@
 
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
-import type { ConversationId, NormalizedMessage, ChannelMessage } from "@rome-os/app-runtime";
+import type {
+  ChannelMessage,
+  ConversationId,
+  MessageReceipt,
+  NormalizedMessage,
+} from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -32,7 +37,8 @@ const fakeState: {
   lastConfig?: FakeConfig;
   startError: unknown;
   typedThread?: string;
-  sent: Array<{ channelUserId: string; threadId: string; message: unknown }>;
+  inbound?: (msg: ChannelMessage) => Promise<void>;
+  sent: Array<{ conversationId: ConversationId; message: unknown }>;
   historyCalls: Array<{ threadId: string | null; windowHours: number }>;
   historyMessages: NormalizedMessage[];
   apiRequests: ChannelApiRequest[];
@@ -62,7 +68,9 @@ rs.mock("../../channels/discord.js", () => ({
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
     }
-    onMessage(): void {}
+    onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+      fakeState.inbound = handler;
+    }
     async directConversationFor(userId: string): Promise<string> {
       return `dm-${userId}`;
     }
@@ -72,8 +80,9 @@ rs.mock("../../channels/discord.js", () => ({
     async stop(): Promise<void> {
       fakeState.stopCalls++;
     }
-    async sendMessage(channelUserId: string, threadId: string, message: unknown): Promise<void> {
-      fakeState.sent.push({ channelUserId, threadId, message });
+    async send(conversationId: ConversationId, message: unknown): Promise<MessageReceipt> {
+      fakeState.sent.push({ conversationId, message });
+      return { conversationId, messageId: "sent-1" };
     }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
@@ -150,6 +159,7 @@ beforeEach(() => {
   fakeState.lastConfig = undefined;
   fakeState.startError = null;
   fakeState.typedThread = undefined;
+  fakeState.inbound = undefined;
   fakeState.sent = [];
   fakeState.historyCalls = [];
   fakeState.historyMessages = [];
@@ -204,7 +214,6 @@ describe("discord descriptor shape", () => {
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "discord", rawEvent: null, attachments: [] },
     } satisfies ChannelMessage;
     await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
     const stopped = h.talker.stop();
@@ -234,13 +243,14 @@ describe("discord descriptor shape", () => {
     expect(findByChannelUser).toHaveBeenCalledWith("discord", "guardian-777");
   });
 
-  it("passes the opaque conversation id to the adapter", async () => {
+  it("passes the opaque conversation id to the adapter and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await h.talker.send("chan-1" as ConversationId, { text: "hi" });
-    expect(fakeState.sent).toEqual([
-      { channelUserId: "chan-1", threadId: "chan-1", message: { text: "hi" } },
-    ]);
+    await expect(h.talker.send("chan-1" as ConversationId, { text: "hi" })).resolves.toStrictEqual({
+      conversationId: "chan-1",
+      messageId: "sent-1",
+    });
+    expect(fakeState.sent).toEqual([{ conversationId: "chan-1", message: { text: "hi" } }]);
   });
 
   // The flag is what gives the channel a \`messages\` port; the feature is what
@@ -428,6 +438,82 @@ describe("discord descriptor shape", () => {
     await expect(request).rejects.toMatchObject({ name: "CredentialRejected", grant: "bot" });
     await actor.stop?.();
     expect(fakeState.stopCalls).toBe(1);
+  });
+});
+
+describe("discord inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const desc = makeDiscordDescriptor(deps);
+    const talker = desc.capabilities.talker!.build(
+      { bot: validCred() },
+      {
+        connectionId: "discord-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: ChannelMessage[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+
+    // A native-thread reply that mentions the bot and carries an image, so
+    // every optional field Discord sets is present.
+    const raw = { id: "msg-7", channelId: "thread-1" };
+    const timestamp = new Date("2026-05-10T00:00:00Z");
+    const emitted: ChannelMessage = {
+      channel: "discord",
+      direction: "inbound",
+      messageId: "msg-7",
+      conversationId: "thread-1" as ConversationId,
+      parentConversationId: "channel-1" as ConversationId,
+      senderId: "user-1",
+      senderDisplayName: "Alice Smith",
+      senderUsername: "alice",
+      text: "see this",
+      attachments: [
+        {
+          type: "image",
+          url: "https://cdn.discordapp.com/attachments/1/2/photo.png",
+          fileName: "photo.png",
+        },
+      ],
+      timestamp,
+      replyTo: { messageId: "msg-5" },
+      addressing: "mention",
+      thread: { kind: "topic", name: "launch" },
+      raw,
+    };
+    await fakeState.inbound?.(emitted);
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "discord",
+        direction: "inbound",
+        messageId: "msg-7",
+        conversationId: "thread-1",
+        parentConversationId: "channel-1",
+        senderId: "user-1",
+        senderDisplayName: "Alice Smith",
+        senderUsername: "alice",
+        text: "see this",
+        attachments: [
+          {
+            type: "image",
+            url: "https://cdn.discordapp.com/attachments/1/2/photo.png",
+            fileName: "photo.png",
+          },
+        ],
+        timestamp,
+        replyTo: { messageId: "msg-5" },
+        addressing: "mention",
+        thread: { kind: "topic", name: "launch" },
+        raw,
+      },
+    ]);
+    expect(delivered[0].raw).toBe(raw);
+    await talker.stop();
   });
 });
 
