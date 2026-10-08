@@ -1,6 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { Dialog, DialogBody, DialogTitle } from "./dialog.js";
+import { Popover, PopoverAnchor, PopoverContent } from "./popover.js";
 import { Sheet } from "./sheet.js";
 import { mountShadowApp } from "./test/shadow-app.js";
 
@@ -16,8 +17,19 @@ function setScrollGeometry(el: HTMLElement, scrollTop: number) {
   Object.defineProperty(el, "scrollTop", { configurable: true, value: scrollTop, writable: true });
 }
 
-function wheel(target: Element, deltaY: number) {
+function setHorizontalGeometry(el: HTMLElement, scrollLeft: number) {
+  Object.defineProperty(el, "scrollWidth", { configurable: true, value: 1000 });
+  Object.defineProperty(el, "clientWidth", { configurable: true, value: 200 });
+  Object.defineProperty(el, "scrollLeft", {
+    configurable: true,
+    value: scrollLeft,
+    writable: true,
+  });
+}
+
+function wheel(target: Element, deltaY: number, deltaX = 0) {
   const event = new WheelEvent("wheel", {
+    deltaX,
     deltaY,
     bubbles: true,
     cancelable: true,
@@ -130,6 +142,92 @@ describe("Dialog scroll lock inside a shadow root", () => {
     setScrollGeometry(find(shadowRoot, "body"), 0);
 
     expect(wheel(find(shadowRoot, "item"), 100).defaultPrevented).toBe(false);
+  });
+  it("lets a horizontal wheel scroll a horizontal area, LTR and RTL", () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    render(
+      <Dialog open onClose={() => {}}>
+        <DialogTitle>Timeline</DialogTitle>
+        <DialogBody data-testid="ltr" style={{ overflowX: "auto" }}>
+          <p data-testid="ltr-item">Frame</p>
+        </DialogBody>
+        <div data-testid="rtl" style={{ overflowX: "auto", direction: "rtl" }}>
+          <p data-testid="rtl-item">Frame</p>
+        </div>
+      </Dialog>,
+      { container: mountRoot },
+    );
+    const ltr = find(shadowRoot, "ltr");
+    const ltrItem = find(shadowRoot, "ltr-item");
+    setHorizontalGeometry(ltr, 0); // at the left start
+    expect(wheel(ltrItem, 0, 100).defaultPrevented).toBe(false);
+    expect(wheel(ltrItem, 0, -100).defaultPrevented).toBe(true);
+    setHorizontalGeometry(ltr, 800); // at the right end
+    expect(wheel(ltrItem, 0, 100).defaultPrevented).toBe(true);
+    expect(wheel(ltrItem, 0, -100).defaultPrevented).toBe(false);
+
+    // RTL starts at the right edge (scrollLeft 0) and runs to -max on the left.
+    const rtl = find(shadowRoot, "rtl");
+    const rtlItem = find(shadowRoot, "rtl-item");
+    setHorizontalGeometry(rtl, 0);
+    expect(wheel(rtlItem, 0, -100).defaultPrevented).toBe(false);
+    expect(wheel(rtlItem, 0, 100).defaultPrevented).toBe(true);
+    setHorizontalGeometry(rtl, -800);
+    expect(wheel(rtlItem, 0, -100).defaultPrevented).toBe(true);
+    expect(wheel(rtlItem, 0, 100).defaultPrevented).toBe(false);
+  });
+
+  it("never lets a portalled layer's event scroll the app behind the dialog", () => {
+    const { shadowRoot, appBody, mountRoot } = mountShadowApp();
+    // The app's own page scroller, behind the dialog, with room to scroll.
+    appBody.style.overflowY = "auto";
+    setScrollGeometry(appBody, 0);
+    render(
+      <Dialog open onClose={() => {}}>
+        <DialogTitle>Pick</DialogTitle>
+        <DialogBody>
+          <Popover open modal={false}>
+            <PopoverAnchor />
+            <PopoverContent data-testid="popover">
+              <p data-testid="option">Option</p>
+            </PopoverContent>
+          </Popover>
+        </DialogBody>
+      </Dialog>,
+      { container: mountRoot },
+    );
+    const dialog = shadowRoot.querySelector("[role=dialog]");
+    const option = find(shadowRoot, "option");
+    // The popover is portalled: a React child of the dialog, not a DOM child.
+    expect(dialog?.contains(find(shadowRoot, "popover"))).toBe(false);
+
+    let reachedDocument = false;
+    const listener = () => {
+      reachedDocument = true;
+    };
+    document.addEventListener("wheel", listener);
+    try {
+      // A walk from the option would reach the scrollable app body; the event
+      // must not be let through, so the lock still sees it and cancels it.
+      expect(wheel(option, 100).defaultPrevented).toBe(true);
+    } finally {
+      document.removeEventListener("wheel", listener);
+    }
+    expect(reachedDocument).toBe(true);
+  });
+
+  it("still delivers the wheel to React handlers above the dialog", () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    let outerCalls = 0;
+    render(
+      // e.g. a canvas zoom surface that renders the dialog
+      <div onWheel={() => outerCalls++}>{tallDialog()}</div>,
+      { container: mountRoot },
+    );
+    setScrollGeometry(find(shadowRoot, "body"), 0);
+
+    expect(wheel(find(shadowRoot, "item"), 100).defaultPrevented).toBe(false);
+    expect(outerCalls).toBe(1);
   });
 });
 

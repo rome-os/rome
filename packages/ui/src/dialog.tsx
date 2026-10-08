@@ -34,16 +34,9 @@ export function Dialog({
   initialFocusRef,
   children,
   className,
-  onWheel,
-  onTouchStart,
-  onTouchMove,
   ...rest
 }: DialogProps) {
-  const scrollHandlers = useShadowRootScroll<HTMLDivElement>({
-    onWheel,
-    onTouchStart,
-    onTouchMove,
-  });
+  const contentRef = useShadowRootScroll();
   return (
     <DialogPrimitive.Root
       open={open}
@@ -73,7 +66,7 @@ export function Dialog({
             className,
           )}
           {...rest}
-          {...scrollHandlers}
+          ref={contentRef}
         >
           {children}
         </DialogPrimitive.Content>

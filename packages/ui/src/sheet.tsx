@@ -27,7 +27,7 @@ export function Sheet({
   className,
   children,
 }: SheetProps) {
-  const scrollHandlers = useShadowRootScroll<HTMLDivElement>();
+  const contentRef = useShadowRootScroll();
   return (
     <DialogPrimitive.Root
       open={open}
@@ -45,7 +45,7 @@ export function Sheet({
             widthClassName,
             className,
           )}
-          {...scrollHandlers}
+          ref={contentRef}
         >
           {children}
         </DialogPrimitive.Content>
