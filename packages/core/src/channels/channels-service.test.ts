@@ -128,4 +128,18 @@ describe("createChannelsService", () => {
       'Channel "discord" reads no messages',
     );
   });
+
+  // TODO(0.8): remove with the migration getters.
+  it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
+    const { channelsService } = service();
+    const [summary] = await channelsService.list();
+
+    expect(() => (channelsService as unknown as { history: unknown }).history).toThrow(
+      "ChannelsService.history was removed in @rome-os/app-runtime 0.7",
+    );
+    expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
+      "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
+    );
+    expect(JSON.parse(JSON.stringify(summary))).toEqual({ name: "discord", sendable: true });
+  });
 });

@@ -75,6 +75,23 @@ describe("ChannelsServiceProxy", () => {
 
     expect(calls).toEqual([{ channel: "discord", conversationId: "c1", message: { text: "a" } }]);
   });
+
+  // TODO(0.8): remove with the migration getters.
+  it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => [{ name: "discord", sendable: true }]);
+    const proxy = new ChannelsServiceProxy();
+
+    const [summary] = await proxy.list();
+
+    expect(summary).toEqual({ name: "discord", sendable: true });
+    expect(() => (proxy as unknown as { history: unknown }).history).toThrow(
+      "ChannelsService.history was removed in @rome-os/app-runtime 0.7",
+    );
+    expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
+      "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
+    );
+  });
 });
 
 describe("BackendTurnRunnerProxy", () => {

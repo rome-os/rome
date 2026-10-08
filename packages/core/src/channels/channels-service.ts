@@ -20,6 +20,18 @@ import type {
 import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
 import type { Connection } from "../connections/types.js";
 import type { Channels } from "./channel.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
+
+// TODO(0.8): remove, with the service's and the proxy's uses.
+export const REMOVED_SERVICE_MEMBERS: Record<string, string> = {
+  history:
+    "ChannelsService.history was removed in @rome-os/app-runtime 0.7: read through query, which answers newest first",
+};
+// TODO(0.8): remove, with the service's and the proxy's uses.
+export const REMOVED_SUMMARY_MEMBERS: Record<string, string> = {
+  connectionIds:
+    "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7: read sendable, and send without naming a Connection",
+};
 
 export interface ChannelsServiceDeps {
   /** The channel list, or undefined until it is built. It is built after the
@@ -53,30 +65,35 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     return messages.query(read);
   }
 
-  return {
-    async list(): Promise<ChannelSummary[]> {
-      const summaries = new Map<string, ChannelSummary>();
-      for (const { service } of talking(deps.registry)) {
-        summaries.set(service, { name: service, sendable: true });
-      }
-      for (const channel of deps.channels() ?? []) {
-        if (!summaries.has(channel.name)) {
-          summaries.set(channel.name, { name: channel.name, sendable: false });
+  return withRemovedMembers<ChannelsService>(
+    {
+      async list(): Promise<ChannelSummary[]> {
+        const summaries = new Map<string, ChannelSummary>();
+        for (const { service } of talking(deps.registry)) {
+          summaries.set(service, { name: service, sendable: true });
         }
-      }
-      return [...summaries.values()];
-    },
+        for (const channel of deps.channels() ?? []) {
+          if (!summaries.has(channel.name)) {
+            summaries.set(channel.name, { name: channel.name, sendable: false });
+          }
+        }
+        return [...summaries.values()].map((summary) =>
+          withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS),
+        );
+      },
 
-    async send(
-      channel: string,
-      conversationId: ConversationId,
-      message: OutgoingMessage,
-    ): Promise<MessageReceipt> {
-      const backing = backingConnection(deps.registry, channel);
-      if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
-      return requireTalk(backing).send(conversationId, message);
-    },
+      async send(
+        channel: string,
+        conversationId: ConversationId,
+        message: OutgoingMessage,
+      ): Promise<MessageReceipt> {
+        const backing = backingConnection(deps.registry, channel);
+        if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
+        return requireTalk(backing).send(conversationId, message);
+      },
 
-    query,
-  };
+      query,
+    },
+    REMOVED_SERVICE_MEMBERS,
+  );
 }

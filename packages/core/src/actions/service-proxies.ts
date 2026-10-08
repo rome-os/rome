@@ -33,6 +33,8 @@ import type {
   AppStoreServiceResult,
 } from "../apps/store-service.js";
 import type { EmailInboundControl, EmailInboundResult } from "../channels/email-control.js";
+import { REMOVED_SERVICE_MEMBERS, REMOVED_SUMMARY_MEMBERS } from "../channels/channels-service.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
 import type { SystemUpgradeChecker, SystemUpgradeOfferResult } from "../system-upgrade/service.js";
 import type {
   AppLifecycle,
@@ -216,8 +218,13 @@ function fromWire(messages: WireChannelMessage[]): ChannelMessage[] {
 
 /** Worker-side proxy for the main process's channels service. */
 export class ChannelsServiceProxy implements ChannelsService {
-  list(): Promise<ChannelSummary[]> {
-    return getWorkerRpc().call("channels.list", {});
+  constructor() {
+    withRemovedMembers(this, REMOVED_SERVICE_MEMBERS);
+  }
+
+  async list(): Promise<ChannelSummary[]> {
+    const summaries = await getWorkerRpc().call<ChannelSummary[]>("channels.list", {});
+    return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
   send(
