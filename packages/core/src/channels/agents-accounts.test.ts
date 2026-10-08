@@ -18,6 +18,7 @@ function cloud(endpoints: AgentEndpointSummary[]) {
       if (client.fail) throw new Error("Rome Cloud unavailable");
       return {
         endpoint: "home-rome",
+        address: "@ouou/home-rome",
         endpoints: [{ endpoint: "home-rome", kind: "rome" as const, ready: true }, ...endpoints],
       };
     },
@@ -89,6 +90,14 @@ describe("the agents address book", () => {
     });
     expect(await book.resolve("muse")).toBeNull();
     expect(await book.resolve("@friend")).toBeNull();
+  });
+
+  it("resolves no other account's agent until Cloud has named this account's handle", async () => {
+    const client = cloud([atlas]);
+    client.fail = true;
+    const book = agentsAccounts({ client, isConnected: () => true });
+    expect(await book.resolve("@ouou/atlas")).toBeNull();
+    expect(await book.resolve("@friend/atlas")).toBeNull();
   });
 
   it("folds an own agent's full address onto its bare name, and never makes it external", async () => {

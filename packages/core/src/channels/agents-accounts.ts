@@ -9,6 +9,9 @@
  * `@handle/endpoint` in another (agentAddress). Cloud keeps a name unique only
  * among current endpoints, so a name freed by a removed dot can return under a
  * new one and carry the old link (I2 holds only while the endpoint lives).
+ * Another account's address also carries its handle, which its owner can
+ * change: after a rename, its agents arrive under a new address, and the old
+ * one resolves at Cloud only through the 30-day hold.
  *
  * Any other account's `@handle/endpoint` resolves, listed or not: an agent
  * Rome wrote to can answer without a link, and such a sender still has to be an
@@ -116,9 +119,11 @@ export function agentsAccounts(deps: {
       const listed = accounts.find((account) => account.addresses.includes(address));
       if (listed) return listed;
       // An address in this Rome's own account names one of its own agents,
-      // which the listing holds by its bare name or not at all.
-      const handle = deps.isConnected() ? agentAddressAccount(address) : null;
-      return handle && handle !== ownHandle ? agentAccount(address, {}) : null;
+      // which the listing holds by its bare name or not at all. Until Cloud
+      // has named this account's handle, no address can be told apart from
+      // an own agent's, so none resolves as another account's.
+      const handle = agentAddressAccount(address);
+      return handle && ownHandle && handle !== ownHandle ? agentAccount(address, {}) : null;
     },
   };
 }
