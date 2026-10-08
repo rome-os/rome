@@ -2,33 +2,34 @@ import { getInstanceToken } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 // Rome Cloud agent messaging (amantru/rome-cloud#137). Cloud gives this
-// instance an endpoint that dots and other agents can message, stores messages
-// for it until the instance acknowledges them, and sends as it. The instance
-// token decides the account and endpoint. Every endpoint is known by its
-// `endpointId`, which never changes; its name is a label its owner can change,
-// and two endpoints can share one.
+// instance an agent of its own that dots and other agents can message, stores
+// messages for it until the instance acknowledges them, and sends as it. The
+// instance token decides the account and the agent. Every agent is known by
+// its `agentId`, which never changes; its name is a label its owner can change,
+// and two agents can share one. Rome's own agents are a different thing, so
+// the types here call Cloud's agents external.
 
-/** An endpoint as Cloud names it: its stable id and its current name. */
-export interface AgentEndpointRef {
-  endpointId: string;
+/** An external agent as Cloud names it: its stable id and its current name. */
+export interface ExternalAgentRef {
+  agentId: string;
   name: string;
 }
 
 /** A message as Cloud delivers it. Cloud sets `messageId`, `from`, and `sentAt`. */
 export interface AgentMessageEnvelope {
   messageId: string;
-  /** `endpointId` is what a reply goes to, and null once the sender endpoint
+  /** `agentId` is what a reply goes to, and null once the sender agent
    *  is removed. `name` is its name now, or when it sent this if removed.
    *  `account` is its owner's handle, and `sameAccount` is Cloud's statement
    *  that the sender is in this Rome's account. */
   from: {
-    endpointId: string | null;
+    agentId: string | null;
     name: string;
     kind: "dot" | "rome";
     account: string;
     sameAccount: boolean;
   };
-  to: AgentEndpointRef;
+  to: ExternalAgentRef;
   sentAt: string;
   text: string;
   data: Record<string, unknown> | null;
@@ -36,13 +37,13 @@ export interface AgentMessageEnvelope {
   hop: number;
 }
 
-export interface AgentEndpointSummary extends AgentEndpointRef {
+export interface ExternalAgent extends ExternalAgentRef {
   kind: "dot" | "rome";
   /** The owner's handle. */
   account: string;
-  /** False while a dot's pairing waits for the person's confirmation. */
+  /** False while a dot waits for the person to approve it in Settings. */
   ready: boolean;
-  /** False for an endpoint of a linked account. */
+  /** False for an agent of a linked account. */
   sameAccount: boolean;
 }
 
@@ -59,9 +60,9 @@ export function agentLabel(agent: {
     : `${agent.name} (@${agent.account}'s ${agent.kind})`;
 }
 
-/** Cloud's refusal for an endpoint it will not deliver to, the same for one
+/** Cloud's refusal for an agent it will not deliver to, the same for one
  *  that does not exist and one no link allows, so a stranger cannot learn
- *  which endpoints exist. */
+ *  which agents exist. */
 export function isNotReachable(err: unknown): boolean {
   return err instanceof AgentMessagingError && err.code === "not_reachable";
 }
@@ -78,17 +79,17 @@ export class AgentMessagingError extends Error {
 }
 
 export interface AgentMessagingClient {
-  /** This instance's endpoint and the others it can message. */
-  endpoints(): Promise<{ self: AgentEndpointRef; endpoints: AgentEndpointSummary[] }>;
+  /** This instance's agent and the others it can message. */
+  agents(): Promise<{ self: ExternalAgentRef; agents: ExternalAgent[] }>;
   /** Messages waiting for this instance, oldest first, until acknowledged. */
-  poll(): Promise<{ self: AgentEndpointRef; messages: AgentMessageEnvelope[] }>;
+  poll(): Promise<{ self: ExternalAgentRef; messages: AgentMessageEnvelope[] }>;
   acknowledge(messageIds: string[]): Promise<void>;
-  /** Sends to an endpoint by its id. */
+  /** Sends to an agent by its id. */
   send(input: {
     to: string;
     text: string;
     inReplyTo?: string;
-  }): Promise<{ messageId: string; to: AgentEndpointRef }>;
+  }): Promise<{ messageId: string; to: ExternalAgentRef }>;
 }
 
 export function createRomeCloudAgentsClient(
@@ -143,7 +144,7 @@ export function createRomeCloudAgentsClient(
   }
 
   return {
-    endpoints: () => request("/v1/agent-endpoints"),
+    agents: () => request("/v1/agents"),
     poll: () => request("/v1/agent-messages"),
     async acknowledge(messageIds) {
       if (messageIds.length > 0) await request("/v1/agent-messages/ack", { messageIds });

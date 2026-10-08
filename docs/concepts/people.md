@@ -92,7 +92,7 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
 - Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it or approves its pairing.
-- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that endpoint to the guardian when its first message arrives. Rome makes this link at most once per endpoint, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the endpoint keeps it that way.
+- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the agent keeps it that way.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**

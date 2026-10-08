@@ -19,12 +19,12 @@ import {
 } from "./agents.js";
 
 const ATLAS = "6f1c2d9e-0a4b-4c1d-9e2f-3a4b5c6d7e8f";
-const HOME = { endpointId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
+const HOME = { agentId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
 
 function envelope(overrides: Partial<AgentMessageEnvelope> = {}): AgentMessageEnvelope {
   return {
     messageId: "msg_1",
-    from: { endpointId: ATLAS, name: "atlas", kind: "dot", account: "ouou", sameAccount: true },
+    from: { agentId: ATLAS, name: "atlas", kind: "dot", account: "ouou", sameAccount: true },
     to: HOME,
     sentAt: "2026-10-07T07:35:36.000Z",
     text: "Refund requested on order #41",
@@ -44,14 +44,14 @@ function fakeClient(pages: AgentMessageEnvelope[][]): AgentMessagingClient & {
   return {
     acknowledged,
     sent,
-    endpoints: async () => ({ self: HOME, endpoints: [] }),
+    agents: async () => ({ self: HOME, agents: [] }),
     poll: async () => ({ self: HOME, messages: pages.shift() ?? [] }),
     acknowledge: async (ids) => {
       acknowledged.push(ids);
     },
     send: async (input) => {
       sent.push(input);
-      return { messageId: "msg_sent", to: { endpointId: input.to, name: "atlas" } };
+      return { messageId: "msg_sent", to: { agentId: input.to, name: "atlas" } };
     },
   };
 }
@@ -71,7 +71,7 @@ async function until(ready: () => boolean, fakeTime = false): Promise<void> {
 }
 
 describe("agents channel", () => {
-  it("turns an agent message into a direct message from its endpoint id", () => {
+  it("turns an agent message into a direct message from its agent id", () => {
     const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
     expect(inbound).toMatchObject({
       messageId: "msg_1",
@@ -85,10 +85,10 @@ describe("agents channel", () => {
     expect(inbound.text).toContain('"order": 41');
   });
 
-  it("names another account's agent with its account, and keys it by endpoint id alone", () => {
+  it("names another account's agent with its account, and keys it by agent id alone", () => {
     const external = envelope({
       from: {
-        endpointId: ATLAS,
+        agentId: ATLAS,
         name: "atlas",
         kind: "dot",
         account: "friend",
@@ -104,10 +104,10 @@ describe("agents channel", () => {
     expect(toAgentInboundMessage(renamed)?.senderId).toBe(ATLAS);
   });
 
-  it("drops a message from an endpoint Cloud has removed, and still acknowledges it", async () => {
+  it("drops a message from an agent Cloud has removed, and still acknowledges it", async () => {
     const removed = envelope({
       messageId: "msg_removed",
-      from: { ...envelope().from, endpointId: null },
+      from: { ...envelope().from, agentId: null },
     });
     expect(toAgentInboundMessage(removed)).toBeNull();
     const client = fakeClient([[removed, envelope({ messageId: "msg_2" })]]);
@@ -190,7 +190,7 @@ describe("agents channel", () => {
     client.poll = async () => {
       throw rejected;
     };
-    client.endpoints = async () => {
+    client.agents = async () => {
       throw rejected;
     };
     const registry = new ConnectionRegistry({
@@ -215,7 +215,7 @@ describe("agents channel", () => {
     expect(client.sent).toEqual([]);
   });
 
-  it("sends to the endpoint id named by the conversation and threads replies", async () => {
+  it("sends to the agent id named by the conversation and threads replies", async () => {
     const client = fakeClient([]);
     const talker = createAgentsTalker(client);
     const receipt = await talker.send(ATLAS as ConversationId, {
@@ -227,7 +227,7 @@ describe("agents channel", () => {
     await expect(talker.send(ATLAS as ConversationId, { text: " " })).rejects.toThrow(/text/);
   });
 
-  it("says plainly when Cloud will not deliver to an endpoint", async () => {
+  it("says plainly when Cloud will not deliver to an agent", async () => {
     const client = fakeClient([]);
     client.send = async () => {
       throw new AgentMessagingError("Not reachable", 404, "not_reachable");
@@ -239,13 +239,13 @@ describe("agents channel", () => {
     );
   });
 
-  it("reaches a dot directly at its endpoint id, so People can write to it first", async () => {
+  it("reaches a dot directly at its agent id, so People can write to it first", async () => {
     const direct = createAgentsTalker(fakeClient([])).directMessaging;
     expect(await direct?.conversationFor(ATLAS)).toBe(ATLAS);
     expect(await direct?.conversationFor(" ")).toBeNull();
   });
 
-  it("records the endpoint Cloud assigned when the guardian connects", async () => {
+  it("records the agent Cloud assigned when the guardian connects", async () => {
     const setup = makeAgentsSetup(fakeClient([]));
     const conferral = await setup(
       { show: () => {} } as never,
@@ -256,5 +256,11 @@ describe("agents channel", () => {
     );
     expect(conferral.profile).toEqual(HOME);
     expect(reviveAgentsProfile(HOME).handle).toBe("home-rome");
+  });
+
+  it("shows the name a grant from before agent ids recorded, rather than failing", () => {
+    expect(reviveAgentsProfile({ endpoint: "home-rome" }).handle).toBe("home-rome");
+    expect(reviveAgentsProfile({ endpointId: "ep-1", name: "home-rome" }).handle).toBe("home-rome");
+    expect(reviveAgentsProfile({}).handle).toBeUndefined();
   });
 });

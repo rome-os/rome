@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { AgentEndpointSummary, AgentMessagingClient } from "../lib/rome-cloud-agents.js";
+import type { ExternalAgent, AgentMessagingClient } from "../lib/rome-cloud-agents.js";
 import { readAccountDirectory } from "../people/account-directory.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../test/helpers.js";
 import { seedBaseline } from "../test/seeds.js";
@@ -7,20 +7,20 @@ import { createAccountNames } from "./account-names.js";
 import { agentsAccounts } from "./agents-accounts.js";
 import type { Channels } from "./channel.js";
 
-const HOME = { endpointId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
+const HOME = { agentId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
 const ATLAS = "6f1c2d9e-0a4b-4c1d-9e2f-3a4b5c6d7e8f";
 const FRIEND_ATLAS = "7a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d";
 
-const atlas: AgentEndpointSummary = {
-  endpointId: ATLAS,
+const atlas: ExternalAgent = {
+  agentId: ATLAS,
   name: "atlas",
   kind: "dot",
   account: "ouou",
   ready: true,
   sameAccount: true,
 };
-const friendAtlas: AgentEndpointSummary = {
-  endpointId: FRIEND_ATLAS,
+const friendAtlas: ExternalAgent = {
+  agentId: FRIEND_ATLAS,
   name: "atlas",
   kind: "dot",
   account: "friend",
@@ -28,33 +28,33 @@ const friendAtlas: AgentEndpointSummary = {
   sameAccount: false,
 };
 
-function cloud(endpoints: AgentEndpointSummary[]) {
+function cloud(agents: ExternalAgent[]) {
   const client = {
     calls: 0,
     fail: false as boolean,
-    async endpoints() {
+    async agents() {
       client.calls++;
       if (client.fail) throw new Error("Rome Cloud unavailable");
       return {
         self: HOME,
-        endpoints: [
+        agents: [
           { ...HOME, kind: "rome" as const, account: "ouou", ready: true, sameAccount: true },
-          ...endpoints,
+          ...agents,
         ],
       };
     },
-  } satisfies Pick<AgentMessagingClient, "endpoints"> & { calls: number; fail: boolean };
+  } satisfies Pick<AgentMessagingClient, "agents"> & { calls: number; fail: boolean };
   return client;
 }
 
 describe("the agents address book", () => {
-  it("lists the account's other ready endpoints by endpoint id", async () => {
+  it("lists the account's other ready agents by agent id", async () => {
     const book = agentsAccounts({
       client: cloud([
         atlas,
         {
           ...atlas,
-          endpointId: "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+          agentId: "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
           name: "pending",
           ready: false,
         },
@@ -82,7 +82,7 @@ describe("the agents address book", () => {
     ]);
   });
 
-  it("resolves an endpoint it does not list, such as one answering Rome, but nothing else", async () => {
+  it("resolves an agent it does not list, such as one answering Rome, but nothing else", async () => {
     const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
     expect(await book.resolve(FRIEND_ATLAS)).toEqual({
       id: FRIEND_ATLAS,
@@ -181,7 +181,7 @@ describe("another account's agent on the People page", () => {
 
   afterEach(() => testDb.close());
 
-  it("is listed unlinked under its endpoint id, named with its account", async () => {
+  it("is listed unlinked under its agent id, named with its account", async () => {
     const channels: Channels = [
       {
         name: "agents",

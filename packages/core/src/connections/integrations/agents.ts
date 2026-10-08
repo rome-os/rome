@@ -2,15 +2,15 @@
 // Cloud, such as ChatGPT dots (amantru/rome-cloud#137), in this Rome's own
 // account or in an account linked to it.
 //
-// Rome Cloud stores each message for this instance's endpoint until the
+// Rome Cloud stores each message for this instance's agent until the
 // instance acknowledges it, so the talker polls and acknowledges after
 // delivering. The instance token is the credential and lives outside the
-// grant; the grant only records the endpoint Cloud assigned. A sender is
+// grant; the grant only records the agent Cloud assigned. A sender is
 // never mapped to a person here. A sender Cloud marks as in this Rome's own
 // account is linked to the guardian when its message is admitted
 // (channels/agents-guardian.ts); any other sender stays unlinked, and the
 // guardian decides whether Rome may answer it. Every agent is addressed by its
-// endpoint id, so a rename or a reused name never moves a conversation or a
+// agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
 import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
@@ -47,26 +47,34 @@ const MAX_BACKOFF_MS = 5 * 60_000;
 const POLL_PAGE_SIZE = 50;
 
 export const agentsGrantProfileSchema = z
-  .object({ endpointId: z.string().min(1), name: z.string().min(1) })
+  .object({ agentId: z.string().min(1), name: z.string().min(1) })
   .strict();
 
+/** A grant made before Cloud keyed agents by id records only a name, under
+ *  `name` or `endpoint`. It shows that name rather than failing the
+ *  Connections page, until the guardian connects Agents again. */
+function earlierGrantName(record: ProfileRecord): string | undefined {
+  const name = record.name ?? record.endpoint;
+  return typeof name === "string" ? name : undefined;
+}
+
 export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
-  const { name } = agentsGrantProfileSchema.parse(record);
+  const parsed = agentsGrantProfileSchema.safeParse(record);
   return Object.freeze({
     displayName: undefined,
-    handle: name,
+    handle: parsed.success ? parsed.data.name : earlierGrantName(record),
     email: undefined,
     avatarUrl: undefined,
   });
 }
 
 /**
- * An agent message as a channel message. The sender's endpoint id is the
+ * An agent message as a channel message. The sender's agent id is the
  * conversation. Null for a sender Cloud has since removed, which nothing can
  * answer.
  */
 export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMessage | null {
-  const sender = message.from.endpointId;
+  const sender = message.from.agentId;
   if (!sender) return null;
   const data =
     message.data && Object.keys(message.data).length > 0
@@ -106,12 +114,12 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
   return async (interact, ctx) => {
     interact.show({
       title: "Connecting to Rome Cloud",
-      body: ["Creating this Rome's endpoint…"],
+      body: ["Registering this Rome with Rome Cloud…"],
       progress: true,
     });
-    const { self } = await ctx.step("register", () => client.endpoints());
+    const { self } = await ctx.step("register", () => client.agents());
     const profile = agentsGrantProfileSchema.parse({
-      endpointId: self.endpointId,
+      agentId: self.agentId,
       name: self.name,
     });
     return {
@@ -121,7 +129,7 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
         title: "Agents connected",
         body: [
           `Agents in your Rome Cloud account can message this Rome as ${self.name}.`,
-          "Pair a dot under Settings → Agents in Rome Cloud.",
+          "To add a dot, tell it to connect to Rome, then approve it under Settings → Agents in Rome Cloud.",
         ],
       },
     };
@@ -138,7 +146,7 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
     // it works; returning it unchanged would rebuild a talker that faults again.
     async renew(cred: Credential): Promise<Credential | "re-confer"> {
       try {
-        await client.endpoints();
+        await client.agents();
       } catch (err) {
         if (isRejectedToken(err)) return "re-confer";
       }
@@ -180,7 +188,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
           if (inbound) {
             deliver(inbound);
           } else {
-            log.warn("Dropped an agent message from an endpoint Cloud has removed", {
+            log.warn("Dropped an agent message from an agent Cloud has removed", {
               messageId: message.messageId,
             });
           }
@@ -207,7 +215,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
     }
   }
 
-  // An agent's endpoint id is both how Cloud reaches it and the conversation
+  // An agent's id is both how Cloud reaches it and the conversation
   // its messages arrive in, so Rome can write to a dot first, from the People
   // page, as well as answer one.
   const features: TalkFeatures = {

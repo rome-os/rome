@@ -10,22 +10,22 @@ import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
-/** A message from an endpoint, by default one of this Rome's own dots. */
+/** A message from an agent, by default one of this Rome's own dots. */
 function message(
-  endpointId: string,
+  agentId: string,
   from: Partial<AgentMessageEnvelope["from"]> = {},
 ): ChannelMessage {
   const inbound = toAgentInboundMessage({
     messageId: "msg_1",
-    from: { endpointId, name: "atlas", kind: "dot", account: "ouou", sameAccount: true, ...from },
-    to: { endpointId: "ep-home", name: "home-rome" },
+    from: { agentId, name: "atlas", kind: "dot", account: "ouou", sameAccount: true, ...from },
+    to: { agentId: "ep-home", name: "home-rome" },
     sentAt: "2026-10-07T09:28:38.000Z",
     text: "17 + 25 = 42.",
     data: null,
     inReplyTo: null,
     hop: 1,
   });
-  if (!inbound) throw new Error("the envelope names no sender endpoint");
+  if (!inbound) throw new Error("the envelope names no sender agent");
   return inbound;
 }
 
@@ -54,7 +54,7 @@ describe("linking same-account agents to the guardian", () => {
   });
   afterEach(() => testDb.close());
 
-  it("links an endpoint Cloud marks as in this account, before its first message is read", async () => {
+  it("links an agent Cloud marks as in this account, before its first message is read", async () => {
     await link(message("ep-atlas"));
 
     const person = await people.findByChannelUser("agents", "ep-atlas");
@@ -91,7 +91,7 @@ describe("linking same-account agents to the guardian", () => {
     expect((await people.findByChannelUser("agents", "ep-atlas"))?.id).toBe("ada");
   });
 
-  it("does not link again an endpoint the guardian unlinked, even renamed", async () => {
+  it("does not link again an agent the guardian unlinked, even renamed", async () => {
     await link(message("ep-atlas"));
     expect(await people.unlinkAccount("owner", "agents", "ep-atlas")).toBe(true);
 
@@ -100,7 +100,7 @@ describe("linking same-account agents to the guardian", () => {
     expect(await people.findByChannelUser("agents", "ep-atlas")).toBeNull();
   });
 
-  it("links a new endpoint that takes the name of one the guardian unlinked", async () => {
+  it("links a new agent that takes the name of one the guardian unlinked", async () => {
     await link(message("ep-atlas"));
     await people.unlinkAccount("owner", "agents", "ep-atlas");
 
@@ -109,7 +109,7 @@ describe("linking same-account agents to the guardian", () => {
     expect((await people.findByChannelUser("agents", "ep-atlas-2"))?.id).toBe("owner");
   });
 
-  it("records every endpoint when several first messages arrive at once", async () => {
+  it("records every agent when several first messages arrive at once", async () => {
     await Promise.all(["ep-atlas", "ep-muse", "ep-nova"].map((id) => link(message(id))));
 
     expect([...((await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [])].sort()).toEqual([
