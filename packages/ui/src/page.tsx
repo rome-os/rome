@@ -1,4 +1,18 @@
-import type { ComponentProps } from "react";
+import {
+  Children,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
 
@@ -16,6 +30,172 @@ import { cn } from "./cn.js";
  * nothing. A page that needs a reading measure constrains itself below the
  * header through `Measure`, so the `h1` sits at the same spot on every route.
  */
+
+type TopBarRegion = "nav" | "title" | "action" | "edge";
+type TopBarHosts = Record<TopBarRegion, HTMLElement | null>;
+
+interface TopBarRegistry {
+  hosts: TopBarHosts;
+  /** The claim ids of mounted headers, oldest first. The newest one fills the bar. */
+  claims: string[];
+  setHost: (region: TopBarRegion, el: HTMLElement | null) => void;
+  claim: (id: string) => void;
+  release: (id: string) => void;
+}
+
+const TopBarContext = createContext<TopBarRegistry | null>(null);
+
+/**
+ * The bar's hosts, handed only to the parts of the header that owns the bar,
+ * and only below `md`. A part renders in exactly one place: the bar while this
+ * is set, the page otherwise.
+ */
+const HeaderTopBarContext = createContext<TopBarHosts | null>(null);
+
+const NO_HOSTS: TopBarHosts = { nav: null, title: null, action: null, edge: null };
+
+/** Below Tailwind's `md`, the width the shell shows its phone top bar at. */
+const PHONE_QUERY = "(max-width: 47.99rem)";
+
+function subscribePhone(onChange: () => void): () => void {
+  const query = window.matchMedia(PHONE_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+const isPhone = () => typeof window !== "undefined" && !!window.matchMedia?.(PHONE_QUERY).matches;
+const notPhone = () => false;
+const noSubscription = () => () => {};
+
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? subscribePhone
+      : noSubscription,
+    isPhone,
+    notPhone,
+  );
+}
+
+/**
+ * Lets a `PageHeader` below it fill a `PageTopBarOutlet` the shell renders
+ * elsewhere, the way a phone app's navigation bar names the screen under it.
+ * Without a provider, while no outlet is mounted, or at `md` and wider, every
+ * part renders only in the page, as it would anywhere else.
+ */
+export function PageTopBarProvider({ children }: { children: ReactNode }) {
+  const [hosts, setHosts] = useState<TopBarHosts>(NO_HOSTS);
+  const [claims, setClaims] = useState<string[]>([]);
+  const mutators = useMemo(
+    () => ({
+      setHost: (region: TopBarRegion, el: HTMLElement | null) =>
+        setHosts((prev) => (prev[region] === el ? prev : { ...prev, [region]: el })),
+      claim: (id: string) => setClaims((prev) => [...prev, id]),
+      release: (id: string) => setClaims((prev) => prev.filter((claimed) => claimed !== id)),
+    }),
+    [],
+  );
+  const value = useMemo(() => ({ hosts, claims, ...mutators }), [hosts, claims, mutators]);
+  return <TopBarContext.Provider value={value}>{children}</TopBarContext.Provider>;
+}
+
+/**
+ * The phone top bar's content row: the back link, the title, and one action, in
+ * that order. Shows `fallback` while no `PageHeader` holds the bar.
+ *
+ * Render it inside the bar's `header`. That element's bottom edge is where the
+ * page's `h1` counts as scrolled under the bar, and the outlet's own box when no
+ * `header` encloses it.
+ */
+export function PageTopBarOutlet({
+  className,
+  fallback,
+}: {
+  className?: string;
+  fallback?: ReactNode;
+}) {
+  const registry = useContext(TopBarContext);
+  const setHost = registry?.setHost;
+  const setRoot = useCallback(
+    (el: HTMLElement | null) => setHost?.("edge", el?.closest("header") ?? el),
+    [setHost],
+  );
+  const setNav = useCallback((el: HTMLElement | null) => setHost?.("nav", el), [setHost]);
+  const setTitle = useCallback((el: HTMLElement | null) => setHost?.("title", el), [setHost]);
+  const setAction = useCallback((el: HTMLElement | null) => setHost?.("action", el), [setHost]);
+  const held = (registry?.claims.length ?? 0) > 0;
+  return (
+    <div
+      ref={setRoot}
+      data-slot="page-top-bar"
+      className={cn("flex min-w-0 items-center gap-2", className)}
+    >
+      {held ? null : fallback}
+      <div ref={setNav} className="flex shrink-0 items-center empty:hidden" />
+      <div
+        ref={setTitle}
+        className={cn(
+          "min-w-0 flex-1 truncate text-ui font-medium text-foreground",
+          !held && "hidden",
+        )}
+      />
+      <div ref={setAction} className="flex shrink-0 items-center empty:hidden" />
+    </div>
+  );
+}
+
+/**
+ * Claims the bar for one header. Returns its hosts while that header is the
+ * newest claim and the viewport is below `md`, and null otherwise.
+ */
+function useTopBarClaim(): TopBarHosts | null {
+  const registry = useContext(TopBarContext);
+  const phone = usePhone();
+  const id = useId();
+  const claim = registry?.claim;
+  const release = registry?.release;
+  // A layout effect, so on a phone the parts reach the bar before the first
+  // paint instead of flashing in the page for a frame.
+  useLayoutEffect(() => {
+    if (!claim || !release) return;
+    claim(id);
+    return () => release(id);
+  }, [id, claim, release]);
+  if (!phone || !registry || registry.claims.at(-1) !== id) return null;
+  return registry.hosts;
+}
+
+/** Whether the element's bottom edge has scrolled up to or past the edge's bottom. */
+function useScrolledUnder(target: HTMLElement | null, edge: HTMLElement | null): boolean {
+  const [under, setUnder] = useState(false);
+  useEffect(() => {
+    if (!target || !edge) {
+      setUnder(false);
+      return;
+    }
+    // Both boxes are read on every check rather than once, so a bar that
+    // changes height, or a viewport that crosses `md`, never leaves a stale
+    // boundary behind. Capture catches a scroll on any ancestor, not only the
+    // document.
+    let frame = 0;
+    const check = () => {
+      frame = 0;
+      setUnder(target.getBoundingClientRect().bottom <= edge.getBoundingClientRect().bottom);
+    };
+    const schedule = () => {
+      if (frame === 0) frame = requestAnimationFrame(check);
+    };
+    check();
+    window.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [target, edge]);
+  return under;
+}
 
 /**
  * The skeleton of a routed page: the regions a page stacks, top to bottom, at
@@ -59,23 +239,33 @@ export function PageHeader({
   className,
   ...props
 }: ComponentProps<"header"> & { align?: "start" | "end" }) {
+  const hosts = useTopBarClaim();
   return (
-    <header
-      data-slot="page-header"
-      data-align={align}
-      className={cn(
-        "flex flex-wrap justify-between gap-x-4 gap-y-2",
-        align === "end" ? "items-end" : "items-start",
-        className,
-      )}
-      {...props}
-    />
+    <HeaderTopBarContext.Provider value={hosts}>
+      <header
+        data-slot="page-header"
+        data-align={align}
+        className={cn(
+          "flex flex-wrap justify-between gap-x-4 gap-y-2",
+          align === "end" ? "items-end" : "items-start",
+          className,
+        )}
+        {...props}
+      />
+    </HeaderTopBarContext.Provider>
   );
 }
 
-/** Breadcrumb or back link above the title. */
+/**
+ * Breadcrumb or back link above the title. Inside the shell, below `md` it
+ * renders in the phone top bar instead, so hold it to one link that fits there.
+ */
 export function PageHeaderNav({ className, ...props }: ComponentProps<"div">) {
-  return <div data-slot="page-header-nav" className={cn("basis-full", className)} {...props} />;
+  const host = useContext(HeaderTopBarContext)?.nav ?? null;
+  const nav = (
+    <div data-slot="page-header-nav" className={cn(!host && "basis-full", className)} {...props} />
+  );
+  return host ? createPortal(nav, host) : nav;
 }
 
 /** Groups the title with its description so the actions stay opposite both. */
@@ -89,17 +279,65 @@ export function PageHeading({ className, ...props }: ComponentProps<"div">) {
   );
 }
 
-/** The one `h1` a page carries. */
-export function PageTitle({ className, ...props }: ComponentProps<"h1">) {
+/**
+ * The one `h1` a page carries. Inside the shell, the phone top bar repeats it
+ * once the `h1` has scrolled up under the bar. The page keeps the large title at
+ * rest, so the bar never shows the same words twice on one screen.
+ */
+export function PageTitle({ className, children, ref, ...props }: ComponentProps<"h1">) {
+  const hosts = useContext(HeaderTopBarContext);
+  const host = hosts?.title ?? null;
+  const [heading, setHeading] = useState<HTMLHeadingElement | null>(null);
+  const setRefs = useCallback(
+    (el: HTMLHeadingElement) => {
+      setHeading(el);
+      // Returning a cleanup tells React to call it instead of passing null,
+      // so a caller's own cleanup runs exactly as it would on a plain `h1`.
+      const cleanup = typeof ref === "function" ? ref(el) : undefined;
+      if (ref && typeof ref === "object") ref.current = el;
+      return () => {
+        setHeading(null);
+        if (typeof ref === "function") {
+          if (typeof cleanup === "function") cleanup();
+          else ref(null);
+        } else if (ref) ref.current = null;
+      };
+    },
+    [ref],
+  );
+  const under = useScrolledUnder(host ? heading : null, hosts?.edge ?? null);
   return (
-    <h1
-      data-slot="page-title"
-      className={cn(
-        "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
-        className,
-      )}
-      {...props}
-    />
+    <>
+      <h1
+        ref={setRefs}
+        data-slot="page-title"
+        className={cn(
+          "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </h1>
+      {host
+        ? createPortal(
+            // The `h1` stays the page's heading, so the bar's copy is hidden
+            // from assistive technology.
+            <span
+              aria-hidden
+              data-slot="page-top-bar-title"
+              data-shown={under || undefined}
+              className={cn(
+                "block truncate transition-opacity duration-150 motion-reduce:transition-none",
+                under ? "opacity-100" : "opacity-0",
+              )}
+            >
+              {children}
+            </span>,
+            host,
+          )
+        : null}
+    </>
   );
 }
 
@@ -113,15 +351,22 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
   );
 }
 
-/** Page-level controls, opposite the heading. */
+/**
+ * Page-level controls, opposite the heading. Inside the shell, below `md` a lone
+ * control renders in the phone top bar instead. Two or more stay in the page,
+ * since the bar holds one.
+ */
 export function PageActions({ className, ...props }: ComponentProps<"div">) {
-  return (
+  const barHost = useContext(HeaderTopBarContext)?.action ?? null;
+  const host = Children.toArray(props.children).length === 1 ? barHost : null;
+  const actions = (
     <div
       data-slot="page-actions"
       className={cn("flex shrink-0 flex-wrap items-center gap-2", className)}
       {...props}
     />
   );
+  return host ? createPortal(actions, host) : actions;
 }
 
 export interface PageNavProps extends ComponentProps<"nav"> {

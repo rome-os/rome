@@ -137,6 +137,8 @@ export {
   PageNavLink,
   type PageNavLinkProps,
   PageTitle,
+  PageTopBarOutlet,
+  PageTopBarProvider,
   Section,
   SectionActions,
   SectionDescription,
