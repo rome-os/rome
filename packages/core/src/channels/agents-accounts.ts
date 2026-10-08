@@ -27,6 +27,7 @@ import {
   type AgentMessagingClient,
   agentAddress,
   agentAddressAccount,
+  canonicalAgentAddress,
 } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
@@ -38,13 +39,6 @@ const log = createLogger("agents-accounts");
  *  whole listing and resolves every stored address at once, so this keeps that
  *  to one request. */
 const READ_TTL_MS = 30_000;
-
-/** An address as Cloud matches it: a handle ignores case, so `@Friend/atlas`
- *  is the listed `@friend/atlas`, not a second account. */
-function addressKey(address: string): string {
-  const handle = agentAddressAccount(address);
-  return handle === null ? address : `@${handle.toLowerCase()}${address.slice(handle.length + 1)}`;
-}
 
 /** One read of Cloud's listing, with the handle of this Rome's own account. */
 interface Book {
@@ -131,9 +125,9 @@ export function agentsAccounts(deps: {
     },
     async resolve(address) {
       const { accounts, ownHandle } = await endpoints();
-      const key = addressKey(address);
+      const key = canonicalAgentAddress(address);
       const listed = accounts.find((account) =>
-        account.addresses.some((known) => addressKey(known) === key),
+        account.addresses.some((known) => canonicalAgentAddress(known) === key),
       );
       if (listed) return listed;
       // An address in this Rome's own account names one of its own agents,
@@ -142,7 +136,7 @@ export function agentsAccounts(deps: {
       // an own agent's, so none resolves as another account's.
       const handle = agentAddressAccount(address);
       return handle && ownHandle && handle.toLowerCase() !== ownHandle.toLowerCase()
-        ? agentAccount(addressKey(address), {})
+        ? agentAccount(canonicalAgentAddress(address), {})
         : null;
     },
   };

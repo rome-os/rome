@@ -150,6 +150,7 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
 
 export function createAgentsTalker(client: AgentMessagingClient): Talker {
   let generation = 0;
+  let warnedNoSameAccount = false;
   let cancelWait: (() => void) | null = null;
 
   const wait = (ms: number) =>
@@ -178,9 +179,10 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         for (const message of messages) {
           const inbound = toAgentInboundMessage(message);
           // Only a Cloud from before cross-account links omits sameAccount;
-          // logged so a newer Cloud dropping it shows up.
-          if (inbound && message.from.sameAccount === undefined) {
-            log.warn("Agent message did not say whether its sender is in this account", {
+          // logged once per run so a newer Cloud dropping it shows up.
+          if (inbound && message.from.sameAccount === undefined && !warnedNoSameAccount) {
+            warnedNoSameAccount = true;
+            log.warn("Agent messages do not say whether their sender is in this account", {
               messageId: message.messageId,
             });
           }

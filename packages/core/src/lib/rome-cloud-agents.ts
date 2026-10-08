@@ -64,7 +64,16 @@ export function agentAddress(agent: {
   ) {
     return agent.endpoint;
   }
-  return agentAddressAccount(agent.endpoint) !== null ? agent.endpoint : null;
+  return agentAddressAccount(agent.endpoint) !== null
+    ? canonicalAgentAddress(agent.endpoint)
+    : null;
+}
+
+/** An address as Cloud matches it: a handle ignores case, so `@Friend/atlas`
+ *  is `@friend/atlas`, not a second account. */
+export function canonicalAgentAddress(address: string): string {
+  const handle = agentAddressAccount(address);
+  return handle === null ? address : `@${handle.toLowerCase()}${address.slice(handle.length + 1)}`;
 }
 
 /** Whether an agent carries what only a linked account's agent does. An older

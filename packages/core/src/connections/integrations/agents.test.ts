@@ -93,6 +93,10 @@ describe("agents channel", () => {
         address: "@friend/atlas",
       },
     });
+    expect(
+      toAgentInboundMessage(envelope({ from: { ...external.from, endpoint: "@Friend/atlas" } }))
+        ?.senderId,
+    ).toBe("@friend/atlas");
     expect(toAgentInboundMessage(external)).toMatchObject({
       conversationId: "@friend/atlas",
       senderId: "@friend/atlas",
