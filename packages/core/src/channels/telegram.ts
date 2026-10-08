@@ -1,12 +1,7 @@
 import { Bot, type Context, InputFile } from "grammy";
 import { Marked, Renderer, type Token } from "marked";
-import type { ProviderAdapter } from "./adapter.js";
-import type {
-  NormalizedMessage,
-  Attachment,
-  OutgoingMessage,
-  OutgoingAttachment,
-} from "./types.js";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, OutgoingMessage, OutgoingAttachment } from "./types.js";
 import {
   isAttachmentTooLargeError,
   readAttachmentResponseBody,
@@ -100,10 +95,14 @@ function markdownToTelegramHtml(md: string): string {
  */
 export type CreateTelegramBot = (botToken: string) => Bot;
 
-export class TelegramAdapter implements ProviderAdapter {
-  readonly channelName = "telegram";
+/**
+ * The Telegram Bot API transport. Inbound updates arrive as the channel's own
+ * record, a `ChannelMessage` whose `raw` is the Bot API message, so the
+ * Connection integration delivers them as they are.
+ */
+export class TelegramAdapter {
   private bot: Bot;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
   private onPollingError?: (err: unknown) => void;
 
   constructor(
@@ -123,29 +122,40 @@ export class TelegramAdapter implements ProviderAdapter {
       const rawMsg = ctx.message ?? ctx.channelPost;
       if (!rawMsg) return;
 
-      const msg: NormalizedMessage = {
-        id: String(rawMsg.message_id),
+      const chat = ctx.chat!;
+      const chatTitle = "title" in chat ? (chat as { title?: string }).title : undefined;
+      // A channel post, or a message sent on behalf of a chat, speaks as the
+      // chat rather than as a person.
+      const fromPerson = ctx.from && !ctx.channelPost && !rawMsg.sender_chat ? ctx.from : undefined;
+
+      const msg: ChannelMessage = {
         channel: "telegram",
-        channelUserId: ctx.channelPost
-          ? String(ctx.chat!.id)
+        direction: "inbound",
+        messageId: String(rawMsg.message_id),
+        conversationId: String(chat.id) as ConversationId,
+        senderId: ctx.channelPost
+          ? String(chat.id)
           : rawMsg.sender_chat
             ? String(rawMsg.sender_chat.id)
             : ctx.from
               ? String(ctx.from.id)
-              : String(ctx.chat!.id),
-        displayName:
-          ctx.from && !ctx.channelPost && !rawMsg.sender_chat
-            ? [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ") || "Unknown"
-            : "title" in ctx.chat!
-              ? ((ctx.chat as { title?: string }).title ?? "Channel")
-              : "Channel",
-        username:
-          ctx.from && !ctx.channelPost && !rawMsg.sender_chat ? ctx.from.username : undefined,
-        threadId: String(ctx.chat!.id),
-        threadName: "title" in ctx.chat! ? (ctx.chat as { title?: string }).title : undefined,
-        threadType: ctx.chat!.type === "private" ? "private" : "group",
+              : String(chat.id),
+        senderDisplayName: fromPerson
+          ? [fromPerson.first_name, fromPerson.last_name].filter(Boolean).join(" ") || "Unknown"
+          : (chatTitle ?? "Channel"),
+        ...(fromPerson?.username ? { senderUsername: fromPerson.username } : {}),
+        text: rawMsg.text ?? rawMsg.caption ?? "",
+        attachments: this.extractAttachments(ctx),
+        timestamp: new Date(rawMsg.date * 1000),
+        ...(rawMsg.reply_to_message
+          ? { replyTo: { messageId: String(rawMsg.reply_to_message.message_id) } }
+          : {}),
+        thread: {
+          kind: chat.type === "private" ? "dm" : "group",
+          ...(chatTitle ? { name: chatTitle } : {}),
+        },
         addressing:
-          ctx.chat!.type === "private"
+          chat.type === "private"
             ? "direct"
             : (rawMsg.entities ?? rawMsg.caption_entities ?? []).some((entity) => {
                   if (entity.type === "text_mention") return entity.user.id === ctx.me.id;
@@ -162,26 +172,20 @@ export class TelegramAdapter implements ProviderAdapter {
               : rawMsg.reply_to_message?.from?.id === ctx.me.id
                 ? "reply"
                 : "ambient",
-        timestamp: new Date(rawMsg.date * 1000),
-        text: rawMsg.text ?? rawMsg.caption ?? "",
-        attachments: this.extractAttachments(ctx),
-        replyTo: rawMsg.reply_to_message
-          ? { messageId: String(rawMsg.reply_to_message.message_id) }
-          : undefined,
-        rawEvent: rawMsg,
+        raw: rawMsg,
       };
 
       log.info("message received", {
-        from: msg.channelUserId,
-        threadId: msg.threadId,
-        threadType: msg.threadType,
+        from: msg.senderId,
+        conversationId: msg.conversationId,
+        threadKind: msg.thread?.kind,
       });
 
       try {
         await this.handler!(msg);
       } catch (err) {
         log.error("message handler error", {
-          messageId: msg.id,
+          messageId: msg.messageId,
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -212,7 +216,8 @@ export class TelegramAdapter implements ProviderAdapter {
     await this.bot.stop();
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = conversationId;
     const replyParams = message.replyToMessageId
       ? { reply_parameters: { message_id: Number(message.replyToMessageId) } }
       : {};
@@ -262,7 +267,7 @@ export class TelegramAdapter implements ProviderAdapter {
       }
 
       log.info("message sent", { threadId });
-      return { messageId, threadId };
+      return { conversationId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -272,11 +277,13 @@ export class TelegramAdapter implements ProviderAdapter {
     }
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
+  /** Download a message's files into the profile. Each attachment's `url` is
+   *  its Bot API `file_id`, so the message needs no provider event. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
     const payloads = [];
     for (const attachment of message.attachments) {
       if (!attachment.url) continue;
@@ -299,13 +306,21 @@ export class TelegramAdapter implements ProviderAdapter {
       } catch (err) {
         if (!isAttachmentTooLargeError(err)) throw err;
         log.warn("telegram attachment too large, skipping save", {
-          messageId: message.id,
+          messageId: message.messageId,
           bytes: err.bytes,
           fileName: attachment.fileName ?? basename(file.file_path),
         });
       }
     }
-    return saveIncomingAttachmentPayloads(message, payloads);
+    return saveIncomingAttachmentPayloads(
+      {
+        channel: message.channel,
+        threadId: message.conversationId,
+        id: message.messageId,
+        attachments: message.attachments,
+      },
+      payloads,
+    );
   }
 
   private extractAttachments(ctx: Context): Attachment[] {
