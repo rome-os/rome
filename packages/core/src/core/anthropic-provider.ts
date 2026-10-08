@@ -504,7 +504,7 @@ export class AnthropicProvider implements ModelProvider {
       systemPrompt,
       subagentTools,
       handback,
-      maxTurns = 500,
+      maxTurns = 1000,
       executeAction,
       executeSubagent,
       executeSubmitOutput,
