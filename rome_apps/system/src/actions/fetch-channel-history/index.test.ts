@@ -97,6 +97,10 @@ describe("fetch_channel_history", () => {
   it("returns error when no Connection backs a channel read through one", async () => {
     const deps = makeDeps(new Map([["discord", {}]]));
     deps.channelsService.list = async () => [{ name: "discord", connectionIds: [] }];
+    // What the channels service says of a channel no Connection backs.
+    deps.channelsService.query = async () => {
+      throw new Error('No connection backs channel "discord"');
+    };
 
     const action = createAction(actionConfig, deps);
     const result = await action.execute({ channel: "discord" });

@@ -163,12 +163,11 @@ export function createAction(
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
-      const summary = (await channels.list()).find((item) => item.name === channel);
       const notConfigured: ActionResult = {
         status: "error",
         error: `Channel "${channel}" is not configured or not running.`,
       };
-      if (!summary) return notConfigured;
+      if (!(await channels.list()).some((item) => item.name === channel)) return notConfigured;
 
       log.info("fetching channel history", { channel, threadId, windowHours });
 
@@ -182,16 +181,16 @@ export function createAction(
           })
         ).reverse();
       } catch (err) {
-        log.error("fetchHistory failed", {
-          channel,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        // A channel with no store reads through its Connection, so with none
-        // connected the read fails for the reason this tool has always given.
-        if (summary.connectionIds.length === 0) return notConfigured;
+        const message = err instanceof Error ? err.message : String(err);
+        log.error("fetchHistory failed", { channel, error: message });
+        // A channel with no store reads through its Connection, and with none
+        // connected the service says so (core's `ChannelNotConnected`). That
+        // is the case this tool has always answered as not configured; any
+        // other failure, a store's included, is reported as it is.
+        if (message.startsWith("No connection backs channel")) return notConfigured;
         return {
           status: "error",
-          error: `Failed to fetch history from "${channel}": ${err instanceof Error ? err.message : String(err)}`,
+          error: `Failed to fetch history from "${channel}": ${message}`,
         };
       }
 

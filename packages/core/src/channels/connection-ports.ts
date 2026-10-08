@@ -94,9 +94,12 @@ function connectionDirectory(deps: ConnectionPortsDeps, service: string): Channe
  * no `byAccount`: a People timeline reads these channels from Rome's own
  * transcript instead.
  *
- * The history answers oldest first, within the Connection's own caps, and
- * reads a window rounded out to whole hours; this port keeps what falls at or
- * after `since` and answers newest first, as every `query` does. The history
+ * The history answers within the Connection's own caps, and reads a window
+ * rounded out to whole hours; this port keeps what falls at or after `since`
+ * and answers newest first, as every `query` does. It sorts by time rather
+ * than trusting the history's order: a read over every conversation
+ * (Discord's) orders each conversation's lines but joins the conversations
+ * one after another. The history
  * keeps the oldest thousand lines of a window that holds more, so such a
  * window answers the newest of those.
  *
@@ -172,7 +175,7 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       );
       return lines
         .filter((message) => message.timestamp.getTime() >= from.getTime())
-        .reverse()
+        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, queryLimit(limit))
         .map(copyOf);
     },
