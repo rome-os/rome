@@ -50,16 +50,12 @@ describe("send_message attachments", () => {
       attachments: [{ type: "document", source, caption: "Report" }],
     });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      "discord",
-      "thread-1",
-      {
-        text: undefined,
-        attachments: [{ type: "document", source: safeSource, caption: "Report" }],
-        replyToMessageId: undefined,
-        turnId: undefined,
-      },
-    );
+    expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
+      text: undefined,
+      attachments: [{ type: "document", source: safeSource, caption: "Report" }],
+      replyToMessageId: undefined,
+      turnId: undefined,
+    });
   });
 
   it("rejects absolute paths outside allowed attachment roots", async () => {
@@ -176,17 +172,13 @@ describe("send_message chat recipient aliases", () => {
       turnId: "turn-1",
     });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      "webchat",
-      "session-1",
-      {
-        text: "Final answer",
-        parts,
-        attachments: undefined,
-        replyToMessageId: undefined,
-        turnId: "turn-1",
-      },
-    );
+    expect(adapter.send).toHaveBeenCalledWith("webchat", "session-1", {
+      text: "Final answer",
+      parts,
+      attachments: undefined,
+      replyToMessageId: undefined,
+      turnId: "turn-1",
+    });
   });
 
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
@@ -213,17 +205,13 @@ describe("send_message chat recipient aliases", () => {
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith(
-      "whatsapp",
-      "15551234567@s.whatsapp.net",
-      {
-        text: "hello guardian",
-        parts: undefined,
-        attachments: undefined,
-        replyToMessageId: undefined,
-        turnId: undefined,
-      },
-    );
+    expect(adapter.send).toHaveBeenCalledWith("whatsapp", "15551234567@s.whatsapp.net", {
+      text: "hello guardian",
+      parts: undefined,
+      attachments: undefined,
+      replyToMessageId: undefined,
+      turnId: undefined,
+    });
   });
 
   it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {
