@@ -89,6 +89,7 @@ describe("the agents address book", () => {
       name: null,
       identifiers: { username: "@friend/atlas", "agents:account": "friend" },
     });
+    expect((await book.resolve("@Friend/atlas"))?.id).toBe("@friend/atlas");
     expect(await book.resolve("muse")).toBeNull();
     expect(await book.resolve("@friend")).toBeNull();
   });

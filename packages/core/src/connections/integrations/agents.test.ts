@@ -111,7 +111,10 @@ describe("agents channel", () => {
     const qualified = envelope({
       from: { endpoint: "@friend/atlas", kind: "dot", account: "friend", address: "@friend/atlas" },
     });
-    expect(toAgentInboundMessage(qualified)?.senderId).toBe("@friend/atlas");
+    expect(toAgentInboundMessage(qualified)).toMatchObject({
+      senderId: "@friend/atlas",
+      senderDisplayName: "@friend/atlas (external dot)",
+    });
     const bare = envelope({ from: { endpoint: "atlas", kind: "dot", account: "friend" } });
     expect(toAgentInboundMessage(bare)).toBeNull();
     // An older Cloud sends none of them, and its agents are this Rome's own.

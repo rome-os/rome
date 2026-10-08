@@ -136,7 +136,7 @@ export function agentsAccounts(deps: {
       // an own agent's, so none resolves as another account's.
       const handle = agentAddressAccount(address);
       return handle && ownHandle && handle.toLowerCase() !== ownHandle.toLowerCase()
-        ? agentAccount(address, {})
+        ? agentAccount(addressKey(address), {})
         : null;
     },
   };

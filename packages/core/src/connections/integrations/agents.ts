@@ -20,6 +20,7 @@ import {
   type AgentMessagingClient,
   AgentMessagingError,
   agentAddress,
+  agentAddressAccount,
   createRomeCloudAgentsClient,
   isNotReachable,
   isUndeliverable,
@@ -74,7 +75,7 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
   // The address already reads as another account's, and the label says so
   // wherever the sender's own name stands in for a person's.
   const kind =
-    message.from.sameAccount === false ? `external ${message.from.kind}` : message.from.kind;
+    agentAddressAccount(sender) !== null ? `external ${message.from.kind}` : message.from.kind;
   return {
     channel: AGENTS_SERVICE,
     direction: "inbound",
