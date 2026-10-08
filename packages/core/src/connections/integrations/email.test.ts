@@ -352,7 +352,7 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
     h.start();
 
-    const history = await h.talker.feature("history")?.query({});
+    const history = await h.talker.history?.query({});
     expect(history?.map((line) => [line.messageId, line.direction])).toEqual([
       ["mine", "outbound"],
     ]);
@@ -369,9 +369,9 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider);
     h.start();
 
-    expect(h.talker.feature("history")).not.toBeNull();
-    expect(h.talker.feature("inboundMedia")).not.toBeNull();
-    const history = await h.talker.feature("history")?.query({ limit: 20 });
+    expect(h.talker.history).toBeDefined();
+    expect(h.talker.inboundMedia).toBeDefined();
+    const history = await h.talker.history?.query({ limit: 20 });
     expect(Array.isArray(history)).toBe(true);
   });
 });
@@ -467,7 +467,7 @@ describe("email inbound delivery", () => {
     const h = buildDeliveringTalker(makeProvider({ getAttachment }));
     await h.ingest(event);
 
-    const saved = await h.talker.feature("inboundMedia")!.materialize(h.delivered[0]);
+    const saved = await h.talker.inboundMedia!.materialize(h.delivered[0]);
 
     expect(getAttachment).toHaveBeenCalledWith("msg_1", "att_1");
     expect(saved[0].localPath).toContain(join("channel-attachments", "email", "t1", "msg_1"));
@@ -480,7 +480,7 @@ describe("email inbound delivery", () => {
     const h = buildDeliveringTalker(makeProvider({ getAttachment }));
     const attachments = [{ type: "document" as const, fileName: "doc.pdf" }];
 
-    const saved = await h.talker.feature("inboundMedia")!.materialize({
+    const saved = await h.talker.inboundMedia!.materialize({
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",

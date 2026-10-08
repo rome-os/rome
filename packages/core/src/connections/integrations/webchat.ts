@@ -22,7 +22,7 @@
 // record, so send and history pass through without a projection.
 
 import { WebChatAdapter } from "../../channels/webchat.js";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { ConnectionDescriptor, Talker } from "../types.js";
 import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
@@ -50,6 +50,17 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
         build(): Talker {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 
+          const features: TalkFeatures = {
+            history: {
+              async query(input) {
+                const messages = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return messages.slice(0, historyQueryLimit(input.limit));
+              },
+            },
+          };
           return {
             start(deliver, _fault): void {
               adapter.onInbound(async (msg) => deliver(msg));
@@ -63,20 +74,7 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
             send(conversationId, msg) {
               return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                history: {
-                  async query(input) {
-                    const messages = await adapter.fetchHistory(
-                      input.conversationId ?? null,
-                      historyWindowHours(input.since),
-                    );
-                    return messages.slice(0, historyQueryLimit(input.limit));
-                  },
-                },
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

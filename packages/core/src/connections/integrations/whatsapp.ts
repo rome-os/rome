@@ -26,7 +26,7 @@
 // → CredentialRejected{ grant: "session" }; any other terminal → Disconnected.
 
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -317,6 +317,14 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             );
           });
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            // A WhatsApp direct chat is addressed by the contact's own JID,
+            // so the address is already the conversation.
+            directMessaging: addressIsConversationFeature(),
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
@@ -334,17 +342,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             async send(conversationId, msg) {
               return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: {
-                  materialize: (message) => adapter.saveIncomingAttachments(message),
-                },
-                // A WhatsApp direct chat is addressed by the contact's own JID,
-                // so the address is already the conversation.
-                directMessaging: addressIsConversationFeature(),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

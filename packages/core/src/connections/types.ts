@@ -56,6 +56,15 @@ export interface TalkFeatureMap {
 
 export type TalkFeatureName = keyof TalkFeatureMap;
 
+/**
+ * What a talker offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the talker
+ * does not offer it. The registry reads a field each time it is used, so a
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
+ */
+export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
+
 export interface Talk {
   subscribe(handler: (message: ChannelMessage) => Promise<void>): () => void;
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
@@ -242,14 +251,13 @@ export interface RuntimeKit {
 }
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker {
+export interface Talker extends TalkFeatures {
   start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
   send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
 }
 
 /** Builder-side Act implementation. */

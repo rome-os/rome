@@ -195,11 +195,9 @@ describe("discord descriptor shape", () => {
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
     const h = buildTalker();
-    await expect(h.talker.feature("directMessaging")?.conversationFor("alice")).resolves.toBe(
-      "dm-alice",
-    );
+    await expect(h.talker.directMessaging?.conversationFor("alice")).resolves.toBe("dm-alice");
     h.start();
-    const inboundMedia = h.talker.feature("inboundMedia");
+    const inboundMedia = h.talker.inboundMedia;
     const message = {
       channel: "discord",
       direction: "inbound",
@@ -272,7 +270,7 @@ describe("discord descriptor shape", () => {
     const h = buildTalker();
     h.start();
     await expect(
-      h.talker.feature("history")?.query({
+      h.talker.history?.query({
         conversationId: "chan-1" as ConversationId,
       }),
     ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
@@ -282,9 +280,7 @@ describe("discord descriptor shape", () => {
   it("exposes provider-neutral activity", async () => {
     const h = buildTalker();
     h.start();
-    const session = await h.talker
-      .feature("activity")
-      ?.begin({ conversationId: "chan-2" as ConversationId });
+    const session = await h.talker.activity?.begin({ conversationId: "chan-2" as ConversationId });
     await session?.update("working");
     expect(fakeState.typedThread).toBe("chan-2");
   });
@@ -297,7 +293,7 @@ describe("discord descriptor shape", () => {
       guildName: "Rome",
       type: "text" as const,
     }));
-    const directory = buildTalker().talker.feature("directory");
+    const directory = buildTalker().talker.directory;
 
     const first = await directory?.listConversations({ limit: 2 });
     expect(first?.conversations.map((entry) => entry.ref)).toEqual([
@@ -349,7 +345,7 @@ describe("discord descriptor shape", () => {
         parentId: "text-1",
       },
     ];
-    const directory = buildTalker().talker.feature("directory");
+    const directory = buildTalker().talker.directory;
 
     const settingsOwners = await directory?.listConversations({ limit: 10 });
     expect(settingsOwners?.conversations).toEqual([

@@ -4,7 +4,7 @@ import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels
 import { readSendStates } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
-  return { name, send, inbound: null, accounts: null, messages: null };
+  return { name, send, inbound: null, accounts: null, messages: null, directory: null };
 }
 
 function sending(direct: TalkDirectMessaging | null): ChannelSend {

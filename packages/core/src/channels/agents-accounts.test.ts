@@ -96,6 +96,7 @@ describe("a dot on the People page", () => {
         send: null,
         inbound: null,
         messages: null,
+        directory: null,
       },
     ];
     const read = () =>

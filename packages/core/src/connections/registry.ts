@@ -740,7 +740,7 @@ class ConnectionImpl implements Connection {
    */
   private checkHistoryDeclared(talker: Talker): void {
     const declared = this.descriptor.capabilities.talker?.history === true;
-    const offered = talker.feature("history") !== null;
+    const offered = talker.history !== undefined;
     if (declared === offered) return;
     this.log.error("talker history flag disagrees with its history feature", {
       connectionId: this.id,
@@ -907,7 +907,7 @@ class ConnectionImpl implements Connection {
       },
       feature: <K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null => {
         this.assertLive(epoch);
-        const current = (epoch.instance as Talker).feature(name);
+        const current = (epoch.instance as Talker)[name];
         if (!current) return null;
         return this.epochFeatureProxy(slot, epoch, name);
       },
@@ -923,9 +923,9 @@ class ConnectionImpl implements Connection {
       get: (_target, property) => {
         return (...args: unknown[]) => {
           this.assertLive(epoch);
-          const feature = (epoch.instance as Talker).feature(name) as
+          const feature = (epoch.instance as Talker)[name] as
             | (TalkFeatureMap[K] & Record<PropertyKey, unknown>)
-            | null;
+            | undefined;
           if (!feature) throw new Error(`talk feature "${name}" is unavailable`);
           const method = feature[property];
           if (typeof method !== "function") {

@@ -161,7 +161,7 @@ describe("whatsapp descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    await expect(talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
+    await expect(talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
     await talker.stop();
     expect(fake.stopped).toBe(true);
   });
@@ -175,7 +175,7 @@ describe("whatsapp descriptor shape", () => {
       { session: sessionCred() },
       runtimeKit(),
     );
-    expect(talker.feature("history")).toBeNull();
+    expect(talker.history).toBeUndefined();
     expect(createWhatsAppDescriptor(deps).capabilities.talker?.history).toBeUndefined();
   });
 });
@@ -398,9 +398,7 @@ describe("whatsapp inbound delivery", () => {
       timestamp: new Date(),
     } satisfies ChannelMessage;
 
-    await expect(talker.feature("inboundMedia")?.materialize(message)).resolves.toBe(
-      message.attachments,
-    );
+    await expect(talker.inboundMedia?.materialize(message)).resolves.toBe(message.attachments);
   });
 });
 
