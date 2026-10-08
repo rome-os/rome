@@ -216,7 +216,6 @@ function connectionFor(deps: ConnectionPortsDeps, service: string): Connection |
   return deps.registry.find(service)[0] ?? null;
 }
 
-
 function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend {
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
