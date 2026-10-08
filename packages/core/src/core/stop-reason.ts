@@ -63,11 +63,11 @@ export function anthropicStop(result: AnthropicResultStopInput, aborted: boolean
  * (`completed`, `interrupted`, `failed`, or `inProgress`). Codex reports no
  * output-limit status at turn level, so it never yields `max_tokens`.
  *
- * `failed` is true when the turn ends in an error. The stop is then `error`
- * whatever the status, and the status stays as `raw`, the way `anthropicStop`
- * reports a failed Claude result. `isInterruptedAccounting` reads an
- * `interrupted` stop as an interrupted turn, so the accounting on an error
- * never carries one.
+ * `failed` is true when the turn itself fails, rather than completing with
+ * output that Rome then rejects. The stop is then `error` whatever the status,
+ * and the status stays as `raw`, the way `anthropicStop` reports a failed
+ * Claude result. `isInterruptedAccounting` reads an `interrupted` stop as an
+ * interrupted turn, so a failed turn's accounting never carries one.
  */
 export function codexStop(status: string | undefined, failed = false): AgentStop {
   if (failed) return status ? { reason: "error", raw: status } : { reason: "error" };
