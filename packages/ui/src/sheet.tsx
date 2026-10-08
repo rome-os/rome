@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "./cn.js";
 import { AutoPortal } from "./portal.js";
+import { useShadowRootScroll } from "./shadow-scroll.js";
 
 export interface SheetProps {
   open: boolean;
@@ -26,6 +27,7 @@ export function Sheet({
   className,
   children,
 }: SheetProps) {
+  const scrollHandlers = useShadowRootScroll<HTMLDivElement>();
   return (
     <DialogPrimitive.Root
       open={open}
@@ -43,6 +45,7 @@ export function Sheet({
             widthClassName,
             className,
           )}
+          {...scrollHandlers}
         >
           {children}
         </DialogPrimitive.Content>
