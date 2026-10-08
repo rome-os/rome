@@ -156,6 +156,7 @@ export class UsageAttributionResolver {
     }
     if (initiator === "webhook") return "event";
     if (initiator?.startsWith("app:")) return "background";
+    if (initiator === "system:skill-review") return "background";
     return "unknown";
   }
 

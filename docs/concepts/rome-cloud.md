@@ -72,7 +72,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
   - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
   - `schedule`: a schedule or poll trigger fired a routine.
   - `event`: an event or webhook trigger fired a routine, or a webhook reached an app's action.
-  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page.
+  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page. So does the skill review Rome starts on its own after a main-agent turn with many tool calls.
   - `unknown`: none of the above can be told.
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.

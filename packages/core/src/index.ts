@@ -29,7 +29,7 @@ import { UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import type { SessionActor } from "./lib/session-actor.js";
+import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -770,7 +770,11 @@ async function main() {
         event.metrics.toolCallCount >= skillReviewInterval &&
         !event.metrics.skillWritten
       ) {
-        actionEngine.run("skill_review", {}).catch((err) => {
+        // No person asked for the review, so it runs outside the finished
+        // turn's request scope and carries no actor.
+        withoutSessionActor(() =>
+          actionEngine.run("skill_review", {}, { initiator: "system:skill-review" }),
+        ).catch((err) => {
           log.warn("skill review failed", { error: String(err) });
         });
       }

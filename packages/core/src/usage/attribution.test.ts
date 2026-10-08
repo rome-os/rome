@@ -166,6 +166,23 @@ describe("UsageAttributionResolver.forTurn", () => {
     expect((await r.forTurn(turn("onEmail"))).trigger).toBe("event");
   });
 
+  it("counts the skill review core starts after a turn as background", async () => {
+    const sessions = {
+      review: session({
+        type: "action",
+        triggerExecutionId: "exec-review",
+        rootActionExecutionId: "exec-review",
+        triggerActionName: "news.digest",
+      }),
+    };
+    const r = resolver(sessions, { "exec-review": "system:skill-review" });
+    expect(await r.forTurn(turn("review"))).toEqual({
+      kind: "app",
+      appId: "@rome/news",
+      trigger: "background",
+    });
+  });
+
   it("falls back to the turn's session type when the row is missing or the root is gone", async () => {
     const sessions = { orphan: session({ type: "subagent", parentSessionId: "deleted" }) };
     const r = resolver(sessions);
