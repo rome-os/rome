@@ -1,5 +1,6 @@
 /**
- * The `send`, `inbound` and `messages` ports of a channel a Connection backs.
+ * The `send`, `inbound`, `messages` and `directory` ports of a channel a
+ * Connection backs.
  * The channel is named by the service; the Connection that backs it is looked
  * up when a port is used, so a port outlives any one Connection epoch.
  * Contract: `Channel` and `Inbound` (channel.ts), `Messages` (messages.ts).
@@ -12,6 +13,7 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
 import {
   ChannelNotConnected,
+  type ChannelDirectory,
   type ChannelSend,
   type Inbound,
   type InboundEvent,
@@ -35,6 +37,7 @@ export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: Inbound | null;
   messages: Messages | null;
+  directory: ChannelDirectory;
 }
 
 /** The ports a service's Talk backs, or null when the service has no Talk. */
@@ -48,6 +51,40 @@ export function connectionPorts(
     send: talker.sends === false ? null : connectionSend(deps, service),
     inbound: talker.receives === false ? null : connectionInbound(deps, service),
     messages: talker.history === true ? connectionMessages(deps, service) : null,
+    directory: connectionDirectory(deps, service),
+  };
+}
+
+/**
+ * The conversations a channel's Connections can see. A talker says at runtime
+ * whether it lists conversations, so the port is present for every channel a
+ * Talk backs, and one whose Connections list none answers empty.
+ */
+function connectionDirectory(deps: ConnectionPortsDeps, service: string): ChannelDirectory {
+  return {
+    async listConversations({ connectionId, ...input }) {
+      const connections = deps.registry
+        .find(service)
+        .filter((connection) => !connectionId || connection.id === connectionId);
+      const listed = await Promise.all(
+        connections.map(async (connection) => {
+          const directory = deps.router.feature(connection.id, "directory");
+          if (!directory) return [];
+          try {
+            const result = await directory.listConversations(input);
+            return result.conversations;
+          } catch (err) {
+            log.warn("channel_directory.failed", {
+              connectionId: connection.id,
+              service,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return [];
+          }
+        }),
+      );
+      return listed.flat();
+    },
   };
 }
 

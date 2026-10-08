@@ -1,5 +1,5 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
-import { createPairingAdmission } from "./channels/pairing.js";
+import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -642,6 +642,7 @@ async function main() {
   const conversationSettings = new ConversationSettingsService({
     repository: new ConversationSettingsRepository(db),
     connections: connectionRegistry,
+    channels: () => builtChannels,
     listAgents: () => agentLoader.getAll().keys(),
     onChanged: async ({ ref, actor, fields, reset }) => {
       await eventService.publish({
@@ -1367,7 +1368,7 @@ async function main() {
       feedback: feedbackClient,
       provisionNodeCaller,
       nodeDevices,
-      talkRouter,
+      notifyPairingResolution: (approval) => notifyPairingResolution(talkRouter, approval),
       channelsService,
       conversationSettings,
       actionEngine,

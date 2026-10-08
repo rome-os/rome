@@ -19,6 +19,7 @@ import type {
   Channel as AppChannel,
   ChannelInbound,
   ChannelSend as AppChannelSend,
+  ConversationDescriptor,
   InboundEvent,
   TalkActivity,
   TalkDirectMessaging,
@@ -46,6 +47,25 @@ export interface ChannelSend extends AppChannelSend {
   /** Showing the account that a reply is on its way, or null where the
    *  channel cannot now. */
   readonly activity: TalkActivity | null;
+}
+
+/**
+ * The conversations a channel can see, for conversation settings. Each
+ * descriptor carries its `ConversationRef`, so a caller addresses a
+ * conversation it found here the way it addresses one an inbound event named.
+ */
+export interface ChannelDirectory {
+  /**
+   * Up to `limit` conversations from each Connection backing the channel, or
+   * only from the one `connectionId` names. A Connection whose read fails is
+   * logged and left out, so one unreachable account does not hide the others.
+   */
+  listConversations(input: {
+    query?: string;
+    limit: number;
+    includeTopics?: boolean;
+    connectionId?: string;
+  }): Promise<ConversationDescriptor[]>;
 }
 
 /** A send, or a direct-conversation lookup, on a channel nothing backs now. */
@@ -114,6 +134,10 @@ export interface Channel extends AppChannel {
    * channel has a store, and not every store is a channel's.
    */
   readonly messages: Messages | null;
+
+  /** The conversations the channel can see, or null where it cannot list
+   *  them. Absent reads as null. */
+  readonly directory?: ChannelDirectory | null;
 }
 
 /**

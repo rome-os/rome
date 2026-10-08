@@ -4,7 +4,7 @@ How a [channel](../concepts/messaging.md#channels) is connected: the server-owne
 
 ## Channel ports
 
-A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound` and `messages`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
+A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). Inside core, a channel also has a `directory` of the conversations it can see. A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound`, `messages` and `directory`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
 
 ### Invariants
 
@@ -25,6 +25,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - That read goes to the first Connection backing the channel. A channel two Connections back (two Telegram accounts) reads one of them through `query`. A caller that means a particular one names it to the channels service below.
 - Every subscriber hears every event. A subscriber hears one conversation's events one at a time, in arrival order. Different conversations and different subscribers never wait on each other, so one slow or failing handler holds up only its own conversation for its own subscriber. A handler that never settles stops that conversation for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a conversation with twenty events waiting. A conversation holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
+- `directory` lists the conversations a channel can see, each with its `ConversationRef`, so conversation settings reach a channel's conversations without holding a Talk. A Connection whose listing fails is logged and left out, and the others still answer.
 
 ### Channels for app actions
 
@@ -70,7 +71,7 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 - Codes belong to one request, connection, channel, and sender. Verification messages never reach agents, including invalid or replayed codes from linked senders.
 - Group messages cannot redeem a code. Group guidance points to a private bot conversation or authenticated Web approval without exposing the code.
 - Requests expire after ten minutes without extending on repeated messages. Five wrong codes disable code verification while leaving Web approval available until expiry.
-- The bot confirms pairing and tells the approved account it can start chatting. No blocked message is automatically replayed.
+- The bot confirms pairing and tells the approved account it can start chatting, through the Connection the request arrived on. No blocked message is automatically replayed.
 - Approval records retain creation and resolution. Web decisions record the verified guardian identity, and code decisions record the provider-authenticated account and completion method.
 - Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
 - Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.

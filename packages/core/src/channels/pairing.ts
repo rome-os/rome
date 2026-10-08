@@ -146,10 +146,25 @@ export function createPairingAdmission(deps: {
   };
 }
 
-export async function notifyPairingResolution(
-  router: TalkRouter,
-  approval: { id: string; type: string; status: string; payload: unknown },
-) {
+/** A resolved approval, as {@link notifyPairingResolution} reads it. */
+export interface ResolvedApproval {
+  id: string;
+  type: string;
+  status: string;
+  payload: unknown;
+}
+
+/** {@link notifyPairingResolution} bound to the router, for callers that hold
+ *  no Connection. */
+export type PairingNotifier = (approval: ResolvedApproval) => Promise<void>;
+
+/**
+ * Tells the account behind an approved pairing request that it can start
+ * chatting. Pairing belongs to the Connection the request arrived through, as
+ * admission does, so the notice goes out on that Connection rather than on
+ * whichever one backs the channel first.
+ */
+export async function notifyPairingResolution(router: TalkRouter, approval: ResolvedApproval) {
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
   try {

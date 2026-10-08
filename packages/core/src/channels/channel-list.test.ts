@@ -5,7 +5,7 @@ import type {
   TalkActivity,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkHistory } from "../connections/types.js";
+import type { InboundMessage, TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -40,6 +40,7 @@ function talkService(
   direct: TalkDirectMessaging | null = null,
   activity: TalkActivity | null = null,
   history: TalkHistory | null = null,
+  directory: TalkDirectory | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
   return {
@@ -69,7 +70,9 @@ function talkService(
                     ? activity
                     : name === "history"
                       ? history
-                      : null) as Talker["feature"],
+                      : name === "directory"
+                        ? directory
+                        : null) as Talker["feature"],
             };
           },
         },
@@ -289,6 +292,58 @@ describe("channelList", () => {
     await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
     // A Connection whose talker offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
+  });
+
+  it("lists the conversations its Connections see, leaving out one whose read fails", async () => {
+    const listConversations = rs.fn(async (_input: { limit: number }) => ({
+      conversations: [
+        {
+          ref: { connectionId: "unused", conversationId: "general" as ConversationId },
+          service: "discord",
+          kind: "channel" as const,
+          displayName: "general",
+        },
+      ],
+    }));
+    const { registry, channels } = setup([
+      talkService("discord", {}, null, null, null, { listConversations }).descriptor,
+      talkService("feishu", {}, null, null, null, {
+        listConversations: async () => {
+          throw new Error("provider down");
+        },
+      }).descriptor,
+    ]);
+    const discord = channels.find((channel) => channel.name === "discord")!;
+    const feishu = channels.find((channel) => channel.name === "feishu")!;
+
+    // Nothing backs the channel yet, so it sees no conversations.
+    await expect(discord.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
+
+    const ids: Record<string, string> = {};
+    for (const service of ["discord", "feishu"]) {
+      const connection = await registry.connect(service);
+      await registry.importCredential(connection.id, "bot", {
+        material: { token: "t" },
+        expiresAt: "never",
+      });
+      ids[service] = connection.id;
+    }
+    const listed = await discord.directory!.listConversations({ limit: 10 });
+    expect(listed.map((conversation) => conversation.displayName)).toEqual(["general"]);
+    // The Connection reads the page it was asked for, without the narrowing.
+    expect(listConversations).toHaveBeenLastCalledWith({ limit: 10 });
+
+    // Narrowed to a Connection that does not back the channel, it reads nothing.
+    listConversations.mockClear();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.feishu }),
+    ).resolves.toEqual([]);
+    expect(listConversations).not.toHaveBeenCalled();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.discord }),
+    ).resolves.toHaveLength(1);
+
+    await expect(feishu.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
   });
 
   it("shows typing through the send port once a Connection offers it", async () => {

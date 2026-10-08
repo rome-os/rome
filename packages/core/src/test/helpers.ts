@@ -1,3 +1,4 @@
+import { notifyPairingResolution } from "../channels/pairing.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -420,6 +421,9 @@ export interface TestDeps extends ApiDeps {
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   channelPortMap: Map<string, MockProviderAdapter>;
+  /** The router behind `channels` and `channelsService`, which a test swaps
+   *  to fake a Connection's Talk. */
+  talkRouter: TalkRouter;
 }
 
 export interface BuildTestDepsOptions {
@@ -653,6 +657,7 @@ export async function buildTestDeps(
 
   return {
     talkRouter,
+    notifyPairingResolution: (approval) => notifyPairingResolution(talkRouter, approval),
     channelsService,
     conversationSettings: emptyConversationSettings,
     actionEngine,

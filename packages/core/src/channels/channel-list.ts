@@ -44,8 +44,8 @@ export function channelList(deps: {
    *  It contributes a live store and an address book of the guardian's own
    *  contacts, read straight from the client's database rather than a sync. */
   wechatUserReader?: WechatUserReader;
-  /** The Connections that back `send`, `inbound` and, where no store does,
-   *  `messages`. Every registered service with a Talk contributes a channel;
+  /** The Connections that back `send`, `inbound`, `directory` and, where no
+   *  store does, `messages`. Every registered service with a Talk contributes a channel;
    *  absent, no channel has those ports. */
   connections?: ConnectionPortsDeps;
   /** Address books for channels a Connection backs, by service. A service
@@ -76,6 +76,7 @@ export function channelList(deps: {
     ...read,
     send: ports.get(read.name)?.send ?? null,
     inbound: ports.get(read.name)?.inbound ?? null,
+    directory: ports.get(read.name)?.directory ?? null,
   }));
   for (const [name, backed] of ports) {
     if (reads.some((read) => read.name === name)) continue;
