@@ -22,7 +22,7 @@ import {
   agentAddress,
   agentAddressAccount,
   createRomeCloudAgentsClient,
-  isNotReachable,
+  isUndeliverable,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
@@ -242,7 +242,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         });
         return { conversationId, messageId: sent.messageId };
       } catch (err) {
-        if (!isNotReachable(err)) throw err;
+        if (!isUndeliverable(err)) throw err;
         // Only another account's agent can be out of reach for want of a link.
         const why =
           agentAddressAccount(conversationId) === null

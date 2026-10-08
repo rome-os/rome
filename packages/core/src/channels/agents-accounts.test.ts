@@ -220,7 +220,7 @@ describe("another account's agent on the People page", () => {
         accounts: agentsAccounts({
           client: cloud([
             {
-              endpoint: "atlas",
+              endpoint: "@friend/atlas",
               kind: "dot",
               ready: true,
               sameAccount: false,

@@ -248,8 +248,10 @@ describe("agents channel", () => {
 
   it("says plainly when Cloud will not deliver to an address", async () => {
     const client = fakeClient([]);
-    client.send = async () => {
-      throw new AgentMessagingError("Not reachable", 404, "not_reachable");
+    client.send = async ({ to }) => {
+      throw to.startsWith("@")
+        ? new AgentMessagingError("Not reachable", 404, "not_reachable")
+        : new AgentMessagingError("No such endpoint", 404, "unknown_endpoint");
     };
     const talker = createAgentsTalker(client);
     await expect(talker.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(

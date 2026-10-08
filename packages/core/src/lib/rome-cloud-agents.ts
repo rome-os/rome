@@ -46,23 +46,13 @@ export interface AgentEndpointSummary {
 
 /**
  * The address Rome knows an agent by: the bare endpoint name in this Rome's own
- * account, `@handle/endpoint` in any other. Null for a cross-account agent
- * whose full address Cloud did not give, which Rome can neither tell apart
- * from its own agents nor answer.
+ * account, `@handle/endpoint` in any other, as Cloud gives each in `endpoint`.
+ * Null for a cross-account agent whose `endpoint` is not a full address, which
+ * Rome can neither tell apart from its own agents nor answer.
  */
-export function agentAddress(agent: {
-  endpoint: string;
-  sameAccount?: boolean;
-  account?: string;
-  address?: string;
-}): string | null {
+export function agentAddress(agent: { endpoint: string; sameAccount?: boolean }): string | null {
   if (agent.sameAccount !== false) return agent.endpoint;
-  // Cloud gives a linked account's endpoint as its full address; an earlier
-  // draft of the contract gave the bare name beside `address` and `account`.
-  if (agentAddressAccount(agent.endpoint) !== null) return agent.endpoint;
-  const address =
-    agent.address ?? (agent.account ? `@${agent.account}/${agent.endpoint}` : undefined);
-  return address && agentAddressAccount(address) !== null ? address : null;
+  return agentAddressAccount(agent.endpoint) !== null ? agent.endpoint : null;
 }
 
 /** The handle of a `@handle/endpoint` address, or null for a bare name. */
@@ -70,11 +60,15 @@ export function agentAddressAccount(address: string): string | null {
   return /^@([^@/\s]+)\/[^@/\s]+$/.exec(address)?.[1] ?? null;
 }
 
-/** Cloud's refusal for an address it will not deliver to. It answers the same
- *  for an agent that does not exist and one whose owner has not allowed this
- *  Rome, so a stranger cannot learn which agents exist. */
-export function isNotReachable(err: unknown): boolean {
-  return err instanceof AgentMessagingError && err.code === "not_reachable";
+/** Cloud's refusal for an address it will not deliver to: `unknown_endpoint`
+ *  for a bare name with no endpoint in this account, and `not_reachable` for
+ *  another account's address, the same for an agent that does not exist and
+ *  one no link allows, so a stranger cannot learn which agents exist. */
+export function isUndeliverable(err: unknown): boolean {
+  return (
+    err instanceof AgentMessagingError &&
+    (err.code === "not_reachable" || err.code === "unknown_endpoint")
+  );
 }
 
 export class AgentMessagingError extends Error {

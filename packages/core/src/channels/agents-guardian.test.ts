@@ -58,7 +58,9 @@ describe("linking same-account agents to the guardian", () => {
 
   it("leaves a sender unlinked when Cloud does not say it is in this account", async () => {
     await link(message({ endpoint: "atlas", kind: "dot" }));
-    await link(message({ endpoint: "muse", kind: "dot", sameAccount: false, account: "friend" }));
+    await link(
+      message({ endpoint: "@friend/muse", kind: "dot", sameAccount: false, account: "friend" }),
+    );
 
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
     expect(await people.findByChannelUser("agents", "@friend/muse")).toBeNull();
@@ -67,7 +69,9 @@ describe("linking same-account agents to the guardian", () => {
 
   it("never links another account's agent, even one sharing a name with the guardian's", async () => {
     await link(message({ endpoint: "atlas", kind: "dot", sameAccount: true }));
-    await link(message({ endpoint: "atlas", kind: "dot", sameAccount: false, account: "friend" }));
+    await link(
+      message({ endpoint: "@friend/atlas", kind: "dot", sameAccount: false, account: "friend" }),
+    );
 
     expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
