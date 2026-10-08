@@ -99,7 +99,7 @@ export function agentsAccounts(deps: {
           endpoints.flatMap((endpoint) => {
             const listed = agentAddress(endpoint);
             return endpoint.endpointId && listed !== null
-              ? [{ endpointId: endpoint.endpointId, address: listed, at: now() }]
+              ? [{ endpointId: endpoint.endpointId, address: listed, by: "listing" as const }]
               : [];
           }),
         );

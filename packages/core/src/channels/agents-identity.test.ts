@@ -10,6 +10,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 import {
   AGENTS_ENDPOINTS_KEY,
+  type AgentSighting,
   type AgentsIdentity,
   agentSightings,
   createAgentsIdentity,
@@ -58,35 +59,47 @@ describe("keeping agents' links on their endpoint", () => {
   });
   afterEach(() => testDb.close());
 
+  const listed = (endpointId: string, address: string): AgentSighting => ({
+    endpointId,
+    address,
+    by: "listing",
+  });
+  const sent = (endpointId: string, address: string, at: number): AgentSighting => ({
+    endpointId,
+    address,
+    by: "message",
+    at,
+  });
+
   it("moves a linked agent's link to its new address when its owner renames their handle", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
-    await identity.observe([{ endpointId: "ep_atlas", address: "@friend/atlas", at: 1 }]);
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
 
-    await identity.observe([{ endpointId: "ep_atlas", address: "@newfriend/atlas", at: 2 }]);
+    await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
     expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
-      ep_atlas: { address: "@newfriend/atlas", at: 2 },
+      ep_atlas: { address: "@newfriend/atlas", by: "listing" },
     });
   });
 
   it("starts a new endpoint that reuses a removed one's name unlinked", async () => {
     await people.addChannelMapping("ada", "agents", "atlas");
-    await identity.observe([{ endpointId: "ep_old", address: "atlas", at: 1 }]);
+    await identity.observe([listed("ep_old", "atlas")]);
 
-    await identity.observe([{ endpointId: "ep_new", address: "atlas", at: 2 }]);
+    await identity.observe([sent("ep_new", "atlas", 2)]);
 
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
   });
 
   it("gives a set-aside link back to its endpoint when it shows up renamed", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
-    await identity.observe([{ endpointId: "ep_atlas", address: "@friend/atlas", at: 1 }]);
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
     // The friend's old handle went to someone else before Rome saw the rename.
-    await identity.observe([{ endpointId: "ep_other", address: "@friend/atlas", at: 2 }]);
+    await identity.observe([listed("ep_other", "@friend/atlas")]);
 
-    await identity.observe([{ endpointId: "ep_atlas", address: "@newfriend/atlas", at: 3 }]);
+    await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
@@ -94,44 +107,95 @@ describe("keeping agents' links on their endpoint", () => {
 
   it("settles a rename before a new endpoint taking the old address, whatever the listing order", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
-    await identity.observe([{ endpointId: "ep_atlas", address: "@friend/atlas", at: 1 }]);
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
 
     await identity.observe([
-      { endpointId: "ep_other", address: "@friend/atlas", at: 2 },
-      { endpointId: "ep_atlas", address: "@newfriend/atlas", at: 2 },
+      listed("ep_other", "@friend/atlas"),
+      listed("ep_atlas", "@newfriend/atlas"),
     ]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
   });
 
-  it("lets no message older than what Rome knows undo a rename or take an address", async () => {
+  it("lets no held-back message undo what a listing settled", async () => {
     await people.addChannelMapping("ada", "agents", "@newfriend/atlas");
-    await identity.observe([{ endpointId: "ep_atlas", address: "@newfriend/atlas", at: 5 }]);
-    await identity.observe([{ endpointId: "ep_other", address: "@friend/atlas", at: 5 }]);
+    await identity.observe([
+      listed("ep_atlas", "@newfriend/atlas"),
+      listed("ep_other", "@friend/atlas"),
+    ]);
     await people.addChannelMapping("owner", "agents", "@friend/atlas");
 
-    await identity.observe([{ endpointId: "ep_atlas", address: "@friend/atlas", at: 1 }]);
+    await identity.observe([sent("ep_atlas", "@friend/atlas", Date.now() + 60_000)]);
 
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
     expect((await people.findByChannelUser("agents", "@friend/atlas"))?.id).toBe("owner");
   });
 
+  it("orders messages by when they were sent", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
+    await identity.observe([sent("ep_atlas", "@newfriend/atlas", 3)]);
+
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 2)]);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
   it("never carries a link between this Rome's own account and another", async () => {
     await people.addChannelMapping("owner", "agents", "atlas");
-    await identity.observe([{ endpointId: "ep_atlas", address: "atlas", at: 1 }]);
+    await identity.observe([listed("ep_atlas", "atlas")]);
 
-    await identity.observe([{ endpointId: "ep_atlas", address: "@other/atlas", at: 2 }]);
+    await identity.observe([listed("ep_atlas", "@other/atlas")]);
 
     expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
-    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
+    // Nor does it stay behind for the next endpoint to take the name.
+    await identity.observe([listed("ep_new", "atlas")]);
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
+  it("never gives a set-aside link back across accounts", async () => {
+    await people.addChannelMapping("owner", "agents", "atlas");
+    await identity.observe([listed("ep_atlas", "atlas")]);
+    await identity.observe([listed("ep_other", "atlas")]);
+
+    await identity.observe([listed("ep_atlas", "@other/atlas")]);
+
+    expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
+  });
+
+  it("finishes a settlement that stopped after recording but before taking the link off", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    await identity.observe([listed("ep_old", "atlas")]);
+    const deleteChannelMapping = people.deleteChannelMapping.bind(people);
+    people.deleteChannelMapping = async () => {
+      throw new Error("disk full");
+    };
+    await identity.observe([listed("ep_new", "atlas")]);
+    people.deleteChannelMapping = deleteChannelMapping;
+    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
+
+    await identity.observe([listed("ep_new", "atlas")]);
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
+  it("keeps a decision made about the new address over a link waiting for it", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
+    await identity.observe([listed("ep_other", "@friend/atlas")]);
+    await people.addChannelMapping("owner", "agents", "@newfriend/atlas");
+
+    await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("owner");
   });
 
   it("lets an endpoint first seen keep the link its address already has", async () => {
     await people.addChannelMapping("ada", "agents", "atlas");
 
-    await identity.observe([{ endpointId: "ep_atlas", address: "atlas", at: 1 }]);
-    await identity.observe([{ endpointId: "ep_atlas", address: "atlas", at: 2 }]);
+    await identity.observe([listed("ep_atlas", "atlas")]);
+    await identity.observe([sent("ep_atlas", "atlas", 2)]);
 
     expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
   });
@@ -139,7 +203,7 @@ describe("keeping agents' links on their endpoint", () => {
   it("takes the endpoint id from an inbound message, and none from an older Cloud", () => {
     expect(
       agentSightings(message({ endpoint: "atlas", endpointId: "ep_atlas", kind: "dot" })),
-    ).toEqual([{ endpointId: "ep_atlas", address: "atlas", at: SENT }]);
+    ).toEqual([{ endpointId: "ep_atlas", address: "atlas", by: "message", at: SENT }]);
     expect(agentSightings(message({ endpoint: "atlas", kind: "dot" }))).toEqual([]);
     expect(agentSightings(message({ endpoint: "atlas", endpointId: null, kind: "dot" }))).toEqual(
       [],
