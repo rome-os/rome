@@ -441,7 +441,7 @@ export function createWechatUserDescriptor(
             },
           };
 
-          // `directMessaging` is absent on purpose: answering null is the
+          // `directMessaging` is absent on purpose: leaving it off is the
           // whole declaration that this channel cannot be written to.
           const features: TalkFeatures = { directory };
           const talker: WechatUserTalker = {

@@ -60,7 +60,8 @@ export type TalkFeatureName = keyof TalkFeatureMap;
  * What a talker offers beyond sending and hearing, one optional field per
  * channel port it backs. An absent field is the declaration that the talker
  * does not offer it. The registry reads a field each time it is used, so a
- * talker may answer one through a getter.
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
  */
 export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
