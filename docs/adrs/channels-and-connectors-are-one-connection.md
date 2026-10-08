@@ -66,10 +66,10 @@ This amends one "future diffs must respect" rule: a new conversational surface d
 
 ## Amendment (2026-10-08): a channel is one presence on a platform
 
-A channel is one of Rome's presences on a platform: one bot, one signed-in user, one mailbox. The platform is the service a Connection names, such as `telegram`, and it is a key rather than an object. Nothing sits above the channels of one platform to merge them.
+A channel is one of Rome's presences on a platform: one bot, one signed-in user, one mailbox. Its name is its service's. Telegram carries two channels, the `telegram` bot and the `telegram_user` signed-in account, and WeChat carries `wechat` and `wechat_user` the same way. Nothing above the channels of one platform merges them, and the platform is not a name Rome stores.
 
-The platform stays a key because a person's address belongs to the platform, not to Rome's presence on it. Links and stored rows name the platform, and person resolution keys on it, as the consequences above already say.
+Links and stored rows name the channel. A person Rome reaches through both Telegram channels is two accounts, and their links join them into one person.
 
-While a service holds at most one Connection, a platform has one channel, and the channel's name is the platform's. Widening that is still its own decision. When it is taken, a second presence on a platform is a second channel with its own name, never a second backer merged into the first. A send that names only the platform resolves the one channel on it, or is refused when there are several.
+A service holds at most one Connection, so a channel's live ports have one Connection behind them. Widening that is still its own decision. When it is taken, a second presence of one service is a second channel with its own name, never a second Connection merged into the first.
 
 This narrows the amendment above without withdrawing it. A channel's ports may still have several backers, such as synced tables and a Connection's Talk. "One presence" says whose channel it is, not how many things answer for it.
