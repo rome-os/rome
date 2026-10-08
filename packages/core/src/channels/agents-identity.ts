@@ -18,7 +18,8 @@
  * lands whole or not at all.
  *
  * Cloud's listing is its current state and always settles, unless a listing
- * asked for later has already settled. A message is as old
+ * asked for later has already settled, or a message moved the endpoint after
+ * it was asked for. A message is as old
  * as when it was sent, and settles an endpoint only against what earlier
  * messages said of it, never against a listing, so a message Cloud held while
  * Rome was offline cannot undo a rename the listing already settled. A message
@@ -26,12 +27,15 @@
  * rename still reaches the person on its first message. The same disagreement
  * is listed again at most once a half minute, so a run of held-back messages
  * reads Cloud once. A message waits for that read only briefly, outside the
- * settlement queue. An endpoint the listing has left out is not listed again
- * for, and its own messages cannot move it, so its rename is not followed. When no listing answers in time, a link stops answering
+ * settlement queue, and not at all for a while after a read fails or hangs.
+ * An endpoint the listing has left out is not listed again for, and is moved
+ * by its own messages sent after the last Rome saw of it. When no listing
+ * answers in time, a link stops answering
  * for an address a listing gave another endpoint, so a reused name never
  * speaks as the old endpoint's person; the next listing gives the link back
  * if it still holds. A listing that leaves an endpoint out stops vouching for
- * its address. Rome's clock and Cloud's are never compared.
+ * its address. Rome's clock stands in for Cloud's only to order an unlisted
+ * endpoint's messages against the listing that last named it.
  *
  * Conversation history stays under the address it was written to. An endpoint
  * first seen here takes over whatever its address already holds, since Rome
