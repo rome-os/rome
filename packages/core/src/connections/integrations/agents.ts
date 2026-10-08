@@ -227,6 +227,11 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       if (msg.attachments?.length) {
         throw new Error("Agent messages carry text only; send the files another way.");
       }
+      // Cloud also takes `handle/endpoint`, but its reply would come back as
+      // `@handle/endpoint` and split the conversation in two.
+      if (/^[^@\s/]+\/[^\s/]+$/.test(conversationId)) {
+        throw new Error(`Address another account's agent as @${conversationId}.`);
+      }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");
       try {
@@ -242,7 +247,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
         const why =
           agentAddressAccount(conversationId) === null
             ? "The agent may no longer exist."
-            : "The agent may not exist, or its owner hasn't linked their account with yours.";
+            : "The agent may not exist, or no link between your accounts lets this Rome reach it.";
         throw new Error(`Rome Cloud can't deliver to ${conversationId}. ${why}`, { cause: err });
       }
     },

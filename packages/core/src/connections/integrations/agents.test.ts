@@ -240,6 +240,10 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     await talker.send("@friend/atlas" as ConversationId, { text: "Hi" });
     expect(client.sent).toEqual([{ to: "@friend/atlas", text: "Hi" }]);
+    await expect(talker.send("friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
+      "Address another account's agent as @friend/atlas.",
+    );
+    expect(client.sent).toHaveLength(1);
   });
 
   it("says plainly when Cloud will not deliver to an address", async () => {
@@ -249,7 +253,7 @@ describe("agents channel", () => {
     };
     const talker = createAgentsTalker(client);
     await expect(talker.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
-      "Rome Cloud can't deliver to @friend/atlas. The agent may not exist, or its owner hasn't linked their account with yours.",
+      "Rome Cloud can't deliver to @friend/atlas. The agent may not exist, or no link between your accounts lets this Rome reach it.",
     );
     await expect(talker.send("muse" as ConversationId, { text: "Hi" })).rejects.toThrow(
       "Rome Cloud can't deliver to muse. The agent may no longer exist.",
