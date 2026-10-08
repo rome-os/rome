@@ -118,3 +118,20 @@ describe("transient turn activity", () => {
     }
   });
 });
+
+describe("typing bubble", () => {
+  it("shows three dots for plain thinking and keeps the label for screen readers", () => {
+    const { container } = render(<LiveTurnActivity snapshot={null} hasText={false} />);
+    expect(container.querySelectorAll(".rome-typing-dot")).toHaveLength(3);
+    const label = screen.getByRole("status").querySelector(":scope > span");
+    expect(label?.className).toBe("sr-only");
+  });
+
+  it("shows a specific step beside the dots", () => {
+    render(
+      <LiveTurnActivity snapshot={snapshot(thinking(0, "Checking results"))} hasText={false} />,
+    );
+    const label = screen.getByText("Checking results");
+    expect(label.className).not.toContain("sr-only");
+  });
+});

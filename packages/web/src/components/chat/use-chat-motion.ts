@@ -130,14 +130,14 @@ function afterPin(content: HTMLElement, start: () => void): () => void {
     done = true;
     start();
   };
-  const observer = new ResizeObserver(run);
-  observer.observe(content);
+  const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(run);
+  observer?.observe(content);
   let frame = requestAnimationFrame(() => {
     frame = requestAnimationFrame(run);
   });
   return () => {
     done = true;
-    observer.disconnect();
+    observer?.disconnect();
     cancelAnimationFrame(frame);
   };
 }
@@ -280,39 +280,74 @@ export function useSendFlight(
   }, [messageId, rowRef, bubbleRef]);
 }
 
+/** How an entry comes in: a bubble pops from its bottom-left corner, a card
+ * mostly rises, and a whole row rises without scaling. */
+export type EntranceKind = "bubble" | "card" | "row";
+
+const ENTRANCES: Record<EntranceKind, { scale: number; rise: number }> = {
+  bubble: { scale: 0.8, rise: 8 },
+  card: { scale: 0.96, rise: 12 },
+  row: { scale: 1, rise: ARRIVAL_RISE_PX },
+};
+
+// The iMessage incoming bubble overshoots a little more than the send does.
+const POP_SPRING = { type: "spring", visualDuration: 0.36, bounce: 0.2 } as const;
+
+// Entries that have already come in on this page. The live preview of a block
+// and its saved copy share a key, so the hand-over does not replay the entrance.
+const enteredEntries = new Set<string>();
+
 /**
- * Brings a row in from just below its slot, fading in, once, on mount. The
- * transcript above glides up to make room instead of jumping.
+ * Brings an entry in once, the first time an entry with `entryKey` mounts while
+ * `live` is true. Entries of a settled turn, and keys seen before, appear in
+ * place. The transcript above glides up to make room instead of jumping.
  *
- * `wrapperRef` wraps the row and receives the motion. Does nothing under
+ * `ref` wraps the entry and receives the motion. Does nothing under
  * `prefers-reduced-motion` or outside a chat transcript.
  */
-export function useArrival(wrapperRef: RefObject<HTMLElement | null>): void {
+export function useEntrance(
+  ref: RefObject<HTMLElement | null>,
+  entryKey: string,
+  live: boolean,
+  kind: EntranceKind,
+): void {
+  // Decided on the first effect run and kept in a ref, so StrictMode's replay
+  // animates the entry the first run claimed.
+  const animateRef = useRef<boolean | undefined>(undefined);
   const doneRef = useRef(false);
 
   useLayoutEffect(() => {
-    const wrapper = wrapperRef.current;
-    const content = wrapper ? transcriptOf(wrapper) : null;
-    if (doneRef.current || !wrapper || !content || prefersReducedMotion()) return;
+    if (animateRef.current === undefined) {
+      animateRef.current = live && !enteredEntries.has(entryKey);
+      enteredEntries.add(entryKey);
+    }
+    const el = ref.current;
+    const content = el ? transcriptOf(el) : null;
+    if (!animateRef.current || doneRef.current || !el || !content || prefersReducedMotion()) {
+      return;
+    }
 
+    const { scale, rise } = ENTRANCES[kind];
     const glide = glideFor(content);
-    wrapper.style.opacity = "0";
+    el.style.opacity = "0";
+    el.style.transformOrigin = "0% 100%";
     const before = restingTop(content, glide);
 
     let controls: Controls | null = null;
     const reset = () => {
-      wrapper.style.removeProperty("opacity");
-      wrapper.style.removeProperty("transform");
+      for (const property of ["opacity", "transform", "transform-origin"]) {
+        el.style.removeProperty(property);
+      }
     };
     const cancelStart = afterPin(content, () => {
       glide.push(before - restingTop(content, glide));
       const step = (p: number) => {
-        wrapper.style.transform = `translate3d(0, ${ARRIVAL_RISE_PX * p}px, 0)`;
-        wrapper.style.opacity = `${clamp01(1 - p)}`;
+        el.style.transform = `translate3d(0, ${rise * p}px, 0) scale(${1 - (1 - scale) * p})`;
+        el.style.opacity = `${clamp01((1 - p) * 3)}`;
       };
       step(1);
       controls = animate(1, 0, {
-        ...ENTRY_SPRING,
+        ...(kind === "bubble" ? POP_SPRING : ENTRY_SPRING),
         onUpdate: step,
         onComplete: () => {
           doneRef.current = true;
@@ -325,5 +360,5 @@ export function useArrival(wrapperRef: RefObject<HTMLElement | null>): void {
       controls?.stop();
       reset();
     };
-  }, [wrapperRef]);
+  }, [ref, entryKey, live, kind]);
 }

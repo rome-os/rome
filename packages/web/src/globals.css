@@ -239,6 +239,55 @@
   }
 }
 
+/* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
+   color tokens markdown reads are re-mapped onto the primary foreground for
+   the bubble's children. The bubble itself keeps the real `--primary` for its
+   own fill. */
+.rome-bubble-on-primary > * {
+  --foreground: var(--primary-foreground);
+  --muted-foreground: color-mix(in oklab, var(--primary-foreground) 75%, transparent);
+  --primary: var(--primary-foreground);
+  --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
+  --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+  --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* Typing bubble (chat TypingBubble): three dots rising in turn while the agent
+   works and has no text to show. Under reduced motion the dots rest. */
+.rome-typing-dot {
+  animation: rome-typing-dot 1.2s ease-in-out infinite;
+}
+
+.rome-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.rome-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes rome-typing-dot {
+
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rome-typing-dot {
+    animation: none;
+  }
+}
+
 /* Pending user bubble (chat UserMessage): the normal bubble, breathing while
    the agent has not taken the input in yet. The delay keeps an input the agent
    picks up at once from blinking. Under reduced motion it rests dimmed, so the

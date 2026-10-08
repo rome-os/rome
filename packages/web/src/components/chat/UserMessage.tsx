@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef } from "react";
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
@@ -32,6 +33,8 @@ export const UserMessage = memo(
         .join("\n");
     }, [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
+    const undelivered =
+      msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";
     const pending =
       msg.inputState === "queued" ||
       msg.inputState === "submitted" ||
@@ -48,13 +51,15 @@ export const UserMessage = memo(
     // name, since there's only ever one human in the conversation.
     return (
       <div ref={rowRef} className="group mb-4 flex flex-col items-end">
-        {/* One inset on every side, equal to `--markdown-block-space-between`
-            at this density. A rim narrower than the space the renderer puts
-            between two paragraphs reads as content spilling out of the box. */}
-        <div
+        {/* A delivered or pending message is the primary bubble. One that
+            never reached the agent drops to the muted bubble, so its state
+            border and icon read. */}
+        <ChatBubble
           ref={bubbleRef}
+          tone={undelivered ? "muted" : "sent"}
           className={cn(
-            "flex max-w-[70%] items-start gap-2 break-words rounded-12 border border-transparent bg-surface-muted p-4 transition-colors motion-reduce:transition-none",
+            "max-w-[70%] transition-colors motion-reduce:transition-none",
+            undelivered && "flex items-start gap-2",
             // A pending bubble is the normal bubble, breathing until the agent
             // takes the input in (see `.rome-bubble-pending` in globals.css).
             pending && "rome-bubble-pending",
@@ -78,7 +83,7 @@ export const UserMessage = memo(
           <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
             {text}
           </Markdown>
-        </div>
+        </ChatBubble>
         <span className="sr-only" role="status">
           {statusLabel}
         </span>

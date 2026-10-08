@@ -19,7 +19,6 @@ import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
-import { useArrival } from "@/components/chat/use-chat-motion";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
@@ -287,16 +286,48 @@ const RowView = memo(function RowView({
         subagentIconByName,
       )}
       className="group"
+      footer={
+        copyText || showFeedback || timestamp ? (
+          // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
+          // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
+          // the row visible while the feedback draft is open (its popover is
+          // portaled, so group-focus-within can't see it) and once a rating is
+          // recorded.
+          <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
+            {copyText ? <CopyMessageButton text={copyText} /> : null}
+            {showFeedback && feedbackTurn?.turnId ? (
+              <TurnFeedbackButtons
+                key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
+                sessionId={feedbackTurn.sessionId}
+                turnId={feedbackTurn.turnId}
+              />
+            ) : null}
+            {showBranch && feedbackTurn?.turnId ? (
+              <TurnBranchButton
+                key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
+                sessionId={feedbackTurn.sessionId}
+                turnId={feedbackTurn.turnId}
+              />
+            ) : null}
+            {timestamp ? (
+              <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
+                {timestamp}
+              </time>
+            ) : null}
+          </div>
+        ) : null
+      }
     >
       {row.messages.map((m) => {
         const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {
           return (
-            <div key={m.id}>
+            <div key={m.id} className="flex flex-col gap-1">
               {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
                 turnId: m.turnId ?? undefined,
+                transcript: { live: !!live },
               })}
             </div>
           );
@@ -305,11 +336,12 @@ const RowView = memo(function RowView({
         const recapIndex = blocks.findIndex((block) => block.type === "turn_recap");
         const recap = blocks[recapIndex];
         return (
-          <div key={m.id}>
+          <div key={m.id} className="flex flex-col gap-1">
             {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
+              transcript: { live: !!live },
             })}
             <TurnSummaryGroup
               plan={summary?.plan}
@@ -329,6 +361,7 @@ const RowView = memo(function RowView({
               ...actions,
               sessionId: m.sessionId,
               turnId: m.turnId ?? undefined,
+              transcript: { live: !!live },
             })}
           </div>
         );
@@ -340,6 +373,7 @@ const RowView = memo(function RowView({
           {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
             ...actions,
             turnId: live.runningTurnId ?? undefined,
+            transcript: { live: true },
           })}
         </div>
       ) : null}
@@ -348,41 +382,19 @@ const RowView = memo(function RowView({
           snapshot={live.snapshot}
           textThroughOrdinal={live.textThroughOrdinal}
           hasText={!!live.text}
+          entranceKey={typingEntranceKey(live)}
         />
       ) : null}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
-      {copyText || showFeedback || timestamp ? (
-        // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
-        // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
-        // the row visible while the feedback draft is open (its popover is
-        // portaled, so group-focus-within can't see it) and once a rating is
-        // recorded.
-        <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
-          {copyText ? <CopyMessageButton text={copyText} /> : null}
-          {showFeedback && feedbackTurn?.turnId ? (
-            <TurnFeedbackButtons
-              key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-              sessionId={feedbackTurn.sessionId}
-              turnId={feedbackTurn.turnId}
-            />
-          ) : null}
-          {showBranch && feedbackTurn?.turnId ? (
-            <TurnBranchButton
-              key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-              sessionId={feedbackTurn.sessionId}
-              turnId={feedbackTurn.turnId}
-            />
-          ) : null}
-          {timestamp ? (
-            <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
-              {timestamp}
-            </time>
-          ) : null}
-        </div>
-      ) : null}
     </MessageRow>
   );
 });
+
+// The typing bubble pops in again each time the agent goes back to work after
+// a text block, so its key moves with the text it follows.
+function typingEntranceKey(live: LivePreview): string {
+  return `${live.runningTurnId ?? "no-turn"}:typing:${live.textThroughOrdinal ?? -1}`;
+}
 
 // A block without an agent row at its transcript position carries its own header.
 // Persisted cards stay in RowView so their local state survives the handoff.
@@ -401,44 +413,42 @@ function StandaloneLiveTail({
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
 }) {
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  useArrival(wrapperRef);
   return (
-    <div ref={wrapperRef}>
-      <MessageRow
-        name={live.identity.name}
-        avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
-        subtitle={
-          <CollapsedTraceButton
-            summary={live.snapshot?.summary}
-            onClick={onOpenLiveTrace}
-            live
-            compact
-          />
-        }
-        headerAccessory={renderSubagents(
-          live.snapshot?.summary.subagents,
-          onOpenSubagentTrace,
-          activeTraceTarget,
-          subagentIconByName,
-        )}
-      >
-        {live.text ? (
-          <div className="rome-live-caret">
-            {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
-              ...actions,
-              turnId: live.runningTurnId ?? undefined,
-            })}
-          </div>
-        ) : null}
-        <LiveTurnActivity
-          snapshot={live.snapshot}
-          textThroughOrdinal={live.textThroughOrdinal}
-          hasText={!!live.text}
+    <MessageRow
+      name={live.identity.name}
+      avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
+      subtitle={
+        <CollapsedTraceButton
+          summary={live.snapshot?.summary}
+          onClick={onOpenLiveTrace}
+          live
+          compact
         />
-        <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
-      </MessageRow>
-    </div>
+      }
+      headerAccessory={renderSubagents(
+        live.snapshot?.summary.subagents,
+        onOpenSubagentTrace,
+        activeTraceTarget,
+        subagentIconByName,
+      )}
+    >
+      {live.text ? (
+        <div className="rome-live-caret">
+          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+            ...actions,
+            turnId: live.runningTurnId ?? undefined,
+            transcript: { live: true },
+          })}
+        </div>
+      ) : null}
+      <LiveTurnActivity
+        snapshot={live.snapshot}
+        textThroughOrdinal={live.textThroughOrdinal}
+        hasText={!!live.text}
+        entranceKey={typingEntranceKey(live)}
+      />
+      <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
+    </MessageRow>
   );
 }
 

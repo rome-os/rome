@@ -1,6 +1,8 @@
 import type { ApprovalCardStatus, ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
+import { ChatBubble } from "@/components/chat/ChatBubble";
+import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
 import { AiToolsCard } from "./AiToolsCard";
@@ -42,6 +44,9 @@ export interface RenderEntryOptions {
   ) => void | Promise<void>;
   /** Invoked when an inline app component dismisses without a result. */
   onDismissAppComponent?: (sessionId: string, toolUseId: string) => void | Promise<void>;
+  /** Set by the chat transcript: each text block renders as its own bubble,
+   * and every entry comes in once while `live` (its turn is running). */
+  transcript?: { live: boolean };
 }
 
 export function renderSingleEntry(
@@ -58,6 +63,7 @@ export function renderSingleEntry(
     interactionResults,
     onSubmitAppComponent,
     onDismissAppComponent,
+    transcript,
   } = options;
   // The blocks of one message all share its session; submissions/lookups use it.
   const sid = sessionId ?? "";
@@ -121,6 +127,19 @@ export function renderSingleEntry(
         turnId !== undefined && block.blockIx !== undefined
           ? `${turnId}:${block.blockIx}`
           : undefined;
+      // In the transcript every text block is its own bubble, so consecutive
+      // narration reads as separate utterances under one speaker.
+      if (transcript) {
+        return (
+          <ChatBubble key={key} tone="received">
+            <TextBlock
+              content={block.content ?? ""}
+              compact={compact}
+              disclosureStateKey={disclosureStateKey}
+            />
+          </ChatBubble>
+        );
+      }
       // In-turn narration: give each commentary its own gap so consecutive
       // narration reads as separate utterances under one speaker (not a run-on
       // paragraph). Same text styling as the final answer. The final answer
@@ -346,14 +365,40 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
       if (consumedResults.has(block)) continue;
       // Orphan result (no matching start in this run): fall back to the
       // original standalone renderer so the data isn't lost.
-      nodes.push(renderSingleEntry(block, i, options));
+      nodes.push(transcriptEntry(renderSingleEntry(block, i, options), block, i, options));
       continue;
     }
 
-    nodes.push(renderSingleEntry(block, i, options));
+    nodes.push(transcriptEntry(renderSingleEntry(block, i, options), block, i, options));
   }
 
   return nodes;
+}
+
+// In the transcript, wraps a rendered entry so it comes in once while its turn
+// is live. The key matches between a live text preview and its saved copy,
+// both of which carry the turn and the block index.
+function transcriptEntry(
+  node: React.ReactNode,
+  block: ChatEntry,
+  index: number,
+  { transcript, turnId }: RenderEntryOptions,
+): React.ReactNode {
+  if (!transcript || node === null || node === undefined) return node;
+  const id =
+    block.type === "text"
+      ? `text:${block.blockIx ?? index}`
+      : `${block.type}:${block.toolUseId ?? index}`;
+  return (
+    <TranscriptEntry
+      key={`entry:${id}`}
+      entryKey={`${turnId ?? "no-turn"}:${id}`}
+      live={transcript.live}
+      kind={block.type === "text" ? "bubble" : "card"}
+    >
+      {node}
+    </TranscriptEntry>
+  );
 }
 
 function pickResult(

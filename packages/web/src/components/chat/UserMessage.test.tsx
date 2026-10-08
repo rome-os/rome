@@ -37,7 +37,7 @@ describe("UserMessage input state", () => {
 
     const bubble = screen.getByTitle(`inputState.${state}`);
     expect(bubble.classList.contains("bg-transparent")).toBe(false);
-    expect(bubble.classList.contains("bg-surface-muted")).toBe(true);
+    expect(bubble.classList.contains("bg-primary")).toBe(true);
     expect(bubble.classList.contains("border-dashed")).toBe(false);
     expect(bubble.classList.contains("rome-bubble-pending")).toBe(true);
     expect(bubble.classList.contains("opacity-60")).toBe(false);
@@ -60,7 +60,7 @@ describe("UserMessage input state", () => {
     rerender(userMessage("consumed"));
 
     expect(bubble.isConnected).toBe(true);
-    expect(bubble.classList.contains("bg-surface-muted")).toBe(true);
+    expect(bubble.classList.contains("bg-primary")).toBe(true);
     expect(bubble.classList.contains("rome-bubble-pending")).toBe(false);
     expect(bubble.hasAttribute("title")).toBe(false);
     expect(bubble.hasAttribute("aria-busy")).toBe(false);
@@ -77,6 +77,8 @@ describe("UserMessage input state", () => {
     const bubble = screen.getByTitle(`inputState.${state}`);
     expect(bubble.classList.contains(bubbleClass)).toBe(true);
     expect(bubble.classList.contains("bg-transparent")).toBe(state === "cancelled");
+    // An input that never reached the agent leaves the primary fill.
+    expect(bubble.classList.contains("bg-primary")).toBe(false);
     expect(bubble.querySelector("svg")?.classList.contains(iconClass)).toBe(true);
     expect(bubble.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
     expect(screen.getByRole("status").className).toBe("sr-only");
@@ -90,7 +92,7 @@ describe("UserMessage input state", () => {
     const { container } = render(userMessage(state));
 
     expect(screen.getByText(message.content)).toBeTruthy();
-    expect(container.querySelector(".bg-surface-muted")).not.toBeNull();
+    expect(container.querySelector(".bg-primary")).not.toBeNull();
     expect(container.querySelector(".border-dashed")).toBeNull();
     expect(container.querySelector(".rome-bubble-pending")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("");
