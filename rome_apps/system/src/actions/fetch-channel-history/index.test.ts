@@ -45,17 +45,18 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
       async send(_channel, conversationId) {
         return { conversationId };
       },
-      query: async () => [],
-      async history(channel, { conversationId, since }) {
+      async query(channel, { conversationId, since } = {}) {
         const adapter = adapters.get(channel);
-        // What the channels service says of a channel that reads no history.
-        if (!adapter?.fetchHistory) {
-          throw new Error(`Talk history is unavailable for connection "test:${channel}"`);
-        }
+        // What the channels service says of a channel that reads no messages.
+        if (!adapter?.fetchHistory) throw new Error(`Channel "${channel}" reads no messages`);
         const hours = since
           ? Math.max(1, Math.ceil((Date.now() - since.getTime()) / 3_600_000))
           : 24;
-        return adapter.fetchHistory(conversationId ?? null, hours);
+        // An adapter answers oldest first, and `query` newest first.
+        return [...(await adapter.fetchHistory(conversationId ?? null, hours))].reverse();
+      },
+      history: async () => {
+        throw new Error("fetch_channel_history reads through query");
       },
     },
   };
@@ -92,22 +93,6 @@ describe("fetch_channel_history", () => {
     expect(result.error).toBe('Channel "slack" is not configured or not running.');
   });
 
-  // The tool's own text, not the channels service's.
-  it("returns error when several Connections back the channel", async () => {
-    const deps = makeDeps(new Map([["telegram_user", {}]]));
-    deps.channelsService.list = async () => [
-      { name: "telegram_user", connectionIds: ["tg-a", "tg-b"] },
-    ];
-
-    const action = createAction(actionConfig, deps);
-    const result = await action.execute({ channel: "telegram_user" });
-
-    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toBe(
-      'Channel "telegram_user" has multiple connections; connectionId is required.',
-    );
-  });
-
   it("returns error when the channel reads no history", async () => {
     const adapter: HistoryAdapter = {};
     const deps = makeDeps(new Map([["telegram", adapter]]));
@@ -117,7 +102,7 @@ describe("fetch_channel_history", () => {
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toBe(
-      'Failed to fetch history from "telegram": Talk history is unavailable for connection "test:telegram"',
+      'Failed to fetch history from "telegram": Channel "telegram" reads no messages',
     );
   });
 

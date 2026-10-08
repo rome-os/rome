@@ -234,7 +234,6 @@ describe("WorkerRpcServer param validation", () => {
         list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
         send: rs.fn(async () => ({ messageId: "m1" })),
         query: rs.fn(async () => []),
-        history: rs.fn(async () => []),
       };
       const { server } = makeServer({ channelsService: service });
       const fake = makeFakeWorker();
@@ -252,7 +251,6 @@ describe("WorkerRpcServer param validation", () => {
         since: "2026-09-29T10:00:00.000Z",
         limit: 5,
       });
-      await rpc(fake, "channels.history", { channel: "discord", conversationId: "c1" });
 
       expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
       expect(sent.result).toEqual({ messageId: "m1" });
@@ -266,7 +264,6 @@ describe("WorkerRpcServer param validation", () => {
         since: new Date("2026-09-29T10:00:00.000Z"),
         limit: 5,
       });
-      expect(service.history).toHaveBeenCalledWith("discord", { conversationId: "c1" });
     });
 
     it("rejects a read with no channel", async () => {

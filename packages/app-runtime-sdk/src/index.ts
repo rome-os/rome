@@ -1765,7 +1765,8 @@ export function connectionRefusalMessage(
   }
 }
 
-/** What {@link ChannelsService.history} reads. */
+/** What {@link ChannelsService.history} reads.
+ *  @deprecated Use {@link ChannelMessageQuery} with {@link ChannelsService.query}. */
 export interface ChannelHistoryRead {
   conversationId?: ConversationId;
   since?: Date;
@@ -1806,10 +1807,11 @@ export interface ChannelsService {
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
   /**
-   * What `fetch_channel_history` has always read: each channel's history
-   * window cut as its Connection's retired history read cut it, oldest first.
-   * Kept apart from `query` because those windows differ from `query`'s. Read
-   * `query` for anything new.
+   * The page `query` answers for the same conversation, window and limit,
+   * oldest first. `connectionId` is not consulted: the channel's messages
+   * answer for whichever Connection backs it.
+   *
+   * @deprecated Use {@link ChannelsService.query}, which answers newest first.
    */
   history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
 }
