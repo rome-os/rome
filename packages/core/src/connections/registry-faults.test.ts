@@ -398,6 +398,73 @@ describe("registry faults", () => {
     });
   });
 
+  // A talker reached through `withTalker` reports a rejected credential the way
+  // `act.invoke` does: thrown or rejected, from `send` or from a feature.
+  describe("faults through withTalker", () => {
+    async function unlocked() {
+      const registry = new ConnectionRegistry({ ledger: makeLedger() });
+      const fx = makePasteTalk();
+      registry.register(fx.descriptor);
+      const conn = await registry.connect("fake-telegram");
+      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      const talker = fx.talkerFactory.instances.at(-1);
+      if (!talker) throw new Error("talker not built");
+      return { registry, fx, conn, talker };
+    }
+
+    it("degrades the grant when a feature call rejects with CredentialRejected", async () => {
+      const { conn, talker } = await unlocked();
+      talker.history = {
+        query: async () => {
+          throw new CredentialRejected({ grant: "bot" });
+        },
+      };
+
+      await expect(conn.withTalker((live) => live.history?.query({}))).rejects.toBeInstanceOf(
+        CredentialRejected,
+      );
+      await flush();
+
+      expect(conn.auth.grants().bot).toBe("degraded");
+      expect(conn.isUnlocked("talk")).toBe(false);
+    });
+
+    it("degrades the grant when the call throws CredentialRejected", async () => {
+      const { conn } = await unlocked();
+
+      expect(() =>
+        conn.withTalker(() => {
+          throw new CredentialRejected({ grant: "bot" });
+        }),
+      ).toThrow(CredentialRejected);
+      await flush();
+
+      expect(conn.auth.grants().bot).toBe("degraded");
+      expect(conn.isUnlocked("talk")).toBe(false);
+    });
+
+    it("ignores a rejection that settles after its epoch was replaced", async () => {
+      const { registry, fx, conn, talker } = await unlocked();
+      let reject: (err: unknown) => void = () => {};
+      talker.history = {
+        query: () =>
+          new Promise((_resolve, rejectRead) => {
+            reject = rejectRead;
+          }),
+      };
+      const pending = conn.withTalker((live) => live.history?.query({}));
+
+      await conn.auth.revoke("bot");
+      await registry.importCredential(conn.id, "bot", fx.validCredential());
+      reject(new CredentialRejected({ grant: "bot" }));
+      await expect(pending).rejects.toBeInstanceOf(CredentialRejected);
+      await flush();
+
+      expect(conn.auth.grants().bot).toBe("authorized");
+      expect(conn.isUnlocked("talk")).toBe(true);
+    });
+  });
+
   // Late faults from a discarded epoch must not touch grant state: transports
   // fire terminal errors from in-flight work while teardown is still draining
   // (WeChat's poll 401 after stop, Baileys' loggedOut close). Acting on one
