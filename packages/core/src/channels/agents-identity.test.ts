@@ -52,6 +52,7 @@ describe("keeping agents' links on their endpoint", () => {
       ])
       .run();
     identity = createAgentsIdentity({
+      db: testDb.db,
       personMappingRepo: people,
       settingsRepo: settings,
       channel: "agents",
@@ -151,6 +152,7 @@ describe("keeping agents' links on their endpoint", () => {
     let listing = [listed("ep_atlas", "@friend/atlas")];
     const asked = { count: 0 };
     identity = createAgentsIdentity({
+      db: testDb.db,
       personMappingRepo: people,
       settingsRepo: settings,
       channel: "agents",
@@ -171,11 +173,12 @@ describe("keeping agents' links on their endpoint", () => {
     expect(asked.count).toBe(1);
   });
 
-  it("reads Cloud at most once a half minute for messages that disagree with it", async () => {
+  it("reads Cloud once a half minute for the same disagreement, and at once for a new one", async () => {
     await people.addChannelMapping("ada", "agents", "@newfriend/atlas");
     let clock = 0;
     const asked = { count: 0 };
     identity = createAgentsIdentity({
+      db: testDb.db,
       personMappingRepo: people,
       settingsRepo: settings,
       channel: "agents",
@@ -187,14 +190,18 @@ describe("keeping agents' links on their endpoint", () => {
     });
     await identity.observeListing([listed("ep_atlas", "@newfriend/atlas")], clock);
 
-    clock = 29_000;
+    // A People page read just before a rename does not hold its first message back.
+    clock = 1_000;
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
     await identity.observe([sent("ep_atlas", "@friend/atlas", 2)]);
-    expect(asked.count).toBe(0);
-    clock = 31_000;
-    await identity.observe([sent("ep_atlas", "@friend/atlas", 3)]);
-    await identity.observe([sent("ep_atlas", "@friend/atlas", 4)]);
     expect(asked.count).toBe(1);
+    clock = 2_000;
+    await identity.observe([sent("ep_atlas", "@other/atlas", 3)]);
+    expect(asked.count).toBe(2);
+    clock = 31_000;
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 4)]);
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 5)]);
+    expect(asked.count).toBe(3);
     expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
   });
 
@@ -245,20 +252,23 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
   });
 
-  it("finishes a settlement that stopped after recording but before taking the link off", async () => {
-    await people.addChannelMapping("ada", "agents", "atlas");
-    await identity.observe([listed("ep_old", "atlas")]);
-    const deleteChannelMapping = people.deleteChannelMapping.bind(people);
-    people.deleteChannelMapping = async () => {
+  it("changes nothing when a settlement fails partway, so the next one settles it whole", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
+    const before = await settings.get(AGENTS_ENDPOINTS_KEY);
+    const writeChannelMapping = people.writeChannelMapping.bind(people);
+    people.writeChannelMapping = () => {
       throw new Error("disk full");
     };
-    await identity.observe([listed("ep_new", "atlas")]);
-    people.deleteChannelMapping = deleteChannelMapping;
-    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("ada");
+    await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
+    people.writeChannelMapping = writeChannelMapping;
+    expect((await people.findByChannelUser("agents", "@friend/atlas"))?.id).toBe("ada");
+    expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual(before);
 
-    await identity.observe([listed("ep_new", "atlas")]);
+    await identity.observe([listed("ep_atlas", "@newfriend/atlas")]);
 
-    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+    expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
   });
 
   it("keeps a decision made about the new address over a link waiting for it", async () => {

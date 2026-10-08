@@ -338,6 +338,7 @@ async function main() {
   });
   const agentsClient = createRomeCloudAgentsClient();
   const agentsIdentity = createAgentsIdentity({
+    db,
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_SERVICE,

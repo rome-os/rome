@@ -14,9 +14,8 @@
  *   never carries the guardian's trust to another account's agent or back, or
  * - someone has already decided about that address, and the decision stands.
  *
- * The record is written before the links change, and marks a link it is
- * about to take off until it is off, so a settlement that fails partway is
- * finished by the next one.
+ * Each settlement writes the record and the links in one transaction, so it
+ * lands whole or not at all.
  *
  * Cloud's listing is its current state and always settles, unless a listing
  * asked for later has already settled. A message is as old
@@ -24,9 +23,11 @@
  * messages said of it, never against a listing, so a message Cloud held while
  * Rome was offline cannot undo a rename the listing already settled. A message
  * that disagrees with a listing has Cloud listed again before it is read, so a
- * rename still reaches the person on its first message. A listing asked for in
- * the last half minute answers for this too, so a run of held-back messages
- * reads Cloud at most once. Rome's clock and Cloud's are never compared.
+ * rename still reaches the person on its first message. The same disagreement
+ * is listed again at most once a half minute, so a run of held-back messages
+ * reads Cloud once. Rome waits for Cloud outside the settlement queue, so other
+ * agents' messages are not held up. Rome's clock and Cloud's are never
+ * compared.
  *
  * Conversation history stays under the address it was written to. An endpoint
  * first seen here takes over whatever its address already holds, since Rome
@@ -34,6 +35,7 @@
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
+import type { DrizzleDb } from "../db/index.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import {
@@ -48,9 +50,9 @@ import { AGENTS_GUARDIAN_LINKED_KEY } from "./agents-guardian.js";
 
 const log = createLogger("agents-identity");
 
-/** How long a listing answers a message that disagrees with it, matching how
- *  long the People page keeps one read. */
-const LISTING_FRESH_MS = 30_000;
+/** How long a listing read for one disagreement answers it again, matching
+ *  how long the People page keeps one read. */
+const RELIST_MS = 30_000;
 
 /** The settings key holding what Rome last knew of each endpoint. */
 export const AGENTS_ENDPOINTS_KEY = "agentsEndpoints";
@@ -65,8 +67,6 @@ interface Known {
   /** The person whose link it took off `parkedFrom`, waiting to go back. */
   parked?: string;
   parkedFrom?: string;
-  /** A link this endpoint is taking off an address, until it is off. */
-  clearing?: { from: string; person: string };
 }
 
 /** One endpoint as Cloud names it. A message's sighting carries when it was
@@ -135,17 +135,21 @@ function disputes(sighting: AgentSighting, entry: Known | undefined): boolean {
   return sighting.by === "message" && entry?.by === "listing" && entry.address !== sighting.address;
 }
 
+/** Names one disagreement, so the same one is listed again only so often. */
+const disputeKey = (sighting: AgentSighting) => `${sighting.endpointId} ${sighting.address}`;
+
 /** The part of an endpoint's record a sighting sets. */
 function seenBy(sighting: AgentSighting): Pick<Known, "by" | "at"> {
   return sighting.by === "message" ? { by: "message", at: sighting.at } : { by: "listing" };
 }
 
 export function createAgentsIdentity(deps: {
+  db: Pick<DrizzleDb, "transaction">;
   personMappingRepo: Pick<
     PersonMappingRepository,
-    "findByChannelUser" | "deleteChannelMapping" | "addChannelMapping"
+    "readChannelHolder" | "writeChannelMapping" | "writeUnlinkAccount"
   >;
-  settingsRepo: Pick<SettingsRepository, "get" | "set">;
+  settingsRepo: Pick<SettingsRepository, "read" | "write">;
   channel: string;
   /** Reads Cloud's listing now, for a message that disagrees with an earlier
    *  one. Null when Cloud cannot be read. */
@@ -153,11 +157,14 @@ export function createAgentsIdentity(deps: {
   now?: () => number;
 }): AgentsIdentity {
   const now = deps.now ?? Date.now;
+  const repo = deps.personMappingRepo;
+  const settings = deps.settingsRepo;
+  const channel = deps.channel;
   let queue: Promise<unknown> = Promise.resolve();
   /** When the newest listing settled so far was asked for. */
   let listedAt = Number.NEGATIVE_INFINITY;
-  const repo = deps.personMappingRepo;
-  const channel = deps.channel;
+  /** When each disagreement last had Cloud listed again. */
+  const relisted = new Map<string, number>();
 
   function serial<T>(fn: () => Promise<T>): Promise<T> {
     const run = queue.then(fn);
@@ -165,146 +172,128 @@ export function createAgentsIdentity(deps: {
     return run;
   }
 
-  /** Settles the sightings, and says whether a message disagreed with a
-   *  listing. */
-  async function settle(sightings: readonly AgentSighting[]): Promise<boolean> {
-    let disputed = false;
-    const known: Record<string, Known> =
-      (await deps.settingsRepo.get<Record<string, Known>>(AGENTS_ENDPOINTS_KEY)) ?? {};
-    let saved = JSON.stringify(known);
-    const holders = new Map<string, string>();
-    for (const [id, entry] of Object.entries(known)) {
-      if (entry.address !== null) holders.set(entry.address, id);
-    }
-
-    async function save(): Promise<void> {
+  /** Settles the sightings, and returns the disagreements between a message
+   *  and a listing. */
+  function settle(sightings: readonly AgentSighting[]): string[] {
+    return deps.db.transaction((tx) => {
+      const disputed: string[] = [];
+      const known = settings.read<Record<string, Known>>(tx, AGENTS_ENDPOINTS_KEY) ?? {};
+      const before = JSON.stringify(known);
+      let guardianRecord = settings.read<string[]>(tx, AGENTS_GUARDIAN_LINKED_KEY) ?? [];
+      const holders = new Map<string, string>();
       for (const [id, entry] of Object.entries(known)) {
-        if (entry.address === null && !entry.parked && !entry.clearing) delete known[id];
+        if (entry.address !== null) holders.set(entry.address, id);
       }
-      const next = JSON.stringify(known);
-      if (next === saved) return;
-      await deps.settingsRepo.set(AGENTS_ENDPOINTS_KEY, known);
-      saved = next;
-    }
+      const holderOf = (address: string) => repo.readChannelHolder(tx, channel, address);
 
-    /** Takes an endpoint's link off the address it is leaving, keeping it on
-     *  the endpoint's record. */
-    async function leave(id: string, from: string): Promise<void> {
-      const person = await repo.findByChannelUser(channel, from);
-      const entry = known[id];
-      known[id] = {
-        ...entry,
-        address: null,
-        ...(person
-          ? { parked: person.id, parkedFrom: from, clearing: { from, person: person.id } }
-          : {}),
-      };
-      holders.delete(from);
-      await save();
-      if (person) {
-        await clear(id);
-        log.info("an agent left its address; its link waits for it", { address: from });
-      }
-    }
-
-    /** Takes off the link an endpoint is marked as clearing, if it is still
-     *  there, then drops the mark. */
-    async function clear(id: string): Promise<void> {
-      const entry = known[id];
-      if (!entry?.clearing) return;
-      const { clearing, ...rest } = entry;
-      if ((await repo.findByChannelUser(channel, clearing.from))?.id === clearing.person) {
-        await repo.deleteChannelMapping(channel, clearing.from);
-      }
-      known[id] = rest;
-      await save();
-    }
-
-    /** Gives an endpoint's waiting link back at its current address. */
-    async function restore(id: string): Promise<void> {
-      const entry = known[id];
-      if (!entry?.parked || !entry.parkedFrom || entry.address === null) return;
-      const { parked, parkedFrom: _from, ...rest } = entry;
-      if (isOwn(entry.parkedFrom) !== isOwn(entry.address)) {
-        // It can never go back, so it stops waiting.
-        log.warn("an agent moved between accounts; its link stays off", {
-          from: entry.parkedFrom,
-          to: entry.address,
-        });
-      } else if (!(await repo.findByChannelUser(channel, entry.address))) {
-        await repo.addChannelMapping(parked, channel, entry.address);
-        log.info("an agent's link followed it to its new address", { to: entry.address });
-      }
-      known[id] = rest;
-      await save();
-    }
-
-    // Finishes what a settlement that stopped partway left marked.
-    for (const id of Object.keys(known)) await clear(id);
-
-    let guardianRecord = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
-
-    // An endpoint Rome knows goes first, so one renamed within a listing has
-    // left its old address before a new endpoint is seen taking it.
-    const ordered = [...sightings].sort(
-      (a, b) =>
-        Number(known[b.endpointId] !== undefined) - Number(known[a.endpointId] !== undefined),
-    );
-    for (const sighting of ordered) {
-      const { endpointId, address } = sighting;
-      const entry = known[endpointId];
-      if (staleAgainst(sighting, entry)) {
-        disputed ||= disputes(sighting, entry);
-        continue;
-      }
-      if (entry?.address === address) {
-        if (sighting.by === "listing" || entry.by === "message") {
-          known[endpointId] = { ...entry, ...seenBy(sighting) };
+      /** Takes an endpoint's link off the address it is leaving, keeping it on
+       *  the endpoint's record. */
+      function leave(id: string, from: string): void {
+        const person = holderOf(from);
+        known[id] = {
+          ...known[id],
+          address: null,
+          ...(person ? { parked: person, parkedFrom: from } : {}),
+        };
+        holders.delete(from);
+        if (person) {
+          repo.writeUnlinkAccount(tx, person, channel, from);
+          log.info("an agent left its address; its link waits for it", { address: from });
         }
-        await save();
-        await restore(endpointId);
-        continue;
       }
-      const holder = holders.get(address);
-      if (holder !== undefined && holder !== endpointId) {
-        // A message never takes an address from an endpoint a listing put
-        // there; only a fresh listing can say it moved.
-        if (sighting.by === "message" && known[holder]?.by === "listing") {
-          disputed = true;
+
+      /** Gives an endpoint's waiting link back at its current address. */
+      function restore(id: string): void {
+        const entry = known[id];
+        if (!entry?.parked || !entry.parkedFrom || entry.address === null) return;
+        const { parked, parkedFrom: _from, ...rest } = entry;
+        known[id] = rest;
+        if (isOwn(entry.parkedFrom) !== isOwn(entry.address)) {
+          // It can never go back, so it stops waiting.
+          log.warn("an agent moved between accounts; its link stays off", {
+            from: entry.parkedFrom,
+            to: entry.address,
+          });
+        } else if (holderOf(entry.address) === null) {
+          repo.writeChannelMapping(tx, parked, channel, entry.address);
+          log.info("an agent's link followed it to its new address", { to: entry.address });
+        }
+      }
+
+      // An endpoint Rome knows goes first, so one renamed within a listing has
+      // left its old address before a new endpoint is seen taking it.
+      const ordered = [...sightings].sort(
+        (a, b) =>
+          Number(known[b.endpointId] !== undefined) - Number(known[a.endpointId] !== undefined),
+      );
+      for (const sighting of ordered) {
+        const { endpointId, address } = sighting;
+        const entry = known[endpointId];
+        if (staleAgainst(sighting, entry)) {
+          if (disputes(sighting, entry)) disputed.push(disputeKey(sighting));
           continue;
         }
-        if (staleAgainst(sighting, known[holder])) continue;
-        // Cloud gives an address to one endpoint at a time, so the one that
-        // held it has left, whether removed or renamed.
-        await leave(holder, address);
+        if (entry?.address === address) {
+          if (sighting.by === "listing" || entry.by === "message") {
+            known[endpointId] = { ...entry, ...seenBy(sighting) };
+          }
+          restore(endpointId);
+          continue;
+        }
+        const holder = holders.get(address);
+        if (holder !== undefined && holder !== endpointId) {
+          // A message never takes an address from an endpoint a listing put
+          // there; only a fresh listing can say it moved.
+          if (sighting.by === "message" && known[holder]?.by === "listing") {
+            disputed.push(disputeKey(sighting));
+            continue;
+          }
+          if (staleAgainst(sighting, known[holder])) continue;
+          // Cloud gives an address to one endpoint at a time, so the one that
+          // held it has left, whether removed or renamed.
+          leave(holder, address);
+        }
+
+        if (entry?.address && entry.address !== address) {
+          leave(endpointId, entry.address);
+        } else if (!entry && guardianRecord.includes(address)) {
+          // Recorded by address before Cloud named endpoints. The record now
+          // names the endpoint, so it stays with it through a rename and does
+          // not hold back a new endpoint that reuses the name.
+          guardianRecord = guardianRecord.map((name) => (name === address ? endpointId : name));
+          settings.write(tx, AGENTS_GUARDIAN_LINKED_KEY, guardianRecord);
+        }
+        known[endpointId] = { ...known[endpointId], address, ...seenBy(sighting) };
+        holders.set(address, endpointId);
+        restore(endpointId);
       }
 
-      if (entry?.address && entry.address !== address) {
-        await leave(endpointId, entry.address);
-      } else if (!entry && guardianRecord.includes(address)) {
-        // Recorded by address before Cloud named endpoints. The record now
-        // names the endpoint, so it stays with it through a rename and does
-        // not hold back a new endpoint that reuses the name.
-        guardianRecord = guardianRecord.map((name) => (name === address ? endpointId : name));
-        await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, guardianRecord);
+      for (const [id, entry] of Object.entries(known)) {
+        if (entry.address === null && !entry.parked) delete known[id];
       }
-      known[endpointId] = { ...known[endpointId], address, ...seenBy(sighting) };
-      holders.set(address, endpointId);
-      await save();
-      await restore(endpointId);
-    }
-    return disputed;
+      if (JSON.stringify(known) !== before) settings.write(tx, AGENTS_ENDPOINTS_KEY, known);
+      return disputed;
+    });
   }
 
   /** Settles a listing unless a later-asked one already has. */
-  async function settleListing(listing: readonly AgentSighting[], askedAt: number): Promise<void> {
+  function settleListing(listing: readonly AgentSighting[], askedAt: number): void {
     if (askedAt < listedAt) return;
     listedAt = askedAt;
-    await settle(listing);
+    settle(listing);
   }
 
-  function settling(fn: () => Promise<void>): Promise<void> {
-    return serial(fn).catch((err: unknown) => {
+  /** Whether any of these disagreements has not had Cloud listed again lately,
+   *  marking them all as listed now when one has not. */
+  function relist(disputed: readonly string[], askedAt: number): boolean {
+    for (const [key, at] of relisted) if (askedAt - at >= RELIST_MS) relisted.delete(key);
+    if (disputed.every((key) => relisted.has(key))) return false;
+    for (const key of disputed) relisted.set(key, askedAt);
+    return true;
+  }
+
+  function guarded(run: Promise<void>): Promise<void> {
+    return run.catch((err: unknown) => {
       log.warn("Could not settle agent addresses", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -314,19 +303,22 @@ export function createAgentsIdentity(deps: {
   return {
     observe(sightings) {
       if (sightings.length === 0) return Promise.resolve();
-      return settling(async () => {
-        // A message never outranks a listing, so when one disagrees with what
-        // a listing recorded, as after a rename, Cloud is asked again before
-        // the message is read.
-        if (!(await settle(sightings)) || !deps.list) return;
-        const askedAt = now();
-        if (askedAt - listedAt < LISTING_FRESH_MS) return;
-        const listing = await deps.list();
-        if (listing) await settleListing(listing, askedAt);
-      });
+      return guarded(
+        (async () => {
+          const disputed = await serial(async () => settle(sightings));
+          // A message never outranks a listing, so when one disagrees with
+          // what a listing recorded, as after a rename, Cloud is asked again
+          // before the message is read.
+          if (disputed.length === 0 || !deps.list) return;
+          const askedAt = now();
+          if (!relist(disputed, askedAt)) return;
+          const listing = await deps.list();
+          if (listing) await serial(async () => settleListing(listing, askedAt));
+        })(),
+      );
     },
     observeListing(sightings, askedAt) {
-      return settling(() => settleListing(sightings, askedAt));
+      return guarded(serial(async () => settleListing(sightings, askedAt)));
     },
     serial,
   };
