@@ -223,8 +223,8 @@ describe("feishu talk lifecycle", () => {
       conversationId: "oc_chat",
     });
 
-    const activity = conn.talk!.feature("activity");
-    const direct = await conn.talk!.feature("directMessaging")?.conversationFor("ou_alice");
+    const activity = conn.talk!.activity;
+    const direct = await conn.talk!.directMessaging?.conversationFor("ou_alice");
     expect(direct).toBe("ou_alice");
     await conn.talk!.send(direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });

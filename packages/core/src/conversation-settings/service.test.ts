@@ -4,7 +4,6 @@ import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
-import { createTalkRouter } from "../connections/talk-router.js";
 import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
@@ -50,10 +49,9 @@ function directoryDescriptor(
 
 /** The channels the registry's Talks back, built by the production ports. */
 function channelsOver(registry: ConnectionRegistry): () => Channels {
-  const router = createTalkRouter(registry);
   return () =>
     registry.registeredServices().flatMap((name) => {
-      const ports = connectionPorts({ registry, router }, name);
+      const ports = connectionPorts({ registry }, name);
       return ports ? [{ name, accounts: null, ...ports }] : [];
     });
 }

@@ -17,7 +17,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it and the
-// router dispatches it. Core-internal: apps reach channels through the
+// channel ports (channels/connection-ports.ts) use it. Core-internal: apps reach channels through the
 // channels service (actions) or a hook's `channels`, never through a Talk.
 // A Talk delivers each message as the channel's own record: a
 // `ChannelMessage` naming the channel it backs, with direction `inbound`.
@@ -65,23 +65,11 @@ export type TalkFeatureName = keyof TalkFeatureMap;
  */
 export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
-export interface Talk {
+/** A Connection's live Talk. Its features are the talker's, each one usable
+ *  only while the epoch that built it lasts. */
+export interface Talk extends TalkFeatures {
   subscribe(handler: (message: ChannelMessage) => Promise<void>): () => void;
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
-}
-
-/** Routing keyed by Connection id: pairing and ordered admission run here,
- *  before a channel's inbound hears anything. */
-export interface TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>>;
-  subscribe(connectionId: string, handler: (message: ChannelMessage) => Promise<void>): () => void;
-  send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
 }
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()

@@ -100,7 +100,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
     const talk = conn.talk!;
 
-    const history = await talk.feature("history")?.query({
+    const history = await talk.history?.query({
       conversationId: "sess-2" as ConversationId,
       limit: 20,
     });
@@ -135,7 +135,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
       JSON.stringify([{ type: "text", content: "Plan drafted" }]),
     );
     const conn = await registry.connect("webchat");
-    const history = await conn.talk!.feature("history")?.query({
+    const history = await conn.talk!.history?.query({
       conversationId: "sess-3" as ConversationId,
     });
 
@@ -177,7 +177,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     }
     const conn = await registry.connect("webchat");
 
-    const history = await conn.talk!.feature("history")?.query({
+    const history = await conn.talk!.history?.query({
       conversationId: "sess-4" as ConversationId,
       limit: 2,
     });

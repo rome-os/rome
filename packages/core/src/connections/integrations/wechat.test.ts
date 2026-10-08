@@ -155,7 +155,7 @@ describe("wechat descriptor shape", () => {
       conversationId: "addr-1",
     });
     expect(adapters[0].sent).toEqual([{ conversationId: "addr-1", text: "hi" }]);
-    const inboundMedia = conn.talk!.feature("inboundMedia");
+    const inboundMedia = conn.talk!.inboundMedia;
     const message = {
       channel: "wechat",
       direction: "inbound",

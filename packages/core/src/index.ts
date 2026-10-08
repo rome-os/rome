@@ -1,5 +1,6 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
+import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
@@ -189,7 +190,7 @@ import {
   isCoreMainAgentId,
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
-import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./connections/index.js";
+import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
@@ -328,28 +329,26 @@ async function main() {
     personMappingRepo,
     talkGrants: (service) =>
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+    registry: connectionRegistry,
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_SERVICE,
   });
-  const talkRouter = createTalkRouter(
-    connectionRegistry,
-    async (connectionId, service, message, router) => {
-      // Before the inbox resolves the sender, so the first message already
-      // reads as the guardian's.
-      if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
-      return pairingAdmission(connectionId, service, message, router);
-    },
-  );
+  const admit: Admission = async (connectionId, service, message) => {
+    // Before the inbox resolves the sender, so the first message already
+    // reads as the guardian's.
+    if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
+    return pairingAdmission(connectionId, service, message);
+  };
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the service
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
   const channelsService = createChannelsService({
     channels: () => builtChannels,
-    router: talkRouter,
+    registry: connectionRegistry,
   });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
@@ -1070,7 +1069,7 @@ async function main() {
   // NO channel adapter is constructed here. Every Talk channel
   // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user, webchat)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
-  // through the stable router.
+  // to the channel ports.
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
@@ -1117,7 +1116,7 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, router: talkRouter },
+    connections: { registry: connectionRegistry, admit },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts({
         client: createRomeCloudAgentsClient(),
@@ -1368,7 +1367,7 @@ async function main() {
       feedback: feedbackClient,
       provisionNodeCaller,
       nodeDevices,
-      notifyPairingResolution: (approval) => notifyPairingResolution(talkRouter, approval),
+      notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
       conversationSettings,
       actionEngine,

@@ -1,9 +1,10 @@
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import type { TalkRouter } from "../connections/types.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { createLogger } from "../logger.js";
+import type { Admission } from "./admission.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { isPairingCodeMessage } from "./pairing-code.js";
 
@@ -46,26 +47,23 @@ export function createPairingAdmission(deps: {
   approvalsRepo: ApprovalsRepository;
   personMappingRepo: PersonMappingRepository;
   talkGrants: (service: string) => readonly string[];
-}) {
-  return async (
-    connectionId: string,
-    service: string,
-    message: ChannelMessage,
-    router: TalkRouter,
-  ): Promise<boolean> => {
+  /** The Connections pairing replies go out on. */
+  registry: Pick<ConnectionRegistry, "get">;
+}): Admission {
+  return async (connectionId, service, message) => {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);
     if (!channel.success) return true;
     const pairingChannel = channel.data;
     if (service === "telegram" && !/^[1-9][0-9]*$/.test(message.senderId)) return false;
     // Replies go out in the background: the decision never depends on them,
-    // and the router admits a conversation's messages one at a time, so a send
+    // and admission takes a conversation's messages one at a time, so a send
     // that hangs must not hold up the next message.
     // Accepted trade-off: the "paired" confirmation is not ordered against the
     // conversation's next reply, so on a slow provider it can arrive after the
     // agent's first answer. Approval is recorded before the send, so only the
     // order of the two bot messages is at stake.
     const reply = (text: string): void => {
-      router.send(connectionId, message.conversationId, { text }).catch(() => {
+      sendOn(deps.registry, connectionId, message.conversationId, text).catch(() => {
         // Provider errors may include the rejected request body. Do not log them.
         log.error("pairing reply failed", { connectionId, senderId: message.senderId });
       });
@@ -154,8 +152,8 @@ export interface ResolvedApproval {
   payload: unknown;
 }
 
-/** {@link notifyPairingResolution} bound to the router, for callers that hold
- *  no Connection. */
+/** {@link notifyPairingResolution} bound to the registry, for callers that
+ *  hold no Connection. */
 export type PairingNotifier = (approval: ResolvedApproval) => Promise<void>;
 
 /**
@@ -164,28 +162,41 @@ export type PairingNotifier = (approval: ResolvedApproval) => Promise<void>;
  * admission does, so the notice goes out on that Connection rather than on
  * whichever one backs the channel first.
  */
-export async function notifyPairingResolution(router: TalkRouter, approval: ResolvedApproval) {
+export async function notifyPairingResolution(
+  registry: Pick<ConnectionRegistry, "get">,
+  approval: ResolvedApproval,
+) {
   const payload = pairingPayload(approval);
   if (!payload || approval.status !== "approved") return;
   try {
     const conversationId =
       (payload.conversationId as ConversationId | undefined) ??
-      (await router
-        .feature(payload.connectionId, "directMessaging")
-        ?.conversationFor(payload.channelUserId));
+      (await registry
+        .get(payload.connectionId)
+        .talk?.directMessaging?.conversationFor(payload.channelUserId));
     if (!conversationId) throw new Error("Direct conversation unavailable");
-    await router.send(payload.connectionId, conversationId, {
-      text: pairingSuccess(
-        payload.channel,
-        payload.channelUserId,
-        payload.displayName,
-        payload.username,
-      ),
-    });
+    await sendOn(
+      registry,
+      payload.connectionId,
+      conversationId,
+      pairingSuccess(payload.channel, payload.channelUserId, payload.displayName, payload.username),
+    );
   } catch {
     log.warn("pairing notification failed", {
       approvalId: approval.id,
       connectionId: payload.connectionId,
     });
   }
+}
+
+/** Sends `text` on one Connection, which must be able to talk now. */
+async function sendOn(
+  registry: Pick<ConnectionRegistry, "get">,
+  connectionId: string,
+  conversationId: ConversationId,
+  text: string,
+): Promise<void> {
+  const talk = registry.get(connectionId).talk;
+  if (!talk) throw new Error(`Talk is unavailable for connection "${connectionId}"`);
+  await talk.send(conversationId, { text });
 }

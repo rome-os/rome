@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { DrizzleGrantLedger } from "./ledger-db.js";
-import { ConnectionRegistry } from "./registry.js";
-import { tokenPaste } from "./schemes.js";
-import type { ConnectionDescriptor, Talker } from "./types.js";
-import { createTalkRouter } from "./talk-router.js";
+import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { ConnectionRegistry } from "../connections/registry.js";
+import { tokenPaste } from "../connections/schemes.js";
+import type { ConnectionDescriptor, Talker } from "../connections/types.js";
+import { connectionPorts } from "./connection-ports.js";
 
-describe("ConnectionTalkRouter", () => {
+describe("a channel's Connection across epochs", () => {
   let testDb: TestDb | undefined;
   afterEach(() => testDb?.close());
 
   it.each([
     false,
     true,
-  ])("keeps subscriptions on the current epoch with admission=%s", async (gated) => {
+  ])("keeps subscriptions and features on the current epoch with admission=%s", async (gated) => {
     testDb = createTestDb();
     const instances: Array<{
       deliver?: (message: ChannelMessage) => void;
@@ -70,14 +70,14 @@ describe("ConnectionTalkRouter", () => {
       async (_id: string, _service: string, message: ChannelMessage) =>
         message.senderId === "guardian",
     );
-    const router = createTalkRouter(registry, gated ? admit : undefined);
+    const ports = connectionPorts({ registry, ...(gated ? { admit } : {}) }, "discord")!;
     const sibling: string[] = [];
-    const unsubscribe = router.subscribe(connection.id, async (message) => {
-      sibling.push(message.messageId);
+    const unsubscribe = ports.inbound!.subscribe(async (event) => {
+      sibling.push(event.message.messageId);
     });
     const received: string[] = [];
-    router.subscribe(connection.id, async (message) => {
-      received.push(message.messageId);
+    ports.inbound!.subscribe(async (event) => {
+      received.push(event.message.messageId);
     });
 
     await registry.importCredential(connection.id, "bot", {
@@ -95,18 +95,21 @@ describe("ConnectionTalkRouter", () => {
       timestamp: new Date(0),
     });
     await rs.waitFor(() => expect(received).toEqual(["inbound-1"]));
-    expect(sibling).toEqual(["inbound-1"]);
+    await rs.waitFor(() => expect(sibling).toEqual(["inbound-1"]));
+    // Admission runs once per message, however many subscribe.
     if (gated) expect(admit).toHaveBeenCalledTimes(1);
-    expect(await router.list()).toEqual([{ connectionId: connection.id, service: "discord" }]);
 
-    const history = router.feature(connection.id, "history");
+    const history = connection.talk?.history;
     expect((await history?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-1");
     await expect(
-      router.send(connection.id, "general" as ConversationId, { text: "first reply" }),
+      ports.send!.send("general" as ConversationId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
+    // A feature held past its epoch refuses rather than reaching a stopped
+    // talker.
     await connection.auth.revoke("bot");
-    expect(() => history?.query({ limit: 10 })).toThrow("Talk is unavailable");
+    expect(() => history?.query({ limit: 10 })).toThrow("capability relocked");
+    expect(connection.talk).toBeNull();
     await registry.importCredential(connection.id, "bot", {
       material: { token: "second" },
       expiresAt: "never",
@@ -122,7 +125,7 @@ describe("ConnectionTalkRouter", () => {
       timestamp: new Date(0),
     });
     await rs.waitFor(() => expect(received).toEqual(["inbound-1", "inbound-2"]));
-    expect(sibling).toEqual(received);
+    await rs.waitFor(() => expect(sibling).toEqual(received));
     if (gated) {
       expect(admit).toHaveBeenCalledTimes(2);
       instances[1]!.deliver?.({
@@ -139,6 +142,52 @@ describe("ConnectionTalkRouter", () => {
       expect(received).toEqual(["inbound-1", "inbound-2"]);
     }
     unsubscribe();
-    expect((await history?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-2");
+    const current = connection.talk?.history;
+    expect((await current?.query({ limit: 10 }))?.[0]?.messageId).toBe("history-2");
+    await expect(
+      ports.send!.send("general" as ConversationId, { text: "second reply" }),
+    ).resolves.toMatchObject({ messageId: "sent-2" });
+  });
+
+  it("admits a message even before anyone subscribes", async () => {
+    testDb = createTestDb();
+    let deliver: ((message: ChannelMessage) => void) | undefined;
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
+    registry.register({
+      service: "telegram",
+      auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
+      capabilities: {
+        talker: {
+          needs: ["bot"],
+          build: (): Talker => ({
+            start(next) {
+              deliver = next;
+            },
+            stop() {},
+            send: async (conversationId) => ({ conversationId }),
+          }),
+        },
+      },
+    });
+    const admit = rs.fn(async () => false);
+    connectionPorts({ registry, admit }, "telegram");
+    const connection = await registry.connect("telegram");
+    await registry.importCredential(connection.id, "bot", {
+      material: { token: "t" },
+      expiresAt: "never",
+    });
+
+    // Pairing answers a pairing code before the inbox hears the channel.
+    deliver?.({
+      channel: "telegram",
+      direction: "inbound",
+      messageId: "code",
+      conversationId: "dm" as ConversationId,
+      senderId: "stranger",
+      text: "PAIR-123",
+      attachments: [],
+      timestamp: new Date(0),
+    });
+    await rs.waitFor(() => expect(admit).toHaveBeenCalledTimes(1));
   });
 });

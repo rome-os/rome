@@ -6,7 +6,8 @@ import type {
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
-import { createChannelsService } from "./channels-service.js";
+import { createChannelsService, type ChannelsServiceDeps } from "./channels-service.js";
+import type { Connection } from "../connections/types.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It chooses the Connection itself.
@@ -34,11 +35,43 @@ const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as Conve
 
 type Feature = (connectionId: string, name: string) => unknown;
 
+/** A registry holding `connections`, each with a Talk that sends through
+ *  `send` and answers its features from `feature`, both told which
+ *  Connection is asking. */
+function registryOf(
+  connections: Array<{ connectionId: string; service: string }>,
+  send: (...args: never[]) => unknown,
+  feature: Feature = () => null,
+): ChannelsServiceDeps["registry"] {
+  const all = connections.map(({ connectionId, service }) => {
+    const talk = {
+      send: (...args: unknown[]) => (send as (...a: unknown[]) => unknown)(connectionId, ...args),
+    };
+    for (const name of ["history", "inboundMedia", "activity", "directory", "directMessaging"]) {
+      Object.defineProperty(talk, name, { get: () => feature(connectionId, name) ?? undefined });
+    }
+    return {
+      id: connectionId,
+      service,
+      talk,
+      status: () => ({ talk: { state: "unlocked" } }),
+    } as unknown as Connection;
+  });
+  return {
+    all: () => all,
+    get: (id) => {
+      const connection = all.find((each) => each.id === id);
+      if (!connection) throw new Error(`unknown connection "${id}"`);
+      return connection;
+    },
+  };
+}
+
 function service(channels: unknown[] = [], feature = rs.fn<Feature>(() => null)) {
   const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
   const channelsService = createChannelsService({
     channels: () => channels as Channels,
-    router: { list: async () => CONNECTIONS, send, feature: feature as never },
+    registry: registryOf(CONNECTIONS, send, feature),
   });
   return { channelsService, send, feature };
 }
@@ -63,7 +96,7 @@ describe("createChannelsService", () => {
     const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
     const early = createChannelsService({
       channels: () => undefined,
-      router: { list: async () => CONNECTIONS, send, feature: rs.fn(() => null) as never },
+      registry: registryOf(CONNECTIONS, send),
     });
 
     expect((await early.list()).map((channel) => channel.name)).toEqual([
@@ -155,11 +188,7 @@ describe("createChannelsService", () => {
     ]);
     const withWhatsApp = createChannelsService({
       channels: () => [{ name: "whatsapp", messages: { query, byAccount: null } }] as never,
-      router: {
-        list: async () => [{ connectionId: "wa-1", service: "whatsapp" }],
-        send: rs.fn() as never,
-        feature: rs.fn(() => null) as never,
-      },
+      registry: registryOf([{ connectionId: "wa-1", service: "whatsapp" }], rs.fn()),
     });
 
     const page = await withWhatsApp.history("whatsapp", {});

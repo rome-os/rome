@@ -36,7 +36,7 @@ export function createAgentsGuardianLink(deps: {
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
 }) {
-  // The router admits different senders at once, and the record of linked
+  // Admission takes different senders at once, and the record of linked
   // endpoints is one setting, so its read and write run one sender at a time.
   let queue: Promise<unknown> = Promise.resolve();
 

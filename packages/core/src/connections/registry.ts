@@ -48,6 +48,17 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
   watch: "watcher",
 };
 
+/** Every feature a Talk can carry. Keyed by name, so a feature added to
+ *  `TalkFeatureMap` fails to compile here until a Talk carries it too. */
+const TALK_FEATURES: { [K in TalkFeatureName]: true } = {
+  history: true,
+  inboundMedia: true,
+  activity: true,
+  directory: true,
+  directMessaging: true,
+};
+const TALK_FEATURE_NAMES = Object.keys(TALK_FEATURES) as TalkFeatureName[];
+
 export interface ConnectionRegistryDeps {
   ledger: GrantLedger;
   logger?: Logger;
@@ -887,7 +898,7 @@ class ConnectionImpl implements Connection {
   }
 
   private talkWrapper(slot: CapabilitySlot, epoch: Epoch): Talk {
-    return {
+    const talk: Talk = {
       subscribe: (handler) => {
         this.assertLive(epoch);
         slot.messageHandlers.push(handler);
@@ -905,13 +916,18 @@ class ConnectionImpl implements Connection {
           throw err;
         }
       },
-      feature: <K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null => {
-        this.assertLive(epoch);
-        const current = (epoch.instance as Talker)[name];
-        if (!current) return null;
-        return this.epochFeatureProxy(slot, epoch, name);
-      },
     };
+    for (const name of TALK_FEATURE_NAMES) {
+      Object.defineProperty(talk, name, {
+        enumerable: true,
+        get: () => {
+          this.assertLive(epoch);
+          if (!(epoch.instance as Talker)[name]) return undefined;
+          return this.epochFeatureProxy(slot, epoch, name);
+        },
+      });
+    }
+    return talk;
   }
 
   private epochFeatureProxy<K extends TalkFeatureName>(

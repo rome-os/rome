@@ -19,7 +19,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { chooseConnection, connectionRefusalMessage } from "@rome-os/app-runtime";
-import type { TalkRouter } from "../connections/types.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "./channel.js";
 import { readTalkHistory } from "./talk-history.js";
 
@@ -29,18 +29,22 @@ export interface ChannelsServiceDeps {
    *  channels a Connection backs, `send` works, and nothing reads messages. */
   channels: () => Channels | undefined;
   /** The Connections that back sending and live history. */
-  router: Pick<TalkRouter, "list" | "send" | "feature">;
+  registry: Pick<ConnectionRegistry, "all" | "get">;
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
 
+  /** Every Connection that can talk, whether or not it is unlocked now. */
+  const talking = () =>
+    deps.registry.all().filter((connection) => connection.status().talk.state !== "unsupported");
+
   /** The Connection an action means: the one it names, which must back the
    *  channel, or else the only one that does. */
   async function connectionFor(channel: string, requested?: string): Promise<string> {
-    const backing = (await deps.router.list())
+    const backing = talking()
       .filter((connection) => connection.service === channel)
-      .map((connection) => connection.connectionId);
+      .map((connection) => connection.id);
     const choice = chooseConnection(backing, requested);
     if ("refused" in choice) {
       throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
@@ -51,9 +55,9 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
   return {
     async list(): Promise<ChannelSummary[]> {
       const summaries = new Map<string, ChannelSummary>();
-      for (const { connectionId, service } of await deps.router.list()) {
+      for (const { id, service } of talking()) {
         const summary = summaries.get(service) ?? { name: service, connectionIds: [] };
-        summary.connectionIds.push(connectionId);
+        summary.connectionIds.push(id);
         summaries.set(service, summary);
       }
       for (const channel of deps.channels() ?? []) {
@@ -71,7 +75,9 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       options?: { connectionId?: string },
     ): Promise<MessageReceipt> {
       const connectionId = await connectionFor(channel, options?.connectionId);
-      return deps.router.send(connectionId, conversationId, message);
+      const talk = deps.registry.get(connectionId).talk;
+      if (!talk) throw new Error(`Talk is unavailable for connection "${connectionId}"`);
+      return talk.send(conversationId, message);
     },
 
     async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
@@ -85,7 +91,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       return readTalkHistory(
         {
           channel: find(channel),
-          connectionHistory: deps.router.feature(connectionId, "history"),
+          connectionHistory: deps.registry.get(connectionId).talk?.history ?? null,
         },
         connectionId,
         {

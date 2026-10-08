@@ -11,8 +11,8 @@ import {
   createTestDb,
   buildAgentConfig,
   channelNamed,
-  createMockTalkRouter,
-  mockConnections,
+  createTestConnections,
+  type TestConnections,
 } from "../helpers.js";
 import type { Accounts } from "../../channels/accounts.js";
 import { channelList } from "../../channels/channel-list.js";
@@ -41,7 +41,6 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { TalkRouter } from "../../connections/types.js";
 import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
@@ -121,7 +120,7 @@ export interface TestRome {
   agentLoader: AgentLoader;
   agentRunner: AgentRunner;
   approvalHandler: ApprovalHandler;
-  talkRouter: TalkRouter;
+  connections: TestConnections;
   seed: TestRomeSeed;
   channel(name: string): FakeChannelEndpoint;
   /** Run one agent turn through the real runner/session stack; collects messages. */
@@ -292,7 +291,7 @@ async function buildHarness(
   for (const name of options.channels ?? ["telegram", "webchat"]) {
     channelEndpoints.set(name, new FakeChannelEndpoint(name));
   }
-  const talkRouter = createMockTalkRouter(channelEndpoints);
+  const connections = createTestConnections(channelEndpoints);
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
@@ -301,7 +300,7 @@ async function buildHarness(
         db,
         whatsAppAccounts: noAccounts,
         linkedInAccounts: noAccounts,
-        connections: mockConnections(talkRouter, channelEndpoints),
+        connections: { registry: connections },
       }),
     ),
   });
@@ -345,7 +344,7 @@ async function buildHarness(
     agentLoader,
     agentRunner,
     approvalHandler,
-    talkRouter,
+    connections,
     seed,
     channel(name: string): FakeChannelEndpoint {
       const endpoint = channelEndpoints.get(name);

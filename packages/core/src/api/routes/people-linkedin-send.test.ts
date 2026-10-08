@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import type { TalkRouter } from "../../connections/types.js";
+import type { Talk } from "../../connections/types.js";
 import type {
   OutboxMessage,
   OutboxPage,
@@ -12,6 +12,7 @@ import type { Credential, RuntimeKit } from "../../connections/types.js";
 import type { OpencliResult } from "../../channels/linkedin-cli.js";
 import {
   buildTestDeps,
+  createTestConnections,
   createTestDb,
   testChannels,
   type TestDb,
@@ -39,7 +40,6 @@ describe("LinkedIn replies through People", () => {
   let app: Hono;
   let person: string;
   const run = rs.fn<() => Promise<OpencliResult>>();
-  let send: TalkRouter["send"];
 
   beforeEach(async () => {
     db = createTestDb();
@@ -60,18 +60,12 @@ describe("LinkedIn replies through People", () => {
       minIntervalMs: 60_000,
       maxIntervalMs: 60_000,
     }).capabilities.talker!.build({} as Record<string, Credential>, {} as RuntimeKit);
-    send = (_connection, conversation, message) => talker.send(conversation, message);
-    deps.talkRouter = {
-      ...deps.talkRouter,
-      list: async () => [{ connectionId: "linkedin", service: "linkedin" }],
-      feature: (_id, name) => (talker[name] ?? null) as never,
-      send: (...args) => send(...args),
-    };
-    // The channel list over that router, with LinkedIn's Connection behind it.
-    deps.channels = testChannels(
-      { ...deps, channelPortMap: new Map([["linkedin", null]]) },
-      deps.talkRouter,
+    // LinkedIn's Connection, whose Talk is that talker, behind the channel list.
+    deps.connections = createTestConnections(
+      new Map([["linkedin", { onMessage() {}, sendMessage: async () => {} }]]),
+      (): Talk => ({ ...talker, subscribe: () => () => {} }),
     );
+    deps.channels = testChannels(deps, deps.connections);
     person = await deps.personMappingRepo.create({
       displayName: "LinkedIn Recipient",
       bondLevel: "acquaintance",

@@ -11,6 +11,7 @@ import type {
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
 import {
+  createTestConnections,
   createTestDb,
   buildTestDeps,
   testChannels,
@@ -153,8 +154,11 @@ describe("People send API", () => {
   });
 
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
-    const talkRouter = { ...deps.talkRouter, feature: () => null };
-    const readOnly = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
+    const connections = createTestConnections(deps.channelPortMap, (_service, talk) => ({
+      ...talk,
+      directMessaging: undefined,
+    }));
+    const readOnly = { ...deps, connections, channels: testChannels(deps, connections) };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));
 
     const res = await readOnlyApp.request(`/people/${personId}/messages`, {
@@ -610,18 +614,15 @@ describe("People send API — delivery bookkeeping", () => {
     // What a thread-keyed channel does when it cannot open a DM. The person
     // read already calls this account `no-conversation`; the send path has to
     // agree rather than answering with a stack trace.
-    const talkRouter = {
-      ...deps.talkRouter,
-      feature: (_connectionId: string, name: string) =>
-        name === "directMessaging"
-          ? {
-              conversationFor: async () => {
-                throw new Error("provider is down");
-              },
-            }
-          : null,
-    } as unknown as TestDeps["talkRouter"];
-    const throwing = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
+    const connections = createTestConnections(deps.channelPortMap, (_service, talk) => ({
+      ...talk,
+      directMessaging: {
+        conversationFor: async () => {
+          throw new Error("provider is down");
+        },
+      },
+    }));
+    const throwing = { ...deps, connections, channels: testChannels(deps, connections) };
 
     const res = await new Hono()
       .route("/", peopleRoutes(throwing))

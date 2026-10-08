@@ -10,12 +10,12 @@ import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
-import { createTalkRouter } from "../connections/talk-router.js";
-import type { ConnectionDescriptor, Talker } from "../connections/types.js";
+import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
 import { ChannelNotConnected } from "./channel.js";
 import { channelList } from "./channel-list.js";
+import type { ConnectionPortsDeps } from "./connection-ports.js";
 
 const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
@@ -86,30 +86,46 @@ describe("channelList", () => {
     descriptors: ConnectionDescriptor[],
     admit = async (_id: string, _service: string, inbound: ChannelMessage) =>
       inbound.senderId === "guardian",
-    routerOptions?: { admissionTimeoutMs?: number },
+    admission?: { admissionTimeoutMs?: number },
     connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     for (const descriptor of descriptors) registry.register(descriptor);
-    const talkRouter = createTalkRouter(registry, admit, routerOptions);
-    // The Connection ids the channel ports hold a router subscription on.
+    // The Connection ids the channel ports hold a Talk subscription on.
     const subscribed: string[] = [];
-    const router: typeof talkRouter = Object.assign(Object.create(talkRouter), {
-      subscribe(connectionId: string, handler: (message: ChannelMessage) => Promise<void>) {
-        subscribed.push(connectionId);
-        const detach = talkRouter.subscribe(connectionId, handler);
-        return () => {
-          subscribed.splice(subscribed.indexOf(connectionId), 1);
-          detach();
-        };
-      },
-    });
+    const tracked = (connection: Connection): Connection =>
+      new Proxy(connection, {
+        get(target, property, receiver) {
+          if (property !== "talk") return Reflect.get(target, property, receiver);
+          const talk = target.talk;
+          if (!talk) return talk;
+          return Object.create(talk, {
+            subscribe: {
+              value(handler: (message: ChannelMessage) => Promise<void>) {
+                subscribed.push(target.id);
+                const detach = talk.subscribe(handler);
+                return () => {
+                  subscribed.splice(subscribed.indexOf(target.id), 1);
+                  detach();
+                };
+              },
+            },
+          });
+        },
+      });
+    const watched: ConnectionPortsDeps["registry"] = {
+      find: (service) => registry.find(service).map(tracked),
+      getDescriptor: (service) => registry.getDescriptor(service),
+      onUnlocked: (capability, handler) =>
+        registry.onUnlocked(capability, (connection) => handler(tracked(connection))),
+      registeredServices: () => registry.registeredServices(),
+    };
     const channels = channelList({
       db: testDb.db,
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
-      connections: { registry, router },
+      connections: { registry: watched, admit, ...(admission ? { admission } : {}) },
       ...(connectionAccounts ? { connectionAccounts } : {}),
     });
     return { registry, channels, subscribed };
