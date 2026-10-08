@@ -271,6 +271,38 @@ describe("keeping agents' links on their endpoint", () => {
     expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
   });
 
+  it("drops a waiting link whose person has since been merged away", async () => {
+    testDb.db
+      .insert(persons)
+      .values({ id: "ada2", displayName: "Ada", bondLevel: "acquaintance", createdAt: new Date() })
+      .run();
+    await people.addChannelMapping("ada2", "agents", "@friend/atlas");
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 1);
+    await identity.observeListing([listed("ep_other", "@friend/atlas")], 2);
+    expect(await people.mergePersons("ada", "ada2")).toMatchObject({ merged: true });
+
+    await identity.observeListing(
+      [listed("ep_other", "@friend/atlas"), listed("ep_atlas", "@newfriend/atlas")],
+      3,
+    );
+
+    expect(await people.findByChannelUser("agents", "@newfriend/atlas")).toBeNull();
+    expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
+      ep_atlas: { address: "@newfriend/atlas", by: "listing" },
+      ep_other: { address: "@friend/atlas", by: "listing" },
+    });
+  });
+
+  it("lets a message take an address from an endpoint the listing no longer names", async () => {
+    await people.addChannelMapping("ada", "agents", "atlas");
+    await identity.observeListing([listed("ep_old", "atlas")], 1);
+    await identity.observeListing([listed("ep_else", "nova")], 2);
+
+    await identity.observe([sent("ep_new", "atlas", 5)]);
+
+    expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+  });
+
   it("keeps a decision made about the new address over a link waiting for it", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([listed("ep_atlas", "@friend/atlas")]);

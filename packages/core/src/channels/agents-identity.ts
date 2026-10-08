@@ -147,7 +147,7 @@ export function createAgentsIdentity(deps: {
   db: Pick<DrizzleDb, "transaction">;
   personMappingRepo: Pick<
     PersonMappingRepository,
-    "readChannelHolder" | "writeChannelMapping" | "writeUnlinkAccount"
+    "readChannelHolder" | "readPersonExists" | "writeChannelMapping" | "writeUnlinkAccount"
   >;
   settingsRepo: Pick<SettingsRepository, "read" | "write">;
   channel: string;
@@ -174,7 +174,7 @@ export function createAgentsIdentity(deps: {
 
   /** Settles the sightings, and returns the disagreements between a message
    *  and a listing. */
-  function settle(sightings: readonly AgentSighting[]): string[] {
+  function settle(sightings: readonly AgentSighting[], listing = false): string[] {
     return deps.db.transaction((tx) => {
       const disputed: string[] = [];
       const known = settings.read<Record<string, Known>>(tx, AGENTS_ENDPOINTS_KEY) ?? {};
@@ -214,6 +214,9 @@ export function createAgentsIdentity(deps: {
             from: entry.parkedFrom,
             to: entry.address,
           });
+        } else if (!repo.readPersonExists(tx, parked)) {
+          // Merged into someone else since, and gone with the merge.
+          log.info("an agent's waiting link was to a person who is gone", { to: entry.address });
         } else if (holderOf(entry.address) === null) {
           repo.writeChannelMapping(tx, parked, channel, entry.address);
           log.info("an agent's link followed it to its new address", { to: entry.address });
@@ -268,6 +271,17 @@ export function createAgentsIdentity(deps: {
         restore(endpointId);
       }
 
+      if (listing) {
+        // Cloud's listing names every endpoint it still has, so one a listing
+        // put at an address and this one leaves out no longer holds it on a
+        // listing's word: a message from another endpoint there can take it.
+        const listed = new Set(sightings.map((sighting) => sighting.endpointId));
+        for (const [id, entry] of Object.entries(known)) {
+          if (entry.by === "listing" && entry.address !== null && !listed.has(id)) {
+            known[id] = { ...entry, by: "message", at: 0 };
+          }
+        }
+      }
       for (const [id, entry] of Object.entries(known)) {
         if (entry.address === null && !entry.parked) delete known[id];
       }
@@ -280,7 +294,7 @@ export function createAgentsIdentity(deps: {
   function settleListing(listing: readonly AgentSighting[], askedAt: number): void {
     if (askedAt < listedAt) return;
     listedAt = askedAt;
-    settle(listing);
+    settle(listing, true);
   }
 
   /** Whether any of these disagreements has not had Cloud listed again lately,

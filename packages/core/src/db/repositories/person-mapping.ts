@@ -133,6 +133,14 @@ export class PersonMappingRepository {
     );
   }
 
+  /** Whether a person is still there, read through a caller's transaction. */
+  readPersonExists(exec: DrizzleDb | DrizzleTx, personId: string): boolean {
+    return (
+      exec.select({ id: persons.id }).from(persons).where(eq(persons.id, personId)).get() !==
+      undefined
+    );
+  }
+
   async findByChannelUser(channel: string, channelUserId: string) {
     const rows = await this.db
       .select({
