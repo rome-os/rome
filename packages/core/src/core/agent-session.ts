@@ -1788,8 +1788,8 @@ interface TurnSink {
    * would hand a queued turn the id of the turn ahead of it.
    */
   providerTurnIdAtStart?: string;
-  /** Payer selected while resolving this turn's model. */
-  resolvedFunding?: UsageFunding;
+  /** Whether Rome credits paid when this turn's model resolved. */
+  resolvedRomeCredits?: boolean;
   /** Payer of the provider session that executes this turn. */
   funding?: UsageFunding;
   usageRecorded: boolean;
@@ -3292,7 +3292,9 @@ class AgentSessionImpl implements AgentSession {
       span.end();
       return;
     }
-    sink.resolvedFunding = this.modelSession.funding;
+    // Taken from the resolution, not the live session: Codex can switch payer
+    // while ensureModelSessionForTurn reopens the provider session.
+    sink.resolvedRomeCredits = this.usesRomeCredits;
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -3443,7 +3445,11 @@ class AgentSessionImpl implements AgentSession {
             const funding = this.modelSession.funding;
             // Compare the payer, not the label: "unknown" becomes "subscription"
             // once the first login probe lands, with no payer change.
-            if ((sink.resolvedFunding === "rome_credits") !== (funding === "rome_credits")) {
+            // A provider that reports no funding has no payer to switch.
+            if (
+              funding !== undefined &&
+              sink.resolvedRomeCredits !== (funding === "rome_credits")
+            ) {
               throw new Error(PAYER_CHANGED_MESSAGE);
             }
             sink.funding = funding;

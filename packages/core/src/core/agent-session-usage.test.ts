@@ -43,6 +43,11 @@ describe("AgentSession turn usage", () => {
   let forkable: boolean;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
+  // The payer a session open leaves behind, as when Codex switches payer
+  // while a resolved turn reopens its provider session.
+  let fundingAfterOpen: UsageFunding | undefined;
+  // Whether the model resolver sees Rome credits paying.
+  let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
   let providerCalls: number;
 
@@ -68,6 +73,8 @@ describe("AgentSession turn usage", () => {
     forkable = false;
     funding = "byok";
     beforeModelDispatch = undefined;
+    fundingAfterOpen = undefined;
+    resolverUsesRomeCredits = false;
     providerCalls = 0;
     const provider: ModelProvider = {
       id: "openai",
@@ -84,6 +91,7 @@ describe("AgentSession turn usage", () => {
         );
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
         Object.defineProperty(session, "funding", { get: () => funding });
+        if (fundingAfterOpen) funding = fundingAfterOpen;
         if (forkable) {
           session.fork = async (fork) => ({
             providerId: "openai",
@@ -122,6 +130,7 @@ describe("AgentSession turn usage", () => {
         modelResolver: createModelResolver({
           providers: [provider],
           aiToolState: { get: () => state, refresh: async () => state },
+          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(),
@@ -231,6 +240,7 @@ describe("AgentSession turn usage", () => {
     const first = session.sendTurn({ prompt: "ChatGPT-funded" });
     await firstStartedPromise;
     funding = "rome_credits";
+    resolverUsesRomeCredits = true;
     releaseFirst();
     await drain(first.events);
 
@@ -302,6 +312,27 @@ describe("AgentSession turn usage", () => {
       }),
     );
     expect(recorded[0]?.funding).toBeUndefined();
+    expect(providerCalls).toBe(0);
+  });
+
+  it("fails a turn when credits start paying after its model resolved under ChatGPT", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    funding = "subscription";
+    fundingAfterOpen = "rome_credits";
+
+    const session = await manager.acquire(key);
+    const turn = session.sendTurn({ prompt: "resolved under ChatGPT" });
+    const events: AgentEvent[] = [];
+    for await (const event of turn.events) events.push(event);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        error: "Model payer changed while preparing this turn; please retry.",
+      }),
+    );
     expect(providerCalls).toBe(0);
   });
 
