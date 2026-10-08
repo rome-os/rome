@@ -32,6 +32,7 @@ import type {
   AppStoreReader,
   AppStoreServiceResult,
 } from "../apps/store-service.js";
+import { historyQuery } from "../channels/channels-service.js";
 import type { EmailInboundControl, EmailInboundResult } from "../channels/email-control.js";
 import type { SystemUpgradeChecker, SystemUpgradeOfferResult } from "../system-upgrade/service.js";
 import type {
@@ -245,14 +246,9 @@ export class ChannelsServiceProxy implements ChannelsService {
     );
   }
 
+  /** @deprecated Use {@link query}. */
   async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-    return fromWire(
-      await getWorkerRpc().call<WireChannelMessage[]>("channels.history", {
-        channel,
-        ...input,
-        ...(input.since ? { since: input.since.toISOString() } : {}),
-      }),
-    );
+    return (await this.query(channel, historyQuery(input))).reverse();
   }
 }
 

@@ -21,15 +21,25 @@ import type {
 import { chooseConnection, connectionRefusalMessage } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "./channel.js";
-import { readTalkHistory } from "./talk-history.js";
 
 export interface ChannelsServiceDeps {
   /** The channel list, or undefined until it is built. It is built after the
    *  services that hand this one out, and until then `list` names only the
    *  channels a Connection backs, `send` works, and nothing reads messages. */
   channels: () => Channels | undefined;
-  /** The Connections that back sending and live history. */
+  /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all" | "get">;
+}
+
+/** The `query` a deprecated `history` read makes. `history` answers the same
+ *  page oldest first, and the Connection it names is not consulted: the
+ *  channel's `messages` answers for whichever Connection backs it. */
+export function historyQuery(input: ChannelHistoryRead): ChannelMessageQuery {
+  return {
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(input.since ? { since: input.since } : {}),
+    ...(input.limit ? { limit: input.limit } : {}),
+  };
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
@@ -50,6 +60,12 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
     }
     return choice.connectionId;
+  }
+
+  async function query(channel: string, read: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+    const messages = find(channel)?.messages;
+    if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
+    return messages.query(read);
   }
 
   return {
@@ -80,26 +96,11 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       return talk.send(conversationId, message);
     },
 
-    async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
-      const messages = find(channel)?.messages;
-      if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
-      return messages.query(query);
-    },
+    query,
 
+    /** @deprecated Use `query`. */
     async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-      const connectionId = await connectionFor(channel, input.connectionId);
-      return readTalkHistory(
-        {
-          channel: find(channel),
-          connectionHistory: deps.registry.get(connectionId).talk?.history ?? null,
-        },
-        connectionId,
-        {
-          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-          ...(input.since ? { since: input.since } : {}),
-          ...(input.limit ? { limit: input.limit } : {}),
-        },
-      );
+      return (await query(channel, historyQuery(input))).reverse();
     },
   };
 }

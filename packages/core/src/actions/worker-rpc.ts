@@ -44,17 +44,16 @@ const ChannelsSendParams = z.object({
   connectionId: z.string().min(1).optional(),
 });
 
-const ChannelsReadParams = z.object({
-  channel: z.string().min(1),
-  conversationId: z.string().optional(),
-  since: z.string().datetime().optional(),
-  limit: z.number().int().positive().optional(),
-  connectionId: z.string().min(1).optional(),
-});
-
 // `query` reads the channel's own `messages`, which names no Connection, so a
 // request naming one is refused rather than answered from another account.
-const ChannelsQueryParams = ChannelsReadParams.omit({ connectionId: true }).strict();
+const ChannelsQueryParams = z
+  .object({
+    channel: z.string().min(1),
+    conversationId: z.string().optional(),
+    since: z.string().datetime().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
 
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
@@ -303,8 +302,6 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
-      case "channels.history":
-        return await this.handleChannelsHistory(params);
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(
           parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,
@@ -457,20 +454,6 @@ export class WorkerRpcServer {
       ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
-    });
-  }
-
-  private async handleChannelsHistory(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, conversationId, since, limit, connectionId } = parseParams(
-      "channels.history",
-      ChannelsReadParams,
-      params,
-    );
-    return await this.services.channelsService.history(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(limit ? { limit } : {}),
-      ...(connectionId ? { connectionId } : {}),
     });
   }
 

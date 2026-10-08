@@ -51,6 +51,7 @@ describe("ChannelsServiceProxy", () => {
     const since = new Date("2026-08-04T09:00:00.000Z");
 
     const queried = await proxy.query("discord", { since, limit: 2 });
+    // `history` is deprecated and reads through `query`.
     const read = await proxy.history("discord", { since, connectionId: "discord-1" });
 
     for (const page of [queried, read]) {
@@ -63,12 +64,8 @@ describe("ChannelsServiceProxy", () => {
         params: { channel: "discord", since: "2026-08-04T09:00:00.000Z", limit: 2 },
       },
       {
-        method: "channels.history",
-        params: {
-          channel: "discord",
-          since: "2026-08-04T09:00:00.000Z",
-          connectionId: "discord-1",
-        },
+        method: "channels.query",
+        params: { channel: "discord", since: "2026-08-04T09:00:00.000Z" },
       },
     ]);
   });
