@@ -457,7 +457,6 @@ describe("message reply bond-level settings", () => {
     expect(agentRunner.calls[0].prompt).toBe("Can you answer?");
     expect(sentMessages).toEqual([
       {
-        connectionId: "connection:telegram",
         channel: "telegram",
         channelUserId: "alice-tg",
         threadId: "thread-1",
@@ -672,7 +671,6 @@ describe("message reply bond-level settings", () => {
     expect(agentRunner.calls).toHaveLength(2);
     expect(sentMessages).toEqual([
       {
-        connectionId: "connection:telegram",
         channel: "telegram",
         channelUserId: "casey-tg",
         threadId: "thread-1",
@@ -731,7 +729,6 @@ describe("message reply bond-level settings", () => {
     expect(agentRunner.calls.map((call) => call.agentName)).toEqual(["sentinel", "main", "envoy"]);
     expect(sentMessages).toEqual([
       {
-        connectionId: "connection:email",
         channel: "email",
         channelUserId: "casey@example.com",
         threadId: "mail-thread-1",

@@ -1,4 +1,4 @@
-import type { ConversationId, TalkActivity, TalkDirectMessaging } from "@rome-os/app-runtime";
+import type { ConversationId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
 
 export function historyWindowHours(since?: Date): number {
   if (!since) return 24;
@@ -52,7 +52,7 @@ export function directoryPage<T>(
  * implementation instead, opening or looking up the thread; that one is a
  * provider call and should be priced as one.
  */
-export function addressIsConversationFeature(): TalkDirectMessaging {
+export function addressIsConversationFeature(): ChannelDirectMessaging {
   return {
     async conversationFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
@@ -63,7 +63,7 @@ export function addressIsConversationFeature(): TalkDirectMessaging {
 
 export function typingActivityFeature(adapter: {
   notifyTyping(conversationId: string): Promise<void>;
-}): TalkActivity {
+}): ChannelActivity {
   return {
     async begin(input) {
       await adapter.notifyTyping(input.conversationId);

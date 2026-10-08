@@ -32,7 +32,6 @@ import type {
   AppStoreReader,
   AppStoreServiceResult,
 } from "../apps/store-service.js";
-import { historyQuery } from "../channels/channels-service.js";
 import type { EmailInboundControl, EmailInboundResult } from "../channels/email-control.js";
 import type { SystemUpgradeChecker, SystemUpgradeOfferResult } from "../system-upgrade/service.js";
 import type {
@@ -50,7 +49,6 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
-  ChannelHistoryRead,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -226,13 +224,11 @@ export class ChannelsServiceProxy implements ChannelsService {
     channel: string,
     conversationId: ConversationId,
     message: OutgoingMessage,
-    options?: { connectionId?: string },
   ): Promise<MessageReceipt> {
     return getWorkerRpc().call<MessageReceipt>("channels.send", {
       channel,
       conversationId,
       message,
-      ...(options?.connectionId ? { connectionId: options.connectionId } : {}),
     });
   }
 
@@ -244,11 +240,6 @@ export class ChannelsServiceProxy implements ChannelsService {
         ...(query.since ? { since: query.since.toISOString() } : {}),
       }),
     );
-  }
-
-  /** @deprecated Use {@link query}. */
-  async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-    return (await this.query(channel, historyQuery(input))).reverse();
   }
 }
 

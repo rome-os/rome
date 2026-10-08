@@ -231,7 +231,7 @@ describe("WorkerRpcServer param validation", () => {
   describe("channels.*", () => {
     it("serves the channel list, sends and reads by channel name", async () => {
       const service = {
-        list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
+        list: rs.fn(async () => [{ name: "discord", sendable: true }]),
         send: rs.fn(async () => ({ messageId: "m1" })),
         query: rs.fn(async () => []),
       };
@@ -244,7 +244,6 @@ describe("WorkerRpcServer param validation", () => {
         channel: "discord",
         conversationId: "c1",
         message: { text: "hi" },
-        connectionId: "discord-1",
       });
       await rpc(fake, "channels.query", {
         channel: "discord",
@@ -252,14 +251,9 @@ describe("WorkerRpcServer param validation", () => {
         limit: 5,
       });
 
-      expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
+      expect(listed.result).toEqual([{ name: "discord", sendable: true }]);
       expect(sent.result).toEqual({ messageId: "m1" });
-      expect(service.send).toHaveBeenCalledWith(
-        "discord",
-        "c1",
-        { text: "hi" },
-        { connectionId: "discord-1" },
-      );
+      expect(service.send).toHaveBeenCalledWith("discord", "c1", { text: "hi" });
       expect(service.query).toHaveBeenCalledWith("discord", {
         since: new Date("2026-09-29T10:00:00.000Z"),
         limit: 5,

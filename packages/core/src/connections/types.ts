@@ -9,9 +9,9 @@ import type {
   ConversationId,
   MessageReceipt,
   OutgoingMessage,
-  TalkActivity,
-  TalkDirectMessaging,
-  TalkInboundMedia,
+  ChannelActivity,
+  ChannelDirectMessaging,
+  ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
@@ -48,10 +48,10 @@ export interface TalkDirectory {
 
 export interface TalkFeatureMap {
   history: TalkHistory;
-  inboundMedia: TalkInboundMedia;
-  activity: TalkActivity;
+  inboundMedia: ChannelInboundMedia;
+  activity: ChannelActivity;
   directory: TalkDirectory;
-  directMessaging: TalkDirectMessaging;
+  directMessaging: ChannelDirectMessaging;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;

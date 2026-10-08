@@ -20,7 +20,7 @@ import type {
   ChannelInbound,
   ChannelSend as AppChannelSend,
   ConversationDescriptor,
-  TalkDirectMessaging,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
@@ -36,7 +36,7 @@ export interface ChannelSend extends AppChannelSend {
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
    * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
-  readonly direct: TalkDirectMessaging | null;
+  readonly direct: ChannelDirectMessaging | null;
 }
 
 /**

@@ -12,9 +12,7 @@ function buildDeps(opts: { adapter?: SendSpy | null } = {}): {
   const adapter = opts.adapter === undefined ? rs.fn(async () => undefined) : opts.adapter;
   const deps = {
     channelsService: {
-      list: async () => [
-        { name: "whatsapp", connectionIds: adapter ? ["connection:whatsapp"] : [] },
-      ],
+      list: async () => [{ name: "whatsapp", sendable: adapter !== null }],
       send: adapter ?? rs.fn(),
     },
     whatsAppStoreRepo: {

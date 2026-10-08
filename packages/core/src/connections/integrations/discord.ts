@@ -16,7 +16,7 @@
 
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
-import type { ChatStopHandler, TalkActivity, TalkInboundMedia } from "@rome-os/app-runtime";
+import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
@@ -280,10 +280,10 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               return messages.slice(0, historyQueryLimit(input.limit));
             },
           };
-          const inboundMedia: TalkInboundMedia = {
+          const inboundMedia: ChannelInboundMedia = {
             materialize: (message) => adapter.saveIncomingAttachments(message),
           };
-          const activity: TalkActivity = {
+          const activity: ChannelActivity = {
             async begin(input) {
               await adapter.notifyTyping(input.conversationId);
               return {

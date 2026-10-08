@@ -29,11 +29,11 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 
 ### Channels for app actions
 
-App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels with the Connections that back each, sends, and reads `messages`, all by channel name. In a worker the same calls cross to the main process over RPC.
+App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels and whether each can send, sends, and reads `messages`, all by channel name. In a worker the same calls cross to the main process over RPC.
 
 - It is the only path an action sends or reads history by. The main process and a worker answer the same call identically, which a worker's direct Connection lookup could not.
-- It chooses the Connection: the one an action names, which must back the channel, or else the channel's only one. A service holds one Connection, so the choice has one answer. The `connectionId` an action may pass stays in the apps SDK until its next breaking release.
-- `query` is the one read, `fetch_channel_history` included. The deprecated `history` answers `query`'s page oldest first, for apps that have not moved to `query` yet.
+- It sends through the Connection backing the channel. A service holds one Connection, so an action never names one.
+- `query` is the one read, `fetch_channel_history` included.
 - Admission and pairing stay in the channel's inbound port, which runs them once per message on the Connection it arrived through, whether or not anything subscribes yet ([`channels/admission.ts`](../../packages/core/src/channels/admission.ts)). An account directory stays on the Connection. The service adds no path around either.
 - A Connection's Talk and its features (history, inbound media, typing, the directory, direct messaging) are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). No app receives them. An app reaches a channel through this service or a hook's `channels`.
 

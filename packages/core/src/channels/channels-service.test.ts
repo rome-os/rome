@@ -10,12 +10,11 @@ import { createChannelsService, type ChannelsServiceDeps } from "./channels-serv
 import type { Connection } from "../connections/types.js";
 
 // The name-keyed service app actions send and read through, in the main
-// process and, over RPC, in a worker. It chooses the Connection itself.
+// process and, over RPC, in a worker. It finds the Connection itself.
 
 const CONNECTIONS = [
   { connectionId: "discord-1", service: "discord" },
   { connectionId: "tg-a", service: "telegram_user" },
-  { connectionId: "tg-b", service: "telegram_user" },
 ];
 
 function line(id: string, at: number): ChannelMessage {
@@ -50,14 +49,7 @@ function registryOf(
       status: () => ({ talk: { state: "unlocked" } }),
     } as unknown as Connection;
   });
-  return {
-    all: () => all,
-    get: (id) => {
-      const connection = all.find((each) => each.id === id);
-      if (!connection) throw new Error(`unknown connection "${id}"`);
-      return connection;
-    },
-  };
+  return { all: () => all };
 }
 
 function service(channels: unknown[] = []) {
@@ -70,16 +62,16 @@ function service(channels: unknown[] = []) {
 }
 
 describe("createChannelsService", () => {
-  it("lists each channel with the Connections backing it", async () => {
+  it("lists each channel and whether a Connection backs it", async () => {
     const { channelsService } = service([
       { name: "discord", messages: null },
       { name: "whatsapp", messages: null },
     ]);
 
     expect(await channelsService.list()).toEqual([
-      { name: "discord", connectionIds: ["discord-1"] },
-      { name: "telegram_user", connectionIds: ["tg-a", "tg-b"] },
-      { name: "whatsapp", connectionIds: [] },
+      { name: "discord", sendable: true },
+      { name: "telegram_user", sendable: true },
+      { name: "whatsapp", sendable: false },
     ]);
   });
 
@@ -101,43 +93,23 @@ describe("createChannelsService", () => {
     await expect(early.query("discord")).rejects.toThrow('Channel "discord" reads no messages');
   });
 
-  it("sends through a channel's only Connection", async () => {
+  it("sends through the Connection backing the channel", async () => {
     const { channelsService, send } = service();
 
-    const receipt = await channelsService.send("discord", "c1" as ConversationId, { text: "hi" });
+    const receipt = await channelsService.send("telegram_user", "c1" as ConversationId, {
+      text: "hi",
+    });
 
     expect(receipt).toEqual(RECEIPT);
-    expect(send).toHaveBeenCalledWith("discord-1", "c1", { text: "hi" });
+    expect(send).toHaveBeenCalledWith("tg-a", "c1", { text: "hi" });
   });
 
-  it("sends through the Connection an action names", async () => {
+  it("refuses a channel no Connection backs", async () => {
     const { channelsService, send } = service();
 
-    await channelsService.send(
-      "telegram_user",
-      "c1" as ConversationId,
-      { text: "hi" },
-      {
-        connectionId: "tg-b",
-      },
-    );
-
-    expect(send).toHaveBeenCalledWith("tg-b", "c1", { text: "hi" });
-  });
-
-  it("refuses a Connection it cannot choose", async () => {
-    const { channelsService, send } = service();
-    const to = "c1" as ConversationId;
-
-    await expect(channelsService.send("telegram_user", to, { text: "hi" })).rejects.toThrow(
-      'Channel "telegram_user" has multiple connections; connectionId is required',
-    );
-    await expect(channelsService.send("whatsapp", to, { text: "hi" })).rejects.toThrow(
-      'No Talk connection registered for "whatsapp"',
-    );
     await expect(
-      channelsService.send("discord", to, { text: "hi" }, { connectionId: "tg-a" }),
-    ).rejects.toThrow('Connection "tg-a" does not provide channel "discord"');
+      channelsService.send("whatsapp", "c1" as ConversationId, { text: "hi" }),
+    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -153,28 +125,6 @@ describe("createChannelsService", () => {
     expect(page.map((m) => m.messageId)).toEqual(["m"]);
     expect(query).toHaveBeenCalledWith({ limit: 3 });
     await expect(channelsService.query("discord")).rejects.toThrow(
-      'Channel "discord" reads no messages',
-    );
-  });
-
-  // `history` is deprecated: it reads `query` and answers the page oldest first.
-  it("reads history through the channel's query, oldest first", async () => {
-    const query = rs.fn(async () => [line("newer", 2_000), line("older", 1_000)]);
-    const { channelsService } = service([
-      { name: "whatsapp", messages: { query, byAccount: null } },
-      { name: "discord", messages: null },
-    ]);
-    const since = new Date(0);
-
-    const page = await channelsService.history("whatsapp", {
-      conversationId: "c1" as ConversationId,
-      since,
-      limit: 5,
-    });
-
-    expect(page.map((m) => m.messageId)).toEqual(["older", "newer"]);
-    expect(query).toHaveBeenCalledWith({ conversationId: "c1", since, limit: 5 });
-    await expect(channelsService.history("discord", {})).rejects.toThrow(
       'Channel "discord" reads no messages',
     );
   });

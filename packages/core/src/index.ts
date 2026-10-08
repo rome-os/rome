@@ -79,7 +79,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
-import { createChannelsService } from "./channels/channels-service.js";
+import { backingConnection, createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
@@ -858,11 +858,9 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const email = (await channelsService.list()).find((channel) => channel.name === "email");
-        if (email?.connectionIds.length !== 1) {
-          return { status: "skipped", reason: "channel_inactive" };
-        }
-        return (await connectionRegistry.ingest(email.connectionIds[0]!, {
+        const email = backingConnection(connectionRegistry, "email");
+        if (!email) return { status: "skipped", reason: "channel_inactive" };
+        return (await connectionRegistry.ingest(email.id, {
           rawBody,
           signature,
         })) as EmailInboundResult;
@@ -1522,7 +1520,7 @@ async function main() {
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
   const activeChannels = (await channelsService.list())
-    .filter((channel) => channel.connectionIds.length > 0)
+    .filter((channel) => channel.sendable)
     .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
   const agentNames = Array.from(agentLoader.getAll().keys());

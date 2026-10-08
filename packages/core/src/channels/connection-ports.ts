@@ -11,7 +11,7 @@ import type {
   ChannelInbound,
   ChannelMessage,
   InboundEvent,
-  TalkDirectMessaging,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { Connection } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
@@ -219,7 +219,7 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
   // What `direct` answers while no Connection exists for the channel: the
   // lookup itself says so, the way `send` does, rather than passing for a
   // channel that cannot reach an account directly.
-  const unbacked: TalkDirectMessaging = {
+  const unbacked: ChannelDirectMessaging = {
     conversationFor: () => Promise.reject(new ChannelNotConnected(service)),
   };
   return {

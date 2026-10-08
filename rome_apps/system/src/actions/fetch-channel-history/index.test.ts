@@ -40,8 +40,7 @@ interface HistoryAdapter {
 function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: ChannelsService } {
   return {
     channelsService: {
-      list: async () =>
-        [...adapters.keys()].map((name) => ({ name, connectionIds: [`test:${name}`] })),
+      list: async () => [...adapters.keys()].map((name) => ({ name, sendable: true })),
       async send(_channel, conversationId) {
         return { conversationId };
       },
@@ -54,9 +53,6 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
           : 24;
         // An adapter answers oldest first, and `query` newest first.
         return [...(await adapter.fetchHistory(conversationId ?? null, hours))].reverse();
-      },
-      history: async () => {
-        throw new Error("fetch_channel_history reads through query");
       },
     },
   };
@@ -96,7 +92,7 @@ describe("fetch_channel_history", () => {
   // A channel with no store reads through its Connection, and none is connected.
   it("returns error when no Connection backs a channel read through one", async () => {
     const deps = makeDeps(new Map([["discord", {}]]));
-    deps.channelsService.list = async () => [{ name: "discord", connectionIds: [] }];
+    deps.channelsService.list = async () => [{ name: "discord", sendable: false }];
     // What the channels service says of a channel no Connection backs.
     deps.channelsService.query = async () => {
       throw new Error('No connection backs channel "discord"');
