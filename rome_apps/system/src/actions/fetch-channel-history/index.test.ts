@@ -93,6 +93,34 @@ describe("fetch_channel_history", () => {
     expect(result.error).toBe('Channel "slack" is not configured or not running.');
   });
 
+  // A channel with no store reads through its Connection, and none is connected.
+  it("returns error when no Connection backs a channel read through one", async () => {
+    const deps = makeDeps(new Map([["discord", {}]]));
+    deps.channelsService.list = async () => [{ name: "discord", connectionIds: [] }];
+
+    const action = createAction(actionConfig, deps);
+    const result = await action.execute({ channel: "discord" });
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toBe('Channel "discord" is not configured or not running.');
+  });
+
+  it("lists the newest-first page `query` answers oldest first", async () => {
+    const deps = makeDeps(new Map([["discord", {}]]));
+    deps.channelsService.query = async () => [
+      makeMessage({ messageId: "m2", text: "second", timestamp: new Date("2026-04-15T11:00:00Z") }),
+      makeMessage({ messageId: "m1", text: "first", timestamp: new Date("2026-04-15T10:00:00Z") }),
+    ];
+
+    const action = createAction(actionConfig, deps);
+    const result = await action.execute({ channel: "discord", includeMessages: true });
+
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    const data = result.data as { content: string; messages: Array<{ id: string }> };
+    expect(data.messages.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(data.content.indexOf("first")).toBeLessThan(data.content.indexOf("second"));
+  });
+
   it("returns error when the channel reads no history", async () => {
     const adapter: HistoryAdapter = {};
     const deps = makeDeps(new Map([["telegram", adapter]]));

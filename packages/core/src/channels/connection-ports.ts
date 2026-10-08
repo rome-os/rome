@@ -114,12 +114,12 @@ function connectionDirectory(deps: ConnectionPortsDeps, service: string): Channe
  * whole-hour window. Only the same window will do. A Connection cuts what it
  * answers within its window (Discord keeps the oldest hundred lines of each
  * channel), so a wider read can hold none of the lines a narrower one would.
- * A reused read answers what a fresh one would, older by at most that long.
- * Rome's own `fetch_channel_history` does not read through this port.
+ * A reused read answers what a fresh one would, older by at most that long,
+ * and `fetch_channel_history` reads through it like any other caller.
  *
  * The port reads the first Connection backing the channel. A channel several
- * Connections back (two Telegram accounts) reads one of them;
- * `ChannelsService.history` and `send` name the one they mean.
+ * Connections back (two Telegram accounts) reads one of them; `send` names
+ * the one it means.
  */
 export const LIVE_DEFAULT_WINDOW_MS = 24 * 3_600_000;
 
