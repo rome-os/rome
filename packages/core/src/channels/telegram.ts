@@ -314,7 +314,7 @@ export class TelegramAdapter {
     }
     return saveIncomingAttachmentPayloads(
       {
-        channel: message.channel,
+        channel: "telegram",
         threadId: message.conversationId,
         id: message.messageId,
         attachments: message.attachments,
