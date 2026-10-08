@@ -112,8 +112,10 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
-  const notifyCodexLoginChanged = (previous: boolean | undefined): void => {
-    if (previous !== value.codex.loggedIn) options.onCodexLoginChanged?.();
+  const notifyCodexLoginChanged = (previous: boolean | undefined): boolean => {
+    if (previous === value.codex.loggedIn) return false;
+    options.onCodexLoginChanged?.();
+    return true;
   };
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
@@ -136,13 +138,18 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     // Login drives the Codex payer, so apply it as soon as the status probe
     // settles rather than waiting on a possibly stalled quota probe.
     const statusProbe = Promise.allSettled([probes.codexStatus()]);
-    const usageProbe = Promise.allSettled([probes.codexUsage()]);
+    let usageProbe = Promise.allSettled([probes.codexUsage()]);
     const [status] = await statusProbe;
     if (status.status === "fulfilled") {
       const previousCodexLogin = value.codex.loggedIn;
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
-      notifyCodexLoginChanged(previousCodexLogin);
+      // A login change can restart Codex under the usage probe above, so ask
+      // the process that serves the new login. The first observation at boot
+      // has no earlier probe result to replace.
+      if (notifyCodexLoginChanged(previousCodexLogin) && previousCodexLogin !== undefined) {
+        usageProbe = Promise.allSettled([probes.codexUsage()]);
+      }
     }
     const [usage] = await usageProbe;
     if (usage.status === "fulfilled" && usage.value && !usage.value.error) {

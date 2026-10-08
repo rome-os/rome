@@ -51,26 +51,42 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("uses Rome credit tier models when ChatGPT is disconnected", async () => {
+  it("resolves Codex models the same way while Rome credits pay", async () => {
+    const loggedOut = {
+      codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
     const r = resolver(
-      {
-        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-        claude: { loggedIn: false, quotaExhausted: false },
-      },
-      { tierModelMappings: { openai: { large: "custom-model" } } },
+      loggedOut,
+      { tierModelMappings: { openai: { medium: "gpt-6-astra" } } },
       true,
     );
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-6-sol",
+      model: "gpt-6.1-sol",
     });
     await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
-      model: "gpt-5.6-terra",
+      model: "gpt-6-astra",
     });
     await expect(
       r.getModelProvider({ tier: "small", providerId: "openai" }),
-    ).resolves.toMatchObject({
-      model: "gpt-6-luna",
+    ).resolves.toMatchObject({ model: "gpt-6-luna" });
+    await expect(
+      r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol" } }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+  });
+
+  it("prefers a connected Claude login over spending Rome credits", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: true, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: claude,
     });
   });
 
@@ -106,14 +122,11 @@ describe("ModelResolver", () => {
     const resolution = r.getModelProvider({ tier: "large" });
     await settingsStarted;
     state.codex.loggedIn = false;
+    state.claude.loggedIn = true;
     usingRomeCredits = true;
     releaseSettings();
 
-    await expect(resolution).resolves.toMatchObject({
-      modelProvider: codex,
-      model: "gpt-6-sol",
-      payer: "rome_credits",
-    });
+    await expect(resolution).resolves.toMatchObject({ modelProvider: claude });
   });
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {

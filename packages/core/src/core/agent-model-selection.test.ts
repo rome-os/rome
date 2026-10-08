@@ -51,24 +51,6 @@ describe("resolveAgentModelRequest", () => {
     });
   });
 
-  it("keeps a credit session on its existing provider while re-resolving a tier", () => {
-    expect(resolveAgentModelRequest({ tier: "large" }, undefined, undefined, "openai")).toEqual({
-      tier: "large",
-      providerId: "openai",
-    });
-  });
-
-  it("keeps a credit session's provider affinity over a changed tier default", () => {
-    expect(
-      resolveAgentModelRequest(
-        { tier: "large", providerId: "anthropic" },
-        undefined,
-        undefined,
-        "openai",
-      ),
-    ).toEqual({ tier: "large", providerId: "openai" });
-  });
-
   it("rejects a missing selection instead of adding an implicit tier", () => {
     expect(() => resolveAgentModelRequest({})).toThrow("requires a tier");
     expect(() => resolveAgentModelRequest({ providerId: "openai" })).toThrow("requires a tier");

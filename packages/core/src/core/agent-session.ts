@@ -110,7 +110,6 @@ import {
 } from "./agent-lifecycle.js";
 import { isInterruptedAccounting, resolveTurnStop } from "./stop-reason.js";
 import type { UsageFunding } from "../usage/events.js";
-import { PAYER_CHANGED_MESSAGE } from "./rome-credits-payer.js";
 import type { TurnUsageSink } from "../usage/recorder.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
@@ -877,11 +876,6 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  // Credit-funded tier conversations keep Codex thread affinity without a
-  // concrete model pin, so a newly available Claude login cannot replace the
-  // conversation's provider history on a later turn or cold resume.
-  const creditProviderAffinity =
-    resumeResult?.provider === "openai" && !resumeResult.model ? "openai" : undefined;
   // The channel-thread-key selection restores a webchat thread's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
@@ -1634,7 +1628,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(config, selectionId, sessionPin, creditProviderAffinity),
+      resolveAgentModelRequest(config, selectionId, sessionPin),
     );
     modelSession = await openModelSession(
       initialResolution,
@@ -1665,11 +1659,6 @@ async function openSession(
     isSubagent: opts.isSubagent,
     selectionId,
     sessionPin,
-    creditProviderAffinity:
-      initialResolution?.payer === "rome_credits"
-        ? initialResolution.modelProvider.id
-        : creditProviderAffinity,
-    usesRomeCredits: initialResolution?.payer === "rome_credits",
     openModelSession,
     toolCount:
       (initialResolution
@@ -1714,10 +1703,6 @@ interface ImplArgs {
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
-  /** Credit-funded tier session's provider history, retained without a model pin. */
-  creditProviderAffinity?: ProviderId;
-  /** Credit-funded tier sessions must re-resolve their tier, not create an exact ChatGPT pin. */
-  usesRomeCredits: boolean;
   openModelSession: (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1788,8 +1773,6 @@ interface TurnSink {
    * would hand a queued turn the id of the turn ahead of it.
    */
   providerTurnIdAtStart?: string;
-  /** Whether Rome credits paid when this turn's model resolved. */
-  resolvedRomeCredits?: boolean;
   /** Payer of the provider session that executes this turn. */
   funding?: UsageFunding;
   usageRecorded: boolean;
@@ -1966,13 +1949,12 @@ class AgentSessionImpl implements AgentSession {
   private threadContextInjected = false;
   private selectionId?: ModelSelectionId;
   /**
-   * The session model pin: the concrete model this session's history was
-   * produced on. Credit-funded tier sessions deliberately keep this absent so
-   * each continuation re-resolves through their active payer.
+   * The session model pin: the concrete model this session's history
+   * was produced on. Seeded from the resumed row at open and refreshed after
+   * every successful pin persist, so per-turn re-resolution requests exactly
+   * this model (never a tier re-map) once a pin exists.
    */
   private sessionPin?: { providerId: ProviderId; model: string };
-  private creditProviderAffinity?: ProviderId;
-  private usesRomeCredits: boolean;
   /** Last effort written to the session row, so an unchanged effort skips the write. */
   private storedReasoningEffort?: string;
   private openModelSession: ImplArgs["openModelSession"];
@@ -2012,8 +1994,6 @@ class AgentSessionImpl implements AgentSession {
     this.isSubagent = args.isSubagent;
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
-    this.creditProviderAffinity = args.creditProviderAffinity;
-    this.usesRomeCredits = args.usesRomeCredits;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
     this.subagentToolNames = args.subagentToolNames;
@@ -2099,17 +2079,8 @@ class AgentSessionImpl implements AgentSession {
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.getModelProvider(
-      resolveAgentModelRequest(
-        this.config,
-        this.selectionId,
-        this.sessionPin,
-        this.creditProviderAffinity,
-      ),
+      resolveAgentModelRequest(this.config, this.selectionId, this.sessionPin),
     );
-    const usesRomeCredits = resolution.payer === "rome_credits";
-    if (this.usesRomeCredits !== usesRomeCredits) this.providerInfoStored = false;
-    this.usesRomeCredits = usesRomeCredits;
-    if (this.usesRomeCredits) this.creditProviderAffinity = resolution.modelProvider.id;
     if (
       this.modelSessionAvailable &&
       !this.modelSession.isClosed &&
@@ -2561,7 +2532,6 @@ class AgentSessionImpl implements AgentSession {
     channelThreadKey: string,
     forkSessionId: string,
     forkSession: ModelSession,
-    usesRomeCredits: boolean,
   ): Promise<void> {
     const providerThreadId = forkSession.providerThreadId;
     if (!providerThreadId) {
@@ -2586,7 +2556,7 @@ class AgentSessionImpl implements AgentSession {
         forkSessionId,
         forkSession.providerId,
         providerThreadId,
-        usesRomeCredits ? undefined : forkSession.model,
+        forkSession.model,
       );
     } catch (err) {
       log.warn("failed to persist fork thread; the branch stays one-shot", {
@@ -2626,15 +2596,13 @@ class AgentSessionImpl implements AgentSession {
         this.sessionId,
         identity.providerId,
         identity.providerThreadId,
-        this.usesRomeCredits ? undefined : identity.model,
+        identity.model,
       );
       this.providerInfoStored = true;
       // The pin becomes readable only once recorded: later turns of
       // this live session now resolve exactly this model, matching what a
       // cold resume of the row would do.
-      this.sessionPin = this.usesRomeCredits
-        ? undefined
-        : { providerId: identity.providerId, model: identity.model };
+      this.sessionPin = { providerId: identity.providerId, model: identity.model };
     } catch (err) {
       log.warn("failed to persist session provider info", {
         sessionId: this.sessionId,
@@ -2855,7 +2823,6 @@ class AgentSessionImpl implements AgentSession {
     let forkSession: ModelSession | undefined;
     let sourceFunding: UsageFunding | undefined;
     let forkFunding: UsageFunding | undefined;
-    let forkUsesRomeCredits = this.usesRomeCredits;
     let disposeForkResources: (() => Promise<void>) | undefined;
     let status: "completed" | "interrupted" | "error" = "completed";
     let terminalSeen = false;
@@ -2909,8 +2876,6 @@ class AgentSessionImpl implements AgentSession {
                 providerId: sourceModelSession.providerId,
               })
             : undefined;
-          forkUsesRomeCredits =
-            forkModel?.payer === "rome_credits" || (!forkModel && this.usesRomeCredits);
           const fork = await sourceModelSession.fork({
             sessionId: forkSessionId,
             // Two different "mode"s meet here — do not confuse them.
@@ -3055,7 +3020,6 @@ class AgentSessionImpl implements AgentSession {
           input.persistThreadKey(forkSessionId),
           forkSessionId,
           forkSession,
-          forkUsesRomeCredits,
         );
       }
       // Best-effort: turn_end is the stream's true terminal, so a close-time
@@ -3292,9 +3256,6 @@ class AgentSessionImpl implements AgentSession {
       span.end();
       return;
     }
-    // Taken from the resolution, not the live session: Codex can switch payer
-    // while ensureModelSessionForTurn reopens the provider session.
-    sink.resolvedRomeCredits = this.usesRomeCredits;
     this.currentSink = sink;
     this.currentTurnId = turnId;
     this.status = "running";
@@ -3442,17 +3403,8 @@ class AgentSessionImpl implements AgentSession {
         try {
           await context.with(turnCtx, async () => {
             await this.inputs.beforeSend(turnId);
-            const funding = this.modelSession.funding;
-            // Compare the payer, not the label: "unknown" becomes "subscription"
-            // once the first login probe lands, with no payer change.
-            // A provider that reports no funding has no payer to switch.
-            if (
-              funding !== undefined &&
-              sink.resolvedRomeCredits !== (funding === "rome_credits")
-            ) {
-              throw new Error(PAYER_CHANGED_MESSAGE);
-            }
-            sink.funding = funding;
+            // The payer this turn is sent under; Codex holds a queued turn to it.
+            sink.funding = this.modelSession.funding;
             await this.modelSession.sendUserInput({
               inputId: input.inputId,
               text: mwInput.prompt,

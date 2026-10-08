@@ -19,7 +19,6 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import { createRomeCreditsPayer } from "./rome-credits-payer.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 
 const AGENT = "usage_agent";
@@ -43,9 +42,6 @@ describe("AgentSession turn usage", () => {
   let forkable: boolean;
   let funding: UsageFunding;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
-  // The payer a session open leaves behind, as when Codex switches payer
-  // while a resolved turn reopens its provider session.
-  let fundingAfterOpen: UsageFunding | undefined;
   // Whether the model resolver sees Rome credits paying.
   let resolverUsesRomeCredits: boolean;
   let state: AIToolStateValue;
@@ -73,7 +69,6 @@ describe("AgentSession turn usage", () => {
     forkable = false;
     funding = "byok";
     beforeModelDispatch = undefined;
-    fundingAfterOpen = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
     const provider: ModelProvider = {
@@ -91,7 +86,6 @@ describe("AgentSession turn usage", () => {
         );
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
         Object.defineProperty(session, "funding", { get: () => funding });
-        if (fundingAfterOpen) funding = fundingAfterOpen;
         if (forkable) {
           session.fork = async (fork) => ({
             providerId: "openai",
@@ -265,75 +259,6 @@ describe("AgentSession turn usage", () => {
     await drain(second.events);
 
     expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
-  });
-
-  it("fails closed when the Codex payer changes during turn preparation", async () => {
-    let releasePreparation!: () => void;
-    const preparationGate = new Promise<void>((resolve) => {
-      releasePreparation = resolve;
-    });
-    let preparationStarted!: () => void;
-    const preparationStartedPromise = new Promise<void>((resolve) => {
-      preparationStarted = resolve;
-    });
-    beforeModelDispatch = async () => {
-      preparationStarted();
-      await preparationGate;
-    };
-    nextRun = async function* () {
-      yield { type: "result", content: "done" };
-    };
-    const payer = createRomeCreditsPayer({
-      aiToolState: { get: () => state },
-      appServerManager: {
-        setDefaultProvider: (provider) => {
-          funding = provider === "rome_credits" ? "rome_credits" : "subscription";
-        },
-        restart: () => {},
-      },
-      getInstanceToken: () => "romeinst_123",
-      hasRomeCloud: () => true,
-    });
-
-    const session = await manager.acquire(key);
-    const turn = session.sendTurn({ prompt: "prepare, then send" });
-    await preparationStartedPromise;
-    state.codex.loggedIn = false;
-    payer.sync();
-    releasePreparation();
-    const events: AgentEvent[] = [];
-    for await (const event of turn.events) events.push(event);
-
-    expect(recorded).toHaveLength(1);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "error",
-        error: "Model payer changed while preparing this turn; please retry.",
-      }),
-    );
-    expect(recorded[0]?.funding).toBeUndefined();
-    expect(providerCalls).toBe(0);
-  });
-
-  it("fails a turn when credits start paying after its model resolved under ChatGPT", async () => {
-    nextRun = async function* () {
-      yield { type: "result", content: "done" };
-    };
-    funding = "subscription";
-    fundingAfterOpen = "rome_credits";
-
-    const session = await manager.acquire(key);
-    const turn = session.sendTurn({ prompt: "resolved under ChatGPT" });
-    const events: AgentEvent[] = [];
-    for await (const event of turn.events) events.push(event);
-
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: "error",
-        error: "Model payer changed while preparing this turn; please retry.",
-      }),
-    );
-    expect(providerCalls).toBe(0);
   });
 
   it("dispatches a turn whose funding label resolves without a payer change", async () => {

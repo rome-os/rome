@@ -169,6 +169,45 @@ describe("AIToolState", () => {
     }
   });
 
+  it("reads Codex usage again after a login change restarts Codex", async () => {
+    let loggedIn = false;
+    let usedPercent = 100;
+    let staleProbe: { reject: (err: Error) => void } | undefined;
+    let usageCalls = 0;
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn, authMode: "chatgpt", planType: "plus" }),
+        codexUsage: async () => {
+          usageCalls += 1;
+          if (loggedIn && !staleProbe) {
+            // Started on the process that the payer change replaces.
+            return await new Promise((_, reject) => {
+              staleProbe = { reject };
+            });
+          }
+          return {
+            checkedAt: "2026-08-07T00:00:00.000Z",
+            source: "test",
+            fiveHour: { usedPercent },
+          };
+        },
+      }),
+      onCodexLoginChanged: () => staleProbe?.reject(new Error("codex app-server exited")),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    await state.refresh("openai");
+    expect(state.get().codex.quotaExhausted).toBe(true);
+
+    loggedIn = true;
+    usedPercent = 10;
+    const callsBefore = usageCalls;
+    await state.refresh("openai");
+
+    expect(usageCalls - callsBefore).toBe(2);
+    expect(state.get().codex.quotaExhausted).toBe(false);
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {
