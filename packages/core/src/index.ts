@@ -1,5 +1,7 @@
 import { createNodeDevicesService } from "./lib/node-devices.js";
-import { createPairingAdmission } from "./channels/pairing.js";
+import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
+import type { Admission } from "./channels/admission.js";
+import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -14,10 +16,13 @@ import {
   onInstanceTokenChanged,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
+import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
 import { recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
@@ -26,6 +31,7 @@ import { UsageAttributionResolver } from "./usage/attribution.js";
 import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
+import type { SessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
@@ -66,6 +72,7 @@ import { WhatsAppStoreRepository } from "./db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "./channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
+import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService } from "./channels/channels-service.js";
@@ -109,6 +116,7 @@ import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
+import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn } from "./core/chat-stop.js";
@@ -184,8 +192,9 @@ import {
   isCoreMainAgentId,
   parseLegacyArtifactBindings,
 } from "./apps/artifact-id.js";
-import { ConnectionRegistry, DrizzleGrantLedger, createTalkRouter } from "./connections/index.js";
+import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
+import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import {
   ConversationSettingsRepository,
@@ -317,22 +326,31 @@ async function main() {
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
   const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
-  const talkRouter = createTalkRouter(
-    connectionRegistry,
-    createPairingAdmission({
-      approvalsRepo,
-      personMappingRepo,
-      talkGrants: (service) =>
-        connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
-    }),
-  );
+  const pairingAdmission = createPairingAdmission({
+    approvalsRepo,
+    personMappingRepo,
+    talkGrants: (service) =>
+      connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+    registry: connectionRegistry,
+  });
+  const linkAgentToGuardian = createAgentsGuardianLink({
+    personMappingRepo,
+    settingsRepo,
+    channel: AGENTS_SERVICE,
+  });
+  const admit: Admission = async (connectionId, service, message) => {
+    // Before the inbox resolves the sender, so the first message already
+    // reads as the guardian's.
+    if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
+    return pairingAdmission(connectionId, service, message);
+  };
   // How app actions — here and, over RPC, in workers — send and read on
   // channels by name. The channel list is built further down, and the service
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
   const channelsService = createChannelsService({
     channels: () => builtChannels,
-    router: talkRouter,
+    registry: connectionRegistry,
   });
   // Conferral setups: in-memory session store keyed per grant,
   // sharing the registry (descriptor lookup + terminal write) and the person
@@ -475,6 +493,7 @@ async function main() {
     firstParty: firstPartyBoot.firstPartyAppIds,
     installed: firstPartyBoot.installed,
     reinstalled: firstPartyBoot.reinstalled,
+    failed: firstPartyBoot.failed.map((failure) => failure.appId),
   });
   appsLog.info("artifact legacy bindings loaded", {
     agents: Object.keys(artifactIdentity.legacyBindings.agent).length,
@@ -596,6 +615,9 @@ async function main() {
   const turnMiddlewareChain = createTurnMiddlewareChain({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
+  const appStartedDispatcher = createAppStartedDispatcher({
+    appRuntimeServices: lifecycleAppRuntimeServices,
+  });
 
   // Retries failed actions once after 30s.
   const routineEngine = new RoutineEngine(
@@ -632,6 +654,7 @@ async function main() {
   const conversationSettings = new ConversationSettingsService({
     repository: new ConversationSettingsRepository(db),
     connections: connectionRegistry,
+    channels: () => builtChannels,
     listAgents: () => agentLoader.getAll().keys(),
     onChanged: async ({ ref, actor, fields, reset }) => {
       await eventService.publish({
@@ -686,8 +709,21 @@ async function main() {
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
-      getExecutionInitiator: async (id) =>
-        (await actionExecutionsRepo.findById(id))?.initiator ?? null,
+      getExecution: async (id) => {
+        const row = await actionExecutionsRepo.findById(id);
+        return row
+          ? {
+              initiator: row.initiator,
+              actor: (row.actor ?? null) as SessionActor | null,
+              rootExecutionId: row.rootExecutionId,
+            }
+          : null;
+      },
+      // A retried fire runs under a new root with no routine run, so it falls
+      // back to the routine's trigger.
+      getRoutineFiredBy: async ({ rootExecutionId, routineName }) =>
+        (await routineRunsRepo.findFiredBy(rootExecutionId)) ??
+        (await routinesRepo.findTriggerTypeByName(routineName)),
     },
     createUsageAppDirectory({ agentLoader, actionRegistry, appCatalog }),
   );
@@ -790,6 +826,15 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance.
   const notifyClient = new NotifyClient();
+  // Learn whether this boot's release version differs from the last completed
+  // boot's — the dashboard reads the result via /api/build-info. The stored
+  // version is committed after "Rome started" below.
+  const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
+  const feedbackClient = new FeedbackClient({
+    diagnostics: () =>
+      assembleDiagnosticBundle({ settingsRepo, channelsService, appCatalog, bootVersionReport }),
+    agentReportsEnabled: async () => (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
+  });
   const resolveArtifactReference = createArtifactReferenceResolver({
     agentLoader,
     actionRegistry,
@@ -869,6 +914,7 @@ async function main() {
       repositories: appRuntimeRepositories,
       favorService,
       hostExecution,
+      feedback: feedbackClient,
     },
   );
 
@@ -880,6 +926,7 @@ async function main() {
       repositories: appRuntimeRepositories,
       favorService,
       hostExecution,
+      feedback: feedbackClient,
     }),
   );
   appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
@@ -997,6 +1044,21 @@ async function main() {
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 
+  // Loads now so load failures join this boot's runtime status. Calls wait
+  // for `appStartedDispatcher.open()` below. An app-keys change does not
+  // reload it: the hook runs once per app start, not once per environment.
+  await registerCatalogHookLoad({
+    sourcePrefix: "app-started",
+    warnMessage: "some app-started hooks failed to initialize",
+    load: () => appStartedDispatcher.reconcile(appCatalog),
+    failureSource: (failure) => `app-started:${failure.path}`,
+  });
+  // After every subscriber, wherever it registers: a hook that runs an action
+  // must reach a worker forked after `actionWorkerWarmPoolInvalidator`.
+  appCatalog.onSettled(function appStartedFlush() {
+    appStartedDispatcher.flush(appCatalog);
+  });
+
   const messageHandlerRegistered = actionRegistry.has("message_handler");
   if (!messageHandlerRegistered) {
     const ownerId =
@@ -1020,7 +1082,7 @@ async function main() {
   // NO channel adapter is constructed here. Every Talk channel
   // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user, webchat)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
-  // through the stable router.
+  // to the channel ports.
   //
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
@@ -1067,7 +1129,14 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, router: talkRouter },
+    connections: { registry: connectionRegistry, admit },
+    connectionAccounts: {
+      [AGENTS_SERVICE]: agentsAccounts({
+        client: createRomeCloudAgentsClient(),
+        isConnected: () =>
+          connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
+      }),
+    },
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
@@ -1210,6 +1279,7 @@ async function main() {
     },
     backendTurnRunner,
     notify: notifyClient,
+    feedback: feedbackClient,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1268,10 +1338,6 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  // Learn whether this boot's release version differs from the last completed
-  // boot's — the dashboard reads the result via /api/build-info. The stored
-  // version is committed after "Rome started" below.
-  const bootVersionReport = await reportBootVersion(settingsRepo, getBuildInfo());
   computerUse.start();
 
   // Wire the process-global feature-flag backend (Statsig) when a server secret
@@ -1311,9 +1377,10 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      feedback: feedbackClient,
       provisionNodeCaller,
       nodeDevices,
-      talkRouter,
+      notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
       conversationSettings,
       actionEngine,
@@ -1365,6 +1432,7 @@ async function main() {
       favorService,
       systemUpgradeService,
       isCloudAuthEnabled,
+      loginUsage: usageRecorder,
       connectionRegistry,
       setupManager,
     };
@@ -1382,9 +1450,7 @@ async function main() {
   });
 
   // Drains the deprecated events table into routines (one-shot, idempotent).
-  // Runs before the engine starts so migrated routines get activated, and
-  // before the sentinel_review bootstrap so a migrated sentinel routine
-  // suppresses a duplicate.
+  // Runs before the engine starts so migrated routines get activated.
   try {
     await migrateEventsToRoutines({ db, routinesRepo, settingsRepo });
   } catch (err) {
@@ -1398,44 +1464,6 @@ async function main() {
 
   favorDispatchRunner.start();
 
-  const intervalMinutes = config.sentinelReviewIntervalMinutes;
-  // Match across all routines, not just enabled ones: a disabled sentinel_review
-  // (e.g. paused by an operator) must not spawn a duplicate on the next boot.
-  const existingRoutines = await routinesRepo.findAll();
-  const hasSentinelReview = existingRoutines.some((r) => r.actionName === "sentinel_review");
-
-  if (!hasSentinelReview) {
-    try {
-      const result = await actionEngine.run(
-        "create_routine",
-        {
-          name: "sentinel_review",
-          trigger: {
-            type: "schedule",
-            tzid: "UTC",
-            localTime: "00:00",
-            rrule:
-              intervalMinutes < 60
-                ? `FREQ=MINUTELY;INTERVAL=${intervalMinutes}`
-                : `FREQ=HOURLY;INTERVAL=${Math.round(intervalMinutes / 60)}`,
-          },
-          actionName: "sentinel_review",
-          args: {},
-        },
-        { initiator: "startup:system-events" },
-      );
-      if (result.status === "error") {
-        throw new Error(result.error);
-      }
-      if (result.status === "pending_approval") {
-        throw new Error('Action "create_routine" unexpectedly requested approval');
-      }
-      log.info("sentinel review scheduled", { intervalMinutes });
-    } catch (err) {
-      log.warn("failed to schedule sentinel_review", { error: err });
-    }
-  }
-
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
   // placement. The trigger is `floating`: 3am means 3am in the
@@ -1444,6 +1472,7 @@ async function main() {
   // the host zone at first boot. The seed `tzid` is the zone at creation; the
   // scheduler ignores it for floating and uses the live guardian zone.
   // Idempotent: a disabled routine still suppresses a duplicate on the next boot.
+  const existingRoutines = await routinesRepo.findAll();
   const hasSystemUpgrade = existingRoutines.some((r) => r.actionName === "system_upgrade");
   if (!hasSystemUpgrade) {
     const tzid = await resolveGuardianTimezone(settingsRepo);
@@ -1512,6 +1541,11 @@ async function main() {
     ([name, record]) =>
       `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
   );
+  // Every boot step above is done, so app-started hooks can rely on actions,
+  // routines, and agents. The API already serves requests, so an install may
+  // be mid-refresh: open between refreshes, never inside one.
+  await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
+
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],
@@ -1521,7 +1555,6 @@ async function main() {
     appActionsLoaded: appActionReload.loaded.length > 0 ? appActionReload.loaded : ["none"],
     appActionFailures: appActionReload.failed,
     routines: allRoutines.length,
-    sentinelReviewIntervalMinutes: config.sentinelReviewIntervalMinutes,
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
   });
 

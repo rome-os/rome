@@ -21,6 +21,8 @@ import {
   WorkerRpcSendError,
   WorkerRpcTimeoutError,
 } from "./worker-rpc-client.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
+import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -30,6 +32,7 @@ import type {
   AppStoreReader,
   AppStoreServiceResult,
 } from "../apps/store-service.js";
+import { historyQuery } from "../channels/channels-service.js";
 import type { EmailInboundControl, EmailInboundResult } from "../channels/email-control.js";
 import type { SystemUpgradeChecker, SystemUpgradeOfferResult } from "../system-upgrade/service.js";
 import type {
@@ -154,23 +157,30 @@ export class AppManagerProxy implements AppLifecycle {
     });
   }
 
+  // install, uninstall, and setEnabled carry the caller's hook chain, so the
+  // app-started hooks they cause count against the chain's recursion budget.
   async install(params: { source: unknown; enabled?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.install", params, {
+    return await getWorkerRpc().call("apps.install", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async uninstall(params: { appId: string; purge?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.uninstall", params, {
+    return await getWorkerRpc().call("apps.uninstall", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async setEnabled(params: { appId: string; enabled: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.setEnabled", params, {
+    return await getWorkerRpc().call("apps.setEnabled", withHookChain(params), {
       timeoutMs: SHORT_RPC_TIMEOUT_MS,
     });
   }
+}
+
+function withHookChain<T extends object>(params: T): T {
+  const hookInvocationContext = getCurrentHookInvocationContext();
+  return hookInvocationContext ? { ...params, hookInvocationContext } : params;
 }
 
 /** Worker-side stand-in for the main-process Rome App Store read surface. */
@@ -236,14 +246,9 @@ export class ChannelsServiceProxy implements ChannelsService {
     );
   }
 
+  /** @deprecated Use {@link query}. */
   async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-    return fromWire(
-      await getWorkerRpc().call<WireChannelMessage[]>("channels.history", {
-        channel,
-        ...input,
-        ...(input.since ? { since: input.since.toISOString() } : {}),
-      }),
-    );
+    return (await this.query(channel, historyQuery(input))).reverse();
   }
 }
 
@@ -327,5 +332,25 @@ export class EmailInboundControlProxy implements EmailInboundControl {
       rawBody,
       signature,
     });
+  }
+}
+
+/** Feedback leaves the instance only in main; an IPC failure can follow a send. */
+export class FeedbackServiceProxy implements FeedbackService {
+  async send(input: AgentFeedback): Promise<FeedbackOutcome> {
+    try {
+      return await getWorkerRpc().call<FeedbackOutcome>("feedback.send", input, {
+        timeoutMs: 30_000,
+      });
+    } catch (err) {
+      if (
+        err instanceof WorkerRpcTimeoutError ||
+        err instanceof WorkerRpcDisconnectError ||
+        err instanceof WorkerRpcSendError
+      ) {
+        return { kind: "unreachable" };
+      }
+      throw err;
+    }
   }
 }

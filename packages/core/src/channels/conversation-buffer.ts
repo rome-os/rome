@@ -1,8 +1,8 @@
 /**
  * The events one inbound subscriber has not handled yet, kept as one list per
- * conversation. Rules R3 and R4 of `Inbound` (channel.ts) are what it keeps:
- * a conversation's events reach the handler one at a time in the order they
- * were pushed, and conversations never wait on each other.
+ * conversation. Rules R3 and R4 of `ChannelInbound` (the apps SDK) are what it
+ * keeps: a conversation's events reach the handler one at a time in the order
+ * they were pushed, and conversations never wait on each other.
  */
 
 import type { Logger } from "../logger.js";

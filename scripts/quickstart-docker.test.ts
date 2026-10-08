@@ -73,16 +73,6 @@ describe("quickstart-docker.sh container env", () => {
     expect(args).toContain("ROME_LOOPBACK_CALLBACK_ORIGIN=http://localhost:7663");
   });
 
-  it("forwards a shell origin override verbatim", async () => {
-    const args = await runQuickstart({ PANTHEON_BASE_ORIGIN: "https://staging.example" });
-    expect(args).toContain("PANTHEON_BASE_ORIGIN=https://staging.example");
-  });
-
-  it("forwards an exported-empty origin as an explicit empty (cloud off)", async () => {
-    const args = await runQuickstart({ PANTHEON_BASE_ORIGIN: "" });
-    expect(args).toContain("PANTHEON_BASE_ORIGIN=");
-  });
-
   it("lets an env file own the origin when the shell is silent", async () => {
     const envFile = await writeEnvFile("PANTHEON_BASE_ORIGIN=https://from-file.example\n");
     const args = await runQuickstart({}, ["--env-file", envFile]);
@@ -92,16 +82,23 @@ describe("quickstart-docker.sh container env", () => {
     expect(args).toContain("--env-file");
   });
 
-  it("prefers a shell origin over an env-file pin", async () => {
-    const envFile = await writeEnvFile("PANTHEON_BASE_ORIGIN=https://from-file.example\n");
-    const args = await runQuickstart({ PANTHEON_BASE_ORIGIN: "https://from-shell.example" }, [
-      "--env-file",
-      envFile,
-    ]);
+  it("forwards shell overrides verbatim, over an env-file pin", async () => {
+    const envFile = await writeEnvFile(
+      "PANTHEON_BASE_ORIGIN=https://from-file.example\n" +
+        "ROME_LOOPBACK_CALLBACK_ORIGIN=http://from-file.example\n",
+    );
+    const args = await runQuickstart(
+      {
+        PANTHEON_BASE_ORIGIN: "https://from-shell.example",
+        ROME_LOOPBACK_CALLBACK_ORIGIN: "http://127.0.0.1:4444",
+      },
+      ["--env-file", envFile],
+    );
     expect(args).toContain("PANTHEON_BASE_ORIGIN=https://from-shell.example");
+    expect(args).toContain("ROME_LOOPBACK_CALLBACK_ORIGIN=http://127.0.0.1:4444");
   });
 
-  it("prefers an exported-empty origin over an env-file pin", async () => {
+  it("forwards an exported-empty origin as an explicit empty (cloud off), over an env-file pin", async () => {
     const envFile = await writeEnvFile("PANTHEON_BASE_ORIGIN=https://from-file.example\n");
     const args = await runQuickstart({ PANTHEON_BASE_ORIGIN: "" }, ["--env-file", envFile]);
     expect(args).toContain("PANTHEON_BASE_ORIGIN=");
@@ -110,12 +107,5 @@ describe("quickstart-docker.sh container env", () => {
   it("derives the callback origin from --port", async () => {
     const args = await runQuickstart({}, ["--port", "9999"]);
     expect(args).toContain("ROME_LOOPBACK_CALLBACK_ORIGIN=http://localhost:9999");
-  });
-
-  it("forwards a shell callback override verbatim", async () => {
-    const args = await runQuickstart({
-      ROME_LOOPBACK_CALLBACK_ORIGIN: "http://127.0.0.1:4444",
-    });
-    expect(args).toContain("ROME_LOOPBACK_CALLBACK_ORIGIN=http://127.0.0.1:4444");
   });
 });

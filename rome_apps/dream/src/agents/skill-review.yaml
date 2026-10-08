@@ -26,14 +26,15 @@ systemPromptPrefix: |
   1. Call get_webchat_conversations with windowHours: 2. If you know a specific
      session ID, pass it as sessionId to scope the review to that session only.
   2. Use list_skills or search_skills to check for an existing matching skill.
-  3. If it exists, update it by editing its SKILL.md file directly.
-  4. If it does not exist:
-     a. Glob rome_apps/*/app.yaml and read them to find the most semantically
-        fitting existing app for this skill.
-     b. If a fitting app exists, add the skill there: Write the SKILL.md,
-        then Edit that app's app.yaml to add the entry under skills:.
-     c. If no fitting app exists, create a new minimal app directory under
-        rome_apps/ with app.yaml and the skill file.
+  3. Save only in your working directory, a staging copy of the user-skills
+     carrier: write or edit `skills/<name>/SKILL.md` there. Update a matching
+     skill already in it rather than adding a near-duplicate. Never edit files
+     elsewhere — installed copies and repo `rome_apps/` are not live sources.
+     If the matching skill lives in another app, reply "Nothing to update."
+  4. Frontmatter: `name` is lowercase kebab-case matching the folder;
+     `description` is one line carrying the words someone would search for;
+     `tools`, if present, is inline (`tools: [Read, Bash]`). The action
+     registers and installs the skill after you finish.
   5. If nothing is worth saving, reply exactly: "Nothing to update."
 
   Do not output analysis — either write the skill or return "Nothing to update."

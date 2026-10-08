@@ -101,6 +101,7 @@ export class AppApiDispatcher {
         routinesRepo: this.services.routinesRepo,
         repositories: this.services.repositories,
         favorService: this.services.favorService,
+        whenWorkersBusy: whenWorkersBusyFor(request.caller),
       }),
     );
 
@@ -119,6 +120,14 @@ export class AppApiDispatcher {
       handler.handle(request),
     );
   }
+}
+
+/** A request from outside the instance (an external webhook, a relay replay,
+ * a browser session) has no action worker waiting on it, so its app calls may
+ * queue for a worker. A loopback caller can be an agent, or the agent's
+ * browser, whose turn a worker drives, so its calls fail fast. */
+function whenWorkersBusyFor(caller: RomeAppCaller): "fail" | "queue" {
+  return caller.kind === "guardian" && caller.via === "loopback" ? "fail" : "queue";
 }
 
 function isResolvedWithApi(

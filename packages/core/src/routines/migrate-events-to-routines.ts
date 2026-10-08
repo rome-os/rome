@@ -106,8 +106,7 @@ async function createRoutines(
  * flag.
  *
  * Must run after schema migrations and before the routine engine starts so the
- * engine activates the freshly-created routines, and before the sentinel_review
- * bootstrap so a migrated sentinel routine suppresses a duplicate.
+ * engine activates the freshly-created routines.
  */
 export async function migrateEventsToRoutines(
   deps: MigrateEventsToRoutinesDeps,

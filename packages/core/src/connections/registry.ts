@@ -1,5 +1,6 @@
 // Connection lifecycle registry. Messaging model: docs/concepts/messaging.md.
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
@@ -24,7 +25,6 @@ import type {
   Credential,
   GrantName,
   GrantState,
-  InboundMessage,
   OperationCall,
   OperationResult,
   ProfileRecord,
@@ -47,6 +47,25 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
   act: "actor",
   watch: "watcher",
 };
+
+/** Every feature a Talk can carry. Keyed by name, so a feature added to
+ *  `TalkFeatureMap` fails to compile here until a Talk carries it too. */
+const TALK_FEATURES: { [K in TalkFeatureName]: true } = {
+  history: true,
+  inboundMedia: true,
+  activity: true,
+  directory: true,
+  directMessaging: true,
+};
+const TALK_FEATURE_NAMES = Object.keys(TALK_FEATURES) as TalkFeatureName[];
+
+/** A Connection's Talk, which sending needs. A Connection whose credentials
+ *  are locked or degraded has none, and sending on it refuses. */
+export function requireTalk(connection: Connection): Talk {
+  const talk = connection.talk;
+  if (!talk) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
+  return talk;
+}
 
 export interface ConnectionRegistryDeps {
   ledger: GrantLedger;
@@ -146,7 +165,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: InboundMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 
@@ -740,7 +759,7 @@ class ConnectionImpl implements Connection {
    */
   private checkHistoryDeclared(talker: Talker): void {
     const declared = this.descriptor.capabilities.talker?.history === true;
-    const offered = talker.feature("history") !== null;
+    const offered = talker.history !== undefined;
     if (declared === offered) return;
     this.log.error("talker history flag disagrees with its history feature", {
       connectionId: this.id,
@@ -887,7 +906,7 @@ class ConnectionImpl implements Connection {
   }
 
   private talkWrapper(slot: CapabilitySlot, epoch: Epoch): Talk {
-    return {
+    const talk: Talk = {
       subscribe: (handler) => {
         this.assertLive(epoch);
         slot.messageHandlers.push(handler);
@@ -905,13 +924,18 @@ class ConnectionImpl implements Connection {
           throw err;
         }
       },
-      feature: <K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null => {
-        this.assertLive(epoch);
-        const current = (epoch.instance as Talker).feature(name);
-        if (!current) return null;
-        return this.epochFeatureProxy(slot, epoch, name);
-      },
     };
+    for (const name of TALK_FEATURE_NAMES) {
+      Object.defineProperty(talk, name, {
+        enumerable: true,
+        get: () => {
+          this.assertLive(epoch);
+          if (!(epoch.instance as Talker)[name]) return undefined;
+          return this.epochFeatureProxy(slot, epoch, name);
+        },
+      });
+    }
+    return talk;
   }
 
   private epochFeatureProxy<K extends TalkFeatureName>(
@@ -923,9 +947,9 @@ class ConnectionImpl implements Connection {
       get: (_target, property) => {
         return (...args: unknown[]) => {
           this.assertLive(epoch);
-          const feature = (epoch.instance as Talker).feature(name) as
+          const feature = (epoch.instance as Talker)[name] as
             | (TalkFeatureMap[K] & Record<PropertyKey, unknown>)
-            | null;
+            | undefined;
           if (!feature) throw new Error(`talk feature "${name}" is unavailable`);
           const method = feature[property];
           if (typeof method !== "function") {

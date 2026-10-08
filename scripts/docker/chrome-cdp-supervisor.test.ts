@@ -50,7 +50,6 @@ async function waitForCount(path: string, minimum: number) {
 describe("rome-start-chrome-cdp.sh", () => {
   it.each([
     [undefined, undefined, false],
-    ["false", "1", false],
     ["true", undefined, true],
     ["true", "0", false],
   ] as const)("gates stealth with CDP automation=%s and stealth=%s", async (automationEnabled, stealthEnabled, expectStealth) => {

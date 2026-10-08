@@ -211,9 +211,8 @@ describe("telegram descriptor shape", () => {
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "telegram", rawEvent: null, attachments: [] },
     } satisfies ChannelMessage;
-    void talker.feature("inboundMedia")?.materialize(message);
+    void talker.inboundMedia?.materialize(message);
     return stopped as Promise<void>;
   });
 
@@ -256,6 +255,78 @@ describe("telegram descriptor shape", () => {
     expect(factory.sent).toEqual([
       { method: "sendMessage", payload: { chat_id: "999", text: "yo", parse_mode: "HTML" } },
     ]);
+  });
+});
+
+describe("telegram inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const factory = new FaultBotFactory(/* skipInit */ true);
+    const desc = makeTelegramDescriptor({ createBot: factory.createBot });
+    const talker = desc.capabilities.talker!.build(
+      { bot: validCred() },
+      {
+        connectionId: "telegram-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    await factory.untilPolling();
+
+    // A group message that mentions the bot, replies to an earlier message and
+    // carries a document, so every optional field Telegram sets is present.
+    const message = {
+      message_id: 7,
+      date: 1700000000,
+      text: "@fault_bot see this",
+      entities: [{ type: "mention", offset: 0, length: 10 }],
+      from: { id: 111, is_bot: false, first_name: "Alice", last_name: "Smith", username: "alice" },
+      chat: { id: -555, type: "supergroup", title: "Team" },
+      reply_to_message: {
+        message_id: 5,
+        date: 1699999999,
+        chat: { id: -555, type: "supergroup", title: "Team" },
+      },
+      document: {
+        file_id: "doc-1",
+        file_unique_id: "u1",
+        file_name: "a.pdf",
+        mime_type: "application/pdf",
+      },
+    };
+    await factory.emitUpdate({ message });
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "telegram",
+        direction: "inbound",
+        messageId: "7",
+        conversationId: "-555",
+        senderId: "111",
+        senderDisplayName: "Alice Smith",
+        senderUsername: "alice",
+        text: "@fault_bot see this",
+        attachments: [
+          {
+            type: "document",
+            url: "doc-1",
+            mimeType: "application/pdf",
+            fileName: "a.pdf",
+            caption: undefined,
+          },
+        ],
+        timestamp: new Date(1700000000 * 1000),
+        replyTo: { messageId: "5" },
+        thread: { kind: "group", name: "Team" },
+        addressing: "mention",
+        raw: message,
+      },
+    ]);
+    await talker.stop();
   });
 });
 

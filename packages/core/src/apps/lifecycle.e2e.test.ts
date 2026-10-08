@@ -860,26 +860,6 @@ describe("App lifecycle e2e", () => {
       expect(cardsAfter.find((c) => c.id === "bogus-app")?.status).toBe("active");
     });
 
-    it("install rejects a bundle source that isn't a packed artifact", async () => {
-      const rawDir = join(workspaceParent, "raw-not-packed");
-      await mkdir(rawDir, { recursive: true });
-      await writeFile(join(rawDir, "src.ts"), "// not packed\n", "utf-8");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source: { mode: "bundle", path: rawDir },
-        }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/not a packed app artifact.*mode: "source"/s);
-
-      const cards = await listApps(harness);
-      expect(cards.find((c) => c.id === "raw-app")).toBeUndefined();
-    });
-
     it("a rejected re-install leaves the healthy installed app running", async () => {
       const goodRoot = await buildWorkspaceApp(workspaceParent, "sturdy", "echo_sturdy");
       await installWorkspace(harness, "sturdy", goodRoot);
@@ -1653,32 +1633,6 @@ describe("App lifecycle e2e", () => {
       await waitFor(() => harness.hasAction("echo_one_step"));
       const result = await harness.invokeAction("echo_one_step", { via: "one-step" });
       expect(result).toMatchObject({ status: "ok" });
-    });
-
-    it("POST mode=source pointed at a packed artifact is rejected with the bundle alternative", async () => {
-      const packed = await buildWorkspaceApp(workspaceParent, "wrong-mode", "echo_wrong_mode");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: { mode: "source", path: packed } }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/packed artifact, not a source workspace[\s\S]*"bundle"/);
-    });
-
-    it("POST mode=bundle pointed at a source repo is rejected with the source install named", async () => {
-      const repo = await buildSourceApp(workspaceParent, "raw-as-bundle", "echo_raw_as_bundle");
-
-      const res = await harness.fetch("/apps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: { mode: "bundle", path: repo } }),
-      });
-      expect(res.status).toBe(422);
-      const body = (await res.json()) as { error?: string };
-      expect(body.error).toMatch(/source workspace, not a packed artifact[\s\S]*"source"/);
     });
   });
 

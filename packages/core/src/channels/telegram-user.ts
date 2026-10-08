@@ -1,8 +1,8 @@
 import { Api, TelegramClient } from "telegram";
 import { NewMessage, type NewMessageEvent } from "telegram/events/NewMessage.js";
 import { StringSession } from "telegram/sessions/StringSession.js";
-import type { ProviderAdapter } from "./adapter.js";
-import type { Attachment, NormalizedMessage, OutgoingMessage } from "./types.js";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import { readFile } from "node:fs/promises";
 import {
@@ -133,10 +133,14 @@ export class TelegramUserSessionNotAuthorizedError extends Error {
   }
 }
 
-export class TelegramUserAdapter implements ProviderAdapter {
-  readonly channelName = "telegram_user";
+/**
+ * The Telegram user-account transport. Inbound messages and history lines
+ * arrive as the channel's own record, a `ChannelMessage` whose `raw` is the
+ * GramJS `Api.Message`, so the Connection integration delivers them as they are.
+ */
+export class TelegramUserAdapter {
   private client: TelegramClient;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
 
   constructor(private settings: TelegramUserSettings) {
     this.client = createTelegramClient(settings.apiId, settings.apiHash, settings.sessionString);
@@ -183,7 +187,8 @@ export class TelegramUserAdapter implements ProviderAdapter {
     }
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = conversationId;
     const entity = entityFromThreadId(threadId);
     const replyTo = message.replyToMessageId
       ? Number.parseInt(message.replyToMessageId, 10)
@@ -206,22 +211,27 @@ export class TelegramUserAdapter implements ProviderAdapter {
     }
 
     log.info("telegram user message sent", { threadId });
-    return { messageId, threadId };
+    return { conversationId, ...(messageId ? { messageId } : {}) };
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    if (message.attachments.length === 0 || !(message.rawEvent instanceof Api.Message)) {
+  /** Download a message's media into the profile. The media lives on the
+   *  GramJS `Api.Message` in `raw`, so a message without one keeps its
+   *  attachments as they are. Only the first attachment is saved, because a
+   *  GramJS message carries one media payload. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    const event = message.raw;
+    if (message.attachments.length === 0 || !(event instanceof Api.Message)) {
       return message.attachments;
     }
 
-    const expectedBytes = telegramUserMediaSizeBytes(message.rawEvent);
+    const expectedBytes = telegramUserMediaSizeBytes(event);
     if (expectedBytes !== undefined && expectedBytes > MAX_ATTACHMENT_BYTES) {
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: expectedBytes,
       });
       return message.attachments;
@@ -229,7 +239,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
 
     let downloaded: string | Buffer | undefined;
     try {
-      downloaded = await this.client.downloadMedia(message.rawEvent, {
+      downloaded = await this.client.downloadMedia(event, {
         progressCallback(downloadedBytes) {
           const bytes = numericTelegramSize(downloadedBytes);
           if (bytes !== undefined && bytes > MAX_ATTACHMENT_BYTES) {
@@ -240,7 +250,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
     } catch (err) {
       if (!isAttachmentTooLargeError(err)) throw err;
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: err.bytes,
       });
       return message.attachments;
@@ -250,7 +260,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
     const data = Buffer.isBuffer(downloaded) ? downloaded : await readFile(downloaded);
     if (data.byteLength > MAX_ATTACHMENT_BYTES) {
       log.warn("telegram user attachment too large, skipping save", {
-        messageId: message.id,
+        messageId: message.messageId,
         bytes: data.byteLength,
       });
       return message.attachments;
@@ -259,23 +269,27 @@ export class TelegramUserAdapter implements ProviderAdapter {
     if (!attachment) return message.attachments;
     if (message.attachments.length > 1) {
       log.warn("telegram user message has additional attachments without separate media payloads", {
-        messageId: message.id,
+        messageId: message.messageId,
         savedAttachments: 1,
         skippedAttachments: message.attachments.length - 1,
       });
     }
 
-    return saveIncomingAttachmentPayloads(message, [
+    return saveIncomingAttachmentPayloads({ ...message, channel: "telegram_user" }, [
       {
         attachment,
         data,
-        mimeType: telegramUserMediaMimeType(message.rawEvent) ?? attachment.mimeType,
-        fileName: telegramUserMediaFileName(message.rawEvent),
+        mimeType: telegramUserMediaMimeType(event) ?? attachment.mimeType,
+        fileName: telegramUserMediaFileName(event),
       },
     ]);
   }
 
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
+  /** Messages from the last `windowHours`, oldest first: one conversation's
+   *  last 100, or the last 50 of each of the first 50 dialogs when
+   *  `threadId` is null. Every line is `direction: "inbound"`. Its `raw`
+   *  `Api.Message` carries `out`, which tells the account's own lines apart. */
+  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
     const cutoffMs = Date.now() - windowHours * 60 * 60 * 1000;
     if (threadId) {
       const messages = await this.client.getMessages(entityFromThreadId(threadId), {
@@ -289,7 +303,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
     }
 
     const dialogs = await this.client.getDialogs({ limit: 50 });
-    const allMessages: NormalizedMessage[] = [];
+    const allMessages: ChannelMessage[] = [];
     for (const dialog of dialogs) {
       const dialogId = dialog.id?.toString();
       if (!dialogId) continue;
@@ -327,8 +341,7 @@ export class TelegramUserAdapter implements ProviderAdapter {
 
   private async handleNewMessage(event: NewMessageEvent): Promise<void> {
     if (!this.handler) return;
-    const normalized = this.normalizeMessage(event.message);
-    await this.handler(normalized);
+    await this.handler(this.normalizeMessage(event.message));
   }
 
   private normalizeMessage(
@@ -338,25 +351,30 @@ export class TelegramUserAdapter implements ProviderAdapter {
       threadName?: string;
       threadType?: "private" | "group";
     } = {},
-  ): NormalizedMessage {
+  ): ChannelMessage {
     const threadId = context.threadId ?? peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
     return {
-      id: String(message.id),
       channel: "telegram_user",
-      channelUserId: isOutgoing ? this.settings.userId : fromId,
-      displayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
-      threadId,
-      threadName: context.threadName,
-      threadType: context.threadType ?? "group",
-      timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      direction: "inbound",
+      messageId: String(message.id),
+      conversationId: threadId as ConversationId,
+      senderId: isOutgoing ? this.settings.userId : fromId,
+      senderDisplayName: isOutgoing ? this.settings.displayName : (context.threadName ?? fromId),
       text: message.message ?? "",
       attachments: extractTelegramAttachments(message.media),
-      replyTo: message.replyTo?.replyToMsgId
-        ? { messageId: String(message.replyTo.replyToMsgId) }
-        : undefined,
-      rawEvent: message,
+      timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      ...(message.replyTo?.replyToMsgId
+        ? { replyTo: { messageId: String(message.replyTo.replyToMsgId) } }
+        : {}),
+      // A live message carries no dialog context, so it reads as a group even
+      // in a private chat. Only the all-dialogs history read knows a line's kind.
+      thread: {
+        kind: context.threadType === "private" ? "dm" : "group",
+        ...(context.threadName ? { name: context.threadName } : {}),
+      },
+      raw: message,
     };
   }
 }

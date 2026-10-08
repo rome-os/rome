@@ -64,6 +64,7 @@ const BULLET_KEYS: Record<string, string[]> = {
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
+  "agents.bot": ["reply", "start"],
   "webchat.bot": ["chat"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],

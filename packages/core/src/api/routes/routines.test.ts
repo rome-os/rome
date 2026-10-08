@@ -692,93 +692,6 @@ describe("Routines API", () => {
     const [row] = await testDb.db.select().from(routines).where(eq(routines.id, id));
     expect(row).toBeDefined();
   });
-
-  it("returns runs for a routine", async () => {
-    const deps = await buildTestDeps(testDb.db);
-    registerStubAction(deps.actionRegistry, "test_action");
-    const routineRunsRepo = new RoutineRunsRepository(testDb.db);
-    const appWithRuns = new Hono().route(
-      "/",
-      routinesRoutes({ ...deps, routineRunsRepo, routineEngine }),
-    );
-
-    const create = await appWithRuns.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "with-runs",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
-        actionName: "test_action",
-      }),
-    });
-    const created = (await create.json()) as { id: string };
-
-    await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-001",
-      status: "success",
-      payload: { scheduledTime: "2026-05-25T10:00:00Z" },
-    });
-
-    const runsRes = await appWithRuns.request(`/routines/${created.id}/runs?limit=10`);
-    expect(runsRes.status).toBe(200);
-    const runs = (await runsRes.json()) as { routineId: string; status: string }[];
-    expect(runs.length).toBe(1);
-    expect(runs[0].status).toBe("success");
-  });
-
-  it("returns stats for a routine", async () => {
-    const deps = await buildTestDeps(testDb.db);
-    registerStubAction(deps.actionRegistry, "test_action");
-    const routineRunsRepo = new RoutineRunsRepository(testDb.db);
-    const appWithRuns = new Hono().route(
-      "/",
-      routinesRoutes({ ...deps, routineRunsRepo, routineEngine }),
-    );
-
-    const create = await appWithRuns.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "stats-routine",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
-        actionName: "test_action",
-      }),
-    });
-    const created = (await create.json()) as { id: string };
-
-    const runId1 = await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-001",
-      status: "success",
-    });
-    await routineRunsRepo.updateStatus(runId1, {
-      status: "success",
-      durationMs: 100,
-    });
-
-    const runId2 = await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-002",
-      status: "error",
-    });
-    await routineRunsRepo.updateStatus(runId2, {
-      status: "error",
-      durationMs: 200,
-      error: "something failed",
-    });
-
-    const statsRes = await appWithRuns.request(`/routines/${created.id}/stats`);
-    expect(statsRes.status).toBe(200);
-    const stats = (await statsRes.json()) as {
-      totalRuns: number;
-      successCount: number;
-      errorCount: number;
-    };
-    expect(stats.totalRuns).toBe(2);
-    expect(stats.successCount).toBe(1);
-    expect(stats.errorCount).toBe(1);
-  });
 });
 
 // Routines fire path — exercises POST /routines → engine.activate → provider
@@ -1165,27 +1078,7 @@ describe("Routines fire path", () => {
     expect(stored!.lastFiredAt).toEqual(harness.clock.now());
   });
 
-  it("records status=error with the message when the action returns a structured error", async () => {
-    // The action returns `{status:"error"}` without throwing. Before the fix the
-    // run was recorded "success" (only thrown errors were caught), so the detail
-    // view's trace showed a failing leaf under a green run header.
-    registerStubAction(harness.actionRegistry, "soft_failing_action", {
-      returnError: "model request timed out",
-    });
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "soft-fails",
-      trigger: scheduleTrigger,
-      actionName: "soft_failing_action",
-    });
-    await harness.manualProvider.triggerNow(id);
-
-    const runs = await harness.routineRunsRepo.findByRoutineId(id);
-    expect(runs).toHaveLength(1);
-    expect(runs[0].status).toBe("error");
-    expect(runs[0].error).toContain("model request timed out");
-  });
-
-  it("does not retry an action that returns a structured error (only thrown ones retry)", async () => {
+  it("records a returned structured error with its message and does not retry it (only thrown ones retry)", async () => {
     const localDb = createTestDb();
     const retryHarness = await buildFireHarness(localDb, 30_000);
     try {
@@ -1202,6 +1095,7 @@ describe("Routines fire path", () => {
       expect(stub.calls).toHaveLength(1);
       const runs = await retryHarness.routineRunsRepo.findByRoutineId(id);
       expect(runs[0].status).toBe("error");
+      expect(runs[0].error).toContain("permanent config error");
 
       // Past the retry delay the action must not re-run — a returned error is a
       // deliberate failure, so (unlike a thrown one) it does not take the retry path.
@@ -1332,8 +1226,10 @@ describe("Routines fire path", () => {
     }
 
     const page1 = await harness.app.request(`/routines/${id}/runs?limit=10`);
-    const rows1 = (await page1.json()) as { executionId: string }[];
+    expect(page1.status).toBe(200);
+    const rows1 = (await page1.json()) as { executionId: string; status: string }[];
     expect(rows1).toHaveLength(10);
+    expect(rows1[0].status).toBe("success");
     // Newest first
     expect(rows1[0].executionId).toBe("exec-024");
     expect(rows1[9].executionId).toBe("exec-015");
@@ -1379,6 +1275,7 @@ describe("Routines fire path", () => {
     });
 
     const res = await harness.app.request(`/routines/${id}/stats`);
+    expect(res.status).toBe(200);
     const stats = (await res.json()) as {
       totalRuns: number;
       successCount: number;

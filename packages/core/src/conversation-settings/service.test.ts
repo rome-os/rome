@@ -4,6 +4,8 @@ import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
+import type { Channels } from "../channels/channel.js";
+import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ConversationSettingsRepository } from "./repository.js";
@@ -37,12 +39,24 @@ function directoryDescriptor(
             async send(conversationId) {
               return { conversationId };
             },
-            feature: (name) => (name === "directory" ? directory : null) as never,
+            directory,
           };
         },
       },
     },
   };
+}
+
+/** The channels the registry's Talks back, built by the production ports,
+ *  once per service as `channelList` builds them. */
+function channelsOver(registry: ConnectionRegistry): () => Channels {
+  const built = new Map<string, ReturnType<typeof connectionPorts>>();
+  return () =>
+    registry.registeredServices().flatMap((name) => {
+      if (!built.has(name)) built.set(name, connectionPorts({ registry }, name));
+      const ports = built.get(name);
+      return ports ? [{ name, accounts: null, ...ports }] : [];
+    });
 }
 
 describe("ConversationSettingsService", () => {
@@ -81,6 +95,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => ["pm-assistant"],
       onChanged,
     });
@@ -541,6 +556,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository: new ConversationSettingsRepository(testDb.db),
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => [],
     });
 
@@ -592,6 +608,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => [],
     });
 

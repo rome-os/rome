@@ -306,6 +306,6 @@ describe("agent model pins through AgentSessionManager", () => {
     );
     await collect(child.sendTurn({ prompt: "child" }).events);
     expect(child.sessionId).not.toBe(parent.sessionId);
-    expect(openai.calls.map((call) => call.model)).toEqual([MODEL, "gpt-5.6-terra"]);
+    expect(openai.calls.map((call) => call.model)).toEqual([MODEL, "gpt-6.1-sol"]);
   });
 });

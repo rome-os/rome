@@ -4,13 +4,10 @@
 // the `expiresAt` envelope).
 
 import type {
-  Attachment,
   ChannelMessage,
   ConversationDescriptor,
   ConversationId,
-  MessageAddressing,
   MessageReceipt,
-  MessageReplyReference,
   OutgoingMessage,
   TalkActivity,
   TalkDirectMessaging,
@@ -20,28 +17,10 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
 // A Connection's conversational surface, as its builder implements it and the
-// router dispatches it. Core-internal: apps reach channels through the
+// channel ports (channels/connection-ports.ts) use it. Core-internal: apps reach channels through the
 // channels service (actions) or a hook's `channels`, never through a Talk.
-
-/** A message as a Talk delivers it, before a channel names itself and the
- *  direction on it ({@link ChannelMessage}). Provider-native data is an opaque
- *  pass-through token reserved for a feature on the same provider. */
-export interface InboundMessage {
-  messageId: string;
-  conversationId: ConversationId;
-  /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ConversationId;
-  senderId: string;
-  senderDisplayName?: string;
-  senderUsername?: string;
-  text: string;
-  attachments: Attachment[];
-  timestamp: Date;
-  replyTo?: MessageReplyReference;
-  thread?: { kind: "dm" | "group" | "topic"; name?: string };
-  addressing?: MessageAddressing;
-  raw?: unknown;
-}
+// A Talk delivers each message as the channel's own record: a
+// `ChannelMessage` naming the channel it backs, with direction `inbound`.
 
 /**
  * The platform's own history of a Connection's conversations: at most `limit`
@@ -77,23 +56,20 @@ export interface TalkFeatureMap {
 
 export type TalkFeatureName = keyof TalkFeatureMap;
 
-export interface Talk {
-  subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
-}
+/**
+ * What a talker offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the talker
+ * does not offer it. The registry reads a field each time it is used, so a
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
+ */
+export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
-/** Routing keyed by Connection id: pairing and ordered admission run here,
- *  before a channel's inbound hears anything. */
-export interface TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>>;
-  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
+/** A Connection's live Talk. Its features are the talker's, each one usable
+ *  only while the epoch that built it lasts. */
+export interface Talk extends TalkFeatures {
+  subscribe(handler: (message: ChannelMessage) => Promise<void>): () => void;
+  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
 }
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
@@ -263,14 +239,13 @@ export interface RuntimeKit {
 }
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker {
-  start(deliver: (msg: InboundMessage) => void, fault: (err: StreamFault) => void): void;
+export interface Talker extends TalkFeatures {
+  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
   send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
 }
 
 /** Builder-side Act implementation. */

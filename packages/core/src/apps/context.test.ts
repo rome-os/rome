@@ -41,7 +41,7 @@ type RuntimeContextGlobal = typeof globalThis & {
 describe("app runtime context", () => {
   const tempDirs: string[] = [];
 
-  it("injects host execution only into system actions in both main and worker loaders", async () => {
+  it("injects host execution and feedback only into system actions in both main and worker loaders", async () => {
     for (const register of [registerAppActions, registerLazyAppActions]) {
       for (const appId of ["system", "ordinary-app"]) {
         const app = resolvedApp(appId);
@@ -52,7 +52,7 @@ describe("app runtime context", () => {
 export function createAction(config, deps) {
   return {
     config,
-    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution) } }),
+    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution), hasFeedback: Boolean(deps.feedback) } }),
   };
 }
 `,
@@ -88,12 +88,13 @@ export function createAction(config, deps) {
             actionEngine: {} as ActionEngine,
             repositories: createRepositories(),
             hostExecution: new HostExecutionService({ enabled: false }),
+            feedback: { send: async () => ({ kind: "ok" }) },
           },
         );
         expect(loaded.failed).toEqual([]);
         expect(await registry.get("host_probe")?.execute({})).toEqual({
           status: "ok",
-          data: { hasHostExecution: appId === "system" },
+          data: { hasHostExecution: appId === "system", hasFeedback: appId === "system" },
         });
       }
     }
@@ -514,6 +515,51 @@ export function createApiHandler(ctx) {
     });
   });
 
+  it.each([
+    { label: "an external webhook", caller: { kind: "anonymous" }, expected: "queue" },
+    // A loopback caller can be an agent whose turn a worker drives.
+    {
+      label: "a loopback caller",
+      caller: { kind: "guardian", userId: "g", via: "loopback" },
+      expected: "fail",
+    },
+  ] as const)("an app API request from $label gets whenWorkersBusy $expected", async ({
+    caller,
+    expected,
+  }) => {
+    const apiEntryPath = join(await tempDir(), "index.js");
+    await writeFile(
+      apiEntryPath,
+      `
+export function createApiHandler(ctx) {
+  return { handle: async () => { await ctx.runAction("probe", {}); return new Response("ok"); } };
+}
+`,
+      "utf-8",
+    );
+    const run = rs.fn(async () => ({ status: "ok", data: null }));
+    const app = resolvedApp("busy-probe-app", { apiEntryPath });
+    await new AppApiDispatcher(catalogFor(app), {
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: { run } as unknown as ActionEngine,
+      repositories: createRepositories(),
+    }).dispatch(app.appId, {
+      method: "POST",
+      path: ["webhook"],
+      headers: {},
+      query: new URLSearchParams(),
+      caller,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      "probe",
+      {},
+      expect.objectContaining({ whenWorkersBusy: expected }),
+      undefined,
+      undefined,
+    );
+  });
+
   async function tempDir(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "rome-app-runtime-context-"));
     tempDirs.push(dir);
@@ -572,6 +618,33 @@ describe("runAction invocation port", () => {
 
     expect(err).toBeInstanceOf(ActionInvocationError);
     expect(err).toMatchObject({ actionName: "nope", code: "not_found" });
+  });
+
+  it.each([
+    // A shared app context also serves code a waiting worker depends on, such
+    // as turn middleware during a summon-driven turn, so it fails fast.
+    { label: "fails fast by default", option: undefined, expected: "fail" },
+    { label: "queues when built for an independent caller", option: "queue", expected: "queue" },
+  ] as const)("$label when every worker is busy", async ({ option, expected }) => {
+    const engine = new ActionEngine(new ActionRegistryImpl([]));
+    const run = rs.spyOn(engine, "run").mockResolvedValue({ status: "ok", data: null });
+    const context = createRomeAppContext(resolvedApp("invoker-app"), {
+      catalog: catalogFor(resolvedApp("invoker-app")),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: engine,
+      repositories: createRepositories(),
+      whenWorkersBusy: option,
+    });
+
+    await context.runAction("publish_event", { name: "x.y" });
+
+    expect(run).toHaveBeenCalledWith(
+      "publish_event",
+      { name: "x.y" },
+      expect.objectContaining({ initiator: "app:invoker-app", whenWorkersBusy: expected }),
+      undefined,
+      undefined,
+    );
   });
 
   it("rejects with code handler_error carrying the handler's message", async () => {

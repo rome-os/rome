@@ -4,8 +4,7 @@ import { Link } from "react-router-dom";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { Timestamp } from "@rome-os/ui/timestamp";
 import { useDocumentTitle } from "@/hooks/use-document-title";
@@ -17,7 +16,6 @@ import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 // /api/sentinel-log (triage activity), /api/connections (source overview).
 
 interface InboxSettings {
-  sentinelReviewIntervalMinutes?: number;
   trustedBondLevels?: string[];
   replyToBondLevels?: string[];
 }
@@ -266,17 +264,7 @@ function TriagePolicySection({
 }) {
   const { t } = useTranslation("inbox");
   const { t: ts } = useTranslation("settings");
-  // Keep the interval as a raw string so clearing the field doesn't coerce to 0
-  // and decimals don't silently persist; only a positive integer is saveable.
-  const savedInterval = settings.sentinelReviewIntervalMinutes ?? 60;
-  const [reviewInterval, setReviewInterval] = useState(String(savedInterval));
-  useEffect(() => {
-    setReviewInterval(String(savedInterval));
-  }, [savedInterval]);
-  const parsedInterval = Number(reviewInterval);
-  const intervalValid = Number.isInteger(parsedInterval) && parsedInterval >= 1;
-  const intervalDirty = parsedInterval !== savedInterval;
-  // Like the interval, the toggle arrays resync whenever `settings` refreshes
+  // The toggle arrays resync whenever `settings` refreshes
   // (loadAll runs again after e.g. mark-reviewed), so the policy UI can't keep
   // showing stale local state over newer server truth.
   const savedTrusted = settings.trustedBondLevels ?? DEFAULT_TRUSTED_LEVELS;
@@ -321,35 +309,6 @@ function TriagePolicySection({
       <p className="mb-6 mt-1 text-ui text-muted-foreground">{t("policy.description")}</p>
 
       <div className="space-y-8">
-        {/* Review interval */}
-        <div>
-          <h3 className="mb-2 text-section text-foreground">{ts("sentinel.title")}</h3>
-          <div className="flex items-center gap-2">
-            <FieldLabel htmlFor="sentinel-review-interval">
-              {ts("sentinel.intervalLabel")}
-            </FieldLabel>
-            <Input
-              id="sentinel-review-interval"
-              type="number"
-              min={1}
-              step={1}
-              value={reviewInterval}
-              disabled={saving}
-              onChange={(e) => setReviewInterval(e.target.value)}
-              aria-invalid={!intervalValid}
-              className="w-24"
-            />
-            <Button
-              disabled={saving || !intervalValid || !intervalDirty}
-              onClick={() => onSave({ sentinelReviewIntervalMinutes: parsedInterval })}
-              className="ml-3"
-            >
-              {saving ? ts("common.saving") : ts("common.save")}
-            </Button>
-          </div>
-          <FieldDescription className="mt-1">{ts("sentinel.intervalHelp")}</FieldDescription>
-        </div>
-
         {/* Trusted levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.trustedLevels.title")}</h3>

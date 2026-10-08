@@ -121,11 +121,12 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "anthropic",
+    // Sonnet 5.5 halved cache reads on 2026-10-07 to 0.05x the input rate.
     matchesModel: (model) => hasPrefix(model, "claude-sonnet-5-5"),
     resolveRates: (rawUsage) => ({
       inputUsdPerMillion: 2,
       outputUsdPerMillion: 10,
-      cacheReadUsdPerMillion: 0.2,
+      cacheReadUsdPerMillion: 0.1,
       cacheWriteUsdPerMillion: 2 * getAnthropicCacheWriteMultiplier(rawUsage),
     }),
   },
@@ -141,6 +142,19 @@ const PRICING_RULES: PricingRule[] = [
       outputUsdPerMillion: 15,
       cacheReadUsdPerMillion: 0.3,
       cacheWriteUsdPerMillion: 3 * getAnthropicCacheWriteMultiplier(rawUsage),
+    }),
+  },
+  {
+    provider: "anthropic",
+    // Haiku 5.5 bills 5x these rates when a single request's prompt exceeds
+    // 100K tokens. Run usage sums every request, so the per-request prompt
+    // size is unknown here and this rule prices the run at the base tier.
+    matchesModel: (model) => hasPrefix(model, "claude-haiku-5-5"),
+    resolveRates: (rawUsage) => ({
+      inputUsdPerMillion: 0.1,
+      outputUsdPerMillion: 0.5,
+      cacheReadUsdPerMillion: 0.01,
+      cacheWriteUsdPerMillion: 0.1 * getAnthropicCacheWriteMultiplier(rawUsage),
     }),
   },
   {

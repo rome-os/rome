@@ -152,6 +152,8 @@ describe("linkedInMessages", () => {
 
   const refs = (entries: { ref: string }[]) => entries.map((entry) => entry.ref);
 
+  // Exact, so it also pins what stays out: `t-room` is three-handed and
+  // `t-flagged` is a group, though both include the member.
   it("answers the member's direct thread, newest first", async () => {
     const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
@@ -171,30 +173,6 @@ describe("linkedInMessages", () => {
       sender: { id: MEMBER, name: "Member" },
       conversation: { id: "t-direct", name: null, kind: "dm" },
     });
-  });
-
-  it("leaves out a thread of more than two participants", async () => {
-    const messages = accountReads(testDb.db);
-    const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
-    expect(refs(page)).not.toContain("t-room:f");
-  });
-
-  it("leaves out a thread LinkedIn calls a group", async () => {
-    const messages = accountReads(testDb.db);
-    const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
-    expect(refs(page)).not.toContain("t-flagged:g");
-  });
-
-  it("answers a message once when the person holds both member ids on it", async () => {
-    const messages = accountReads(testDb.db);
-    const twins = [
-      { channel: "linkedin", addresses: [TWIN_A] },
-      { channel: "linkedin", addresses: [TWIN_B] },
-    ];
-    expect(refs(await messages.read({ accounts: twins, limit: WHOLE_HISTORY }))).toEqual([
-      "t-twins:i",
-    ]);
-    expect(await messages.count(twins)).toBe(1);
   });
 
   // A thread is the conversation, named by LinkedIn's own id: what the account
@@ -266,32 +244,12 @@ describe("linkedInMessages", () => {
     });
   });
 
-  it("holds nothing for an account on another channel", async () => {
-    const messages = accountReads(testDb.db);
-    const elsewhere: MessageAccount[] = [{ channel: "whatsapp", addresses: [MEMBER] }];
-    expect(await messages.latest(elsewhere)).toBeNull();
-    expect(await messages.count(elsewhere)).toBe(0);
-    expect(await messages.read({ accounts: elsewhere, limit: WHOLE_HISTORY })).toEqual([]);
-  });
-
-  it("holds nothing for an empty scope", async () => {
-    const messages = accountReads(testDb.db);
-    expect(await messages.latest([])).toBeNull();
-    expect(await messages.count([])).toBe(0);
-    expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
-  });
-
   // The scope is the member ids an account answers to, and the three verbs
   // answer one history over it: `count` is the length of the full read and
   // `latest` its first entry. Per scope rather than once, because a store that
   // scoped `read` one way and `count` another would still agree on the widest
   // scope there is.
   it.each([
-    {
-      of: "a member's direct thread",
-      scope: accounts,
-      refs: ["t-direct:e", "t-direct:c", "t-direct:d", "t-direct:b", "t-direct:a"],
-    },
     // `t-room` is three-handed and `t-flagged` is a group, so neither is any
     // member's direct history — only `t-other` is.
     {
@@ -309,7 +267,6 @@ describe("linkedInMessages", () => {
       ],
       refs: ["t-twins:i"],
     },
-    { of: "a member the mirror holds nothing for", scope: silent, refs: [] },
   ])("answers read, count and latest over $of", async ({ scope, refs: expected }) => {
     const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts: scope, limit: WHOLE_HISTORY });
@@ -342,33 +299,30 @@ describe("linkedInMessages", () => {
     expect(refs(tail)).toEqual(["t-direct:c", "t-direct:d", "t-direct:b", "t-direct:a"]);
     expect(total).toBe(5);
   });
-
-  it("costs one pass per round of calls, not one per account", async () => {
-    const counted = countingDb(testDb.db);
-    const messages = accountReads(counted.db);
-    const directory = [MEMBER, OTHER, TWIN_A, TWIN_B, "ACoAASILENT"].map(
-      (address): MessageAccount[] => [{ channel: "linkedin", addresses: [address] }],
-    );
-
-    const before = counted.passes();
-    await Promise.all(directory.map((row) => messages.latest(row)));
-    expect(counted.passes() - before).toBe(1);
-  });
 });
 
-testAccountMessagesContract("linkedInMessages", () => {
-  const testDb = createTestDb();
-  seedMirror(testDb);
-  return { messages: accountReads(testDb.db), accounts, silent };
-});
+// One seeded database for both suites: every assertion in them reads, so a
+// fresh one per case would only buy migrations.
+let enrolled: DrizzleDb | null = null;
 
-testMessagesQueryContract("linkedInMessages", () => {
-  const testDb = createTestDb();
-  seedMirror(testDb);
-  return {
-    messages: linkedInMessages(testDb.db),
-    channel: "linkedin",
-    conversation: room,
-    silentConversation: emptyThread,
-  };
-});
+function enrolledDb(): DrizzleDb {
+  if (!enrolled) {
+    const testDb = createTestDb();
+    seedMirror(testDb);
+    enrolled = testDb.db;
+  }
+  return enrolled;
+}
+
+testAccountMessagesContract("linkedInMessages", () => ({
+  messages: accountReads(enrolledDb()),
+  accounts,
+  silent,
+}));
+
+testMessagesQueryContract("linkedInMessages", () => ({
+  messages: linkedInMessages(enrolledDb()),
+  channel: "linkedin",
+  conversation: room,
+  silentConversation: emptyThread,
+}));

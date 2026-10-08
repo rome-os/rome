@@ -66,10 +66,7 @@ export function ToolCallView({
           aria-hidden="true"
           className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(status, live)}`}
         />
-        <span
-          className="flex-none font-mono text-aux text-foreground"
-          title={toolLabel === rawToolLabel ? undefined : rawToolLabel}
-        >
+        <span className="min-w-0 truncate font-mono text-aux text-foreground" title={rawToolLabel}>
           {toolLabel}
         </span>
         {summary && (

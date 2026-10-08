@@ -170,11 +170,25 @@ media:
   - type: image
     path: assets/dashboard.png
     alt: Morning Brief dashboard
+  - type: video
+    path: assets/demo.mp4
+    poster: assets/demo-poster.png
+    alt: Morning Brief demo
 noindex: false
 ```
 
 Store asset paths are relative to `.rome_store/`, so the example above expects
-files under `.rome_store/assets/`.
+files under `.rome_store/assets/`. Rome Cloud's
+[submission rules](https://romeos.cc/docs/building-apps/app-store-submission)
+set these limits:
+
+- The packed `.rome_store` directory must stay under 30 MB, or Rome Cloud
+  rejects the whole publish. Plan for one short demo video, not several.
+- `media` holds up to 8 entries. Images may be PNG, JPEG, or WebP up to 2 MB.
+  Videos may be MP4, WebM, or MOV up to 25 MB, and a video's optional `poster`
+  must point at an image.
+- A single asset over its limit or in another format still publishes, but the
+  store page leaves it out.
 
 ### `action.yaml`
 
@@ -564,6 +578,9 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   public app any surviving header is attacker-controlled. In the web UI,
   `useCaller()` / `getCaller()` from `@rome-os/app-web-sdk` return the same
   identity for UI gating only; enforcement belongs in the API handler.
+  For per-visitor private data, quotas, or favor charges
+  (`favorRequirement` + `ctx.favors.requestAction`), follow
+  [`PAID_APPS.md`](./PAID_APPS.md).
 - `RomeAppContext` — handler-injected context; common fields: `ctx.app.id`,
   `ctx.app.version`, `ctx.log`, `ctx.runAction`, `ctx.db`,
   `ctx.repositories`.
@@ -1217,12 +1234,53 @@ Hook directory layout:
 
 ```
 src/hooks/<name>/
-├── hook.yaml      # Declares the hook type and trigger conditions
 └── index.ts       # Implementation: export function createHook(deps): Hook
 ```
 
-The exact shape varies by hook type. See the community sample repo for an
-inbox-style channel hook.
+The directory name is the hook type, and `app.yaml` lists the directory
+under `hooks:`. The hook types are `channel-message`, `agent-turn-started`,
+`agent-turn-finished`, `turn-middleware`, and `app-started`. Each type's
+`createHook` deps and hook interface are exported from
+`@rome-os/app-runtime`. See the community sample repo for an inbox-style
+channel hook.
+
+### Setting up on start: `app-started`
+
+Use an `app-started` hook for state the app must always have, such as a
+routine that has to exist for the app to work. Rome calls `onAppStarted` at
+boot for every enabled app and after each install, upgrade, or re-enable,
+once boot has finished. Nothing waits for it, and a throw is logged, not
+retried. Every boot calls it again, so check before you create:
+
+```ts
+// src/hooks/app-started/index.ts
+import type { AppStartedHook, AppStartedHookDeps } from "@rome-os/app-runtime";
+
+export function createHook(deps: AppStartedHookDeps): AppStartedHook {
+  return {
+    async onAppStarted() {
+      const routines = await deps.appContext.listRoutines();
+      if (routines.some((routine) => routine.name === "nightly-sync")) return;
+      const result = await deps.appContext.runAction("system:create_routine", {
+        name: "nightly-sync",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "floating", // 02:00 in the guardian's timezone
+          localTime: "02:00",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: "my-app:sync",
+        args: {},
+      });
+      if (result.status === "error") throw new Error(result.error);
+    },
+  };
+}
+```
+
+A routine the user asks for belongs to the action or API that handles the
+request, not to this hook.
 
 ---
 

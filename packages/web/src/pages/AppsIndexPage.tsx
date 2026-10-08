@@ -88,7 +88,7 @@ function AppTile({
   caption,
 }: AppTileProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  // Whether the one-line name label is actually clipped ("Competitor …").
+  // Whether the two-line name label is actually clipped ("Competitor Analysis …").
   // Measured lazily right before the tooltip could open (cover pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
   // moment, and hover-time measurement stays correct across grid reflows for
@@ -106,7 +106,7 @@ function AppTile({
 
   const syncNameClipped = () => {
     const el = nameRef.current;
-    setNameClipped(el !== null && el.scrollWidth > el.clientWidth);
+    setNameClipped(el !== null && el.scrollHeight > el.clientHeight);
   };
 
   return (
@@ -151,7 +151,10 @@ function AppTile({
       </Tooltip>
 
       <div className="relative">{icon}</div>
-      <span ref={nameRef} className="mt-2 w-full truncate text-center text-ui text-foreground">
+      <span
+        ref={nameRef}
+        className="mt-2 line-clamp-2 w-full break-words text-center text-ui text-foreground"
+      >
         {name}
       </span>
       {caption ? (
@@ -247,7 +250,7 @@ function GhostTile({ icon, label, onClick }: GhostTileProps) {
       >
         {icon}
       </span>
-      <span className="mt-2 w-full truncate text-center text-ui font-medium text-primary">
+      <span className="mt-2 line-clamp-2 w-full break-words text-center text-ui font-medium text-primary">
         {label}
       </span>
     </button>

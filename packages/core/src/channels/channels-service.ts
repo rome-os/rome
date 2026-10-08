@@ -19,28 +19,42 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { chooseConnection, connectionRefusalMessage } from "@rome-os/app-runtime";
-import type { TalkRouter } from "../connections/types.js";
+import { requireTalk, type ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "./channel.js";
-import { readTalkHistory } from "./talk-history.js";
 
 export interface ChannelsServiceDeps {
   /** The channel list, or undefined until it is built. It is built after the
    *  services that hand this one out, and until then `list` names only the
    *  channels a Connection backs, `send` works, and nothing reads messages. */
   channels: () => Channels | undefined;
-  /** The Connections that back sending and live history. */
-  router: Pick<TalkRouter, "list" | "send" | "feature">;
+  /** The Connections that back sending. */
+  registry: Pick<ConnectionRegistry, "all" | "get">;
+}
+
+/** The `query` a deprecated `history` read makes. `history` answers the same
+ *  page oldest first, and the Connection it names is not consulted: the
+ *  channel's `messages` answers for whichever Connection backs it. */
+export function historyQuery(input: ChannelHistoryRead): ChannelMessageQuery {
+  return {
+    ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(input.since ? { since: input.since } : {}),
+    ...(input.limit ? { limit: input.limit } : {}),
+  };
 }
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
 
+  /** Every Connection that can talk, whether or not it is unlocked now. */
+  const talking = () =>
+    deps.registry.all().filter((connection) => connection.status().talk.state !== "unsupported");
+
   /** The Connection an action means: the one it names, which must back the
    *  channel, or else the only one that does. */
   async function connectionFor(channel: string, requested?: string): Promise<string> {
-    const backing = (await deps.router.list())
+    const backing = talking()
       .filter((connection) => connection.service === channel)
-      .map((connection) => connection.connectionId);
+      .map((connection) => connection.id);
     const choice = chooseConnection(backing, requested);
     if ("refused" in choice) {
       throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
@@ -48,12 +62,18 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     return choice.connectionId;
   }
 
+  async function query(channel: string, read: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
+    const messages = find(channel)?.messages;
+    if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
+    return messages.query(read);
+  }
+
   return {
     async list(): Promise<ChannelSummary[]> {
       const summaries = new Map<string, ChannelSummary>();
-      for (const { connectionId, service } of await deps.router.list()) {
+      for (const { id, service } of talking()) {
         const summary = summaries.get(service) ?? { name: service, connectionIds: [] };
-        summary.connectionIds.push(connectionId);
+        summary.connectionIds.push(id);
         summaries.set(service, summary);
       }
       for (const channel of deps.channels() ?? []) {
@@ -71,29 +91,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       options?: { connectionId?: string },
     ): Promise<MessageReceipt> {
       const connectionId = await connectionFor(channel, options?.connectionId);
-      return deps.router.send(connectionId, conversationId, message);
+      return requireTalk(deps.registry.get(connectionId)).send(conversationId, message);
     },
 
-    async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
-      const messages = find(channel)?.messages;
-      if (!messages) throw new Error(`Channel "${channel}" reads no messages`);
-      return messages.query(query);
-    },
+    query,
 
+    /** @deprecated Use `query`. */
     async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-      const connectionId = await connectionFor(channel, input.connectionId);
-      return readTalkHistory(
-        {
-          channel: find(channel),
-          connectionHistory: deps.router.feature(connectionId, "history"),
-        },
-        connectionId,
-        {
-          ...(input.conversationId ? { conversationId: input.conversationId } : {}),
-          ...(input.since ? { since: input.since } : {}),
-          ...(input.limit ? { limit: input.limit } : {}),
-        },
-      );
+      return (await query(channel, historyQuery(input))).reverse();
     },
   };
 }

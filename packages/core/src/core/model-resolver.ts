@@ -117,13 +117,13 @@ export interface CreateModelResolverOptions {
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
-  small: "claude-haiku-4-5-20251001",
+  small: "claude-haiku-5-5",
 };
 
 const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
-  small: "claude-haiku-4-5-20251001",
+  small: "claude-haiku-5-5",
 };
 
 export const ROME_CREDITS_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -145,7 +145,7 @@ function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
   if (tier === "large") return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
   if (tier === "small") return state.lunaAccess ? "gpt-6-luna" : "gpt-5.6-terra";
-  return "gpt-5.6-terra";
+  return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
 }
 
 function claudeModel(tier: ModelTier, enableFable: boolean): string {

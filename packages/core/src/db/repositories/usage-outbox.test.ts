@@ -9,6 +9,7 @@ function run(eventId: string, status: ActionRunUsageEvent["status"] = "success")
     eventId,
     kind: "routine",
     appId: null,
+    trigger: "schedule",
     status,
     durationMs: 10,
     occurredAt: "2026-10-06T12:00:00.000Z",
@@ -33,7 +34,12 @@ describe("UsageOutboxRepository", () => {
     await repo.enqueue(run("a", "error"), "cred-a");
     await repo.enqueue(run("b"), "cred-a");
     const queued = await repo.peek("cred-a", 10);
-    expect(queued.map((entry) => [entry.event.eventId, entry.event.status])).toEqual([
+    expect(
+      queued.map((entry) => [
+        entry.event.eventId,
+        entry.event.type === "action_run" ? entry.event.status : null,
+      ]),
+    ).toEqual([
       ["a", "success"],
       ["b", "success"],
     ]);

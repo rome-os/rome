@@ -8,8 +8,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { wrapHookSpan } from "./telemetry.js";
 import { MockProviderAdapter, buildMessage } from "./test/helpers.js";
-import type { ProviderAdapter } from "./channels/adapter.js";
-import type { NormalizedMessage } from "./channels/types.js";
+import type { NormalizedMessage } from "./types.js";
 
 /**
  * Apply the same handler wrapping `packages/core/src/index.ts` performs at
@@ -18,7 +17,7 @@ import type { NormalizedMessage } from "./channels/types.js";
  * the full startup path.
  */
 function instrumentAdaptersWithChannelMessageSpan(
-  channelPorts: Map<string, ProviderAdapter>,
+  channelPorts: Map<string, MockProviderAdapter>,
 ): void {
   for (const [name, adapter] of channelPorts) {
     const originalOnMessage = adapter.onMessage.bind(adapter);
@@ -60,7 +59,7 @@ describe("hook:channel-message span instrumentation", () => {
 
   it("emits one hook:channel-message span per handler invocation", async () => {
     const adapter = new MockProviderAdapter("telegram");
-    const adapters = new Map<string, ProviderAdapter>([["telegram", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["telegram", adapter]]);
 
     // Simulate the hook: register a handler after instrumentation.
     instrumentAdaptersWithChannelMessageSpan(adapters);
@@ -89,7 +88,7 @@ describe("hook:channel-message span instrumentation", () => {
   it("labels channel.name per adapter", async () => {
     const telegram = new MockProviderAdapter("telegram");
     const webchat = new MockProviderAdapter("webchat");
-    const adapters = new Map<string, ProviderAdapter>([
+    const adapters = new Map<string, MockProviderAdapter>([
       ["telegram", telegram],
       ["webchat", webchat],
     ]);
@@ -108,7 +107,7 @@ describe("hook:channel-message span instrumentation", () => {
 
   it("records exceptions and still ends the span when the handler throws", async () => {
     const adapter = new MockProviderAdapter("discord");
-    const adapters = new Map<string, ProviderAdapter>([["discord", adapter]]);
+    const adapters = new Map<string, MockProviderAdapter>([["discord", adapter]]);
 
     instrumentAdaptersWithChannelMessageSpan(adapters);
 

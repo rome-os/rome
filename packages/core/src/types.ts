@@ -124,7 +124,6 @@ export interface PolicyRule {
 }
 
 export interface Settings {
-  sentinelReviewIntervalMinutes: number;
   trustedBondLevels: string[];
   replyToBondLevels: string[];
   database: {

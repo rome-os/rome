@@ -11,7 +11,12 @@
 //
 // All factories produce plain objects — no singletons, safe to call per test.
 
-import type { Attachment, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type {
+  ChannelMessage,
+  Attachment,
+  ConversationId,
+  MessageReceipt,
+} from "@rome-os/app-runtime";
 import { CredentialRejected, Disconnected } from "./errors.js";
 import type {
   Actor,
@@ -20,7 +25,6 @@ import type {
   Credential,
   GrantCustody,
   GrantName,
-  InboundMessage,
   OperationCall,
   OperationResult,
   OutgoingMessage,
@@ -56,7 +60,7 @@ export function makeRecordingSleep(): RecordingSleep {
 
 export interface FakeTalkerState {
   /** The `deliver` callback passed to start(). Null until start() is called. */
-  deliver: ((msg: InboundMessage) => void) | null;
+  deliver: ((msg: ChannelMessage) => void) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
   fault: ((err: CredentialRejected | Disconnected) => void) | null;
   /** Every start() call is recorded here as the creds snapshot at the time. */
@@ -69,7 +73,7 @@ export interface FakeTalkerState {
    *  callback before returning — models a Talker flushing buffered inbound on
    *  start. Used to prove onUnlocked fires before start() so a handler registered
    *  synchronously in the callback catches the first delivery. */
-  flushOnStart: InboundMessage[] | null;
+  flushOnStart: ChannelMessage[] | null;
   /** Number of stop() drains awaited to completion. */
   stopResolved: number;
 }
@@ -135,7 +139,6 @@ export function makeFakeTalker(
         conversationId: address,
       } satisfies MessageReceipt;
     },
-    feature: () => null,
   };
 
   return talker;
@@ -336,11 +339,13 @@ export function makeFakeRenewableScheme(opts?: {
   return scheme;
 }
 
-// Helpers for building InboundMessage / WatchEvent in tests
+// Helpers for building ChannelMessage / WatchEvent in tests
 
-export function makeInboundMessage(overrides?: Partial<InboundMessage>): InboundMessage {
+export function makeInboundMessage(overrides?: Partial<ChannelMessage>): ChannelMessage {
   const attachments: Attachment[] = [];
   return {
+    channel: "test",
+    direction: "inbound",
     messageId: "msg-1",
     conversationId: "thread-1" as ConversationId,
     senderId: "sender-1",

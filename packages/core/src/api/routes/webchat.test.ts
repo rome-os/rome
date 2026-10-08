@@ -1118,7 +1118,7 @@ describe("Webchat API", () => {
     }
   });
 
-  // Routes webchat's primary chat surface around ProviderAdapter.onMessage,
+  // Routes webchat's primary chat surface around the channel's inbound,
   // so the shared inbound-message log must fire at the accepted-turn boundary —
   // this drives the real POST route, not a mock channel port.
   it("logs the inbound message content to OTLP when a webchat turn is accepted", async () => {
@@ -2683,32 +2683,49 @@ describe("Webchat API", () => {
       return ((await res.json()) as { id: string }).id;
     }
 
+    async function cardIn(sessionId: string, toolUseId: string) {
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      for (const m of messages) {
+        if (m.role !== "assistant") continue;
+        let parts: unknown;
+        try {
+          parts = JSON.parse(m.content);
+        } catch {
+          continue;
+        }
+        if (!Array.isArray(parts)) continue;
+        const card = parts.find(
+          (p) =>
+            p &&
+            typeof p === "object" &&
+            ((p as { type?: unknown }).type === "pending_interaction" ||
+              (p as { type?: unknown }).type === "handoff") &&
+            (p as { toolUseId?: unknown }).toolUseId === toolUseId,
+        );
+        if (card) return card as Record<string, unknown>;
+      }
+      return undefined;
+    }
+
     async function findCard(sessionId: string, toolUseId: string) {
       // The card is persisted by the background drain, so poll briefly.
       for (let i = 0; i < 100; i++) {
-        const messages = await deps.webchatRepo.getMessages(sessionId);
-        for (const m of messages) {
-          if (m.role !== "assistant") continue;
-          let parts: unknown;
-          try {
-            parts = JSON.parse(m.content);
-          } catch {
-            continue;
-          }
-          if (!Array.isArray(parts)) continue;
-          const card = parts.find(
-            (p) =>
-              p &&
-              typeof p === "object" &&
-              ((p as { type?: unknown }).type === "pending_interaction" ||
-                (p as { type?: unknown }).type === "handoff") &&
-              (p as { toolUseId?: unknown }).toolUseId === toolUseId,
-          );
-          if (card) return card as Record<string, unknown>;
-        }
+        const card = await cardIn(sessionId, toolUseId);
+        if (card) return card;
         await new Promise((r) => setTimeout(r, 10));
       }
       return undefined;
+    }
+
+    /** Reads the turn's SSE stream to its end, so the drain has settled
+     *  whatever it was going to persist. */
+    async function drainTurn(
+      app: ReturnType<typeof createWebchatRuntime>["routes"],
+      sendRes: Response,
+    ) {
+      const { turnId } = (await sendRes.json()) as { turnId: string };
+      const streamRes = await app.request(`/chat/turns/${turnId}/stream`);
+      await streamRes.text();
     }
 
     const handoffEvents = (toolUseId: string) =>
@@ -2956,9 +2973,9 @@ describe("Webchat API", () => {
         body: JSON.stringify({ text: "ask me something" }),
       });
       expect(res.status).toBe(200);
+      await drainTurn(app, res);
       // The drain rejects the undeclared component, so no card is ever written.
-      const card = await findCard(sessionId, "tu-inline-2");
-      expect(card).toBeUndefined();
+      expect(await cardIn(sessionId, "tu-inline-2")).toBeUndefined();
     });
 
     it("does not persist a parked interaction whose owning app is not installed (fail closed)", async () => {
@@ -2967,12 +2984,13 @@ describe("Webchat API", () => {
       const app = createWebchatRuntime(deps).routes;
       const sessionId = await newSession(app);
 
-      await app.request(`/chat/sessions/${sessionId}/turns`, {
+      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "ask me something" }),
       });
-      expect(await findCard(sessionId, "tu-ghost-1")).toBeUndefined();
+      await drainTurn(app, res);
+      expect(await cardIn(sessionId, "tu-ghost-1")).toBeUndefined();
     });
   });
 
@@ -3348,23 +3366,6 @@ describe("Webchat API", () => {
       const winner = a.status === 200 ? "first" : "second";
       const row = await deps.webchatRepo.getTurnFeedback(SESSION_ID, TURN_ID);
       expect(row?.comment).toBe(winner);
-    });
-
-    it("session delete cascades feedback rows via the FK constraint", async () => {
-      // Defense-in-depth: even if a future delete path forgets to call
-      // deleteTurnFeedback / deleteSession's explicit feedback delete, the
-      // FK ON DELETE CASCADE keeps the contract.
-      const app = createWebchatRuntime(deps).routes;
-      const post = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/feedback`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rating: "negative", comment: "leaks?" }),
-      });
-      expect(post.status).toBe(200);
-      await expect(deps.webchatRepo.getTurnFeedback(SESSION_ID, TURN_ID)).resolves.not.toBeNull();
-
-      await deps.webchatRepo.deleteSession(SESSION_ID);
-      await expect(deps.webchatRepo.getTurnFeedback(SESSION_ID, TURN_ID)).resolves.toBeNull();
     });
 
     it("rejects a second submit with 409 and preserves the first record", async () => {

@@ -38,13 +38,13 @@ function resolver(
 }
 
 describe("ModelResolver", () => {
-  it("maps Codex tiers through Sol, Terra, and Luna", async () => {
+  it("maps Codex tiers through Sol and Luna", async () => {
     await expect(resolver().getModelProvider({ tier: "large" })).resolves.toMatchObject({
       modelProvider: codex,
       model: "gpt-6.1-sol",
     });
     await expect(resolver().getModelProvider({ tier: "medium" })).resolves.toMatchObject({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     });
     await expect(resolver().getModelProvider({ tier: "small" })).resolves.toMatchObject({
       model: "gpt-6-luna",
@@ -116,7 +116,7 @@ describe("ModelResolver", () => {
     });
   });
 
-  it("falls back from unavailable Sol/Luna to Terra", async () => {
+  it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {
     const r = resolver({
       codex: {
         loggedIn: true,
@@ -126,6 +126,9 @@ describe("ModelResolver", () => {
       },
     });
     await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      model: "gpt-5.6-terra",
+    });
+    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
       model: "gpt-5.6-terra",
     });
     await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
@@ -232,7 +235,7 @@ describe("ModelResolver", () => {
     });
     await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
       modelProvider: codex,
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
     });
   });
 
@@ -299,7 +302,7 @@ describe("ModelResolver", () => {
       resolver().getModelProvider({ tier: "small", providerId: "anthropic" }),
     ).resolves.toMatchObject({
       modelProvider: claude,
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-haiku-5-5",
     });
   });
 

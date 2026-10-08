@@ -91,16 +91,15 @@ export function flattenVisibleTreePaths(nodes: TreeNode[], expandedPaths: Set<st
   });
 }
 
+/**
+ * Drops duplicates and any path nested under another path in the list. The
+ * survivors keep their input order, so a tree-ordered selection stays in tree
+ * order.
+ */
 export function getTopLevelActionPaths(paths: string[]): string[] {
-  const sortedPaths = Array.from(new Set(paths)).sort((a, b) => {
-    const depthDelta = a.split("/").length - b.split("/").length;
-    return depthDelta === 0 ? a.localeCompare(b) : depthDelta;
-  });
-  const topLevelPaths: string[] = [];
-  for (const path of sortedPaths) {
-    if (!topLevelPaths.some((parentPath) => isPathWithin(path, parentPath))) {
-      topLevelPaths.push(path);
-    }
-  }
-  return topLevelPaths;
+  const uniquePaths = Array.from(new Set(paths));
+  return uniquePaths.filter(
+    (path) =>
+      !uniquePaths.some((parentPath) => parentPath !== path && isPathWithin(path, parentPath)),
+  );
 }

@@ -88,8 +88,9 @@ export const CLAUDE_AGENT_SDK_ENV = {
   CLAUDE_CODE_ENABLE_TASKS: "false",
 } as const;
 
+// Rome's efforts are a subset of Claude's, so Ultrathink (`xhigh`) maps to
+// Claude's `xhigh`, not `max`.
 function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
-  if (effort === "xhigh") return "max";
   return effort ?? DEFAULT_REASONING_EFFORT;
 }
 
@@ -503,7 +504,7 @@ export class AnthropicProvider implements ModelProvider {
       systemPrompt,
       subagentTools,
       handback,
-      maxTurns = 500,
+      maxTurns = 1000,
       executeAction,
       executeSubagent,
       executeSubmitOutput,

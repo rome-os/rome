@@ -1,5 +1,5 @@
 import type { ComponentType, SVGProps } from "react";
-import { Blocks, Mail } from "lucide-react";
+import { Blocks, Bot, Mail } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
@@ -269,6 +269,19 @@ export function ConnectionBrandBadge({
         aria-hidden
       >
         <Mail className="h-5 w-5" />
+      </div>
+    );
+  }
+  if (connection === "agents") {
+    return (
+      <div
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-primary/15 text-primary",
+          className,
+        )}
+        aria-hidden
+      >
+        <Bot className="h-5 w-5" />
       </div>
     );
   }

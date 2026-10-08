@@ -252,6 +252,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       }
 
       const session = createGuardianSession(identity.accountId);
+      deps.loginUsage.recordLogin("rome_cloud_native");
       return c.json({
         cookie_name: COOKIE_NAME,
         session_token: session.token,
@@ -477,12 +478,14 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (!guardian.exists) {
       await createGuardianSeat(identity);
       issueGuardianSession(c, identity.accountId);
+      deps.loginUsage.recordLogin("rome_cloud");
       log.info("cloud login created the guardian seat and signed in", {
         accountId: identity.accountId,
       });
       return c.redirect(WELCOME_PATH);
     }
     issueGuardianSession(c, identity.accountId);
+    deps.loginUsage.recordLogin("rome_cloud");
     log.info("cloud login signed in", { accountId: identity.accountId });
     return c.redirect(successRedirect());
   }

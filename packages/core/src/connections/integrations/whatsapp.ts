@@ -2,9 +2,11 @@
 //
 // WhatsApp is a Talker with a single `session` grant: a linked-device session
 // (Baileys auth state) that comes from entering a pairing code on the phone. The
-// transport core — normalization, address-book sync, media download, the
-// generation-gated reconnect loop — is the existing `WhatsAppAdapter`
-// (packages/core/src/channels/whatsapp.ts), wrapped here.
+// transport core — the inbound `ChannelMessage`, address-book sync, media
+// download, the generation-gated reconnect loop — is `WhatsAppAdapter`
+// (packages/core/src/channels/whatsapp.ts), wrapped here. The transport already
+// speaks the channel's record, so inbound and send pass through without a
+// projection.
 //
 // Two things make WhatsApp the hard channel:
 //   1. Custody. Baileys rotates signal keys constantly and must persist them or
@@ -24,7 +26,7 @@
 // → CredentialRejected{ grant: "session" }; any other terminal → Disconnected.
 
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -46,12 +48,7 @@ import {
   readWhatsAppAuthStateFromDirectory,
   type WhatsAppAuthMaterial,
 } from "./whatsapp-auth-state.js";
-import {
-  addressIsConversationFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { addressIsConversationFeature } from "./talk-features.js";
 
 /** Runtime deps the WhatsApp adapter needs that `kit` cannot supply: the
  *  address-book store mirror and the guardian auto-map callback. Threaded in at
@@ -320,10 +317,18 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             );
           });
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            // A WhatsApp direct chat is addressed by the contact's own JID,
+            // so the address is already the conversation.
+            directMessaging: addressIsConversationFeature(),
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() awaits the socket build; a fatal build error surfaces as
               // Disconnected (transient reconnect owns recoverable failures).
               adapter.start().catch((err) => fault(new Disconnected(err)));
@@ -335,20 +340,9 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
               await auth.flush();
             },
             async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                // A WhatsApp direct chat is addressed by the contact's own JID,
-                // so the address is already the conversation.
-                directMessaging: addressIsConversationFeature(),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

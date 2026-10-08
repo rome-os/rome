@@ -299,11 +299,11 @@ describe("wechatUserAccounts", () => {
 });
 
 /**
- * A reader that answers `messages` the way the helper does: every conversation
+ * A reader that answers `messages` the way the real one does: every conversation
  * unless one is named, at or after `since`, the newest `limit` of them, oldest
  * first.
  */
-function helperOrderReader(rows: WechatUserMessage[]): WechatUserReader {
+function readerOrderReader(rows: WechatUserMessage[]): WechatUserReader {
   return {
     async messages(input: { conversationId?: string; since?: Date; limit: number }) {
       const since = input.since ? Math.floor(input.since.getTime() / 1000) : null;
@@ -319,7 +319,7 @@ function helperOrderReader(rows: WechatUserMessage[]): WechatUserReader {
 describe("wechatUserMessages query order", () => {
   it("answers same-second messages newest first", async () => {
     const store = wechatUserMessages(
-      helperOrderReader([
+      readerOrderReader([
         msg({ id: "wxid_a:1", timestamp: 1000, text: "first" }),
         msg({ id: "wxid_a:2", timestamp: 1000, text: "second" }),
       ]),
@@ -331,7 +331,7 @@ describe("wechatUserMessages query order", () => {
 
 testMessagesQueryContract("wechatUserMessages", () => ({
   messages: wechatUserMessages(
-    helperOrderReader([
+    readerOrderReader([
       msg({
         id: "room@chatroom:1",
         conversationId: "room@chatroom",

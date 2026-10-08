@@ -19,6 +19,7 @@ import { credentialFromBundle, grantProfileFromBundle } from "../providers-impor
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
+import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "./feishu.js";
@@ -38,6 +39,7 @@ export { createWechatDescriptor } from "./wechat.js";
 export { createWechatUserDescriptor, WECHAT_USER_SERVICE } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
+export { makeAgentsDescriptor } from "./agents.js";
 export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
@@ -128,6 +130,9 @@ export function registerBuiltinConnections(
     }),
   );
   registry.register(makeWebchatDescriptor({ webchatRepo: deps.webchatRepo }));
+  // Messages with other agents in the Rome Cloud account (dots). Offered on
+  // every instance; it does nothing until the guardian connects it.
+  registry.register(makeAgentsDescriptor());
   registry.register(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,

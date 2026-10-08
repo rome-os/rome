@@ -6,7 +6,8 @@ import type {
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import type { Channels } from "./channel.js";
-import { createChannelsService } from "./channels-service.js";
+import { createChannelsService, type ChannelsServiceDeps } from "./channels-service.js";
+import type { Connection } from "../connections/types.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It chooses the Connection itself.
@@ -32,15 +33,40 @@ function line(id: string, at: number): ChannelMessage {
 
 const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ConversationId };
 
-type Feature = (connectionId: string, name: string) => unknown;
+/** A registry holding `connections`, each with a Talk that sends through
+ *  `send`, told which Connection is sending. */
+function registryOf(
+  connections: Array<{ connectionId: string; service: string }>,
+  send: (...args: never[]) => unknown,
+): ChannelsServiceDeps["registry"] {
+  const all = connections.map(({ connectionId, service }) => {
+    const talk = {
+      send: (...args: unknown[]) => (send as (...a: unknown[]) => unknown)(connectionId, ...args),
+    };
+    return {
+      id: connectionId,
+      service,
+      talk,
+      status: () => ({ talk: { state: "unlocked" } }),
+    } as unknown as Connection;
+  });
+  return {
+    all: () => all,
+    get: (id) => {
+      const connection = all.find((each) => each.id === id);
+      if (!connection) throw new Error(`unknown connection "${id}"`);
+      return connection;
+    },
+  };
+}
 
-function service(channels: unknown[] = [], feature = rs.fn<Feature>(() => null)) {
+function service(channels: unknown[] = []) {
   const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
   const channelsService = createChannelsService({
     channels: () => channels as Channels,
-    router: { list: async () => CONNECTIONS, send, feature: feature as never },
+    registry: registryOf(CONNECTIONS, send),
   });
-  return { channelsService, send, feature };
+  return { channelsService, send };
 }
 
 describe("createChannelsService", () => {
@@ -63,7 +89,7 @@ describe("createChannelsService", () => {
     const send = rs.fn<ChannelsService["send"]>(async () => RECEIPT);
     const early = createChannelsService({
       channels: () => undefined,
-      router: { list: async () => CONNECTIONS, send, feature: rs.fn(() => null) as never },
+      registry: registryOf(CONNECTIONS, send),
     });
 
     expect((await early.list()).map((channel) => channel.name)).toEqual([
@@ -131,42 +157,25 @@ describe("createChannelsService", () => {
     );
   });
 
-  it("reads history from the chosen Connection for a channel with no store", async () => {
-    const history = { query: rs.fn(async () => [line("live", 1_000)]) };
-    const feature = rs.fn<Feature>(() => history);
-    const { channelsService } = service([{ name: "telegram_user", messages: null }], feature);
-    const since = new Date(0);
-
-    const page = await channelsService.history("telegram_user", {
-      connectionId: "tg-b",
-      conversationId: "c1" as ConversationId,
-      since,
-    });
-
-    expect(page.map((m) => m.messageId)).toEqual(["live"]);
-    expect(feature).toHaveBeenCalledWith("tg-b", "history");
-    expect(history.query).toHaveBeenCalledWith({ conversationId: "c1", since });
-  });
-
-  it("reads history from a store oldest first", async () => {
+  // `history` is deprecated: it reads `query` and answers the page oldest first.
+  it("reads history through the channel's query, oldest first", async () => {
     const query = rs.fn(async () => [line("newer", 2_000), line("older", 1_000)]);
     const { channelsService } = service([
       { name: "whatsapp", messages: { query, byAccount: null } },
+      { name: "discord", messages: null },
     ]);
-    const withWhatsApp = createChannelsService({
-      channels: () => [{ name: "whatsapp", messages: { query, byAccount: null } }] as never,
-      router: {
-        list: async () => [{ connectionId: "wa-1", service: "whatsapp" }],
-        send: rs.fn() as never,
-        feature: rs.fn(() => null) as never,
-      },
+    const since = new Date(0);
+
+    const page = await channelsService.history("whatsapp", {
+      conversationId: "c1" as ConversationId,
+      since,
+      limit: 5,
     });
 
-    const page = await withWhatsApp.history("whatsapp", {});
-
     expect(page.map((m) => m.messageId)).toEqual(["older", "newer"]);
-    await expect(channelsService.history("whatsapp", {})).rejects.toThrow(
-      'No Talk connection registered for "whatsapp"',
+    expect(query).toHaveBeenCalledWith({ conversationId: "c1", since, limit: 5 });
+    await expect(channelsService.history("discord", {})).rejects.toThrow(
+      'Channel "discord" reads no messages',
     );
   });
 });

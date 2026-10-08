@@ -255,7 +255,7 @@ export interface ModelSession {
   readonly model: string;
   /**
    * Effort the provider applied to its most recent turn, in the provider's
-   * own terminology (for example Claude's `max`, Codex's `xhigh`). A provider
+   * own terminology (for example `xhigh` for Claude and Codex). A provider
    * that fixes effort when the session opens may report it before the first
    * turn. Unset when the provider reports none.
    */

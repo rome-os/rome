@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { actionExecutionContext } from "./context.js";
 import { replayContext } from "./replay.js";
 import { z } from "zod";
+import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import type {
   BackendTurnRunner,
@@ -24,6 +25,7 @@ import { toRoutine } from "../db/repositories/routines.js";
 import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
+import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -42,17 +44,16 @@ const ChannelsSendParams = z.object({
   connectionId: z.string().min(1).optional(),
 });
 
-const ChannelsReadParams = z.object({
-  channel: z.string().min(1),
-  conversationId: z.string().optional(),
-  since: z.string().datetime().optional(),
-  limit: z.number().int().positive().optional(),
-  connectionId: z.string().min(1).optional(),
-});
-
 // `query` reads the channel's own `messages`, which names no Connection, so a
 // request naming one is refused rather than answered from another account.
-const ChannelsQueryParams = ChannelsReadParams.omit({ connectionId: true }).strict();
+const ChannelsQueryParams = z
+  .object({
+    channel: z.string().min(1),
+    conversationId: z.string().optional(),
+    since: z.string().datetime().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
 
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
@@ -97,19 +98,37 @@ const AppsCreateParams = z.union([
     .strict(),
 ]);
 
+// The hook chain of the worker-side caller. An install or an enable starts
+// the app, and the app-started dispatch reads the chain from the async context
+// of the catalog refresh, so the handler restores it around the call.
+const HookInvocationContextParam = z.object({
+  rootInvocationId: z.string().min(1),
+  depth: z.number().int().nonnegative(),
+  chain: z.array(
+    z.object({
+      hookType: z.string().min(1),
+      appId: z.string().min(1),
+      hookName: z.string().min(1),
+    }),
+  ),
+});
+
 const AppsInstallParams = z.object({
   source: SpecSourceSchema,
   enabled: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsUninstallParams = z.object({
   appId: AppIdSchema,
   purge: z.boolean().optional(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppsSetEnabledParams = z.object({
   appId: AppIdSchema,
   enabled: z.boolean(),
+  hookInvocationContext: HookInvocationContextParam.optional(),
 });
 
 const AppStoreListListingsParams = z.object({
@@ -218,6 +237,7 @@ export interface WorkerRpcServices {
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
+  feedback: FeedbackService;
 }
 
 export class WorkerRpcServer {
@@ -282,8 +302,6 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
-      case "channels.history":
-        return await this.handleChannelsHistory(params);
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(
           parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,
@@ -334,6 +352,10 @@ export class WorkerRpcServer {
         return await this.services.systemUpgrade.checkAndOffer();
       case "session.continue":
         return await this.handleSessionContinue(params);
+      case "feedback.send":
+        return await this.services.feedback.send(
+          parseParams("feedback.send", feedbackSendSchema, params),
+        );
       case "notify.send": {
         // The sender reads token/origin from main-process state; the only wire
         // param is the optional body. Preserve the no-body call shape
@@ -356,19 +378,40 @@ export class WorkerRpcServer {
     return await this.services.appLifecycle.create(createParams);
   }
 
+  // Each lifecycle handler runs under the caller's hook chain, or under none.
+  // Running under none is deliberate: a pooled worker's IPC callback carries
+  // the async context of whatever forked it, which is not this caller's.
   private async handleAppsInstall(params: unknown): Promise<unknown> {
-    const installParams = parseParams("apps.install", AppsInstallParams, params);
-    return await this.services.appLifecycle.install(installParams);
+    const { hookInvocationContext, ...installParams } = parseParams(
+      "apps.install",
+      AppsInstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.install(installParams),
+    );
   }
 
   private async handleAppsUninstall(params: unknown): Promise<unknown> {
-    const { appId, purge } = parseParams("apps.uninstall", AppsUninstallParams, params);
-    return await this.services.appLifecycle.uninstall({ appId, purge });
+    const { appId, purge, hookInvocationContext } = parseParams(
+      "apps.uninstall",
+      AppsUninstallParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.uninstall({ appId, purge }),
+    );
   }
 
   private async handleAppsSetEnabled(params: unknown): Promise<unknown> {
-    const { appId, enabled } = parseParams("apps.setEnabled", AppsSetEnabledParams, params);
-    return await this.services.appLifecycle.setEnabled({ appId, enabled });
+    const { appId, enabled, hookInvocationContext } = parseParams(
+      "apps.setEnabled",
+      AppsSetEnabledParams,
+      params,
+    );
+    return await runWithHookInvocationContext(hookInvocationContext, () =>
+      this.services.appLifecycle.setEnabled({ appId, enabled }),
+    );
   }
 
   private async handleAppStoreListListings(params: unknown): Promise<unknown> {
@@ -411,20 +454,6 @@ export class WorkerRpcServer {
       ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
       ...(since ? { since: new Date(since) } : {}),
       ...(limit ? { limit } : {}),
-    });
-  }
-
-  private async handleChannelsHistory(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, conversationId, since, limit, connectionId } = parseParams(
-      "channels.history",
-      ChannelsReadParams,
-      params,
-    );
-    return await this.services.channelsService.history(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(limit ? { limit } : {}),
-      ...(connectionId ? { connectionId } : {}),
     });
   }
 

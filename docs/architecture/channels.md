@@ -4,7 +4,7 @@ How a [channel](../concepts/messaging.md#channels) is connected: the server-owne
 
 ## Channel ports
 
-A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound` and `messages`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
+A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messages` ([`Channel`](../../packages/core/src/channels/channel.ts)). Inside core, a channel also has a `directory` of the conversations it can see. A Connection is not a channel. A service's Talk may back a channel's `send`, `inbound`, `messages` and `directory`, and Rome's own synced tables may back its `accounts` and `messages`, but what backs a port is incidental to the channel ([decision record](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-09-28-a-channel-is-not-a-connection)).
 
 ### Invariants
 
@@ -25,6 +25,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - That read goes to the first Connection backing the channel. A channel two Connections back (two Telegram accounts) reads one of them through `query`. A caller that means a particular one names it to the channels service below.
 - Every subscriber hears every event. A subscriber hears one conversation's events one at a time, in arrival order. Different conversations and different subscribers never wait on each other, so one slow or failing handler holds up only its own conversation for its own subscriber. A handler that never settles stops that conversation for that subscriber for good, so a subscriber settles every event it takes. A handler still running after ten minutes is logged, and so is a conversation with twenty events waiting. A conversation holds at most a hundred waiting events per subscriber. Past that, the oldest is dropped and logged. Events still waiting when a subscription ends are dropped, and a handler already running keeps running.
 - An inbound subscription outlives a reconnect of whatever backs it.
+- `directory` lists the conversations a channel can see, each with its `ConversationRef`, so conversation settings reach a channel's conversations without holding a Talk. A Connection whose listing fails is logged and left out, and the others still answer.
 
 ### Channels for app actions
 
@@ -32,9 +33,9 @@ App actions reach channels through one service, `deps.channelsService` ([`Channe
 
 - It is the only path an action sends or reads history by. The main process and a worker answer the same call identically, which a worker's direct Connection lookup could not.
 - It chooses the Connection: the one an action names, which must back the channel, or else the channel's only one. With several and none named, it refuses rather than guessing.
-- `query` is the general read. `history` is the read `fetch_channel_history` has always made, with the windows and pages the retired per-channel reads cut, oldest first. It is kept only so the tool's output does not change.
-- Admission and pairing stay in the router that dispatches a Connection's inbound events, and an account directory stays on the Connection. The service adds no path around either.
-- A Connection's Talk, its features (history, inbound media, typing, the directory, direct messaging) and the router that dispatches them are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). No app receives them. An app reaches a channel through this service or a hook's `channels`.
+- `query` is the one read, `fetch_channel_history` included. The deprecated `history` answers `query`'s page oldest first, for apps that have not moved to `query` yet.
+- Admission and pairing stay in the channel's inbound port, which runs them once per message on the Connection it arrived through, whether or not anything subscribes yet ([`channels/admission.ts`](../../packages/core/src/channels/admission.ts)). An account directory stays on the Connection. The service adds no path around either.
+- A Connection's Talk and its features (history, inbound media, typing, the directory, direct messaging) are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). No app receives them. An app reaches a channel through this service or a hook's `channels`.
 
 ## Connection setup
 
@@ -70,7 +71,7 @@ An unknown Telegram, Discord, or Feishu account creates one expiring [approval](
 - Codes belong to one request, connection, channel, and sender. Verification messages never reach agents, including invalid or replayed codes from linked senders.
 - Group messages cannot redeem a code. Group guidance points to a private bot conversation or authenticated Web approval without exposing the code.
 - Requests expire after ten minutes without extending on repeated messages. Five wrong codes disable code verification while leaving Web approval available until expiry.
-- The bot confirms pairing and tells the approved account it can start chatting. No blocked message is automatically replayed.
+- The bot confirms pairing and tells the approved account it can start chatting, through the Connection the request arrived on. No blocked message is automatically replayed.
 - Approval records retain creation and resolution. Web decisions record the verified guardian identity, and code decisions record the provider-authenticated account and completion method.
 - Codes are absent from approval history and logs. Guidance and failed verification logs are best-effort telemetry, not the durable approval record.
 - Provider-owned pairing, including WhatsApp device linking, retains its provider-specific proof of control.
@@ -85,13 +86,13 @@ Approval listing includes pending requests and the latest 100 resolved pairing r
 
 WeChat has two connections. The `wechat` service is Tencent's official bot channel: it sends and receives, scoped to a bot. The `wechat_user` service is the guardian's own account, read through the official desktop client Rome runs in its own container, on the desktop it serves at `/desktop`.
 
-The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in. The container carries the capability the debugger needs (`SYS_ADMIN`, AppArmor unconfined) and gdb traces a child it launched, so the runtime launches the client under gdb from inside the container, catches the key the first login derives, and reads back only the passphrase. No host-root script or namespace crossing is involved. The client, debugger, and reader run as `rome` in the default `multi` mode. Enabling the connection does not change the Rome service user. The client, the store, and the reads are all local to the container.
+The account's history is encrypted at rest with a key the client derives only at login and only ever holds in memory. Recovering it needs ptrace on the client as it signs in. The container carries the capability the debugger needs (`SYS_ADMIN`, AppArmor unconfined) and gdb traces a child it launched, so the runtime runs wechat-bridge's `init` inside the container: it launches the client under gdb, catches the key the first login derives, and stores only the per-database keys. No host-root script or namespace crossing is involved. The client, debugger, and reader run as `rome` in the default `multi` mode. Enabling the connection does not change the Rome service user. The client, the store, and the reads are all local to the container.
 
 ### Invariants
 
 - The personal account is read-only. Rome answers what a chat contains and has no way to post to the account. A surface that could post would be a different connection.
 - A personal account's history is never delivered as inbound turns. An archive of every conversation the guardian has ever had is something to consult, not something to answer.
-- Recovering the store key is the only privileged step, and it produces a passphrase, not standing access. The ledger records where the authority lives, never the key itself.
+- Recovering the store key is the only privileged step, and it produces database keys, not standing access. The ledger records where the authority lives, never the key itself.
 - Recovery launches the client under gdb rather than attaching to a running one. The key is derived once, at the first login, so owning the client from its first instruction lets a single login both sign the guardian in and yield the key — attaching after it is up would miss that derivation and demand a second login.
 - A signed-out account and a client that is merely not running are different answers. Only the first invalidates the connection.
 - A connect ceremony asks for the confirmations the client demands and no more. Retrying a login the client has already remembered invalidates it, which costs the guardian the whole ceremony again.

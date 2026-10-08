@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import type { ConversationId } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { WebChatAdapter } from "./webchat.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
@@ -69,21 +70,26 @@ describe("WebChatAdapter", () => {
     const messages = await adapter.fetchHistory("sess-1", 2);
 
     expect(messages).toHaveLength(2);
-    expect(messages.map((m) => m.id)).toEqual(["msg-user", "msg-assistant"]);
-    expect(messages[0]).toMatchObject({
+    expect(messages.map((m) => m.messageId)).toEqual(["msg-user", "msg-assistant"]);
+    expect(messages[0]).toStrictEqual({
       channel: "webchat",
-      channelUserId: "guardian",
-      displayName: "Guardian",
-      threadId: "sess-1",
-      threadName: "Build Planner",
+      direction: "inbound",
+      messageId: "msg-user",
+      conversationId: "sess-1",
+      senderId: "guardian",
+      senderDisplayName: "Guardian",
       text: "Please draft the plan.",
       attachments: [],
+      timestamp: expect.any(Date),
+      thread: { kind: "dm", name: "Build Planner" },
+      raw: expect.objectContaining({ id: "msg-user", role: "user", sessionId: "sess-1" }),
     });
     expect(messages[1]).toMatchObject({
-      channelUserId: "workflow-planner",
-      displayName: "Workflow Planner",
-      threadId: "sess-1",
-      threadName: "Build Planner",
+      direction: "outbound",
+      senderId: "workflow-planner",
+      senderDisplayName: "Workflow Planner",
+      conversationId: "sess-1",
+      thread: { kind: "dm", name: "Build Planner" },
       text: "Working on it.\nPlan draft complete.",
     });
   });
@@ -114,7 +120,7 @@ describe("WebChatAdapter", () => {
 
     const messages = await adapter.fetchHistory(null, 24);
 
-    expect(messages.map((m) => [m.id, m.threadName, m.text])).toEqual([
+    expect(messages.map((m) => [m.messageId, m.thread?.name, m.text])).toEqual([
       ["msg-a", "Alpha", "First session"],
       ["msg-b", "Beta", "Second session"],
     ]);
@@ -146,12 +152,12 @@ describe("WebChatAdapter", () => {
     );
 
     await expect(adapter.fetchHistory(null, 24)).resolves.toEqual([
-      expect.objectContaining({ id: "msg-parent", threadId: "sess-parent" }),
+      expect.objectContaining({ messageId: "msg-parent", conversationId: "sess-parent" }),
     ]);
     await expect(adapter.fetchHistory("sess-child", 24)).resolves.toEqual([
       expect.objectContaining({
-        id: "msg-child",
-        threadId: "sess-child",
+        messageId: "msg-child",
+        conversationId: "sess-child",
         text: "Hidden specialist context",
       }),
     ]);
@@ -172,7 +178,7 @@ describe("WebChatAdapter", () => {
   it("persists the WebChat text-block identity in transcript content", async () => {
     await repo.createSession("sess-block", "Block identity");
 
-    await adapter.sendMessage("guardian", "sess-block", {
+    const receipt = await adapter.send("sess-block" as ConversationId, {
       text: "Final answer",
       parts: [
         {
@@ -186,6 +192,7 @@ describe("WebChatAdapter", () => {
     });
 
     const messages = await repo.getMessages("sess-block");
+    expect(receipt).toStrictEqual({ conversationId: "sess-block", messageId: messages[0]?.id });
     expect(messages).toEqual([
       expect.objectContaining({
         turnId: "turn-block",
@@ -200,5 +207,14 @@ describe("WebChatAdapter", () => {
         ]),
       }),
     ]);
+  });
+
+  it("returns a receipt without a messageId when there is nothing to persist", async () => {
+    await repo.createSession("sess-empty", "Empty");
+
+    await expect(adapter.send("sess-empty" as ConversationId, {})).resolves.toStrictEqual({
+      conversationId: "sess-empty",
+    });
+    await expect(repo.getMessages("sess-empty")).resolves.toEqual([]);
   });
 });

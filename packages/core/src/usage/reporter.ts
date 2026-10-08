@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
+import type { SessionActor } from "../lib/session-actor.js";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
 import type { ActionRunUsageEvent } from "./events.js";
@@ -141,13 +142,17 @@ export class UsageReporter {
         limit: SWEEP_PAGE_SIZE,
       });
       for (const row of rows) {
-        const attribution = this.deps.attribution.forActionRun(row);
+        const attribution = await this.deps.attribution.forActionRun({
+          ...row,
+          actor: (row.actor ?? null) as SessionActor | null,
+        });
         if (attribution && row.finishedAt) {
           const event: ActionRunUsageEvent = {
             type: "action_run",
             eventId: row.id,
             kind: attribution.kind,
             appId: attribution.appId,
+            trigger: attribution.trigger,
             status: row.status as ActionRunUsageEvent["status"],
             durationMs: row.durationMs ?? null,
             occurredAt: row.finishedAt.toISOString(),

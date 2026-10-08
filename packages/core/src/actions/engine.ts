@@ -113,6 +113,11 @@ const WORKER_ENTRY_PATH = resolveActionWorkerEntryPath(import.meta.url);
 const CANCEL_SIGNAL_GRACE_MS = 5_000;
 const DEFAULT_WORKER_WARM_POOL_SIZE = 1;
 const DEFAULT_WORKER_MAX_USES = 100;
+const DEFAULT_QUEUED_ROOT_MAX_WAIT_MS = 10 * 60_000;
+/** Worker slots a queued root may never take. They stay free for fail-fast
+ * callers — agent tool calls, nested delegations, interactive turns — whose
+ * caller often holds a worker of its own and cannot wait for one. */
+const RESERVED_WORKER_SLOTS = 2;
 
 export interface ActionRunContext {
   initiator?: string;
@@ -145,6 +150,16 @@ export interface ActionRunContext {
    *  trace UI can group every action invocation that happened within one
    *  turn under the originating `agent:*`. */
   turnId?: string;
+  /** What a root run does when it needs a new action worker and none is free.
+   * `"fail"` (the default) throws {@link ActionWorkerCapacityError} at once.
+   * `"queue"` waits in FIFO order for a slot, then throws that error if none
+   * opens within the engine's queue deadline. Queue only from a caller that
+   * holds no action worker and waits on no caller that does — a routine fire,
+   * an external app API request, a detached dispatch. A missing execution
+   * store does not prove that, since worker ingress clears it. A worker-held
+   * caller that queues can wait on its own slot. Read on the root only and
+   * never inherited by nested calls, which always fail fast. */
+  whenWorkersBusy?: "fail" | "queue";
   executionId?: string;
   rootExecutionId?: string;
   parentExecutionId?: string;
@@ -170,11 +185,15 @@ interface ActionEngineOptions {
   processRole?: "main" | "worker";
   /**
    * Hard cap for every live action-worker process owned by main, including
-   * warm, root, and delegated workers. Capacity exhaustion fails immediately:
-   * waiting for capacity inside a nested action would retain its ancestors and
-   * can deadlock a chain such as A -> B -> C -> D.
+   * warm, root, and delegated workers. Capacity exhaustion fails immediately
+   * unless the root run opted into `whenWorkersBusy: "queue"`: waiting for
+   * capacity inside a nested action would retain its ancestors and can
+   * deadlock a chain such as A -> B -> C -> D.
    */
   maxWorkerProcesses?: number;
+  /** How long a queued root waits for a worker before it fails with
+   * {@link ActionWorkerCapacityError}. Defaults to ten minutes. */
+  queuedRootMaxWaitMs?: number;
   /**
    * Number of already-initialized action workers to keep ready in the main
    * process. Root actions take a ready worker and fall back
@@ -254,6 +273,14 @@ interface ActiveRootProcess {
   cancelTimer: ClockTimer | null;
 }
 
+interface QueuedRoot {
+  rootExecutionId: string;
+  queuedAt: number;
+  deadline: ClockTimer;
+  admit: (worker: ActionWorkerProcess) => void;
+  reject: (error: Error) => void;
+}
+
 type ActionWorkerState = "starting" | "idle" | "running" | "stopping";
 
 interface ActionWorkerProcess {
@@ -297,6 +324,8 @@ export class ActionEngine {
   private workerWarmPoolSize: number;
   private workerMaxUses: number;
   private maxWorkerProcesses: number;
+  private queuedRootMaxWaitMs: number;
+  private queuedRoots: QueuedRoot[] = [];
   private workerWarmPoolStarted = false;
   private workerPoolGeneration = 0;
   private warmWorkers = new Set<ActionWorkerProcess>();
@@ -332,6 +361,7 @@ export class ActionEngine {
       this.processRole === "main"
         ? Math.max(1, Math.floor(options?.maxWorkerProcesses ?? Number.POSITIVE_INFINITY))
         : 0;
+    this.queuedRootMaxWaitMs = options?.queuedRootMaxWaitMs ?? DEFAULT_QUEUED_ROOT_MAX_WAIT_MS;
   }
 
   setWorkerRpcServer(server: WorkerRpcServer | null): void {
@@ -472,6 +502,13 @@ export class ActionEngine {
   }
 
   async cancel(rootExecutionId: string): Promise<boolean> {
+    const queued = this.queuedRoots.find((entry) => entry.rootExecutionId === rootExecutionId);
+    if (queued) {
+      this.removeQueuedRoot(queued);
+      queued.reject(new ActionCancelledError("Cancelled by user"));
+      return true;
+    }
+
     const active = this.activeRootProcesses.get(rootExecutionId);
     if (!active?.worker.child.pid) {
       return false;
@@ -1049,6 +1086,20 @@ export class ActionEngine {
       return await this.actionSubprocessRunner.run(payload, observer, actionEventObserver);
     }
 
+    if (invocation.isRoot && invocation.context?.whenWorkersBusy === "queue") {
+      // Accepted on joining the queue, so a detached dispatcher, which may be a
+      // worker, never waits on capacity.
+      onRootAccepted?.();
+      const worker = await this.waitForRootWorker(invocation.rootExecutionId);
+      return await this.runPayloadOnWorker(
+        worker,
+        invocation,
+        payload,
+        observer,
+        actionEventObserver,
+      );
+    }
+
     const worker = this.checkoutWorker(invocation.isRoot);
     const result = this.runPayloadOnWorker(
       worker,
@@ -1139,9 +1190,11 @@ export class ActionEngine {
       resolveAccepted = resolve;
       rejectAccepted = reject;
     });
+    // A detached caller waits only for acceptance, so its root can always queue.
+    const context: ActionRunContext = { ...payload.context, whenWorkersBusy: "queue" };
     const run = replayContext.exit(() =>
       actionExecutionContext.exit(() =>
-        this.run(payload.actionName, payload.args, payload.context, undefined, undefined, () => {
+        this.run(payload.actionName, payload.args, context, undefined, undefined, () => {
           accepted = true;
           resolveAccepted();
         }),
@@ -1196,6 +1249,88 @@ export class ActionEngine {
     });
     worker.state = "running";
     return worker;
+  }
+
+  /** Resolves with a running worker for a queued root, in FIFO order with
+   * every other queued root. Rejects with ActionWorkerCapacityError after
+   * `queuedRootMaxWaitMs`, or with ActionCancelledError when `cancel()` names
+   * the root first. */
+  private waitForRootWorker(rootExecutionId: string): Promise<ActionWorkerProcess> {
+    if (this.queuedRoots.length === 0 && this.canAdmitQueuedRoot()) {
+      return Promise.resolve(this.checkoutWorker(true));
+    }
+    return new Promise<ActionWorkerProcess>((resolve, reject) => {
+      const queuedAt = this.clock.now().getTime();
+      const entry: QueuedRoot = {
+        rootExecutionId,
+        queuedAt,
+        deadline: this.clock.setTimeout(() => {
+          this.removeQueuedRoot(entry);
+          const waitedMs = this.clock.now().getTime() - queuedAt;
+          log.warn("queued root timed out waiting for an action worker", {
+            rootExecutionId,
+            waitedMs,
+          });
+          reject(new ActionWorkerCapacityError(this.maxWorkerProcesses, waitedMs));
+        }, this.queuedRootMaxWaitMs),
+        admit: resolve,
+        reject,
+      };
+      this.queuedRoots.push(entry);
+      log.info("root queued for an action worker", {
+        rootExecutionId,
+        queueDepth: this.queuedRoots.length,
+        liveWorkers: this.liveWorkers.size,
+      });
+    });
+  }
+
+  /** Whether a queued root may take a worker now. Queued roots stop short of
+   * the last RESERVED_WORKER_SLOTS: fail-fast callers keep those, because a
+   * backlog that filled every slot would fail each agent tool call and
+   * interactive turn until it drained. Idle and starting warm workers are
+   * spare capacity, not committed work, so they do not count as busy. */
+  private canAdmitQueuedRoot(): boolean {
+    const reserved = Math.min(RESERVED_WORKER_SLOTS, this.maxWorkerProcesses - 1);
+    const busy = this.liveWorkers.size - this.warmWorkers.size;
+    if (busy >= this.maxWorkerProcesses - reserved) return false;
+    if (this.liveWorkers.size < this.maxWorkerProcesses) return true;
+    return [...this.warmWorkers].some(
+      (worker) =>
+        worker.state === "idle" &&
+        worker.generation === this.workerPoolGeneration &&
+        worker.child.connected,
+    );
+  }
+
+  /** Hands freed capacity to queued roots. Called wherever a slot opens: a
+   * worker exits, a worker returns to the warm pool, or a warm worker becomes
+   * ready. Runs before the warm pool refills, so a queued root outranks a new
+   * idle worker. */
+  private admitQueuedRoots(): void {
+    while (this.queuedRoots.length > 0 && this.canAdmitQueuedRoot()) {
+      const entry = this.queuedRoots.shift()!;
+      this.clock.clearTimeout(entry.deadline);
+      let worker: ActionWorkerProcess;
+      try {
+        worker = this.checkoutWorker(true);
+      } catch (err) {
+        entry.reject(err instanceof Error ? err : new Error(String(err)));
+        continue;
+      }
+      log.info("queued root admitted to an action worker", {
+        rootExecutionId: entry.rootExecutionId,
+        waitedMs: this.clock.now().getTime() - entry.queuedAt,
+        queueDepth: this.queuedRoots.length,
+      });
+      entry.admit(worker);
+    }
+  }
+
+  private removeQueuedRoot(entry: QueuedRoot): void {
+    this.clock.clearTimeout(entry.deadline);
+    const index = this.queuedRoots.indexOf(entry);
+    if (index !== -1) this.queuedRoots.splice(index, 1);
   }
 
   private runPayloadOnWorker(
@@ -1338,6 +1473,7 @@ export class ActionEngine {
       worker.sessionRpc?.dispose();
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
+      this.admitQueuedRoots();
       if (worker.pooled && worker.hasBeenReady && this.workerWarmPoolStarted) {
         this.ensureWorkerWarmPool();
       }
@@ -1369,6 +1505,7 @@ export class ActionEngine {
 
     worker.state = "idle";
     this.warmWorkers.add(worker);
+    this.admitQueuedRoots();
     this.ensureWorkerWarmPool();
   }
 
@@ -1407,6 +1544,7 @@ export class ActionEngine {
         if (worker.state === "starting") {
           worker.hasBeenReady = true;
           worker.state = "idle";
+          this.admitQueuedRoots();
         }
       };
       worker.child.on("message", markReady);
@@ -1423,6 +1561,7 @@ export class ActionEngine {
       // capacity here so a startup failure cannot permanently exhaust the
       // instance-wide worker budget.
       this.liveWorkers.delete(worker);
+      this.admitQueuedRoots();
       return;
     }
     await new Promise<void>((resolve) => {

@@ -130,6 +130,7 @@ import {
 // ── Types ──────────────────────────────────────────────
 
 interface SettingsData {
+  "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
@@ -1029,6 +1030,21 @@ function AdvancedSection({
         {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
+        <Section>
+          <SectionHeader>
+            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+          </SectionHeader>
+          <FormRows>
+            <SettingsToggleRow
+              title={t("advanced.feedback.agentReports.title")}
+              description={t("advanced.feedback.agentReports.description")}
+              label={t("advanced.feedback.agentReports.toggleLabel")}
+              checked={settings["feedback.agentReportsEnabled"] ?? true}
+              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+              disabled={saving}
+            />
+          </FormRows>
+        </Section>
         <ComputerUseSection />
         <PresentationModeSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
@@ -1167,11 +1183,11 @@ const TIER_MODEL_MAPPING_FIELDS: Array<{
   placeholder: string;
 }> = [
   { provider: "openai", tier: "large", placeholder: "gpt-6.1-sol" },
-  { provider: "openai", tier: "medium", placeholder: "gpt-5.6-terra" },
+  { provider: "openai", tier: "medium", placeholder: "gpt-6.1-sol" },
   { provider: "openai", tier: "small", placeholder: "gpt-6-luna" },
   { provider: "anthropic", tier: "large", placeholder: "claude-opus-5-5[1m]" },
   { provider: "anthropic", tier: "medium", placeholder: "claude-sonnet-5-5" },
-  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-4-5-20251001" },
+  { provider: "anthropic", tier: "small", placeholder: "claude-haiku-5-5" },
 ];
 
 function normalizeTierModelMappings(value: unknown): TierModelMappings {

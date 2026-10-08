@@ -106,21 +106,6 @@ describe("sentinelLogMessages", () => {
     expect(entries.indexOf(outbound!)).toBeLessThan(entries.indexOf(inbound!));
   });
 
-  it("reads a row with no reply as the inbound message alone", async () => {
-    expect(await refs()).toContain("sentinel:unheard");
-    expect(await refs()).not.toContain("sentinel:unheard:reply");
-  });
-
-  it("counts an empty reply as no reply", async () => {
-    expect(await refs()).toContain("sentinel:quiet");
-    expect(await refs()).not.toContain("sentinel:quiet:reply");
-  });
-
-  it("subtracts a thread Rome knows to be a group, reply included", async () => {
-    expect(await refs()).not.toContain("sentinel:in-group");
-    expect(await refs()).not.toContain("sentinel:in-group:reply");
-  });
-
   it("names the sender and the thread the row recorded", async () => {
     const entries = await page();
     const inbound = entries.find((entry) => entry.ref === "sentinel:answered");
@@ -132,11 +117,9 @@ describe("sentinelLogMessages", () => {
     expect(outbound?.conversation?.id).toBe(DIRECT);
   });
 
-  it("subtracts only a group on the row's own channel", async () => {
-    // "quiet" sits on a thread id a *discord* group session names.
-    expect(await refs()).toContain("sentinel:quiet");
-  });
-
+  // Exact, so it also pins what stays out: no reply line for `unheard` or for
+  // the empty reply on `quiet`, and nothing from the group thread. `quiet` stays
+  // in, since only a group on its own channel subtracts its thread.
   it("merges every address of the account into one newest-first history", async () => {
     expect(await refs()).toEqual([
       "sentinel:quiet",
@@ -157,13 +140,6 @@ describe("sentinelLogMessages", () => {
       limit: WHOLE_HISTORY,
     });
     expect(elsewhere).toEqual([]);
-  });
-
-  it("holds nothing for an empty scope", async () => {
-    const messages = sentinelLogMessages(db);
-    expect(await messages.latest([])).toBeNull();
-    expect(await messages.count([])).toBe(0);
-    expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
 });
 

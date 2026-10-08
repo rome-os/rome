@@ -1,3 +1,5 @@
+import type { PairingNotifier } from "../channels/pairing.js";
+import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
 import type { ActionLoader } from "../actions/loader.js";
@@ -24,6 +26,7 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
@@ -45,7 +48,6 @@ import type {
   ConversationSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
-import type { TalkRouter } from "../connections/types.js";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { SetupManager } from "../connections/setup/manager.js";
@@ -72,7 +74,9 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  talkRouter: TalkRouter;
+  /** Tells a paired account that the guardian resolved its request, on the
+   *  Connection the request arrived through (channels/pairing.ts). */
+  notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
   conversationSettings: ConversationSettingsControl;
@@ -127,6 +131,7 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  feedback: FeedbackRelay;
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
@@ -183,6 +188,8 @@ export interface ApiDeps {
    * (`GET /api/bootstrap` behind `/login`) and the cloud-login start/callback —
    * so flipping the gate takes effect without restarting the instance. */
   isCloudAuthEnabled: () => Promise<boolean>;
+  /** Reports each guardian sign-in to Rome Cloud as a usage event. */
+  loginUsage: LoginUsageSink;
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;

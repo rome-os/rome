@@ -1,3 +1,4 @@
+import { notifyPairingResolution } from "../channels/pairing.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -41,9 +42,13 @@ import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
-import type { ProviderAdapter } from "../channels/adapter.js";
-import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
+import type {
+  ChannelMessage,
+  ConversationId,
+  ConversationSettingsControl,
+} from "@rome-os/app-runtime";
+import type { Talk } from "../connections/types.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -90,6 +95,8 @@ import {
 import { createAppStoreService } from "../apps/store-service.js";
 import type { CatalogEvent } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
+import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/types.js";
 import { Hono } from "hono";
@@ -108,17 +115,32 @@ export interface TestDb {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYSTEM_MIGRATIONS_DIR = resolve(__dirname, "../../drizzle/system");
 
+// Running the migrations costs ~11ms against ~0.15ms to deserialize their
+// result, and a core run opens well over a thousand test databases.
+let migratedImage: Buffer | undefined;
+
+function migratedSystemImage(): Buffer {
+  if (!migratedImage) {
+    const sqlite = new Database(":memory:");
+    migrate(drizzle(sqlite, { schema }), {
+      migrationsFolder: SYSTEM_MIGRATIONS_DIR,
+      migrationsTable: "__drizzle_migrations_system",
+    });
+    migratedImage = sqlite.serialize();
+    sqlite.close();
+  }
+  return migratedImage;
+}
+
+/** Opens a private in-memory database at the latest system schema. Each call
+ *  starts from the same freshly migrated state, unaffected by writes to any
+ *  other instance. */
 export function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
+  const sqlite = new Database(migratedSystemImage());
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
   const db = drizzle(sqlite, { schema }) as unknown as DrizzleDb;
-
-  migrate(db, {
-    migrationsFolder: SYSTEM_MIGRATIONS_DIR,
-    migrationsTable: "__drizzle_migrations_system",
-  });
 
   return {
     db,
@@ -184,7 +206,7 @@ export class MockModelProvider implements ModelProvider {
 
 // MockProviderAdapter — captures sent messages
 
-export class MockProviderAdapter implements ProviderAdapter {
+export class MockProviderAdapter {
   readonly channelName: string;
   sentMessages: {
     channelUserId: string;
@@ -215,64 +237,70 @@ export class MockProviderAdapter implements ProviderAdapter {
   }
 }
 
-/** The Connections a mock Talk router answers for, as `channelList` reads
- *  them: one `test:<name>` Connection with a Talk per mock adapter. */
-export function mockConnections(
-  talkRouter: TalkRouter,
-  adapters: ReadonlyMap<string, unknown>,
-): ConnectionPortsDeps {
+/** What a test Connection's Talk sends and hears through: a mock adapter or
+ *  a kit endpoint. */
+export type TestTransport = Pick<MockProviderAdapter, "onMessage" | "sendMessage">;
+
+/** The Connections a test channel list reads: one `test:<name>` Connection per
+ *  mock adapter, each with a live Talk over its adapter. */
+export type TestConnections = ConnectionPortsDeps["registry"] &
+  Pick<ConnectionRegistry, "get" | "all">;
+
+/**
+ * Builds the test Connections. `talk` edits one service's Talk, for a test
+ * that fakes what a Connection offers; the default Talk addresses a direct
+ * chat by the contact, like the two channels that ship with sending.
+ */
+export function createTestConnections(
+  adapters: ReadonlyMap<string, TestTransport>,
+  talk: (service: string, talk: Talk) => Talk = (_service, talk) => talk,
+): TestConnections {
+  const connections = new Map<string, Connection>();
+  for (const [service, adapter] of adapters) {
+    const id = `test:${service}`;
+    connections.set(id, {
+      id,
+      service,
+      talk: talk(service, mockTalk(adapter)),
+      status: () => ({ talk: { state: "unlocked" } }),
+    } as unknown as Connection);
+  }
+  const find = (service: string) => connections.get(`test:${service}`);
   return {
-    registry: {
-      find: (service) =>
-        adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
-      getDescriptor: (service) =>
-        adapters.has(service)
-          ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
-          : null,
-      onUnlocked: () => {},
-      registeredServices: () => [...adapters.keys()],
+    find: (service) => {
+      const connection = find(service);
+      return connection ? [connection] : [];
     },
-    router: talkRouter,
+    get: (id) => {
+      const connection = connections.get(id);
+      if (!connection) throw new Error(`unknown connection "${id}"`);
+      return connection;
+    },
+    all: () => [...connections.values()],
+    getDescriptor: (service) =>
+      find(service)
+        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+        : null,
+    // Every test Connection is unlocked from the start, so a handler hears
+    // each of them at once, as the registry's replay does.
+    onUnlocked: (_capability, handler) => {
+      for (const connection of connections.values()) handler(connection);
+    },
+    registeredServices: () => [...adapters.keys()],
   };
 }
 
-/** The harness's channel list over `talkRouter`, built by the production
- *  `channelList`. A test that swaps the router rebuilds the list with it. */
-export function testChannels(
-  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts"> & {
-    channelPortMap: ReadonlyMap<string, unknown>;
-  },
-  talkRouter: TalkRouter,
-): Channels {
-  return channelList({
-    db: deps.db,
-    whatsAppAccounts: deps.whatsAppAccounts,
-    linkedInAccounts: deps.linkedInAccounts,
-    connections: mockConnections(talkRouter, deps.channelPortMap),
-  });
-}
+let mockSent = 0;
 
-/** Look a channel up by name, as the backend-turn runner does. */
-export function channelNamed(channels: Channels): (name: string) => Channel | null {
-  return (name) => channels.find((channel) => channel.name === name) ?? null;
-}
-
-export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
-  const byConnection = new Map<string, { service: string; adapter: MockProviderAdapter }>(
-    [...adapters].map(([service, adapter]) => [`test:${service}`, { service, adapter }] as const),
-  );
-  let sent = 0;
+/** A Talk over a mock adapter, delivering what it hears as the channel's
+ *  record. */
+function mockTalk(adapter: TestTransport): Talk {
   return {
-    list: async () =>
-      [...byConnection].map(([connectionId, value]) => ({
-        connectionId,
-        service: value.service,
-      })),
-    subscribe(connectionId, handler) {
-      const target = byConnection.get(connectionId);
-      if (!target) throw new Error(`Unknown test connection ${connectionId}`);
-      target.adapter.onMessage(async (message) =>
+    subscribe(handler) {
+      adapter.onMessage(async (message) =>
         handler({
+          channel: message.channel,
+          direction: "inbound",
           messageId: message.id,
           conversationId: message.threadId as ConversationId,
           senderId: message.channelUserId,
@@ -290,27 +318,38 @@ export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>)
       );
       return () => {};
     },
-    async send(connectionId, conversationId, message) {
-      const target = byConnection.get(connectionId);
-      if (!target) throw new Error(`Unknown test connection ${connectionId}`);
-      await target.adapter.sendMessage(conversationId, conversationId, message);
+    async send(conversationId, message) {
+      await adapter.sendMessage(conversationId, conversationId, message);
       // A message id, the way every real talker answers with one. The outbox
-      // recognizes a delivered message by it, so a router that named nothing
+      // recognizes a delivered message by it, so a Talk that named nothing
       // would make every send untrackable in tests and only in tests.
-      return { conversationId, messageId: `sent-${++sent}` };
+      return { conversationId, messageId: `sent-${++mockSent}` };
     },
-    // Every test channel addresses a direct chat by the contact, like the two
-    // channels that ship with sending. A test needing a channel that cannot be
-    // written to overrides `feature` to answer null.
-    feature: (_connectionId, name) =>
-      name === "directMessaging"
-        ? ({
-            async conversationFor(channelUserId: string) {
-              return channelUserId as ConversationId;
-            },
-          } as TalkFeatureMap[typeof name])
-        : null,
+    directMessaging: {
+      async conversationFor(channelUserId: string) {
+        return channelUserId as ConversationId;
+      },
+    },
   };
+}
+
+/** The harness's channel list over `connections`, built by the production
+ *  `channelList`. A test that fakes a Talk rebuilds the list with it. */
+export function testChannels(
+  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
+  connections: TestConnections,
+): Channels {
+  return channelList({
+    db: deps.db,
+    whatsAppAccounts: deps.whatsAppAccounts,
+    linkedInAccounts: deps.linkedInAccounts,
+    connections: { registry: connections },
+  });
+}
+
+/** Look a channel up by name, as the backend-turn runner does. */
+export function channelNamed(channels: Channels): (name: string) => Channel | null {
+  return (name) => channels.find((channel) => channel.name === name) ?? null;
 }
 
 const emptyConversationSettings: ConversationSettingsControl = {
@@ -403,6 +442,9 @@ export interface TestDeps extends ApiDeps {
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   channelPortMap: Map<string, MockProviderAdapter>;
+  /** The Connections behind `channels` and `channelsService`. A test that
+   *  fakes a Talk builds its own with `createTestConnections`. */
+  connections: TestConnections;
 }
 
 export interface BuildTestDepsOptions {
@@ -472,11 +514,8 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const talkRouter = createMockTalkRouter(channelPortMap);
-  const channels = testChannels(
-    { db, whatsAppAccounts, linkedInAccounts, channelPortMap },
-    talkRouter,
-  );
+  const connections = createTestConnections(channelPortMap);
+  const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
@@ -632,10 +671,15 @@ export async function buildTestDeps(
   await dashboardAccessState.load(db);
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
+  const channelsService = createChannelsService({
+    channels: () => channels,
+    registry: connections,
+  });
 
   return {
-    talkRouter,
-    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
+    connections,
+    notifyPairingResolution: (approval) => notifyPairingResolution(connections, approval),
+    channelsService,
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
@@ -710,6 +754,17 @@ export async function buildTestDeps(
       }),
     },
     favorService: unavailableFavorService,
+    feedback: new FeedbackClient({
+      diagnostics: () =>
+        assembleDiagnosticBundle({
+          settingsRepo,
+          channelsService,
+          appCatalog,
+          bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },
+        }),
+      agentReportsEnabled: async () =>
+        (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
+    }),
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.
     bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },
@@ -717,6 +772,7 @@ export async function buildTestDeps(
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
     isCloudAuthEnabled: async () => false,
+    loginUsage: { recordLogin: () => {} },
     channelPortMap,
   };
 }

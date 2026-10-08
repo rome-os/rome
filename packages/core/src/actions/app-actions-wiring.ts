@@ -22,6 +22,7 @@ import {
 } from "./module-loader.js";
 import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
+import type { FeedbackService } from "../lib/feedback-client.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -91,6 +92,8 @@ interface AppActionServices {
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
   hostExecution?: HostExecutionService;
+  /** System-only: reporter provenance must come from system:send_feedback. */
+  feedback?: FeedbackService;
 }
 
 interface AppLookup {
@@ -156,6 +159,9 @@ function createAppActionRuntimeDeps(
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
         ? { hostExecution: services.hostExecution }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.feedback
+        ? { feedback: services.feedback }
         : {}),
       appContext: createRomeAppContext(app, {
         catalog,

@@ -53,8 +53,8 @@ export const sessions = sqliteTable("sessions", {
    *  rows and sessions that never completed a turn. Nothing reads it yet. */
   model: text("model"),
   /** The reasoning effort the session's last successful model turn ran with,
-   *  as the provider reported it in its own terms (Claude `max`, Codex
-   *  `xhigh`). Display only: it never seeds the next turn's effort. Null for
+   *  as the provider reported it in its own terms (for example `xhigh`).
+   *  Display only: it never seeds the next turn's effort. Null for
    *  legacy rows and sessions that never completed a model turn. */
   reasoningEffort: text("reasoning_effort"),
   /** The cwd the session's provider ran in, so an explicit resume reopens the
@@ -844,6 +844,9 @@ export const routineRuns = sqliteTable(
       enum: ["success", "error", "running", "pending_approval", "cancelled"],
     }).notNull(),
     payload: text("payload", { mode: "json" }),
+    // The routine's trigger type when it fired, or `run_now` for a manual run.
+    // Null on runs recorded before this column existed.
+    firedBy: text("fired_by"),
     firedAt: integer("fired_at", { mode: "timestamp" }).notNull(),
     durationMs: integer("duration_ms"),
     error: text("error"),
@@ -852,6 +855,7 @@ export const routineRuns = sqliteTable(
     index("idx_routine_runs_routine_id").on(table.routineId),
     index("idx_routine_runs_fired_at").on(table.firedAt),
     index("idx_routine_runs_status").on(table.status),
+    index("idx_routine_runs_execution_id").on(table.executionId),
   ],
 );
 

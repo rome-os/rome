@@ -162,6 +162,15 @@
           }
         }
       },
+      "agents": {
+        "bot": {
+          "title": "与你的其他 agent 互发消息",
+          "bullets": {
+            "reply": "你的 dot 通过 Rome Cloud 给你的 agent 发消息",
+            "start": "有事需要处理时，你的 agent 给 dot 发消息"
+          }
+        }
+      },
       "webchat": {
         "bot": {
           "title": "面板聊天",
@@ -782,6 +791,14 @@
       "lastSeen": "上次在线",
       "notReported": "未提供",
       "installExtension": "安装 OpenCLI 扩展"
+    },
+    "feedback": {
+      "title": "反馈",
+      "agentReports": {
+        "title": "智能体平台问题报告",
+        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "toggleLabel": "允许智能体发送报告"
+      }
     }
   },
   "system": {
@@ -813,11 +830,6 @@
     "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "Rome 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。"
-  },
-  "sentinel": {
-    "title": "哨兵设置",
-    "intervalLabel": "审阅间隔（分钟）",
-    "intervalHelp": "提醒守护者审阅哨兵日志条目的频率。"
   },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",

@@ -1,7 +1,6 @@
 /**
- * Drives one inbound message through the same composition-root wiring Rome
- * uses in production (see `buildGoldenTraceRig`) and asserts the expected
- * span hierarchy:
+ * Drives one inbound message through the golden-trace rig (see
+ * `buildGoldenTraceRig`) and asserts the expected span hierarchy:
  *
  *     channel:<channel>.handle
  *       └── hook:channel-message
@@ -9,10 +8,11 @@
  *                   ├── model.turn
  *                   └── action:<name>
  *
- * The instrumentation lives at the neutral ProviderAdapter / ModelProvider
- * boundaries so any adapter or provider impl produces these spans uniformly;
- * the EXPECT_*_SPAN gates remain as dials in case a future migration wants
- * to soften an assertion.
+ * The `channel:<channel>.handle` span comes from wrapping the rig's mock
+ * adapters (`wrapProviderAdaptersWithSpans`). Production transports are not
+ * wrapped, so this test does not guard production channel spans. The
+ * EXPECT_*_SPAN gates remain as dials in case a future migration wants to
+ * soften an assertion.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";

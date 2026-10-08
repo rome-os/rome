@@ -150,6 +150,10 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     service: "email",
     defaultGrant: "inbox",
   },
+  agents: {
+    service: "agents",
+    defaultGrant: "cloud",
+  },
 };
 
 // ── ChannelConnectCard ──────────────────────────────────────────────────────

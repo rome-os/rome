@@ -162,6 +162,15 @@
           }
         }
       },
+      "agents": {
+        "bot": {
+          "title": "Messages with your other agents",
+          "bullets": {
+            "reply": "Your dots message your agent through Rome Cloud",
+            "start": "Your agent messages a dot when something needs its attention"
+          }
+        }
+      },
       "webchat": {
         "bot": {
           "title": "Dashboard chat",
@@ -782,6 +791,14 @@
       "lastSeen": "Last seen",
       "notReported": "Not reported",
       "installExtension": "Install OpenCLI extension"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "agentReports": {
+        "title": "Agent platform reports",
+        "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
+        "toggleLabel": "Allow agent reports"
+      }
     }
   },
   "system": {
@@ -813,11 +830,6 @@
     "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "Rome hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud."
-  },
-  "sentinel": {
-    "title": "Sentinel Settings",
-    "intervalLabel": "Review interval (minutes)",
-    "intervalHelp": "How often the guardian is reminded to review sentinel log entries."
   },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",

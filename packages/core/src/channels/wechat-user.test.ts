@@ -1,18 +1,19 @@
 // The WeChat user-account runtime and reader, driven against an injected
-// command runner (no client, no python, no filesystem side effects beyond a
-// temp home).
+// command runner (no client, no bridge process, no filesystem side effects
+// beyond a temp home).
 //
 // Seams under test:
 //   1. status() reads the linear connecting progression off the filesystem and
 //      the process table.
 //   2. install() unpacks rather than dpkg-installs, and is idempotent.
-//   3. The reader parses the helper's JSON and classifies a signed-out account
-//      (exit 3) as terminal, everything else as transient.
+//   3. The reader maps wechat-cli's JSON envelopes onto its own shapes, and
+//      classifies missing keys as terminal and everything else as transient.
 
 import { existsSync, renameSync, writeFileSync } from "node:fs";
-import { mkdtemp, mkdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile, readFile, rm, readlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   loginWindowId,
@@ -20,6 +21,7 @@ import {
   WechatUserRuntime,
   WechatUserRuntimeError,
   WechatUserSessionRejected,
+  WechatUserStorePending,
   WECHAT_CLIENT_SHA256,
   type RunCommand,
   type RunResult,
@@ -50,6 +52,36 @@ afterEach(async () => {
 async function tempHome(): Promise<string> {
   home = await mkdtemp(join(tmpdir(), "wechat-user-"));
   return home;
+}
+
+const SALT = "5a".repeat(16);
+
+/** A database under `dbDir` that starts with `salt`, as SQLCipher lays it out. */
+async function database(dbDir: string, rel: string, salt = SALT): Promise<void> {
+  await writeFile(await ensureFile(join(dbDir, rel)), Buffer.from(salt.repeat(4), "hex"));
+}
+
+/** An account store under `h` whose stored keys fit it, as a capture leaves
+ *  it. With `stale`, the client has since created a shard no key covers.
+ *  `databases` limits which databases exist and have keys. */
+async function readableStore(
+  h: string,
+  runtime: WechatUserRuntime,
+  stale = false,
+  databases = ["session/session.db", "contact/contact.db", "message/message_0.db"],
+): Promise<string> {
+  const dbDir = join(h, "xwechat_files/wxid_guardian/db_storage");
+  const keys: Record<string, { encKey: string; salt: string }> = {};
+  for (const rel of databases) {
+    await database(dbDir, rel);
+    keys[rel] = { encKey: "00".repeat(32), salt: SALT };
+  }
+  if (stale) await database(dbDir, "message/message_1.db");
+  await writeFile(
+    await ensureFile(runtime.keysFile),
+    JSON.stringify({ dbDir, wxid: "wxid_guardian", keys, capturedAt: "2026-10-04T00:00:00Z" }),
+  );
+  return dbDir;
 }
 
 const LOGIN_HINTS =
@@ -119,12 +151,10 @@ describe("WechatUserRuntime.status", () => {
         },
         // accountDir lists xwechat_files
         sh: (args) => (args[1]?.includes("xwechat_files") ? ok("wxid_guardian\n") : ok()),
-        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
       }).run,
     });
     await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
-    await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
-    await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
+    await readableStore(h, runtime);
 
     const status = await runtime.status();
     expect(status.state).toBe(kind === "login" ? "awaiting-scan" : "ready");
@@ -140,12 +170,10 @@ describe("WechatUserRuntime.status", () => {
       run: scriptedRun({
         pgrep: () => ({ code: 1, stdout: "", stderr: "" }),
         sh: () => ok("wxid_guardian\n"),
-        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ok('{"keysReady":true}'),
       }).run,
     });
     await writeFile(await ensureFile(join(runtime.clientDir, "wechat")), "x");
-    await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
-    await writeFile(await ensureFile(runtime.keysFile), "{}");
+    await readableStore(h, runtime);
     expect(await runtime.status()).toMatchObject({
       state: "stopped",
       running: false,
@@ -154,24 +182,103 @@ describe("WechatUserRuntime.status", () => {
     });
   });
 
-  it.each([3, 4])("keeps unreadable or pending keys awaiting keys (exit %s)", async (code) => {
+  it.each([
+    "missing",
+    "stale",
+    "recreated",
+    "contactless",
+    "shardless",
+    "deleted",
+  ])("keeps %s keys awaiting keys", async (kind) => {
     const h = await tempHome();
     const runtime = new WechatUserRuntime({
       home: h,
       run: scriptedRun({
         pgrep: () => ok("1234\n"),
         sh: () => ok("wxid_guardian\n"),
-        [join(h, ".local/share/wechat/cli/bin/python3")]: () => ({
-          code,
-          stdout: "",
-          stderr: "The WeChat message store is locked: message/message_0.db has no valid key.",
-        }),
       }).run,
     });
     await writeFile(await ensureFile(join(h, ".local/share/wechat/client/opt/wechat/wechat")), "x");
-    await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
-    await writeFile(await ensureFile(join(h, ".wechat-cli/all_keys.json")), "{}");
+    if (kind === "missing") await ensureDir(join(h, "xwechat_files/wxid_guardian/db_storage"));
+    else if (kind === "stale") await readableStore(h, runtime, true);
+    else if (kind === "recreated") {
+      const dbDir = await readableStore(h, runtime);
+      await database(dbDir, "message/message_0.db", "a5".repeat(16));
+    } else if (kind === "contactless") {
+      await readableStore(h, runtime, false, ["session/session.db", "message/message_0.db"]);
+    } else if (kind === "deleted") {
+      const dbDir = await readableStore(h, runtime, false, [
+        "session/session.db",
+        "contact/contact.db",
+        "message/message_0.db",
+        "message/message_1.db",
+      ]);
+      await rm(join(dbDir, "message/message_1.db"));
+    } else await readableStore(h, runtime, false, ["session/session.db", "contact/contact.db"]);
     expect(await runtime.status()).toMatchObject({ state: "awaiting-keys", keysReady: false });
+  });
+});
+
+describe("WechatUserRuntime.captureKeys", () => {
+  type Call = { file: string; args: string[]; env?: Record<string, string> };
+  async function capturing(answer: RunResult, opts: { store?: boolean } = {}) {
+    const calls: Call[] = [];
+    const h = await tempHome();
+    const runtime = new WechatUserRuntime({
+      home: h,
+      runtimeDir: join(h, "run"),
+      run: async (file, args, opts) => {
+        calls.push({ file, args, ...(opts?.env ? { env: opts.env } : {}) });
+        if (file === "sh") return ok("wxid_guardian\n");
+        if (file !== process.execPath) return ok();
+        // The bridge leaves its passphrase file behind when it is killed, and
+        // the client it launched keeps using TMPDIR.
+        const tmp = opts!.env!.TMPDIR!;
+        await writeFile(
+          await ensureFile(join(tmp, "wechat-cli-capture-1/capture.result")),
+          "WECHAT_PASSPHRASE=00",
+        );
+        await writeFile(join(tmp, "client.tmp"), "");
+        return answer;
+      },
+    });
+    if (opts.store !== false) await readableStore(h, runtime);
+    return { runtime, calls };
+  }
+  const envelope = (body: object) => ok(JSON.stringify({ v: 1, ...body }));
+  const READY_INIT = envelope({ ok: true, data: { state: "ready", missing: [] } });
+  const bridgeCall = (calls: Call[]) => calls.find((call) => call.file === process.execPath)!;
+
+  it("runs the bridge's init on the given display", async () => {
+    const { runtime, calls } = await capturing(READY_INIT);
+    await runtime.captureKeys(":100");
+    const call = bridgeCall(calls);
+    expect(call.args.slice(1)).toEqual(["-f", "json", "init", "--wait", "540"]);
+    expect(call.env).toMatchObject({
+      DISPLAY: ":100",
+      HOME: runtime.home,
+      XDG_RUNTIME_DIR: runtime.runtimeDir,
+      WECHAT_CLI_HOME: runtime.bridgeHome,
+    });
+    expect(calls.map((c) => c.file)).not.toContain("pkill");
+    expect(await readdir(call.env!.TMPDIR!)).toEqual(["client.tmp"]);
+  });
+
+  it("reports databases the login had not created yet as pending", async () => {
+    const { runtime } = await capturing(
+      envelope({ ok: true, data: { state: "pending", missing: ["message/message_0.db"] } }),
+      { store: false },
+    );
+    await expect(runtime.captureKeys(":100")).rejects.toBeInstanceOf(WechatUserStorePending);
+  });
+
+  it("stops the debugger and removes the passphrase file when the capture fails", async () => {
+    const { runtime, calls } = await capturing(
+      envelope({ ok: false, error: { code: "CAPTURE_FAILED", message: "no login" } }),
+    );
+    await expect(runtime.captureKeys(":100")).rejects.toThrow("no login");
+    expect(calls.map((call) => [call.file, ...call.args].join(" "))).toContain("pkill -x gdb");
+    expect(await readdir(join(runtime.runtimeDir, "wechat-tmp"))).toEqual(["client.tmp"]);
   });
 });
 
@@ -815,45 +922,408 @@ describe("WechatUserRuntime.install", () => {
 });
 
 describe("WechatUserReader", () => {
-  function readerWith(reader: (args: string[]) => RunResult) {
-    const h = "/nonexistent-home";
-    const runtime = new WechatUserRuntime({
-      home: h,
-      run: scriptedRun({
-        // readerCommand runs "<venv>/bin/python3 <helper> <subcommand> ..."
-        [join(h, ".local/share/wechat/cli/bin/python3")]: reader,
-      }).run,
-    });
-    return new WechatUserReader(runtime);
-  }
-
-  it("parses a conversation page", async () => {
-    const reader = readerWith(() =>
-      ok(
-        JSON.stringify({
-          conversations: [
-            { id: "45357963768@chatroom", name: "Karball", isGroup: true, unread: 1 },
-            { id: "wxid_friend", name: "A Friend", isGroup: false, unread: 0 },
-          ],
-        }),
-      ),
-    );
-    const conversations = await reader.conversations({ limit: 20 });
-    expect(conversations).toHaveLength(2);
-    expect(conversations[0]!.isGroup).toBe(true);
-    expect(conversations[1]!.unread).toBe(0);
+  const envelope = (data: unknown): RunResult => ok(JSON.stringify({ v: 1, ok: true, data }));
+  const failure = (code: string): RunResult => ({
+    code: 1,
+    stdout: JSON.stringify({ v: 1, ok: false, error: { code, message: `${code} happened` } }),
+    stderr: "",
   });
 
-  it("maps a signed-out reader (exit 3) to a rejected session", async () => {
-    const reader = readerWith(() => ({ code: 3, stdout: "", stderr: "signed out" }));
+  const SESSIONS = [
+    {
+      username: "45357963768@chatroom",
+      displayName: "Karball",
+      type: "group",
+      unread: 1,
+      lastMessage: { content: "wxid_friend:\nsee you", createdAt: "2026-10-01T10:00:00.000Z" },
+    },
+    {
+      username: "wxid_friend",
+      displayName: "A Friend",
+      type: "private",
+      unread: 0,
+      lastMessage: { content: "yo", createdAt: "2026-10-01T09:00:00.000Z" },
+    },
+    { username: "@placeholder_foldgroup", displayName: "折叠的群聊", type: "folded", unread: 0 },
+    { username: "wxid_quiet", displayName: "Quiet", type: "private", unread: 0 },
+  ];
+
+  function message(id: number, createdAt: string, over: Record<string, unknown> = {}) {
+    return {
+      id: `wxid_friend:message/message_0.db:${id}`,
+      session: "wxid_friend",
+      sessionType: "private",
+      sender: "wxid_friend",
+      senderName: "A Friend",
+      isSelf: false,
+      type: "text",
+      content: `line ${id}`,
+      createdAt,
+      ...over,
+    };
+  }
+
+  /** A runtime over an unlocked store whose bridge answers per subcommand.
+   *  The calls record each wechat-cli argv after `-f json`. */
+  async function readerWith(
+    answer: (argv: string[]) => RunResult | Promise<RunResult>,
+    store: { stale?: boolean } = {},
+  ) {
+    const calls: string[][] = [];
+    const h = await tempHome();
+    const runtime = new WechatUserRuntime({
+      home: h,
+      run: async (file, args) => {
+        if (file === "sh") return ok("wxid_guardian\n");
+        expect(file).toBe(process.execPath);
+        expect(args.slice(1, 3)).toEqual(["-f", "json"]);
+        const argv = args.slice(3);
+        calls.push(argv);
+        return answer(argv);
+      },
+    });
+    await readableStore(h, runtime, store.stale);
+    return { reader: new WechatUserReader(runtime), calls };
+  }
+
+  /**
+   * A bridge `query` over `history`, paging as wechat-cli does: the newest
+   * `-n` messages inside the inclusive `--since`/`--until` seconds, oldest
+   * first, with a cursor while older ones remain. Pages larger than
+   * `maxPage` overflow the output limit.
+   */
+  function queryOver(history: ReturnType<typeof message>[], maxPage = Infinity) {
+    const second = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+    const flag = (argv: string[], name: string) =>
+      argv.includes(name) ? argv[argv.indexOf(name) + 1]! : undefined;
+    return (argv: string[]): RunResult => {
+      const limit = Number(flag(argv, "-n"));
+      if (limit > maxPage) {
+        throw Object.assign(new Error("stdout maxBuffer length exceeded"), {
+          code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+        });
+      }
+      const since = flag(argv, "--since");
+      const until = flag(argv, "--until");
+      const window = history.filter(
+        (m) =>
+          (!since || second(m.createdAt) >= second(since)) &&
+          (!until || second(m.createdAt) <= second(until)),
+      );
+      const end = Number(flag(argv, "--cursor") ?? window.length);
+      const start = Math.max(0, end - limit);
+      return envelope({
+        messages: window.slice(start, end),
+        cursor: start > 0 ? String(start) : null,
+      });
+    };
+  }
+
+  it("lists chats from the session list, without folded entries or empty chats", async () => {
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS));
+    const conversations = await reader.conversations({ limit: 20 });
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
+    expect(conversations).toEqual([
+      {
+        id: "45357963768@chatroom",
+        name: "Karball",
+        isGroup: true,
+        unread: 1,
+        lastMessageAt: Date.parse("2026-10-01T10:00:00Z") / 1000,
+        lastMessagePreview: "see you",
+      },
+      {
+        id: "wxid_friend",
+        name: "A Friend",
+        isGroup: false,
+        unread: 0,
+        lastMessageAt: Date.parse("2026-10-01T09:00:00Z") / 1000,
+        lastMessagePreview: "yo",
+      },
+    ]);
+  });
+
+  it("reads a preview the client stored as bytes, compressed or not", async () => {
+    const asJson = (bytes: Buffer) => JSON.parse(JSON.stringify(new Uint8Array(bytes)));
+    const { reader } = await readerWith(() =>
+      envelope([
+        {
+          ...SESSIONS[1],
+          lastMessage: { ...SESSIONS[1]!.lastMessage, content: asJson(Buffer.from("plain bytes")) },
+        },
+        {
+          ...SESSIONS[0],
+          lastMessage: {
+            ...SESSIONS[0]!.lastMessage,
+            content: asJson(zstdCompressSync(Buffer.from("wxid_friend:\nsqueezed"))),
+          },
+        },
+      ]),
+    );
+    const conversations = await reader.conversations({ limit: 5 });
+    expect(conversations.map((c) => c.lastMessagePreview)).toEqual(["squeezed", "plain bytes"]);
+  });
+
+  it("reads a chat with no stored preview as empty", async () => {
+    const { reader } = await readerWith(() =>
+      envelope([{ ...SESSIONS[1], lastMessage: { ...SESSIONS[1]!.lastMessage, content: null } }]),
+    );
+    const conversations = await reader.conversations({ limit: 5 });
+    expect(conversations).toEqual([
+      expect.objectContaining({ id: "wxid_friend", lastMessagePreview: "" }),
+    ]);
+  });
+
+  it("splits a window too large to capture into smaller pages", async () => {
+    const history = Array.from({ length: 400 }, (_, i) =>
+      message(i, new Date(Date.parse("2026-10-01T00:00:00Z") + i * 1000).toISOString()),
+    );
+    const query = queryOver(history, 60);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
+    const plain = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    expect(plain).toHaveLength(300);
+    expect(plain[0]!.text).toBe("line 100");
+    expect(plain.at(-1)!.text).toBe("line 399");
+    const paged = await reader.messages({
+      conversationId: "wxid_friend",
+      before: new Date("2026-10-01T00:05:00Z"),
+      limit: 250,
+      includeBoundaryTies: true,
+    });
+    // 250 strictly older messages, plus the one in the cursor second.
+    expect(paged).toHaveLength(251);
+    expect(paged[0]!.text).toBe("line 50");
+    expect(paged.at(-1)!.text).toBe("line 300");
+  });
+
+  it("runs one bridge process at a time", async () => {
+    let running = 0;
+    let most = 0;
+    const query = queryOver([message(1, "2026-10-01T08:00:00.000Z")]);
+    const { reader, calls } = await readerWith(async (argv) => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running--;
+      return argv[0] === "sessions" ? envelope(SESSIONS) : query(argv);
+    });
+    // A read across chats asks for several chats at once.
+    await reader.messages({ limit: 5 });
+    expect(calls.filter((argv) => argv[0] === "query").length).toBeGreaterThan(1);
+    expect(most).toBe(1);
+  });
+
+  it("picks the most recently active chats, not the pinned ones the bridge lists first", async () => {
+    const pinned = {
+      username: "wxid_pinned",
+      displayName: "Pinned",
+      type: "private",
+      unread: 0,
+      lastMessage: { content: "old news", createdAt: "2026-01-01T00:00:00.000Z" },
+    };
+    const { reader } = await readerWith(() => envelope([pinned, ...SESSIONS]));
+    const conversations = await reader.conversations({ limit: 1 });
+    expect(conversations.map((c) => c.id)).toEqual(["45357963768@chatroom"]);
+  });
+
+  it("filters chats by name or id", async () => {
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS));
+    const conversations = await reader.conversations({ query: "friend", limit: 5 });
+    expect(calls).toEqual([["sessions", "--include-hidden"]]);
+    expect(conversations.map((c) => c.id)).toEqual(["wxid_friend"]);
+  });
+
+  it("reads one chat's window and names it from the session list", async () => {
+    const { reader, calls } = await readerWith((argv) =>
+      argv[0] === "sessions"
+        ? envelope(SESSIONS)
+        : envelope({
+            messages: [
+              message(1, "2026-10-01T08:00:00.000Z"),
+              message(2, "2026-10-01T09:00:00.000Z", {
+                sender: "wxid_guardian",
+                isSelf: true,
+                type: "image",
+                content: '<?xml version="1.0"?><msg><img aeskey="secret"/></msg>',
+              }),
+            ],
+            cursor: null,
+          }),
+    );
+    const messages = await reader.messages({
+      conversationId: "wxid_friend",
+      since: new Date("2026-10-01T00:00:00.500Z"),
+      before: new Date("2026-10-02T00:00:00Z"),
+      limit: 10,
+    });
+    expect(calls).toContainEqual([
+      "query",
+      "wxid_friend",
+      "-n",
+      "10",
+      "--since",
+      "2026-10-01T00:00:00.000Z",
+      "--until",
+      "2026-10-02T00:00:00.000Z",
+    ]);
+    expect(messages).toEqual([
+      {
+        id: "wxid_friend:message/message_0.db:1",
+        conversationId: "wxid_friend",
+        conversationName: "A Friend",
+        isGroup: false,
+        senderId: "wxid_friend",
+        senderName: "A Friend",
+        isSelf: false,
+        timestamp: Date.parse("2026-10-01T08:00:00Z") / 1000,
+        type: "text",
+        text: "line 1",
+      },
+      expect.objectContaining({
+        senderId: "wxid_guardian",
+        isSelf: true,
+        type: "image",
+        // The envelope is key material, not anything anyone said.
+        text: "[image]",
+      }),
+    ]);
+  });
+
+  it("follows the oldest second's ties past the page edge", async () => {
+    const edge = "2026-10-01T08:00:00.000Z";
+    const query = queryOver([
+      message(0, "2026-10-01T07:00:00.000Z"),
+      message(1, edge),
+      message(2, edge),
+      message(3, edge),
+      message(4, "2026-10-01T09:00:00.000Z"),
+    ]);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
+    const messages = await reader.messages({
+      conversationId: "wxid_friend",
+      limit: 2,
+      includeBoundaryTies: true,
+    });
+    expect(messages.map((m) => m.text)).toEqual(["line 1", "line 2", "line 3", "line 4"]);
+  });
+
+  it("pages past a cursor second that holds more than a page", async () => {
+    const cursorSecond = "2026-10-01T08:00:00.000Z";
+    const history = [
+      message(0, "2026-10-01T07:59:00.000Z"),
+      ...Array.from({ length: 650 }, (_, i) => message(i + 1, cursorSecond)),
+      message(651, "2026-10-01T09:00:00.000Z"),
+    ];
+    const query = queryOver(history);
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : query(argv),
+    );
+    const messages = await reader.messages({
+      conversationId: "wxid_friend",
+      before: new Date(cursorSecond),
+      limit: 50,
+      includeBoundaryTies: true,
+    });
+    // The whole cursor second, and the older history behind it.
+    expect(messages).toHaveLength(651);
+    expect(messages[0]!.text).toBe("line 0");
+    expect(messages.at(-1)!.text).toBe("line 650");
+  });
+
+  it("reads across the recently active chats when none is named", async () => {
+    const { reader, calls } = await readerWith((argv) => {
+      if (argv[0] === "sessions") return envelope(SESSIONS);
+      return envelope({
+        messages: [
+          message(
+            1,
+            argv[1] === "45357963768@chatroom"
+              ? "2026-10-01T10:00:00.000Z"
+              : "2026-10-01T09:00:00.000Z",
+            {
+              session: argv[1],
+              sessionType: argv[1]!.endsWith("@chatroom") ? "group" : "private",
+            },
+          ),
+        ],
+        cursor: null,
+      });
+    });
+    const messages = await reader.messages({ limit: 1 });
+    expect(calls).toContainEqual(["sessions", "--include-hidden"]);
+    expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[1])).toEqual([
+      "45357963768@chatroom",
+      "wxid_friend",
+      "wxid_quiet",
+    ]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ conversationId: "45357963768@chatroom", isGroup: true });
+  });
+
+  it("reads in smaller pages when a page overflows the output limit", async () => {
+    const history = Array.from({ length: 400 }, (_, i) =>
+      message(i, new Date(Date.parse("2026-10-01T00:00:00Z") + i * 1000).toISOString()),
+    );
+    const { reader, calls } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope(SESSIONS) : queryOver(history, 200)(argv),
+    );
+    const messages = await reader.messages({ conversationId: "wxid_friend", limit: 300 });
+    expect(messages).toHaveLength(300);
+    expect(messages[0]!.text).toBe("line 100");
+    expect(calls.filter((argv) => argv[0] === "query").map((argv) => argv[3])).toContain("150");
+  });
+
+  it("counts a chat with the bridge's count, without reading messages", async () => {
+    const { reader, calls } = await readerWith(() =>
+      envelope({ session: "wxid_friend", count: 100_000 }),
+    );
+    expect(await reader.count("wxid_friend")).toBe(100_000);
+    expect(calls).toEqual([["count", "wxid_friend"]]);
+  });
+
+  it("refuses to read a store with a shard no stored key covers", async () => {
+    const { reader, calls } = await readerWith(() => envelope(SESSIONS), { stale: true });
+    await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(
+      WechatUserSessionRejected,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("reads an unknown chat as empty", async () => {
+    const { reader } = await readerWith((argv) =>
+      argv[0] === "sessions" ? envelope([]) : failure("SESSION_NOT_FOUND"),
+    );
+    expect(await reader.messages({ conversationId: "wxid_gone", limit: 5 })).toEqual([]);
+    expect(await reader.count("wxid_gone")).toBe(0);
+  });
+
+  it.each(["KEY_NOT_FOUND", "WECHAT_NOT_FOUND"])("maps %s to a rejected session", async (code) => {
+    const { reader } = await readerWith(() => failure(code));
     await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(
       WechatUserSessionRejected,
     );
   });
 
-  it("maps any other failure to a runtime error", async () => {
-    const reader = readerWith(() => ({ code: 1, stdout: "", stderr: "boom" }));
-    await expect(reader.conversations({ limit: 5 })).rejects.toBeInstanceOf(WechatUserRuntimeError);
+  it("maps a store mid-write to pending, and anything else to a runtime error", async () => {
+    await expect(
+      (await readerWith(() => failure("DECRYPT_FAILED"))).reader.conversations({ limit: 5 }),
+    ).rejects.toBeInstanceOf(WechatUserStorePending);
+    const other = (await readerWith(() => failure("DATABASE_QUERY_FAILED"))).reader.conversations({
+      limit: 5,
+    });
+    await expect(other).rejects.toBeInstanceOf(WechatUserRuntimeError);
+    await expect(other).rejects.not.toBeInstanceOf(WechatUserSessionRejected);
+    await expect(
+      (
+        await readerWith(() => ({ code: 1, stdout: "", stderr: "node: bad option" }))
+      ).reader.conversations({
+        limit: 5,
+      }),
+    ).rejects.toThrow(/bad option/);
   });
 });
 

@@ -223,8 +223,8 @@ describe("feishu talk lifecycle", () => {
       conversationId: "oc_chat",
     });
 
-    const activity = conn.talk!.feature("activity");
-    const direct = await conn.talk!.feature("directMessaging")?.conversationFor("ou_alice");
+    const activity = conn.talk!.activity;
+    const direct = await conn.talk!.directMessaging?.conversationFor("ou_alice");
     expect(direct).toBe("ou_alice");
     await conn.talk!.send(direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
@@ -237,6 +237,60 @@ describe("feishu talk lifecycle", () => {
       { messageId: "om_1", emojiType: "Typing", reactionId: "reaction-1" },
     ]);
     expect(channel.removedReactions).toEqual([{ messageId: "om_1", reactionId: "reaction-1" }]);
+  });
+});
+
+describe("feishu inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const channel = new FakeLarkChannel();
+    const talker = makeDescriptor(channel).capabilities.talker!.build(
+      { app: validCred() },
+      {
+        connectionId: "feishu-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => {
+        delivered.push(msg);
+      },
+      () => {},
+    );
+    await flush();
+
+    // A group message that mentions the bot and replies to an earlier message,
+    // with the wire event attached, so every field Feishu sets is present.
+    const wire = { event: { message: { message_id: "om_7" } } };
+    await channel.emitMessage({
+      messageId: "om_7",
+      chatType: "group",
+      content: "@_user_1 see this",
+      mentions: [{ key: "@_user_1", name: "Rome" }],
+      mentionedBot: true,
+      replyToMessageId: "om_6",
+      raw: wire,
+    });
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "feishu",
+        direction: "inbound",
+        messageId: "om_7",
+        conversationId: "oc_chat",
+        senderId: "ou_alice",
+        senderDisplayName: "Alice",
+        text: "Rome see this",
+        attachments: [],
+        timestamp: new Date(1700000000000),
+        replyTo: { messageId: "om_6" },
+        thread: { kind: "group" },
+        addressing: "mention",
+        raw: wire,
+      },
+    ]);
+    await talker.stop();
   });
 });
 

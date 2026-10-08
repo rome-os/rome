@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { AgentAccounting, AgentTurnStatus, RomeSessionType } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { TurnUsageEvent, UsageEvent, UsageFunding } from "./events.js";
+import type { LoginMethod, TurnUsageEvent, UsageEvent, UsageFunding } from "./events.js";
 
 const log = createLogger("usage-recorder");
 
@@ -27,6 +28,11 @@ export interface TurnUsageSink {
   recordTurn(facts: TurnUsageFacts): void;
 }
 
+/** The sign-in seam the auth routes call. Never throws and never blocks the sign-in. */
+export interface LoginUsageSink {
+  recordLogin(method: LoginMethod): void;
+}
+
 export interface UsageRecorderDeps {
   outbox: { enqueue(event: UsageEvent, credential: string): Promise<void> };
   attribution: Pick<UsageAttributionResolver, "forTurn">;
@@ -38,10 +44,11 @@ export interface UsageRecorderDeps {
 }
 
 /**
- * Turns finished turns into queued usage events. A turn that ends while the
- * instance is not signed in is not recorded.
+ * Turns finished turns and guardian sign-ins into queued usage events. One
+ * that happens while the instance is not signed in to Rome Cloud is not
+ * recorded.
  */
-export class UsageRecorder implements TurnUsageSink {
+export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
   private readonly pending = new Set<Promise<void>>();
 
   constructor(private readonly deps: UsageRecorderDeps) {}
@@ -51,19 +58,43 @@ export class UsageRecorder implements TurnUsageSink {
     // written cannot move it to another enrollment.
     const credential = this.deps.credential();
     if (!credential) return;
-    const write = this.writeTurn(facts, credential).catch((err: unknown) => {
-      log.warn("failed to queue turn usage", {
-        turnId: facts.turnId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-    this.pending.add(write);
-    void write.finally(() => this.pending.delete(write));
+    this.track(
+      this.writeTurn(facts, credential).catch((err: unknown) => {
+        log.warn("failed to queue turn usage", {
+          turnId: facts.turnId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    );
+  }
+
+  recordLogin(method: LoginMethod): void {
+    const credential = this.deps.credential();
+    if (!credential) return;
+    const event: UsageEvent = {
+      type: "login",
+      eventId: randomUUID(),
+      kind: method,
+      occurredAt: new Date().toISOString(),
+    };
+    this.track(
+      this.deps.outbox.enqueue(event, credential).catch((err: unknown) => {
+        log.warn("failed to queue login usage", {
+          method,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    );
   }
 
   /** Resolves once every turn recorded so far is queued or has failed. */
   async flush(): Promise<void> {
     await Promise.all(this.pending);
+  }
+
+  private track(write: Promise<void>): void {
+    this.pending.add(write);
+    void write.finally(() => this.pending.delete(write));
   }
 
   private async writeTurn(facts: TurnUsageFacts, credential: string): Promise<void> {
@@ -79,6 +110,7 @@ export class UsageRecorder implements TurnUsageSink {
       eventId: facts.turnId,
       kind: attribution.kind,
       appId: attribution.appId,
+      trigger: attribution.trigger,
       status: facts.status,
       provider: accounting?.provider ?? facts.provider,
       model: accounting?.model ?? facts.model,

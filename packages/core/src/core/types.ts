@@ -100,7 +100,7 @@ export interface ForkRunParams {
 export const MODEL_MAP: Record<NonNullable<AgentConfig["tier"]>, string> = {
   large: "claude-opus-5-5[1m]",
   medium: "claude-sonnet-5-5",
-  small: "claude-haiku-4-5-20251001",
+  small: "claude-haiku-5-5",
 };
 
 export interface AgentRunnerInterface {

@@ -120,6 +120,7 @@ describe("PromptBuilder", () => {
       "# Alpha\n\nAlpha project first paragraph.\n\nDetails stay available on demand.",
     );
     writeFileSync(join(projectMemoryDir, "SUMMARY.md"), "Legacy summary should not load.");
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 
@@ -166,6 +167,7 @@ describe("PromptBuilder", () => {
     mkdirSync(projectMemoryDir, { recursive: true });
     const filePath = join(projectMemoryDir, "PROJECT.md");
     writeFileSync(filePath, content);
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const prompt = new PromptBuilder().build(mainConfig, corePromptOptions);
     const projectSection = prompt.split("# Projects\n\n")[1];
@@ -175,6 +177,28 @@ describe("PromptBuilder", () => {
     );
     expect(Array.from(expected).length).toBeLessThanOrEqual(PROJECT_SUMMARY_CHAR_LIMIT);
     expect(readFileSync(filePath, "utf8")).toBe(content);
+  });
+
+  it("points each project at a directory that exists, or at none", () => {
+    for (const name of ["alpha", "beta", "gamma"]) {
+      const dir = join(mockPaths.profileMemoryDir, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "PROJECT.md"), `${name} introduction.`);
+    }
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
+    mkdirSync(join(mockPaths.customAppAuthoringRoot, "beta"), { recursive: true });
+
+    const projectSection = new PromptBuilder()
+      .build(mainConfig, corePromptOptions)
+      .split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      [
+        `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): alpha introduction.`,
+        `- \`beta\` (\`${join(mockPaths.customAppAuthoringRoot, "beta")}\`): beta introduction.`,
+        "- `gamma`: gamma introduction.",
+      ].join("\n"),
+    );
   });
 
   it("refreshes project introductions without injecting detailed notes", () => {
@@ -204,6 +228,25 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain("Agent browser:");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141` to open the Rome dashboard");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141/apps/<appId>` to use a specific app");
+  });
+
+  it("asks guardian-facing agents to state a short plan before long-running work", () => {
+    const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
+    // Cut at the next top-level heading so the checks stay inside this section.
+    const section = prompt.split("# Asking The Guardian For Input\n\n")[1]?.split("\n# ")[0] ?? "";
+    const planIndex = section.indexOf("Before you start a long-running task");
+
+    expect(planIndex).toBeGreaterThan(-1);
+    expect(section).toContain("state your plan, then start without waiting for approval");
+    expect(section).toContain("ASD-STE100 Simplified Technical English");
+    expect(section).toContain(
+      "If you already show the plan as a todo list, do not repeat it in prose.",
+    );
+    // The plan paragraph sits before the "use the ask_question tool" rule.
+    expect(planIndex).toBeLessThan(section.indexOf("When you do need to ask"));
+
+    const withoutAskTool = new PromptBuilder().build(mainConfig, corePromptOptions);
+    expect(withoutAskTool).not.toContain("Before you start a long-running task");
   });
 
   it("advertises the globally available Discord CLI to every agent", () => {

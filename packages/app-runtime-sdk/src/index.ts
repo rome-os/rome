@@ -655,6 +655,43 @@ export interface AgentLifecycleHookDeps {
   agentRunner?: AgentRunnerInterface;
 }
 
+// App-started hook. Contract: docs/concepts/apps.md#hooks.
+
+export type AppStartedEventVersion = 1;
+
+/** One app start: an installed bundle of an enabled app becoming active in
+ *  the running daemon. */
+export interface AppStartedEvent {
+  type: "app-started";
+  version: AppStartedEventVersion;
+  appId: string;
+  /** The manifest `version` of the bundle that started. */
+  appVersion: string;
+}
+
+/**
+ * Declared as `hooks/app-started`. Rome calls `onAppStarted` once per app
+ * start: at boot for every enabled app, and after an install, upgrade, or
+ * re-enable. A re-install of identical content is not a new start. The call
+ * comes after boot finishes, so actions, routines, and agents are available.
+ * Neither boot nor the install waits for it. Rome logs a throw and does not
+ * retry until the next app start.
+ *
+ * Every boot is a new start, so Rome calls the hook again for state it
+ * already set up. Make it idempotent: check that the state exists before
+ * creating it.
+ */
+export interface AppStartedHook {
+  onAppStarted(event: AppStartedEvent): Promise<void> | void;
+}
+
+export interface AppStartedHookDeps {
+  appId: string;
+  logger: AppLogger;
+  appContext: RomeAppContext;
+  agentRunner?: AgentRunnerInterface;
+}
+
 // Awaited onion middleware around an agent turn. Agent model: docs/concepts/agents.md.
 
 /** Identifies the wrapped turn; middleware matching uses only `agentName`. */
@@ -1583,6 +1620,7 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
+/** @deprecated Use {@link ChannelMessage}. */
 export interface NormalizedMessage {
   id: string;
   channel:
@@ -1728,7 +1766,8 @@ export function connectionRefusalMessage(
   }
 }
 
-/** What {@link ChannelsService.history} reads. */
+/** What {@link ChannelsService.history} reads.
+ *  @deprecated Use {@link ChannelMessageQuery} with {@link ChannelsService.query}. */
 export interface ChannelHistoryRead {
   conversationId?: ConversationId;
   since?: Date;
@@ -1769,10 +1808,11 @@ export interface ChannelsService {
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
   /**
-   * What `fetch_channel_history` has always read: each channel's history
-   * window cut as its Connection's retired history read cut it, oldest first.
-   * Kept apart from `query` because those windows differ from `query`'s. Read
-   * `query` for anything new.
+   * The page `query` answers for the same conversation, window and limit,
+   * oldest first. `connectionId` is not consulted: the channel's messages
+   * answer for whichever Connection backs it.
+   *
+   * @deprecated Use {@link ChannelsService.query}, which answers newest first.
    */
   history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
 }
@@ -1815,21 +1855,30 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-export interface TalkInboundMedia {
+export interface ChannelInboundMedia {
   materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
-export interface TalkActivitySession {
+/** @deprecated Use {@link ChannelInboundMedia}. */
+export type TalkInboundMedia = ChannelInboundMedia;
+
+export interface ChannelActivitySession {
   update(state: "thinking" | "working"): Promise<void>;
   finish(result: "done" | "error"): Promise<void>;
 }
 
-export interface TalkActivity {
+/** @deprecated Use {@link ChannelActivitySession}. */
+export type TalkActivitySession = ChannelActivitySession;
+
+export interface ChannelActivity {
   begin(input: {
     conversationId: ConversationId;
     messageId?: string;
-  }): Promise<TalkActivitySession | null>;
+  }): Promise<ChannelActivitySession | null>;
 }
+
+/** @deprecated Use {@link ChannelActivity}. */
+export type TalkActivity = ChannelActivity;
 
 /**
  * Reaching one account directly, rather than replying inside a conversation
@@ -1853,7 +1902,7 @@ export interface TalkActivity {
  * both spellings of that entry share. A send accepted anonymously cannot be
  * followed, and is reported as delivered the moment the channel takes it.
  */
-export interface TalkDirectMessaging {
+export interface ChannelDirectMessaging {
   /**
    * The conversation that reaches `channelUserId` directly, or null when the
    * channel cannot produce one.
@@ -1866,13 +1915,16 @@ export interface TalkDirectMessaging {
   conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
 
+/** @deprecated Use {@link ChannelDirectMessaging}. */
+export type TalkDirectMessaging = ChannelDirectMessaging;
+
 /** Sending on a channel. */
 export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
-  readonly activity?: TalkActivity | null;
+  readonly activity?: ChannelActivity | null;
 }
 
 /**
@@ -1923,7 +1975,7 @@ export interface ChannelInbound {
   subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
   /** Materializes a message's attachments, or null when the channel cannot
    *  now. A consumer without it uses the attachments as delivered. */
-  readonly media: TalkInboundMedia | null;
+  readonly media: ChannelInboundMedia | null;
 }
 
 /**
@@ -2764,7 +2816,8 @@ export interface BackendTurnParams {
   /** Exact runtime session resume handle. */
   sessionId: string;
   /** Connection that owns the provider conversation, passed to the resumed
-   * turn's thread context. Delivery finds the channel by `channel`, not by this. */
+   * turn's thread context. Delivery finds the channel by `channel`, not by this.
+   * @deprecated Delivery does not read it. */
   connectionId?: string;
   channel: string;
   threadId: string;

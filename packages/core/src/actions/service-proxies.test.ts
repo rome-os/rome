@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  AppManagerProxy,
   BackendTurnRunnerProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
+  FeedbackServiceProxy,
 } from "./service-proxies.js";
+import {
+  runWithHookInvocationContext,
+  runWithoutHookInvocationContext,
+  type HookInvocationContext,
+} from "../core/hook-recursion.js";
+import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { AppLifecycleService } from "../apps/lifecycle-service.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import {
   setWorkerRpcInProcessDispatcher,
   WorkerRpcDisconnectError,
@@ -41,6 +51,7 @@ describe("ChannelsServiceProxy", () => {
     const since = new Date("2026-08-04T09:00:00.000Z");
 
     const queried = await proxy.query("discord", { since, limit: 2 });
+    // `history` is deprecated and reads through `query`.
     const read = await proxy.history("discord", { since, connectionId: "discord-1" });
 
     for (const page of [queried, read]) {
@@ -53,12 +64,8 @@ describe("ChannelsServiceProxy", () => {
         params: { channel: "discord", since: "2026-08-04T09:00:00.000Z", limit: 2 },
       },
       {
-        method: "channels.history",
-        params: {
-          channel: "discord",
-          since: "2026-08-04T09:00:00.000Z",
-          connectionId: "discord-1",
-        },
+        method: "channels.query",
+        params: { channel: "discord", since: "2026-08-04T09:00:00.000Z" },
       },
     ]);
   });
@@ -257,5 +264,120 @@ describe("NotifyServiceProxy", () => {
     await expect(new NotifyServiceProxy().send()).rejects.toThrow(
       /not running in a Node\.js child process/,
     );
+  });
+});
+
+describe("AppManagerProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  const chain: HookInvocationContext = {
+    rootInvocationId: "root-1",
+    depth: 1,
+    chain: [{ hookType: "app", appId: "looper", hookName: "app-started" }],
+  };
+
+  it("sends the caller's hook chain with every lifecycle call", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return {};
+    });
+    const proxy = new AppManagerProxy();
+
+    await runWithHookInvocationContext(chain, async () => {
+      await proxy.install({ source: { mode: "bundle", path: "/tmp/app" } });
+      await proxy.uninstall({ appId: "looper" });
+      await proxy.setEnabled({ appId: "looper", enabled: true });
+    });
+    await proxy.setEnabled({ appId: "looper", enabled: false });
+
+    expect(calls).toEqual([
+      {
+        method: "apps.install",
+        params: { source: { mode: "bundle", path: "/tmp/app" }, hookInvocationContext: chain },
+      },
+      { method: "apps.uninstall", params: { appId: "looper", hookInvocationContext: chain } },
+      {
+        method: "apps.setEnabled",
+        params: { appId: "looper", enabled: true, hookInvocationContext: chain },
+      },
+      { method: "apps.setEnabled", params: { appId: "looper", enabled: false } },
+    ]);
+  });
+
+  it("delivers the chain to the app manager across the worker hop", async () => {
+    process.send = undefined;
+    let seen: HookInvocationContext | undefined;
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const server = new WorkerRpcServer({
+      appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
+    } as unknown as WorkerRpcServices);
+    // A real worker hop serializes the params and loses the caller's async
+    // context. Model both, so only the params can carry the chain.
+    setWorkerRpcInProcessDispatcher((method, params) =>
+      runWithoutHookInvocationContext(() =>
+        server.dispatchInProcess(method, JSON.parse(JSON.stringify(params))),
+      ),
+    );
+
+    await runWithHookInvocationContext(chain, () =>
+      new AppManagerProxy().setEnabled({ appId: "looper", enabled: true }),
+    );
+
+    expect(appManager.setEnabled).toHaveBeenCalledWith("looper", true);
+    expect(seen).toEqual(chain);
+  });
+});
+
+describe("FeedbackServiceProxy", () => {
+  const originalSend = process.send;
+  const input = {
+    category: "bug" as const,
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent" as const, agentName: "main" },
+  };
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+  it("forwards runtime provenance and returns only the classified outcome", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      expect(method).toBe("feedback.send");
+      expect(params).toEqual(input);
+      return { kind: "ok" };
+    });
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "ok" });
+  });
+  it.each([
+    new WorkerRpcTimeoutError("feedback.send", 30_000),
+    new WorkerRpcDisconnectError(),
+    new WorkerRpcSendError("feedback.send", new Error("EPIPE")),
+  ])("classifies transport uncertainty without retry: %s", async (err) => {
+    process.send = undefined;
+    const dispatch = rs.fn(async () => {
+      throw err;
+    });
+    setWorkerRpcInProcessDispatcher(dispatch);
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "unreachable" });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+  it("does not hide a genuine handler bug", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => {
+      throw new Error("bug");
+    });
+    await expect(new FeedbackServiceProxy().send(input)).rejects.toThrow("bug");
   });
 });

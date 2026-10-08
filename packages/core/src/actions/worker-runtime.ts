@@ -28,6 +28,7 @@ import {
   EventBusProxy,
   EventCatalogProxy,
   NotifyServiceProxy,
+  FeedbackServiceProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
@@ -190,6 +191,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,
       }),
+      feedback: new FeedbackServiceProxy(),
     },
   );
   if (agentLoader.getRegistryLoadFailures().length > 0) {

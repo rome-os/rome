@@ -1,12 +1,13 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, normalization, slash commands, send
-// formatting, history — is the existing `DiscordAdapter`
+// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// commands, send formatting, history — is `DiscordAdapter`
 // (packages/core/src/channels/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
-// discord.js owns transient reconnect internally (auto-resumes dropped shards);
-// only TERMINAL failures reach `fault`:
+// The transport already speaks the channel's record, so inbound and send pass
+// through without a projection. discord.js owns transient reconnect internally
+// (auto-resumes dropped shards); only TERMINAL failures reach `fault`:
 //   - login `TokenInvalid` / `DisallowedIntents`, or a live `invalidated`
 //     session revocation → CredentialRejected{ grant: "bot" } → runtime renews
 //     once, then degrades.
@@ -16,7 +17,7 @@
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type { ChatStopHandler, TalkActivity, TalkInboundMedia } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName, TalkHistory } from "../types.js";
+import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
@@ -24,15 +25,7 @@ import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import {
-  directoryPage,
-  historyQueryLimit,
-  historyWindowHours,
-  normalizedFromInbound,
-  toHistoryMessage,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { directoryPage, historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
 // (users/@me). Declared next to the material shape ({ token }); parse-then-store,
@@ -278,10 +271,88 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             );
           };
 
+          const history: TalkHistory = {
+            async query(input) {
+              const messages = await adapter.fetchHistory(
+                input.conversationId ?? null,
+                historyWindowHours(input.since),
+              );
+              return messages.slice(0, historyQueryLimit(input.limit));
+            },
+          };
+          const inboundMedia: TalkInboundMedia = {
+            materialize: (message) => adapter.saveIncomingAttachments(message),
+          };
+          const activity: TalkActivity = {
+            async begin(input) {
+              await adapter.notifyTyping(input.conversationId);
+              return {
+                update: async () => adapter.notifyTyping(input.conversationId),
+                finish: async () => {},
+              };
+            },
+          };
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                adapter
+                  .listGuildChannels()
+                  .filter((channel) => input.includeTopics || channel.type !== "thread")
+                  .filter(
+                    (channel) =>
+                      !query ||
+                      `${channel.guildName} ${channel.name}`.toLocaleLowerCase().includes(query),
+                  )
+                  .sort((left, right) =>
+                    `${left.guildName}\0${left.name}\0${left.id}`.localeCompare(
+                      `${right.guildName}\0${right.name}\0${right.id}`,
+                    ),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((channel) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    conversationId: channel.id as import("@rome-os/app-runtime").ConversationId,
+                  },
+                  service: "discord",
+                  kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
+                  displayName: channel.name,
+                  containerName: channel.guildName,
+                  // Discord also uses parentId for a channel's category.
+                  // Only native threads inherit conversation settings.
+                  ...(channel.type === "thread" && channel.parentId
+                    ? {
+                        parent: {
+                          connectionId: kit.connectionId,
+                          conversationId:
+                            channel.parentId as import("@rome-os/app-runtime").ConversationId,
+                        },
+                      }
+                    : {}),
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            directMessaging: {
+              conversationFor: async (userId) =>
+                (await adapter.directConversationFor(
+                  userId,
+                )) as import("@rome-os/app-runtime").ConversationId,
+            },
+            history,
+            inboundMedia,
+            activity,
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // adapter.start() awaits client.login(), which rejects with a
               // DiscordjsError { code: TokenInvalid | DisallowedIntents } on a
               // refused token; the live gateway routes terminal errors through
@@ -291,100 +362,10 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const history: TalkHistory = {
-                async query(input) {
-                  const messages = await adapter.fetchHistory(
-                    input.conversationId ?? null,
-                    historyWindowHours(input.since),
-                  );
-                  // The read leaves bot messages out, so every line is one a
-                  // person wrote and Rome was told.
-                  return messages
-                    .slice(0, historyQueryLimit(input.limit))
-                    .map((message) => toHistoryMessage(message, "discord"));
-                },
-              };
-              const inboundMedia: TalkInboundMedia = {
-                materialize: (message) =>
-                  adapter.saveIncomingAttachments(normalizedFromInbound(message)),
-              };
-              const activity: TalkActivity = {
-                async begin(input) {
-                  await adapter.notifyTyping(input.conversationId);
-                  return {
-                    update: async () => adapter.notifyTyping(input.conversationId),
-                    finish: async () => {},
-                  };
-                },
-              };
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    adapter
-                      .listGuildChannels()
-                      .filter((channel) => input.includeTopics || channel.type !== "thread")
-                      .filter(
-                        (channel) =>
-                          !query ||
-                          `${channel.guildName} ${channel.name}`
-                            .toLocaleLowerCase()
-                            .includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.guildName}\0${left.name}\0${left.id}`.localeCompare(
-                          `${right.guildName}\0${right.name}\0${right.id}`,
-                        ),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((channel) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId: channel.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "discord",
-                      kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
-                      displayName: channel.name,
-                      containerName: channel.guildName,
-                      // Discord also uses parentId for a channel's category.
-                      // Only native threads inherit conversation settings.
-                      ...(channel.type === "thread" && channel.parentId
-                        ? {
-                            parent: {
-                              connectionId: kit.connectionId,
-                              conversationId:
-                                channel.parentId as import("@rome-os/app-runtime").ConversationId,
-                            },
-                          }
-                        : {}),
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                directMessaging: {
-                  conversationFor: async (userId) =>
-                    (await adapter.directConversationFor(
-                      userId,
-                    )) as import("@rome-os/app-runtime").ConversationId,
-                },
-                history,
-                inboundMedia,
-                activity,
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

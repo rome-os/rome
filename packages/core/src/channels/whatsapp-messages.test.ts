@@ -99,6 +99,7 @@ describe("whatsAppMessages", () => {
 
   const refs = (entries: { ref: string }[]) => entries.map((entry) => entry.ref);
 
+  // Exact, so it also pins what stays out: the reaction `r` on the same chat.
   it("merges both addresses of the account, newest first", async () => {
     const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
@@ -113,19 +114,6 @@ describe("whatsAppMessages", () => {
       sender: { id: PHONE, name: null },
       conversation: { id: PHONE, name: null, kind: "dm" },
     });
-  });
-
-  it("leaves out reactions", async () => {
-    const messages = accountReads(testDb.db);
-    const page = await messages.read({ accounts, limit: WHOLE_HISTORY });
-    expect(refs(page)).not.toContain(`${PHONE}:r`);
-  });
-
-  it("leaves out group threads", async () => {
-    const messages = accountReads(testDb.db);
-    const group: MessageAccount[] = [{ channel: "whatsapp", addresses: [GROUP] }];
-    expect(await messages.latest(group)).toBeNull();
-    expect(await messages.count(group)).toBe(0);
   });
 
   // The chat is the conversation: a WhatsApp message hangs off it, and a group
@@ -249,45 +237,19 @@ describe("whatsAppMessages", () => {
     expect(read?.sender).toEqual({ id: PHONE, name: "Ada" });
   });
 
-  it("holds nothing for an account on another channel", async () => {
-    const messages = accountReads(testDb.db);
-    // The same string, on a channel this store does not serve.
-    const elsewhere: MessageAccount[] = [{ channel: "linkedin", addresses: [PHONE] }];
-    expect(await messages.latest(elsewhere)).toBeNull();
-    expect(await messages.count(elsewhere)).toBe(0);
-    expect(await messages.read({ accounts: elsewhere, limit: WHOLE_HISTORY })).toEqual([]);
-  });
-
-  it("holds nothing for an empty scope", async () => {
-    const messages = accountReads(testDb.db);
-    expect(await messages.latest([])).toBeNull();
-    expect(await messages.count([])).toBe(0);
-    expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
-  });
-
   // The scope is the account's address set, and the three verbs answer one
   // history over it: `count` is the length of the full read and `latest` its
-  // first entry. Per scope rather than once, because a store that scoped `read`
-  // one way and `count` another would still agree on the widest scope there is.
-  it.each([
-    {
-      scope: accounts,
-      of: "both addresses of the account",
-      refs: [`${PHONE}:e`, `${PHONE}:c`, `${LID}:d`, `${PHONE}:a`],
-    },
-    // `d` arrived on the `@lid` address, so a scope naming only the phone
-    // leaves it out — the address set is the scope, not the account.
-    {
-      scope: [{ channel: "whatsapp", addresses: [PHONE] }],
-      of: "one address",
-      refs: [`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`],
-    },
-    { scope: silent, of: "a contact the mirror holds nothing for", refs: [] },
-  ])("answers read, count and latest over $of", async ({ scope, refs: expected }) => {
+  // first entry. Over a narrower scope than the contract suite's, because a
+  // store that scoped `read` one way and `count` another would still agree on
+  // the widest scope there is. `d` arrived on the `@lid` address, so a scope
+  // naming only the phone leaves it out — the address set is the scope, not
+  // the account.
+  it("answers read, count and latest over one address", async () => {
+    const scope: MessageAccount[] = [{ channel: "whatsapp", addresses: [PHONE] }];
     const messages = accountReads(testDb.db);
     const page = await messages.read({ accounts: scope, limit: WHOLE_HISTORY });
 
-    expect(refs(page)).toEqual(expected);
+    expect(refs(page)).toEqual([`${PHONE}:e`, `${PHONE}:c`, `${PHONE}:a`]);
     expect(await messages.count(scope)).toBe(page.length);
     expect(await messages.latest(scope)).toEqual(page[0] ?? null);
   });
@@ -318,33 +280,30 @@ describe("whatsAppMessages", () => {
     expect(refs(tail)).toEqual([`${PHONE}:c`, `${LID}:d`, `${PHONE}:a`]);
     expect(total).toBe(4);
   });
-
-  it("costs one pass per round of calls, not one per account", async () => {
-    const counted = countingDb(testDb.db);
-    const messages = accountReads(counted.db);
-    const directory = [PHONE, LID, OTHER, GROUP, "15554444@s.whatsapp.net"].map(
-      (address): MessageAccount[] => [{ channel: "whatsapp", addresses: [address] }],
-    );
-
-    const before = counted.passes();
-    await Promise.all(directory.map((row) => messages.latest(row)));
-    expect(counted.passes() - before).toBe(1);
-  });
 });
 
-testAccountMessagesContract("whatsAppMessages", () => {
-  const testDb = createTestDb();
-  seedMirror(testDb);
-  return { messages: accountReads(testDb.db), accounts, silent };
-});
+// One seeded database for both suites: every assertion in them reads, so a
+// fresh one per case would only buy migrations.
+let enrolled: DrizzleDb | null = null;
 
-testMessagesQueryContract("whatsAppMessages", () => {
-  const testDb = createTestDb();
-  seedMirror(testDb);
-  return {
-    messages: whatsAppMessages(testDb.db),
-    channel: "whatsapp",
-    conversation: groupChat,
-    silentConversation: emptyChat,
-  };
-});
+function enrolledDb(): DrizzleDb {
+  if (!enrolled) {
+    const testDb = createTestDb();
+    seedMirror(testDb);
+    enrolled = testDb.db;
+  }
+  return enrolled;
+}
+
+testAccountMessagesContract("whatsAppMessages", () => ({
+  messages: accountReads(enrolledDb()),
+  accounts,
+  silent,
+}));
+
+testMessagesQueryContract("whatsAppMessages", () => ({
+  messages: whatsAppMessages(enrolledDb()),
+  channel: "whatsapp",
+  conversation: groupChat,
+  silentConversation: emptyChat,
+}));

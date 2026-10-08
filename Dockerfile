@@ -231,7 +231,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
       libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
       libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      python3-venv gdb x11-utils imagemagick \
+      gdb x11-utils imagemagick \
       at-spi2-core xdotool python3-jeepney
 
 # Install AI tool CLIs globally (early for better layer caching).
@@ -240,7 +240,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # does NOT work: npm's replace-registry-host rewrites the npmjs tarball host to the
 # top-level --registry (the mirror), producing a 404.
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.281 @openai/codex@0.160.0 && \
+    npm install -g ${NPM_REGISTRY:+--registry "$NPM_REGISTRY"} @anthropic-ai/claude-code@2.1.293 @openai/codex@0.160.0 && \
     npm install -g @yunfanye/opencli@1.8.8
 
 RUN curl -fsSL --retry 5 --retry-delay 2 https://composio.dev/install | COMPOSIO_INSTALL_DIR=/usr/local/lib/composio bash -s -- "$COMPOSIO_CLI_VERSION" && \
@@ -289,6 +289,19 @@ RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 # Create rome user early so COPY --chown can avoid expensive recursive chown
 RUN groupadd --system rome && \
     useradd --system --no-log-init --gid rome --create-home --shell /bin/bash rome
+
+# The daemon runs as rome with HOME on the persistent volume. Corepack's
+# default cache lives under HOME, and an empty cache pins whatever pnpm is
+# latest on first use, so each instance would install apps with a different
+# pnpm. App installs run pnpm against this cache instead (runPnpm in
+# packages/core/src/apps/packaging/pack.ts). rome owns it so an app that
+# declares another packageManager version can still download that version.
+# Such downloads live in the image layer, not the volume, so they repeat after
+# each container recreate (first-party apps all declare this version).
+ENV ROME_PNPM_COREPACK_HOME=/opt/rome-corepack
+RUN mkdir -p /opt/rome-corepack && \
+    COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
+    chown -R rome:rome /opt/rome-corepack
 
 # Tailscale binaries + state dirs
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale

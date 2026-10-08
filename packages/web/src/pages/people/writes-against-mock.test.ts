@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { afterAll, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";
@@ -125,7 +125,9 @@ const readOutbox = (personId: string) =>
   fetchJson<OutboxPage>(`/api/people/${personId}/outbox`, { fallback: "outbox unavailable" });
 
 /** Read the outbox until it answers what the caller is waiting for — the same
- *  poll a reader of the page makes, and the read that clears a landed row. */
+ *  poll a reader of the page makes, and the read that clears a landed row.
+ *  Moves the faked clock 50ms between reads, because the mock outbox advances
+ *  its rows by `Date.now()` alone. */
 async function outboxUntil(
   personId: string,
   done: (page: OutboxPage) => boolean,
@@ -133,7 +135,7 @@ async function outboxUntil(
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const page = await readOutbox(personId);
     if (done(page)) return page;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    rs.setSystemTime(Date.now() + 50);
   }
   throw new Error("the outbox never reached the state under test");
 }
@@ -141,58 +143,53 @@ async function outboxUntil(
 const holds = (page: OutboxPage, id: string) => page.messages.some((m) => m.id === id);
 
 describe("Sending, against the contract's own handlers", () => {
-  it("retains delivered send receipts through cleanup and expires them after 24 hours", async () => {
+  beforeEach(() => {
     rs.useFakeTimers({ toFake: ["Date"] });
-    const startedAt = Date.now();
-    rs.setSystemTime(startedAt);
-    try {
-      const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "mock receipt lifecycle" };
-      const sent = await sendMessage(RAY, request, t);
-      expect(sent.ok).toBe(true);
-      if (!sent.ok) return;
-      const removedAt = startedAt + 10_000;
-      rs.setSystemTime(removedAt);
-      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-      const replayed = await sendMessage(RAY, request, t);
-      expect(replayed).toMatchObject({ ok: true, value: { id: request.id, state: "unconfirmed" } });
-      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-      expect(await sendMessage(RAY, { ...request, text: "changed" }, t)).toMatchObject({
-        ok: false,
-      });
-      const timeline = await fetchJson<TimelinePage>(`/api/people/${RAY}/messages`, {
-        fallback: "timeline unavailable",
-      });
-      expect(timeline.entries.filter((entry) => entry.body === request.text)).toHaveLength(1);
+  });
+  afterEach(() => {
+    rs.useRealTimers();
+  });
 
-      rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
-      expect(await sendMessage(RAY, request, t)).toEqual(replayed);
-      rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
-      expect(await sendMessage(RAY, request, t)).toMatchObject({
-        ok: true,
-        value: { state: "sending" },
-      });
-      expect(holds(await readOutbox(RAY), request.id)).toBe(true);
-    } finally {
-      rs.useRealTimers();
-    }
+  it("retains delivered send receipts through cleanup and expires them after 24 hours", async () => {
+    const startedAt = Date.now();
+    const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "mock receipt lifecycle" };
+    const sent = await sendMessage(RAY, request, t);
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+    const removedAt = startedAt + 10_000;
+    rs.setSystemTime(removedAt);
+    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
+    const replayed = await sendMessage(RAY, request, t);
+    expect(replayed).toMatchObject({ ok: true, value: { id: request.id, state: "unconfirmed" } });
+    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
+    expect(await sendMessage(RAY, { ...request, text: "changed" }, t)).toMatchObject({
+      ok: false,
+    });
+    const timeline = await fetchJson<TimelinePage>(`/api/people/${RAY}/messages`, {
+      fallback: "timeline unavailable",
+    });
+    expect(timeline.entries.filter((entry) => entry.body === request.text)).toHaveLength(1);
+
+    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
+    expect(await sendMessage(RAY, request, t)).toEqual(replayed);
+    rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
+    expect(await sendMessage(RAY, request, t)).toMatchObject({
+      ok: true,
+      value: { state: "sending" },
+    });
+    expect(holds(await readOutbox(RAY), request.id)).toBe(true);
   });
 
   it("keeps a receipt when a failed mock send is discarded", async () => {
-    rs.useFakeTimers({ toFake: ["Date"] });
     const startedAt = Date.now();
-    rs.setSystemTime(startedAt);
-    try {
-      const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "fail discarded receipt" };
-      expect(await sendMessage(RAY, request, t)).toMatchObject({ ok: true });
-      rs.setSystemTime(startedAt + 10_000);
-      const failed = (await readOutbox(RAY)).messages.find((message) => message.id === request.id)!;
-      expect(failed.state).toBe("failed");
-      expect(await discardSend(RAY, request.id, t)).toMatchObject({ ok: true });
-      expect(await sendMessage(RAY, request, t)).toEqual({ ok: true, value: failed });
-      expect(holds(await readOutbox(RAY), request.id)).toBe(false);
-    } finally {
-      rs.useRealTimers();
-    }
+    const request = { ...RAY_TELEGRAM, id: crypto.randomUUID(), text: "fail discarded receipt" };
+    expect(await sendMessage(RAY, request, t)).toMatchObject({ ok: true });
+    rs.setSystemTime(startedAt + 10_000);
+    const failed = (await readOutbox(RAY)).messages.find((message) => message.id === request.id)!;
+    expect(failed.state).toBe("failed");
+    expect(await discardSend(RAY, request.id, t)).toMatchObject({ ok: true });
+    expect(await sendMessage(RAY, request, t)).toEqual({ ok: true, value: failed });
+    expect(holds(await readOutbox(RAY), request.id)).toBe(false);
   });
 
   it("holds a send in the outbox, and lets it go once it is on the timeline", async () => {

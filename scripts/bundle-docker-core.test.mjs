@@ -104,13 +104,7 @@ test("compiled People contracts run in plain Node without TypeScript source reso
 // only visible in the image — the source tree keeps working under tsx.
 test("bundles the WeChat scripts the compiled runtime reads from dist", async () => {
   const expected = [
-    ["packages/core/src/channels/wechat-user-helper.py", "dist/wechat-user-helper.py"],
-    [
-      "packages/core/src/channels/wechat-user-launch-driver.py",
-      "dist/wechat-user-launch-driver.py",
-    ],
     ["packages/core/src/channels/wechat-user-send-driver.py", "dist/wechat-user-send-driver.py"],
-    ["packages/core/src/channels/vendor/wcdb_key_tool.py", "dist/vendor/wcdb_key_tool.py"],
   ];
 
   for (const [source, destination] of expected) {

@@ -11,6 +11,10 @@ import { EventCatalog } from "../event-catalog.js";
 import { EventService } from "../events/event-service.js";
 import { AppLifecycleService } from "../apps/lifecycle-service.js";
 import { buildAction } from "../test/kit/index.js";
+import {
+  getCurrentHookInvocationContext,
+  runWithHookInvocationContext,
+} from "../core/hook-recursion.js";
 import type { ActionResult } from "./types.js";
 
 interface SubprocessEngine {
@@ -50,11 +54,16 @@ async function rpc(
 ): Promise<RpcResponse> {
   const id = nextId++;
   fake.emitter.emit("message", { type: "rpc_request", clientId: "client-1", id, method, params });
-  return await rs.waitFor(() => {
-    const response = fake.sent.find((m) => m.id === id);
-    if (!response) throw new Error("no response yet");
-    return response;
-  });
+  // The default 50ms poll would floor every call at 50ms, and the reply
+  // usually lands within a few microtasks of the request.
+  return await rs.waitFor(
+    () => {
+      const response = fake.sent.find((m) => m.id === id);
+      if (!response) throw new Error("no response yet");
+      return response;
+    },
+    { interval: 1 },
+  );
 }
 
 // The RPC server now only validates wire params and delegates to the
@@ -74,6 +83,7 @@ function makeServer(
     };
     hasRegisteredAction?: ReturnType<typeof rs.fn>;
     notify?: { send: ReturnType<typeof rs.fn> };
+    feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
     connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
   } = {},
@@ -106,6 +116,7 @@ function makeServer(
     systemUpgrade: { checkAndOffer: rs.fn() },
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
+    feedback: overrides.feedback ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
   } as unknown as WorkerRpcServices;
@@ -223,7 +234,6 @@ describe("WorkerRpcServer param validation", () => {
         list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
         send: rs.fn(async () => ({ messageId: "m1" })),
         query: rs.fn(async () => []),
-        history: rs.fn(async () => []),
       };
       const { server } = makeServer({ channelsService: service });
       const fake = makeFakeWorker();
@@ -241,7 +251,6 @@ describe("WorkerRpcServer param validation", () => {
         since: "2026-09-29T10:00:00.000Z",
         limit: 5,
       });
-      await rpc(fake, "channels.history", { channel: "discord", conversationId: "c1" });
 
       expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
       expect(sent.result).toEqual({ messageId: "m1" });
@@ -255,7 +264,6 @@ describe("WorkerRpcServer param validation", () => {
         since: new Date("2026-09-29T10:00:00.000Z"),
         limit: 5,
       });
-      expect(service.history).toHaveBeenCalledWith("discord", { conversationId: "c1" });
     });
 
     it("rejects a read with no channel", async () => {
@@ -294,6 +302,89 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({ appId: "demo", enabled: false });
     expect(appManager.setEnabled).toHaveBeenCalledWith("demo", false);
+  });
+
+  it("runs apps.setEnabled under the caller's hook chain", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+    const hookInvocationContext = {
+      rootInvocationId: "root-1",
+      depth: 1,
+      chain: [{ hookType: "app", appId: "demo", hookName: "app-started" }],
+    };
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(appManager.setEnabled).toHaveBeenCalledWith("demo", true);
+    expect(seen).toEqual(hookInvocationContext);
+  });
+
+  it("runs apps.install without a hook chain when the caller sent none", async () => {
+    let seen: unknown = "unset";
+    const appManager = {
+      setEnabled: rs.fn(async () => {}),
+      install: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+        return { appId: "demo" };
+      }),
+    };
+    const { server } = makeServer({ appManager });
+    const fake = makeFakeWorker();
+    const stale = {
+      rootInvocationId: "stale",
+      depth: 3,
+      chain: [{ hookType: "app", appId: "other", hookName: "app-started" }],
+    };
+    // A pooled worker's IPC callbacks run in the async context of whatever
+    // forked it, here a stale hook chain.
+    let pooledWorkerResource!: AsyncResource;
+    runWithHookInvocationContext(stale, () => {
+      pooledWorkerResource = new AsyncResource("pooled-worker-ipc");
+      server.attach(fake.worker);
+    });
+
+    const id = nextId++;
+    pooledWorkerResource.runInAsyncScope(() => {
+      fake.emitter.emit("message", {
+        type: "rpc_request",
+        clientId: "client-1",
+        id,
+        method: "apps.install",
+        params: { source: { mode: "bundle", path: "/tmp/demo" } },
+      });
+    });
+    await rs.waitFor(() => expect(fake.sent.some((message) => message.id === id)).toBe(true));
+    pooledWorkerResource.emitDestroy();
+
+    expect(appManager.install).toHaveBeenCalled();
+    expect(seen).toBeUndefined();
+  });
+
+  it("rejects apps.setEnabled with a malformed hook chain without touching the service", async () => {
+    const { server, appManager } = makeServer({});
+    const fake = makeFakeWorker();
+    server.attach(fake.worker);
+
+    const response = await rpc(fake, "apps.setEnabled", {
+      appId: "demo",
+      enabled: true,
+      hookInvocationContext: { rootInvocationId: "root-1", depth: -1, chain: [] },
+    });
+
+    expect(response.error).toContain("apps.setEnabled: invalid params");
+    expect(appManager.setEnabled).not.toHaveBeenCalled();
   });
 
   it("rejects apps.setEnabled when enabled is missing without touching the service", async () => {
@@ -833,5 +924,35 @@ describe("notify.send dispatch", () => {
       release();
       kill.mockRestore();
     }
+  });
+});
+
+describe("feedback.send dispatch", () => {
+  const input = {
+    category: "bug",
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent", agentName: "main", callerAppId: "some-app" },
+  };
+  it("forwards validated fields and runtime provenance", async () => {
+    const send = rs.fn(async () => ({ kind: "ok" }));
+    const { server } = makeServer({ feedback: { send } });
+    expect(await server.dispatchInProcess("feedback.send", input)).toEqual({ kind: "ok" });
+    expect(send).toHaveBeenCalledWith(input);
+  });
+  it.each([
+    { ...input, token: "spoof" },
+    { ...input, reporter: { kind: "guardian" } },
+    { ...input, reporter: { kind: "agent", extra: true } },
+    { ...input, details: "x".repeat(4000) },
+    { ...input, summary: "two\nlines" },
+    { ...input, category: "invalid" },
+  ])("rejects invalid RPC parameters without sending: %j", async (params) => {
+    const send = rs.fn();
+    const { server } = makeServer({ feedback: { send } });
+    await expect(server.dispatchInProcess("feedback.send", params)).rejects.toThrow(
+      "invalid params",
+    );
+    expect(send).not.toHaveBeenCalled();
   });
 });
