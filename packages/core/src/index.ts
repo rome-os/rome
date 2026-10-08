@@ -2,11 +2,6 @@ import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
-import {
-  agentSightings,
-  createAgentsIdentity,
-  listAgentSightings,
-} from "./channels/agents-identity.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -343,28 +338,15 @@ async function main() {
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
   });
-  const agentsClient = createRomeCloudAgentsClient();
-  const agentsIdentity = createAgentsIdentity({
-    db,
-    personMappingRepo,
-    settingsRepo,
-    channel: AGENTS_SERVICE,
-    list: () => listAgentSightings(agentsClient),
-  });
   const linkAgentToGuardian = createAgentsGuardianLink({
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_SERVICE,
-    serial: agentsIdentity.serial,
   });
   const admit: Admission = async (connectionId, service, message) => {
-    // Before the inbox resolves the sender, so a renamed agent's first message
-    // already reaches its person, and an own agent's already reads as the
-    // guardian's.
-    if (service === AGENTS_SERVICE) {
-      await agentsIdentity.observe(agentSightings(message));
-      await linkAgentToGuardian(message);
-    }
+    // Before the inbox resolves the sender, so the first message already
+    // reads as the guardian's.
+    if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
     return pairingAdmission(connectionId, service, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
@@ -1153,10 +1135,9 @@ async function main() {
     connections: { registry: connectionRegistry, admit },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts({
-        client: agentsClient,
+        client: createRomeCloudAgentsClient(),
         isConnected: () =>
           connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
-        onListed: (sightings, askedAt) => void agentsIdentity.observeListing(sightings, askedAt),
       }),
     },
   });
@@ -1570,12 +1551,6 @@ async function main() {
   // routines, and agents. The API already serves requests, so an install may
   // be mid-refresh: open between refreshes, never inside one.
   await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
-
-  // Records where every listed agent is now, so one renamed before its next
-  // message still finds its link.
-  if (connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null)) {
-    void agentsIdentity.prime();
-  }
 
   log.info("Rome started", {
     apps: appIds.length > 0 ? appIds : ["none"],

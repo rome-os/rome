@@ -116,35 +116,6 @@ export class PersonMappingRepository {
     return nextAvailablePersonId(base, [base, ...conflicts.map((row) => row.id)]);
   }
 
-  /** Who holds an account, the stranger sentinel included, and the name it
-   *  carries there, read through a caller's transaction. */
-  readChannelHolder(exec: DrizzleDb | DrizzleTx, channel: string, channelUserId: string) {
-    return (
-      exec
-        .select({ personId: channelMappings.personId, displayName: channelMappings.displayName })
-        .from(channelMappings)
-        .where(
-          and(
-            eq(channelMappings.channel, channel),
-            eq(channelMappings.channelUserId, channelUserId),
-          ),
-        )
-        .get() ?? null
-    );
-  }
-
-  /** When a person was created, or null when there is no such person, read
-   *  through a caller's transaction. */
-  readPersonCreatedAt(exec: DrizzleDb | DrizzleTx, personId: string): Date | null {
-    return (
-      exec
-        .select({ createdAt: persons.createdAt })
-        .from(persons)
-        .where(eq(persons.id, personId))
-        .get()?.createdAt ?? null
-    );
-  }
-
   async findByChannelUser(channel: string, channelUserId: string) {
     const rows = await this.db
       .select({
@@ -795,18 +766,7 @@ export class PersonMappingRepository {
    *  every other link they hold alone. Reports whether the link was theirs to
    *  drop, which is the only way a caller can tell an unlink from a no-op. */
   async unlinkAccount(personId: string, channel: string, channelUserId: string): Promise<boolean> {
-    return this.writeUnlinkAccount(this.db, personId, channel, channelUserId);
-  }
-
-  /** Write helper for {@link unlinkAccount}, taking an executor (see
-   *  {@link writeChannelMapping}). */
-  writeUnlinkAccount(
-    exec: SqliteExec,
-    personId: string,
-    channel: string,
-    channelUserId: string,
-  ): boolean {
-    const result = exec
+    const result = this.db
       .delete(channelMappings)
       .where(
         and(
