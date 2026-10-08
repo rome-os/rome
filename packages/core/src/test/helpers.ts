@@ -43,8 +43,12 @@ import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type { ProviderAdapter } from "../channels/adapter.js";
-import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
+import type {
+  ChannelMessage,
+  ConversationId,
+  ConversationSettingsControl,
+} from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkRouter } from "../connections/types.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -291,6 +295,8 @@ export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>)
       if (!target) throw new Error(`Unknown test connection ${connectionId}`);
       target.adapter.onMessage(async (message) =>
         handler({
+          channel: message.channel,
+          direction: "inbound",
           messageId: message.id,
           conversationId: message.threadId as ConversationId,
           senderId: message.channelUserId,

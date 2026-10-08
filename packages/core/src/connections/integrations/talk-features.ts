@@ -8,14 +8,19 @@ import type {
   TalkDirectMessaging,
   TalkInboundMedia,
 } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkHistory } from "../types.js";
+import type { TalkHistory } from "../types.js";
 import type { HistoryLine } from "../../channels/types.js";
 
 /** Adapters still normalize their provider SDK events into the established
- * internal shape. The integration owns the one-way projection into Talk's
- * provider-neutral contract. */
-export function toInboundMessage(message: NormalizedMessage): InboundMessage {
+ * internal shape. The integration owns the one-way projection into the
+ * channel's record, which names the channel and which way the message went. */
+export function toInboundMessage(
+  message: NormalizedMessage,
+  direction: ChannelMessage["direction"] = "inbound",
+): ChannelMessage {
   return {
+    channel: message.channel,
+    direction,
     messageId: message.id,
     conversationId: message.threadId as ConversationId,
     ...(message.parentThreadId
@@ -39,7 +44,7 @@ export function toInboundMessage(message: NormalizedMessage): InboundMessage {
   };
 }
 
-export function normalizedFromInbound(message: InboundMessage): NormalizedMessage {
+export function normalizedFromInbound(message: ChannelMessage): NormalizedMessage {
   const raw = message.raw;
   if (raw && typeof raw === "object" && "channel" in raw && "rawEvent" in raw) {
     return raw as NormalizedMessage;
@@ -179,7 +184,7 @@ export function toHistoryMessage(
   channel: string,
   own = false,
 ): ChannelMessage {
-  return { ...toInboundMessage(message), channel, direction: own ? "outbound" : "inbound" };
+  return { ...toInboundMessage(message, own ? "outbound" : "inbound"), channel };
 }
 
 export function typingActivityFeature(adapter: {

@@ -1,5 +1,5 @@
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkRouter } from "../connections/types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../connections/types.js";
 import { pairingPayload, pairingPayloadSchema } from "@rome/api-types/approvals";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -50,7 +50,7 @@ export function createPairingAdmission(deps: {
   return async (
     connectionId: string,
     service: string,
-    message: InboundMessage,
+    message: ChannelMessage,
     router: TalkRouter,
   ): Promise<boolean> => {
     const channel = pairingPayloadSchema.shape.channel.safeParse(service);

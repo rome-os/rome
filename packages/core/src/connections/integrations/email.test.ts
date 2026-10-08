@@ -10,6 +10,7 @@
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
 //      degrades the inbox grant (renew-once via setup-driven "re-confer").
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
@@ -26,7 +27,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, InboundMessage, StreamFault, Talker } from "../types.js";
+import type { ConversationId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -301,7 +302,7 @@ describe("email Talker fault mapping", () => {
         },
       },
     );
-    const received: InboundMessage[] = [];
+    const received: ChannelMessage[] = [];
     talker.start(
       (msg) => received.push(msg),
       () => {},
@@ -390,7 +391,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const talk = conn.talk!;
 
-    const received: InboundMessage[] = [];
+    const received: ChannelMessage[] = [];
     talk.subscribe(async (msg) => {
       received.push(msg);
       return;

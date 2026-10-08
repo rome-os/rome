@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkFeatureMap, TalkFeatureName } from "./types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName } from "./types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -18,7 +18,7 @@ describe("ConnectionTalkRouter", () => {
   ])("keeps subscriptions on the current epoch with admission=%s", async (gated) => {
     testDb = createTestDb();
     const instances: Array<{
-      deliver?: (message: InboundMessage) => void;
+      deliver?: (message: ChannelMessage) => void;
       sends: string[];
       epoch: number;
     }> = [];
@@ -69,7 +69,7 @@ describe("ConnectionTalkRouter", () => {
     registry.register(descriptor);
     const connection = await registry.connect("discord");
     const admit = rs.fn(
-      async (_id: string, _service: string, message: InboundMessage) =>
+      async (_id: string, _service: string, message: ChannelMessage) =>
         message.senderId === "guardian",
     );
     const router = createTalkRouter(registry, gated ? admit : undefined);
@@ -87,6 +87,8 @@ describe("ConnectionTalkRouter", () => {
       expiresAt: "never",
     });
     instances[0]!.deliver?.({
+      channel: "discord",
+      direction: "inbound",
       messageId: "inbound-1",
       conversationId: "general" as ConversationId,
       senderId: "guardian",
@@ -112,6 +114,8 @@ describe("ConnectionTalkRouter", () => {
       expiresAt: "never",
     });
     instances[1]!.deliver?.({
+      channel: "discord",
+      direction: "inbound",
       messageId: "inbound-2",
       conversationId: "general" as ConversationId,
       senderId: "guardian",
@@ -124,6 +128,8 @@ describe("ConnectionTalkRouter", () => {
     if (gated) {
       expect(admit).toHaveBeenCalledTimes(2);
       instances[1]!.deliver?.({
+        channel: "discord",
+        direction: "inbound",
         messageId: "blocked",
         conversationId: "general" as ConversationId,
         senderId: "unknown",

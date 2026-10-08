@@ -1,6 +1,6 @@
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { STRANGER_PERSON_ID } from "../constants.js";
-import type { InboundMessage } from "../connections/types.js";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
 import { ensureSentinelPersons } from "../db/ensure-sentinel-persons.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -10,7 +10,7 @@ import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
-function message(from: AgentMessageEnvelope["from"]): InboundMessage {
+function message(from: AgentMessageEnvelope["from"]): ChannelMessage {
   return toAgentInboundMessage({
     messageId: "msg_1",
     from,
@@ -27,7 +27,7 @@ describe("linking same-account agents to the guardian", () => {
   let testDb: TestDb;
   let people: PersonMappingRepository;
   let settings: SettingsRepository;
-  let link: (message: InboundMessage) => Promise<void>;
+  let link: (message: ChannelMessage) => Promise<void>;
 
   beforeEach(async () => {
     testDb = createTestDb();

@@ -7,7 +7,7 @@
  */
 
 import type { ChannelMessage, TalkDirectMessaging } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkRouter } from "../connections/types.js";
+import type { TalkRouter } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
@@ -224,7 +224,7 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
 }
 
 /** R2 in the one form every channel shares: nothing to answer. */
-function isAnswerable(message: InboundMessage): boolean {
+function isAnswerable(message: ChannelMessage): boolean {
   return Boolean(message.text?.trim()) || message.attachments.length > 0;
 }
 
@@ -246,12 +246,12 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound 
   // stopping it.
   const dispatchFrom =
     (connectionId: string) =>
-    async (message: InboundMessage): Promise<void> => {
+    async (message: ChannelMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
-      // What a Talk delivers is the record a channel names itself on.
+      // A Talk delivers the channel's own record, named and inbound.
       const event: InboundEvent = {
         kind: "message",
-        message: { ...message, channel: service, direction: "inbound" },
+        message,
         ref: { connectionId, conversationId: message.conversationId },
       };
       // A Connection id is a UUID, so the first colon ends it.

@@ -11,8 +11,7 @@
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage } from "../types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
@@ -392,7 +391,7 @@ describe("the WeChat personal Talker", () => {
     };
     const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
     const deliver = rs.fn();
-    talker.start(deliver as unknown as (msg: InboundMessage) => void, fault);
+    talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {
       talker,
       deliver,

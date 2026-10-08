@@ -5,7 +5,7 @@ import type {
   TalkActivity,
   TalkDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkDirectory, TalkHistory } from "../connections/types.js";
+import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -21,8 +21,10 @@ const noAccounts: Accounts = {
   resolve: async () => null,
 };
 
-function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
+function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
+    channel: "telegram",
+    direction: "inbound",
     messageId: "m-1",
     conversationId: "c-1" as ConversationId,
     senderId: "guardian",
@@ -41,8 +43,8 @@ function talkService(
   activity: TalkActivity | null = null,
   history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,
-): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
-  const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
+): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
+  const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
     epochs,
     descriptor: {
@@ -87,7 +89,7 @@ describe("channelList", () => {
 
   function setup(
     descriptors: ConnectionDescriptor[],
-    admit = async (_id: string, _service: string, inbound: InboundMessage) =>
+    admit = async (_id: string, _service: string, inbound: ChannelMessage) =>
       inbound.senderId === "guardian",
     routerOptions?: { admissionTimeoutMs?: number },
     connectionAccounts?: Record<string, Accounts>,
@@ -99,7 +101,7 @@ describe("channelList", () => {
     // The Connection ids the channel ports hold a router subscription on.
     const subscribed: string[] = [];
     const router: typeof talkRouter = Object.assign(Object.create(talkRouter), {
-      subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>) {
+      subscribe(connectionId: string, handler: (message: ChannelMessage) => Promise<void>) {
         subscribed.push(connectionId);
         const detach = talkRouter.subscribe(connectionId, handler);
         return () => {

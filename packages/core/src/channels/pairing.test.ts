@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkRouter } from "../connections/types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { TalkRouter } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -85,6 +85,8 @@ describe("channel pairing approvals", () => {
       "connection",
       channel,
       {
+        channel,
+        direction: "inbound",
         senderId: id,
         senderUsername: channel === "telegram" ? "actualuser" : undefined,
         conversationId: "group" as ConversationId,
@@ -130,6 +132,8 @@ describe("channel pairing approvals", () => {
       "connection",
       "telegram",
       {
+        channel: "telegram",
+        direction: "inbound",
         senderId: "123",
         conversationId: "group" as ConversationId,
         messageId: "request",
@@ -169,6 +173,8 @@ describe("channel pairing approvals", () => {
       "connection",
       channel,
       {
+        channel,
+        direction: "inbound",
         senderId: id,
         senderDisplayName: name,
         conversationId: "dm" as ConversationId,
@@ -278,7 +284,9 @@ describe("channel pairing approvals", () => {
       conversationId: "dm" as ConversationId,
     }));
     const router = { send } as unknown as TalkRouter;
-    const message: InboundMessage = {
+    const message: ChannelMessage = {
+      channel,
+      direction: "inbound",
       senderId: accountId,
       senderDisplayName: "Alice",
       conversationId: "dm" as ConversationId,
@@ -349,6 +357,8 @@ describe("channel pairing approvals", () => {
       "connection",
       "telegram",
       {
+        channel: "telegram",
+        direction: "inbound",
         senderId: "123",
         senderDisplayName: "Alice",
         conversationId: "dm" as ConversationId,
@@ -580,7 +590,9 @@ describe("channel pairing approvals", () => {
         : service === "discord"
           ? "<@123> (`123`)"
           : '<at user_id="ou_123">Owner</at> (`ou_123`)';
-    const message: InboundMessage = {
+    const message: ChannelMessage = {
+      channel: service,
+      direction: "inbound",
       senderId: id,
       senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,

@@ -10,7 +10,7 @@
 // (channels/agents-guardian.ts); any other sender stays unlinked, and the
 // guardian decides whether Rome may answer it.
 
-import type { ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
@@ -26,7 +26,6 @@ import type {
   AuthScheme,
   ConnectionDescriptor,
   Credential,
-  InboundMessage,
   ProfileDisplay,
   ProfileRecord,
   StreamFault,
@@ -56,12 +55,14 @@ export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
 }
 
 /** An agent message as a channel message. The sender endpoint is the conversation. */
-export function toAgentInboundMessage(message: AgentMessageEnvelope): InboundMessage {
+export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMessage {
   const data =
     message.data && Object.keys(message.data).length > 0
       ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
       : "";
   return {
+    channel: AGENTS_SERVICE,
+    direction: "inbound",
     messageId: message.messageId,
     conversationId: message.from.endpoint as ConversationId,
     senderId: message.from.endpoint,
@@ -149,7 +150,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
 
   async function loop(
     current: number,
-    deliver: (msg: InboundMessage) => void,
+    deliver: (msg: ChannelMessage) => void,
     fault: (err: StreamFault) => void,
   ) {
     let failures = 0;

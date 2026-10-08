@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
@@ -9,7 +9,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { InboundMessage, StreamFault } from "../types.js";
+import type { StreamFault } from "../types.js";
 import {
   createAgentsTalker,
   makeAgentsDescriptor,
@@ -85,7 +85,7 @@ describe("agents channel", () => {
   it("delivers polled messages, then acknowledges them", async () => {
     const client = fakeClient([[envelope(), envelope({ messageId: "msg_2" })]]);
     const talker = createAgentsTalker(client);
-    const delivered: InboundMessage[] = [];
+    const delivered: ChannelMessage[] = [];
     talker.start(
       (message) => delivered.push(message),
       () => {},
@@ -106,7 +106,7 @@ describe("agents channel", () => {
       return { endpoint: "home-rome", messages: [envelope()] };
     };
     const talker = createAgentsTalker(client);
-    const delivered: InboundMessage[] = [];
+    const delivered: ChannelMessage[] = [];
     talker.start(
       (message) => delivered.push(message),
       () => {},

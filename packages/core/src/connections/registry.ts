@@ -1,5 +1,6 @@
 // Connection lifecycle registry. Messaging model: docs/concepts/messaging.md.
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
@@ -24,7 +25,6 @@ import type {
   Credential,
   GrantName,
   GrantState,
-  InboundMessage,
   OperationCall,
   OperationResult,
   ProfileRecord,
@@ -146,7 +146,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: InboundMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 

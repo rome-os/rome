@@ -1,5 +1,10 @@
-import type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkFeatureMap, TalkFeatureName, TalkRouter } from "./types.js";
+import type {
+  ChannelMessage,
+  ConversationId,
+  MessageReceipt,
+  OutgoingMessage,
+} from "@rome-os/app-runtime";
+import type { TalkFeatureMap, TalkFeatureName, TalkRouter } from "./types.js";
 import type { Connection, ConnectionId } from "./types.js";
 import type { ConnectionRegistry } from "./registry.js";
 import { createLogger } from "../logger.js";
@@ -11,7 +16,7 @@ const log = createLogger("talk-router");
 type Admission = (
   connectionId: string,
   service: string,
-  message: InboundMessage,
+  message: ChannelMessage,
   router: TalkRouter,
 ) => Promise<boolean>;
 
@@ -22,7 +27,7 @@ export const ADMISSION_TIMEOUT_MS = 15_000;
 export class ConnectionTalkRouter implements TalkRouter {
   private readonly handlers = new Map<
     ConnectionId,
-    Set<(message: InboundMessage) => Promise<void>>
+    Set<(message: ChannelMessage) => Promise<void>>
   >();
 
   private readonly attached = new Map<ConnectionId, () => void>();
@@ -45,7 +50,7 @@ export class ConnectionTalkRouter implements TalkRouter {
       .map((connection) => ({ connectionId: connection.id, service: connection.service }));
   }
 
-  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void {
+  subscribe(connectionId: string, handler: (message: ChannelMessage) => Promise<void>): () => void {
     const handlers = this.handlers.get(connectionId) ?? new Set();
     handlers.add(handler);
     this.handlers.set(connectionId, handlers);
@@ -123,7 +128,7 @@ export class ConnectionTalkRouter implements TalkRouter {
    *  is released once they start, not once they finish. */
   private admitInOrder(
     connection: Connection,
-    message: InboundMessage,
+    message: ChannelMessage,
     admit: Admission,
   ): Promise<{ handled: Promise<unknown> } | null> {
     const key = `${connection.id}\0${message.conversationId}`;
@@ -135,7 +140,7 @@ export class ConnectionTalkRouter implements TalkRouter {
 
   private async admitWithin(
     connection: Connection,
-    message: InboundMessage,
+    message: ChannelMessage,
     admit: Admission,
   ): Promise<boolean> {
     const timeoutMs = this.options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
@@ -161,7 +166,7 @@ export class ConnectionTalkRouter implements TalkRouter {
     }
   }
 
-  private startHandlers(connectionId: ConnectionId, message: InboundMessage): Promise<unknown> {
+  private startHandlers(connectionId: ConnectionId, message: ChannelMessage): Promise<unknown> {
     return Promise.all(
       [...(this.handlers.get(connectionId) ?? [])].map((handler) => handler(message)),
     );
