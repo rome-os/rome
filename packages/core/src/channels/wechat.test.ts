@@ -501,7 +501,7 @@ describe("WechatAdapter send", () => {
   });
 
   it("sends proactive text to the channel user with the latest cached context token", async () => {
-    const fetchMock = rs.fn(async () => new Response("{}", { status: 200 }));
+    const fetchMock = rs.fn(async () => new Response('{"message_id":123}', { status: 200 }));
     rs.stubGlobal("fetch", fetchMock);
 
     const adapter = new WechatAdapter({
@@ -519,7 +519,7 @@ describe("WechatAdapter send", () => {
 
     const receipt = await adapter.send("alice@im.wechat" as ConversationId, { text: "hello" });
 
-    expect(receipt).toStrictEqual({ conversationId: "alice@im.wechat" });
+    expect(receipt).toStrictEqual({ conversationId: "alice@im.wechat", messageId: "123" });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -555,6 +555,31 @@ describe("WechatAdapter send", () => {
     expect(body.msg.client_id).toMatch(/^rome-wechat:/);
     expect(body.msg.item_list).toEqual([{ type: 1, text_item: { text: "hello" } }]);
     expect(body.base_info).toEqual({ channel_version: "2.4.3", bot_agent: "Rome/0.1.1" });
+  });
+
+  it.each([
+    ['{"ret":-3,"errmsg":"invalid arguments"}', "ret=-3 invalid arguments"],
+    ["{}", "unconfirmed"],
+  ])("fails a text send when iLink answers HTTP 200 with %s", async (answer, error) => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(answer, { status: 200 })),
+    );
+
+    const adapter = new WechatAdapter({
+      token: "token",
+      baseUrl: "https://ilinkai.weixin.qq.com",
+      accountId: "account",
+      connectedAt: "2026-05-09T00:00:00.000Z",
+    }) as unknown as {
+      send(conversationId: ConversationId, message: { text: string }): Promise<unknown>;
+      rememberContextToken(key: string, contextToken: string, typingTarget: string): void;
+    };
+    adapter.rememberContextToken("alice@im.wechat", "ctx-alice", "alice@im.wechat");
+
+    await expect(
+      adapter.send("alice@im.wechat" as ConversationId, { text: "hello" }),
+    ).rejects.toThrow(error);
   });
 });
 

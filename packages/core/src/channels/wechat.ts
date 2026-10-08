@@ -508,14 +508,45 @@ function generateClientId(): string {
   return `rome-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+interface SendMessageResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+  message_id?: number | string;
+}
+
+/**
+ * Throws when iLink refused a send. The live service refuses with HTTP 200 and
+ * a non-zero `ret` or `errcode`, so the status alone says nothing.
+ */
+function assertSendAccepted(raw: string): SendMessageResp {
+  let response: SendMessageResp;
+  try {
+    response = JSON.parse(raw) as SendMessageResp;
+  } catch {
+    throw new Error("WeChat send unconfirmed: the answer is not JSON");
+  }
+  if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) {
+    const detail = [
+      response.ret !== undefined ? `ret=${response.ret}` : undefined,
+      response.errcode !== undefined ? `errcode=${response.errcode}` : undefined,
+      response.errmsg,
+    ];
+    throw new Error(`WeChat send refused: ${detail.filter(Boolean).join(" ")}`);
+  }
+  return response;
+}
+
+/** Sends text and answers the id iLink gave it. An accepted text send carries
+ *  its `message_id`; an answer without one does not show the send was accepted. */
 async function sendTextMessage(
   baseUrl: string,
   token: string,
   to: string,
   text: string,
   contextToken: string,
-): Promise<void> {
-  await apiFetch({
+): Promise<string> {
+  const raw = await apiFetch({
     baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({
@@ -533,6 +564,10 @@ async function sendTextMessage(
     token,
     timeoutMs: 15_000,
   });
+  const messageId = assertSendAccepted(raw).message_id;
+  if (messageId === undefined || messageId === null || messageId === "")
+    throw new Error("WeChat send unconfirmed: the answer has no message_id");
+  return String(messageId);
 }
 
 function encodeAesKeyHex(key: Buffer): string {
@@ -702,7 +737,9 @@ async function sendMediaMessage(
   }
 
   const encryptQueryParam = await uploadToCdn(uploadUrl, encrypted);
-  await apiFetch({
+  // No capture shows what an accepted media send answers, so only a refusal
+  // fails it.
+  const raw = await apiFetch({
     baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({
@@ -728,6 +765,7 @@ async function sendMediaMessage(
     token,
     timeoutMs: 15_000,
   });
+  assertSendAccepted(raw);
 }
 
 function inferMessageItemType(item: MessageItem): number | undefined {
@@ -1179,8 +1217,9 @@ export class WechatAdapter {
     this.assertSessionActive();
     const target = this.resolveSendTarget(conversationId);
 
+    let messageId: string | undefined;
     if (message.text) {
-      await sendTextMessage(
+      messageId = await sendTextMessage(
         this.config.baseUrl,
         this.config.token,
         target.to,
@@ -1213,8 +1252,7 @@ export class WechatAdapter {
         fileName,
       );
     }
-    // iLink's sendmessage answers no message id.
-    return { conversationId };
+    return { conversationId, ...(messageId ? { messageId } : {}) };
   }
 
   onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
