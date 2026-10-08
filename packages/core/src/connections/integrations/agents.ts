@@ -183,6 +183,16 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       try {
         const { messages } = await client.poll();
         if (current !== generation) return;
+        // A sender without `agentId` is a Cloud on another contract, not a
+        // removed agent. Acknowledging would lose the messages, so the poll
+        // fails and Cloud keeps them.
+        if (messages.some((message) => message.from?.agentId === undefined)) {
+          throw new AgentMessagingError(
+            "Rome Cloud sent messages without a sender agentId; this Rome cannot read them.",
+            undefined,
+            "unexpected_shape",
+          );
+        }
         for (const message of messages) {
           const inbound = toAgentInboundMessage(message);
           if (inbound) {

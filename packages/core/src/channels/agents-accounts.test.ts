@@ -82,6 +82,24 @@ describe("the agents address book", () => {
     ]);
   });
 
+  it("orders same-named agents of one account by id, so paging is stable", async () => {
+    const second = { ...atlas, agentId: "00000000-0000-4000-8000-000000000001" };
+    const book = agentsAccounts({ client: cloud([atlas, second]), isConnected: () => true });
+    const first = await book.listAccounts({ limit: 1 });
+    const rest = await book.listAccounts({ limit: 1, cursor: first.nextCursor });
+    expect([...first.accounts, ...rest.accounts].map((account) => account.id)).toEqual([
+      second.agentId,
+      ATLAS,
+    ]);
+  });
+
+  it("lists no agents, rather than failing the page, when it cannot read Cloud's listing", async () => {
+    const client = cloud([atlas]);
+    client.agents = async () => ({ self: HOME, agents: null as never });
+    const book = agentsAccounts({ client, isConnected: () => true });
+    expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
+  });
+
   it("resolves an agent it does not list, such as one answering Rome, but nothing else", async () => {
     const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
     expect(await book.resolve(FRIEND_ATLAS)).toEqual({

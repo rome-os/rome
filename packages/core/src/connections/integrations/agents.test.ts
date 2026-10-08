@@ -123,6 +123,30 @@ describe("agents channel", () => {
     await talker.stop();
   });
 
+  it("keeps messages whose sender has no agentId unacknowledged, as from another contract", async () => {
+    const { agentId: _, ...from } = envelope().from;
+    const client = fakeClient([
+      [envelope({ from: from as never }), envelope({ messageId: "msg_2" })],
+    ]);
+    let polls = 0;
+    const poll = client.poll;
+    client.poll = async () => {
+      polls++;
+      return poll();
+    };
+    const talker = createAgentsTalker(client);
+    const delivered: ChannelMessage[] = [];
+    talker.start(
+      (message) => delivered.push(message),
+      () => {},
+    );
+    await until(() => polls > 0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(delivered).toEqual([]);
+    expect(client.acknowledged).toEqual([]);
+    await talker.stop();
+  });
+
   it("delivers polled messages, then acknowledges them", async () => {
     const client = fakeClient([[envelope(), envelope({ messageId: "msg_2" })]]);
     const talker = createAgentsTalker(client);

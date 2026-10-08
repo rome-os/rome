@@ -60,24 +60,29 @@ export function agentsAccounts(deps: {
   function agents(): Promise<Account[]> {
     if (!deps.isConnected()) return Promise.resolve([]);
     if (read && now() - read.at < READ_TTL_MS) return read.accounts;
-    const accounts = deps.client.agents().then(
-      ({ self, agents }) =>
+    const accounts = deps.client
+      .agents()
+      .then(({ self, agents }) =>
         agents
           // A dot waiting for approval in Settings cannot be reached.
           .filter((agent) => agent.ready && agent.agentId !== self.agentId)
           .map((agent) => agentAccount(agent.agentId, agent))
-          .sort((a, b) => compareCodePoints(a.name ?? a.id, b.name ?? b.id)),
+          // Names can repeat, so the id keeps the order, and each page, stable.
+          .sort(
+            (a, b) =>
+              compareCodePoints(a.name ?? a.id, b.name ?? b.id) || compareCodePoints(a.id, b.id),
+          ),
+      )
       // Every address book is read for every People page, so an unreachable
-      // Cloud lists no agents rather than failing the page. The empty answer
-      // is kept like any other read, so an outage does not hold each page
-      // load for Cloud's timeout.
-      (err: unknown) => {
+      // Cloud, or a listing this Rome cannot read, lists no agents rather than
+      // failing the page. The empty answer is kept like any other read, so an
+      // outage does not hold each page load for Cloud's timeout.
+      .catch((err: unknown) => {
         log.warn("Could not list external agents", {
           error: err instanceof Error ? err.message : String(err),
         });
         return [];
-      },
-    );
+      });
     read = { at: now(), accounts };
     return accounts;
   }
