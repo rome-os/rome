@@ -1,12 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import {
-  chooseConnection,
-  connectionRefusalMessage,
-  createAppLogger,
-  getCurrentActionContext,
-} from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -244,20 +239,11 @@ async function resolveChatThreadId(
 /**
  * Refuse a channel no Connection can send on before anything else is checked,
  * so an unconfigured channel is not reported as a bad attachment or a missing
- * guardian mapping. The rule and its texts are the SDK's, which the channels
- * service applies again when it sends.
+ * guardian mapping. The text is the one the channels service rejects with.
  */
-async function requireSendableChannel(
-  channels: ChannelsService,
-  channel: string,
-  requested?: string,
-): Promise<void> {
-  const backing =
-    (await channels.list()).find((candidate) => candidate.name === channel)?.connectionIds ?? [];
-  const choice = chooseConnection(backing, requested);
-  if ("refused" in choice) {
-    throw new Error(connectionRefusalMessage(channel, choice.refused, requested));
-  }
+async function requireSendableChannel(channels: ChannelsService, channel: string): Promise<void> {
+  const target = (await channels.list()).find((candidate) => candidate.name === channel);
+  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
 }
 
 export async function executeSendMessage(
@@ -269,9 +255,7 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  await requireSendableChannel(channels, channel, input.connectionId);
-  // The channels service chooses the Connection among those backing it.
-  const via = input.connectionId ? { connectionId: input.connectionId } : undefined;
+  await requireSendableChannel(channels, channel);
 
   const safeInput = await validateAttachmentSources(input);
 
@@ -293,24 +277,19 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await channels.send(
-      channel,
-      threadId as ConversationId,
-      {
-        kind: "email",
-        text,
-        parts,
-        attachments: safeInput.attachments,
-        turnId,
-        to: email.to,
-        cc: email.cc,
-        bcc: email.bcc,
-        subject: email.subject,
-        html: email.html,
-        inReplyToMessageId: replyTarget,
-      },
-      via,
-    );
+    const delivery = await channels.send(channel, threadId as ConversationId, {
+      kind: "email",
+      text,
+      parts,
+      attachments: safeInput.attachments,
+      turnId,
+      to: email.to,
+      cc: email.cc,
+      bcc: email.bcc,
+      subject: email.subject,
+      html: email.html,
+      inReplyToMessageId: replyTarget,
+    });
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
     return delivery.messageId
@@ -331,18 +310,13 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await channels.send(
-    channel,
-    threadId as ConversationId,
-    {
-      text,
-      parts,
-      attachments: safeInput.attachments,
-      replyToMessageId: chat.replyToMessageId,
-      turnId,
-    },
-    via,
-  );
+  const delivery = await channels.send(channel, threadId as ConversationId, {
+    text,
+    parts,
+    attachments: safeInput.attachments,
+    replyToMessageId: chat.replyToMessageId,
+    turnId,
+  });
   await recordDeliveredConversationMessageBestEffort(
     deps,
     input,

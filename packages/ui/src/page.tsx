@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import { type ComponentProps, useEffect, useRef } from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cn } from "./cn.js";
+import { revealInRow, ScrollEdgeButtons, useScrollEdges } from "./scroll-edges.js";
 
 /*
  * The page frame and the section rhythm every layout in the catalogue composes.
@@ -141,13 +142,32 @@ export interface PageNavProps extends ComponentProps<"nav"> {
  * Renders its own `ul`, because a strip of links is a list and every entry is a
  * `PageNavLink`. The row scrolls sideways rather than wrapping: a second line of
  * entries reads as two strips, and the underline no longer marks one row.
+ *
+ * A clipped end carries a chevron that scrolls the row. The active
+ * entry is scrolled into view, so a deep link shows where the reader is.
  */
 export function PageNav({ className, children, ...props }: PageNavProps) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const edges = useScrollEdges(listRef);
+  const shownActive = useRef<Element | null>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    const active = list?.querySelector('[aria-current="page"]');
+    if (!list || !active || active === shownActive.current) return;
+    shownActive.current = active;
+    revealInRow(list, active);
+  });
+
   return (
-    <nav data-slot="page-nav" className={className} {...props}>
-      <ul className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border">
+    <nav data-slot="page-nav" className={cn("relative", className)} {...props}>
+      <ul
+        ref={listRef}
+        className="flex w-full justify-start gap-6 overflow-x-auto overflow-y-hidden border-b border-border"
+      >
         {children}
       </ul>
+      <ScrollEdgeButtons edges={edges} rowRef={listRef} />
     </nav>
   );
 }

@@ -16,6 +16,7 @@ import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
+import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import {
   ChatApiError,
@@ -641,6 +642,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // text the user may still be reading (or about to cancel) reads as loss.
     // It clears only once the server has accepted the turn.
     const clearsOptimistically = uploads.length === 0;
+    if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
     if (clearsOptimistically) {
       setInputText("");
       setPendingUploads([]);
@@ -658,6 +660,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         setInputText((current) => (current === rawText ? "" : current));
       }
     } catch {
+      discardSendOrigin(inputId);
       failedSendRef.current = { inputId, text, uploads, skill };
       if (clearsOptimistically) {
         setInputText(text);

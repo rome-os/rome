@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
-import type { ConversationId } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import type { GrantLedger } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -26,7 +26,6 @@ import {
   makePasteTalk,
   makeTwoGrant,
 } from "./test-fixtures.js";
-import type { InboundMessage } from "./types.js";
 
 // A macrotask flush: lets the async `void handle…` fault flows (which chain
 // awaits over the ledger + reconcile) settle before assertions run.
@@ -588,6 +587,8 @@ describe("registry faults", () => {
       const inst1 = fx.talkerFactory.instances.at(-1);
       if (!inst1) throw new Error("inst1 not built");
       inst1.state.deliver?.({
+        channel: "test",
+        direction: "inbound",
         messageId: "m",
         conversationId: "thread-1" as ConversationId,
         senderId: "s",
@@ -678,7 +679,7 @@ describe("registry faults", () => {
       // Register the unlock handler BEFORE the epoch is built. When talk unlocks,
       // the handler synchronously registers an onMessage listener — which must be
       // wired before start() runs, or the buffered flush is lost.
-      const received: InboundMessage[] = [];
+      const received: ChannelMessage[] = [];
       registry.onUnlocked("talk", (c) => {
         c.talk?.subscribe(async (msg) => {
           received.push(msg);

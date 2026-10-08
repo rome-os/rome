@@ -84,6 +84,130 @@ describe("AIToolState", () => {
     expect(state.get().codex.quotaExhausted).toBe(false);
   });
 
+  it("notifies only when the Codex login changes", async () => {
+    let loggedIn = true;
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({ codexStatus: async () => ({ loggedIn }) }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    state.markQuotaExhausted("openai");
+    expect(onCodexLoginChanged).not.toHaveBeenCalled();
+
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    state.markQuotaExhausted("openai");
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+
+    loggedIn = false;
+    await state.refresh("openai");
+    expect(onCodexLoginChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("notifies a Codex login change before unrelated full-refresh probes settle", async () => {
+    let releaseClaude!: () => void;
+    const claudeGate = new Promise<void>((resolve) => {
+      releaseClaude = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        claudeStatus: async () => {
+          await claudeGate;
+          return { loggedIn: true };
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseClaude();
+      await refresh;
+    }
+  });
+
+  it("notifies a Codex login change while the quota probe is still pending", async () => {
+    let releaseUsage!: () => void;
+    const usageGate = new Promise<void>((resolve) => {
+      releaseUsage = resolve;
+    });
+    const onCodexLoginChanged = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn: false }),
+        codexUsage: async () => {
+          await usageGate;
+          return null;
+        },
+      }),
+      onCodexLoginChanged,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    const refresh = state.refresh("openai");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(state.get().codex.loggedIn).toBe(false);
+      expect(onCodexLoginChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseUsage();
+      await refresh;
+    }
+  });
+
+  it("reads Codex usage again after a login change restarts Codex", async () => {
+    let loggedIn = false;
+    let usedPercent = 100;
+    let staleProbe: { reject: (err: Error) => void } | undefined;
+    let usageCalls = 0;
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => ({ loggedIn, authMode: "chatgpt", planType: "plus" }),
+        codexUsage: async () => {
+          usageCalls += 1;
+          if (loggedIn && !staleProbe) {
+            // Started on the process that the payer change replaces.
+            return await new Promise((_, reject) => {
+              staleProbe = { reject };
+            });
+          }
+          return {
+            checkedAt: "2026-08-07T00:00:00.000Z",
+            source: "test",
+            fiveHour: { usedPercent },
+          };
+        },
+      }),
+      onCodexLoginChanged: () => staleProbe?.reject(new Error("codex app-server exited")),
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    await state.refresh("openai");
+    expect(state.get().codex.quotaExhausted).toBe(true);
+
+    loggedIn = true;
+    usedPercent = 10;
+    const callsBefore = usageCalls;
+    await state.refresh("openai");
+
+    expect(usageCalls - callsBefore).toBe(2);
+    expect(state.get().codex.quotaExhausted).toBe(false);
+  });
+
   it("does not let an older in-flight refresh clear a runtime quota failure", async () => {
     let releaseUsage!: () => void;
     const usageGate = new Promise<void>((resolve) => {

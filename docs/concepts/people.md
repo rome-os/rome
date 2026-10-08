@@ -63,7 +63,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one party on that platform.
+- **[Channel](messaging.md#channels)** — a channel is one of Rome's presences on a platform, which messages arrive through. An account is one party Rome sees on that channel.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address

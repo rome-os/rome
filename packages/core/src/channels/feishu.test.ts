@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, rs } from "@rstest/core";
 import type {
+  ChannelMessage,
   ConversationDescriptor,
   ConversationId,
   ConversationSettings,
@@ -17,7 +18,6 @@ import type {
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
 import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
-import type { NormalizedMessage } from "./types.js";
 
 // The official SDK's LarkChannel is the process edge here, played by a fake
 // through the adapter's createChannel seam. The fake captures the registered
@@ -225,7 +225,7 @@ function guardianPersonRepo(channelUserId: string): PersonMappingRepository {
 describe("FeishuAdapter", () => {
   let channel: FakeLarkChannel;
   let adapter: FeishuAdapter;
-  let captured: NormalizedMessage[];
+  let captured: ChannelMessage[];
 
   beforeEach(async () => {
     channel = new FakeLarkChannel();
@@ -234,7 +234,7 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     captured = [];
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
@@ -244,24 +244,42 @@ describe("FeishuAdapter", () => {
     expect(channel.connected).toBe(true);
   });
 
-  it("normalizes an inbound private text message", async () => {
-    await channel.emit({ content: "hi there" });
-    expect(captured).toHaveLength(1);
-    const msg = captured[0];
-    expect(msg.channel).toBe("feishu");
-    expect(msg.channelUserId).toBe("ou_alice");
-    expect(msg.displayName).toBe("Alice");
-    expect(msg.threadId).toBe("oc_chat");
-    expect(msg.threadType).toBe("private");
-    expect(msg.addressing).toBe("direct");
-    expect(msg.text).toBe("hi there");
-    expect(msg.id).toBe("om_123");
+  it("maps an inbound private text message onto a ChannelMessage", async () => {
+    const event = makeMessage({ content: "hi there" });
+    await channel.emit(event);
+    expect(captured).toStrictEqual([
+      {
+        channel: "feishu",
+        direction: "inbound",
+        messageId: "om_123",
+        conversationId: "oc_chat",
+        senderId: "ou_alice",
+        senderDisplayName: "Alice",
+        text: "hi there",
+        attachments: [],
+        timestamp: new Date(1700000000000),
+        thread: { kind: "dm" },
+        addressing: "direct",
+        raw: event,
+      },
+    ]);
   });
 
   it("maps group chat type to a group thread", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
-    expect(captured[0].threadType).toBe("group");
+    expect(captured[0].thread).toStrictEqual({ kind: "group" });
     expect(captured[0].addressing).toBe("mention");
+  });
+
+  it("carries the replied-to message and a fallback sender name", async () => {
+    await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
+    expect(captured[0].senderDisplayName).toBe("Feishu User");
+    expect(captured[0].replyTo).toStrictEqual({ messageId: "om_parent" });
+  });
+
+  it("leaves replyTo out when the message replies to nothing", async () => {
+    await channel.emit({});
+    expect(captured[0]).not.toHaveProperty("replyTo");
   });
 
   it("normalizes an addressed group /stop without leaving the bot mention in the command", async () => {
@@ -333,7 +351,7 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     captured = [];
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
@@ -378,7 +396,7 @@ describe("FeishuAdapter", () => {
     expect(inputJson).not.toContain('"tag":"action"');
   });
 
-  it("routes group messages to the configured agent", async () => {
+  it("leaves a group's configured agent to the conversation settings", async () => {
     const conversationSettings = makeConversationSettings({
       activation: { mode: "all" },
       routing: { agentName: "pm-assistant" },
@@ -394,15 +412,17 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     captured = [];
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
 
     await channel.emit({ chatType: "group", mentionedBot: false, content: "please check" });
 
+    // The inbox reads the agent from the conversation settings, so the
+    // message carries no routing of its own.
     expect(captured).toHaveLength(1);
-    expect(captured[0].routing).toEqual({ agentName: "pm-assistant" });
+    expect(captured[0]).not.toHaveProperty("routing");
   });
 
   it("ignores normal group messages when group policy is disabled", async () => {
@@ -422,7 +442,7 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     captured = [];
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
@@ -448,7 +468,7 @@ describe("FeishuAdapter", () => {
       () => channel as unknown as LarkChannel,
     );
     captured = [];
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
@@ -480,7 +500,7 @@ describe("FeishuAdapter", () => {
       },
       () => channel as unknown as LarkChannel,
     );
-    adapter.onMessage(async (msg) => {
+    adapter.onInbound(async (msg) => {
       captured.push(msg);
     });
     await adapter.start();
@@ -521,18 +541,21 @@ describe("FeishuAdapter", () => {
     expect(captured).toHaveLength(0);
   });
 
-  it("carries the raw wire event on rawEvent when present", async () => {
+  it("carries the raw wire event on raw when present", async () => {
     await channel.emit({ raw: { wire: "event" } });
-    expect(captured[0].rawEvent).toEqual({ wire: "event" });
+    expect(captured[0].raw).toEqual({ wire: "event" });
   });
 
-  it("falls back to the normalized message when raw is absent", async () => {
+  it("falls back to the SDK's normalized event when raw is absent", async () => {
     await channel.emit({});
-    expect(captured[0].rawEvent).toMatchObject({ messageId: "om_123" });
+    expect(captured[0].raw).toMatchObject({ messageId: "om_123" });
   });
 
   it("sends the agent's text as markdown for the SDK to render", async () => {
-    await adapter.sendMessage("ou_alice", "oc_chat", { text: "## Title\n**bold**\n- [x] done" });
+    const receipt = await adapter.send("oc_chat" as ConversationId, {
+      text: "## Title\n**bold**\n- [x] done",
+    });
+    expect(receipt).toStrictEqual({ conversationId: "oc_chat", messageId: "om_sent" });
     expect(channel.sent).toHaveLength(1);
     expect(channel.sent[0]).toEqual({
       to: "oc_chat",
@@ -542,7 +565,7 @@ describe("FeishuAdapter", () => {
   });
 
   it("threads a reply via replyTo", async () => {
-    await adapter.sendMessage("ou_alice", "oc_chat", { text: "ok", replyToMessageId: "om_42" });
+    await adapter.send("oc_chat" as ConversationId, { text: "ok", replyToMessageId: "om_42" });
     expect(channel.sent[0].opts).toEqual({ replyTo: "om_42", replyInThread: true });
   });
 
@@ -562,7 +585,7 @@ describe("FeishuAdapter", () => {
     );
     await adapter.start();
 
-    await adapter.sendMessage("ou_alice", "oc_chat", { text: "ok", replyToMessageId: "om_42" });
+    await adapter.send("oc_chat" as ConversationId, { text: "ok", replyToMessageId: "om_42" });
 
     expect(channel.sent[0].opts).toEqual({ replyTo: "om_42", replyInThread: false });
   });
@@ -819,7 +842,8 @@ describe("FeishuAdapter", () => {
   });
 
   it("skips sending when there is no text body", async () => {
-    await adapter.sendMessage("ou_alice", "oc_chat", {});
+    const receipt = await adapter.send("oc_chat" as ConversationId, {});
+    expect(receipt).toStrictEqual({ conversationId: "oc_chat" });
     expect(channel.sent).toHaveLength(0);
   });
 

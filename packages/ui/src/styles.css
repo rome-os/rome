@@ -40,6 +40,7 @@
 @source "./page.tsx";
 @source "./popover.tsx";
 @source "./radio-group.tsx";
+@source "./scroll-edges.tsx";
 @source "./segmented-control.tsx";
 @source "./select.tsx";
 @source "./separator.tsx";

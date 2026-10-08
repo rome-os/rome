@@ -1,5 +1,6 @@
-// Agents connection: messages between this Rome and other agents in the same
-// Rome Cloud account, such as ChatGPT dots (amantru/rome-cloud#137).
+// Agents connection: messages between this Rome and other agents on Rome
+// Cloud, such as ChatGPT dots (amantru/rome-cloud#137), in this Rome's own
+// account or in an account linked to it.
 //
 // Rome Cloud stores each message for this instance's endpoint until the
 // instance acknowledges it, so the talker polls and acknowledges after
@@ -8,27 +9,34 @@
 // never mapped to a person here. A sender Cloud marks as in this Rome's own
 // account is linked to the guardian when its message is admitted
 // (channels/agents-guardian.ts); any other sender stays unlinked, and the
-// guardian decides whether Rome may answer it.
+// guardian decides whether Rome may answer it. A sender in another account is
+// addressed as `@handle/endpoint`, and Cloud refuses a send to an agent whose
+// owner has not linked with this Rome's account as `not_reachable`.
 
-import type { ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId, OutgoingMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
 import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
   AgentMessagingError,
+  agentAddress,
+  agentAddressAccount,
   createRomeCloudAgentsClient,
+  isNotReachable,
+  isUndeliverable,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
+import { addressIsConversationFeature } from "./talk-features.js";
 import type {
   AuthScheme,
   ConnectionDescriptor,
   Credential,
-  InboundMessage,
   ProfileDisplay,
   ProfileRecord,
   StreamFault,
+  TalkFeatures,
   Talker,
 } from "../types.js";
 
@@ -52,17 +60,29 @@ export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
   });
 }
 
-/** An agent message as a channel message. The sender endpoint is the conversation. */
-export function toAgentInboundMessage(message: AgentMessageEnvelope): InboundMessage {
+/**
+ * An agent message as a channel message. The sender's address is the
+ * conversation. Null for a cross-account sender Cloud named no account for,
+ * whose bare name could pass for one of the guardian's own agents.
+ */
+export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMessage | null {
+  const sender = agentAddress(message.from);
+  if (sender === null) return null;
   const data =
     message.data && Object.keys(message.data).length > 0
       ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
       : "";
+  // The address already reads as another account's, and the label says so
+  // wherever the sender's own name stands in for a person's.
+  const kind =
+    agentAddressAccount(sender) !== null ? `external ${message.from.kind}` : message.from.kind;
   return {
+    channel: AGENTS_SERVICE,
+    direction: "inbound",
     messageId: message.messageId,
-    conversationId: message.from.endpoint as ConversationId,
-    senderId: message.from.endpoint,
-    senderDisplayName: `${message.from.endpoint} (${message.from.kind})`,
+    conversationId: sender as ConversationId,
+    senderId: sender,
+    senderDisplayName: `${sender} (${kind})`,
     text: `${message.text}${data}`,
     attachments: [],
     timestamp: new Date(message.sentAt),
@@ -130,6 +150,7 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
 
 export function createAgentsTalker(client: AgentMessagingClient): Talker {
   let generation = 0;
+  let warnedNoSameAccount = false;
   let cancelWait: (() => void) | null = null;
 
   const wait = (ms: number) =>
@@ -146,7 +167,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
 
   async function loop(
     current: number,
-    deliver: (msg: InboundMessage) => void,
+    deliver: (msg: ChannelMessage) => void,
     fault: (err: StreamFault) => void,
   ) {
     let failures = 0;
@@ -155,7 +176,24 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       try {
         const { messages } = await client.poll();
         if (current !== generation) return;
-        for (const message of messages) deliver(toAgentInboundMessage(message));
+        for (const message of messages) {
+          const inbound = toAgentInboundMessage(message);
+          // Only a Cloud from before cross-account links omits sameAccount;
+          // logged once per run so a newer Cloud dropping it shows up.
+          if (inbound && message.from.sameAccount === undefined && !warnedNoSameAccount) {
+            warnedNoSameAccount = true;
+            log.warn("Agent messages do not say whether their sender is in this account", {
+              messageId: message.messageId,
+            });
+          }
+          if (inbound) {
+            deliver(inbound);
+          } else {
+            log.warn("Dropped a cross-account agent message that named no sender account", {
+              messageId: message.messageId,
+            });
+          }
+        }
         // Delivery is at most once, as for every channel; a repeat after a
         // failed acknowledgement keeps its messageId and the inbox drops it.
         await client.acknowledge(messages.map((message) => message.messageId));
@@ -178,6 +216,12 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
     }
   }
 
+  // An agent's address is both how Cloud reaches it and the conversation its
+  // messages arrive in, so Rome can write to a dot first, from the People
+  // page, as well as answer one.
+  const features: TalkFeatures = {
+    directMessaging: addressIsConversationFeature(),
+  };
   return {
     start(deliver, fault) {
       const current = ++generation;
@@ -193,18 +237,36 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       if (msg.attachments?.length) {
         throw new Error("Agent messages carry text only; send the files another way.");
       }
+      // Cloud also takes `handle/endpoint`, but its reply would come back as
+      // `@handle/endpoint` and split the conversation in two.
+      if (/^[^@\s/]+\/[^\s/]+$/.test(conversationId)) {
+        throw new Error(`Address another account's agent as @${conversationId}.`);
+      }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");
-      const sent = await client.send({
-        to: conversationId,
-        text,
-        ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
-      });
-      return { conversationId, messageId: sent.messageId };
+      try {
+        const sent = await client.send({
+          to: conversationId,
+          text,
+          ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
+        });
+        // Cloud answers with the address its reply will come from: the bare
+        // name for an own agent written to as `@ownhandle/name`.
+        return {
+          conversationId: (sent.to || conversationId) as ConversationId,
+          messageId: sent.messageId,
+        };
+      } catch (err) {
+        if (!isUndeliverable(err)) throw err;
+        // Cloud says `not_reachable` only for another account's agent, which a
+        // missing link can put out of reach; an own agent is `unknown_endpoint`.
+        const why = isNotReachable(err)
+          ? "The agent may not exist, or no link between your accounts lets this Rome reach it."
+          : "The agent may no longer exist.";
+        throw new Error(`Rome Cloud can't deliver to ${conversationId}. ${why}`, { cause: err });
+      }
     },
-    feature() {
-      return null;
-    },
+    ...features,
   };
 }
 

@@ -7,8 +7,8 @@ import type {
   ConversationSettingsControl,
   ChannelMessage,
   InboundEvent,
-  TalkActivity,
-  TalkInboundMedia,
+  ChannelActivity,
+  ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js";
 
@@ -17,8 +17,8 @@ const WHATSAPP_ID = "connection:whatsapp";
 
 // What a channel's port reads for activity and inbound media, per Connection.
 interface ChannelFeatures {
-  activity: TalkActivity;
-  inboundMedia: TalkInboundMedia;
+  activity: ChannelActivity;
+  inboundMedia: ChannelInboundMedia;
 }
 
 function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {

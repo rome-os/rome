@@ -19,21 +19,15 @@ import type {
   Channel as AppChannel,
   ChannelInbound,
   ChannelSend as AppChannelSend,
-  InboundEvent,
-  TalkActivity,
-  TalkDirectMessaging,
+  ConversationDescriptor,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
 import type { AccountMessages, Messages } from "./messages.js";
 
-// The port contracts, rules R1–R5 among them, are the apps SDK's: an app hears
-// a channel through the same `ChannelInbound` core does.
-export type { InboundEvent };
-export type Inbound = ChannelInbound;
-
-/** Sending on a channel, as core's channels do it: the SDK's send port, a way
- *  to reach one account directly, and a typing indicator. */
+/** Sending on a channel, as core's channels do it: the SDK's send port, typing
+ *  indicator included, and a way to reach one account directly. */
 export interface ChannelSend extends AppChannelSend {
   /**
    * Reaching one account directly rather than replying in a conversation that
@@ -42,10 +36,26 @@ export interface ChannelSend extends AppChannelSend {
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
    * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
-  readonly direct: TalkDirectMessaging | null;
-  /** Showing the account that a reply is on its way, or null where the
-   *  channel cannot now. */
-  readonly activity: TalkActivity | null;
+  readonly direct: ChannelDirectMessaging | null;
+}
+
+/**
+ * The conversations a channel can see, for conversation settings. Each
+ * descriptor carries its `ConversationRef`, so a caller addresses a
+ * conversation it found here the way it addresses one an inbound event named.
+ */
+export interface ChannelDirectory {
+  /**
+   * Up to `limit` conversations from the Connection backing the channel, or
+   * none when `connectionId` names another. A read that fails is logged and
+   * answers none.
+   */
+  listConversations(input: {
+    query?: string;
+    limit: number;
+    includeTopics?: boolean;
+    connectionId?: string;
+  }): Promise<ConversationDescriptor[]>;
 }
 
 /** A send, or a direct-conversation lookup, on a channel nothing backs now. */
@@ -57,14 +67,17 @@ export class ChannelNotConnected extends Error {
 }
 
 /**
- * A channel Rome uses.
+ * A channel Rome uses: one of Rome's presences on a platform, such as the
+ * `telegram` bot or the `telegram_user` signed-in account. A second presence is
+ * a second channel, never a second Connection behind this one.
  *
  * The two contracts below are the whole of it. Every channel owes both:
  *
  * - **C1 The name is the identity.** One channel per name, one name per
- *   channel, stable for the life of the deployment. It is the `channel` written
- *   on every link, every stored message and every sentinel row, so the name is
- *   not a label a channel can restyle — changing it reassigns history.
+ *   channel, stable for the life of the deployment. A channel's name is its
+ *   service's, and it is the `channel` written on every link, every stored
+ *   message and every sentinel row. The name is not a label a channel can
+ *   restyle — changing it reassigns history.
  * - **C2 What a channel carries is the channel's.** No port reaches past this
  *   channel's conversations, accounts and messages, so a caller can attribute
  *   anything a port answers to the channel it came from.
@@ -82,8 +95,10 @@ export interface Channel extends AppChannel {
   /** Sending on the channel, or null where it cannot send at all. */
   readonly send: ChannelSend | null;
 
-  /** What arrives on the channel, or null where nothing ever arrives. */
-  readonly inbound: Inbound | null;
+  /** What arrives on the channel, or null where nothing ever arrives. The port
+   *  contracts, rules R1–R5 among them, are the apps SDK's: an app hears a
+   *  channel through the same `ChannelInbound` core does. */
+  readonly inbound: ChannelInbound | null;
 
   /**
    * The channel's address book, or null where the platform gives Rome no way
@@ -114,6 +129,10 @@ export interface Channel extends AppChannel {
    * channel has a store, and not every store is a channel's.
    */
   readonly messages: Messages | null;
+
+  /** The conversations the channel can see, or null where it cannot list
+   *  them. */
+  readonly directory: ChannelDirectory | null;
 }
 
 /**

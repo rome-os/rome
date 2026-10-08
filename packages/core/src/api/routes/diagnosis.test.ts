@@ -19,11 +19,7 @@ function buildDeps(
       get: overrides.settingsByKey ?? overrides.settingsGet ?? (async () => null),
     },
     channelsService: {
-      list: async () =>
-        (overrides.channels ?? []).map((name) => ({
-          name,
-          connectionIds: [`connection:${name}`],
-        })),
+      list: async () => (overrides.channels ?? []).map((name) => ({ name, sendable: true })),
     },
     appCatalog: {
       list: () => overrides.apps ?? [],

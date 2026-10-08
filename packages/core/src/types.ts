@@ -13,7 +13,6 @@ export type {
   ApprovalCardStatus,
   MessagePart,
   MessageReplyReference,
-  NormalizedMessage,
   AgentEvent,
   /** @deprecated Use AgentEvent from @rome-os/app-runtime. */
   AgentMessage,

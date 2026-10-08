@@ -7,6 +7,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
+import type { UsageFunding } from "../usage/events.js";
 import type { TurnUsageFacts } from "../usage/recorder.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -17,6 +18,8 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import type { TurnMiddlewareChain } from "./turn-middleware.js";
+import type { AIToolStateValue } from "./ai-tool-state.js";
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -37,6 +40,12 @@ describe("AgentSession turn usage", () => {
   let nextRun: () => AsyncIterable<AgentEvent>;
   let providerTurnId: string | undefined;
   let forkable: boolean;
+  let funding: UsageFunding;
+  let beforeModelDispatch: (() => Promise<void>) | undefined;
+  // Whether the model resolver sees Rome credits paying.
+  let resolverUsesRomeCredits: boolean;
+  let state: AIToolStateValue;
+  let providerCalls: number;
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -58,14 +67,25 @@ describe("AgentSession turn usage", () => {
     recorded = [];
     providerTurnId = undefined;
     forkable = false;
+    funding = "byok";
+    beforeModelDispatch = undefined;
+    resolverUsesRomeCredits = false;
+    providerCalls = 0;
     const provider: ModelProvider = {
       id: "openai",
       displayName: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
-        const session = createSessionFromRun("openai", () => nextRun(), params);
+        const session = createSessionFromRun(
+          "openai",
+          () => {
+            providerCalls++;
+            return nextRun();
+          },
+          params,
+        );
         Object.defineProperty(session, "lastProviderTurnId", { get: () => providerTurnId });
-        Object.defineProperty(session, "funding", { get: () => "byok" });
+        Object.defineProperty(session, "funding", { get: () => funding });
         if (forkable) {
           session.fork = async (fork) => ({
             providerId: "openai",
@@ -79,13 +99,21 @@ describe("AgentSession turn usage", () => {
         return session;
       },
     };
-    const state = {
+    state = {
       codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
       claude: { loggedIn: false, quotaExhausted: false },
     };
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
+    const turnMiddleware: TurnMiddlewareChain = {
+      loadFromCatalog: async () => [],
+      run: async (_ctx, terminal) => {
+        await beforeModelDispatch?.();
+        await terminal();
+      },
+      size: () => 1,
+    };
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
@@ -96,10 +124,12 @@ describe("AgentSession turn usage", () => {
         modelResolver: createModelResolver({
           providers: [provider],
           aiToolState: { get: () => state, refresh: async () => state },
+          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
       },
       { keepAliveAcrossTurns: true },
@@ -183,6 +213,82 @@ describe("AgentSession turn usage", () => {
       ["completed", "provider-turn-1"],
       ["error", undefined],
     ]);
+  });
+
+  it("keeps funding from the turn's payer when the payer changes during it", async () => {
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstStarted!: () => void;
+    const firstStartedPromise = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
+    nextRun = async function* () {
+      firstStarted();
+      await firstRelease;
+      yield { type: "error", error: "Codex exited" };
+    };
+
+    const session = await manager.acquire(key);
+    const first = session.sendTurn({ prompt: "ChatGPT-funded" });
+    await firstStartedPromise;
+    funding = "rome_credits";
+    resolverUsesRomeCredits = true;
+    releaseFirst();
+    await drain(first.events);
+
+    let releaseSecond!: () => void;
+    const secondRelease = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let secondStarted!: () => void;
+    const secondStartedPromise = new Promise<void>((resolve) => {
+      secondStarted = resolve;
+    });
+    nextRun = async function* () {
+      secondStarted();
+      await secondRelease;
+      yield { type: "error", error: "Codex exited" };
+    };
+
+    const second = session.sendTurn({ prompt: "Credit-funded" });
+    await secondStartedPromise;
+    funding = "subscription";
+    releaseSecond();
+    await drain(second.events);
+
+    expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
+  });
+
+  it("dispatches a turn whose funding label resolves without a payer change", async () => {
+    let releasePreparation!: () => void;
+    const preparationGate = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    let preparationStarted!: () => void;
+    const preparationStartedPromise = new Promise<void>((resolve) => {
+      preparationStarted = resolve;
+    });
+    beforeModelDispatch = async () => {
+      preparationStarted();
+      await preparationGate;
+    };
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    funding = "unknown";
+
+    const session = await manager.acquire(key);
+    const turn = session.sendTurn({ prompt: "boot-time turn" });
+    await preparationStartedPromise;
+    // The first status probe lands; Codex's payer is still ChatGPT.
+    funding = "subscription";
+    releasePreparation();
+    await drain(turn.events);
+
+    expect(providerCalls).toBe(1);
+    expect(recorded.map((facts) => facts.funding)).toEqual(["subscription"]);
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {

@@ -1,4 +1,4 @@
-import { chooseConnection, createAppLogger } from "@rome-os/app-runtime";
+import { createAppLogger } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -163,41 +163,34 @@ export function createAction(
       const windowHours = (args.windowHours as number | undefined) ?? 24;
       const includeMessages = args.includeMessages === true;
 
-      // The SDK's rule, which the service applies again in `history`, but
-      // answered in the texts this tool has always given.
-      const connections =
-        (await channels.list()).find((item) => item.name === channel)?.connectionIds ?? [];
-      const choice = chooseConnection(connections);
-      if ("refused" in choice && choice.refused === "none") {
-        return {
-          status: "error",
-          error: `Channel "${channel}" is not configured or not running.`,
-        };
-      }
-
-      if ("refused" in choice) {
-        return {
-          status: "error",
-          error: `Channel "${channel}" has multiple connections; connectionId is required.`,
-        };
-      }
+      const notConfigured: ActionResult = {
+        status: "error",
+        error: `Channel "${channel}" is not configured or not running.`,
+      };
+      if (!(await channels.list()).some((item) => item.name === channel)) return notConfigured;
 
       log.info("fetching channel history", { channel, threadId, windowHours });
 
       let messages: ChannelMessage[];
       try {
-        messages = await channels.history(channel, {
-          ...(threadId ? { conversationId: threadId as ConversationId } : {}),
-          since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
-        });
+        // `query` answers newest first; the transcript reads oldest first.
+        messages = (
+          await channels.query(channel, {
+            ...(threadId ? { conversationId: threadId as ConversationId } : {}),
+            since: new Date(Date.now() - windowHours * 60 * 60 * 1000),
+          })
+        ).reverse();
       } catch (err) {
-        log.error("fetchHistory failed", {
-          channel,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        const message = err instanceof Error ? err.message : String(err);
+        log.error("fetchHistory failed", { channel, error: message });
+        // A channel with no store reads through its Connection, and with none
+        // connected the service says so (core's `ChannelNotConnected`). That
+        // is the case this tool has always answered as not configured; any
+        // other failure, a store's included, is reported as it is.
+        if (message.startsWith("No connection backs channel")) return notConfigured;
         return {
           status: "error",
-          error: `Failed to fetch history from "${channel}": ${err instanceof Error ? err.message : String(err)}`,
+          error: `Failed to fetch history from "${channel}": ${message}`,
         };
       }
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
+import { resolveProjectWorkingDirWithinRoot } from "../../../../../packages/core/src/webchat/projects.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
 import { createAction } from "./index.js";
 
@@ -60,14 +61,14 @@ function seedSession(id: string, type: string, createdAt: number, name = id): vo
 function makeDeps(
   agentMessages: Array<Record<string, unknown>>,
   runCalls: Array<{ prompt: string; workingDir?: string }> = [],
-  beforeEvents: (workingDir: string) => void = () => {},
+  beforeEvents: (workingDir: string) => void | Promise<void> = () => {},
 ): AppActionRuntimeDeps<{ agentRunner: AgentRunner; carrierDir: string }> {
   return {
     carrierDir,
     agentRunner: {
       async *run(params: { prompt: string; workingDir?: string }) {
         runCalls.push(params);
-        beforeEvents(params.workingDir as string);
+        await beforeEvents(params.workingDir as string);
         for (const msg of agentMessages) {
           yield msg;
         }
@@ -228,6 +229,22 @@ describe("skill_review", () => {
     expect(existsSync(workingDir)).toBe(false);
     expect(readFileSync(join(carrierDir, "app.yaml"), "utf8")).toContain("id: user-skills");
     expect(installCalls).toEqual([]);
+  });
+
+  it("stages where core accepts the working dir of a carrier inside the projects root", async () => {
+    seedSession("web", "webchat", 1700000000);
+    const projectsRoot = dirname(carrierDir);
+    let accepted = "";
+
+    const result = await createAction(
+      actionConfig,
+      makeDeps([{ type: "result", content: "Nothing to update." }], [], async (workingDir) => {
+        accepted = await resolveProjectWorkingDirWithinRoot(workingDir, projectsRoot);
+      }),
+    ).execute({});
+
+    expect(result.status).toBe("ok");
+    expect(accepted).toContain(".dream-skill-review-");
   });
 
   it("leaves a skill imported into the carrier mid-review alone when its install fails", async () => {

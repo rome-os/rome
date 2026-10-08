@@ -8,16 +8,17 @@ import {
   type NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
-import type { ProviderAdapter } from "./adapter.js";
 import { preserveMentionOnlyText } from "./mention-only.js";
-import type { NormalizedMessage, OutgoingMessage } from "./types.js";
+import type { OutgoingMessage } from "./types.js";
 import { createLogger } from "../logger.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type {
+  ChannelMessage,
   ConversationDescriptor,
   ConversationId,
   ConversationSettingsControl,
   MessageAddressing,
+  MessageReceipt,
 } from "@rome-os/app-runtime";
 
 const log = createLogger("feishu");
@@ -100,7 +101,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  * otherwise hand-roll:
  *
  * - inbound `on("message")` events arrive already normalized (sender name,
- *   resolved chat type, structured mentions) — we just map onto Rome's shape;
+ *   resolved chat type, structured mentions). The adapter maps each onto the
+ *   channel's own record, a `ChannelMessage` whose `raw` is the SDK's wire
+ *   event, so the Connection integration delivers it as it is;
  * - outbound `send(..., { markdown })` runs the SDK's builtin converter, which
  *   renders the text as a Feishu rich-text post so bold/lists/code/headings
  *   display correctly. Agent output is Markdown by design, so every reply takes
@@ -108,10 +111,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  *
  * Media attachments remain out of scope (text/post only).
  */
-export class FeishuAdapter implements ProviderAdapter {
-  readonly channelName = "feishu";
+export class FeishuAdapter {
   private channel: LarkChannel;
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+  private handler?: (msg: ChannelMessage) => Promise<void>;
   private readonly connectionId?: string;
   private readonly conversationSettings?: ConversationSettingsControl & {
     observe?(descriptor: ConversationDescriptor): void;
@@ -136,8 +138,9 @@ export class FeishuAdapter implements ProviderAdapter {
         domain: c.domain === "lark" ? Domain.Lark : Domain.Feishu,
         transport: "websocket",
         outbound: { markdownConverter: "builtin" },
-        // Populate `raw` on normalized events so rawEvent carries the real
-        // wire-level payload (e.g. for media not surfaced in the normal shape).
+        // Populate `raw` on normalized events so the inbound message's `raw`
+        // carries the real wire-level payload (e.g. for media not surfaced in
+        // the normal shape).
         includeRawEvent: true,
         loggerLevel: LoggerLevel.warn,
       }),
@@ -180,8 +183,9 @@ export class FeishuAdapter implements ProviderAdapter {
     log.info("feishu adapter stopped");
   }
 
-  async sendMessage(_channelUserId: string, threadId: string, message: OutgoingMessage) {
-    if (!message.text) return;
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    if (!message.text) return { conversationId };
+    const threadId: string = conversationId;
 
     // Agent output is Markdown; let the SDK render it as a rich-text post.
     const opts = message.replyToMessageId
@@ -201,7 +205,8 @@ export class FeishuAdapter implements ProviderAdapter {
         message_id?: string;
       };
       log.info("message sent", { threadId });
-      return { messageId: sent?.messageId ?? sent?.message_id, threadId };
+      const messageId = sent?.messageId ?? sent?.message_id;
+      return { conversationId, ...(messageId ? { messageId } : {}) };
     } catch (err) {
       log.error("failed to send message", {
         threadId,
@@ -211,7 +216,7 @@ export class FeishuAdapter implements ProviderAdapter {
     }
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -281,35 +286,35 @@ export class FeishuAdapter implements ProviderAdapter {
       }
     }
 
-    const cfg = threadType === "group" ? await this.getChannelConfig(m.chatId) : {};
-
-    const msg: NormalizedMessage = {
-      id: m.messageId,
+    // The group's agent is not stamped on the message. The inbox reads it
+    // from the conversation settings.
+    const msg: ChannelMessage = {
       channel: "feishu",
-      channelUserId: m.senderId,
-      displayName: m.senderName ?? "Feishu User",
-      threadId: m.chatId,
-      threadType,
-      timestamp: new Date(m.createTime),
+      direction: "inbound",
+      messageId: m.messageId,
+      conversationId: m.chatId as ConversationId,
+      senderId: m.senderId,
+      senderDisplayName: m.senderName ?? "Feishu User",
       text,
       attachments: [],
-      replyTo: m.replyToMessageId ? { messageId: m.replyToMessageId } : undefined,
-      routing: cfg.agentName ? { agentName: cfg.agentName } : undefined,
+      timestamp: new Date(m.createTime),
+      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
+      thread: { kind: threadType === "private" ? "dm" : "group" },
       addressing,
-      rawEvent: m.raw ?? m,
+      raw: m.raw ?? m,
     };
 
     log.info("message received", {
-      from: msg.channelUserId,
-      threadId: msg.threadId,
-      threadType: msg.threadType,
+      from: msg.senderId,
+      conversationId: msg.conversationId,
+      threadKind: msg.thread?.kind,
     });
 
     try {
       await this.handler(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.id,
+        messageId: msg.messageId,
         error: err instanceof Error ? err.message : String(err),
       });
     }

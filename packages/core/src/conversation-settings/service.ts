@@ -16,12 +16,12 @@ import type {
   StoredConversationSettings,
   UpdateConversationSettingsInput,
 } from "@rome-os/app-runtime";
-import type { TalkDirectory } from "../connections/types.js";
 import { CONVERSATION_SETTING_FIELDS } from "@rome-os/app-runtime";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import type { Channels } from "../channels/channel.js";
 import type { StoredConversationRow } from "./repository.js";
 import { ConversationSettingsRepository, storedSettings } from "./repository.js";
 import {
@@ -210,6 +210,9 @@ function encodeCursor(offset: number): string {
 export interface ConversationSettingsServiceDeps {
   repository: ConversationSettingsRepository;
   connections: ConnectionRegistry;
+  /** The channels whose directories list live conversations. Undefined until
+   *  the channel list is built, and until then only persisted rows list. */
+  channels: () => Channels | undefined;
   listAgents: () => Iterable<string>;
   support?: ReadonlyMap<string, ConversationSettingsSupport>;
   onChanged?: (event: {
@@ -528,25 +531,29 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     input: ListConversationSettingsInput,
     discoveryLimit: number,
   ): Promise<ConversationDescriptor[]> {
+    const selected = input.connectionId
+      ? this.deps.connections.all().find((connection) => connection.id === input.connectionId)
+      : undefined;
+    if (input.connectionId && !selected) return [];
+    const channels = (this.deps.channels() ?? []).filter(
+      (channel) => !selected || channel.name === selected.service,
+    );
     const conversations: ConversationDescriptor[] = [];
-    const connections = input.connectionId
-      ? this.deps.connections.all().filter((connection) => connection.id === input.connectionId)
-      : this.deps.connections.all();
     await Promise.all(
-      connections.map(async (connection) => {
-        const directory = connection.talk?.feature("directory") as TalkDirectory | null | undefined;
-        if (!directory) return;
+      channels.map(async (channel) => {
+        if (!channel.directory) return;
         try {
-          const result = await directory.listConversations({
-            query: input.query,
-            limit: discoveryLimit,
-            includeTopics: false,
-          });
-          conversations.push(...result.conversations);
+          conversations.push(
+            ...(await channel.directory.listConversations({
+              query: input.query,
+              limit: discoveryLimit,
+              includeTopics: false,
+              ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+            })),
+          );
         } catch (err) {
           log.warn("conversation_settings.directory_failed", {
-            connectionId: connection.id,
-            service: connection.service,
+            channel: channel.name,
             error: err instanceof Error ? err.message : String(err),
           });
           // Persisted rows still render; directory availability is not a data gate.

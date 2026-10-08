@@ -11,10 +11,11 @@ import {
   createTestDb,
   buildAgentConfig,
   channelNamed,
-  createMockTalkRouter,
-  mockConnections,
+  createTestConnections,
+  noAccounts,
+  type TestConnections,
 } from "../helpers.js";
-import type { Accounts } from "../../channels/accounts.js";
+import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
@@ -41,7 +42,6 @@ import { CapabilityDiscovery } from "../../core/capability-discovery.js";
 import { SkillCatalog } from "../../core/skill-catalog.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { TalkRouter } from "../../connections/types.js";
 import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
@@ -52,11 +52,6 @@ import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js"
 // approval handler are all the production classes, so tests assert outcomes
 // (DB rows, outbound messages, prompts the model saw) instead of stub calls.
 
-/** An address book with nobody in it: this kit reads no People. */
-const noAccounts: Accounts = {
-  listAccounts: async () => ({ accounts: [] }),
-  resolve: async () => null,
-};
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
@@ -121,7 +116,11 @@ export interface TestRome {
   agentLoader: AgentLoader;
   agentRunner: AgentRunner;
   approvalHandler: ApprovalHandler;
-  talkRouter: TalkRouter;
+  connections: TestConnections;
+  /** The channels over `connections`, built by the production `channelList`.
+   *  A test hears and answers a channel through its ports here, and plays the
+   *  platform's side through `channel(name)`. */
+  channels: Channels;
   seed: TestRomeSeed;
   channel(name: string): FakeChannelEndpoint;
   /** Run one agent turn through the real runner/session stack; collects messages. */
@@ -292,18 +291,17 @@ async function buildHarness(
   for (const name of options.channels ?? ["telegram", "webchat"]) {
     channelEndpoints.set(name, new FakeChannelEndpoint(name));
   }
-  const talkRouter = createMockTalkRouter(channelEndpoints);
+  const connections = createTestConnections(channelEndpoints);
+  const channels = channelList({
+    db,
+    whatsAppAccounts: noAccounts,
+    linkedInAccounts: noAccounts,
+    connections: { registry: connections },
+  });
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: channelNamed(
-      channelList({
-        db,
-        whatsAppAccounts: noAccounts,
-        linkedInAccounts: noAccounts,
-        connections: mockConnections(talkRouter, channelEndpoints),
-      }),
-    ),
+    channel: channelNamed(channels),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
@@ -345,7 +343,8 @@ async function buildHarness(
     agentLoader,
     agentRunner,
     approvalHandler,
-    talkRouter,
+    connections,
+    channels,
     seed,
     channel(name: string): FakeChannelEndpoint {
       const endpoint = channelEndpoints.get(name);

@@ -10,6 +10,7 @@ import {
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 import { matchesModelAlias } from "./model-alias.js";
 import { createLogger } from "../logger.js";
+import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
 const log = createLogger("model-resolver");
 
@@ -108,6 +109,7 @@ export interface CreateModelResolverOptions {
   aiToolState: Pick<AIToolState, "get" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
+  romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits">;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -227,10 +229,30 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
+  /**
+   * Account state as seen by resolution. Rome credits are another way to pay
+   * for Codex: while they pay, Codex runs every model a ChatGPT plan with Sol
+   * and Luna would, so a model resolves the same way under either payer.
+   */
+  const usingRomeCredits = (): boolean => options.romeCreditsPayer?.isUsingRomeCredits() === true;
+  const resolutionState = (state = options.aiToolState.get()): AIToolStateValue => {
+    if (!usingRomeCredits()) return state;
+    return {
+      ...state,
+      codex: {
+        ...state.codex,
+        loggedIn: true,
+        quotaExhausted: false,
+        solAccess: true,
+        lunaAccess: true,
+      },
+    };
+  };
+
   return {
     async getModelProvider(request) {
-      const state = options.aiToolState.get();
       if (request.exact) {
+        const state = resolutionState();
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
@@ -239,6 +261,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
+        const state = resolutionState();
         const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
@@ -247,35 +270,44 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model: selection.model };
       }
 
-      const useFable =
+      const fableEnabled =
         request.tier === "large" &&
-        state.claude.authMethod !== "stored-compatible" &&
         (await options.settingsRepo?.get<unknown>(ENABLE_FABLE_SETTING_KEY)) === true;
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
+      // Settings reads can yield while account state changes. Read the payer
+      // and provider state after the final await so this resolution sees the
+      // current login-selected payer.
+      const accountState = options.aiToolState.get();
+      const creditsPay = usingRomeCredits();
+      const state = resolutionState(accountState);
+      const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
-      const resolveTierModel = (provider: ModelProvider): string => {
+      const resolveTierModel = (provider: ModelProvider, providerState = state): string => {
         const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
         const model =
           configured ??
           (provider.id === "openai"
-            ? codexModel(request.tier, state.codex)
+            ? codexModel(request.tier, providerState.codex)
             : provider.id === "anthropic"
               ? claudeModel(request.tier, useFable)
               : TEST_TIER_TO_MODEL[request.tier]);
         // A configured model is intentional, but known Codex entitlement
         // restrictions still fail with the same recoverable error as an exact
         // model selection instead of reaching the provider with a bad request.
-        requireModelAccess(provider.id, model, state.codex);
+        requireModelAccess(provider.id, model, providerState.codex);
         return model;
       };
 
       if (request.providerId) {
         const provider = providers.get(request.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${request.providerId}`);
-        requireUsableProvider(provider, state);
-        return { modelProvider: provider, model: resolveTierModel(provider) };
+        // A provider pin by tier asks for that provider's own login. The one
+        // Codex pin, image_gen, needs ChatGPT's hosted image tool, which the
+        // Rome credits gateway rejects.
+        requireUsableProvider(provider, accountState);
+        return { modelProvider: provider, model: resolveTierModel(provider, accountState) };
       }
 
       const claude = providers.get("anthropic");
@@ -283,11 +315,15 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
       const codex = providers.get("openai");
-      if (codex && providerUsable("openai", state.codex)) {
+      if (codex && providerUsable("openai", accountState.codex)) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
       if (claude && providerUsable("anthropic", state.claude)) {
         return { modelProvider: claude, model: resolveTierModel(claude) };
+      }
+      // Rome credits pay only when no subscription can serve the tier.
+      if (codex && creditsPay) {
+        return { modelProvider: codex, model: resolveTierModel(codex) };
       }
 
       // Test providers have no login/quota concept. Production only registers

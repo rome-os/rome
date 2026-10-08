@@ -482,7 +482,6 @@ describe("scenario 17: register() validation", () => {
               async send(conversationId) {
                 return { conversationId };
               },
-              feature: () => null,
             }),
           },
         },

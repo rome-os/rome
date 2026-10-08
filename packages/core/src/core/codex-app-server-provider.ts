@@ -41,7 +41,11 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./codex/image-trace.js";
-import { CodexAppServerManager, type CodexThreadBinding } from "./codex/app-server-manager.js";
+import {
+  CodexAppServerManager,
+  PayerChangedError,
+  type CodexThreadBinding,
+} from "./codex/app-server-manager.js";
 import {
   Method,
   Notify,
@@ -81,6 +85,7 @@ import {
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -370,12 +375,15 @@ interface CodexAppServerProviderOptions {
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
   onQuotaExhausted?: () => void;
-  /** Who pays for a turn that ends now. Read once per turn, at turn end. */
+  /** Only the Rome credits payer may classify its 402 as exhausted credits. */
+  isUsingRomeCredits?: () => boolean;
+  /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => UsageFunding;
 }
 
 interface CodexFailureClassification {
   code: AgentErrorCode | null;
+  error?: string;
   httpStatus?: number;
   pending?: Promise<void>;
 }
@@ -424,6 +432,13 @@ function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
 ): CodexFailureClassification {
+  if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
+    return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
+  }
+  // The turn never started; a retry runs under the new payer.
+  if (turnError instanceof PayerChangedError) {
+    return { code: "transient" };
+  }
   if (isCodexUsageLimitError(turnError)) {
     options.onQuotaExhausted?.();
     return { code: "usage_limit" };
@@ -814,8 +829,9 @@ export class CodexAppServerProvider implements ModelProvider {
               // not a string — extract the human message and classify quota
               // exhaustion / revoked credentials off it.
               activeTurn.failed = true;
-              activeTurn.errorMessage = codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               const classification = classifyCodexFailure(p.turn?.error, this.options);
+              activeTurn.errorMessage =
+                classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
               activeTurn.errorHttpStatus = classification.httpStatus;
               if (classification.pending) activeTurn.pending.push(classification.pending);
@@ -836,8 +852,9 @@ export class CodexAppServerProvider implements ModelProvider {
           // v2 wraps the structured TurnError under `error`; tolerate older
           // shapes that put `message` at the top level.
           const payload = p.error ?? (params2 as { message?: unknown });
-          const message = codexTurnErrorMessage(payload, "codex app-server error");
           const classification = classifyCodexFailure(payload, this.options);
+          const message =
+            classification.error ?? codexTurnErrorMessage(payload, "codex app-server error");
           const code = classification.code;
           if (activeTurn) {
             // Route the terminal through runOne (see turn/completed).
@@ -953,6 +970,10 @@ export class CodexAppServerProvider implements ModelProvider {
     const failedTurnAccounting = (turn: ActiveTurn) =>
       turn.usage ? turnAccounting(turn, true) : undefined;
 
+    // The payer each source input was sent under. Codex may replace its
+    // process while an input waits in the turn lane or in buildTurnInput.
+    const payerAtSend = new WeakMap<ModelUserInput, string | null>();
+
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
         .map((i) => i.text)
@@ -1012,13 +1033,25 @@ export class CodexAppServerProvider implements ModelProvider {
       // A borrowed exact fork runs here too; only the session's own turns report.
       if (runtime === sourceRuntime) appliedReasoningEffort = effort;
       try {
-        const started = (await this.appServerManager.requestForThread(tid, Method.turnStart, {
-          threadId: tid,
-          input: turnInput,
-          effort,
-          ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
-          ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
-        })) as { turn?: { id?: string } } | undefined;
+        const payers = new Set(
+          inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
+        );
+        // A batch that spans a payer change fails whole, including inputs sent
+        // under the current payer, and surfaces as a transient failure to retry.
+        if (payers.size > 1) throw new PayerChangedError();
+        const [expectedProvider] = payers;
+        const started = (await this.appServerManager.requestForThread(
+          tid,
+          Method.turnStart,
+          {
+            threadId: tid,
+            input: turnInput,
+            effort,
+            ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
+            ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
+          },
+          { expectedProvider },
+        )) as { turn?: { id?: string } } | undefined;
         turn.turnId ??= started?.turn?.id ?? null;
         if (turn.turnId) runtime.onProviderTurn?.(turn.turnId);
         // turn/start can acknowledge before the native input becomes steerable.
@@ -1093,7 +1126,13 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(codexErrorEvent(message, classification, failedTurnAccounting(turn)));
+          runtime.sink.push(
+            codexErrorEvent(
+              classification.error ?? message,
+              classification,
+              failedTurnAccounting(turn),
+            ),
+          );
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();
@@ -1119,6 +1158,7 @@ export class CodexAppServerProvider implements ModelProvider {
         sourceStarted = new Promise<void>((resolve) => {
           resolveSourceStarted = resolve;
         });
+        payerAtSend.set(input, this.appServerManager.getDefaultProvider());
         dispatcher.enqueue(input);
       }
     };
@@ -1254,6 +1294,8 @@ export class CodexAppServerProvider implements ModelProvider {
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),
+              // The fork turn queues behind the source's turns like any other.
+              onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
               revertTurn: async (threadIdToRevert, beforeTurnId) => {
                 // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain

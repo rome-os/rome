@@ -12,7 +12,7 @@
  * linked here and never links it again.
  */
 
-import type { InboundMessage } from "../connections/types.js";
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
@@ -23,7 +23,7 @@ const log = createLogger("agents-guardian");
 /** The settings key holding every endpoint this admission has linked. */
 export const AGENTS_GUARDIAN_LINKED_KEY = "agentsGuardianLinkedEndpoints";
 
-function isSameAccount(message: InboundMessage): boolean {
+function isSameAccount(message: ChannelMessage): boolean {
   const from = (message.raw as Partial<AgentMessageEnvelope> | undefined)?.from;
   return from?.sameAccount === true && from.endpoint === message.senderId;
 }
@@ -36,11 +36,11 @@ export function createAgentsGuardianLink(deps: {
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
 }) {
-  // The router admits different senders at once, and the record of linked
+  // Admission takes different senders at once, and the record of linked
   // endpoints is one setting, so its read and write run one sender at a time.
   let queue: Promise<unknown> = Promise.resolve();
 
-  async function link(message: InboundMessage): Promise<void> {
+  async function link(message: ChannelMessage): Promise<void> {
     const endpoint = message.senderId;
     if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
@@ -61,7 +61,7 @@ export function createAgentsGuardianLink(deps: {
   }
 
   /** Links the sender when it qualifies. Never refuses the message. */
-  return (message: InboundMessage): Promise<void> => {
+  return (message: ChannelMessage): Promise<void> => {
     if (!isSameAccount(message)) return Promise.resolve();
     const run = queue.then(() => link(message));
     queue = run.catch((err: unknown) => {

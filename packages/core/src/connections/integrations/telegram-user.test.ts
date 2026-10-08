@@ -16,12 +16,7 @@
 // pin the descriptor's own mapping arithmetic here.
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type {
-  ConversationId,
-  NormalizedMessage,
-  OutgoingMessage,
-  ChannelMessage,
-} from "@rome-os/app-runtime";
+import type { ConversationId, OutgoingMessage, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
 import { installTestClock } from "../../test/kit/index.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
@@ -36,12 +31,18 @@ const fakeState: {
   startError: unknown;
   sendError: unknown;
   stopped: boolean;
-  sent: Array<{ channelUserId: string; threadId: string; message: OutgoingMessage }>;
+  sent: Array<{ conversationId: ConversationId; message: OutgoingMessage }>;
   /** Error the fake probe() throws on its next tick (null → session healthy). */
   probeError: unknown;
   /** Count of probe() ticks, so a test can assert the timer stopped. */
   probeCalls: number;
   historyCalls: Array<{ threadId: string | null; windowHours: number }>;
+  /** What the fake fetchHistory answers. */
+  historyLines: ChannelMessage[];
+  /** The handler the integration registered through onInbound. */
+  inbound: ((msg: ChannelMessage) => Promise<void>) | null;
+  /** What the fake saveIncomingAttachments was asked to materialize. */
+  materialized: ChannelMessage[];
   /** When set, probe() awaits this instead of resolving — lets a test hold a
    *  probe in flight across a re-login and release it afterward. */
   probeGate: Promise<void> | null;
@@ -53,6 +54,9 @@ const fakeState: {
   probeError: null,
   probeCalls: 0,
   historyCalls: [],
+  historyLines: [],
+  inbound: null,
+  materialized: [],
   probeGate: null,
 };
 
@@ -61,7 +65,9 @@ rs.mock("../../channels/telegram-user.js", () => {
   return {
     ...telegramUserModule,
     TelegramUserAdapter: class {
-      onMessage(_handler: (msg: NormalizedMessage) => Promise<void>): void {}
+      onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+        fakeState.inbound = handler;
+      }
       async start(): Promise<void> {
         if (fakeState.startError) throw fakeState.startError;
       }
@@ -73,20 +79,21 @@ rs.mock("../../channels/telegram-user.js", () => {
         if (fakeState.probeGate) await fakeState.probeGate;
         if (fakeState.probeError) throw fakeState.probeError;
       }
-      async sendMessage(
-        channelUserId: string,
-        threadId: string,
+      async send(
+        conversationId: ConversationId,
         message: OutgoingMessage,
-      ): Promise<void> {
+      ): Promise<{ conversationId: ConversationId; messageId: string }> {
         if (fakeState.sendError) throw fakeState.sendError;
-        fakeState.sent.push({ channelUserId, threadId, message });
+        fakeState.sent.push({ conversationId, message });
+        return { conversationId, messageId: "sent-1" };
       }
-      async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
+      async saveIncomingAttachments(msg: ChannelMessage): Promise<unknown[]> {
+        fakeState.materialized.push(msg);
         return msg.attachments;
       }
-      async fetchHistory(threadId: string | null, windowHours: number): Promise<unknown[]> {
+      async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
         fakeState.historyCalls.push({ threadId, windowHours });
-        return [];
+        return fakeState.historyLines;
       }
     },
   };
@@ -159,6 +166,9 @@ beforeEach(() => {
   fakeState.probeError = null;
   fakeState.probeCalls = 0;
   fakeState.historyCalls = [];
+  fakeState.historyLines = [];
+  fakeState.inbound = null;
+  fakeState.materialized = [];
   fakeState.probeGate = null;
 });
 
@@ -210,9 +220,10 @@ describe("telegram_user descriptor shape", () => {
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "telegram_user", rawEvent: null, attachments: [] },
     } satisfies ChannelMessage;
-    await expect(h.talker.feature("inboundMedia")?.materialize(message)).resolves.toEqual([]);
+    await expect(h.talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
+    // The ChannelMessage reaches the transport as it is, with no `raw` to unwrap.
+    expect(fakeState.materialized).toStrictEqual([message]);
     const stopped = h.talker.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
@@ -229,12 +240,87 @@ describe("telegram_user descriptor shape", () => {
     const h = buildTalker();
     h.start();
     await expect(
-      h.talker.feature("history")?.query({
+      h.talker.history?.query({
         conversationId: "dialog-1" as ConversationId,
         limit: 20,
       }),
     ).resolves.toEqual([]);
     expect(fakeState.historyCalls).toEqual([{ threadId: "dialog-1", windowHours: 24 }]);
+  });
+
+  it("marks the lines GramJS flags `out` as outbound and slices to the limit", async () => {
+    const line = (messageId: string, out: boolean): ChannelMessage => ({
+      channel: "telegram_user",
+      direction: "inbound",
+      messageId,
+      conversationId: "dialog-1" as ConversationId,
+      senderId: out ? "u-1" : "999",
+      senderDisplayName: out ? "Me" : "999",
+      text: `line ${messageId}`,
+      attachments: [],
+      timestamp: new Date(1_700_000_000_000),
+      thread: { kind: "group" },
+      raw: { out },
+    });
+    fakeState.historyLines = [line("1", false), line("2", true), line("3", false)];
+    const h = buildTalker();
+    h.start();
+    const lines = await h.talker.history?.query({ limit: 2 });
+    expect(lines).toStrictEqual([line("1", false), { ...line("2", true), direction: "outbound" }]);
+    expect(fakeState.historyCalls).toEqual([{ threadId: null, windowHours: 24 }]);
+  });
+});
+
+describe("telegram_user inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const desc = makeTelegramUserDescriptor();
+    const talker = desc.capabilities.talker!.build(
+      { session: validCred() },
+      {
+        connectionId: "telegram-user-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    const raw = { id: 7, out: false };
+    const message: ChannelMessage = {
+      channel: "telegram_user",
+      direction: "inbound",
+      messageId: "7",
+      conversationId: "-100555" as ConversationId,
+      senderId: "111",
+      senderDisplayName: "111",
+      text: "see this",
+      attachments: [{ type: "document" }],
+      timestamp: new Date(1_700_000_000_000),
+      replyTo: { messageId: "5" },
+      thread: { kind: "group" },
+      raw,
+    };
+    await fakeState.inbound!(message);
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "telegram_user",
+        direction: "inbound",
+        messageId: "7",
+        conversationId: "-100555",
+        senderId: "111",
+        senderDisplayName: "111",
+        text: "see this",
+        attachments: [{ type: "document" }],
+        timestamp: new Date(1_700_000_000_000),
+        replyTo: { messageId: "5" },
+        thread: { kind: "group" },
+        raw,
+      },
+    ]);
+    await talker.stop();
   });
 });
 
@@ -293,13 +379,14 @@ describe("telegram_user Talker fault mapping", () => {
     await expect(h.talker.send("999" as ConversationId, { text: "hi" })).rejects.toThrow("timeout");
   });
 
-  it("forwards the opaque conversation id to the adapter's sendMessage", async () => {
+  it("forwards the opaque conversation id to the adapter's send and returns its receipt", async () => {
     const h = buildTalker();
     h.start();
-    await h.talker.send("chat-42" as ConversationId, { text: "hi" });
-    expect(fakeState.sent).toEqual([
-      { channelUserId: "chat-42", threadId: "chat-42", message: { text: "hi" } },
-    ]);
+    await expect(h.talker.send("chat-42" as ConversationId, { text: "hi" })).resolves.toEqual({
+      conversationId: "chat-42",
+      messageId: "sent-1",
+    });
+    expect(fakeState.sent).toEqual([{ conversationId: "chat-42", message: { text: "hi" } }]);
   });
 });
 

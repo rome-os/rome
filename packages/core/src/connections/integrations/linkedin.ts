@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { ConversationId } from "@rome-os/app-runtime";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -285,6 +285,17 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             maxIntervalMs: deps.maxIntervalMs,
           });
 
+          const sink = deps.syncSink;
+          const features: TalkFeatures = {};
+          if (sink.findReplyTarget) {
+            features.directMessaging = {
+              async conversationFor(address: string) {
+                const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
+                const target = await sink.findReplyTarget?.({ participantId });
+                return target ? (target.threadId as ConversationId) : null;
+              },
+            };
+          }
           const talker: LinkedInTalker = {
             // v1 is a mirror: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused until LinkedIn messages join the routed
@@ -356,20 +367,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               }
               return { conversationId, messageId: message.messageId };
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const sink = deps.syncSink;
-              const features: Partial<TalkFeatureMap> = {};
-              if (sink.findReplyTarget) {
-                features.directMessaging = {
-                  async conversationFor(address: string) {
-                    const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
-                    const target = await sink.findReplyTarget?.({ participantId });
-                    return target ? (target.threadId as ConversationId) : null;
-                  },
-                };
-              }
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return poller.getRuntimeDegradation();
             },

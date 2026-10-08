@@ -1,6 +1,6 @@
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { STRANGER_PERSON_ID } from "../constants.js";
-import type { InboundMessage } from "../connections/types.js";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
 import { ensureSentinelPersons } from "../db/ensure-sentinel-persons.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -10,8 +10,8 @@ import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { AGENTS_GUARDIAN_LINKED_KEY, createAgentsGuardianLink } from "./agents-guardian.js";
 
-function message(from: AgentMessageEnvelope["from"]): InboundMessage {
-  return toAgentInboundMessage({
+function message(from: AgentMessageEnvelope["from"]): ChannelMessage {
+  const inbound = toAgentInboundMessage({
     messageId: "msg_1",
     from,
     to: { endpoint: "home-rome" },
@@ -21,13 +21,15 @@ function message(from: AgentMessageEnvelope["from"]): InboundMessage {
     inReplyTo: null,
     hop: 1,
   });
+  if (!inbound) throw new Error("the envelope names no sender account");
+  return inbound;
 }
 
 describe("linking same-account agents to the guardian", () => {
   let testDb: TestDb;
   let people: PersonMappingRepository;
   let settings: SettingsRepository;
-  let link: (message: InboundMessage) => Promise<void>;
+  let link: (message: ChannelMessage) => Promise<void>;
 
   beforeEach(async () => {
     testDb = createTestDb();
@@ -56,10 +58,24 @@ describe("linking same-account agents to the guardian", () => {
 
   it("leaves a sender unlinked when Cloud does not say it is in this account", async () => {
     await link(message({ endpoint: "atlas", kind: "dot" }));
-    await link(message({ endpoint: "muse", kind: "dot", sameAccount: false }));
+    await link(
+      message({ endpoint: "@friend/muse", kind: "dot", sameAccount: false, account: "friend" }),
+    );
 
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();
+    expect(await people.findByChannelUser("agents", "@friend/muse")).toBeNull();
     expect(await people.findByChannelUser("agents", "muse")).toBeNull();
+  });
+
+  it("never links another account's agent, even one sharing a name with the guardian's", async () => {
+    await link(message({ endpoint: "atlas", kind: "dot", sameAccount: true }));
+    await link(
+      message({ endpoint: "@friend/atlas", kind: "dot", sameAccount: false, account: "friend" }),
+    );
+
+    expect((await people.findByChannelUser("agents", "atlas"))?.id).toBe("owner");
+    expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
+    expect(await settings.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)).toEqual(["atlas"]);
   });
 
   it("keeps a dismissal", async () => {

@@ -89,7 +89,10 @@ describe("agent model pins through AgentSessionManager", () => {
     await loader.loadAll(directory);
   }
 
-  function createManager(isSubagent = false): AgentSessionManager {
+  function createManager(
+    isSubagent = false,
+    useRomeCredits: boolean | (() => boolean) = false,
+  ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
@@ -103,6 +106,10 @@ describe("agent model pins through AgentSessionManager", () => {
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           aiToolState: { get: () => state, refresh: async () => state },
+          romeCreditsPayer: {
+            isUsingRomeCredits: () =>
+              typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
+          },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(),
@@ -147,6 +154,46 @@ describe("agent model pins through AgentSessionManager", () => {
       model: MODEL,
       providerThreadId: `native-${session.sessionId}`,
     });
+  });
+
+  it("pins a credit-funded session to the model ChatGPT would run", async () => {
+    await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
+    state.codex.loggedIn = false;
+    state.codex.solAccess = false;
+    state.claude.loggedIn = false;
+    let usingRomeCredits = true;
+    const session = await createManager(false, () => usingRomeCredits).acquire(key, {
+      workingDir: directory,
+    });
+    await collect(session.sendTurn({ prompt: "credits" }).events);
+    expect(await sessionManager.findResumableSessionById(session.sessionId, AGENT)).toMatchObject({
+      provider: "openai",
+      model: "gpt-6.1-sol",
+    });
+
+    // Connecting ChatGPT changes only who pays: the pinned model keeps running.
+    state.codex.loggedIn = true;
+    state.codex.solAccess = true;
+    usingRomeCredits = false;
+    await collect(session.sendTurn({ prompt: "guardian" }).events);
+
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6.1-sol", "gpt-6.1-sol"]);
+    expect(openai.openSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a pinned Codex session running on credits after ChatGPT disconnects", async () => {
+    await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
+    const firstManager = createManager();
+    const first = await firstManager.acquire(key, { workingDir: directory });
+    await collect(first.sendTurn({ prompt: "guardian" }).events);
+    await firstManager.shutdown();
+
+    state.codex.loggedIn = false;
+    state.codex.lunaAccess = false;
+    const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
+    await collect(resumed.sendTurn({ prompt: "credits" }).events);
+
+    expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
   });
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {

@@ -18,6 +18,7 @@ function cloud(endpoints: AgentEndpointSummary[]) {
       if (client.fail) throw new Error("Rome Cloud unavailable");
       return {
         endpoint: "home-rome",
+        address: "@ouou/home-rome",
         endpoints: [{ endpoint: "home-rome", kind: "rome" as const, ready: true }, ...endpoints],
       };
     },
@@ -42,6 +43,91 @@ describe("the agents address book", () => {
     ]);
     expect((await book.resolve("atlas"))?.id).toBe("atlas");
     expect(await book.resolve("pending")).toBeNull();
+  });
+
+  it("lists a linked account's endpoints by their full address, even one sharing this Rome's name", async () => {
+    const book = agentsAccounts({
+      client: cloud([
+        atlas,
+        {
+          endpoint: "@friend/atlas",
+          kind: "dot",
+          ready: true,
+          sameAccount: false,
+          address: "@friend/atlas",
+        },
+        {
+          endpoint: "@friend/home-rome",
+          kind: "rome",
+          ready: true,
+          sameAccount: false,
+          address: "@friend/home-rome",
+        },
+      ]),
+      isConnected: () => true,
+    });
+    expect((await book.resolve("@Friend/atlas"))?.id).toBe("@friend/atlas");
+    const { accounts } = await book.listAccounts({ limit: 100 });
+    expect(accounts.map((account) => account.id)).toEqual([
+      "@friend/atlas",
+      "@friend/home-rome",
+      "atlas",
+    ]);
+    expect(accounts[0]).toEqual({
+      id: "@friend/atlas",
+      addresses: ["@friend/atlas"],
+      name: null,
+      identifiers: { username: "@friend/atlas", "agents:kind": "dot", "agents:account": "friend" },
+    });
+  });
+
+  it("resolves another account's agent it does not list, such as one answering Rome", async () => {
+    const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
+    expect(await book.resolve("@friend/atlas")).toEqual({
+      id: "@friend/atlas",
+      addresses: ["@friend/atlas"],
+      name: null,
+      identifiers: { username: "@friend/atlas", "agents:account": "friend" },
+    });
+    expect((await book.resolve("@Friend/atlas"))?.id).toBe("@friend/atlas");
+    expect(await book.resolve("muse")).toBeNull();
+    expect(await book.resolve("@friend")).toBeNull();
+  });
+
+  it("resolves no other account's agent until Cloud has named this account's handle", async () => {
+    const client = cloud([atlas]);
+    client.fail = true;
+    const book = agentsAccounts({ client, isConnected: () => true });
+    expect(await book.resolve("@ouou/atlas")).toBeNull();
+    expect(await book.resolve("@friend/atlas")).toBeNull();
+  });
+
+  it("folds an own agent's full address onto its bare name, and never makes it external", async () => {
+    const book = agentsAccounts({
+      client: {
+        endpoints: async () => ({
+          endpoint: "home-rome",
+          address: "@ouou/home-rome",
+          endpoints: [{ ...atlas, address: "@ouou/atlas", sameAccount: true }],
+        }),
+      },
+      isConnected: () => true,
+    });
+    const { accounts } = await book.listAccounts({ limit: 100 });
+    expect(accounts).toEqual([
+      {
+        id: "atlas",
+        addresses: ["atlas", "@ouou/atlas"],
+        name: null,
+        identifiers: { username: "atlas", "agents:kind": "dot" },
+      },
+    ]);
+    expect((await book.resolve("@ouou/atlas"))?.id).toBe("atlas");
+    expect(await book.resolve("@ouou/removed")).toBeNull();
+    expect((await book.resolve("@OUOU/atlas"))?.id).toBe("atlas");
+    expect(await book.resolve("@OUOU/removed")).toBeNull();
+    expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
+    expect(await book.resolve("@@friend/atlas")).toBeNull();
   });
 
   it("asks Cloud nothing until Agents is connected", async () => {
@@ -74,6 +160,17 @@ describe("the agents address book", () => {
     now = 60_000;
     expect((await book.listAccounts({ limit: 100 })).accounts).toHaveLength(1);
   });
+
+  it("keeps resolving other accounts' agents through an outage after Cloud has named the handle", async () => {
+    let now = 0;
+    const client = cloud([atlas]);
+    const book = agentsAccounts({ client, isConnected: () => true, now: () => now });
+    await book.listAccounts({ limit: 100 });
+    client.fail = true;
+    now = 60_000;
+    expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
+    expect(await book.resolve("@ouou/atlas")).toBeNull();
+  });
 });
 
 describe("a dot on the People page", () => {
@@ -96,6 +193,7 @@ describe("a dot on the People page", () => {
         send: null,
         inbound: null,
         messages: null,
+        directory: null,
       },
     ];
     const read = () =>
@@ -115,5 +213,53 @@ describe("a dot on the People page", () => {
       channelMappings: [{ channel: "agents", channelUserId: "atlas" }],
     });
     expect(await find()).toMatchObject({ personId, state: "linked" });
+  });
+});
+
+describe("another account's agent on the People page", () => {
+  let testDb: TestDb;
+  let deps: TestDeps;
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    await seedBaseline(testDb.db);
+    deps = await buildTestDeps(testDb.db);
+  });
+
+  afterEach(() => testDb.close());
+
+  it("is listed unlinked under its full address", async () => {
+    const channels: Channels = [
+      {
+        name: "agents",
+        accounts: agentsAccounts({
+          client: cloud([
+            {
+              endpoint: "@friend/atlas",
+              kind: "dot",
+              ready: true,
+              sameAccount: false,
+              address: "@friend/atlas",
+            },
+          ]),
+          isConnected: () => true,
+        }),
+        send: null,
+        inbound: null,
+        messages: null,
+        directory: null,
+      },
+    ];
+    const accounts = await readAccountDirectory({
+      ...deps,
+      channels,
+      accountNames: createAccountNames({ channels, sentinelLogRepo: deps.sentinelLogRepo }),
+    });
+    expect(accounts.find((a) => a.channel === "agents")).toMatchObject({
+      channelUserId: "@friend/atlas",
+      displayName: "@friend/atlas",
+      state: "unlinked",
+      personId: null,
+    });
   });
 });

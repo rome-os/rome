@@ -4,6 +4,7 @@ import { replayContext } from "./replay.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
+import { backingConnection } from "../channels/channels-service.js";
 import type {
   BackendTurnRunner,
   ConversationId,
@@ -41,20 +42,18 @@ const ChannelsSendParams = z.object({
   message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
     message: "message must be an object",
   }),
-  connectionId: z.string().min(1).optional(),
-});
-
-const ChannelsReadParams = z.object({
-  channel: z.string().min(1),
-  conversationId: z.string().optional(),
-  since: z.string().datetime().optional(),
-  limit: z.number().int().positive().optional(),
-  connectionId: z.string().min(1).optional(),
 });
 
 // `query` reads the channel's own `messages`, which names no Connection, so a
 // request naming one is refused rather than answered from another account.
-const ChannelsQueryParams = ChannelsReadParams.omit({ connectionId: true }).strict();
+const ChannelsQueryParams = z
+  .object({
+    channel: z.string().min(1),
+    conversationId: z.string().optional(),
+    since: z.string().datetime().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
 
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
@@ -159,7 +158,6 @@ const EventsSearchCatalogParams = z.object({
 const SessionContinueParams = z.object({
   agentName: z.string().min(1),
   sessionId: z.string().min(1),
-  connectionId: z.string().min(1).optional(),
   channel: z.string().min(1),
   threadId: z.string().min(1),
   channelUserId: z.string().optional(),
@@ -303,8 +301,6 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
-      case "channels.history":
-        return await this.handleChannelsHistory(params);
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(
           parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,
@@ -434,7 +430,7 @@ export class WorkerRpcServer {
   }
 
   private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
-    const { channel, conversationId, message, connectionId } = parseParams(
+    const { channel, conversationId, message } = parseParams(
       "channels.send",
       ChannelsSendParams,
       params,
@@ -443,7 +439,6 @@ export class WorkerRpcServer {
       channel,
       conversationId as ConversationId,
       message,
-      connectionId ? { connectionId } : undefined,
     );
   }
 
@@ -460,31 +455,15 @@ export class WorkerRpcServer {
     });
   }
 
-  private async handleChannelsHistory(params: unknown): Promise<ChannelMessage[]> {
-    const { channel, conversationId, since, limit, connectionId } = parseParams(
-      "channels.history",
-      ChannelsReadParams,
-      params,
-    );
-    return await this.services.channelsService.history(channel, {
-      ...(conversationId ? { conversationId: conversationId as ConversationId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(limit ? { limit } : {}),
-      ...(connectionId ? { connectionId } : {}),
-    });
-  }
-
   private async handleEmailIngestInbound(params: unknown): Promise<EmailInboundResult> {
     const { rawBody, signature } = parseParams(
       "channels.email.ingestInbound",
       EmailIngestInboundParams,
       params,
     );
-    const email = (await this.services.channelsService.list()).find(
-      (channel) => channel.name === "email",
-    );
-    if (email?.connectionIds.length !== 1) return { status: "skipped", reason: "channel_inactive" };
-    return (await this.services.connectionRegistry.ingest(email.connectionIds[0]!, {
+    const email = backingConnection(this.services.connectionRegistry, "email");
+    if (!email) return { status: "skipped", reason: "channel_inactive" };
+    return (await this.services.connectionRegistry.ingest(email.id, {
       rawBody,
       signature,
     })) as EmailInboundResult;

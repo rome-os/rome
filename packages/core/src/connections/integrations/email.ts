@@ -3,10 +3,11 @@
 // Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
-// gate + body-pull + normalize, attachment download, history paging — is the
-// existing `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here
+// gate + body-pull + the inbound `ChannelMessage`, attachment download, history
+// paging — is `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here
 // so the runtime's grant-epoch lifecycle and fault→grant-state mapping
-// (registry.ts) drive it.
+// (registry.ts) drive it. The transport already speaks the channel's record, so
+// inbound, send and history pass through without a projection.
 //
 // Unlike the polling/gateway channels, email is PUSH-driven: there is no live
 // transport loop to report a terminal failure from. Two distinct signals reach
@@ -29,7 +30,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
@@ -50,12 +51,7 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import {
-  historyLinesFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `inbox` grant's profile — the non-secret provisioned identity (the
 // `<slug>@romeos.cc` address Rome Cloud minted). Declared next to the material
@@ -262,10 +258,24 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let unregisterIngress: (() => void) | null = null;
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            history: {
+              async query(input) {
+                const messages = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return messages.slice(0, historyQueryLimit(input.limit));
+              },
+            },
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               unregisterIngress = kit.registerIngress(async (input) => {
                 const deposit = input as { rawBody?: unknown; signature?: unknown };
                 if (typeof deposit.rawBody !== "string" || typeof deposit.signature !== "string") {
@@ -291,19 +301,10 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
               unregisterIngress = null;
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                history: historyLinesFeature(adapter, "email"),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

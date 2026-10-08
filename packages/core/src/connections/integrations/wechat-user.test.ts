@@ -11,8 +11,7 @@
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage } from "../types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
@@ -392,7 +391,7 @@ describe("the WeChat personal Talker", () => {
     };
     const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
     const deliver = rs.fn();
-    talker.start(deliver as unknown as (msg: InboundMessage) => void, fault);
+    talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {
       talker,
       deliver,
@@ -557,7 +556,7 @@ describe("the WeChat personal Talker", () => {
     await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
       /read-only/,
     );
-    expect(talker.feature("directMessaging")).toBeNull();
+    expect(talker.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 
     await talker.stop();
@@ -587,7 +586,7 @@ describe("the WeChat personal Talker", () => {
     });
     const { talker } = buildTalker(runtime);
 
-    const page = await talker.feature("directory")!.listConversations({ limit: 10 });
+    const page = await talker.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
         ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
@@ -610,7 +609,7 @@ describe("the WeChat personal Talker", () => {
   // (wechat-user-messages.ts). The Talk offers only the directory.
   it("leaves history to the channel", async () => {
     const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
-    expect(talker.feature("history")).toBeNull();
+    expect(talker.history).toBeUndefined();
     expect(
       createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
         .talker?.history,

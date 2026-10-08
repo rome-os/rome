@@ -2,10 +2,12 @@
 //
 // WeChat is a Talker with a single `account` grant: the bot token + the account
 // coordinates (baseUrl, accountId, optional userId) minted by the QR pairing
-// flow. The transport core — long-poll, normalization, attachment
-// download/decrypt, media send — is the existing `WechatAdapter`
+// flow. The transport core — long-poll, the inbound `ChannelMessage`,
+// attachment download/decrypt, media send — is `WechatAdapter`
 // (packages/core/src/channels/wechat.ts), wrapped here so the runtime's
-// grant-epoch lifecycle and fault→grant-state mapping drive it.
+// grant-epoch lifecycle and fault→grant-state mapping drive it. The transport
+// already speaks the channel's record, so inbound and send pass through
+// without a projection.
 //
 // The pairing conferral is the setup on the `account` scheme
 // (`makeWechatSetup`): the coroutine mints the QR via `WechatAuthService`,
@@ -20,7 +22,7 @@
 // CredentialRejected{ grant: "account" }. Any other terminal poll failure is a
 // Disconnected.
 
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   getDefaultWechatStatePath,
   isWechatAuthError,
@@ -42,12 +44,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-  typingActivityFeature,
-} from "./talk-features.js";
+import { typingActivityFeature } from "./talk-features.js";
 
 /** The `account` grant material — the pairing flow's output (see wechat.ts). */
 export interface WechatAccountMaterial {
@@ -334,10 +331,16 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
           const adapter = createAdapter(config);
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            activity: typingActivityFeature(adapter),
+          };
           const talker: Talker = {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() kicks off the long-poll; terminal poll failures route
               // through onFault → routeFault. start() itself only reads local
               // state, so it does not reject on a bad token — that surfaces from
@@ -347,19 +350,10 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                activity: typingActivityFeature(adapter),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
           liveAdapters.set(talker, adapter);
           return talker;

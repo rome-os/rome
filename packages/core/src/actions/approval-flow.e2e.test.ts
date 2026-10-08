@@ -1,8 +1,8 @@
 /**
  * End-to-end coverage for the approval flow.
  *
- * Wires real DB-backed repos + ActionEngine + ApprovalHandler with mock
- * channel adapter + mock agent runner. Behaviors numbered 1-N below match the
+ * Wires real DB-backed repos + ActionEngine + ApprovalHandler with a fake
+ * channel transport + mock agent runner. Behaviors numbered 1-N below match the
  * historical BRS at d6807982:docs/specs/approval-flow-brs.md; unimplemented
  * cases (4, 5) are kept as it.skip so the gap stays visible without falsely
  * passing.
@@ -21,12 +21,13 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import {
   createTestDb,
   buildTestDeps,
-  MockProviderAdapter,
+  FakeTransport,
   createMockAgentRunner,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
+import type { ConversationId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
 
@@ -71,7 +72,7 @@ function buildHarness() {
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 
   const registry = new ActionRegistryImpl([]);
-  const channel = new MockProviderAdapter("webchat");
+  const channel = new FakeTransport("webchat");
   const cardEmissions: ApprovalCreatedEvent[] = [];
 
   const engine = new ActionEngine(registry, undefined, executionsRepo, approvalsRepo, journalRepo, {
@@ -96,11 +97,7 @@ function buildHarness() {
           },
         ],
       };
-      await channel.sendMessage(
-        event.channelContext.channelUserId ?? event.channelContext.threadId,
-        event.channelContext.threadId,
-        msg,
-      );
+      await channel.send(event.channelContext.threadId as ConversationId, msg);
     },
   });
 
@@ -265,7 +262,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.threadId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });

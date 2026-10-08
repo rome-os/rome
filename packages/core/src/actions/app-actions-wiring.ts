@@ -23,6 +23,7 @@ import {
 import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../lib/feedback-client.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -110,38 +111,20 @@ function makeAppLookup(catalog: AppCatalog): AppLookup {
 }
 
 /**
- * Deps that @rome-os/app-runtime 0.7 removed, answered for that release with
- * the change an app built against 0.6 has to make, rather than with a
- * `Cannot read properties of undefined` from deep inside the app. Each is a
- * non-enumerable getter, so copying or listing the deps never trips it. It is
- * still an own property, so `"talkRouter" in deps` answers true while the
- * getter is here: an app feature-testing with `in` must read the value.
+ * Deps that @rome-os/app-runtime 0.7 removed, answered with the migration
+ * ({@link withRemovedMembers}).
  *
- * TODO(0.8): remove, with REMOVED_HOOK_DEPS and withRemovedDeps.
+ * TODO(0.8): remove, with REMOVED_HOOK_DEPS.
  */
 const REMOVED_ACTION_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
 };
-// TODO(0.8): remove, with REMOVED_ACTION_DEPS and withRemovedDeps.
+// TODO(0.8): remove, with REMOVED_ACTION_DEPS.
 const REMOVED_HOOK_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",
 };
-
-function withRemovedDeps<T extends object>(deps: T, removed: Record<string, string>): T {
-  for (const [name, migration] of Object.entries(removed)) {
-    if (name in deps) continue;
-    Object.defineProperty(deps, name, {
-      configurable: true,
-      enumerable: false,
-      get() {
-        throw new Error(migration);
-      },
-    });
-  }
-  return deps;
-}
 
 function createAppActionRuntimeDeps(
   record: AppActionRecord,
@@ -154,7 +137,7 @@ function createAppActionRuntimeDeps(
     throw new Error(`App "${record.metadata.ownerId}" is not resolved in the catalog`);
   }
 
-  return withRemovedDeps(
+  return withRemovedMembers(
     {
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
@@ -317,7 +300,7 @@ export async function createChannelMessageHookFromCatalog(
 
   if (typeof module.createHook === "function") {
     const hook = module.createHook(
-      withRemovedDeps({ ...deps }, REMOVED_HOOK_DEPS),
+      withRemovedMembers({ ...deps }, REMOVED_HOOK_DEPS),
     ) as ChannelMessageHook;
     // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
     // removed registerConnection, which the host no longer calls: it would hear

@@ -7,7 +7,8 @@ import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import type { ApprovalHandler } from "../../actions/approval-handler.js";
-import type { TalkRouter } from "../../connections/types.js";
+import type { ConnectionRegistry } from "../../connections/registry.js";
+import { notifyPairingResolution, type ResolvedApproval } from "../../channels/pairing.js";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {
@@ -57,7 +58,13 @@ describe("Approvals API", () => {
     const deps = {
       ...(await buildTestDeps(testDb.db)),
       approvalHandler,
-      talkRouter: { send, feature: () => ({ conversationFor }) } as unknown as TalkRouter,
+      notifyPairingResolution: (resolved: ResolvedApproval) =>
+        notifyPairingResolution(
+          {
+            get: () => ({ talk: { send, directMessaging: { conversationFor } } }),
+          } as unknown as Pick<ConnectionRegistry, "get">,
+          resolved,
+        ),
     };
     const guarded = new Hono();
     guarded.use("*", (_c, next) =>

@@ -39,7 +39,7 @@ export function whatsappContactsRoutes(deps: ApiDeps): Hono {
     const whatsapp = (await deps.channelsService.list()).find(
       (channel) => channel.name === "whatsapp",
     );
-    if (whatsapp?.connectionIds.length !== 1) {
+    if (!whatsapp?.sendable) {
       return c.json({ error: "WhatsApp is not connected" }, 503);
     }
 

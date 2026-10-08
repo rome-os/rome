@@ -72,6 +72,8 @@ export interface CreateBorrowedExactForkSessionArgs {
   openParams: ModelSessionForkOpenParams;
   runExclusive<T>(work: () => Promise<T>): Promise<T>;
   runTurn(input: ModelUserInput, runtime: CodexTurnRuntime): Promise<void>;
+  /** Called when the input is sent, before it waits behind the source's turns. */
+  onSend?: (input: ModelUserInput) => void;
   revertTurn(threadId: string, beforeTurnId: string): Promise<void>;
   interrupt(reason?: string): Promise<void>;
   funding?: () => UsageFunding | undefined;
@@ -132,6 +134,7 @@ export async function createBorrowedExactForkSession(
       if (inputSent) throw new Error("Exact Codex forks support one turn");
       if (!input.text.trim()) throw new Error("Exact Codex forks require non-empty input");
       inputSent = true;
+      args.onSend?.(input);
       runPromise = args
         .runExclusive(async () => await args.runTurn(input, runtime))
         .catch((err) => {

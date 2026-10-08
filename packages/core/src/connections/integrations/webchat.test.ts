@@ -3,7 +3,7 @@
 // never faults (in-process, no external transport). Coverage:
 //   1. descriptor shape — zero grants, a talker needing none.
 //   2. registry-level: connect() unlocks talk immediately.
-//   3. send/fetchHistory round-trip through the wrapped WebChatAdapter.
+//   3. send and history round-trip through the wrapped WebChatAdapter.
 
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ConversationId } from "@rome-os/app-runtime";
@@ -73,11 +73,12 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
     const talk = conn.talk!;
 
-    await talk.send("sess-1" as ConversationId, { text: "hello from talk" });
+    const receipt = await talk.send("sess-1" as ConversationId, { text: "hello from talk" });
 
     const rows = await repo.getHistoryMessages("sess-1", new Date(0));
     expect(rows).toHaveLength(1);
     expect(rows[0].content).toContain("hello from talk");
+    expect(receipt).toStrictEqual({ conversationId: "sess-1", messageId: rows[0].id });
   });
 
   // The flag is what gives the channel a \`messages\` port; the feature is what
@@ -88,7 +89,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     );
   });
 
-  it("forwards fetchHistory to the wrapped adapter", async () => {
+  it("forwards history to the wrapped adapter", async () => {
     await repo.createSession("sess-2", "History Session");
     await repo.addMessage(
       "msg-1",
@@ -99,7 +100,7 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     const conn = await registry.connect("webchat");
     const talk = conn.talk!;
 
-    const history = await talk.feature("history")?.query({
+    const history = await talk.history?.query({
       conversationId: "sess-2" as ConversationId,
       limit: 20,
     });
@@ -109,6 +110,78 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
       senderId: "guardian",
       text: "Hi there",
     });
+  });
+
+  it("answers history as the channel's record, field by field", async () => {
+    await repo.createSession(
+      "sess-3",
+      "Planner Session",
+      undefined,
+      "default",
+      null,
+      "default",
+      "workflow-planner",
+    );
+    await repo.addMessage(
+      "msg-guardian",
+      "sess-3",
+      "user",
+      JSON.stringify([{ type: "text", content: "Draft the plan" }]),
+    );
+    await repo.addMessage(
+      "msg-agent",
+      "sess-3",
+      "assistant",
+      JSON.stringify([{ type: "text", content: "Plan drafted" }]),
+    );
+    const conn = await registry.connect("webchat");
+    const history = await conn.talk!.history?.query({
+      conversationId: "sess-3" as ConversationId,
+    });
+
+    const rows = await repo.getHistoryMessages("sess-3", new Date(0));
+    expect(history).toStrictEqual([
+      {
+        channel: "webchat",
+        direction: "inbound",
+        messageId: "msg-guardian",
+        conversationId: "sess-3",
+        senderId: "guardian",
+        senderDisplayName: "Guardian",
+        text: "Draft the plan",
+        attachments: [],
+        timestamp: rows[0].createdAt,
+        thread: { kind: "dm", name: "Planner Session" },
+        raw: rows[0],
+      },
+      {
+        channel: "webchat",
+        direction: "outbound",
+        messageId: "msg-agent",
+        conversationId: "sess-3",
+        senderId: "workflow-planner",
+        senderDisplayName: "Workflow Planner",
+        text: "Plan drafted",
+        attachments: [],
+        timestamp: rows[1].createdAt,
+        thread: { kind: "dm", name: "Planner Session" },
+        raw: rows[1],
+      },
+    ]);
+  });
+
+  it("caps history at the query's limit", async () => {
+    await repo.createSession("sess-4", "Limit Session");
+    for (const id of ["msg-a", "msg-b", "msg-c"]) {
+      await repo.addMessage(id, "sess-4", "user", JSON.stringify([{ type: "text", content: id }]));
+    }
+    const conn = await registry.connect("webchat");
+
+    const history = await conn.talk!.history?.query({
+      conversationId: "sess-4" as ConversationId,
+      limit: 2,
+    });
+    expect(history).toHaveLength(2);
   });
 
   it("never reports a fault (in-process, no transport)", async () => {

@@ -957,6 +957,7 @@ export interface TurnResultEvent {
 /** Machine-readable classification of a failed turn, carried as `TurnErrorEvent.code`. */
 export type AgentErrorCode =
   | "usage_limit"
+  | "credits_used_up"
   | "auth_revoked"
   | "model_provider_unavailable"
   | "model_unavailable"
@@ -984,6 +985,8 @@ export interface TurnErrorEvent {
    * human-readable `error`.
    *
    * - `usage_limit`: the provider's quota or rate limit is exhausted.
+   * - `credits_used_up`: the instance's Rome credits are used up. Retrying
+   *   fails until credits are added or ChatGPT is connected.
    * - `auth_revoked`: the stored credentials are no longer valid server-side
    *   (for example, Codex's refresh token was revoked) and need a re-login.
    * - `context_window_exceeded`: the conversation no longer fits the model's
@@ -1619,35 +1622,6 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
-export interface NormalizedMessage {
-  id: string;
-  channel:
-    | "telegram"
-    | "telegram_user"
-    | "whatsapp"
-    | "wechat"
-    | "webchat"
-    | "discord"
-    | "email"
-    | "feishu"
-    | "linkedin";
-  channelUserId: string;
-  displayName: string;
-  username?: string;
-  threadId: string;
-  /** Parent chat id when threadId is a platform-native thread id. */
-  parentThreadId?: string;
-  threadName?: string;
-  threadType: "private" | "group";
-  timestamp: Date;
-  text: string;
-  attachments: Attachment[];
-  replyTo?: MessageReplyReference;
-  routing?: MessageRouting;
-  addressing?: MessageAddressing;
-  rawEvent: unknown;
-}
-
 /** Opaque provider-owned conversation address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
 export type ConversationId = string & { readonly __brand: "ConversationId" };
@@ -1717,60 +1691,10 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
-  /** The Connections backing the channel now. `send` and `history` pick among
-   *  them, and need one named when there are several. */
-  connectionIds: string[];
-}
-
-/** Why no Connection could be chosen for a channel: none backs it, several do
- *  and none was named, or the one named does not back it. */
-export type ConnectionRefusal = "none" | "several" | "not-backing";
-
-/**
- * The Connection a send or a history read on a channel goes through, given
- * the Connections backing the channel ({@link ChannelSummary.connectionIds}):
- * the one named, which must back the channel, or else the channel's only one.
- * With several and none named it refuses rather than guessing. The rule
- * `ChannelsService.send` and `history` apply, for a caller that checks first.
- */
-export function chooseConnection(
-  connectionIds: readonly string[],
-  requested?: string,
-): { connectionId: string } | { refused: ConnectionRefusal } {
-  if (requested) {
-    return connectionIds.includes(requested)
-      ? { connectionId: requested }
-      : { refused: "not-backing" };
-  }
-  if (connectionIds.length === 0) return { refused: "none" };
-  if (connectionIds.length > 1) return { refused: "several" };
-  return { connectionId: connectionIds[0]! };
-}
-
-/** What `ChannelsService.send` and `history` say when {@link chooseConnection}
- *  refuses. */
-export function connectionRefusalMessage(
-  channel: string,
-  refused: ConnectionRefusal,
-  requested?: string,
-): string {
-  switch (refused) {
-    case "not-backing":
-      return `Connection "${requested}" does not provide channel "${channel}"`;
-    case "none":
-      return `No Talk connection registered for "${channel}"`;
-    case "several":
-      return `Channel "${channel}" has multiple connections; connectionId is required`;
-  }
-}
-
-/** What {@link ChannelsService.history} reads. */
-export interface ChannelHistoryRead {
-  conversationId?: ConversationId;
-  since?: Date;
-  limit?: number;
-  /** The Connection to read, needed when several back the channel. */
-  connectionId?: string;
+  /** Whether a Connection backs the channel, so `send` has something to send
+   *  through. A send can still fail while that Connection is locked or
+   *  offline. */
+  sendable: boolean;
 }
 
 /**
@@ -1783,18 +1707,14 @@ export interface ChannelHistoryRead {
  * it subscribes through.
  */
 export interface ChannelsService {
-  /** Every channel this Rome has, with the Connections backing each now. */
+  /** Every channel this Rome has, and whether a Connection backs each. */
   list(): Promise<ChannelSummary[]>;
-  /**
-   * Send on a channel, through the one Connection backing it, or through
-   * `options.connectionId` when several do. Rejects when no Connection backs
-   * the channel, or when several do and none is named.
-   */
+  /** Send on a channel, through the Connection backing it. Rejects when no
+   *  Connection backs the channel. */
   send(
     channel: string,
     conversationId: ConversationId,
     message: OutgoingMessage,
-    options?: { connectionId?: string },
   ): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
@@ -1804,13 +1724,6 @@ export interface ChannelsService {
    * `send` may not appear until that read expires.
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
-  /**
-   * What `fetch_channel_history` has always read: each channel's history
-   * window cut as its Connection's retired history read cut it, oldest first.
-   * Kept apart from `query` because those windows differ from `query`'s. Read
-   * `query` for anything new.
-   */
-  history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */
@@ -1851,20 +1764,20 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-export interface TalkInboundMedia {
+export interface ChannelInboundMedia {
   materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
-export interface TalkActivitySession {
+export interface ChannelActivitySession {
   update(state: "thinking" | "working"): Promise<void>;
   finish(result: "done" | "error"): Promise<void>;
 }
 
-export interface TalkActivity {
+export interface ChannelActivity {
   begin(input: {
     conversationId: ConversationId;
     messageId?: string;
-  }): Promise<TalkActivitySession | null>;
+  }): Promise<ChannelActivitySession | null>;
 }
 
 /**
@@ -1874,7 +1787,7 @@ export interface TalkActivity {
  * A channel that offers this can be written to from a surface that knows only
  * who it wants to talk to — the People page, which holds addresses and no
  * thread ids. A channel that does not offer it can still be replied to, and
- * still delivers inbound: `feature("directMessaging")` answering null is the
+ * still delivers inbound: offering no direct messaging is the
  * whole declaration, which is why LinkedIn's read-only inbox needs no flag of
  * its own and no exception anywhere else.
  *
@@ -1889,7 +1802,7 @@ export interface TalkActivity {
  * both spellings of that entry share. A send accepted anonymously cannot be
  * followed, and is reported as delivered the moment the channel takes it.
  */
-export interface TalkDirectMessaging {
+export interface ChannelDirectMessaging {
   /**
    * The conversation that reaches `channelUserId` directly, or null when the
    * channel cannot produce one.
@@ -1908,7 +1821,7 @@ export interface ChannelSend {
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
-  readonly activity?: TalkActivity | null;
+  readonly activity?: ChannelActivity | null;
 }
 
 /**
@@ -1959,7 +1872,7 @@ export interface ChannelInbound {
   subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
   /** Materializes a message's attachments, or null when the channel cannot
    *  now. A consumer without it uses the attachments as delivered. */
-  readonly media: TalkInboundMedia | null;
+  readonly media: ChannelInboundMedia | null;
 }
 
 /**
@@ -2799,9 +2712,6 @@ export interface BackendTurnParams {
   agentName: string;
   /** Exact runtime session resume handle. */
   sessionId: string;
-  /** Connection that owns the provider conversation, passed to the resumed
-   * turn's thread context. Delivery finds the channel by `channel`, not by this. */
-  connectionId?: string;
   channel: string;
   threadId: string;
   /** Recipient id on the channel, used as the reply target where the channel

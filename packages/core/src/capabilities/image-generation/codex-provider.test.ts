@@ -229,6 +229,17 @@ describe("createCodexImageGenerationProvider", () => {
       });
     });
 
+    it("maps used-up Rome credits to an unavailable result", async () => {
+      const runner = makeRunner([
+        { type: "error", error: "Rome credits are used up.", code: "credits_used_up" },
+      ]);
+      const provider = createCodexImageGenerationProvider({ agentRunner: runner });
+
+      const result = await provider.generate({ prompt: "anything" });
+
+      expect(result).toMatchObject({ status: "unavailable", reason: "Rome credits are used up." });
+    });
+
     it("maps a thrown resolution failure to an unavailable result", async () => {
       const run = rs.fn(async function* (): AsyncGenerator<AgentEvent> {
         throw new Error("Selected model provider is unavailable: Codex (ChatGPT)");
