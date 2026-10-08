@@ -15,7 +15,7 @@
 
 import { Bot, GrammyError } from "grammy";
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
@@ -230,6 +230,14 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             createBot,
           );
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            // A Telegram private chat carries the user's own id as its chat
+            // id, so the address is already the conversation.
+            directMessaging: addressIsConversationFeature(),
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
@@ -257,17 +265,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: {
-                  materialize: (message) => adapter.saveIncomingAttachments(message),
-                },
-                // A Telegram private chat carries the user's own id as its chat
-                // id, so the address is already the conversation.
-                directMessaging: addressIsConversationFeature(),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

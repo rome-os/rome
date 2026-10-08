@@ -40,7 +40,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type { TalkActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
@@ -465,6 +465,55 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
           };
           const adapter = new FeishuAdapter(config, createChannel);
 
+          const activity: TalkActivity = {
+            async begin(input) {
+              if (!input.messageId) return null;
+              const messageId = input.messageId;
+              const reactionId = await adapter.addProcessingReaction(messageId);
+              if (!reactionId) return null;
+              return {
+                update: async () => {},
+                finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
+              };
+            },
+          };
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                adapter
+                  .listObservedConversations()
+                  .filter(
+                    (conversation) =>
+                      !query || conversation.displayName.toLocaleLowerCase().includes(query),
+                  )
+                  .sort((left, right) =>
+                    `${left.displayName}\0${left.id}`.localeCompare(
+                      `${right.displayName}\0${right.id}`,
+                    ),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((conversation) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    conversationId:
+                      conversation.id as import("@rome-os/app-runtime").ConversationId,
+                  },
+                  service: "feishu",
+                  kind: conversation.kind,
+                  displayName: conversation.displayName,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            directMessaging: addressIsConversationFeature(),
+            activity,
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
@@ -488,58 +537,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const activity: TalkActivity = {
-                async begin(input) {
-                  if (!input.messageId) return null;
-                  const messageId = input.messageId;
-                  const reactionId = await adapter.addProcessingReaction(messageId);
-                  if (!reactionId) return null;
-                  return {
-                    update: async () => {},
-                    finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
-                  };
-                },
-              };
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    adapter
-                      .listObservedConversations()
-                      .filter(
-                        (conversation) =>
-                          !query || conversation.displayName.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.displayName}\0${left.id}`.localeCompare(
-                          `${right.displayName}\0${right.id}`,
-                        ),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((conversation) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId:
-                          conversation.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "feishu",
-                      kind: conversation.kind,
-                      displayName: conversation.displayName,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                directMessaging: addressIsConversationFeature(),
-                activity,
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

@@ -64,7 +64,7 @@ describe("LinkedIn replies through People", () => {
     deps.talkRouter = {
       ...deps.talkRouter,
       list: async () => [{ connectionId: "linkedin", service: "linkedin" }],
-      feature: (_id, name) => talker.feature(name),
+      feature: (_id, name) => (talker[name] ?? null) as never,
       send: (...args) => send(...args),
     };
     // The channel list over that router, with LinkedIn's Connection behind it.

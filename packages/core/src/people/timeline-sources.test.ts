@@ -43,6 +43,7 @@ const channelList = (books: Record<string, Accounts | null>): Channels =>
     messages: null,
     send: null,
     inbound: null,
+    directory: null,
   }));
 
 const ada = "12025550100@s.whatsapp.net";

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import type { TalkFeatureMap, TalkFeatureName } from "./types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
@@ -45,20 +44,19 @@ describe("ConnectionTalkRouter", () => {
                 state.sends.push(message.text ?? "");
                 return { conversationId, messageId: `sent-${state.epoch}` };
               },
-              feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-                if (name !== "history") return null;
-                return {
-                  query: async () => [
-                    {
-                      messageId: `history-${state.epoch}`,
-                      conversationId: "general" as ConversationId,
-                      senderId: "guardian",
-                      text: `epoch ${state.epoch}`,
-                      attachments: [],
-                      timestamp: new Date(0),
-                    },
-                  ],
-                } as unknown as TalkFeatureMap[K];
+              history: {
+                query: async () => [
+                  {
+                    channel: "discord",
+                    direction: "inbound",
+                    messageId: `history-${state.epoch}`,
+                    conversationId: "general" as ConversationId,
+                    senderId: "guardian",
+                    text: `epoch ${state.epoch}`,
+                    attachments: [],
+                    timestamp: new Date(0),
+                  },
+                ],
               },
             };
           },

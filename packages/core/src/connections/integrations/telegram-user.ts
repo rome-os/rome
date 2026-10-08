@@ -36,7 +36,7 @@
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,
@@ -411,6 +411,64 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             }
           };
 
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const dialogs = await adapter.listDialogs(
+                directoryCursorOffset(input.cursor) + input.limit,
+              );
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                dialogs
+                  .filter((dialog) => !query || dialog.title.toLocaleLowerCase().includes(query))
+                  .sort((left, right) =>
+                    `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((dialog) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
+                  },
+                  service: "telegram_user",
+                  kind:
+                    dialog.type === "private"
+                      ? ("dm" as const)
+                      : dialog.type === "group"
+                        ? ("group" as const)
+                        : ("channel" as const),
+                  displayName: dialog.title,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            history: {
+              async query(input) {
+                const lines = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return lines.slice(0, historyQueryLimit(input.limit)).map(
+                  (line): ChannelMessage => ({
+                    ...line,
+                    channel: "telegram_user",
+                    // The account's own lines are the ones GramJS marks `out`.
+                    direction:
+                      (line.raw as { out?: unknown } | null | undefined)?.out === true
+                        ? "outbound"
+                        : "inbound",
+                  }),
+                );
+              },
+            },
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
@@ -442,69 +500,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const dialogs = await adapter.listDialogs(
-                    directoryCursorOffset(input.cursor) + input.limit,
-                  );
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    dialogs
-                      .filter(
-                        (dialog) => !query || dialog.title.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((dialog) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "telegram_user",
-                      kind:
-                        dialog.type === "private"
-                          ? ("dm" as const)
-                          : dialog.type === "group"
-                            ? ("group" as const)
-                            : ("channel" as const),
-                      displayName: dialog.title,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: {
-                  materialize: (message) => adapter.saveIncomingAttachments(message),
-                },
-                history: {
-                  async query(input) {
-                    const lines = await adapter.fetchHistory(
-                      input.conversationId ?? null,
-                      historyWindowHours(input.since),
-                    );
-                    return lines.slice(0, historyQueryLimit(input.limit)).map(
-                      (line): ChannelMessage => ({
-                        ...line,
-                        channel: "telegram_user",
-                        // The account's own lines are the ones GramJS marks `out`.
-                        direction:
-                          (line.raw as { out?: unknown } | null | undefined)?.out === true
-                            ? "outbound"
-                            : "inbound",
-                      }),
-                    );
-                  },
-                },
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

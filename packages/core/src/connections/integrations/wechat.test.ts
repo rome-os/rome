@@ -356,7 +356,7 @@ describe("wechat inbound delivery", () => {
 
     // Media reads its CDN reference from raw. A failed download leaves the
     // attachment unsaved rather than failing the message.
-    const inboundMedia = talker.feature("inboundMedia")!;
+    const inboundMedia = talker.inboundMedia!;
     const message = delivered[0] as ChannelMessage;
     await expect(inboundMedia.materialize(message)).resolves.toStrictEqual(message.attachments);
     expect(cdnRequests).toEqual([

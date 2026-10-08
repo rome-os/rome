@@ -22,7 +22,7 @@
 // CredentialRejected{ grant: "account" }. Any other terminal poll failure is a
 // Disconnected.
 
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   getDefaultWechatStatePath,
   isWechatAuthError,
@@ -331,6 +331,12 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
           const adapter = createAdapter(config);
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            activity: typingActivityFeature(adapter),
+          };
           const talker: Talker = {
             start(deliver, fault): void {
               faultSink = fault;
@@ -347,15 +353,7 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             send(conversationId, msg) {
               return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: {
-                  materialize: (message) => adapter.saveIncomingAttachments(message),
-                },
-                activity: typingActivityFeature(adapter),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
           liveAdapters.set(talker, adapter);
           return talker;

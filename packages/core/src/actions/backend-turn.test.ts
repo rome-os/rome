@@ -27,6 +27,7 @@ describe("backend turn delivery", () => {
       inbound: null,
       accounts: null,
       messages: null,
+      directory: null,
     };
     const ensureChannelConversation = rs.fn(async () => ({
       id: "channel:wechat:wechat-thread-1",
@@ -75,7 +76,14 @@ describe("backend turn delivery", () => {
     const agentRunner = createMockAgentRunner([[{ type: "result", content: "Done." }]]);
     const runner = createBackendTurnRunner({
       agentRunner,
-      channel: (name) => ({ name, send: null, inbound: null, accounts: null, messages: null }),
+      channel: (name) => ({
+        name,
+        send: null,
+        inbound: null,
+        accounts: null,
+        messages: null,
+        directory: null,
+      }),
     });
 
     await expect(

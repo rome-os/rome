@@ -3,21 +3,21 @@
  * Connection backs.
  * The channel is named by the service; the Connection that backs it is looked
  * up when a port is used, so a port outlives any one Connection epoch.
- * Contract: `Channel` and `Inbound` (channel.ts), `Messages` (messages.ts).
+ * Contract: `Channel` (channel.ts), `ChannelInbound` (the apps SDK), `Messages`
+ * (messages.ts).
  */
 
-import type { ChannelMessage, TalkDirectMessaging } from "@rome-os/app-runtime";
+import type {
+  ChannelInbound,
+  ChannelMessage,
+  InboundEvent,
+  TalkDirectMessaging,
+} from "@rome-os/app-runtime";
 import type { TalkRouter } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
-import {
-  ChannelNotConnected,
-  type ChannelDirectory,
-  type ChannelSend,
-  type Inbound,
-  type InboundEvent,
-} from "./channel.js";
+import { ChannelNotConnected, type ChannelDirectory, type ChannelSend } from "./channel.js";
 import { ConversationBuffers } from "./conversation-buffer.js";
 import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
@@ -35,7 +35,7 @@ export interface ConnectionPortsDeps {
 
 export interface ConnectionPorts {
   send: ChannelSend | null;
-  inbound: Inbound | null;
+  inbound: ChannelInbound | null;
   messages: Messages | null;
   directory: ChannelDirectory;
 }
@@ -231,7 +231,7 @@ function isAnswerable(message: ChannelMessage): boolean {
   return Boolean(message.text?.trim()) || message.attachments.length > 0;
 }
 
-function connectionInbound(deps: ConnectionPortsDeps, service: string): Inbound {
+function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelInbound {
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
   const subscriptions = new Set<ConversationBuffers<InboundEvent>>();

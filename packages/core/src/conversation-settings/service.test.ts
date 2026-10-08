@@ -40,7 +40,7 @@ function directoryDescriptor(
             async send(conversationId) {
               return { conversationId };
             },
-            feature: (name) => (name === "directory" ? directory : null) as never,
+            directory,
           };
         },
       },
