@@ -79,8 +79,9 @@ export function agentsAccounts(deps: {
   /** Whether the guardian has connected Agents. Until then the channel
    *  reaches no one, and Cloud is not asked. */
   isConnected: () => boolean;
-  /** Told every listed endpoint Cloud names by id, after each good read. */
-  onListed?: (sightings: AgentSighting[]) => void;
+  /** Told every listed endpoint Cloud names by id, after each good read, with
+   *  when the read was asked for. */
+  onListed?: (sightings: AgentSighting[], askedAt: number) => void;
   now?: () => number;
 }): Accounts {
   const now = deps.now ?? Date.now;
@@ -92,10 +93,11 @@ export function agentsAccounts(deps: {
   function endpoints(): Promise<Book> {
     if (!deps.isConnected()) return Promise.resolve({ accounts: [], ownHandle: null });
     if (read && now() - read.at < READ_TTL_MS) return read.book;
+    const askedAt = now();
     const book = deps.client.endpoints().then(
       ({ endpoint: own, address, endpoints }) => {
         lastOwnHandle = address ? agentAddressAccount(address) : null;
-        deps.onListed?.(listingSightings(endpoints));
+        deps.onListed?.(listingSightings(endpoints), askedAt);
         return {
           accounts: endpoints
             // A dot still waiting on its pairing confirmation cannot be reached.
@@ -119,7 +121,7 @@ export function agentsAccounts(deps: {
         return { accounts: [], ownHandle: lastOwnHandle };
       },
     );
-    read = { at: now(), book };
+    read = { at: askedAt, book };
     return book;
   }
 

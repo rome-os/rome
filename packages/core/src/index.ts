@@ -1139,7 +1139,7 @@ async function main() {
         client: agentsClient,
         isConnected: () =>
           connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
-        onListed: (sightings) => void agentsIdentity.observe(sightings),
+        onListed: (sightings, askedAt) => void agentsIdentity.observeListing(sightings, askedAt),
       }),
     },
   });

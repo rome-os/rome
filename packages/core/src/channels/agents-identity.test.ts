@@ -171,6 +171,44 @@ describe("keeping agents' links on their endpoint", () => {
     expect(asked.count).toBe(1);
   });
 
+  it("reads Cloud at most once a half minute for messages that disagree with it", async () => {
+    await people.addChannelMapping("ada", "agents", "@newfriend/atlas");
+    let clock = 0;
+    const asked = { count: 0 };
+    identity = createAgentsIdentity({
+      personMappingRepo: people,
+      settingsRepo: settings,
+      channel: "agents",
+      now: () => clock,
+      list: async () => {
+        asked.count++;
+        return [listed("ep_atlas", "@newfriend/atlas")];
+      },
+    });
+    await identity.observeListing([listed("ep_atlas", "@newfriend/atlas")], clock);
+
+    clock = 29_000;
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 2)]);
+    expect(asked.count).toBe(0);
+    clock = 31_000;
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 3)]);
+    await identity.observe([sent("ep_atlas", "@friend/atlas", 4)]);
+    expect(asked.count).toBe(1);
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+  });
+
+  it("lets no listing settle after one asked for later", async () => {
+    await people.addChannelMapping("ada", "agents", "@friend/atlas");
+    await identity.observe([listed("ep_atlas", "@friend/atlas")]);
+
+    await identity.observeListing([listed("ep_atlas", "@newfriend/atlas")], 2);
+    await identity.observeListing([listed("ep_atlas", "@friend/atlas")], 1);
+
+    expect((await people.findByChannelUser("agents", "@newfriend/atlas"))?.id).toBe("ada");
+    expect(await people.findByChannelUser("agents", "@friend/atlas")).toBeNull();
+  });
+
   it("orders messages by when they were sent", async () => {
     await people.addChannelMapping("ada", "agents", "@friend/atlas");
     await identity.observe([sent("ep_atlas", "@friend/atlas", 1)]);
@@ -188,6 +226,10 @@ describe("keeping agents' links on their endpoint", () => {
     await identity.observe([listed("ep_atlas", "@other/atlas")]);
 
     expect(await people.findByChannelUser("agents", "@other/atlas")).toBeNull();
+    // It stops waiting, since it can never go back.
+    expect(await settings.get(AGENTS_ENDPOINTS_KEY)).toEqual({
+      ep_atlas: { address: "@other/atlas", by: "listing" },
+    });
     // Nor does it stay behind for the next endpoint to take the name.
     await identity.observe([listed("ep_new", "atlas")]);
     expect(await people.findByChannelUser("agents", "atlas")).toBeNull();

@@ -18,13 +18,15 @@
  * about to take off until it is off, so a settlement that fails partway is
  * finished by the next one.
  *
- * Cloud's listing is its current state and always settles. A message is as old
+ * Cloud's listing is its current state and always settles, unless a listing
+ * asked for later has already settled. A message is as old
  * as when it was sent, and settles an endpoint only against what earlier
  * messages said of it, never against a listing, so a message Cloud held while
  * Rome was offline cannot undo a rename the listing already settled. A message
  * that disagrees with a listing has Cloud listed again before it is read, so a
- * rename still reaches the person on its first message. Rome's clock and
- * Cloud's are never compared.
+ * rename still reaches the person on its first message. A listing asked for in
+ * the last half minute answers for this too, so a run of held-back messages
+ * reads Cloud at most once. Rome's clock and Cloud's are never compared.
  *
  * Conversation history stays under the address it was written to. An endpoint
  * first seen here takes over whatever its address already holds, since Rome
@@ -45,6 +47,10 @@ import { createLogger } from "../logger.js";
 import { AGENTS_GUARDIAN_LINKED_KEY } from "./agents-guardian.js";
 
 const log = createLogger("agents-identity");
+
+/** How long a listing answers a message that disagrees with it, matching how
+ *  long the People page keeps one read. */
+const LISTING_FRESH_MS = 30_000;
 
 /** The settings key holding what Rome last knew of each endpoint. */
 export const AGENTS_ENDPOINTS_KEY = "agentsEndpoints";
@@ -106,6 +112,9 @@ export async function listAgentSightings(
 export interface AgentsIdentity {
   /** Settles what the sightings change. Never throws. */
   observe(sightings: readonly AgentSighting[]): Promise<void>;
+  /** Settles a listing asked for at `askedAt`, unless one asked for later has
+   *  settled first. Never throws. */
+  observeListing(sightings: readonly AgentSighting[], askedAt: number): Promise<void>;
   /** Runs `fn` after every earlier settlement, and before any later one. The
    *  guardian link runs here, because both rewrite the guardian's record. */
   serial<T>(fn: () => Promise<T>): Promise<T>;
@@ -141,8 +150,12 @@ export function createAgentsIdentity(deps: {
   /** Reads Cloud's listing now, for a message that disagrees with an earlier
    *  one. Null when Cloud cannot be read. */
   list?: () => Promise<AgentSighting[] | null>;
+  now?: () => number;
 }): AgentsIdentity {
+  const now = deps.now ?? Date.now;
   let queue: Promise<unknown> = Promise.resolve();
+  /** When the newest listing settled so far was asked for. */
+  let listedAt = Number.NEGATIVE_INFINITY;
   const repo = deps.personMappingRepo;
   const channel = deps.channel;
 
@@ -211,15 +224,14 @@ export function createAgentsIdentity(deps: {
     async function restore(id: string): Promise<void> {
       const entry = known[id];
       if (!entry?.parked || !entry.parkedFrom || entry.address === null) return;
+      const { parked, parkedFrom: _from, ...rest } = entry;
       if (isOwn(entry.parkedFrom) !== isOwn(entry.address)) {
-        log.warn("an agent moved between accounts; its link stays behind", {
+        // It can never go back, so it stops waiting.
+        log.warn("an agent moved between accounts; its link stays off", {
           from: entry.parkedFrom,
           to: entry.address,
         });
-        return;
-      }
-      const { parked, parkedFrom: _from, ...rest } = entry;
-      if (!(await repo.findByChannelUser(channel, entry.address))) {
+      } else if (!(await repo.findByChannelUser(channel, entry.address))) {
         await repo.addChannelMapping(parked, channel, entry.address);
         log.info("an agent's link followed it to its new address", { to: entry.address });
       }
@@ -284,21 +296,37 @@ export function createAgentsIdentity(deps: {
     return disputed;
   }
 
+  /** Settles a listing unless a later-asked one already has. */
+  async function settleListing(listing: readonly AgentSighting[], askedAt: number): Promise<void> {
+    if (askedAt < listedAt) return;
+    listedAt = askedAt;
+    await settle(listing);
+  }
+
+  function settling(fn: () => Promise<void>): Promise<void> {
+    return serial(fn).catch((err: unknown) => {
+      log.warn("Could not settle agent addresses", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   return {
     observe(sightings) {
       if (sightings.length === 0) return Promise.resolve();
-      return serial(async () => {
+      return settling(async () => {
         // A message never outranks a listing, so when one disagrees with what
         // a listing recorded, as after a rename, Cloud is asked again before
         // the message is read.
         if (!(await settle(sightings)) || !deps.list) return;
+        const askedAt = now();
+        if (askedAt - listedAt < LISTING_FRESH_MS) return;
         const listing = await deps.list();
-        if (listing) await settle(listing);
-      }).catch((err: unknown) => {
-        log.warn("Could not settle agent addresses", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        if (listing) await settleListing(listing, askedAt);
       });
+    },
+    observeListing(sightings, askedAt) {
+      return settling(() => settleListing(sightings, askedAt));
     },
     serial,
   };
