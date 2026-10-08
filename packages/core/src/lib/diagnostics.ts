@@ -73,9 +73,7 @@ export async function assembleDiagnosticBundle(deps: DiagnosticsDeps): Promise<D
     previousVersion: deps.bootVersionReport.previousVersion,
     database,
     relay,
-    channels: channels
-      .filter((channel) => channel.connectionIds.length > 0)
-      .map((channel) => channel.name),
+    channels: channels.filter((channel) => channel.sendable).map((channel) => channel.name),
     apps: { total: apps.length, failed, broken },
   };
 }

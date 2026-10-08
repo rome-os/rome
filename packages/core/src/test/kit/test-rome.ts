@@ -12,9 +12,10 @@ import {
   buildAgentConfig,
   channelNamed,
   createTestConnections,
+  noAccounts,
   type TestConnections,
 } from "../helpers.js";
-import type { Accounts } from "../../channels/accounts.js";
+import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
@@ -51,11 +52,6 @@ import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js"
 // approval handler are all the production classes, so tests assert outcomes
 // (DB rows, outbound messages, prompts the model saw) instead of stub calls.
 
-/** An address book with nobody in it: this kit reads no People. */
-const noAccounts: Accounts = {
-  listAccounts: async () => ({ accounts: [] }),
-  resolve: async () => null,
-};
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
@@ -121,6 +117,10 @@ export interface TestRome {
   agentRunner: AgentRunner;
   approvalHandler: ApprovalHandler;
   connections: TestConnections;
+  /** The channels over `connections`, built by the production `channelList`.
+   *  A test hears and answers a channel through its ports here, and plays the
+   *  platform's side through `channel(name)`. */
+  channels: Channels;
   seed: TestRomeSeed;
   channel(name: string): FakeChannelEndpoint;
   /** Run one agent turn through the real runner/session stack; collects messages. */
@@ -292,17 +292,16 @@ async function buildHarness(
     channelEndpoints.set(name, new FakeChannelEndpoint(name));
   }
   const connections = createTestConnections(channelEndpoints);
+  const channels = channelList({
+    db,
+    whatsAppAccounts: noAccounts,
+    linkedInAccounts: noAccounts,
+    connections: { registry: connections },
+  });
 
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    channel: channelNamed(
-      channelList({
-        db,
-        whatsAppAccounts: noAccounts,
-        linkedInAccounts: noAccounts,
-        connections: { registry: connections },
-      }),
-    ),
+    channel: channelNamed(channels),
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,
@@ -345,6 +344,7 @@ async function buildHarness(
     agentRunner,
     approvalHandler,
     connections,
+    channels,
     seed,
     channel(name: string): FakeChannelEndpoint {
       const endpoint = channelEndpoints.get(name);

@@ -20,7 +20,7 @@ import type {
   ChannelInbound,
   ChannelSend as AppChannelSend,
   ConversationDescriptor,
-  TalkDirectMessaging,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
 import type { Accounts } from "./accounts.js";
@@ -36,7 +36,7 @@ export interface ChannelSend extends AppChannelSend {
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
    * has no live Talk (locked, awaiting re-authorization) reads as null.
    */
-  readonly direct: TalkDirectMessaging | null;
+  readonly direct: ChannelDirectMessaging | null;
 }
 
 /**
@@ -46,9 +46,9 @@ export interface ChannelSend extends AppChannelSend {
  */
 export interface ChannelDirectory {
   /**
-   * Up to `limit` conversations from each Connection backing the channel, or
-   * only from the one `connectionId` names. A Connection whose read fails is
-   * logged and left out, so one unreachable account does not hide the others.
+   * Up to `limit` conversations from the Connection backing the channel, or
+   * none when `connectionId` names another. A read that fails is logged and
+   * answers none.
    */
   listConversations(input: {
     query?: string;
@@ -67,14 +67,17 @@ export class ChannelNotConnected extends Error {
 }
 
 /**
- * A channel Rome uses.
+ * A channel Rome uses: one of Rome's presences on a platform, such as the
+ * `telegram` bot or the `telegram_user` signed-in account. A second presence is
+ * a second channel, never a second Connection behind this one.
  *
  * The two contracts below are the whole of it. Every channel owes both:
  *
  * - **C1 The name is the identity.** One channel per name, one name per
- *   channel, stable for the life of the deployment. It is the `channel` written
- *   on every link, every stored message and every sentinel row, so the name is
- *   not a label a channel can restyle — changing it reassigns history.
+ *   channel, stable for the life of the deployment. A channel's name is its
+ *   service's, and it is the `channel` written on every link, every stored
+ *   message and every sentinel row. The name is not a label a channel can
+ *   restyle — changing it reassigns history.
  * - **C2 What a channel carries is the channel's.** No port reaches past this
  *   channel's conversations, accounts and messages, so a caller can attribute
  *   anything a port answers to the channel it came from.

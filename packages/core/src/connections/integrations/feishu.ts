@@ -39,7 +39,7 @@ import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
-import type { TalkActivity } from "@rome-os/app-runtime";
+import type { ChannelActivity } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import type {
   ConnectionDescriptor,
@@ -465,7 +465,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
           };
           const adapter = new FeishuAdapter(config, createChannel);
 
-          const activity: TalkActivity = {
+          const activity: ChannelActivity = {
             async begin(input) {
               if (!input.messageId) return null;
               const messageId = input.messageId;

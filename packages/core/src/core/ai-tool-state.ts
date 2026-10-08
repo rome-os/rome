@@ -52,6 +52,8 @@ export interface CreateAIToolStateOptions {
   /** Null disables the hourly timer (used by deterministic unit tests). */
   refreshIntervalMs?: number | null;
   startRefresh?: boolean;
+  /** Called when a Codex login is connected or disconnected. */
+  onCodexLoginChanged?: () => void;
 }
 
 function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
@@ -110,7 +112,11 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     codex: { quotaExhausted: false, solAccess: false, lunaAccess: false },
     claude: { quotaExhausted: false },
   };
-
+  const notifyCodexLoginChanged = (previous: boolean | undefined): boolean => {
+    if (previous === value.codex.loggedIn) return false;
+    options.onCodexLoginChanged?.();
+    return true;
+  };
   const refreshProvider = async (provider: AIToolProviderId): Promise<void> => {
     if (provider === "anthropic") {
       const [status, usage] = await Promise.allSettled([
@@ -129,11 +135,23 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       return;
     }
 
-    const [status, usage] = await Promise.allSettled([probes.codexStatus(), probes.codexUsage()]);
+    // Login drives the Codex payer, so apply it as soon as the status probe
+    // settles rather than waiting on a possibly stalled quota probe.
+    const statusProbe = Promise.allSettled([probes.codexStatus()]);
+    let usageProbe = Promise.allSettled([probes.codexUsage()]);
+    const [status] = await statusProbe;
     if (status.status === "fulfilled") {
+      const previousCodexLogin = value.codex.loggedIn;
       applyStatus(value.codex, status.value);
       Object.assign(value.codex, deriveCodexModelAccess(status.value));
+      // A login change can restart Codex under the usage probe above, so ask
+      // the process that serves the new login. The first observation at boot
+      // has no earlier probe result to replace.
+      if (notifyCodexLoginChanged(previousCodexLogin) && previousCodexLogin !== undefined) {
+        usageProbe = Promise.allSettled([probes.codexUsage()]);
+      }
     }
+    const [usage] = await usageProbe;
     if (usage.status === "fulfilled" && usage.value && !usage.value.error) {
       value.codex.usage = usage.value;
       value.codex.quotaExhausted = usageShowsExhaustion(usage.value);
@@ -175,6 +193,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       // may still hold the old "logged in" answer. Let that work drain first,
       // then make the runtime failure the newest authoritative observation.
       await refreshesInFlight.get(provider);
+      const previousCodexLogin = value.codex.loggedIn;
       const target = provider === "openai" ? value.codex : value.claude;
       target.loggedIn = false;
       target.needsReauth = true;
@@ -182,6 +201,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         value.codex.solAccess = false;
         value.codex.lunaAccess = false;
       }
+      notifyCodexLoginChanged(previousCodexLogin);
     },
     markQuotaExhausted(provider) {
       const applyRuntimeSignal = (): boolean => {

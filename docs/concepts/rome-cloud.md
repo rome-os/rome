@@ -2,12 +2,13 @@
 
 Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](people.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
 
-It plays five roles:
+It plays six roles:
 
 - **Tenant provisioner** — provisions a Rome instance per paying user, manages domains and certificates.
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
+- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected ([Rome credits](#rome-credits)).
 - **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, and guardian sign-ins ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
@@ -58,6 +59,18 @@ The handoff is the last leg of brokered third-party OAuth: a short-lived, single
 
 - **[Instance sign-in](#instance-sign-in)** — the identity trust root. The handoff delivers a provider token and never asserts who owns the instance.
 - **Sign-in links** — Rome Cloud-side records of which external account signs a user in. They hold no token and are independent of provider connections ([decision](../adrs/sign-in-links-separate-from-provider-connections.md)).
+
+## Rome credits
+
+Rome credits are an account-wide allowance that Rome Cloud serves through its inference gateway. An instance that has a Rome Cloud origin and an instance credential can run Codex on them.
+
+**Contracts:**
+
+- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login alone. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential. A login whose token was revoked counts as disconnected, so credits pay until the guardian signs in to ChatGPT again. Usage limits and quota probes never change the payer.
+- A payer change restarts Codex, which fails the turns running at that moment. A credential change restarts Codex only while Rome credits pay.
+- A Codex turn waiting to start fails if Codex restarts under another payer first.
+- Rome credits and a ChatGPT plan are two ways to pay for the same Codex models. A tier, a custom tier mapping, and a [model pin](sessions.md#model-pin) resolve to the same model under either payer, and credits run Sol and Luna without a plan entitlement. Connecting a ChatGPT plan without Sol or Luna therefore leaves a session pinned on credits to one of them failing with `model_unavailable`, as it would after any plan downgrade, until the guardian selects another model or the session ends. A tier prefers a connected Claude login over Rome credits. An agent pinned to Codex by tier, such as the image generation agent, still needs the ChatGPT login, because the credits gateway rejects ChatGPT's hosted tools.
+- The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before a turn.
 
 ## Usage reporting
 

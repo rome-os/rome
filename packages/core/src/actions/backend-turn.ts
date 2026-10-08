@@ -98,7 +98,6 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // cwd). Undefined leaves the session's default-dir fallback intact.
       workingDir,
       threadContext: {
-        connectionId: params.connectionId,
         channel: params.channel,
         threadId: params.threadId,
         channelUserId: params.channelUserId,

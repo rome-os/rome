@@ -14,6 +14,7 @@ import {
   buildTestDeps,
   createTestConnections,
   createTestDb,
+  FakeTransport,
   testChannels,
   type TestDb,
   type TestDeps,
@@ -62,7 +63,7 @@ describe("LinkedIn replies through People", () => {
     }).capabilities.talker!.build({} as Record<string, Credential>, {} as RuntimeKit);
     // LinkedIn's Connection, whose Talk is that talker, behind the channel list.
     deps.connections = createTestConnections(
-      new Map([["linkedin", { onMessage() {}, sendMessage: async () => {} }]]),
+      new Map([["linkedin", new FakeTransport("linkedin")]]),
       (): Talk => ({ ...talker, subscribe: () => () => {} }),
     );
     deps.channels = testChannels(deps, deps.connections);

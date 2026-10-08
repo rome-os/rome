@@ -1,13 +1,13 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
   createTestDb,
   createMockAgentRunner,
-  createMockChannel,
   buildMessage,
   buildAgentConfig,
+  FakeTransport,
   MockModelProvider,
-  MockProviderAdapter,
   type TestDb,
 } from "./helpers.js";
 
@@ -46,14 +46,15 @@ describe("Test Helpers", () => {
   });
 
   describe("buildMessage", () => {
-    it("returns a NormalizedMessage with defaults", () => {
+    it("returns an inbound ChannelMessage with defaults", () => {
       const msg = buildMessage();
-      expect(msg.id).toBe("msg-001");
+      expect(msg.messageId).toBe("msg-001");
       expect(msg.channel).toBe("telegram");
-      expect(msg.channelUserId).toBe("user-123");
-      expect(msg.displayName).toBe("Test User");
-      expect(msg.threadId).toBe("thread-001");
-      expect(msg.threadType).toBe("private");
+      expect(msg.direction).toBe("inbound");
+      expect(msg.senderId).toBe("user-123");
+      expect(msg.senderDisplayName).toBe("Test User");
+      expect(msg.conversationId).toBe("thread-001");
+      expect(msg.thread).toEqual({ kind: "dm" });
       expect(msg.text).toBe("Hello, world!");
       expect(msg.attachments).toEqual([]);
     });
@@ -62,13 +63,13 @@ describe("Test Helpers", () => {
       const msg = buildMessage({
         channel: "whatsapp",
         text: "Custom text",
-        threadType: "group",
+        thread: { kind: "group" },
       });
       expect(msg.channel).toBe("whatsapp");
       expect(msg.text).toBe("Custom text");
-      expect(msg.threadType).toBe("group");
+      expect(msg.thread).toEqual({ kind: "group" });
       // defaults still apply for non-overridden fields
-      expect(msg.id).toBe("msg-001");
+      expect(msg.messageId).toBe("msg-001");
     });
   });
 
@@ -145,33 +146,30 @@ describe("Test Helpers", () => {
     });
   });
 
-  describe("MockProviderAdapter", () => {
-    it("captures sent messages", async () => {
-      const adapter = new MockProviderAdapter("telegram");
-      expect(adapter.channelName).toBe("telegram");
+  describe("FakeTransport", () => {
+    it("captures sent messages and answers each with a receipt", async () => {
+      const transport = new FakeTransport("telegram");
+      expect(transport.channel).toBe("telegram");
 
-      await adapter.sendMessage("user-1", "thread-1", { text: "Hi" });
-      expect(adapter.sentMessages).toHaveLength(1);
-      expect(adapter.sentMessages[0]).toEqual({
-        channelUserId: "user-1",
-        threadId: "thread-1",
-        message: { text: "Hi" },
-      });
+      const receipt = await transport.send("thread-1" as ConversationId, { text: "Hi" });
+      expect(receipt.conversationId).toBe("thread-1");
+      expect(receipt.messageId).toEqual(expect.any(String));
+      expect(transport.sentMessages).toEqual([
+        { conversationId: "thread-1", message: { text: "Hi" } },
+      ]);
     });
 
-    it("delivers simulated messages to handler", async () => {
-      const adapter = new MockProviderAdapter();
-      const received: unknown[] = [];
-
-      adapter.onMessage(async (msg) => {
+    it("delivers a received message, named for its channel, to every listener", async () => {
+      const transport = new FakeTransport("discord");
+      const received: ChannelMessage[] = [];
+      transport.listen(async (msg) => {
         received.push(msg);
       });
 
-      const msg = buildMessage();
-      await adapter.simulateMessage(msg);
+      const msg = await transport.receive({ text: "ping" });
 
-      expect(received).toHaveLength(1);
-      expect(received[0]).toEqual(msg);
+      expect(msg).toMatchObject({ channel: "discord", direction: "inbound", text: "ping" });
+      expect(received).toEqual([msg]);
     });
   });
 
@@ -195,14 +193,6 @@ describe("Test Helpers", () => {
       expect(messages).toHaveLength(2);
       expect(runner.calls).toHaveLength(1);
       expect(runner.calls[0].agentName).toBe("test");
-    });
-  });
-
-  describe("createMockChannel", () => {
-    it("returns a MockProviderAdapter", () => {
-      const channel = createMockChannel("whatsapp");
-      expect(channel).toBeInstanceOf(MockProviderAdapter);
-      expect(channel.channelName).toBe("whatsapp");
     });
   });
 });

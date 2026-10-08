@@ -6,6 +6,7 @@ import { describe, expect, it } from "@rstest/core";
 import { CodexAppServerManager, type CodexThreadBinding } from "./app-server-manager.js";
 import { Method, type ThreadStartParams } from "./app-server-protocol.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID, ROME_CREDITS_TOKEN_ENV } from "./rome-credits-provider.js";
+import { isRomeCreditsExhaustedError } from "../rome-credits-error.js";
 
 const TOKEN = "romeinst_integration_test_token";
 
@@ -31,6 +32,7 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
   it("routes a thread to the gateway after a payer replacement", async () => {
     const home = await mkdtemp(join(tmpdir(), "rome-codex-credits-"));
     const authorizations: string[] = [];
+    let exhaustCredits = false;
     const gatewayTurnIds: unknown[] = [];
     const gateway = createServer((request, response) => {
       if (request.method !== "POST" || request.url !== "/v1/responses") {
@@ -45,6 +47,18 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
           : null,
       );
       request.resume();
+      if (exhaustCredits) {
+        response.writeHead(402, { "content-type": "application/json" }).end(
+          JSON.stringify({
+            error: {
+              type: "gateway_error",
+              code: "insufficient_credits",
+              message: "Rome credits are used up.",
+            },
+          }),
+        );
+        return;
+      }
       const message = {
         type: "message",
         role: "assistant",
@@ -78,12 +92,14 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
     if (!address || typeof address === "string") throw new Error("mock gateway did not bind");
 
     const completions: Array<{ threadId: string; status: string }> = [];
+    const turnErrors: unknown[] = [];
     const waiters: Array<() => void> = [];
     const binding: CodexThreadBinding = {
       onNotification(method, params) {
         if (method !== "turn/completed") return;
         const { threadId, turn } = params as { threadId: string; turn: { status: string } };
         completions.push({ threadId, status: turn.status });
+        if (turn.status === "failed") turnErrors.push((turn as { error?: unknown }).error);
         waiters.shift()?.();
       },
       async onDynamicToolCall() {
@@ -138,11 +154,18 @@ describe("Rome credits provider on the bundled Codex app-server", () => {
       await manager.setDefaultProvider(ROME_CREDITS_MODEL_PROVIDER_ID);
       await runTurn(manager, threadId);
 
+      // The real gateway response from #124 makes bundled Codex retain the
+      // status and human message, but it drops the nested error.code.
+      exhaustCredits = true;
+      await runTurn(manager, threadId);
+
       expect(completions).toEqual([
         { threadId, status: "completed" },
         { threadId, status: "completed" },
+        { threadId, status: "failed" },
       ]);
-      expect(authorizations).toEqual([`Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
+      expect(authorizations).toEqual([`Bearer ${TOKEN}`, `Bearer ${TOKEN}`, `Bearer ${TOKEN}`]);
+      expect(isRomeCreditsExhaustedError(turnErrors[0])).toBe(true);
       // Rome reports the turn/start id on its usage event, and the gateway
       // records the header's turn_id. Rome Cloud joins credit charges on them.
       expect(startedTurnIds.every((id) => typeof id === "string")).toBe(true);

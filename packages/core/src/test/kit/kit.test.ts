@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
+import type { ConversationId } from "@rome-os/app-runtime";
 import {
   createTestRome,
   recordingAction,
@@ -153,24 +154,27 @@ describe("testkit", () => {
   });
 
   describe("FakeChannelEndpoint", () => {
-    it("drives a request/reply round trip through the adapter seam", async () => {
+    it("drives a request/reply round trip through the channel's ports", async () => {
       rome = await createTestRome({ channels: ["telegram"] });
       const tg = rome.channel("telegram");
+      const channel = rome.channels.find((each) => each.name === "telegram")!;
 
       // Stand-in for the inbox pipeline (system-app hook) until the kit can
-      // boot it: anything that consumes onMessage and replies via the adapter.
-      tg.onMessage(async (msg) => {
-        await tg.sendMessage(msg.channelUserId, msg.threadId, {
-          text: `echo: ${msg.text}`,
-        });
+      // boot it: anything that hears the channel's inbound port and answers
+      // on its send port.
+      channel.inbound!.subscribe(async ({ message }) => {
+        await channel.send!.send(message.conversationId, { text: `echo: ${message.text}` });
       });
 
-      await tg.send({ text: "hello", threadId: "t-1", channelUserId: "u-1" });
+      await tg.receive({
+        text: "hello",
+        conversationId: "t-1" as ConversationId,
+        senderId: "u-1",
+      });
 
       const reply = await tg.nextReply();
       expect(reply).toMatchObject({
-        channelUserId: "u-1",
-        threadId: "t-1",
+        conversationId: "t-1",
         message: { text: "echo: hello" },
       });
     });

@@ -13,6 +13,7 @@ const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
   settings: { enableFable?: unknown; tierModelMappings?: unknown } = {},
+  usingRomeCredits = false,
 ) {
   const value: AIToolStateValue = {
     codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
@@ -30,6 +31,9 @@ function resolver(
             ? (settings.tierModelMappings ?? null)
             : null) as T | null,
     },
+    romeCreditsPayer: {
+      isUsingRomeCredits: () => usingRomeCredits,
+    },
   });
 }
 
@@ -45,6 +49,115 @@ describe("ModelResolver", () => {
     await expect(resolver().getModelProvider({ tier: "small" })).resolves.toMatchObject({
       model: "gpt-6-luna",
     });
+  });
+
+  it("resolves Codex models the same way while Rome credits pay", async () => {
+    const loggedOut = {
+      codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = resolver(
+      loggedOut,
+      { tierModelMappings: { openai: { medium: "gpt-6-astra" } } },
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6.1-sol",
+    });
+    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+      model: "gpt-6-astra",
+    });
+    await expect(
+      r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol" } }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+  });
+
+  it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "small", providerId: "openai" })).rejects.toMatchObject(
+      {
+        code: "model_provider_unavailable",
+        provider: "openai",
+        reason: "not_logged_in",
+      },
+    );
+  });
+
+  it("fails a tier with no usable provider when credits do not pay", async () => {
+    const state: AIToolStateValue = {
+      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      // Production returns a fresh copy on every read.
+      aiToolState: { get: () => structuredClone(state), refresh: async () => state },
+      providers: [claude, codex],
+      romeCreditsPayer: { isUsingRomeCredits: () => false },
+    });
+    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+      code: "no_model_provider_available",
+    });
+  });
+
+  it("prefers a connected Claude login over spending Rome credits", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: true, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: claude,
+    });
+  });
+
+  it("uses the payer and provider state that are current after settings reads", async () => {
+    let releaseSettings!: () => void;
+    const settingsReady = new Promise<void>((resolve) => {
+      releaseSettings = resolve;
+    });
+    let settingsRead!: () => void;
+    const settingsStarted = new Promise<void>((resolve) => {
+      settingsRead = resolve;
+    });
+    let usingRomeCredits = false;
+    const state: AIToolStateValue = {
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      aiToolState: { get: () => state, refresh: async () => state },
+      providers: [claude, codex],
+      settingsRepo: {
+        get: async () => {
+          settingsRead();
+          await settingsReady;
+          return null;
+        },
+      },
+      romeCreditsPayer: {
+        isUsingRomeCredits: () => usingRomeCredits,
+      },
+    });
+
+    const resolution = r.getModelProvider({ tier: "large" });
+    await settingsStarted;
+    state.codex.loggedIn = false;
+    state.claude.loggedIn = true;
+    usingRomeCredits = true;
+    releaseSettings();
+
+    await expect(resolution).resolves.toMatchObject({ modelProvider: claude });
   });
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {

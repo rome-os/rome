@@ -32,8 +32,9 @@ import type {
   AppStoreReader,
   AppStoreServiceResult,
 } from "../apps/store-service.js";
-import { historyQuery } from "../channels/channels-service.js";
 import type { EmailInboundControl, EmailInboundResult } from "../channels/email-control.js";
+import { REMOVED_SERVICE_MEMBERS, REMOVED_SUMMARY_MEMBERS } from "../channels/channels-service.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
 import type { SystemUpgradeChecker, SystemUpgradeOfferResult } from "../system-upgrade/service.js";
 import type {
   AppLifecycle,
@@ -50,7 +51,6 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
-  ChannelHistoryRead,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -218,21 +218,24 @@ function fromWire(messages: WireChannelMessage[]): ChannelMessage[] {
 
 /** Worker-side proxy for the main process's channels service. */
 export class ChannelsServiceProxy implements ChannelsService {
-  list(): Promise<ChannelSummary[]> {
-    return getWorkerRpc().call("channels.list", {});
+  constructor() {
+    withRemovedMembers(this, REMOVED_SERVICE_MEMBERS);
+  }
+
+  async list(): Promise<ChannelSummary[]> {
+    const summaries = await getWorkerRpc().call<ChannelSummary[]>("channels.list", {});
+    return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
   send(
     channel: string,
     conversationId: ConversationId,
     message: OutgoingMessage,
-    options?: { connectionId?: string },
   ): Promise<MessageReceipt> {
     return getWorkerRpc().call<MessageReceipt>("channels.send", {
       channel,
       conversationId,
       message,
-      ...(options?.connectionId ? { connectionId: options.connectionId } : {}),
     });
   }
 
@@ -244,11 +247,6 @@ export class ChannelsServiceProxy implements ChannelsService {
         ...(query.since ? { since: query.since.toISOString() } : {}),
       }),
     );
-  }
-
-  /** @deprecated Use {@link query}. */
-  async history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]> {
-    return (await this.query(channel, historyQuery(input))).reverse();
   }
 }
 

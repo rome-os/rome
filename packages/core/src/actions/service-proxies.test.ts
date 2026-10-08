@@ -51,26 +51,18 @@ describe("ChannelsServiceProxy", () => {
     const since = new Date("2026-08-04T09:00:00.000Z");
 
     const queried = await proxy.query("discord", { since, limit: 2 });
-    // `history` is deprecated and reads through `query`.
-    const read = await proxy.history("discord", { since, connectionId: "discord-1" });
 
-    for (const page of [queried, read]) {
-      expect(page[0]?.timestamp).toBeInstanceOf(Date);
-      expect(page[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
-    }
+    expect(queried[0]?.timestamp).toBeInstanceOf(Date);
+    expect(queried[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
     expect(calls).toEqual([
       {
         method: "channels.query",
         params: { channel: "discord", since: "2026-08-04T09:00:00.000Z", limit: 2 },
       },
-      {
-        method: "channels.query",
-        params: { channel: "discord", since: "2026-08-04T09:00:00.000Z" },
-      },
     ]);
   });
 
-  it("names the Connection a send means only when the action does", async () => {
+  it("sends by channel name", async () => {
     process.send = undefined;
     const calls: unknown[] = [];
     setWorkerRpcInProcessDispatcher(async (_method, params) => {
@@ -80,17 +72,25 @@ describe("ChannelsServiceProxy", () => {
     const proxy = new ChannelsServiceProxy();
 
     await proxy.send("discord", "c1" as never, { text: "a" });
-    await proxy.send("discord", "c1" as never, { text: "b" }, { connectionId: "discord-1" });
 
-    expect(calls).toEqual([
-      { channel: "discord", conversationId: "c1", message: { text: "a" } },
-      {
-        channel: "discord",
-        conversationId: "c1",
-        message: { text: "b" },
-        connectionId: "discord-1",
-      },
-    ]);
+    expect(calls).toEqual([{ channel: "discord", conversationId: "c1", message: { text: "a" } }]);
+  });
+
+  // TODO(0.8): remove with the migration getters.
+  it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => [{ name: "discord", sendable: true }]);
+    const proxy = new ChannelsServiceProxy();
+
+    const [summary] = await proxy.list();
+
+    expect(summary).toEqual({ name: "discord", sendable: true });
+    expect(() => (proxy as unknown as { history: unknown }).history).toThrow(
+      "ChannelsService.history was removed in @rome-os/app-runtime 0.7",
+    );
+    expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
+      "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
+    );
   });
 });
 

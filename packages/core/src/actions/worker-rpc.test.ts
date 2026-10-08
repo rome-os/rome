@@ -85,7 +85,7 @@ function makeServer(
     notify?: { send: ReturnType<typeof rs.fn> };
     feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
-    connectionRegistry?: { all: () => Array<{ id: string; service: string }> };
+    connectionRegistry?: unknown;
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -231,7 +231,7 @@ describe("WorkerRpcServer param validation", () => {
   describe("channels.*", () => {
     it("serves the channel list, sends and reads by channel name", async () => {
       const service = {
-        list: rs.fn(async () => [{ name: "discord", connectionIds: ["discord-1"] }]),
+        list: rs.fn(async () => [{ name: "discord", sendable: true }]),
         send: rs.fn(async () => ({ messageId: "m1" })),
         query: rs.fn(async () => []),
       };
@@ -244,7 +244,6 @@ describe("WorkerRpcServer param validation", () => {
         channel: "discord",
         conversationId: "c1",
         message: { text: "hi" },
-        connectionId: "discord-1",
       });
       await rpc(fake, "channels.query", {
         channel: "discord",
@@ -252,18 +251,37 @@ describe("WorkerRpcServer param validation", () => {
         limit: 5,
       });
 
-      expect(listed.result).toEqual([{ name: "discord", connectionIds: ["discord-1"] }]);
+      expect(listed.result).toEqual([{ name: "discord", sendable: true }]);
       expect(sent.result).toEqual({ messageId: "m1" });
-      expect(service.send).toHaveBeenCalledWith(
-        "discord",
-        "c1",
-        { text: "hi" },
-        { connectionId: "discord-1" },
-      );
+      expect(service.send).toHaveBeenCalledWith("discord", "c1", { text: "hi" });
       expect(service.query).toHaveBeenCalledWith("discord", {
         since: new Date("2026-09-29T10:00:00.000Z"),
         limit: 5,
       });
+    });
+
+    it("ingests inbound email through the email Connection, and skips without one", async () => {
+      const ingest = rs.fn(async () => ({ status: "accepted" }));
+      const email = {
+        id: "email-1",
+        service: "email",
+        status: () => ({ talk: { state: "unlocked" } }),
+      };
+      const withEmail = makeServer({ connectionRegistry: { all: () => [email], ingest } });
+      const without = makeServer({ connectionRegistry: { all: () => [], ingest } });
+      const fakeWith = makeFakeWorker();
+      const fakeWithout = makeFakeWorker();
+      withEmail.server.attach(fakeWith.worker);
+      without.server.attach(fakeWithout.worker);
+      const params = { rawBody: "raw", signature: "sig" };
+
+      const accepted = await rpc(fakeWith, "channels.email.ingestInbound", params);
+      const skipped = await rpc(fakeWithout, "channels.email.ingestInbound", params);
+
+      expect(accepted.result).toEqual({ status: "accepted" });
+      expect(ingest).toHaveBeenCalledWith("email-1", params);
+      expect(skipped.result).toEqual({ status: "skipped", reason: "channel_inactive" });
+      expect(ingest).toHaveBeenCalledTimes(1);
     });
 
     it("rejects a read with no channel", async () => {

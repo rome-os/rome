@@ -282,7 +282,7 @@ export async function readOutbox(
   // A row the channel accepted but never named cannot be recognized when it
   // arrives, so waiting on it is waiting forever. Clearing it is the lesser
   // wrong, and the requirement that makes it unreachable is stated on
-  // `TalkDirectMessaging`.
+  // `ChannelDirectMessaging`.
   const landed = awaiting.filter(
     (row) =>
       row.providerMessageId === null ||

@@ -14,10 +14,9 @@ let outsideRoot = "";
 /** A channels service with one channel, `service`, backed by one Connection. */
 function makeAdapter(service = "discord"): ChannelsService {
   return {
-    list: rs.fn(async () => [{ name: service, connectionIds: [`test:${service}`] }]),
+    list: rs.fn(async () => [{ name: service, sendable: true }]),
     send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
     query: async () => [],
-    history: async () => [],
   };
 }
 
@@ -51,17 +50,12 @@ describe("send_message attachments", () => {
       attachments: [{ type: "document", source, caption: "Report" }],
     });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      "discord",
-      "thread-1",
-      {
-        text: undefined,
-        attachments: [{ type: "document", source: safeSource, caption: "Report" }],
-        replyToMessageId: undefined,
-        turnId: undefined,
-      },
-      undefined,
-    );
+    expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
+      text: undefined,
+      attachments: [{ type: "document", source: safeSource, caption: "Report" }],
+      replyToMessageId: undefined,
+      turnId: undefined,
+    });
   });
 
   it("rejects absolute paths outside allowed attachment roots", async () => {
@@ -116,10 +110,8 @@ describe("send_message email union", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [channel, threadId, message, options] = (adapter.send as ReturnType<typeof rs.fn>).mock
-      .calls[0];
+    const [channel, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(channel).toBe("email");
-    expect(options).toBeUndefined();
     expect(threadId).toBe("");
     expect(message.kind).toBe("email");
     expect(message.text).toBe("body");
@@ -180,18 +172,13 @@ describe("send_message chat recipient aliases", () => {
       turnId: "turn-1",
     });
 
-    expect(adapter.send).toHaveBeenCalledWith(
-      "webchat",
-      "session-1",
-      {
-        text: "Final answer",
-        parts,
-        attachments: undefined,
-        replyToMessageId: undefined,
-        turnId: "turn-1",
-      },
-      undefined,
-    );
+    expect(adapter.send).toHaveBeenCalledWith("webchat", "session-1", {
+      text: "Final answer",
+      parts,
+      attachments: undefined,
+      replyToMessageId: undefined,
+      turnId: "turn-1",
+    });
   });
 
   it("resolves WhatsApp to: guardian through the guardian channel mapping", async () => {
@@ -218,18 +205,13 @@ describe("send_message chat recipient aliases", () => {
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith(
-      "whatsapp",
-      "15551234567@s.whatsapp.net",
-      {
-        text: "hello guardian",
-        parts: undefined,
-        attachments: undefined,
-        replyToMessageId: undefined,
-        turnId: undefined,
-      },
-      undefined,
-    );
+    expect(adapter.send).toHaveBeenCalledWith("whatsapp", "15551234567@s.whatsapp.net", {
+      text: "hello guardian",
+      parts: undefined,
+      attachments: undefined,
+      replyToMessageId: undefined,
+      turnId: undefined,
+    });
   });
 
   it("fails loudly when a chat guardian alias has no mapping for the channel", async () => {
@@ -291,24 +273,6 @@ describe("send_message connection choice", () => {
     ).rejects.toThrow('No Talk connection registered for "whatsapp"');
     expect(personMappingRepo.findByBondLevel).not.toHaveBeenCalled();
     expect(adapter.send).not.toHaveBeenCalled();
-  });
-
-  it("refuses a channel with several Connections when none is named", async () => {
-    const adapter = makeAdapter("telegram_user");
-    adapter.list = rs.fn(async () => [{ name: "telegram_user", connectionIds: ["tg-a", "tg-b"] }]);
-
-    await expect(
-      executeSendMessage(adapter, { channel: "telegram_user", threadId: "t1", text: "a" }),
-    ).rejects.toThrow('Channel "telegram_user" has multiple connections; connectionId is required');
-    await executeSendMessage(adapter, {
-      channel: "telegram_user",
-      threadId: "t1",
-      text: "b",
-      connectionId: "tg-b",
-    });
-
-    const calls = (adapter.send as ReturnType<typeof rs.fn>).mock.calls;
-    expect(calls.map((call) => call[3])).toEqual([{ connectionId: "tg-b" }]);
   });
 });
 

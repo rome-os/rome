@@ -48,8 +48,6 @@ export type ChatChannel =
   | "agents";
 
 interface SendMessageBase {
-  /** Exact Connection that owns the opaque provider conversation. */
-  connectionId?: string;
   /** The message text to send (supports markdown). Optional when attachments are provided. */
   text?: string;
   /** Optional file attachments to send. */

@@ -3,8 +3,8 @@ import type {
   ChannelMessage,
   ConversationId,
   InboundEvent,
-  TalkActivity,
-  TalkDirectMessaging,
+  ChannelActivity,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
@@ -40,8 +40,8 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
-  direct: TalkDirectMessaging | null = null,
-  activity: TalkActivity | null = null,
+  direct: ChannelDirectMessaging | null = null,
+  activity: ChannelActivity | null = null,
   history: TalkHistory | null = null,
   directory: TalkDirectory | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {

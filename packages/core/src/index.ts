@@ -18,6 +18,7 @@ import {
   hydrateInstanceToken,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
+  onInstanceTokenChanged,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -38,7 +39,12 @@ import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./us
 import type { SessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
-import { initTelemetry, getTracer, shutdown as shutdownTelemetry } from "./telemetry.js";
+import {
+  initTelemetry,
+  getTracer,
+  shutdown as shutdownTelemetry,
+  withInboundSpans,
+} from "./telemetry.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
@@ -79,7 +85,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
-import { createChannelsService } from "./channels/channels-service.js";
+import { backingConnection, createChannelsService } from "./channels/channels-service.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
@@ -116,6 +122,7 @@ import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
 import { SharedCodexAccountService } from "./core/codex/account-service.js";
 import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
+import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
@@ -564,13 +571,22 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  let syncRomeCreditsPayer = (): void => {};
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
       codexStatus: () => codexAccountService.getStatus(),
       codexUsage: () => codexAccountService.getUsage(),
     },
+    onCodexLoginChanged: () => syncRomeCreditsPayer(),
   });
+  const romeCreditsPayer = createRomeCreditsPayer({
+    aiToolState,
+    appServerManager: codexAppServerManager,
+  });
+  syncRomeCreditsPayer = () => romeCreditsPayer.sync();
+  const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
+  romeCreditsPayer.sync();
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
     void aiToolState.refresh("openai").catch((err) => {
       log.warn("Codex account change refresh failed", {
@@ -587,6 +603,7 @@ async function main() {
     appServerManager: codexAppServerManager,
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
+    isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
     funding: () => {
       const account = aiToolState.get().codex;
       return codexFunding({
@@ -600,6 +617,7 @@ async function main() {
     aiToolState,
     providers: [anthropicProvider, codexProvider],
     settingsRepo,
+    romeCreditsPayer,
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
   const lifecycleAppRuntimeServices: RomeAppRuntimeServices = {
@@ -871,11 +889,9 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const email = (await channelsService.list()).find((channel) => channel.name === "email");
-        if (email?.connectionIds.length !== 1) {
-          return { status: "skipped", reason: "channel_inactive" };
-        }
-        return (await connectionRegistry.ingest(email.connectionIds[0]!, {
+        const email = backingConnection(connectionRegistry, "email");
+        if (!email) return { status: "skipped", reason: "channel_inactive" };
+        return (await connectionRegistry.ingest(email.id, {
           rawBody,
           signature,
         })) as EmailInboundResult;
@@ -1147,6 +1163,9 @@ async function main() {
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
 
+  // The channel-message hook hears every channel through these, so each
+  // inbound message it handles is traced and logged once.
+  const hookChannels = withInboundSpans(channels, "channel-message");
   let messageHook: ChannelMessageHook = createNoopChannelMessageHook();
   const channelMessageHookArtifact = appCatalog
     .listArtifacts("hook")
@@ -1157,7 +1176,7 @@ async function main() {
         actionEngine,
         conversationSettings,
         chatStop,
-        channels,
+        channels: hookChannels,
       });
       if (loadedHook) {
         messageHook = loadedHook;
@@ -1190,7 +1209,7 @@ async function main() {
   const reloadChannelMessageHook = messageHandlerRegistered
     ? createChannelMessageHookReloader({
         catalog: appCatalog,
-        deps: { actionEngine, conversationSettings, chatStop, channels },
+        deps: { actionEngine, conversationSettings, chatStop, channels: hookChannels },
         getCurrent: () => messageHook,
         setCurrent: (hook) => {
           messageHook = hook;
@@ -1533,7 +1552,7 @@ async function main() {
   const journalCleanupInterval = setInterval(runJournalCleanup, 6 * 3600000);
 
   const activeChannels = (await channelsService.list())
-    .filter((channel) => channel.connectionIds.length > 0)
+    .filter((channel) => channel.sendable)
     .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
   const agentNames = Array.from(agentLoader.getAll().keys());
@@ -1675,6 +1694,8 @@ async function main() {
     shutdownLog.info("capability discovery stopped");
 
     unsubscribeCodexAccountChanged();
+    unsubscribeInstanceTokenChanged();
+    romeCreditsPayer.close();
     codexAccountService.close();
     shutdownLog.info("Codex account service stopped");
 

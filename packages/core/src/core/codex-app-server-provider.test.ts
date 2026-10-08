@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { UsageFunding } from "../usage/events.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
+import { CodexAppServerManager } from "./codex/app-server-manager.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
@@ -960,6 +961,51 @@ describe("CodexAppServerProvider", () => {
     });
     // The settled turn released the coordinator, so shutdown does not hang.
     await session.close();
+  });
+
+  it("fails a queued turn instead of starting it after the payer changes", async () => {
+    const previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
+    process.env.PANTHEON_BASE_ORIGIN = "https://rome.example";
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thread-payer" } };
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", {
+          threadId: "thread-payer",
+          turn: { id: "turn-1" },
+        });
+      }
+      return {};
+    });
+    const appServerManager = new CodexAppServerManager();
+    const provider = new CodexAppServerProvider({ appServerManager });
+    try {
+      const session = await provider.openSession(buildParams());
+      const first = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "first" });
+      await rs.waitFor(() => {
+        expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
+      });
+      // Queued behind the active turn while ChatGPT is still the payer.
+      await session.sendUserInput({ text: "second" });
+
+      appServerManager.setDefaultProvider("rome_credits");
+      expect(await first).toEqual([
+        expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+      ]);
+      expect(await collectUntilTerminal(session)).toEqual([
+        expect.objectContaining({
+          type: "error",
+          error: "Model payer changed while preparing this turn; please retry.",
+          code: "transient",
+        }),
+      ]);
+      expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
+      await session.close();
+    } finally {
+      appServerManager.close();
+      if (previousOrigin === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
+      else process.env.PANTHEON_BASE_ORIGIN = previousOrigin;
+    }
   });
 
   it("lazily resumes an idle thread on a new shared process after exit", async () => {
