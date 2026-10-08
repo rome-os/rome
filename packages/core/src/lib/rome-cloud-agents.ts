@@ -17,10 +17,12 @@ export interface AgentMessageEnvelope {
    *  account, the full `@handle/endpoint` in a linked one, and the only field
    *  Rome keys a sender by. `account` and `address` are read only for
    *  whether they are present, as a sign the sender is in another account.
-   *  `endpointId` follows Cloud's contract and nothing reads it yet. */
+   *  `endpointId` never changes for an endpoint, and keeps its links on it
+   *  through a rename (agents-identity.ts). It is null once the endpoint is
+   *  removed, and an older Cloud omits it. */
   from: {
     endpoint: string;
-    endpointId?: string;
+    endpointId?: string | null;
     kind: "dot" | "rome";
     sameAccount?: boolean;
     account?: string;
@@ -44,6 +46,8 @@ export interface AgentEndpointSummary {
   /** False for an endpoint of a linked account. Omitted by an older Cloud,
    *  which lists this Rome's own account only. */
   sameAccount?: boolean;
+  /** Cloud's stable id for the endpoint. Omitted by an older Cloud. */
+  endpointId?: string;
 }
 
 /**

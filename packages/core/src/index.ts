@@ -2,6 +2,7 @@ import { createNodeDevicesService } from "./lib/node-devices.js";
 import { createPairingAdmission, notifyPairingResolution } from "./channels/pairing.js";
 import type { Admission } from "./channels/admission.js";
 import { createAgentsGuardianLink } from "./channels/agents-guardian.js";
+import { agentSightings, createAgentsIdentity } from "./channels/agents-identity.js";
 import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -331,15 +332,25 @@ async function main() {
       connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
     registry: connectionRegistry,
   });
-  const linkAgentToGuardian = createAgentsGuardianLink({
+  const agentsIdentity = createAgentsIdentity({
     personMappingRepo,
     settingsRepo,
     channel: AGENTS_SERVICE,
   });
+  const linkAgentToGuardian = createAgentsGuardianLink({
+    personMappingRepo,
+    settingsRepo,
+    channel: AGENTS_SERVICE,
+    serial: agentsIdentity.serial,
+  });
   const admit: Admission = async (connectionId, service, message) => {
-    // Before the inbox resolves the sender, so the first message already
-    // reads as the guardian's.
-    if (service === AGENTS_SERVICE) await linkAgentToGuardian(message);
+    // Before the inbox resolves the sender, so a renamed agent's first message
+    // already reaches its person, and an own agent's already reads as the
+    // guardian's.
+    if (service === AGENTS_SERVICE) {
+      await agentsIdentity.observe(agentSightings(message));
+      await linkAgentToGuardian(message);
+    }
     return pairingAdmission(connectionId, service, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
@@ -1122,6 +1133,7 @@ async function main() {
         client: createRomeCloudAgentsClient(),
         isConnected: () =>
           connectionRegistry.find(AGENTS_SERVICE).some((conn) => conn.talk !== null),
+        onListed: (sightings) => void agentsIdentity.observe(sightings),
       }),
     },
   });

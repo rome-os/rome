@@ -30,6 +30,7 @@ import {
   canonicalAgentAddress,
 } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
+import type { AgentSighting } from "./agents-identity.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
 
@@ -78,6 +79,8 @@ export function agentsAccounts(deps: {
   /** Whether the guardian has connected Agents. Until then the channel
    *  reaches no one, and Cloud is not asked. */
   isConnected: () => boolean;
+  /** Told every listed endpoint Cloud names by id, after each good read. */
+  onListed?: (sightings: AgentSighting[]) => void;
   now?: () => number;
 }): Accounts {
   const now = deps.now ?? Date.now;
@@ -92,6 +95,14 @@ export function agentsAccounts(deps: {
     const book = deps.client.endpoints().then(
       ({ endpoint: own, address, endpoints }) => {
         lastOwnHandle = address ? agentAddressAccount(address) : null;
+        deps.onListed?.(
+          endpoints.flatMap((endpoint) => {
+            const listed = agentAddress(endpoint);
+            return endpoint.endpointId && listed !== null
+              ? [{ endpointId: endpoint.endpointId, address: listed }]
+              : [];
+          }),
+        );
         return {
           accounts: endpoints
             // A dot still waiting on its pairing confirmation cannot be reached.

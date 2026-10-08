@@ -130,6 +130,32 @@ describe("the agents address book", () => {
     expect(await book.resolve("@@friend/atlas")).toBeNull();
   });
 
+  it("tells which endpoint holds each address, by Cloud's id", async () => {
+    const told: unknown[] = [];
+    const book = agentsAccounts({
+      client: cloud([
+        { ...atlas, endpointId: "ep_atlas" },
+        {
+          endpoint: "@friend/atlas",
+          kind: "dot",
+          ready: true,
+          sameAccount: false,
+          endpointId: "ep_friend",
+        },
+        { endpoint: "nova", kind: "dot", ready: true },
+      ]),
+      isConnected: () => true,
+      onListed: (sightings) => told.push(sightings),
+    });
+    await book.listAccounts({ limit: 100 });
+    expect(told).toEqual([
+      [
+        { endpointId: "ep_atlas", address: "atlas" },
+        { endpointId: "ep_friend", address: "@friend/atlas" },
+      ],
+    ]);
+  });
+
   it("asks Cloud nothing until Agents is connected", async () => {
     const client = cloud([atlas]);
     const book = agentsAccounts({ client, isConnected: () => false });

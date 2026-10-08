@@ -9,7 +9,9 @@
  * Only an account nobody has decided about is linked. A link to anyone, a
  * dismissal, or an earlier automatic link the guardian has since removed all
  * stand. Unlinking leaves no row behind, so Rome records each endpoint it
- * linked here and never links it again.
+ * linked here and never links it again. The record names an endpoint by its
+ * `endpointId` when Cloud gives one, so a new endpoint reusing a removed
+ * one's name is still linked (agents-identity.ts).
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -23,8 +25,12 @@ const log = createLogger("agents-guardian");
 /** The settings key holding every endpoint this admission has linked. */
 export const AGENTS_GUARDIAN_LINKED_KEY = "agentsGuardianLinkedEndpoints";
 
+function envelopeFrom(message: ChannelMessage): Partial<AgentMessageEnvelope["from"]> | undefined {
+  return (message.raw as Partial<AgentMessageEnvelope> | undefined)?.from;
+}
+
 function isSameAccount(message: ChannelMessage): boolean {
-  const from = (message.raw as Partial<AgentMessageEnvelope> | undefined)?.from;
+  const from = envelopeFrom(message);
   return from?.sameAccount === true && from.endpoint === message.senderId;
 }
 
@@ -35,22 +41,33 @@ export function createAgentsGuardianLink(deps: {
   >;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   channel: string;
+  /** Runs one change to the record at a time, in turn with every other writer
+   *  of it. Defaults to a queue of this link's own. */
+  serial?: <T>(fn: () => Promise<T>) => Promise<T>;
 }) {
   // Admission takes different senders at once, and the record of linked
   // endpoints is one setting, so its read and write run one sender at a time.
   let queue: Promise<unknown> = Promise.resolve();
+  const serial =
+    deps.serial ??
+    (<T>(fn: () => Promise<T>): Promise<T> => {
+      const run = queue.then(fn);
+      queue = run.catch(() => {});
+      return run;
+    });
 
   async function link(message: ChannelMessage): Promise<void> {
     const endpoint = message.senderId;
     if (await deps.personMappingRepo.findByChannelUser(deps.channel, endpoint)) return;
+    const recorded = envelopeFrom(message)?.endpointId ?? endpoint;
     const linked = (await deps.settingsRepo.get<string[]>(AGENTS_GUARDIAN_LINKED_KEY)) ?? [];
-    if (linked.includes(endpoint)) return;
+    if (linked.includes(recorded)) return;
     const [guardian] = await deps.personMappingRepo.findByBondLevel("guardian");
     if (!guardian) return;
     // The record goes first. If the link then fails, the endpoint stays
     // unlinked, which is the guardian's call to change. The other order could
     // leave a link that the guardian's unlink does not keep removed.
-    await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, endpoint]);
+    await deps.settingsRepo.set(AGENTS_GUARDIAN_LINKED_KEY, [...linked, recorded]);
     await deps.personMappingRepo.addChannelMapping(
       guardian.id,
       deps.channel,
@@ -63,13 +80,11 @@ export function createAgentsGuardianLink(deps: {
   /** Links the sender when it qualifies. Never refuses the message. */
   return (message: ChannelMessage): Promise<void> => {
     if (!isSameAccount(message)) return Promise.resolve();
-    const run = queue.then(() => link(message));
-    queue = run.catch((err: unknown) => {
+    return serial(() => link(message)).catch((err: unknown) => {
       log.warn("Could not link a same-account agent", {
         endpoint: message.senderId,
         error: err instanceof Error ? err.message : String(err),
       });
     });
-    return queue as Promise<void>;
   };
 }
