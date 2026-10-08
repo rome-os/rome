@@ -107,6 +107,17 @@ describe("agents channel", () => {
     });
   });
 
+  it("never takes an agent carrying another account's fields for an own one, even without sameAccount", () => {
+    const qualified = envelope({
+      from: { endpoint: "@friend/atlas", kind: "dot", account: "friend", address: "@friend/atlas" },
+    });
+    expect(toAgentInboundMessage(qualified)?.senderId).toBe("@friend/atlas");
+    const bare = envelope({ from: { endpoint: "atlas", kind: "dot", account: "friend" } });
+    expect(toAgentInboundMessage(bare)).toBeNull();
+    // An older Cloud sends none of them, and its agents are this Rome's own.
+    expect(toAgentInboundMessage(envelope())?.senderId).toBe("atlas");
+  });
+
   it("drops a cross-account message that names no sender account, and still acknowledges it", async () => {
     const nameless = envelope({
       messageId: "msg_nameless",
@@ -244,6 +255,15 @@ describe("agents channel", () => {
       "Address another account's agent as @friend/atlas.",
     );
     expect(client.sent).toHaveLength(1);
+  });
+
+  it("answers in the conversation Cloud's reply will come from", async () => {
+    const client = fakeClient([]);
+    client.send = async () => ({ messageId: "msg_sent", to: "atlas" });
+    const receipt = await createAgentsTalker(client).send("@ouou/atlas" as ConversationId, {
+      text: "Hi",
+    });
+    expect(receipt.conversationId).toBe("atlas");
   });
 
   it("says plainly when Cloud will not deliver to an address", async () => {

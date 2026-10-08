@@ -20,8 +20,8 @@ import {
   type AgentMessagingClient,
   AgentMessagingError,
   agentAddress,
-  agentAddressAccount,
   createRomeCloudAgentsClient,
+  isNotReachable,
   isUndeliverable,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
@@ -240,14 +240,19 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
           text,
           ...(msg.replyToMessageId ? { inReplyTo: msg.replyToMessageId } : {}),
         });
-        return { conversationId, messageId: sent.messageId };
+        // Cloud answers with the address its reply will come from: the bare
+        // name for an own agent written to as `@ownhandle/name`.
+        return {
+          conversationId: (sent.to || conversationId) as ConversationId,
+          messageId: sent.messageId,
+        };
       } catch (err) {
         if (!isUndeliverable(err)) throw err;
-        // Only another account's agent can be out of reach for want of a link.
-        const why =
-          agentAddressAccount(conversationId) === null
-            ? "The agent may no longer exist."
-            : "The agent may not exist, or no link between your accounts lets this Rome reach it.";
+        // Cloud says `not_reachable` only for another account's agent, which a
+        // missing link can put out of reach; an own agent is `unknown_endpoint`.
+        const why = isNotReachable(err)
+          ? "The agent may not exist, or no link between your accounts lets this Rome reach it."
+          : "The agent may no longer exist.";
         throw new Error(`Rome Cloud can't deliver to ${conversationId}. ${why}`, { cause: err });
       }
     },

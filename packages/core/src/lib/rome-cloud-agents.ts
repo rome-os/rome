@@ -50,9 +50,30 @@ export interface AgentEndpointSummary {
  * Null for a cross-account agent whose `endpoint` is not a full address, which
  * Rome can neither tell apart from its own agents nor answer.
  */
-export function agentAddress(agent: { endpoint: string; sameAccount?: boolean }): string | null {
-  if (agent.sameAccount !== false) return agent.endpoint;
+export function agentAddress(agent: {
+  endpoint: string;
+  sameAccount?: boolean;
+  account?: string;
+  address?: string;
+}): string | null {
+  if (
+    agent.sameAccount === true ||
+    (agent.sameAccount === undefined && !crossAccountShaped(agent))
+  ) {
+    return agent.endpoint;
+  }
   return agentAddressAccount(agent.endpoint) !== null ? agent.endpoint : null;
+}
+
+/** Whether an agent carries what only a linked account's agent does. An older
+ *  Cloud omits `sameAccount` and every one of these, so an agent that carries
+ *  any of them without `sameAccount` is not taken for one of this Rome's own. */
+function crossAccountShaped(agent: { endpoint: string; account?: string; address?: string }) {
+  return (
+    agent.account !== undefined ||
+    agent.address !== undefined ||
+    agentAddressAccount(agent.endpoint) !== null
+  );
 }
 
 /** The handle of a `@handle/endpoint` address, or null for a bare name. */
@@ -64,6 +85,10 @@ export function agentAddressAccount(address: string): string | null {
  *  for a bare name with no endpoint in this account, and `not_reachable` for
  *  another account's address, the same for an agent that does not exist and
  *  one no link allows, so a stranger cannot learn which agents exist. */
+export function isNotReachable(err: unknown): boolean {
+  return err instanceof AgentMessagingError && err.code === "not_reachable";
+}
+
 export function isUndeliverable(err: unknown): boolean {
   return (
     err instanceof AgentMessagingError &&
