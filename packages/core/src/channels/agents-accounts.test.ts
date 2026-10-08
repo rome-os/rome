@@ -91,6 +91,32 @@ describe("the agents address book", () => {
     expect(await book.resolve("@friend")).toBeNull();
   });
 
+  it("folds an own agent's full address onto its bare name, and never makes it external", async () => {
+    const book = agentsAccounts({
+      client: {
+        endpoints: async () => ({
+          endpoint: "home-rome",
+          address: "@ouou/home-rome",
+          endpoints: [{ ...atlas, address: "@ouou/atlas", sameAccount: true }],
+        }),
+      },
+      isConnected: () => true,
+    });
+    const { accounts } = await book.listAccounts({ limit: 100 });
+    expect(accounts).toEqual([
+      {
+        id: "atlas",
+        addresses: ["atlas", "@ouou/atlas"],
+        name: null,
+        identifiers: { username: "atlas", "agents:kind": "dot" },
+      },
+    ]);
+    expect((await book.resolve("@ouou/atlas"))?.id).toBe("atlas");
+    expect(await book.resolve("@ouou/removed")).toBeNull();
+    expect((await book.resolve("@friend/atlas"))?.id).toBe("@friend/atlas");
+    expect(await book.resolve("@@friend/atlas")).toBeNull();
+  });
+
   it("asks Cloud nothing until Agents is connected", async () => {
     const client = cloud([atlas]);
     const book = agentsAccounts({ client, isConnected: () => false });

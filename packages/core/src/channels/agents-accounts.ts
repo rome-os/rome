@@ -10,9 +10,10 @@
  * among current endpoints, so a name freed by a removed dot can return under a
  * new one and carry the old link (I2 holds only while the endpoint lives).
  *
- * Any `@handle/endpoint` address resolves, listed or not: an agent Rome wrote to
- * can answer without a link, and such a sender still has to be an account the
- * guardian can find and place (I4).
+ * Any other account's `@handle/endpoint` resolves, listed or not: an agent
+ * Rome wrote to can answer without a link, and such a sender still has to be an
+ * account the guardian can find and place (I4). An own agent's full address
+ * folds onto its bare name.
  */
 
 import { compareCodePoints } from "@rome/api-types/people";
@@ -33,32 +34,37 @@ const log = createLogger("agents-accounts");
  *  to one request. */
 const READ_TTL_MS = 30_000;
 
-function toAccount(endpoint: AgentEndpointSummary): Account | null {
-  const address = agentAddress(endpoint);
-  if (address === null) return null;
+/** One read of Cloud's listing, with the handle of this Rome's own account. */
+interface Book {
+  accounts: Account[];
+  ownHandle: string | null;
+}
+
+/** An agent's account. Its id is its address; one in this Rome's own account
+ *  also answers to the full address Cloud gives it. */
+function agentAccount(address: string, more: { kind?: string; fullAddress?: string }): Account {
+  const handle = agentAddressAccount(address);
   return {
     id: address as AccountId,
-    addresses: [address],
+    addresses:
+      more.fullAddress && more.fullAddress !== address ? [address, more.fullAddress] : [address],
     // The address names the endpoint, so it is not repeated as a name.
     name: null,
     identifiers: {
       username: address,
-      "agents:kind": endpoint.kind,
-      ...(endpoint.sameAccount === false
-        ? { "agents:account": agentAddressAccount(address) as string }
-        : {}),
+      ...(more.kind ? { "agents:kind": more.kind } : {}),
+      ...(handle ? { "agents:account": handle } : {}),
     },
   };
 }
 
-/** An agent in another account that the listing does not hold. */
-function externalAccount(address: string, account: string): Account {
-  return {
-    id: address as AccountId,
-    addresses: [address],
-    name: null,
-    identifiers: { username: address, "agents:account": account },
-  };
+function toAccount(endpoint: AgentEndpointSummary): Account | null {
+  const address = agentAddress(endpoint);
+  if (address === null) return null;
+  return agentAccount(address, {
+    kind: endpoint.kind,
+    ...(endpoint.address ? { fullAddress: endpoint.address } : {}),
+  });
 }
 
 export function agentsAccounts(deps: {
@@ -69,14 +75,14 @@ export function agentsAccounts(deps: {
   now?: () => number;
 }): Accounts {
   const now = deps.now ?? Date.now;
-  let read: { at: number; accounts: Promise<Account[]> } | null = null;
+  let read: { at: number; book: Promise<Book> } | null = null;
 
-  function endpoints(): Promise<Account[]> {
-    if (!deps.isConnected()) return Promise.resolve([]);
-    if (read && now() - read.at < READ_TTL_MS) return read.accounts;
-    const accounts = deps.client.endpoints().then(
-      ({ endpoint: own, endpoints }) =>
-        endpoints
+  function endpoints(): Promise<Book> {
+    if (!deps.isConnected()) return Promise.resolve({ accounts: [], ownHandle: null });
+    if (read && now() - read.at < READ_TTL_MS) return read.book;
+    const book = deps.client.endpoints().then(
+      ({ endpoint: own, address, endpoints }) => ({
+        accounts: endpoints
           // A dot still waiting on its pairing confirmation cannot be reached.
           .filter(
             (endpoint) =>
@@ -84,6 +90,8 @@ export function agentsAccounts(deps: {
           )
           .flatMap((endpoint) => toAccount(endpoint) ?? [])
           .sort((a, b) => compareCodePoints(a.id, b.id)),
+        ownHandle: address ? agentAddressAccount(address) : null,
+      }),
       // Every address book is read for every People page, so an unreachable
       // Cloud lists no agents rather than failing the page. The empty answer
       // is kept like any other read, so an outage does not hold each page
@@ -92,22 +100,25 @@ export function agentsAccounts(deps: {
         log.warn("Could not list agent endpoints", {
           error: err instanceof Error ? err.message : String(err),
         });
-        return [];
+        return { accounts: [], ownHandle: null };
       },
     );
-    read = { at: now(), accounts };
-    return accounts;
+    read = { at: now(), book };
+    return book;
   }
 
   return {
     async listAccounts(input) {
-      return pageAccounts(await endpoints(), input);
+      return pageAccounts((await endpoints()).accounts, input);
     },
     async resolve(address) {
-      const listed = (await endpoints()).find((account) => account.id === address);
+      const { accounts, ownHandle } = await endpoints();
+      const listed = accounts.find((account) => account.addresses.includes(address));
       if (listed) return listed;
-      const account = deps.isConnected() ? agentAddressAccount(address) : null;
-      return account ? externalAccount(address, account) : null;
+      // An address in this Rome's own account names one of its own agents,
+      // which the listing holds by its bare name or not at all.
+      const handle = deps.isConnected() ? agentAddressAccount(address) : null;
+      return handle && handle !== ownHandle ? agentAccount(address, {}) : null;
     },
   };
 }

@@ -63,7 +63,7 @@ export function agentAddress(agent: {
 
 /** The handle of a `@handle/endpoint` address, or null for a bare name. */
 export function agentAddressAccount(address: string): string | null {
-  return /^@([^/\s]+)\/[^/\s]+$/.exec(address)?.[1] ?? null;
+  return /^@([^@/\s]+)\/[^@/\s]+$/.exec(address)?.[1] ?? null;
 }
 
 /** Cloud's refusal for an address it will not deliver to. It answers the same
@@ -86,7 +86,12 @@ export class AgentMessagingError extends Error {
 
 export interface AgentMessagingClient {
   /** This instance's endpoint and the others it can message. */
-  endpoints(): Promise<{ endpoint: string; endpoints: AgentEndpointSummary[] }>;
+  endpoints(): Promise<{
+    endpoint: string;
+    /** This instance's full `@handle/endpoint`. An older Cloud omits it. */
+    address?: string;
+    endpoints: AgentEndpointSummary[];
+  }>;
   /** Messages waiting for this instance, oldest first, until acknowledged. */
   poll(): Promise<{ endpoint: string; messages: AgentMessageEnvelope[] }>;
   acknowledge(messageIds: string[]): Promise<void>;
