@@ -12,6 +12,11 @@ import {
   type ConnectionPortsDeps,
 } from "./connection-ports.js";
 import { testMessagesQueryContract } from "./messages-contract.js";
+import { ChannelNotConnected } from "./channel.js";
+import { ConnectionRegistry } from "../connections/registry.js";
+import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { makePasteTalk } from "../connections/test-fixtures.js";
+import { createTestDb } from "../test/helpers.js";
 
 // A channel with no store answers `query` through its Connection's history.
 // That history reads a window rounded out to whole hours, as the adapters do,
@@ -296,5 +301,33 @@ describe("connection-backed messages, shared reads", () => {
     fail = false;
     expect(ids(await messages.query({}))).toEqual(["only"]);
     expect(query).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("connection-backed send, across epochs", () => {
+  it("keeps a held direct port on whichever talker is live", async () => {
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(createTestDb().db),
+    });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    const offerDirect = (answer: string) => {
+      const talker = fx.talkerFactory.instances.at(-1);
+      if (!talker) throw new Error("talker not built");
+      talker.directMessaging = { conversationFor: async () => answer as ConversationId };
+    };
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    offerDirect("first");
+    const direct = connectionPorts({ registry }, "fake-telegram")?.send?.direct;
+    if (!direct) throw new Error("the talker offers direct messaging");
+    await expect(direct.conversationFor("7")).resolves.toBe("first");
+
+    await connection.auth.revoke("bot");
+    await expect(direct.conversationFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    offerDirect("second");
+    await expect(direct.conversationFor("7")).resolves.toBe("second");
   });
 });
