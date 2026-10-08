@@ -54,16 +54,16 @@ describe("LinkedIn replies through People", () => {
       { participantId: SELF, type: "member", isSelf: true },
     ]);
     await deps.linkedInStoreRepo.markThreadSynced(THREAD, { isGroup: false });
-    const talker = createLinkedInDescriptor({
+    const transport = createLinkedInDescriptor({
       syncSink: deps.linkedInStoreRepo,
       run,
       minIntervalMs: 60_000,
       maxIntervalMs: 60_000,
-    }).capabilities.talker!.build({} as Record<string, Credential>, {} as RuntimeKit);
-    // LinkedIn's Connection, live on that talker, behind the channel list.
+    }).capabilities.transport!.build({} as Record<string, Credential>, {} as RuntimeKit);
+    // LinkedIn's Connection, live on that transport, behind the channel list.
     deps.connections = createTestConnections(
       new Map([["linkedin", new FakeTransport("linkedin")]]),
-      () => talker,
+      () => transport,
     );
     deps.channels = testChannels(deps, deps.connections);
     person = await deps.personMappingRepo.create({

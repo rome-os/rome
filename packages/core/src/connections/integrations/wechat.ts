@@ -1,6 +1,6 @@
 // WeChat connection integration. Channel contract: docs/architecture/channels.md.
 //
-// WeChat is a Talker with a single `account` grant: the bot token + the account
+// WeChat is a ChannelTransport with a single `account` grant: the bot token + the account
 // coordinates (baseUrl, accountId, optional userId) minted by the QR pairing
 // flow. The transport core — long-poll, the inbound `ChannelMessage`,
 // attachment download/decrypt, media send — is `WechatAdapter`
@@ -22,7 +22,7 @@
 // CredentialRejected{ grant: "account" }. Any other terminal poll failure is a
 // Disconnected.
 
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import {
   getDefaultWechatStatePath,
   isWechatAuthError,
@@ -42,7 +42,7 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   SecretRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import { typingActivityFeature } from "./talk-features.js";
 
@@ -286,7 +286,7 @@ function wechatAccountScheme(): AuthScheme {
 export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): ConnectionDescriptor {
   const createAdapter: CreateWechatAdapter =
     deps.createAdapter ?? ((config) => new WechatAdapter(config));
-  const liveAdapters = new WeakMap<Talker, WechatAdapter>();
+  const liveAdapters = new WeakMap<ChannelTransport, WechatAdapter>();
 
   const accountScheme = wechatAccountScheme();
   // The WeChat conferral setup: QR show → scan-confirmed wait →
@@ -304,9 +304,9 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
       account: accountScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["account"] as const,
-        build(creds): Talker {
+        build(creds): ChannelTransport {
           // Inline material for the `account` grant (never an external
           // resolver for a Talk grant); the pairing flow packs these fields.
           const account = creds.account.material as unknown as WechatAccountMaterial;
@@ -331,13 +331,13 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
 
           const adapter = createAdapter(config);
 
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
             },
             activity: typingActivityFeature(adapter),
           };
-          const talker: Talker = {
+          const transport: ChannelTransport = {
             start(deliver, fault): void {
               faultSink = fault;
               adapter.onInbound(async (msg) => deliver(msg));
@@ -355,8 +355,8 @@ export function createWechatDescriptor(deps: WechatDescriptorDeps = {}): Connect
             },
             ...features,
           };
-          liveAdapters.set(talker, adapter);
-          return talker;
+          liveAdapters.set(transport, adapter);
+          return transport;
         },
         degradation(instance) {
           return liveAdapters.get(instance)?.getRuntimeDegradation() ?? null;

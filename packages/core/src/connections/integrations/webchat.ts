@@ -2,7 +2,7 @@
 //
 // WebChat is the zero-grant case: access is bounded out-of-band
 // by the guardian-gated web app (the Rome dashboard, itself behind guardian
-// auth), so there is nothing to confer — `auth: {}` and the Talker is unlocked
+// auth), so there is nothing to confer — `auth: {}` and the ChannelTransport is unlocked
 // from birth (`needs: []`). It is also entirely in-process: no external
 // transport, so it can never fault (`fault` is accepted but never called).
 //
@@ -22,9 +22,9 @@
 // record, so send and history pass through without a projection.
 
 import { WebChatAdapter } from "../../channels/webchat.js";
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import type { ConnectionDescriptor, Talker } from "../types.js";
+import type { ConnectionDescriptor, ChannelTransport } from "../types.js";
 import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 export interface WebchatDescriptorDeps {
@@ -41,16 +41,16 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
     service: "webchat",
     auth: {},
     capabilities: {
-      talker: {
+      transport: {
         needs: [] as const,
         // Webchat turns start from its own HTTP route, so its channel has no
         // inbound port for the channel-message hook to answer a second time.
         receives: false,
         history: true,
-        build(): Talker {
+        build(): ChannelTransport {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             history: {
               async query(input) {
                 const messages = await adapter.fetchHistory(

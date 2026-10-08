@@ -1,6 +1,6 @@
 // Email connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
+// Email is a ChannelTransport with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
 // gate + body-pull + the inbound `ChannelMessage`, attachment download, history
@@ -30,7 +30,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
@@ -49,7 +49,7 @@ import type {
   Credential,
   ProfileDisplay,
   ProfileRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
@@ -236,10 +236,10 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
       inbox: inboxScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["inbox"] as const,
         history: true,
-        build(creds, kit): Talker {
+        build(creds, kit): ChannelTransport {
           const material = creds.inbox.material as unknown as EmailInboxMaterial;
           const config: EmailInboxCoordinates = {
             address: material.address,
@@ -258,7 +258,7 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let unregisterIngress: (() => void) | null = null;
 
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
             },

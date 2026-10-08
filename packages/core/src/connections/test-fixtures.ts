@@ -2,9 +2,9 @@
 // test agents (registry, ledger, rehydration) can import from this one file.
 //
 // Six fake descriptors mirror the six canonical services:
-//   zeroGrantTalk   — webchat-like: Talker with no grants, unlocked from birth
-//   pasteTalk       — telegram-like: one tokenPaste grant → Talker
-//   twoGrant        — discord-like: bot(paste)+user(renewable) → talker+watcher+actor
+//   zeroGrantTalk   — webchat-like: ChannelTransport with no grants, unlocked from birth
+//   pasteTalk       — telegram-like: one tokenPaste grant → ChannelTransport
+//   twoGrant        — discord-like: bot(paste)+user(renewable) → transport+watcher+actor
 //   renewableAct    — github-like: one renewable grant → Actor (N renewals, then re-confer)
 //   gatedWatch      — github-like: zero-grant Watcher with subscriptionGated:true
 //   externalCustody — Composio-like: scheme with resolveExternal; no secrets in ledger
@@ -30,7 +30,7 @@ import type {
   OutgoingMessage,
   ProfileRecord,
   SecretRecord,
-  Talker,
+  ChannelTransport,
   Watcher,
   WatchEvent,
 } from "./types.js";
@@ -56,9 +56,9 @@ export function makeRecordingSleep(): RecordingSleep {
   };
 }
 
-// Fake Talker
+// Fake ChannelTransport
 
-export interface FakeTalkerState {
+export interface FakeChannelTransportState {
   /** The `deliver` callback passed to start(). Null until start() is called. */
   deliver: ((msg: ChannelMessage) => void) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
@@ -70,7 +70,7 @@ export interface FakeTalkerState {
   /** If set, the next send() call will throw this error (then clear). */
   nextSendError: Error | null;
   /** If set, start() synchronously delivers these messages via the deliver
-   *  callback before returning — models a Talker flushing buffered inbound on
+   *  callback before returning — models a ChannelTransport flushing buffered inbound on
    *  start. Used to prove onUnlocked fires before start() so a handler registered
    *  synchronously in the callback catches the first delivery. */
   flushOnStart: ChannelMessage[] | null;
@@ -78,25 +78,25 @@ export interface FakeTalkerState {
   stopResolved: number;
 }
 
-/** A fake Talker that records all interactions and exposes the captured
+/** A fake ChannelTransport that records all interactions and exposes the captured
  *  deliver/fault callbacks so tests can push messages and faults in. */
-export interface FakeTalker extends Talker {
-  readonly state: FakeTalkerState;
+export interface FakeChannelTransport extends ChannelTransport {
+  readonly state: FakeChannelTransportState;
 }
 
-/** Options for makeFakeTalker. */
-export interface FakeTalkerOptions {
+/** Options for makeFakeChannelTransport. */
+export interface FakeChannelTransportOptions {
   /** If true, stop() returns a promise that resolves on the next microtask AND
    *  bumps state.stopResolved when it resolves — models grammy's async drain so
    *  awaitable-shutdown tests can prove stopAll() waits for it. */
   asyncStop?: boolean;
 }
 
-export function makeFakeTalker(
+export function makeFakeChannelTransport(
   creds: Record<string, Credential>,
-  opts?: FakeTalkerOptions,
-): FakeTalker {
-  const state: FakeTalkerState = {
+  opts?: FakeChannelTransportOptions,
+): FakeChannelTransport {
+  const state: FakeChannelTransportState = {
     deliver: null,
     fault: null,
     starts: [],
@@ -107,13 +107,13 @@ export function makeFakeTalker(
     stopResolved: 0,
   };
 
-  const talker: FakeTalker = {
+  const transport: FakeChannelTransport = {
     state,
     start(deliver, fault) {
       state.deliver = deliver;
       state.fault = fault;
       state.starts.push({ creds });
-      // Synchronously flush any buffered inbound (models a Talker that delivers
+      // Synchronously flush any buffered inbound (models a ChannelTransport that delivers
       // from start()). This runs AFTER onUnlocked fired, so a handler registered
       // synchronously in the callback is already wired.
       if (state.flushOnStart) {
@@ -141,7 +141,7 @@ export function makeFakeTalker(
     },
   };
 
-  return talker;
+  return transport;
 }
 
 // Fake Actor
@@ -223,22 +223,24 @@ export function makeFakeWatcher(creds: Record<string, Credential>): FakeWatcher 
   return watcher;
 }
 
-// FakeTalkerFactory / FakeActorFactory / FakeWatcherFactory
+// FakeChannelTransportFactory / FakeActorFactory / FakeWatcherFactory
 
 // Factories that remember every instance built so tests can reach into them.
 // Each factory.instances[n] is the nth fake created (in build() call order).
 
-export interface FakeTalkerFactory {
-  readonly instances: FakeTalker[];
-  build(creds: Record<string, Credential>): FakeTalker;
+export interface FakeChannelTransportFactory {
+  readonly instances: FakeChannelTransport[];
+  build(creds: Record<string, Credential>): FakeChannelTransport;
 }
 
-export function makeFakeTalkerFactory(opts?: FakeTalkerOptions): FakeTalkerFactory {
-  const instances: FakeTalker[] = [];
+export function makeFakeChannelTransportFactory(
+  opts?: FakeChannelTransportOptions,
+): FakeChannelTransportFactory {
+  const instances: FakeChannelTransport[] = [];
   return {
     instances,
     build(creds) {
-      const t = makeFakeTalker(creds, opts);
+      const t = makeFakeChannelTransport(creds, opts);
       instances.push(t);
       return t;
     },
@@ -369,44 +371,44 @@ export function makeWatchEvent(overrides?: Partial<WatchEvent>): WatchEvent {
 
 // Descriptor: zeroGrantTalk (webchat-like)
 //
-// No auth grants; Talker unlocked from birth. Models webchat where access is
+// No auth grants; ChannelTransport unlocked from birth. Models webchat where access is
 // bounded out-of-band by the guardian-gated web app.
 
 export interface ZeroGrantTalkFixture {
   descriptor: ConnectionDescriptor;
-  talkerFactory: FakeTalkerFactory;
+  transportFactory: FakeChannelTransportFactory;
 }
 
 export function makeZeroGrantTalk(): ZeroGrantTalkFixture {
-  const talkerFactory = makeFakeTalkerFactory();
+  const transportFactory = makeFakeChannelTransportFactory();
   const descriptor: ConnectionDescriptor = {
     service: "fake-webchat",
     auth: {},
     capabilities: {
-      talker: {
+      transport: {
         needs: [] as const,
         build(creds) {
-          return talkerFactory.build(creds);
+          return transportFactory.build(creds);
         },
       },
     },
   };
-  return { descriptor, talkerFactory };
+  return { descriptor, transportFactory };
 }
 
 // Descriptor: pasteTalk (telegram-like)
 //
-// One tokenPaste grant "bot" → Talker. validate is a no-op (always valid).
+// One tokenPaste grant "bot" → ChannelTransport. validate is a no-op (always valid).
 
 export interface PasteTalkFixture {
   descriptor: ConnectionDescriptor;
-  talkerFactory: FakeTalkerFactory;
+  transportFactory: FakeChannelTransportFactory;
   /** Call this inside an importCredential call to supply a valid token. */
   validCredential: () => Credential;
 }
 
-export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
-  const talkerFactory = makeFakeTalkerFactory(opts);
+export function makePasteTalk(opts?: FakeChannelTransportOptions): PasteTalkFixture {
+  const transportFactory = makeFakeChannelTransportFactory(opts);
 
   const descriptor: ConnectionDescriptor = {
     service: "fake-telegram",
@@ -419,10 +421,10 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
       }),
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["bot"] as const,
         build(creds) {
-          return talkerFactory.build(creds);
+          return transportFactory.build(creds);
         },
       },
     },
@@ -433,20 +435,20 @@ export function makePasteTalk(opts?: FakeTalkerOptions): PasteTalkFixture {
     expiresAt: "never",
   });
 
-  return { descriptor, talkerFactory, validCredential };
+  return { descriptor, transportFactory, validCredential };
 }
 
 // Descriptor: twoGrant (discord-like)
 //
 // Two grants:
-//   bot  (tokenPaste) → talker + watcher
+//   bot  (tokenPaste) → transport + watcher
 //   user (renewable)  → actor
 //
 // A degraded user grant relocks Act while Talk+Watch stay live.
 
 export interface TwoGrantFixture {
   descriptor: ConnectionDescriptor;
-  talkerFactory: FakeTalkerFactory;
+  transportFactory: FakeChannelTransportFactory;
   watcherFactory: FakeWatcherFactory;
   actorFactory: FakeActorFactory;
   botScheme: AuthScheme; // tokenPaste — renew is always "re-confer"
@@ -458,7 +460,7 @@ export interface TwoGrantFixture {
 }
 
 export function makeTwoGrant(): TwoGrantFixture {
-  const talkerFactory = makeFakeTalkerFactory();
+  const transportFactory = makeFakeChannelTransportFactory();
   const watcherFactory = makeFakeWatcherFactory();
   const actorFactory = makeFakeActorFactory();
   const userScheme = makeFakeRenewableScheme({ successCount: 3 });
@@ -477,10 +479,10 @@ export function makeTwoGrant(): TwoGrantFixture {
       user: userScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["bot"] as const,
         build(creds) {
-          return talkerFactory.build(creds);
+          return transportFactory.build(creds);
         },
       },
       watcher: {
@@ -510,7 +512,7 @@ export function makeTwoGrant(): TwoGrantFixture {
 
   return {
     descriptor,
-    talkerFactory,
+    transportFactory,
     watcherFactory,
     actorFactory,
     botScheme,

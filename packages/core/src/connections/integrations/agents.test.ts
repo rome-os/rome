@@ -11,7 +11,7 @@ import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import type { StreamFault } from "../types.js";
 import {
-  createAgentsTalker,
+  createAgentsTransport,
   makeAgentsDescriptor,
   makeAgentsSetup,
   reviveAgentsProfile,
@@ -132,30 +132,30 @@ describe("agents channel", () => {
     });
     expect(toAgentInboundMessage(nameless)).toBeNull();
     const client = fakeClient([[nameless, envelope({ messageId: "msg_2" })]]);
-    const talker = createAgentsTalker(client);
+    const transport = createAgentsTransport(client);
     const delivered: ChannelMessage[] = [];
-    talker.start(
+    transport.start(
       (message) => delivered.push(message),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
     expect(client.acknowledged).toEqual([["msg_nameless", "msg_2"]]);
     expect(delivered.map((message) => message.messageId)).toEqual(["msg_2"]);
-    await talker.stop();
+    await transport.stop();
   });
 
   it("delivers polled messages, then acknowledges them", async () => {
     const client = fakeClient([[envelope(), envelope({ messageId: "msg_2" })]]);
-    const talker = createAgentsTalker(client);
+    const transport = createAgentsTransport(client);
     const delivered: ChannelMessage[] = [];
-    talker.start(
+    transport.start(
       (message) => delivered.push(message),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
     expect(client.acknowledged).toEqual([["msg_1", "msg_2"]]);
     expect(delivered.map((message) => message.messageId)).toEqual(["msg_1", "msg_2"]);
-    await talker.stop();
+    await transport.stop();
   });
 
   it("keeps polling with backoff after a failure", async () => {
@@ -167,9 +167,9 @@ describe("agents channel", () => {
       if (calls === 1) throw new Error("Rome Cloud unavailable");
       return { endpoint: "home-rome", messages: [envelope()] };
     };
-    const talker = createAgentsTalker(client);
+    const transport = createAgentsTransport(client);
     const delivered: ChannelMessage[] = [];
-    talker.start(
+    transport.start(
       (message) => delivered.push(message),
       () => {},
     );
@@ -177,7 +177,7 @@ describe("agents channel", () => {
     expect(delivered).toHaveLength(0);
     await rs.advanceTimersByTimeAsync(20_000);
     await until(() => delivered.length === 1, true);
-    await talker.stop();
+    await transport.stop();
   });
 
   it.each([
@@ -191,9 +191,9 @@ describe("agents channel", () => {
       calls++;
       throw error;
     };
-    const talker = createAgentsTalker(client);
+    const transport = createAgentsTransport(client);
     const faults: StreamFault[] = [];
-    talker.start(
+    transport.start(
       () => {},
       (fault) => faults.push(fault),
     );
@@ -202,7 +202,7 @@ describe("agents channel", () => {
     expect((faults[0] as CredentialRejected).grant).toBe("cloud");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls).toBe(1);
-    await talker.stop();
+    await transport.stop();
   });
 
   it("degrades the grant when Cloud rejects the token, rather than renewing it unchanged", async () => {
@@ -231,9 +231,9 @@ describe("agents channel", () => {
 
   it("refuses attachments rather than sending only the text", async () => {
     const client = fakeClient([]);
-    const talker = createAgentsTalker(client);
+    const transport = createAgentsTransport(client);
     await expect(
-      talker.send("atlas" as ConversationId, {
+      transport.send("atlas" as ConversationId, {
         text: "Here is the invoice",
         attachments: [{ type: "document", source: "/tmp/invoice.pdf" }],
       }),
@@ -243,22 +243,22 @@ describe("agents channel", () => {
 
   it("sends to the endpoint named by the conversation and threads replies", async () => {
     const client = fakeClient([]);
-    const talker = createAgentsTalker(client);
-    const receipt = await talker.send("atlas" as ConversationId, {
+    const transport = createAgentsTransport(client);
+    const receipt = await transport.send("atlas" as ConversationId, {
       text: "On it",
       replyToMessageId: "msg_1",
     });
     expect(client.sent).toEqual([{ to: "atlas", text: "On it", inReplyTo: "msg_1" }]);
     expect(receipt).toEqual({ conversationId: "atlas", messageId: "msg_sent" });
-    await expect(talker.send("atlas" as ConversationId, { text: " " })).rejects.toThrow(/text/);
+    await expect(transport.send("atlas" as ConversationId, { text: " " })).rejects.toThrow(/text/);
   });
 
   it("sends to another account's agent by its full address", async () => {
     const client = fakeClient([]);
-    const talker = createAgentsTalker(client);
-    await talker.send("@friend/atlas" as ConversationId, { text: "Hi" });
+    const transport = createAgentsTransport(client);
+    await transport.send("@friend/atlas" as ConversationId, { text: "Hi" });
     expect(client.sent).toEqual([{ to: "@friend/atlas", text: "Hi" }]);
-    await expect(talker.send("friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
+    await expect(transport.send("friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
       "Address another account's agent as @friend/atlas.",
     );
     expect(client.sent).toHaveLength(1);
@@ -267,7 +267,7 @@ describe("agents channel", () => {
   it("answers in the conversation Cloud's reply will come from", async () => {
     const client = fakeClient([]);
     client.send = async () => ({ messageId: "msg_sent", to: "atlas" });
-    const receipt = await createAgentsTalker(client).send("@ouou/atlas" as ConversationId, {
+    const receipt = await createAgentsTransport(client).send("@ouou/atlas" as ConversationId, {
       text: "Hi",
     });
     expect(receipt.conversationId).toBe("atlas");
@@ -280,17 +280,17 @@ describe("agents channel", () => {
         ? new AgentMessagingError("Not reachable", 404, "not_reachable")
         : new AgentMessagingError("No such endpoint", 404, "unknown_endpoint");
     };
-    const talker = createAgentsTalker(client);
-    await expect(talker.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
+    const transport = createAgentsTransport(client);
+    await expect(transport.send("@friend/atlas" as ConversationId, { text: "Hi" })).rejects.toThrow(
       "Rome Cloud can't deliver to @friend/atlas. The agent may not exist, or no link between your accounts lets this Rome reach it.",
     );
-    await expect(talker.send("muse" as ConversationId, { text: "Hi" })).rejects.toThrow(
+    await expect(transport.send("muse" as ConversationId, { text: "Hi" })).rejects.toThrow(
       "Rome Cloud can't deliver to muse. The agent may no longer exist.",
     );
   });
 
   it("reaches a dot directly at its endpoint, so People can write to it first", async () => {
-    const direct = createAgentsTalker(fakeClient([])).directMessaging;
+    const direct = createAgentsTransport(fakeClient([])).directMessaging;
     expect(await direct?.conversationFor("atlas")).toBe("atlas");
     expect(await direct?.conversationFor(" ")).toBeNull();
   });

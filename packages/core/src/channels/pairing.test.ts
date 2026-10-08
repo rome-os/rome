@@ -31,7 +31,7 @@ function registryOf(
   return {
     get: (connectionId) =>
       ({
-        withTalker: (call: (talker: object) => unknown) =>
+        withTransport: (call: (transport: object) => unknown) =>
           call({
             send: (...args: Parameters<ChannelSend["send"]>) => send(connectionId, ...args),
             get directMessaging() {

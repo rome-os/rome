@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConversationDescriptor, ConversationId, ConversationRef } from "@rome-os/app-runtime";
-import type { TalkDirectory } from "../connections/types.js";
+import type { TransportDirectory } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
 import { connectionPorts } from "../channels/connection-ports.js";
-import type { ConnectionDescriptor, Talker } from "../connections/types.js";
+import type { ConnectionDescriptor, ChannelTransport } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ConversationSettingsRepository } from "./repository.js";
 import { ConversationSettingsService } from "./service.js";
@@ -19,10 +19,10 @@ function directoryDescriptor(
     service,
     auth: {},
     capabilities: {
-      talker: {
+      transport: {
         needs: [],
-        build(_creds, kit): Talker {
-          const directory: TalkDirectory = {
+        build(_creds, kit): ChannelTransport {
+          const directory: TransportDirectory = {
             async listConversations(input) {
               const all = conversations(kit.connectionId).filter(
                 (conversation) => input.includeTopics || conversation.kind !== "topic",

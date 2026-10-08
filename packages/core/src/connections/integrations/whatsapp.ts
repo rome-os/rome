@@ -1,6 +1,6 @@
 // WhatsApp connection integration. Channel contract: docs/architecture/channels.md.
 //
-// WhatsApp is a Talker with a single `session` grant: a linked-device session
+// WhatsApp is a ChannelTransport with a single `session` grant: a linked-device session
 // (Baileys auth state) that comes from entering a pairing code on the phone. The
 // transport core — the inbound `ChannelMessage`, address-book sync, media
 // download, the generation-gated reconnect loop — is `WhatsAppAdapter`
@@ -26,7 +26,7 @@
 // → CredentialRejected{ grant: "session" }; any other terminal → Disconnected.
 
 import { z } from "zod";
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import { WhatsAppAdapter, type WhatsAppAuthProvider } from "../../channels/whatsapp.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -41,7 +41,7 @@ import type {
   ProfileRecord,
   RuntimeKit,
   SecretRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import {
   createWhatsAppAuthState,
@@ -147,7 +147,7 @@ export interface WhatsAppPairingHandle {
  *  whose persist hook is a no-op — during setup the mutating session state
  *  lives in setup memory only. The sync sink still mirrors contacts/history so
  *  the address book populates during pairing (parity with the pre-cutover
- *  transient socket); the real Talker re-attaches the same sink post-confer. */
+ *  transient socket); the real ChannelTransport re-attaches the same sink post-confer. */
 function openWhatsAppPairingSocket(
   createAdapter: (authProvider: WhatsAppAuthProvider) => WhatsAppAdapter,
   syncSink: WhatsAppSyncSink,
@@ -235,7 +235,7 @@ export function makeWhatsAppSetup(deps: { openPairing: () => WhatsAppPairingHand
 
       // Stop the transient socket BEFORE the conferral commit — WhatsApp rejects
       // a second concurrent socket on the same session, and the registry builds
-      // the real Talker from the ledger the moment the credential lands.
+      // the real ChannelTransport from the ledger the moment the credential lands.
       await pairing.stop();
       const material = pairing.serialize();
       conferred = true;
@@ -292,11 +292,11 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
       session: sessionScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["session"] as const,
-        build(creds, kit: RuntimeKit): Talker {
+        build(creds, kit: RuntimeKit): ChannelTransport {
           const material = asSessionMaterial(creds.session.material as SecretRecord);
-          // One auth state for the whole Talker lifetime: every socket
+          // One auth state for the whole ChannelTransport lifetime: every socket
           // generation (initial + each reconnect) reads the SAME live record,
           // and every mutation write-throughs via kit.persist("session", …).
           const auth = createWhatsAppAuthState(material, (next) => kit.persist("session", next));
@@ -317,7 +317,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             );
           });
 
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
             },

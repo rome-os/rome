@@ -193,7 +193,7 @@ function placeholderView(
     display[name] = null;
   }
 
-  const capStatus = (kind: "talker" | "actor" | "watcher"): CapabilityStatus => {
+  const capStatus = (kind: "transport" | "actor" | "watcher"): CapabilityStatus => {
     const cap = descriptor.capabilities[kind];
     if (!cap) return { state: "unsupported" };
     if (cap.needs.length > 0) return { state: "needs-auth", missingGrants: [...cap.needs] };
@@ -210,7 +210,7 @@ function placeholderView(
     grants,
     display,
     capabilities: {
-      talk: capStatus("talker"),
+      talk: capStatus("transport"),
       act: capStatus("actor"),
       watch: capStatus("watcher"),
     },
@@ -294,8 +294,8 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     conn: Connection,
     grant?: string,
   ): ((tx: DrizzleTx) => void) | undefined => {
-    const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
+    const transport = registry.getDescriptor(conn.service)?.capabilities.transport;
+    if (!transport || (grant !== undefined && !transport.needs.includes(grant))) return undefined;
     return (tx) => {
       deps.approvalsRepo.supersedePairings(conn.id, tx);
       deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);

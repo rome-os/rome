@@ -32,20 +32,20 @@ function line(id: string, at: number): ChannelMessage {
 
 const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ConversationId };
 
-/** A registry holding `connections`, each with a talker that sends through
+/** A registry holding `connections`, each with a transport that sends through
  *  `send`, told which Connection is sending. */
 function registryOf(
   connections: Array<{ connectionId: string; service: string }>,
   send: (...args: never[]) => unknown,
 ): ChannelsServiceDeps["registry"] {
   const all = connections.map(({ connectionId, service }) => {
-    const talker = {
+    const transport = {
       send: (...args: unknown[]) => (send as (...a: unknown[]) => unknown)(connectionId, ...args),
     };
     return {
       id: connectionId,
       service,
-      withTalker: (call: (live: typeof talker) => unknown) => call(talker),
+      withTransport: (call: (live: typeof transport) => unknown) => call(transport),
       status: () => ({ talk: { state: "unlocked" } }),
     } as unknown as Connection;
   });

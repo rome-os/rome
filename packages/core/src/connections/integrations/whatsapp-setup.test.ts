@@ -79,7 +79,7 @@ describe("makeWhatsAppSetup", () => {
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     // The transient socket is stopped BEFORE the conferral commit (WhatsApp
-    // allows one live socket per session; the registry builds the real Talker).
+    // allows one live socket per session; the registry builds the real ChannelTransport).
     expect(pairing.stop).toHaveBeenCalledTimes(1);
     expect(pairing.stop.mock.invocationCallOrder[0]).toBeLessThan(
       commit.mock.invocationCallOrder[0],

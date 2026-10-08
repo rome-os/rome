@@ -1,7 +1,7 @@
 // The Email descriptor. Email is push-driven (no live transport
 // loop), so its fault mapping is exercised through the two out-of-band signals
 // documented in email.ts:
-//   1. descriptor shape — one `inbox` grant, a talker needing it.
+//   1. descriptor shape — one `inbox` grant, a transport needing it.
 //   2. registry-level: import unlocks talk; send()/ingestInbound() round-trip
 //      through the wrapped EmailAdapter.
 //   3. fault mapping: ingestInbound's bad_signature verdict → CredentialRejected
@@ -30,7 +30,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, StreamFault, Talker } from "../types.js";
+import type { ConversationId, StreamFault, ChannelTransport } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -162,11 +162,11 @@ const validCred = (material: Partial<EmailInboxMaterial> = {}) => ({
 });
 
 describe("email descriptor shape", () => {
-  it("declares one `inbox` grant and a talker needing it", () => {
+  it("declares one `inbox` grant and a transport needing it", () => {
     const desc = makeEmailDescriptor(makeDeps(makeProvider()));
     expect(desc.service).toBe("email");
     expect(Object.keys(desc.auth)).toEqual(["inbox"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["inbox"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["inbox"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -186,21 +186,21 @@ describe("email descriptor shape", () => {
   });
 });
 
-// A direct-Talker harness bypassing the registry, mirroring telegram's
-// buildTalker helper — observes exactly what the builder reports to fault().
-function buildTalker(
+// A direct-ChannelTransport harness bypassing the registry, mirroring telegram's
+// buildTransport helper — observes exactly what the builder reports to fault().
+function buildTransport(
   provider: MailProvider,
   material: Partial<EmailInboxMaterial> = {},
   depsOverride: Partial<EmailDescriptorDeps> = {},
 ): {
-  talker: Talker;
+  transport: ChannelTransport;
   faults: StreamFault[];
   start: () => void;
   ingest: (rawBody: string, signature: string) => Promise<EmailInboundResult>;
 } {
   const desc = makeEmailDescriptor(makeDeps(provider, depsOverride));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { inbox: validCred(material) },
     {
       connectionId: "email-test",
@@ -215,10 +215,10 @@ function buildTalker(
   );
   const faults: StreamFault[] = [];
   return {
-    talker,
+    transport,
     faults,
     start: () =>
-      talker.start(
+      transport.start(
         () => {},
         (err) => faults.push(err),
       ),
@@ -228,10 +228,10 @@ function buildTalker(
   };
 }
 
-describe("email Talker fault mapping", () => {
+describe("email ChannelTransport fault mapping", () => {
   it("maps ingestInbound's bad_signature verdict to CredentialRejected{ grant: 'inbox' }", async () => {
     const provider = makeProvider();
-    const h = buildTalker(provider);
+    const h = buildTransport(provider);
     h.start();
 
     const raw = JSON.stringify(buildEvent());
@@ -245,7 +245,7 @@ describe("email Talker fault mapping", () => {
 
   it("does not fault on a well-signed, well-formed deposit", async () => {
     const provider = makeProvider();
-    const h = buildTalker(provider);
+    const h = buildTransport(provider);
     h.start();
 
     const raw = JSON.stringify(buildEvent());
@@ -257,7 +257,7 @@ describe("email Talker fault mapping", () => {
 
   it("never provisions from start() — the route is the sole provisioner", async () => {
     const provider = makeProvider();
-    const h = buildTalker(provider);
+    const h = buildTransport(provider);
     h.start();
     await flush();
 
@@ -280,7 +280,7 @@ describe("email Talker fault mapping", () => {
       },
       set: async () => {},
     } as unknown as SettingsRepository;
-    const h = buildTalker(provider, {}, { settingsRepo: brokenSettings });
+    const h = buildTransport(provider, {}, { settingsRepo: brokenSettings });
     h.start();
     await flush();
 
@@ -294,7 +294,7 @@ describe("email Talker fault mapping", () => {
     const provider = makeProvider();
     const desc = makeEmailDescriptor(makeDeps(provider));
     let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { inbox: validCred() },
       {
         connectionId: "email-test",
@@ -306,7 +306,7 @@ describe("email Talker fault mapping", () => {
       },
     );
     const received: ChannelMessage[] = [];
-    talker.start(
+    transport.start(
       (msg) => received.push(msg),
       () => {},
     );
@@ -320,10 +320,10 @@ describe("email Talker fault mapping", () => {
 
   it("forwards send() to the provider", async () => {
     const provider = makeProvider();
-    const h = buildTalker(provider);
+    const h = buildTransport(provider);
     h.start();
 
-    const receipt = await h.talker.send("t1" as ConversationId, {
+    const receipt = await h.transport.send("t1" as ConversationId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
@@ -349,10 +349,10 @@ describe("email Talker fault mapping", () => {
         ],
       }),
     });
-    const h = buildTalker(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
+    const h = buildTransport(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
     h.start();
 
-    const history = await h.talker.history?.query({});
+    const history = await h.transport.history?.query({});
     expect(history?.map((line) => [line.messageId, line.direction])).toEqual([
       ["mine", "outbound"],
     ]);
@@ -361,30 +361,32 @@ describe("email Talker fault mapping", () => {
   // The flag is what gives the channel a \`messages\` port; the feature is what
   // answers it. A Talk offering one without the other is unreachable or broken.
   it("declares the history its Talk offers", () => {
-    expect(makeEmailDescriptor(makeDeps(makeProvider())).capabilities.talker?.history).toBe(true);
+    expect(makeEmailDescriptor(makeDeps(makeProvider())).capabilities.transport?.history).toBe(
+      true,
+    );
   });
 
   it("forwards fetchHistory and saveIncomingAttachments", async () => {
     const provider = makeProvider();
-    const h = buildTalker(provider);
+    const h = buildTransport(provider);
     h.start();
 
-    expect(h.talker.history).toBeDefined();
-    expect(h.talker.inboundMedia).toBeDefined();
-    const history = await h.talker.history?.query({ limit: 20 });
+    expect(h.transport.history).toBeDefined();
+    expect(h.transport.inboundMedia).toBeDefined();
+    const history = await h.transport.history?.query({ limit: 20 });
     expect(Array.isArray(history)).toBe(true);
   });
 });
 
-/** A talker whose ingress and deliveries the test drives directly. */
-function buildDeliveringTalker(provider: MailProvider): {
-  talker: Talker;
+/** A transport whose ingress and deliveries the test drives directly. */
+function buildDeliveringTransport(provider: MailProvider): {
+  transport: ChannelTransport;
   delivered: ChannelMessage[];
   ingest: (event: RomeMailEvent) => Promise<unknown>;
 } {
   const desc = makeEmailDescriptor(makeDeps(provider));
   let ingress: ((input: unknown) => Promise<unknown>) | undefined;
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { inbox: validCred() },
     {
       connectionId: "email-test",
@@ -396,12 +398,12 @@ function buildDeliveringTalker(provider: MailProvider): {
     },
   );
   const delivered: ChannelMessage[] = [];
-  talker.start(
+  transport.start(
     (msg) => delivered.push(msg),
     () => {},
   );
   return {
-    talker,
+    transport,
     delivered,
     ingest: async (event) => {
       const rawBody = JSON.stringify(event);
@@ -433,7 +435,7 @@ describe("email inbound delivery", () => {
   });
 
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
-    const h = buildDeliveringTalker(makeProvider());
+    const h = buildDeliveringTransport(makeProvider());
 
     await h.ingest(event);
 
@@ -464,10 +466,10 @@ describe("email inbound delivery", () => {
       expiresAt: new Date(0).toISOString(),
       size: 3,
     }));
-    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    const h = buildDeliveringTransport(makeProvider({ getAttachment }));
     await h.ingest(event);
 
-    const saved = await h.talker.inboundMedia!.materialize(h.delivered[0]);
+    const saved = await h.transport.inboundMedia!.materialize(h.delivered[0]);
 
     expect(getAttachment).toHaveBeenCalledWith("msg_1", "att_1");
     expect(saved[0].localPath).toContain(join("channel-attachments", "email", "t1", "msg_1"));
@@ -477,10 +479,10 @@ describe("email inbound delivery", () => {
     const getAttachment = rs.fn(async () => {
       throw new Error("should not be called");
     });
-    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    const h = buildDeliveringTransport(makeProvider({ getAttachment }));
     const attachments = [{ type: "document" as const, fileName: "doc.pdf" }];
 
-    const saved = await h.talker.inboundMedia!.materialize({
+    const saved = await h.transport.inboundMedia!.materialize({
       channel: "email",
       direction: "inbound",
       messageId: "msg_unknown",
@@ -514,7 +516,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: ChannelMessage[] = [];
-    conn.hearTalker(async (msg) => {
+    conn.hearTransport(async (msg) => {
       received.push(msg);
       return;
     });

@@ -17,7 +17,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talker } from "../types.js";
+import type { Connection, StreamFault, ChannelTransport } from "../types.js";
 import { isTelegramAuthError, makeTelegramDescriptor } from "./telegram.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -175,11 +175,11 @@ describe("isTelegramAuthError", () => {
 });
 
 describe("telegram descriptor shape", () => {
-  it("declares one `bot` grant and a talker needing it", () => {
+  it("declares one `bot` grant and a transport needing it", () => {
     const desc = makeTelegramDescriptor();
     expect(desc.service).toBe("telegram");
     expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["bot"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -187,7 +187,7 @@ describe("telegram descriptor shape", () => {
   it("exposes an awaitable stop() and forwards saveIncomingAttachments", () => {
     const factory = new FaultBotFactory(true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { bot: validCred() },
       {
         connectionId: "telegram-test",
@@ -197,11 +197,11 @@ describe("telegram descriptor shape", () => {
     );
     // stop() returns the adapter's drain promise so registry.stopAll can await
     // grammy's bot.stop() letting in-flight sends / the long-poll finish.
-    talker.start(
+    transport.start(
       () => {},
       () => {},
     );
-    const stopped = talker.stop();
+    const stopped = transport.stop();
     expect(stopped).toBeInstanceOf(Promise);
     const message = {
       channel: "telegram",
@@ -213,7 +213,7 @@ describe("telegram descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    void talker.inboundMedia?.materialize(message);
+    void transport.inboundMedia?.materialize(message);
     return stopped as Promise<void>;
   });
 
@@ -234,7 +234,7 @@ describe("telegram descriptor shape", () => {
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     const received: string[] = [];
     expect(conn.isUnlocked("talk")).toBe(true);
-    conn.hearTalker(async (msg) => {
+    conn.hearTransport(async (msg) => {
       received.push(`${msg.conversationId}:${msg.text}`);
       return;
     });
@@ -261,7 +261,7 @@ describe("telegram inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { bot: validCred() },
       {
         connectionId: "telegram-test",
@@ -270,7 +270,7 @@ describe("telegram inbound delivery", () => {
       },
     );
     const delivered: unknown[] = [];
-    talker.start(
+    transport.start(
       (msg) => delivered.push(msg),
       () => {},
     );
@@ -325,19 +325,19 @@ describe("telegram inbound delivery", () => {
         raw: message,
       },
     ]);
-    await talker.stop();
+    await transport.stop();
   });
 });
 
-// A direct-Talker harness for the raw start()/fault() contract, bypassing the
+// A direct-ChannelTransport harness for the raw start()/fault() contract, bypassing the
 // registry so we observe exactly what the builder reports.
-function buildTalker(factory: FaultBotFactory): {
-  talker: Talker;
+function buildTransport(factory: FaultBotFactory): {
+  transport: ChannelTransport;
   faults: StreamFault[];
   start: () => void;
 } {
   const desc = makeTelegramDescriptor({ createBot: factory.createBot });
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { bot: validCred() },
     {
       connectionId: "telegram-test",
@@ -347,21 +347,21 @@ function buildTalker(factory: FaultBotFactory): {
   );
   const faults: StreamFault[] = [];
   return {
-    talker,
+    transport,
     faults,
     start: () =>
-      talker.start(
+      transport.start(
         () => {},
         (err) => faults.push(err),
       ),
   };
 }
 
-describe("telegram Talker fault mapping", () => {
+describe("telegram ChannelTransport fault mapping", () => {
   it("maps a 401 at start (getMe/init) to CredentialRejected{ grant: 'bot' }", async () => {
     const factory = new FaultBotFactory(/* skipInit */ false);
     factory.getMe = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
-    const h = buildTalker(factory);
+    const h = buildTransport(factory);
 
     h.start();
     await flush();
@@ -374,7 +374,7 @@ describe("telegram Talker fault mapping", () => {
   it("maps a 401 from the getUpdates poll to CredentialRejected{ grant: 'bot' }", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     factory.getUpdatesError = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
-    const h = buildTalker(factory);
+    const h = buildTransport(factory);
 
     h.start();
     await flush();
@@ -390,7 +390,7 @@ describe("telegram Talker fault mapping", () => {
     // terminally and routeFault sees a non-auth error.
     const factory = new FaultBotFactory(/* skipInit */ false);
     factory.getMeThrow = () => new Error("ECONNRESET");
-    const h = buildTalker(factory);
+    const h = buildTransport(factory);
 
     h.start();
     await flush();
@@ -403,12 +403,12 @@ describe("telegram Talker fault mapping", () => {
   it("throws CredentialRejected{ grant: 'bot' } from send() on a 401", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     factory.sendMessage = () => ({ ok: false, error_code: 401, description: "Unauthorized" });
-    const h = buildTalker(factory);
+    const h = buildTransport(factory);
     h.start();
 
     const addr = "999" as ConversationId;
-    await expect(h.talker.send(addr, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
-    await expect(h.talker.send(addr, { text: "hi" })).rejects.toMatchObject({ grant: "bot" });
+    await expect(h.transport.send(addr, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
+    await expect(h.transport.send(addr, { text: "hi" })).rejects.toMatchObject({ grant: "bot" });
   });
 });
 

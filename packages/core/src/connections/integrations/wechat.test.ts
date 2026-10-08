@@ -1,6 +1,6 @@
 // The WeChat descriptor. Three layers under test:
 //   1. isWechatAuthError / descriptor shape — pure, no transport.
-//   2. Talker fault mapping — a fake WechatAdapter (injected through the
+//   2. ChannelTransport fault mapping — a fake WechatAdapter (injected through the
 //      createAdapter seam) fires its onFault callback so we assert HTTP 401/403
 //      → CredentialRejected{ grant: "account" } and other terminal → Disconnected.
 //   3. The account-401 → renew-once-then-degrade flow end-to-end over the real
@@ -19,7 +19,7 @@ import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.j
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talker } from "../types.js";
+import type { Connection, StreamFault, ChannelTransport } from "../types.js";
 import { createWechatDescriptor } from "./wechat.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -116,11 +116,11 @@ describe("isWechatAuthError", () => {
 });
 
 describe("wechat descriptor shape", () => {
-  it("declares one `account` grant and a talker needing it", () => {
+  it("declares one `account` grant and a transport needing it", () => {
     const desc = createWechatDescriptor();
     expect(desc.service).toBe("wechat");
     expect(Object.keys(desc.auth)).toEqual(["account"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["account"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["account"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -167,7 +167,7 @@ describe("wechat descriptor shape", () => {
       timestamp: new Date(),
     } satisfies ChannelMessage;
     await expect(
-      conn.withTalker((talker) => talker.inboundMedia?.materialize(message)),
+      conn.withTransport((transport) => transport.inboundMedia?.materialize(message)),
     ).resolves.toEqual([]);
   });
 
@@ -193,8 +193,12 @@ describe("wechat descriptor shape", () => {
   });
 });
 
-// Direct-Talker harness for the raw start()/fault() contract.
-function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: StreamFault[] } {
+// Direct-ChannelTransport harness for the raw start()/fault() contract.
+function buildTransport(): {
+  transport: ChannelTransport;
+  adapter: FakeWechatAdapter;
+  faults: StreamFault[];
+} {
   let adapter!: FakeWechatAdapter;
   const desc = createWechatDescriptor({
     createAdapter: (config) => {
@@ -202,7 +206,7 @@ function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: St
       return adapter as never;
     },
   });
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { account: validCred() },
     {
       connectionId: "wechat-test",
@@ -211,16 +215,16 @@ function buildTalker(): { talker: Talker; adapter: FakeWechatAdapter; faults: St
     },
   );
   const faults: StreamFault[] = [];
-  talker.start(
+  transport.start(
     () => {},
     (err) => faults.push(err),
   );
-  return { talker, adapter, faults };
+  return { transport, adapter, faults };
 }
 
-describe("wechat Talker fault mapping", () => {
+describe("wechat ChannelTransport fault mapping", () => {
   it("maps an HTTP 401 poll failure to CredentialRejected{ grant: 'account' }", () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.adapter.fault(new Error("HTTP 401: unauthorized"));
     expect(h.faults).toHaveLength(1);
     expect(h.faults[0]).toBeInstanceOf(CredentialRejected);
@@ -228,7 +232,7 @@ describe("wechat Talker fault mapping", () => {
   });
 
   it("maps a non-auth terminal failure to Disconnected", () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.adapter.fault(new Error("HTTP 500: boom"));
     expect(h.faults).toHaveLength(1);
     expect(h.faults[0]).toBeInstanceOf(Disconnected);
@@ -315,7 +319,7 @@ describe("wechat inbound delivery", () => {
     );
 
     const desc = createWechatDescriptor({ createAdapter: (config) => new WechatAdapter(config) });
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { account: { ...validCred(), material: { ...validCred().material, statePath } } },
       {
         connectionId: "wechat-test",
@@ -324,7 +328,7 @@ describe("wechat inbound delivery", () => {
       },
     );
     const delivered: unknown[] = [];
-    talker.start(
+    transport.start(
       (msg) => delivered.push(msg),
       () => {},
     );
@@ -357,7 +361,7 @@ describe("wechat inbound delivery", () => {
 
     // Media reads its CDN reference from raw. A failed download leaves the
     // attachment unsaved rather than failing the message.
-    const inboundMedia = talker.inboundMedia!;
+    const inboundMedia = transport.inboundMedia!;
     const message = delivered[0] as ChannelMessage;
     await expect(inboundMedia.materialize(message)).resolves.toStrictEqual(message.attachments);
     expect(cdnRequests).toEqual([
@@ -369,6 +373,6 @@ describe("wechat inbound delivery", () => {
     await expect(inboundMedia.materialize(withoutRaw)).resolves.toBe(withoutRaw.attachments);
     expect(cdnRequests).toHaveLength(1);
 
-    await talker.stop();
+    await transport.stop();
   });
 });

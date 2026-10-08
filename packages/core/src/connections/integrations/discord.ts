@@ -1,6 +1,6 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Discord is a Talker with a single `bot` grant (a pasted bot token). The
+// Discord is a ChannelTransport with a single `bot` grant (a pasted bot token). The
 // transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
 // commands, send formatting, history — is `DiscordAdapter`
 // (packages/core/src/channels/discord.ts), wrapped here so the runtime's
@@ -17,14 +17,19 @@
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures, TalkHistory } from "../types.js";
+import type { TransportDirectory, TransportFeatures, TransportHistory } from "../types.js";
 import { DiscordAdapter } from "../../channels/discord.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
-import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
+import type {
+  ConnectionDescriptor,
+  ProfileDisplay,
+  ProfileRecord,
+  ChannelTransport,
+} from "../types.js";
 import { directoryPage, historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
@@ -237,10 +242,10 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
       bot: botScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["bot"] as const,
         history: true,
-        build(creds, kit): Talker {
+        build(creds, kit): ChannelTransport {
           const token = creds.bot.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
 
@@ -271,7 +276,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             );
           };
 
-          const history: TalkHistory = {
+          const history: TransportHistory = {
             async query(input) {
               const messages = await adapter.fetchHistory(
                 input.conversationId ?? null,
@@ -292,7 +297,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               };
             },
           };
-          const directory: TalkDirectory = {
+          const directory: TransportDirectory = {
             async listConversations(input) {
               const query = input.query?.toLocaleLowerCase();
               const page = directoryPage(
@@ -337,7 +342,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               };
             },
           };
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             directMessaging: {
               conversationFor: async (userId) =>
                 (await adapter.directConversationFor(

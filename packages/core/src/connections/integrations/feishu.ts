@@ -1,6 +1,6 @@
 // Feishu and Lark connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Feishu is a Talker with a single `app` grant: the custom-app credentials
+// Feishu is a ChannelTransport with a single `app` grant: the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
 // the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
@@ -40,13 +40,13 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
 import type { ChannelActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TransportDirectory, TransportFeatures } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
   ProfileRecord,
   SecretRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
 
@@ -438,9 +438,9 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
       app: appScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["app"] as const,
-        build(creds, kit): Talker {
+        build(creds, kit): ChannelTransport {
           // Inline material for the `app` grant (never an external resolver for
           // a Talk grant); credentialsPaste packs these fields.
           const app = creds.app.material as unknown as FeishuAppMaterial;
@@ -477,7 +477,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
               };
             },
           };
-          const directory: TalkDirectory = {
+          const directory: TransportDirectory = {
             async listConversations(input) {
               const query = input.query?.toLocaleLowerCase();
               const page = directoryPage(
@@ -509,7 +509,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
               };
             },
           };
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             directMessaging: addressIsConversationFeature(),
             activity,
             directory,

@@ -9,7 +9,7 @@
 // does not look like a metronome to LinkedIn.
 //
 // Fault taxonomy (mirrors the whatsapp/telegram-user split):
-//   - an auth wall / signed-out session → `onAuthRejected` (the Talker maps it
+//   - an auth wall / signed-out session → `onAuthRejected` (the ChannelTransport maps it
 //     to CredentialRejected{ grant: "session" } → renew-probe → degrade);
 //   - anything else (CDP down, timeout, shape drift) is transient: it never
 //     touches grant state. After two consecutive failed ticks the poller

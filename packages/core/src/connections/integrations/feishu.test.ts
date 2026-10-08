@@ -2,10 +2,10 @@
 //   1. isFeishuAuthError / descriptor shape — pure, no transport.
 //   2. credentialsPaste confer: a transient connect validates the pasted app
 //      credentials (bad creds → connect rejects → confer refuses).
-//   3. Talker fault mapping via a fake LarkChannel (injected through
+//   3. ChannelTransport fault mapping via a fake LarkChannel (injected through
 //      createChannel): a bad-credential connect at start → CredentialRejected,
 //      an `error` event → CredentialRejected (auth) or Disconnected (transport).
-//   4. inbound/outbound messages map through the Connection's talker.
+//   4. inbound/outbound messages map through the Connection's transport.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
@@ -23,7 +23,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talker } from "../types.js";
+import type { Connection, StreamFault, ChannelTransport } from "../types.js";
 import { createFeishuDescriptor, feishuRegistrationAddons } from "./feishu.js";
 
 // A fresh drizzle-backed ledger per test; opened DBs are closed after each test.
@@ -159,11 +159,11 @@ describe("isFeishuAuthError", () => {
 });
 
 describe("feishu descriptor shape", () => {
-  it("declares one `app` grant and a talker needing it", () => {
+  it("declares one `app` grant and a transport needing it", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
     expect(desc.service).toBe("feishu");
     expect(Object.keys(desc.auth)).toEqual(["app"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["app"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["app"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -212,7 +212,7 @@ describe("feishu talk lifecycle", () => {
     expect(channel.connected).toBe(true);
 
     const received: string[] = [];
-    conn.hearTalker(async (msg) => {
+    conn.hearTransport(async (msg) => {
       received.push(`${msg.senderId}/${msg.conversationId}:${msg.text}`);
       return;
     });
@@ -226,14 +226,14 @@ describe("feishu talk lifecycle", () => {
       conversationId: "oc_chat",
     });
 
-    const direct = await conn.withTalker((talker) =>
-      talker.directMessaging?.conversationFor("ou_alice"),
+    const direct = await conn.withTransport((transport) =>
+      transport.directMessaging?.conversationFor("ou_alice"),
     );
     expect(direct).toBe("ou_alice");
     await sendThrough(conn, direct!, { text: "paired" });
     expect(channel.sent.at(-1)).toMatchObject({ to: "ou_alice", input: { markdown: "paired" } });
-    const session = await conn.withTalker((talker) =>
-      talker.activity?.begin({
+    const session = await conn.withTransport((transport) =>
+      transport.activity?.begin({
         conversationId: "oc_chat" as ConversationId,
         messageId: "om_1",
       }),
@@ -249,7 +249,7 @@ describe("feishu talk lifecycle", () => {
 describe("feishu inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const channel = new FakeLarkChannel();
-    const talker = makeDescriptor(channel).capabilities.talker!.build(
+    const transport = makeDescriptor(channel).capabilities.transport!.build(
       { app: validCred() },
       {
         connectionId: "feishu-test",
@@ -258,7 +258,7 @@ describe("feishu inbound delivery", () => {
       },
     );
     const delivered: unknown[] = [];
-    talker.start(
+    transport.start(
       (msg) => {
         delivered.push(msg);
       },
@@ -296,13 +296,16 @@ describe("feishu inbound delivery", () => {
         raw: wire,
       },
     ]);
-    await talker.stop();
+    await transport.stop();
   });
 });
 
-// Direct-Talker harness for the raw start()/fault() contract.
-function buildTalker(channel: FakeLarkChannel): { talker: Talker; faults: StreamFault[] } {
-  const talker = makeDescriptor(channel).capabilities.talker!.build(
+// Direct-ChannelTransport harness for the raw start()/fault() contract.
+function buildTransport(channel: FakeLarkChannel): {
+  transport: ChannelTransport;
+  faults: StreamFault[];
+} {
+  const transport = makeDescriptor(channel).capabilities.transport!.build(
     { app: validCred() },
     {
       connectionId: "feishu-test",
@@ -311,18 +314,18 @@ function buildTalker(channel: FakeLarkChannel): { talker: Talker; faults: Stream
     },
   );
   const faults: StreamFault[] = [];
-  talker.start(
+  transport.start(
     () => {},
     (err) => faults.push(err),
   );
-  return { talker, faults };
+  return { transport, faults };
 }
 
-describe("feishu Talker fault mapping", () => {
+describe("feishu ChannelTransport fault mapping", () => {
   it("maps a bad-credential connect at start to CredentialRejected{ grant: 'app' }", async () => {
     const channel = new FakeLarkChannel();
     channel.connectError = new LarkChannelError("permission_denied", "denied");
-    const h = buildTalker(channel);
+    const h = buildTransport(channel);
     await flush();
     expect(h.faults).toHaveLength(1);
     expect(h.faults[0]).toBeInstanceOf(CredentialRejected);
@@ -331,7 +334,7 @@ describe("feishu Talker fault mapping", () => {
 
   it("maps a transport error event to Disconnected", async () => {
     const channel = new FakeLarkChannel();
-    const h = buildTalker(channel);
+    const h = buildTransport(channel);
     await flush();
     channel.emitError(new LarkChannelError("not_connected", "ws dropped"));
     expect(h.faults).toHaveLength(1);
@@ -341,7 +344,7 @@ describe("feishu Talker fault mapping", () => {
 
   it("maps an auth error event to CredentialRejected{ grant: 'app' }", async () => {
     const channel = new FakeLarkChannel();
-    const h = buildTalker(channel);
+    const h = buildTransport(channel);
     await flush();
     channel.emitError(new LarkChannelError("permission_denied", "revoked"));
     expect(h.faults).toHaveLength(1);

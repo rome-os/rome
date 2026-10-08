@@ -31,16 +31,16 @@ import type {
   RuntimeKit,
   SecretRecord,
   StreamFault,
-  Talker,
+  ChannelTransport,
   Watch,
   WatchEvent,
   Watcher,
 } from "./types.js";
 
-type CapabilityKind = "talker" | "actor" | "watcher";
+type CapabilityKind = "transport" | "actor" | "watcher";
 
 const KIND_OF: Record<Capability, CapabilityKind> = {
-  talk: "talker",
+  talk: "transport",
   act: "actor",
   watch: "watcher",
 };
@@ -122,7 +122,7 @@ interface Epoch {
   /** Monotonic token; every relock/rebuild-from-scratch increments it. */
   readonly token: number;
   /** The current built instance (swapped by backoff rebuild). */
-  instance: Talker | Actor | Watcher;
+  instance: ChannelTransport | Actor | Watcher;
   /** True once the epoch has been torn down; wrapper calls then throw. */
   dead: boolean;
   /** In-flight Disconnected backoff generation; cancels superseded loops. */
@@ -139,7 +139,9 @@ interface CapabilitySlot {
   readonly kind: CapabilityKind;
   readonly needs: readonly GrantName[];
   readonly subscriptionGated: boolean;
-  readonly degradation?: (instance: Talker) => import("./types.js").CapabilityDegradation | null;
+  readonly degradation?: (
+    instance: ChannelTransport,
+  ) => import("./types.js").CapabilityDegradation | null;
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
@@ -195,7 +197,7 @@ export class ConnectionRegistry {
       throw new Error(`duplicate connection descriptor for service "${desc.service}"`);
     }
     const declared = new Set(Object.keys(desc.auth));
-    for (const kind of ["talker", "actor", "watcher"] as const) {
+    for (const kind of ["transport", "actor", "watcher"] as const) {
       const cap = desc.capabilities[kind];
       if (!cap) continue;
       for (const grant of cap.needs) {
@@ -359,7 +361,7 @@ export class ConnectionRegistry {
   /** Stop every live capability instance across every connection WITHOUT
    *  deleting connections or touching grant state — the graceful-shutdown
    *  counterpart to the adapter `stop()` loop. Epochs are torn down (each
-   *  Talker/Watcher `stop()` is called and AWAITED); the ledger is untouched, so
+   *  ChannelTransport/Watcher `stop()` is called and AWAITED); the ledger is untouched, so
    *  the next boot's `load()` rehydrates and rebuilds them.
    *
    *  Unlike relock teardown, this AWAITS each instance's `stop()` so a transport
@@ -597,14 +599,14 @@ export class ConnectionRegistry {
    *  importCredential, re-import after degrade, subscription arrival).
    *
    *  Delivery guarantee: only handlers a caller registers SYNCHRONOUSLY inside
-   *  the onUnlocked callback (via `conn.hearTalker` / `conn.watch.onEvent`)
+   *  the onUnlocked callback (via `conn.hearTransport` / `conn.watch.onEvent`)
    *  are guaranteed to see the epoch's FIRST deliveries. For a fresh unlock epoch
    *  the registry fires onUnlocked before the capability's stream starts, so a
    *  synchronous registration is wired before start() runs; a handler attached
    *  later (after an await, or on an already-unlocked connection whose stream is
    *  already running) may miss deliveries the stream emitted synchronously from
    *  start(). Send-before-start is permitted: the instance exists when the
-   *  callback runs, so a send through `conn.withTalker` inside it works. */
+   *  callback runs, so a send through `conn.withTransport` inside it works. */
   onUnlocked(cap: Capability, handler: (conn: Connection) => void): void {
     this.unlockHandlers[cap].push(handler);
     for (const conn of this.connections.values()) {
@@ -713,7 +715,8 @@ class ConnectionImpl implements Connection {
         kind,
         needs: capDef.needs,
         subscriptionGated: gated,
-        degradation: kind === "talker" ? descriptor.capabilities.talker?.degradation : undefined,
+        degradation:
+          kind === "transport" ? descriptor.capabilities.transport?.degradation : undefined,
         epoch: null,
         messageHandlers: [],
         eventHandlers: [],
@@ -735,11 +738,11 @@ class ConnectionImpl implements Connection {
    * disagree: a port that fails every read, or a history no channel reaches.
    * Said loudly here, where the Talk first exists, rather than at a read.
    */
-  private checkHistoryDeclared(talker: Talker): void {
-    const declared = this.descriptor.capabilities.talker?.history === true;
-    const offered = talker.history !== undefined;
+  private checkHistoryDeclared(transport: ChannelTransport): void {
+    const declared = this.descriptor.capabilities.transport?.history === true;
+    const offered = transport.history !== undefined;
     if (declared === offered) return;
-    this.log.error("talker history flag disagrees with its history feature", {
+    this.log.error("transport history flag disagrees with its history feature", {
       connectionId: this.id,
       service: this.service,
       declared,
@@ -861,19 +864,21 @@ class ConnectionImpl implements Connection {
       return { state: "needs-subscription" };
     }
     if (cap === "talk" && slot.epoch) {
-      const degradation = slot.degradation?.(slot.epoch.instance as Talker);
+      const degradation = slot.degradation?.(slot.epoch.instance as ChannelTransport);
       if (degradation) return { state: "unlocked", degradation };
     }
     return { state: "unlocked" };
   }
 
-  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined {
+  withTransport<T>(
+    call: (transport: Omit<ChannelTransport, "start" | "stop">) => T,
+  ): T | undefined {
     const slot = this.slots.get("talk");
     const epoch = slot?.epoch;
     if (!slot || !epoch) return undefined;
     let answer: T;
     try {
-      answer = call(epoch.instance as Talker);
+      answer = call(epoch.instance as ChannelTransport);
     } catch (err) {
       this.handleThrownFault(slot, err, epoch);
       throw err;
@@ -884,7 +889,7 @@ class ConnectionImpl implements Connection {
     return answer;
   }
 
-  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
+  hearTransport(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
     const slot = this.slots.get("talk");
     if (!slot || !slot.epoch) return null;
     slot.messageHandlers.push(handler);
@@ -939,16 +944,16 @@ class ConnectionImpl implements Connection {
   }
 
   /** Build a fresh epoch for an unlocked capability: instantiate the builder,
-   *  wire deliver/fault (Talker/Watcher), fire onUnlocked (when `fire`), THEN
+   *  wire deliver/fault (ChannelTransport/Watcher), fire onUnlocked (when `fire`), THEN
    *  start it. The prior epoch (if any) must already be torn down.
    *
    *  Ordering matters: onUnlocked fires BEFORE startInstance so that handlers a
    *  caller registers SYNCHRONOUSLY inside its onUnlocked callback are wired
-   *  into the slot before the stream starts. A Talker/Watcher whose start()
+   *  into the slot before the stream starts. A ChannelTransport/Watcher whose start()
    *  delivers synchronously (e.g. flushing buffered inbound) would otherwise send
    *  into empty handler arrays and drop its first delivery. The instance already
    *  exists when onUnlocked fires, so an onUnlocked handler may send through
-   *  `withTalker` before start() has run — send-before-start is permitted. */
+   *  `withTransport` before start() has run — send-before-start is permitted. */
   private buildEpoch(slot: CapabilitySlot, fire: boolean): void {
     const creds: Record<GrantName, Credential> = {};
     for (const grant of slot.needs) {
@@ -967,12 +972,12 @@ class ConnectionImpl implements Connection {
     const capDef = this.descriptor.capabilities[slot.kind];
     if (!capDef) return;
     const instance = capDef.build(creds, kit);
-    if (slot.kind === "talker") {
+    if (slot.kind === "transport") {
       try {
-        this.checkHistoryDeclared(instance as Talker);
+        this.checkHistoryDeclared(instance as ChannelTransport);
       } catch (err) {
         // A diagnostic that cannot run says so, and never fails the build.
-        this.log.warn("could not check the talker's history flag", {
+        this.log.warn("could not check the transport's history flag", {
           connectionId: this.id,
           service: this.service,
           error: errMsg(err),
@@ -991,20 +996,20 @@ class ConnectionImpl implements Connection {
     slot.eventHandlers = [];
     // Fire onUnlocked BEFORE starting the instance so handlers registered
     // synchronously in the callback are wired when the stream starts (see the
-    // method doc). A handler may also send through withTalker here — the
+    // method doc). A handler may also send through withTransport here — the
     // instance exists, so send-before-start works.
     if (fire) this.registry.fireUnlock(slot.cap, this);
     this.startInstance(slot, epoch);
   }
 
-  /** Start a long-lived instance (Talker/Watcher), wiring deliver/emit into the
+  /** Start a long-lived instance (ChannelTransport/Watcher), wiring deliver/emit into the
    *  current epoch's handler list and fault into the runtime decoration. Actor
    *  has no start(). Delivery/emit route through the SLOT so a backoff rebuild
    *  (new instance, same epoch/wrapper) keeps existing handlers wired. */
   private startInstance(slot: CapabilitySlot, epoch: Epoch): void {
     const fault = (err: StreamFault) => this.handleFault(slot, err, epoch);
-    if (slot.kind === "talker") {
-      (epoch.instance as Talker).start((msg) => {
+    if (slot.kind === "transport") {
+      (epoch.instance as ChannelTransport).start((msg) => {
         epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
         for (const handler of slot.messageHandlers) {
           void handler(msg).catch((err) => {
@@ -1054,7 +1059,7 @@ class ConnectionImpl implements Connection {
       const ret =
         slot.kind === "actor"
           ? (epoch.instance as Actor).stop?.()
-          : (epoch.instance as Talker | Watcher).stop();
+          : (epoch.instance as ChannelTransport | Watcher).stop();
       if (ret instanceof Promise) ret.catch((err) => this.warnStopThrew(slot, err));
     } catch (err) {
       this.warnStopThrew(slot, err);
@@ -1068,7 +1073,7 @@ class ConnectionImpl implements Connection {
       if (slot.kind === "actor") {
         await (epoch.instance as Actor).stop?.();
       } else {
-        await (epoch.instance as Talker | Watcher).stop();
+        await (epoch.instance as ChannelTransport | Watcher).stop();
       }
     } catch (err) {
       this.warnStopThrew(slot, err);
@@ -1374,7 +1379,7 @@ class ConnectionImpl implements Connection {
     else if (!shouldBeUnlocked && isUnlocked) this.teardownEpoch(slot);
   }
 
-  /** Faults reported through a Talker/Watcher start() fault channel. */
+  /** Faults reported through a ChannelTransport/Watcher start() fault channel. */
   private handleFault(slot: CapabilitySlot, err: StreamFault, source: Epoch): void {
     // A fault callback can outlive its epoch: transports fire terminal errors
     // from in-flight work while teardown's stopInstance is still draining.
@@ -1389,7 +1394,7 @@ class ConnectionImpl implements Connection {
     this.runFaultFlow(slot, "CredentialRejected", this.handleCredentialRejected(slot, err, source));
   }
 
-  /** Faults thrown from act.invoke or inside withTalker. The caller still gets
+  /** Faults thrown from act.invoke or inside withTransport. The caller still gets
    *  the original error; the grant flow runs async. */
   private handleThrownFault(slot: CapabilitySlot, err: unknown, source: Epoch): void {
     if (source.dead || slot.epoch !== source) return; // see handleFault

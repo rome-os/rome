@@ -111,12 +111,12 @@ const sessionCred = (): Credential => ({
 });
 
 describe("whatsapp descriptor shape", () => {
-  it("declares one `session` grant and a talker needing it", () => {
+  it("declares one `session` grant and a transport needing it", () => {
     const { deps } = makeDeps(new FakeWhatsAppAdapter());
     const desc = createWhatsAppDescriptor(deps);
     expect(desc.service).toBe("whatsapp");
     expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["session"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -134,7 +134,7 @@ describe("whatsapp descriptor shape", () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps, mapped, sync } = makeDeps(fake);
     const desc = createWhatsAppDescriptor(deps);
-    desc.capabilities.talker!.build({ session: sessionCred() }, runtimeKit());
+    desc.capabilities.transport!.build({ session: sessionCred() }, runtimeKit());
 
     expect(fake.sync).toBe(sync);
     fake.connectedCb?.("15550100@s.whatsapp.net");
@@ -144,11 +144,11 @@ describe("whatsapp descriptor shape", () => {
   it("forwards saveIncomingAttachments and awaits stop()", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
+    const transport = createWhatsAppDescriptor(deps).capabilities.transport!.build(
       { session: sessionCred() },
       runtimeKit(),
     );
-    talker.start(
+    transport.start(
       () => {},
       () => {},
     );
@@ -162,8 +162,8 @@ describe("whatsapp descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    await expect(talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
-    await talker.stop();
+    await expect(transport.inboundMedia?.materialize(message)).resolves.toEqual([]);
+    await transport.stop();
     expect(fake.stopped).toBe(true);
   });
 
@@ -172,12 +172,12 @@ describe("whatsapp descriptor shape", () => {
   it("leaves history to the channel", async () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
+    const transport = createWhatsAppDescriptor(deps).capabilities.transport!.build(
       { session: sessionCred() },
       runtimeKit(),
     );
-    expect(talker.history).toBeUndefined();
-    expect(createWhatsAppDescriptor(deps).capabilities.talker?.history).toBeUndefined();
+    expect(transport.history).toBeUndefined();
+    expect(createWhatsAppDescriptor(deps).capabilities.transport?.history).toBeUndefined();
   });
 });
 
@@ -187,11 +187,11 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
     const { deps } = makeDeps(fake);
     const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
     const kit = runtimeKit(persist);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
+    const transport = createWhatsAppDescriptor(deps).capabilities.transport!.build(
       { session: sessionCred() },
       kit,
     );
-    talker.start(
+    transport.start(
       () => {},
       () => {},
     );
@@ -214,32 +214,32 @@ describe("whatsapp descriptor — kit.persist write-through", () => {
     const fake = new FakeWhatsAppAdapter();
     const { deps } = makeDeps(fake);
     const persist = rs.fn(async (_grant: string, _material: SecretRecord) => {});
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
+    const transport = createWhatsAppDescriptor(deps).capabilities.transport!.build(
       { session: sessionCred() },
       runtimeKit(persist),
     );
-    talker.start(
+    transport.start(
       () => {},
       () => {},
     );
     const { state } = await fake.authProvider();
     // A rotation lands, then stop() runs before the debounce fires on its own.
     void state.keys.set({ session: { last: new Uint8Array([9]) } });
-    await talker.stop();
+    await transport.stop();
     expect(persist).toHaveBeenCalledTimes(1);
     expect(JSON.parse(persist.mock.calls[0][1].keys).session.last).toBeTruthy();
   });
 });
 
-describe("whatsapp Talker fault mapping", () => {
-  function buildTalker(fake: FakeWhatsAppAdapter): { faults: StreamFault[] } {
+describe("whatsapp ChannelTransport fault mapping", () => {
+  function buildTransport(fake: FakeWhatsAppAdapter): { faults: StreamFault[] } {
     const { deps } = makeDeps(fake);
-    const talker = createWhatsAppDescriptor(deps).capabilities.talker!.build(
+    const transport = createWhatsAppDescriptor(deps).capabilities.transport!.build(
       { session: sessionCred() },
       runtimeKit(),
     );
     const faults: StreamFault[] = [];
-    talker.start(
+    transport.start(
       () => {},
       (err) => faults.push(err),
     );
@@ -248,7 +248,7 @@ describe("whatsapp Talker fault mapping", () => {
 
   it("maps loggedOut to CredentialRejected{ grant: 'session' }", () => {
     const fake = new FakeWhatsAppAdapter();
-    const { faults } = buildTalker(fake);
+    const { faults } = buildTransport(fake);
     fake.faultCb?.({ kind: "loggedOut", cause: new Error("device unlinked") });
     expect(faults).toHaveLength(1);
     expect(faults[0]).toBeInstanceOf(CredentialRejected);
@@ -257,7 +257,7 @@ describe("whatsapp Talker fault mapping", () => {
 
   it("maps a non-loggedOut terminal to Disconnected (not a credential fault)", () => {
     const fake = new FakeWhatsAppAdapter();
-    const { faults } = buildTalker(fake);
+    const { faults } = buildTransport(fake);
     fake.faultCb?.({ kind: "terminal", cause: new Error("stream errored") });
     expect(faults).toHaveLength(1);
     expect(faults[0]).toBeInstanceOf(Disconnected);
@@ -267,7 +267,7 @@ describe("whatsapp Talker fault mapping", () => {
   it("maps a fatal start() error to Disconnected", async () => {
     const fake = new FakeWhatsAppAdapter();
     fake.startError = new Error("socket build failed");
-    const { faults } = buildTalker(fake);
+    const { faults } = buildTransport(fake);
     await flush();
     expect(faults).toHaveLength(1);
     expect(faults[0]).toBeInstanceOf(Disconnected);
@@ -307,7 +307,7 @@ describe("whatsapp descriptor over a real registry", () => {
 // A real WhatsAppAdapter over a fake Baileys socket, so the delivered message
 // is the transport's own record rather than a fake's.
 describe("whatsapp inbound delivery", () => {
-  function realTalker() {
+  function realTransport() {
     const handlers = new Map<string, (payload: unknown) => unknown>();
     const socketFactory = (() => ({
       ev: {
@@ -319,7 +319,7 @@ describe("whatsapp inbound delivery", () => {
       sendMessage: async () => undefined,
       user: undefined,
     })) as unknown as WhatsAppSocketFactory;
-    const talker = createWhatsAppDescriptor({
+    const transport = createWhatsAppDescriptor({
       syncSink: {
         async upsertContacts() {},
         async upsertChats() {},
@@ -327,14 +327,14 @@ describe("whatsapp inbound delivery", () => {
       },
       onGuardianConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
-    }).capabilities.talker!.build({ session: sessionCred() }, runtimeKit());
-    return { talker, handlers };
+    }).capabilities.transport!.build({ session: sessionCred() }, runtimeKit());
+    return { transport, handlers };
   }
 
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
-    const { talker, handlers } = realTalker();
+    const { transport, handlers } = realTransport();
     const delivered: unknown[] = [];
-    talker.start(
+    transport.start(
       (msg) => delivered.push(msg),
       () => {},
     );
@@ -383,11 +383,11 @@ describe("whatsapp inbound delivery", () => {
         raw: waMsg,
       },
     ]);
-    await talker.stop();
+    await transport.stop();
   });
 
   it("materialize keeps the attachments unsaved when the message carries no raw", async () => {
-    const { talker } = realTalker();
+    const { transport } = realTransport();
     const message = {
       channel: "whatsapp",
       direction: "inbound",
@@ -399,7 +399,7 @@ describe("whatsapp inbound delivery", () => {
       timestamp: new Date(),
     } satisfies ChannelMessage;
 
-    await expect(talker.inboundMedia?.materialize(message)).resolves.toBe(message.attachments);
+    await expect(transport.inboundMedia?.materialize(message)).resolves.toBe(message.attachments);
   });
 });
 

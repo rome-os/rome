@@ -335,7 +335,7 @@ async function main() {
     approvalsRepo,
     personMappingRepo,
     talkGrants: (service) =>
-      connectionRegistry.getDescriptor(service)?.capabilities.talker?.needs ?? [],
+      connectionRegistry.getDescriptor(service)?.capabilities.transport?.needs ?? [],
     registry: connectionRegistry,
   });
   const linkAgentToGuardian = createAgentsGuardianLink({
@@ -1231,7 +1231,7 @@ async function main() {
   }
 
   // The transport lifecycle is entirely registry-owned: every channel is a
-  // ConnectionDescriptor whose Talker the registry starts on unlock. No
+  // ConnectionDescriptor whose ChannelTransport the registry starts on unlock. No
   // adapter-level start() loop exists.
 
   if (relayDrains.length > 0) {

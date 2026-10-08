@@ -41,7 +41,7 @@ describe("scenario 1: zero-grant talk", () => {
   it("talk is non-null immediately after connect", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, transportFactory } = makeZeroGrantTalk();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
@@ -50,7 +50,7 @@ describe("scenario 1: zero-grant talk", () => {
     expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.act).toBeNull();
     expect(conn.watch).toBeNull();
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
   });
 
   it("status reports unlocked for talk, unsupported for act/watch", async () => {
@@ -85,33 +85,33 @@ describe("scenario 1: zero-grant talk", () => {
   it("deliver→handler roundtrip: message delivered via onMessage reaches the handler", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, transportFactory } = makeZeroGrantTalk();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
     const received: unknown[] = [];
-    conn.hearTalker(async (msg) => {
+    conn.hearTransport(async (msg) => {
       received.push(msg);
     });
 
     const msg = makeInboundMessage({ text: "hello" });
-    talkerFactory.instances[0].state.deliver!(msg);
+    transportFactory.instances[0].state.deliver!(msg);
 
     expect(received).toHaveLength(1);
     expect(received[0]).toBe(msg);
   });
 
-  it("send() is recorded on the fake talker", async () => {
+  it("send() is recorded on the fake transport", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, transportFactory } = makeZeroGrantTalk();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-webchat");
     await sendThrough(conn, "thread-1" as ConversationId, { text: "reply" });
 
-    expect(talkerFactory.instances[0].state.sends).toHaveLength(1);
-    expect(talkerFactory.instances[0].state.sends[0].address).toBe("thread-1");
+    expect(transportFactory.instances[0].state.sends).toHaveLength(1);
+    expect(transportFactory.instances[0].state.sends[0].address).toBe("thread-1");
   });
 });
 
@@ -241,17 +241,17 @@ describe("scenario 3: import unlocks + fires onUnlocked", () => {
 // Scenario 4 — idempotent import: same material → no new epoch, no re-fire
 
 describe("scenario 4: idempotent import", () => {
-  it("re-importing same material does not call stop() on the talker", async () => {
+  it("re-importing same material does not call stop() on the transport", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential, talkerFactory } = makeTwoGrant();
+    const { descriptor, botCredential, transportFactory } = makeTwoGrant();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
     const cred = botCredential();
     await reg.importCredential(conn.id, "bot", cred);
 
-    const firstInstance = talkerFactory.instances[0];
+    const firstInstance = transportFactory.instances[0];
     expect(firstInstance.state.stopCount).toBe(0);
 
     // Re-import identical material.
@@ -259,7 +259,7 @@ describe("scenario 4: idempotent import", () => {
 
     // No new stop() call, same instance count.
     expect(firstInstance.state.stopCount).toBe(0);
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
   });
 
   it("re-importing same material does not re-fire onUnlocked", async () => {
@@ -286,13 +286,13 @@ describe("scenario 4: idempotent import", () => {
   it("importing different material DOES trigger a new epoch", async () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
-    const { descriptor, botCredential, talkerFactory } = makeTwoGrant();
+    const { descriptor, botCredential, transportFactory } = makeTwoGrant();
     reg.register(descriptor);
 
     const conn = await reg.connect("fake-discord");
     await reg.importCredential(conn.id, "bot", botCredential());
 
-    const firstInstance = talkerFactory.instances[0];
+    const firstInstance = transportFactory.instances[0];
 
     // Import a credential with different material.
     await reg.importCredential(conn.id, "bot", {
@@ -302,7 +302,7 @@ describe("scenario 4: idempotent import", () => {
 
     // Old instance stopped, new one built.
     expect(firstInstance.state.stopCount).toBe(1);
-    expect(talkerFactory.instances).toHaveLength(2);
+    expect(transportFactory.instances).toHaveLength(2);
   });
 });
 
@@ -464,7 +464,7 @@ describe("scenario 17: register() validation", () => {
     ).toThrow(/undeclared grant/i);
   });
 
-  it("throws when talker needs an undeclared grant", () => {
+  it("throws when transport needs an undeclared grant", () => {
     const ledger = makeLedger();
     const reg = makeRegistry(ledger);
 
@@ -473,7 +473,7 @@ describe("scenario 17: register() validation", () => {
         service: "bad-talk",
         auth: {},
         capabilities: {
-          talker: {
+          transport: {
             needs: ["bot" as const],
             build: () => ({
               start() {},
@@ -595,7 +595,7 @@ describe("startup capability activation barrier", () => {
       createdAt: new Date(),
     });
     const reg = makeRegistry(ledger);
-    const { descriptor, talkerFactory } = makeZeroGrantTalk();
+    const { descriptor, transportFactory } = makeZeroGrantTalk();
     reg.register(descriptor);
     const unlocked: Connection[] = [];
     reg.onUnlocked("talk", (connection) => unlocked.push(connection));
@@ -603,13 +603,13 @@ describe("startup capability activation barrier", () => {
     await reg.load({ deferCapabilities: true });
 
     expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(false);
-    expect(talkerFactory.instances).toHaveLength(0);
+    expect(transportFactory.instances).toHaveLength(0);
     expect(unlocked).toHaveLength(0);
 
     reg.startCapabilities();
 
     expect(reg.get("boot-webchat").isUnlocked("talk")).toBe(true);
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
     expect(unlocked).toEqual([reg.get("boot-webchat")]);
   });
 });

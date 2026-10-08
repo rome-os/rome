@@ -15,7 +15,7 @@ import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
 import type { ChannelApiRequest, ChannelApiResult } from "../../channels/api-request.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import type { StreamFault, Talker } from "../types.js";
+import type { StreamFault, ChannelTransport } from "../types.js";
 
 // ── Fake DiscordAdapter (module mock) ──────────────────────────────────────
 // Captures the config the descriptor passes (so we can drive onGatewayFault)
@@ -123,14 +123,14 @@ function discordError(code: DiscordjsErrorCodes): DiscordjsError {
   return Reflect.construct(DiscordjsError, [code]) as DiscordjsError;
 }
 
-function buildTalker(startError: unknown = null): {
-  talker: Talker;
+function buildTransport(startError: unknown = null): {
+  transport: ChannelTransport;
   faults: StreamFault[];
   start: () => void;
 } {
   fakeState.startError = startError;
   const desc = makeDiscordDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { bot: validCred() },
     {
       connectionId: "discord-test",
@@ -140,10 +140,10 @@ function buildTalker(startError: unknown = null): {
   );
   const faults: StreamFault[] = [];
   return {
-    talker,
+    transport,
     faults,
     start: () =>
-      talker.start(
+      transport.start(
         () => {},
         (err) => faults.push(err),
       ),
@@ -175,11 +175,11 @@ describe("isDiscordAuthError", () => {
 });
 
 describe("discord descriptor shape", () => {
-  it("declares one `bot` grant and a talker needing it", () => {
+  it("declares one `bot` grant and a transport needing it", () => {
     const desc = makeDiscordDescriptor(deps);
     expect(desc.service).toBe("discord");
     expect(Object.keys(desc.auth)).toEqual(["bot"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["bot"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["bot"]);
     expect(desc.capabilities.actor?.needs).toEqual(["bot"]);
     expect(desc.capabilities.watcher).toBeUndefined();
   });
@@ -194,10 +194,10 @@ describe("discord descriptor shape", () => {
   });
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
-    const h = buildTalker();
-    await expect(h.talker.directMessaging?.conversationFor("alice")).resolves.toBe("dm-alice");
+    const h = buildTransport();
+    await expect(h.transport.directMessaging?.conversationFor("alice")).resolves.toBe("dm-alice");
     h.start();
-    const inboundMedia = h.talker.inboundMedia;
+    const inboundMedia = h.transport.inboundMedia;
     const message = {
       channel: "discord",
       direction: "inbound",
@@ -209,7 +209,7 @@ describe("discord descriptor shape", () => {
       timestamp: new Date(),
     } satisfies ChannelMessage;
     await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
-    const stopped = h.talker.stop();
+    const stopped = h.transport.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
   });
@@ -221,7 +221,7 @@ describe("discord descriptor shape", () => {
       ...deps,
       personMappingRepo: { findByChannelUser } as never,
     });
-    desc.capabilities.talker!.build(
+    desc.capabilities.transport!.build(
       { bot: validCred() },
       {
         connectionId: "discord-test",
@@ -237,9 +237,11 @@ describe("discord descriptor shape", () => {
   });
 
   it("passes the opaque conversation id to the adapter and returns its receipt", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
-    await expect(h.talker.send("chan-1" as ConversationId, { text: "hi" })).resolves.toStrictEqual({
+    await expect(
+      h.transport.send("chan-1" as ConversationId, { text: "hi" }),
+    ).resolves.toStrictEqual({
       conversationId: "chan-1",
       messageId: "sent-1",
     });
@@ -249,7 +251,7 @@ describe("discord descriptor shape", () => {
   // The flag is what gives the channel a \`messages\` port; the feature is what
   // answers it. A Talk offering one without the other is unreachable or broken.
   it("declares the history its Talk offers", () => {
-    expect(makeDiscordDescriptor(deps).capabilities.talker?.history).toBe(true);
+    expect(makeDiscordDescriptor(deps).capabilities.transport?.history).toBe(true);
   });
 
   it("exposes provider-neutral history", async () => {
@@ -267,10 +269,10 @@ describe("discord descriptor shape", () => {
         thread: { kind: "group" },
       },
     ];
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     await expect(
-      h.talker.history?.query({
+      h.transport.history?.query({
         conversationId: "chan-1" as ConversationId,
       }),
     ).resolves.toMatchObject([{ messageId: "message-1", text: "hello" }]);
@@ -278,9 +280,11 @@ describe("discord descriptor shape", () => {
   });
 
   it("exposes provider-neutral activity", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
-    const session = await h.talker.activity?.begin({ conversationId: "chan-2" as ConversationId });
+    const session = await h.transport.activity?.begin({
+      conversationId: "chan-2" as ConversationId,
+    });
     await session?.update("working");
     expect(fakeState.typedThread).toBe("chan-2");
   });
@@ -293,7 +297,7 @@ describe("discord descriptor shape", () => {
       guildName: "Rome",
       type: "text" as const,
     }));
-    const directory = buildTalker().talker.directory;
+    const directory = buildTransport().transport.directory;
 
     const first = await directory?.listConversations({ limit: 2 });
     expect(first?.conversations.map((entry) => entry.ref)).toEqual([
@@ -345,7 +349,7 @@ describe("discord descriptor shape", () => {
         parentId: "text-1",
       },
     ];
-    const directory = buildTalker().talker.directory;
+    const directory = buildTransport().transport.directory;
 
     const settingsOwners = await directory?.listConversations({ limit: 10 });
     expect(settingsOwners?.conversations).toEqual([
@@ -435,7 +439,7 @@ describe("discord descriptor shape", () => {
 describe("discord inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeDiscordDescriptor(deps);
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { bot: validCred() },
       {
         connectionId: "discord-test",
@@ -444,7 +448,7 @@ describe("discord inbound delivery", () => {
       },
     );
     const delivered: ChannelMessage[] = [];
-    talker.start(
+    transport.start(
       (msg) => delivered.push(msg),
       () => {},
     );
@@ -504,13 +508,13 @@ describe("discord inbound delivery", () => {
       },
     ]);
     expect(delivered[0].raw).toBe(raw);
-    await talker.stop();
+    await transport.stop();
   });
 });
 
-describe("discord Talker fault mapping", () => {
+describe("discord ChannelTransport fault mapping", () => {
   it("maps a login TokenInvalid to CredentialRejected{ grant: 'bot' }", async () => {
-    const h = buildTalker(discordError(DiscordjsErrorCodes.TokenInvalid));
+    const h = buildTransport(discordError(DiscordjsErrorCodes.TokenInvalid));
     h.start();
     await flush();
     expect(h.faults).toHaveLength(1);
@@ -519,7 +523,7 @@ describe("discord Talker fault mapping", () => {
   });
 
   it("maps a login DisallowedIntents to CredentialRejected{ grant: 'bot' }", async () => {
-    const h = buildTalker(discordError(DiscordjsErrorCodes.DisallowedIntents));
+    const h = buildTransport(discordError(DiscordjsErrorCodes.DisallowedIntents));
     h.start();
     await flush();
     expect(h.faults[0]).toBeInstanceOf(CredentialRejected);
@@ -527,7 +531,7 @@ describe("discord Talker fault mapping", () => {
   });
 
   it("maps a non-auth login failure to Disconnected", async () => {
-    const h = buildTalker(new Error("ECONNRESET"));
+    const h = buildTransport(new Error("ECONNRESET"));
     h.start();
     await flush();
     expect(h.faults[0]).toBeInstanceOf(Disconnected);
@@ -535,7 +539,7 @@ describe("discord Talker fault mapping", () => {
   });
 
   it("routes a live 'credential' gateway fault to CredentialRejected{ grant: 'bot' }", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     fakeState.lastConfig?.onGatewayFault?.({ kind: "credential", cause: new Error("invalidated") });
     expect(h.faults[0]).toBeInstanceOf(CredentialRejected);
@@ -543,7 +547,7 @@ describe("discord Talker fault mapping", () => {
   });
 
   it("routes a live 'transport' gateway fault to Disconnected", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     fakeState.lastConfig?.onGatewayFault?.({ kind: "transport", cause: new Error("shard died") });
     expect(h.faults[0]).toBeInstanceOf(Disconnected);

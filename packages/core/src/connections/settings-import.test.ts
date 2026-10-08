@@ -17,7 +17,7 @@ import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { tokenPaste } from "./schemes.js";
-import { makeFakeTalkerFactory, makeFakeActorFactory } from "./test-fixtures.js";
+import { makeFakeChannelTransportFactory, makeFakeActorFactory } from "./test-fixtures.js";
 import type { ConnectionDescriptor } from "./types.js";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -74,10 +74,10 @@ function makeSettingsSource(initial?: Record<string, unknown>): SettingsSource &
 }
 
 /** Descriptor shaped exactly like the real Telegram descriptor's auth surface
- *  (service "telegram", grant "bot") but with a fake Talker so no network is
+ *  (service "telegram", grant "bot") but with a fake ChannelTransport so no network is
  *  touched. Matches the hardcoded service/grant in TELEGRAM_SETTINGS_IMPORT_ROW. */
 function makeTelegramLikeDescriptor() {
-  const talkerFactory = makeFakeTalkerFactory();
+  const transportFactory = makeFakeChannelTransportFactory();
   const descriptor: ConnectionDescriptor = {
     service: "telegram",
     auth: {
@@ -89,15 +89,15 @@ function makeTelegramLikeDescriptor() {
       }),
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["bot"] as const,
         build(creds) {
-          return talkerFactory.build(creds);
+          return transportFactory.build(creds);
         },
       },
     },
   };
-  return { descriptor, talkerFactory };
+  return { descriptor, transportFactory };
 }
 
 // Table shape
@@ -134,7 +134,7 @@ describe("importChannelSettings — telegram", () => {
   it("fresh settings → connection created + authorized + unlocked", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     const settings = makeSettingsSource({ telegram: { botToken: "tok-1" } });
@@ -145,8 +145,8 @@ describe("importChannelSettings — telegram", () => {
     expect(conn.service).toBe("telegram");
     expect(conn.auth.grants().bot).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
-    expect(talkerFactory.instances).toHaveLength(1);
-    expect(talkerFactory.instances[0].state.starts[0].creds.bot.material).toEqual({
+    expect(transportFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances[0].state.starts[0].creds.bot.material).toEqual({
       token: "tok-1",
     });
   });
@@ -154,7 +154,7 @@ describe("importChannelSettings — telegram", () => {
   it("re-run with identical token → no new connection, no epoch churn", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     let unlockFireCount = 0;
@@ -175,8 +175,8 @@ describe("importChannelSettings — telegram", () => {
     expect(registry.all()).toHaveLength(1);
     expect(registry.all()[0].id).toBe(firstConnId);
     // importCredential's material comparison makes the re-import a full no-op:
-    // no epoch rebuild (no second Talker build), no onUnlocked re-fire.
-    expect(talkerFactory.instances).toHaveLength(1);
+    // no epoch rebuild (no second ChannelTransport build), no onUnlocked re-fire.
+    expect(transportFactory.instances).toHaveLength(1);
     expect(unlockFireCount).toBe(1);
   });
 
@@ -186,7 +186,7 @@ describe("importChannelSettings — telegram", () => {
     // must NOT resurrect over the authorized ledger credential.
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     let unlockFireCount = 0;
@@ -203,12 +203,12 @@ describe("importChannelSettings — telegram", () => {
     await importChannelSettings(registry, settings);
 
     // Same connection, SAME epoch: boot never touched the authorized credential,
-    // so no second Talker was built and no onUnlocked re-fired.
+    // so no second ChannelTransport was built and no onUnlocked re-fired.
     expect(registry.all()).toHaveLength(1);
     expect(registry.all()[0].id).toBe(connId);
     expect(unlockFireCount).toBe(1);
-    expect(talkerFactory.instances).toHaveLength(1);
-    expect(talkerFactory.instances[0].state.starts[0].creds.bot.material).toEqual({
+    expect(transportFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances[0].state.starts[0].creds.bot.material).toEqual({
       token: "tok-1",
     });
   });
@@ -280,7 +280,7 @@ describe("importChannelSettings — three-way guard", () => {
   it("bridge-era install: authorized grant with no profile gets a profile backfilled at boot, no epoch rebuild", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     // Simulate a pre-#1548 install: the grant was authorized before profiles
@@ -298,7 +298,7 @@ describe("importChannelSettings — three-way guard", () => {
       unlockFireCount++;
     });
     expect(unlockFireCount).toBe(1);
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
 
     // Boot sweep: settings carries the SAME token plus the identity that was
     // never captured. The grant is authorized-without-profile → profile-only
@@ -312,14 +312,14 @@ describe("importChannelSettings — three-way guard", () => {
     expect(grant?.state).toBe("authorized");
     expect(grant?.profile).toEqual({ botId: "42", botUsername: "@rome_bot" });
     // No epoch rebuild, no onUnlocked re-fire — the credential was never rewritten.
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
     expect(unlockFireCount).toBe(1);
   });
 
   it("a settings row whose token differs from the authorized grant does NOT resurrect the credential", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     // The ledger holds the FRESH token (e.g. rotated by a direct conferral).
@@ -328,7 +328,7 @@ describe("importChannelSettings — three-way guard", () => {
       material: { token: "tok-fresh" },
       expiresAt: "never",
     });
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
 
     // A frozen legacy settings row still carries the STALE token.
     const settings = makeSettingsSource({
@@ -342,7 +342,7 @@ describe("importChannelSettings — three-way guard", () => {
       material: { kind: "inline", record: { token: "tok-fresh" } },
     });
     // No epoch rebuild.
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
     // Identity is non-secret and safe to hydrate onto a profile-less grant; only
     // the credential is protected from the stale row.
     expect(grant?.profile).toEqual({ botId: "42", botUsername: "@rome_bot" });
@@ -351,7 +351,7 @@ describe("importChannelSettings — three-way guard", () => {
   it("a grant that already has a profile is left fully untouched at boot", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     const conn = await registry.connect("telegram");
@@ -361,7 +361,7 @@ describe("importChannelSettings — three-way guard", () => {
       { material: { token: "tok-1" }, expiresAt: "never" },
       { botId: "1", botUsername: "@original" },
     );
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
 
     // Boot sweep with a settings row carrying a DIFFERENT identity + token.
     const settings = makeSettingsSource({
@@ -375,13 +375,13 @@ describe("importChannelSettings — three-way guard", () => {
       material: { kind: "inline", record: { token: "tok-1" } },
     });
     expect(grant?.profile).toEqual({ botId: "1", botUsername: "@original" });
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
   });
 
   it("an explicitly-revoked grant is NOT resurrected by a credential-bearing legacy row at boot", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     // Confer, then the guardian explicitly disconnects (revoke-only — the legacy
@@ -394,7 +394,7 @@ describe("importChannelSettings — three-way guard", () => {
     await conn.auth.revoke("bot");
     expect(conn.auth.grants().bot).toBe("unauthorized");
     expect(conn.isUnlocked("talk")).toBe(false);
-    const epochsAfterRevoke = talkerFactory.instances.length;
+    const epochsAfterRevoke = transportFactory.instances.length;
 
     // Next boot: the sweep sees the revoke tombstone (unauthorized WITH a prior
     // conferral) and must not re-import the disconnected credential.
@@ -407,7 +407,7 @@ describe("importChannelSettings — three-way guard", () => {
     expect(grant?.state).toBe("unauthorized");
     expect(grant?.credential).toBeUndefined();
     expect(conn.isUnlocked("talk")).toBe(false);
-    expect(talkerFactory.instances).toHaveLength(epochsAfterRevoke);
+    expect(transportFactory.instances).toHaveLength(epochsAfterRevoke);
 
     // A NEW connect ceremony (route full-import) still confers normally — the
     // tombstone only blocks the boot sweep.
@@ -425,32 +425,32 @@ describe("importChannelSettings — three-way guard", () => {
 // the three-way guard until the post-soak bridge deletion.
 
 /** Descriptor shaped exactly like the real Email descriptor's auth surface
- *  (service "email", grant "inbox") with a fake Talker — the bridge tests pin
+ *  (service "email", grant "inbox") with a fake ChannelTransport — the bridge tests pin
  *  import/guard mechanics, not the mail transport. */
 function makeEmailLikeDescriptor() {
-  const talkerFactory = makeFakeTalkerFactory();
+  const transportFactory = makeFakeChannelTransportFactory();
   const descriptor: ConnectionDescriptor = {
     service: "email",
     auth: {
       inbox: tokenPaste({ label: "Email inbox", validate: async () => {} }),
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["inbox"] as const,
         build(creds) {
-          return talkerFactory.build(creds);
+          return transportFactory.build(creds);
         },
       },
     },
   };
-  return { descriptor, talkerFactory };
+  return { descriptor, transportFactory };
 }
 
 describe("importChannelSettings — email (boot bridge)", () => {
   it("a legacy credential-bearing email row still hydrates the inbox grant at boot (bridge intact)", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeEmailLikeDescriptor();
+    const { descriptor, transportFactory } = makeEmailLikeDescriptor();
     registry.register(descriptor);
 
     // A pre-4c install's frozen row: credentials next to config.
@@ -468,7 +468,7 @@ describe("importChannelSettings — email (boot bridge)", () => {
     expect(conn.auth.grants().inbox).toBe("authorized");
     expect(conn.isUnlocked("talk")).toBe(true);
     // Material is the NEW shape — coords only; guardianEmail stays settings config.
-    expect(talkerFactory.instances[0].state.starts[0].creds.inbox.material).toEqual({
+    expect(transportFactory.instances[0].state.starts[0].creds.inbox.material).toEqual({
       address: "slug@mail.romeos.cc",
       inboundSecret: "legacy-hmac",
     });
@@ -480,7 +480,7 @@ describe("importChannelSettings — email (boot bridge)", () => {
   it("a fresh pure-config email row imports nothing at boot (the route already conferred)", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeEmailLikeDescriptor();
+    const { descriptor, transportFactory } = makeEmailLikeDescriptor();
     registry.register(descriptor);
 
     const settings = makeSettingsSource({
@@ -490,13 +490,13 @@ describe("importChannelSettings — email (boot bridge)", () => {
 
     // No coords → absent material → the boot sweep is a no-op for email.
     expect(registry.find("email")).toHaveLength(0);
-    expect(talkerFactory.instances).toHaveLength(0);
+    expect(transportFactory.instances).toHaveLength(0);
   });
 
   it("a legacy row never resurrects over a route-conferred (rotated) inbox credential", async () => {
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeEmailLikeDescriptor();
+    const { descriptor, transportFactory } = makeEmailLikeDescriptor();
     registry.register(descriptor);
 
     // The connect route conferred fresh coordinates directly.
@@ -510,7 +510,7 @@ describe("importChannelSettings — email (boot bridge)", () => {
       },
       { address: "slug@mail.romeos.cc" },
     );
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
 
     // Boot sweep over a stale legacy row with the OLD secret.
     const settings = makeSettingsSource({
@@ -531,7 +531,7 @@ describe("importChannelSettings — email (boot bridge)", () => {
       },
     });
     // No epoch churn: the authorized grant's credential + profile win.
-    expect(talkerFactory.instances).toHaveLength(1);
+    expect(transportFactory.instances).toHaveLength(1);
   });
 });
 
@@ -601,7 +601,7 @@ describe("importOneChannel — generic row", () => {
     // unlike the boot sweep, a rotated token here MUST reach the credential.
     const ledger = makeLedger();
     const registry = new ConnectionRegistry({ ledger });
-    const { descriptor, talkerFactory } = makeTelegramLikeDescriptor();
+    const { descriptor, transportFactory } = makeTelegramLikeDescriptor();
     registry.register(descriptor);
 
     const settings = makeSettingsSource({ telegram: { botToken: "tok-1" } });
@@ -612,8 +612,8 @@ describe("importOneChannel — generic row", () => {
     await importOneChannel(registry, settings, TELEGRAM_SETTINGS_IMPORT_ROW);
 
     expect(registry.all()[0].id).toBe(connId);
-    expect(talkerFactory.instances).toHaveLength(2);
-    expect(talkerFactory.instances[1].state.starts[0].creds.bot.material).toEqual({
+    expect(transportFactory.instances).toHaveLength(2);
+    expect(transportFactory.instances[1].state.starts[0].creds.bot.material).toEqual({
       token: "tok-2",
     });
   });
@@ -879,13 +879,13 @@ describe("importOneChannel — whatsapp directory migration", () => {
     await writeFile(join(dir, "creds.json"), JSON.stringify({ me: { id: "1@s.whatsapp.net" } }));
 
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    // A whatsapp-shaped descriptor with a fake Talker (no Baileys socket).
-    const talkerFactory = makeFakeTalkerFactory();
+    // A whatsapp-shaped descriptor with a fake ChannelTransport (no Baileys socket).
+    const transportFactory = makeFakeChannelTransportFactory();
     registry.register({
       service: "whatsapp",
       auth: { session: tokenPaste({ label: "s", validate: async () => {} }) },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        transport: { needs: ["session"] as const, build: (creds) => transportFactory.build(creds) },
       },
     });
 
@@ -900,12 +900,12 @@ describe("importOneChannel — whatsapp directory migration", () => {
   it("no-op when the directory has no creds.json", async () => {
     const dir = await mkdtemp(join(tmpdir(), "wa-empty-"));
     const registry = new ConnectionRegistry({ ledger: makeLedger() });
-    const talkerFactory = makeFakeTalkerFactory();
+    const transportFactory = makeFakeChannelTransportFactory();
     registry.register({
       service: "whatsapp",
       auth: { session: tokenPaste({ label: "s", validate: async () => {} }) },
       capabilities: {
-        talker: { needs: ["session"] as const, build: (creds) => talkerFactory.build(creds) },
+        transport: { needs: ["session"] as const, build: (creds) => transportFactory.build(creds) },
       },
     });
 

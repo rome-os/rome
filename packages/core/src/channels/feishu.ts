@@ -39,11 +39,11 @@ export interface FeishuConfig {
   personMappingRepo?: PersonMappingRepository;
   listAgents?: () => string[];
   /**
-   * Optional fault seam the Talker wires in. Fires on a terminal
-   * `error` event from the long connection so the Talker maps it (auth →
+   * Optional fault seam the ChannelTransport wires in. Fires on a terminal
+   * `error` event from the long connection so the ChannelTransport maps it (auth →
    * CredentialRejected via {@link isFeishuAuthError}, else Disconnected). A
    * bad-credential `connect()` at start rejects out of {@link FeishuAdapter.start}
-   * instead, which the Talker routes the same way. ChannelManager passes no
+   * instead, which the ChannelTransport routes the same way. ChannelManager passes no
    * callback, so its behavior (error logged, swallowed) is unchanged.
    */
   onFault?: (err: unknown) => void;
@@ -165,7 +165,7 @@ export class FeishuAdapter {
         log.error("lark channel error", {
           error: err instanceof Error ? err.message : String(err),
         });
-        // Surface terminal long-connection errors to the Talker; it maps
+        // Surface terminal long-connection errors to the ChannelTransport; it maps
         // auth failures to CredentialRejected and everything else to Disconnected.
         this.onFault?.(err);
       }),

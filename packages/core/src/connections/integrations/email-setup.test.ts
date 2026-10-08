@@ -318,7 +318,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 
     // Hello mail: a signed inbound deposit dispatches through the live Talk.
     const received: unknown[] = [];
-    conn.hearTalker(async (m) => {
+    conn.hearTransport(async (m) => {
       received.push(m);
       return;
     });

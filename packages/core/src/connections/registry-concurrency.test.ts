@@ -142,7 +142,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
 
     // No split-brain: the live capability was built with the SAME credential the
     // ledger row records (tok2), not the earlier conferral's tok1.
-    const latest = fx.talkerFactory.instances.at(-1);
+    const latest = fx.transportFactory.instances.at(-1);
     expect(latest?.state.starts.at(-1)?.creds.bot.material).toEqual({ token: "tok2" });
     expect(conn.auth.grants().bot).toBe("authorized");
   });

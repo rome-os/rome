@@ -48,7 +48,7 @@ import type {
   ConversationSettingsControl,
   MessageReceipt,
 } from "@rome-os/app-runtime";
-import type { Talker } from "../connections/types.js";
+import type { ChannelTransport } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -233,13 +233,13 @@ export class FakeTransport {
 
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.sentMessages.push({ conversationId, message });
-    // A message id, the way every real talker answers with one. The outbox
+    // A message id, the way every real transport answers with one. The outbox
     // recognizes a delivered message by it, so a Talk that named nothing
     // would make every send untrackable in tests and only in tests.
     return { conversationId, messageId: `sent-${++sentCount}` };
   }
 
-  /** What the Connection's talker delivers through. */
+  /** What the Connection's transport delivers through. */
   listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -258,33 +258,34 @@ export class FakeTransport {
   }
 }
 
-/** What a test Connection's live talker offers: sending and its features. */
-export type TestTalker = Omit<Talker, "start" | "stop">;
+/** What a test Connection's live transport offers: sending and its features. */
+export type TestChannelTransport = Omit<ChannelTransport, "start" | "stop">;
 
 /** The Connections a test channel list reads: one `test:<name>` Connection per
- *  fake transport, each with a live talker over its transport. */
+ *  fake transport, each with a live ChannelTransport over it. */
 export type TestConnections = ConnectionPortsDeps["registry"] &
   Pick<ConnectionRegistry, "get" | "all">;
 
 /**
- * Builds the test Connections. `talker` edits one service's talker, for a test
- * that fakes what a Connection offers; the default talker addresses a direct
+ * Builds the test Connections. `edit` changes one service's transport, for a test
+ * that fakes what a Connection offers; the default transport addresses a direct
  * chat by the contact, like the two channels that ship with sending. Every
  * Connection hears its transport's deliveries.
  */
 export function createTestConnections(
   transports: ReadonlyMap<string, FakeTransport>,
-  talker: (service: string, talker: TestTalker) => TestTalker = (_service, talker) => talker,
+  edit: (service: string, live: TestChannelTransport) => TestChannelTransport = (_service, live) =>
+    live,
 ): TestConnections {
   const connections = new Map<string, Connection>();
   for (const [service, transport] of transports) {
     const id = `test:${service}`;
-    const live = talker(service, talkerOver(transport));
+    const live = edit(service, transportOver(transport));
     connections.set(id, {
       id,
       service,
-      withTalker: (call: (talker: TestTalker) => unknown) => call(live),
-      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+      withTransport: (call: (live: TestChannelTransport) => unknown) => call(live),
+      hearTransport: (handler: (message: ChannelMessage) => Promise<void>) =>
         transport.listen(handler),
       isUnlocked: (capability: string) => capability === "talk",
       status: () => ({ talk: { state: "unlocked" } }),
@@ -304,7 +305,11 @@ export function createTestConnections(
     all: () => [...connections.values()],
     getDescriptor: (service) =>
       find(service)
-        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+        ? ({
+            service,
+            auth: {},
+            capabilities: { transport: {} },
+          } as unknown as ConnectionDescriptor)
         : null,
     // Every test Connection is unlocked from the start, so a handler hears
     // each of them at once, as the registry's replay does.
@@ -315,8 +320,8 @@ export function createTestConnections(
   };
 }
 
-/** A talker over a fake transport. */
-function talkerOver(transport: FakeTransport): TestTalker {
+/** A ChannelTransport that sends on a fake transport. */
+function transportOver(transport: FakeTransport): TestChannelTransport {
   return {
     send: (conversationId, message) => transport.send(conversationId, message),
     directMessaging: {
@@ -334,7 +339,7 @@ export const noAccounts: Accounts = {
 };
 
 /** The harness's channel list over `connections`, built by the production
- *  `channelList`. A test that fakes a talker rebuilds the list with it. */
+ *  `channelList`. A test that fakes a transport rebuilds the list with it. */
 export function testChannels(
   deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
   connections: TestConnections,
@@ -438,7 +443,7 @@ export interface TestDeps extends ApiDeps {
   /** The platform end of each channel `connections` backs, by channel name. */
   transports: Map<string, FakeTransport>;
   /** The Connections behind `channels` and `channelsService`. A test that
-   *  fakes a talker builds its own with `createTestConnections`. */
+   *  fakes a transport builds its own with `createTestConnections`. */
   connections: TestConnections;
 }
 

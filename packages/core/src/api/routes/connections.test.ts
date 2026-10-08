@@ -349,7 +349,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     expect(connection.capabilities.act).toEqual({ state: "needs-auth", missingGrants: ["user"] });
     expect(connection.capabilities.talk).toEqual({ state: "unlocked" });
     // The talk epoch survived the sibling revoke; only act was torn down.
-    expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
+    expect(fixture.transportFactory.instances[0].state.stopCount).toBe(0);
     expect(personMappingRepo.deleteGuardianChannelMappings).not.toHaveBeenCalled();
   });
 
@@ -437,7 +437,7 @@ describe("DELETE /connections/:id", () => {
     expect(list.connections[0].service).toBe("fake-telegram");
     expect(await ledger.listConnections()).toEqual([]);
     // The live talk epoch was torn down with the connection.
-    expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
+    expect(fixture.transportFactory.instances[0].state.stopCount).toBe(1);
     // Guardian mapping cleanup is enlisted in the deletion transaction (called
     // with the tx participant), not as a separate best-effort write.
     expect(personMappingRepo.writeDeleteGuardianChannelMappings).toHaveBeenCalledWith(
@@ -474,7 +474,7 @@ describe("DELETE /connections/:id", () => {
     // connection is never evicted — no stale mapping against a deleted row.
     expect(await ledger.listConnections()).toHaveLength(1);
     expect(registry.get(conn.id).id).toBe(conn.id);
-    expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
+    expect(fixture.transportFactory.instances[0].state.stopCount).toBe(0);
   });
 
   it("404s an unknown connection and rejects cross-site requests", async () => {
@@ -555,7 +555,7 @@ describe("connection pairing teardown", () => {
       expect(await ledger.listConnections()).toHaveLength(1);
       expect(registry.get(conn.id).auth.grants().bot).toBe("authorized");
       expect((await ledger.getGrant(conn.id, "bot"))?.credential).toBeDefined();
-      expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
+      expect(fixture.transportFactory.instances[0].state.stopCount).toBe(0);
       expect(await personMappingRepo.findByChannelUser("discord", "paired")).not.toBeNull();
       expect((await approvalsRepo.findById(request.approval.id))?.status).toBe("pending");
       return;

@@ -17,7 +17,7 @@ import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
-import type { Credential, RuntimeKit, StreamFault, Talker } from "../types.js";
+import type { Credential, RuntimeKit, StreamFault, ChannelTransport } from "../types.js";
 import { toWechatUserChannelMessage } from "../../channels/wechat-user-messages.js";
 import {
   createWechatUserDescriptor,
@@ -373,8 +373,8 @@ describe("toWechatUserChannelMessage", () => {
   });
 });
 
-describe("the WeChat personal Talker", () => {
-  function buildTalker(
+describe("the WeChat personal ChannelTransport", () => {
+  function buildTransport(
     runtime: WechatUserRuntime,
     fault: (err: StreamFault) => void = () => {},
     probeIntervalMs = 60_000,
@@ -389,13 +389,13 @@ describe("the WeChat personal Talker", () => {
       material: { custody: "rome-container", wxid: "wxid_guardian" },
       expiresAt: "never",
     };
-    const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
+    const transport = descriptor.capabilities.transport!.build({ session: credential }, kit);
     const deliver = rs.fn();
-    talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
+    transport.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {
-      talker,
+      transport,
       deliver,
-      degradation: () => descriptor.capabilities.talker!.degradation!(talker),
+      degradation: () => descriptor.capabilities.transport!.degradation!(transport),
     };
   }
 
@@ -404,26 +404,26 @@ describe("the WeChat personal Talker", () => {
       statuses: [{ ...READY, running: false, pid: undefined }, READY],
     });
     const fault = rs.fn();
-    const { talker } = buildTalker(runtime, fault);
+    const { transport } = buildTransport(runtime, fault);
     try {
       await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
       expect(fault).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
   it("turns accessibility on for a client that is already running", async () => {
     const runtime = fakeRuntime({ statuses: [READY] });
     rs.mocked(runtime.prepareSession).mockRejectedValue(new Error("dbus-daemon failed"));
-    const { talker, degradation } = buildTalker(runtime);
+    const { transport, degradation } = buildTransport(runtime);
     try {
       await rs.waitFor(() => expect(runtime.ensureAccessibility).toHaveBeenCalledTimes(1));
       await rs.waitFor(() => expect(degradation()).toBeNull());
       expect(runtime.prepareSession).not.toHaveBeenCalled();
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
@@ -431,12 +431,12 @@ describe("the WeChat personal Talker", () => {
     // A crashed websockify or Openbox would otherwise leave /desktop/wechat
     // broken until the client itself exits.
     const runtime = fakeRuntime({ statuses: [READY] });
-    const { talker } = buildTalker(runtime);
+    const { transport } = buildTransport(runtime);
     try {
       await rs.waitFor(() => expect(runtime.repairDesktop).toHaveBeenCalledTimes(1));
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
@@ -444,7 +444,7 @@ describe("the WeChat personal Talker", () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, display: ":99", desktopPath: "/desktop", movePending: true }],
     });
-    const { talker, degradation } = buildTalker(runtime);
+    const { transport, degradation } = buildTransport(runtime);
     try {
       await rs.waitFor(() => expect(degradation()?.reason).toContain("shared desktop"));
       // There is no restart button: quitting WeChat on the shared desktop lets
@@ -453,20 +453,20 @@ describe("the WeChat personal Talker", () => {
       expect(degradation()?.reason).toContain("/desktop/wechat");
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
   it("leaves accessibility to start() for a client the probe restarts", async () => {
     const runtime = fakeRuntime({ statuses: [{ ...READY, running: false }, READY] });
-    const { talker, degradation } = buildTalker(runtime);
+    const { transport, degradation } = buildTransport(runtime);
     try {
       await rs.waitFor(() => expect(degradation()).toBeNull());
       expect(runtime.start).toHaveBeenCalledTimes(1);
       expect(runtime.prepareSession).not.toHaveBeenCalled();
       expect(runtime.ensureAccessibility).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
@@ -476,7 +476,7 @@ describe("the WeChat personal Talker", () => {
     });
     rs.mocked(runtime.start).mockRejectedValue(new Error("desktop unavailable"));
     const fault = rs.fn();
-    const { talker, degradation } = buildTalker(runtime, fault, 5);
+    const { transport, degradation } = buildTransport(runtime, fault, 5);
     try {
       await rs.waitFor(() =>
         expect(rs.mocked(runtime.start).mock.calls.length).toBeGreaterThanOrEqual(2),
@@ -484,7 +484,7 @@ describe("the WeChat personal Talker", () => {
       expect(degradation()?.reason).toContain("desktop unavailable");
       expect(fault).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
@@ -493,37 +493,37 @@ describe("the WeChat personal Talker", () => {
       statuses: [{ ...READY, state: "awaiting-scan", loggedIn: false, keysReady: false }],
     });
     const fault = rs.fn();
-    const { talker } = buildTalker(runtime, fault);
+    const { transport } = buildTransport(runtime, fault);
     try {
       await rs.waitFor(() => expect(fault).toHaveBeenCalledWith(expect.any(CredentialRejected)));
       expect(fault.mock.calls[0]![0].grant).toBe("session");
       expect(runtime.start).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
   it("reports phone confirmation without restarting a running client", async () => {
     const runtime = fakeRuntime({ statuses: [{ ...READY, state: "awaiting-scan" }] });
     const fault = rs.fn();
-    const { talker, degradation } = buildTalker(runtime, fault);
+    const { transport, degradation } = buildTransport(runtime, fault);
     try {
       await rs.waitFor(() => expect(degradation()?.reason).toContain("phone"));
       expect(runtime.start).not.toHaveBeenCalled();
       expect(fault).not.toHaveBeenCalled();
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
   it("recovers a later crash and clears degradation after the client resumes", async () => {
     const runtime = fakeRuntime({ statuses: [READY, { ...READY, running: false }, READY] });
-    const { talker, degradation } = buildTalker(runtime, undefined, 5);
+    const { transport, degradation } = buildTransport(runtime, undefined, 5);
     try {
       await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
       await rs.waitFor(() => expect(degradation()).toBeNull());
     } finally {
-      await talker.stop();
+      await transport.stop();
     }
   });
 
@@ -536,8 +536,8 @@ describe("the WeChat personal Talker", () => {
           resolve = done;
         }),
     );
-    const { talker } = buildTalker(runtime, undefined, 1);
-    const stopped = talker.stop();
+    const { transport } = buildTransport(runtime, undefined, 1);
+    const stopped = transport.stop();
     resolve({
       display: ":100",
       desktopPath: "/desktop/wechat",
@@ -551,15 +551,15 @@ describe("the WeChat personal Talker", () => {
   });
 
   it("is read-only: send throws, direct messaging is absent, nothing delivered", async () => {
-    const { talker, deliver } = buildTalker(fakeRuntime({ statuses: [READY] }));
+    const { transport, deliver } = buildTransport(fakeRuntime({ statuses: [READY] }));
 
-    await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
+    await expect(transport.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
       /read-only/,
     );
-    expect(talker.directMessaging).toBeUndefined();
+    expect(transport.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 
-    await talker.stop();
+    await transport.stop();
   });
 
   it("lists conversations as provider-neutral descriptors", async () => {
@@ -584,9 +584,9 @@ describe("the WeChat personal Talker", () => {
         { username: "brandsessionholder", displayName: "订阅号消息", type: "folded", unread: 0 },
       ],
     });
-    const { talker } = buildTalker(runtime);
+    const { transport } = buildTransport(runtime);
 
-    const page = await talker.directory!.listConversations({ limit: 10 });
+    const page = await transport.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
         ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
@@ -602,18 +602,18 @@ describe("the WeChat personal Talker", () => {
       },
     ]);
 
-    await talker.stop();
+    await transport.stop();
   });
 
   // What was said is the channel's `messages`, read through the same reader
   // (wechat-user-messages.ts). The Talk offers only the directory.
   it("leaves history to the channel", async () => {
-    const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
-    expect(talker.history).toBeUndefined();
+    const { transport } = buildTransport(fakeRuntime({ statuses: [READY] }));
+    expect(transport.history).toBeUndefined();
     expect(
       createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
-        .talker?.history,
+        .transport?.history,
     ).toBeUndefined();
-    await talker.stop();
+    await transport.stop();
   });
 });

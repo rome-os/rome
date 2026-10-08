@@ -25,7 +25,7 @@
 // account can revoke the session while the socket stays open and no NewMessage
 // ever arrives — so the Talk epoch polls `checkAuthorization` on its OWN live
 // client on a fixed interval. An auth failure is reported through the same
-// `fault` callback every Talker receives (→ CredentialRejected → the grant
+// `fault` callback every ChannelTransport receives (→ CredentialRejected → the grant
 // degrades with reason + timestamp). A network failure is NOT a fault: the live
 // NewMessage stream + GramJS reconnection own transport health, so a probe blip
 // stays silent. The probe is a private idiom of this one integration (the only
@@ -36,7 +36,7 @@
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TransportDirectory, TransportFeatures } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,
@@ -53,7 +53,7 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   SecretRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import {
   directoryCursorOffset,
@@ -369,10 +369,10 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
       session,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["session"] as const,
         history: true,
-        build(creds, kit): Talker {
+        build(creds, kit): ChannelTransport {
           const settings = telegramUserSettingsFromMaterial(creds.session.material as SecretRecord);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let probeTimer: ReturnType<typeof setInterval> | null = null;
@@ -411,7 +411,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             }
           };
 
-          const directory: TalkDirectory = {
+          const directory: TransportDirectory = {
             async listConversations(input) {
               const dialogs = await adapter.listDialogs(
                 directoryCursorOffset(input.cursor) + input.limit,
@@ -444,7 +444,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
               };
             },
           };
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
             },

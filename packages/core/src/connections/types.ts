@@ -15,12 +15,13 @@ import type {
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
-// ── Talk ─────────────────────────────────────────────────────────────────────
-// A Connection's conversational surface, as its builder implements it
-// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
-// through `Connection.withTalker`: apps reach channels through the channels
-// service (actions) or a hook's `channels`. A talker delivers each message as
-// the channel's own record: a `ChannelMessage` naming the channel it backs,
+// ── Channel transport ────────────────────────────────────────────────────────
+// The live part of the channel a Connection backs, as its builder implements it
+// (`ChannelTransport`), rebuilt each time the Connection's `talk` capability
+// unlocks. Only the channel ports (channels/connection-ports.ts) reach it,
+// through `Connection.withTransport`: apps reach channels through the channels
+// service (actions) or a hook's `channels`. A transport delivers each message
+// as the channel's own record: a `ChannelMessage` naming the channel it backs,
 // with direction `inbound`.
 
 /**
@@ -29,7 +30,7 @@ import type { CredentialRejected, Disconnected } from "./errors.js";
  * it and which way it went. It backs `messages.query` for a channel with no
  * store of its own (channels/connection-ports.ts).
  */
-export interface TalkHistory {
+export interface TransportHistory {
   query(input: {
     conversationId?: ConversationId;
     since?: Date;
@@ -38,7 +39,7 @@ export interface TalkHistory {
 }
 
 /** The conversations a Connection can see, for conversation settings. */
-export interface TalkDirectory {
+export interface TransportDirectory {
   listConversations(input: {
     query?: string;
     cursor?: string;
@@ -47,24 +48,24 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
 }
 
-export interface TalkFeatureMap {
-  history: TalkHistory;
+export interface TransportFeatureMap {
+  history: TransportHistory;
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
-  directory: TalkDirectory;
+  directory: TransportDirectory;
   directMessaging: ChannelDirectMessaging;
 }
 
-export type TalkFeatureName = keyof TalkFeatureMap;
+export type TransportFeatureName = keyof TransportFeatureMap;
 
 /**
- * What a talker offers beyond sending and hearing, one optional field per
- * channel port it backs. An absent field is the declaration that the talker
+ * What a transport offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the transport
  * does not offer it. The registry reads a field each time it is used, so a
- * getter defined on the talker literal stays live; spreading an object into the
- * talker reads its getters once.
+ * getter defined on the transport literal stays live; spreading an object into
+ * the transport reads its getters once.
  */
-export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
+export type TransportFeatures = { [K in TransportFeatureName]?: TransportFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
@@ -216,17 +217,17 @@ export interface Connection {
    *  reads whether the capability's instance exists. */
   isUnlocked(cap: Capability): boolean;
   /**
-   * Calls `call` with the talker of the live epoch and answers what it
+   * Calls `call` with the transport of the live epoch and answers what it
    * returns, or undefined while talk is locked. Starting and stopping the
-   * talker are the registry's. A `CredentialRejected` that
+   * transport are the registry's. A `CredentialRejected` that
    * `call` throws, or that the promise it returns rejects with, runs the
-   * grant's fault flow before it reaches the caller. Read the talker inside
-   * `call` only: a talker held past it outlives a relock unguarded.
+   * grant's fault flow before it reaches the caller. Read the transport inside
+   * `call` only: a transport held past it outlives a relock unguarded.
    */
-  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
-  /** Hears each message the live talker delivers until talk relocks, or null
+  withTransport<T>(call: (transport: Omit<ChannelTransport, "start" | "stop">) => T): T | undefined;
+  /** Hears each message the live transport delivers until talk relocks, or null
    *  while talk is locked. */
-  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
+  hearTransport(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
   get act(): Act | null;
   get watch(): Watch | null;
@@ -246,8 +247,8 @@ export interface RuntimeKit {
   // kit.webhook() lands in phase 6 — do not add it now.
 }
 
-/** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker extends TalkFeatures {
+/** Builder-side channel transport. Long-lived; faults are REPORTED not thrown. */
+export interface ChannelTransport extends TransportFeatures {
   start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
@@ -308,19 +309,20 @@ export interface ConnectionDescriptor {
    *  auth). Omitted by services with no such artifact — most descriptors. */
   custody?: GrantCustody;
   capabilities: Partial<{
-    talker: {
+    transport: {
       needs: readonly GrantName[];
-      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
-      degradation?(instance: Talker): CapabilityDegradation | null;
-      /** False when the talker can never send, so the channel it backs has no
-       *  `send` port. Absent means it can. */
+      build(creds: Record<GrantName, Credential>, kit: RuntimeKit): ChannelTransport;
+      degradation?(instance: ChannelTransport): CapabilityDegradation | null;
+      /** False when the transport can never send, so the channel it backs has
+       *  no `send` port. Absent means it can. */
       sends?: boolean;
-      /** False when this Talk's deliveries do not back the channel's `inbound`
-       *  port, so that channel has none. It says what the Talk backs, not what
-       *  the talker does: webchat's talker is wired to `deliver`, but its turns
-       *  start from its own route. Absent means the deliveries back it. */
+      /** False when this transport's deliveries do not back the channel's
+       *  `inbound` port, so that channel has none. It says what the deliveries
+       *  back, not what the transport does: webchat's transport is wired to
+       *  `deliver`, but its turns start from its own route. Absent means the
+       *  deliveries back it. */
       receives?: boolean;
-      /** True when the Talk reads the platform's own history, so the channel it
+      /** True when the transport reads the platform's own history, so the channel it
        *  backs answers `messages.query` through it. Absent means it does not:
        *  the channel's messages come from a store, or from nowhere. */
       history?: boolean;

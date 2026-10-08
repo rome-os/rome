@@ -3,7 +3,7 @@
 // account or in an account linked to it.
 //
 // Rome Cloud stores each message for this instance's endpoint until the
-// instance acknowledges it, so the talker polls and acknowledges after
+// instance acknowledges it, so the transport polls and acknowledges after
 // delivering. The instance token is the credential and lives outside the
 // grant; the grant only records the endpoint name Cloud assigned. A sender is
 // never mapped to a person here. A sender Cloud marks as in this Rome's own
@@ -36,8 +36,8 @@ import type {
   ProfileDisplay,
   ProfileRecord,
   StreamFault,
-  TalkFeatures,
-  Talker,
+  TransportFeatures,
+  ChannelTransport,
 } from "../types.js";
 
 const log = createLogger("agents-channel");
@@ -135,7 +135,7 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
     },
     // The instance token is the real credential and Cloud renews nothing here.
     // A token Cloud still refuses needs the guardian, so renewal only confirms
-    // it works; returning it unchanged would rebuild a talker that faults again.
+    // it works; returning it unchanged would rebuild a transport that faults again.
     async renew(cred: Credential): Promise<Credential | "re-confer"> {
       try {
         await client.endpoints();
@@ -148,7 +148,7 @@ function agentsScheme(client: AgentMessagingClient): AuthScheme {
   };
 }
 
-export function createAgentsTalker(client: AgentMessagingClient): Talker {
+export function createAgentsTransport(client: AgentMessagingClient): ChannelTransport {
   let generation = 0;
   let warnedNoSameAccount = false;
   let cancelWait: (() => void) | null = null;
@@ -219,7 +219,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   // An agent's address is both how Cloud reaches it and the conversation its
   // messages arrive in, so Rome can write to a dot first, from the People
   // page, as well as answer one.
-  const features: TalkFeatures = {
+  const features: TransportFeatures = {
     directMessaging: addressIsConversationFeature(),
   };
   return {
@@ -278,9 +278,9 @@ export function makeAgentsDescriptor(
     reviveProfile: (_grant, record) => reviveAgentsProfile(record),
     auth: { cloud: agentsScheme(client) },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["cloud"] as const,
-        build: () => createAgentsTalker(client),
+        build: () => createAgentsTransport(client),
       },
     },
   };

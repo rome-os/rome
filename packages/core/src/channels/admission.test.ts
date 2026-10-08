@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
-import type { ConnectionDescriptor, Talker } from "../connections/types.js";
+import type { ConnectionDescriptor, ChannelTransport } from "../connections/types.js";
 import { connectionPorts } from "./connection-ports.js";
 
 describe("a channel's Connection across epochs", () => {
@@ -27,9 +27,9 @@ describe("a channel's Connection across epochs", () => {
         bot: tokenPaste({ label: "token", validate: async () => {} }),
       },
       capabilities: {
-        talker: {
+        transport: {
           needs: ["bot"],
-          build(): Talker {
+          build(): ChannelTransport {
             const state: (typeof instances)[number] = {
               sends: [],
               epoch: instances.length + 1,
@@ -99,15 +99,17 @@ describe("a channel's Connection across epochs", () => {
     // Admission runs once per message, however many subscribe.
     if (gated) expect(admit).toHaveBeenCalledTimes(1);
 
-    const history = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
+    const history = await connection.withTransport((transport) =>
+      transport.history?.query({ limit: 10 }),
+    );
     expect(history?.[0]?.messageId).toBe("history-1");
     await expect(
       ports.send!.send("general" as ConversationId, { text: "first reply" }),
     ).resolves.toMatchObject({ messageId: "sent-1" });
 
-    // Past its epoch nothing reaches the stopped talker.
+    // Past its epoch nothing reaches the stopped transport.
     await connection.auth.revoke("bot");
-    expect(connection.withTalker(() => "reached")).toBeUndefined();
+    expect(connection.withTransport(() => "reached")).toBeUndefined();
     expect(connection.isUnlocked("talk")).toBe(false);
     await registry.importCredential(connection.id, "bot", {
       material: { token: "second" },
@@ -141,7 +143,9 @@ describe("a channel's Connection across epochs", () => {
       expect(received).toEqual(["inbound-1", "inbound-2"]);
     }
     unsubscribe();
-    const current = await connection.withTalker((talker) => talker.history?.query({ limit: 10 }));
+    const current = await connection.withTransport((transport) =>
+      transport.history?.query({ limit: 10 }),
+    );
     expect(current?.[0]?.messageId).toBe("history-2");
     await expect(
       ports.send!.send("general" as ConversationId, { text: "second reply" }),
@@ -156,9 +160,9 @@ describe("a channel's Connection across epochs", () => {
       service: "telegram",
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
-        talker: {
+        transport: {
           needs: ["bot"],
-          build: (): Talker => ({
+          build: (): ChannelTransport => ({
             start(next) {
               deliver = next;
             },

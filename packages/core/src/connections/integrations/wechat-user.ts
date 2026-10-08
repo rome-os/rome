@@ -23,7 +23,7 @@
 
 import { z } from "zod";
 import type { ConversationDescriptor, ConversationId } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatures } from "../types.js";
+import type { TransportDirectory, TransportFeatures } from "../types.js";
 import {
   isWechatUserSessionRejected,
   WechatUserReader,
@@ -43,7 +43,7 @@ import type {
   Credential,
   ProfileDisplay,
   ProfileRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import { directoryPage } from "./talk-features.js";
 
@@ -387,7 +387,7 @@ export interface WechatUserDescriptorDeps {
   probeIntervalMs?: number;
 }
 
-interface WechatUserTalker extends Talker {
+interface WechatUserTransport extends ChannelTransport {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
@@ -410,19 +410,19 @@ export function createWechatUserDescriptor(
       session: sessionScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["session"] as const,
         // Read-only: the personal account is consulted, never written to or
         // answered (docs/architecture/channels.md#wechat-personal-account).
         sends: false,
         receives: false,
-        build(_creds, kit): Talker {
+        build(_creds, kit): ChannelTransport {
           let degradation: CapabilityDegradation | null = null;
           let probe: ReturnType<typeof setTimeout> | null = null;
           let controller: AbortController | null = null;
           let pending: Promise<void> | null = null;
 
-          const directory: TalkDirectory = {
+          const directory: TransportDirectory = {
             async listConversations(input) {
               // The reader ranks by recency and has no native cursor, so a page
               // is taken locally over a bounded fetch — the same bargain the
@@ -443,8 +443,8 @@ export function createWechatUserDescriptor(
 
           // `directMessaging` is absent on purpose: leaving it off is the
           // whole declaration that this channel cannot be written to.
-          const features: TalkFeatures = { directory };
-          const talker: WechatUserTalker = {
+          const features: TransportFeatures = { directory };
+          const transport: WechatUserTransport = {
             // Read-only: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused. History is answered on demand, never pushed.
             start(_deliver, fault): void {
@@ -547,10 +547,10 @@ export function createWechatUserDescriptor(
               return degradation;
             },
           };
-          return talker;
+          return transport;
         },
-        degradation(instance: Talker): CapabilityDegradation | null {
-          return (instance as WechatUserTalker).getRuntimeDegradation();
+        degradation(instance: ChannelTransport): CapabilityDegradation | null {
+          return (instance as WechatUserTransport).getRuntimeDegradation();
         },
       },
     },

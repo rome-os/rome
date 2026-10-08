@@ -34,7 +34,7 @@ export interface ChannelSend extends AppChannelSend {
    * exists, or null where the channel cannot. When no Connection
    * exists for the channel, `conversationFor` rejects with
    * {@link ChannelNotConnected}, as `send` does. A Connection that exists but
-   * has no live talker (locked, awaiting re-authorization) reads as null.
+   * has no live transport (locked, awaiting re-authorization) reads as null.
    */
   readonly direct: ChannelDirectMessaging | null;
 }

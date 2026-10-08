@@ -62,7 +62,7 @@ export interface WechatSettings {
 
 /**
  * Runtime config for {@link WechatAdapter}: the persisted settings plus the
- * optional fault seam the Talker wires in. `onFault` fires ONLY on a
+ * optional fault seam the ChannelTransport wires in. `onFault` fires ONLY on a
  * terminal outcome the adapter cannot recover — a refused credential (ilinkai
  * HTTP 401/403, see {@link isWechatAuthError}). Transient getupdates failures
  * retry internally. ChannelManager passes no callback, so failures are only
@@ -1201,7 +1201,7 @@ export class WechatAdapter {
       this.lastError = err instanceof Error ? err.message : String(err);
       log.error("polling stopped", { error: this.lastError });
       // A terminal poll failure the loop could not swallow — surface it so the
-      // Talker maps it (auth → CredentialRejected, else Disconnected).
+      // ChannelTransport maps it (auth → CredentialRejected, else Disconnected).
       this.onFault?.(err);
     });
   }

@@ -1,6 +1,6 @@
 // Telegram connection integration. Channel contract: docs/architecture/channels.md.
 //
-// Telegram is a Talker with a single `bot` grant (a pasted bot token). The
+// Telegram is a ChannelTransport with a single `bot` grant (a pasted bot token). The
 // transport core — the inbound `ChannelMessage`, attachment extraction, send
 // formatting — is `TelegramAdapter` (packages/core/src/channels/telegram.ts),
 // wrapped here so the runtime's grant-epoch lifecycle and fault→grant-state
@@ -15,12 +15,17 @@
 
 import { Bot, GrammyError } from "grammy";
 import { z } from "zod";
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
-import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
+import type {
+  ConnectionDescriptor,
+  ProfileDisplay,
+  ProfileRecord,
+  ChannelTransport,
+} from "../types.js";
 import { addressIsConversationFeature } from "./talk-features.js";
 
 /**
@@ -212,9 +217,9 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
       bot: botScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["bot"] as const,
-        build(creds): Talker {
+        build(creds): ChannelTransport {
           const token = creds.bot.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           const routeFault = (err: unknown): void => {
@@ -230,7 +235,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             createBot,
           );
 
-          const features: TalkFeatures = {
+          const features: TransportFeatures = {
             inboundMedia: {
               materialize: (message) => adapter.saveIncomingAttachments(message),
             },

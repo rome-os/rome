@@ -18,7 +18,7 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import type { Connection, TalkFeatureName, Talker } from "../connections/types.js";
+import type { Connection, TransportFeatureName, ChannelTransport } from "../connections/types.js";
 import { historyWindowHours } from "../connections/integrations/talk-features.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createLogger } from "../logger.js";
@@ -51,7 +51,7 @@ export interface ConnectionPorts {
 /**
  * The ports a service's Talk backs, or null when the service has no Talk.
  *
- * Building the ports subscribes the inbound port to the service's talkers for
+ * Building the ports subscribes the inbound port to the service's transports for
  * the registry's lifetime, and admission runs once per message for each
  * subscription. So build one set per registry and service, as `channelList`
  * does: a second set would run admission (pairing replies included) twice.
@@ -60,18 +60,18 @@ export function connectionPorts(
   deps: ConnectionPortsDeps,
   service: string,
 ): ConnectionPorts | null {
-  const talker = deps.registry.getDescriptor(service)?.capabilities.talker;
-  if (!talker) return null;
+  const transport = deps.registry.getDescriptor(service)?.capabilities.transport;
+  if (!transport) return null;
   return {
-    send: talker.sends === false ? null : connectionSend(deps, service),
-    inbound: talker.receives === false ? null : connectionInbound(deps, service),
-    messages: talker.history === true ? connectionMessages(deps, service) : null,
+    send: transport.sends === false ? null : connectionSend(deps, service),
+    inbound: transport.receives === false ? null : connectionInbound(deps, service),
+    messages: transport.history === true ? connectionMessages(deps, service) : null,
     directory: connectionDirectory(deps, service),
   };
 }
 
 /**
- * The conversations a channel's Connection can see. A talker says at runtime
+ * The conversations a channel's Connection can see. A transport says at runtime
  * whether it lists conversations, so the port is present for every channel a
  * Talk backs, and one whose Connection lists none answers empty.
  */
@@ -84,8 +84,8 @@ function connectionDirectory(deps: ConnectionPortsDeps, service: string): Channe
       const listed = await Promise.all(
         connections.map(async (connection) => {
           try {
-            const result = await connection.withTalker((talker) =>
-              talker.directory?.listConversations(input),
+            const result = await connection.withTransport((transport) =>
+              transport.directory?.listConversations(input),
             );
             return result?.conversations ?? [];
           } catch (err) {
@@ -173,9 +173,9 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       const connection = connectionFor(deps, service);
       if (!connection) throw new ChannelNotConnected(service);
       const connectionId = connection.id;
-      // A Connection whose talker is not built yet (a credential missing or
+      // A Connection whose transport is not built yet (a credential missing or
       // degraded) backs nothing, the same as no Connection at all.
-      if (!connection.withTalker((talker) => talker.history !== undefined)) {
+      if (!connection.withTransport((transport) => transport.history !== undefined)) {
         throw new ChannelNotConnected(service);
       }
       const from = since ?? new Date(Date.now() - LIVE_DEFAULT_WINDOW_MS);
@@ -185,8 +185,8 @@ function connectionMessages(deps: ConnectionPortsDeps, service: string): Message
       const lines = await read(
         `${connectionId}\n${conversationId ?? ""}\n${hours}`,
         () =>
-          connection.withTalker((talker) =>
-            talker.history?.query({
+          connection.withTransport((transport) =>
+            transport.history?.query({
               ...(conversationId ? { conversationId } : {}),
               since: from,
               limit: MAX_QUERY_LIMIT,
@@ -225,30 +225,30 @@ function connectionFor(deps: ConnectionPortsDeps, service: string): Connection |
   return deps.registry.find(service)[0] ?? null;
 }
 
-/** Sends on `connection`'s live talker. A Connection whose credentials are
+/** Sends on `connection`'s live transport. A Connection whose credentials are
  *  locked or degraded has none, and sending on it refuses. */
 export async function sendThrough(
   connection: Connection,
   conversationId: ConversationId,
   message: OutgoingMessage,
 ): Promise<MessageReceipt> {
-  const sent = connection.withTalker((talker) => talker.send(conversationId, message));
+  const sent = connection.withTransport((transport) => transport.send(conversationId, message));
   if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
   return sent;
 }
 
-/** Whether `connection`'s live talker offers `feature` now. */
-function offers(connection: Connection, feature: TalkFeatureName): boolean {
-  return connection.withTalker((talker) => talker[feature] !== undefined) ?? false;
+/** Whether `connection`'s live transport offers `feature` now. */
+function offers(connection: Connection, feature: TransportFeatureName): boolean {
+  return connection.withTransport((transport) => transport[feature] !== undefined) ?? false;
 }
 
-/** Calls one of `connection`'s talker features as it is when called, which
- *  rejects once the talker no longer offers it. */
-async function callTalker<T>(
+/** Calls one of `connection`'s transport features as it is when called, which
+ *  rejects once the transport no longer offers it. */
+async function callTransport<T>(
   connection: Connection,
-  call: (talker: Omit<Talker, "start" | "stop">) => Promise<T> | undefined,
+  call: (transport: Omit<ChannelTransport, "start" | "stop">) => Promise<T> | undefined,
 ): Promise<T> {
-  const called = connection.withTalker(call);
+  const called = connection.withTransport(call);
   if (!called) throw new ChannelNotConnected(connection.service);
   return called;
 }
@@ -272,8 +272,8 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
       if (!offers(connection, "directMessaging")) return null;
       const direct: ChannelDirectMessaging = {
         conversationFor: (channelUserId) =>
-          callTalker(connection, (talker) =>
-            talker.directMessaging?.conversationFor(channelUserId),
+          callTransport(connection, (transport) =>
+            transport.directMessaging?.conversationFor(channelUserId),
           ),
       };
       return direct;
@@ -282,7 +282,8 @@ function connectionSend(deps: ConnectionPortsDeps, service: string): ChannelSend
       const connection = connectionFor(deps, service);
       if (!connection || !offers(connection, "activity")) return null;
       const activity: ChannelActivity = {
-        begin: (input) => callTalker(connection, (talker) => talker.activity?.begin(input)),
+        begin: (input) =>
+          callTransport(connection, (transport) => transport.activity?.begin(input)),
       };
       return activity;
     },
@@ -298,7 +299,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
   // One buffer set per subscription, so two subscriptions of one handler stay
   // two, and each subscription's conversations wait only on themselves (R4).
   const subscriptions = new Set<ConversationBuffers<InboundEvent>>();
-  // One talker subscription per Connection, fanned out to every handler. A new
+  // One transport subscription per Connection, fanned out to every handler. A new
   // epoch starts with no handlers, so each unlock subscribes again (R5).
   const attached = new Map<string, () => void>();
   const admission = new OrderedAdmission(deps.admit, deps.admission);
@@ -315,7 +316,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
     (connectionId: string) =>
     async (message: ChannelMessage): Promise<void> => {
       if (!isAnswerable(message)) return;
-      // A talker delivers the channel's own record, named and inbound.
+      // A transport delivers the channel's own record, named and inbound.
       const event: InboundEvent = {
         kind: "message",
         message,
@@ -339,7 +340,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
       attached.delete(id);
     }
     const dispatch = dispatchFrom(connection.id);
-    const detach = connection.hearTalker((message) =>
+    const detach = connection.hearTransport((message) =>
       admission.deliver(connection, message, dispatch),
     );
     if (detach) attached.set(connection.id, detach);
@@ -367,7 +368,7 @@ function connectionInbound(deps: ConnectionPortsDeps, service: string): ChannelI
       if (!connection || !offers(connection, "inboundMedia")) return null;
       const media: ChannelInboundMedia = {
         materialize: (message) =>
-          callTalker(connection, (talker) => talker.inboundMedia?.materialize(message)),
+          callTransport(connection, (transport) => transport.inboundMedia?.materialize(message)),
       };
       return media;
     },

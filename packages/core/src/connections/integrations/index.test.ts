@@ -37,13 +37,13 @@ describe("registerBuiltinConnections", () => {
       persist: async () => {},
       registerIngress: () => () => {},
     } satisfies RuntimeKit;
-    const talker = registered
+    const transport = registered
       .get(WECHAT_USER_SERVICE)!
-      .capabilities.talker!.build(
+      .capabilities.transport!.build(
         { session: { material: { wxid: "wxid_guardian" }, expiresAt: "never" } },
         kit,
       );
-    const page = await talker.directory!.listConversations({ limit: 10 });
+    const page = await transport.directory!.listConversations({ limit: 10 });
 
     expect(page.conversations.map((c) => c.ref.conversationId)).toEqual(["wxid_friend"]);
     expect(bridgeCommand).toHaveBeenCalled();

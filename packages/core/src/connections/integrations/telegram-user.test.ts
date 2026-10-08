@@ -22,7 +22,13 @@ import { installTestClock } from "../../test/kit/index.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
-import type { Credential, ProfileRecord, SecretRecord, StreamFault, Talker } from "../types.js";
+import type {
+  Credential,
+  ProfileRecord,
+  SecretRecord,
+  StreamFault,
+  ChannelTransport,
+} from "../types.js";
 import * as telegramUserModule from "../../channels/telegram-user.js" with {
   rstest: "importActual",
 };
@@ -132,13 +138,13 @@ function rpcError(code: number | undefined, errorMessage: string): Error {
   return Object.assign(new Error(errorMessage), { code, errorMessage });
 }
 
-function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}): {
-  talker: Talker;
+function buildTransport(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}): {
+  transport: ChannelTransport;
   faults: StreamFault[];
   start: () => void;
 } {
   const desc = makeTelegramUserDescriptor(deps);
-  const talker = desc.capabilities.talker!.build(
+  const transport = desc.capabilities.transport!.build(
     { session: validCred() },
     {
       connectionId: "telegram-user-test",
@@ -148,10 +154,10 @@ function buildTalker(deps: Parameters<typeof makeTelegramUserDescriptor>[0] = {}
   );
   const faults: StreamFault[] = [];
   return {
-    talker,
+    transport,
     faults,
     start: () =>
-      talker.start(
+      transport.start(
         () => {},
         (err) => faults.push(err),
       ),
@@ -188,11 +194,11 @@ describe("telegram_user material round-trip", () => {
 });
 
 describe("telegram_user descriptor shape", () => {
-  it("declares one setup-driven `session` grant and a talker needing it", () => {
+  it("declares one setup-driven `session` grant and a transport needing it", () => {
     const desc = makeTelegramUserDescriptor();
     expect(desc.service).toBe("telegram_user");
     expect(Object.keys(desc.auth)).toEqual(["session"]);
-    expect(desc.capabilities.talker?.needs).toEqual(["session"]);
+    expect(desc.capabilities.transport?.needs).toEqual(["session"]);
     expect(desc.capabilities.actor).toBeUndefined();
     // The `session` grant carries a conferral setup coroutine.
     expect(typeof desc.auth.session.setup).toBe("function");
@@ -209,7 +215,7 @@ describe("telegram_user descriptor shape", () => {
   });
 
   it("exposes inbound media and returns an awaitable stop()", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     const message = {
       channel: "telegram_user",
@@ -221,10 +227,10 @@ describe("telegram_user descriptor shape", () => {
       attachments: [],
       timestamp: new Date(),
     } satisfies ChannelMessage;
-    await expect(h.talker.inboundMedia?.materialize(message)).resolves.toEqual([]);
+    await expect(h.transport.inboundMedia?.materialize(message)).resolves.toEqual([]);
     // The ChannelMessage reaches the transport as it is, with no `raw` to unwrap.
     expect(fakeState.materialized).toStrictEqual([message]);
-    const stopped = h.talker.stop();
+    const stopped = h.transport.stop();
     expect(stopped).toBeInstanceOf(Promise);
     await stopped;
     expect(fakeState.stopped).toBe(true);
@@ -233,14 +239,14 @@ describe("telegram_user descriptor shape", () => {
   // The flag is what gives the channel a \`messages\` port; the feature is what
   // answers it. A Talk offering one without the other is unreachable or broken.
   it("declares the history its Talk offers", () => {
-    expect(makeTelegramUserDescriptor().capabilities.talker?.history).toBe(true);
+    expect(makeTelegramUserDescriptor().capabilities.transport?.history).toBe(true);
   });
 
   it("exposes provider-neutral history", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     await expect(
-      h.talker.history?.query({
+      h.transport.history?.query({
         conversationId: "dialog-1" as ConversationId,
         limit: 20,
       }),
@@ -263,9 +269,9 @@ describe("telegram_user descriptor shape", () => {
       raw: { out },
     });
     fakeState.historyLines = [line("1", false), line("2", true), line("3", false)];
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
-    const lines = await h.talker.history?.query({ limit: 2 });
+    const lines = await h.transport.history?.query({ limit: 2 });
     expect(lines).toStrictEqual([line("1", false), { ...line("2", true), direction: "outbound" }]);
     expect(fakeState.historyCalls).toEqual([{ threadId: null, windowHours: 24 }]);
   });
@@ -274,7 +280,7 @@ describe("telegram_user descriptor shape", () => {
 describe("telegram_user inbound delivery", () => {
   it("delivers the transport's ChannelMessage as it is, field for field", async () => {
     const desc = makeTelegramUserDescriptor();
-    const talker = desc.capabilities.talker!.build(
+    const transport = desc.capabilities.transport!.build(
       { session: validCred() },
       {
         connectionId: "telegram-user-test",
@@ -283,7 +289,7 @@ describe("telegram_user inbound delivery", () => {
       },
     );
     const delivered: unknown[] = [];
-    talker.start(
+    transport.start(
       (msg) => delivered.push(msg),
       () => {},
     );
@@ -320,13 +326,13 @@ describe("telegram_user inbound delivery", () => {
         raw,
       },
     ]);
-    await talker.stop();
+    await transport.stop();
   });
 });
 
-describe("telegram_user Talker fault mapping", () => {
+describe("telegram_user ChannelTransport fault mapping", () => {
   it("maps a not-authorized session at start to CredentialRejected{ grant: 'session' }", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     fakeState.startError = new TelegramUserSessionNotAuthorizedError();
     h.start();
     await flush();
@@ -335,7 +341,7 @@ describe("telegram_user Talker fault mapping", () => {
   });
 
   it("maps a 401 at start to CredentialRejected{ grant: 'session' }", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     fakeState.startError = rpcError(401, "UNAUTHORIZED");
     h.start();
     await flush();
@@ -344,7 +350,7 @@ describe("telegram_user Talker fault mapping", () => {
   });
 
   it("maps an AUTH_KEY_UNREGISTERED RPC error to CredentialRejected", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     fakeState.startError = rpcError(undefined, "AUTH_KEY_UNREGISTERED");
     h.start();
     await flush();
@@ -353,7 +359,7 @@ describe("telegram_user Talker fault mapping", () => {
   });
 
   it("maps a generic transport failure at start to Disconnected", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     fakeState.startError = new Error("ECONNRESET");
     h.start();
     await flush();
@@ -362,27 +368,31 @@ describe("telegram_user Talker fault mapping", () => {
   });
 
   it("throws CredentialRejected{ grant: 'session' } from send() on a session revocation", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     fakeState.sendError = rpcError(undefined, "SESSION_REVOKED");
     const address = "999" as ConversationId;
-    await expect(h.talker.send(address, { text: "hi" })).rejects.toBeInstanceOf(CredentialRejected);
-    await expect(h.talker.send(address, { text: "hi" })).rejects.toMatchObject({
+    await expect(h.transport.send(address, { text: "hi" })).rejects.toBeInstanceOf(
+      CredentialRejected,
+    );
+    await expect(h.transport.send(address, { text: "hi" })).rejects.toMatchObject({
       grant: "session",
     });
   });
 
   it("rethrows a non-auth send() failure unchanged (not a credential fault)", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
     fakeState.sendError = new Error("timeout");
-    await expect(h.talker.send("999" as ConversationId, { text: "hi" })).rejects.toThrow("timeout");
+    await expect(h.transport.send("999" as ConversationId, { text: "hi" })).rejects.toThrow(
+      "timeout",
+    );
   });
 
   it("forwards the opaque conversation id to the adapter's send and returns its receipt", async () => {
-    const h = buildTalker();
+    const h = buildTransport();
     h.start();
-    await expect(h.talker.send("chat-42" as ConversationId, { text: "hi" })).resolves.toEqual({
+    await expect(h.transport.send("chat-42" as ConversationId, { text: "hi" })).resolves.toEqual({
       conversationId: "chat-42",
       messageId: "sent-1",
     });
@@ -394,7 +404,7 @@ describe("telegram_user in-epoch session probe", () => {
   it("reports a revoked session (auth failure) as CredentialRejected on the next probe", async () => {
     const clock = installTestClock();
     try {
-      const h = buildTalker({ probeIntervalMs: 1000 });
+      const h = buildTransport({ probeIntervalMs: 1000 });
       h.start();
       fakeState.probeError = rpcError(401, "UNAUTHORIZED");
       await clock.advance(1000); // one probe interval
@@ -408,7 +418,7 @@ describe("telegram_user in-epoch session probe", () => {
   it("does NOT treat a network failure during a probe as a fault", async () => {
     const clock = installTestClock();
     try {
-      const h = buildTalker({ probeIntervalMs: 1000 });
+      const h = buildTransport({ probeIntervalMs: 1000 });
       h.start();
       fakeState.probeError = new Error("ECONNRESET");
       await clock.advance(3000); // three probe intervals, all network failures
@@ -422,12 +432,12 @@ describe("telegram_user in-epoch session probe", () => {
   it("stops probing once the epoch is stopped (the timer dies with the epoch)", async () => {
     const clock = installTestClock();
     try {
-      const h = buildTalker({ probeIntervalMs: 1000 });
+      const h = buildTransport({ probeIntervalMs: 1000 });
       h.start();
       await clock.advance(1000);
       const callsAfterOne = fakeState.probeCalls;
       expect(callsAfterOne).toBeGreaterThanOrEqual(1);
-      await h.talker.stop();
+      await h.transport.stop();
       await clock.advance(5000);
       expect(fakeState.probeCalls).toBe(callsAfterOne);
     } finally {
@@ -438,7 +448,7 @@ describe("telegram_user in-epoch session probe", () => {
   it("never runs probes concurrently: ticks are skipped while one is in flight on a stalled client", async () => {
     const clock = installTestClock();
     try {
-      const h = buildTalker({ probeIntervalMs: 1000 });
+      const h = buildTransport({ probeIntervalMs: 1000 });
       h.start();
       // The client stalls: the first probe parks and outlives several intervals.
       let releaseProbe!: () => void;

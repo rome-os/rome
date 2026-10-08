@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import type { TalkHistory } from "../connections/types.js";
+import type { TransportHistory } from "../connections/types.js";
 import {
   historyQueryLimit,
   historyWindowHours,
@@ -42,7 +42,7 @@ function said(id: string, conversationId: string, hoursAgo: number): ChannelMess
 /** A Connection's history over an adapter's read, as the integrations build it. */
 function historyOver(
   fetchHistory: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>,
-): TalkHistory {
+): TransportHistory {
   return {
     async query(input) {
       const messages = await fetchHistory(
@@ -74,12 +74,12 @@ testMessagesQueryContract("connection-backed messages", () => {
   });
   const deps = {
     registry: {
-      getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
+      getDescriptor: () => ({ capabilities: { transport: { history: true } } }),
       find: () => [
         {
           id: "conn-1",
-          withTalker: (call: (talker: object) => unknown) => call({ history }),
-          hearTalker: () => () => {},
+          withTransport: (call: (transport: object) => unknown) => call({ history }),
+          hearTransport: () => () => {},
         },
       ],
       onUnlocked: () => {},
@@ -87,7 +87,7 @@ testMessagesQueryContract("connection-backed messages", () => {
     },
   } as unknown as ConnectionPortsDeps;
   const messages = connectionPorts(deps, "telegram_user")?.messages;
-  if (!messages) throw new Error("a talker with history backs the channel's messages");
+  if (!messages) throw new Error("a transport with history backs the channel's messages");
   return {
     messages,
     channel: "telegram_user",
@@ -108,12 +108,12 @@ describe("connection-backed messages", () => {
     });
     const deps = {
       registry: {
-        getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
+        getDescriptor: () => ({ capabilities: { transport: { history: true } } }),
         find: () => [
           {
             id: "conn-1",
-            withTalker: (call: (talker: object) => unknown) => call({ history }),
-            hearTalker: () => () => {},
+            withTransport: (call: (transport: object) => unknown) => call({ history }),
+            hearTransport: () => () => {},
           },
         ],
         onUnlocked: () => {},
@@ -140,12 +140,12 @@ describe("connection-backed messages, across conversations", () => {
     const history = historyOver(async () => lines);
     const deps = {
       registry: {
-        getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
+        getDescriptor: () => ({ capabilities: { transport: { history: true } } }),
         find: () => [
           {
             id: "conn-1",
-            withTalker: (call: (talker: object) => unknown) => call({ history }),
-            hearTalker: () => () => {},
+            withTransport: (call: (transport: object) => unknown) => call({ history }),
+            hearTransport: () => () => {},
           },
         ],
         onUnlocked: () => {},
@@ -184,15 +184,15 @@ describe("connection-backed messages, shared reads", () => {
   // A live read that counts itself, answering `lines(input)` oldest first.
   function port(lines: (input: { since?: Date }) => ChannelMessage[] | Promise<ChannelMessage[]>) {
     rs.spyOn(Date, "now").mockImplementation(() => clock);
-    const query = rs.fn<TalkHistory["query"]>(async (input) => lines(input));
+    const query = rs.fn<TransportHistory["query"]>(async (input) => lines(input));
     const deps = {
       registry: {
-        getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
+        getDescriptor: () => ({ capabilities: { transport: { history: true } } }),
         find: () => [
           {
             id: "conn-1",
-            withTalker: (call: (talker: object) => unknown) => call({ history: { query } }),
-            hearTalker: () => () => {},
+            withTransport: (call: (transport: object) => unknown) => call({ history: { query } }),
+            hearTransport: () => () => {},
           },
         ],
         onUnlocked: () => {},
@@ -200,7 +200,7 @@ describe("connection-backed messages, shared reads", () => {
       },
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
-    if (!messages) throw new Error("a talker with history backs the channel's messages");
+    if (!messages) throw new Error("a transport with history backs the channel's messages");
     return { messages, query };
   }
 
@@ -305,7 +305,7 @@ describe("connection-backed messages, shared reads", () => {
 });
 
 describe("connection-backed send, across epochs", () => {
-  it("keeps a held direct port on whichever talker is live", async () => {
+  it("keeps a held direct port on whichever transport is live", async () => {
     const registry = new ConnectionRegistry({
       ledger: new DrizzleGrantLedger(createTestDb().db),
     });
@@ -313,14 +313,14 @@ describe("connection-backed send, across epochs", () => {
     registry.register(fx.descriptor);
     const connection = await registry.connect("fake-telegram");
     const offerDirect = (answer: string) => {
-      const talker = fx.talkerFactory.instances.at(-1);
-      if (!talker) throw new Error("talker not built");
-      talker.directMessaging = { conversationFor: async () => answer as ConversationId };
+      const transport = fx.transportFactory.instances.at(-1);
+      if (!transport) throw new Error("transport not built");
+      transport.directMessaging = { conversationFor: async () => answer as ConversationId };
     };
     await registry.importCredential(connection.id, "bot", fx.validCredential());
     offerDirect("first");
     const direct = connectionPorts({ registry }, "fake-telegram")?.send?.direct;
-    if (!direct) throw new Error("the talker offers direct messaging");
+    if (!direct) throw new Error("the transport offers direct messaging");
     await expect(direct.conversationFor("7")).resolves.toBe("first");
 
     await connection.auth.revoke("bot");

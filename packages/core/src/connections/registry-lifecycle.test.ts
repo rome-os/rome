@@ -152,7 +152,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
   it("fresh registry over same db unlocks without confer", async () => {
     const { db, close } = createTestDb();
     try {
-      const { descriptor: desc, talkerFactory: tf1, validCredential } = makePasteTalk();
+      const { descriptor: desc, transportFactory: tf1, validCredential } = makePasteTalk();
 
       // Registry A: connect + import
       const ledgerA = new DrizzleGrantLedger(db);
@@ -165,7 +165,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
 
       // Registry B: fresh registry over same db, same descriptor
       const ledgerB = new DrizzleGrantLedger(db);
-      const { descriptor: desc2, talkerFactory: tf2 } = makePasteTalk();
+      const { descriptor: desc2, transportFactory: tf2 } = makePasteTalk();
       const registryB = new ConnectionRegistry({ ledger: ledgerB });
       registryB.register(desc2);
       await registryB.load();
@@ -303,37 +303,37 @@ describe("Scenario 13 — kit.persist write-through", () => {
   it("kit.persist updates ledger in place without stop/build or onUnlocked", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, talkerFactory, validCredential } = makePasteTalk();
+      const { descriptor, transportFactory, validCredential } = makePasteTalk();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.importCredential(conn.id, "bot", validCredential());
 
-      expect(talkerFactory.instances).toHaveLength(1);
-      const talker = talkerFactory.instances[0];
-      const initialStopCount = talker.state.stopCount;
-      const initialBuilds = talkerFactory.instances.length;
+      expect(transportFactory.instances).toHaveLength(1);
+      const transport = transportFactory.instances[0];
+      const initialStopCount = transport.state.stopCount;
+      const initialBuilds = transportFactory.instances.length;
 
       const unlockCount: number[] = [];
       registry.onUnlocked("talk", () => unlockCount.push(1));
       // The above handler fires immediately for the already-unlocked connection
       const initialUnlockCount = unlockCount.length;
 
-      // The talker's kit.persist is called through start() — we need to
+      // The transport's kit.persist is called through start() — we need to
       // extract kit from the build call. The easiest way: kit is passed to
-      // build() in the descriptor. We can test this via the talker's start
+      // build() in the descriptor. We can test this via the transport's start
       // capture. But kit is not exposed directly.
       //
       // Alternative approach: use the registry's importCredential to get a
-      // connection, then check that the talker built from the descriptor
+      // connection, then check that the transport built from the descriptor
       // has access to kit. The kit is passed to build(). We need to capture it.
       //
       // The cleanest approach: capture kit inside build() using a custom descriptor.
       let capturedKit: import("./types.js").RuntimeKit | null = null;
-      const { descriptor: desc2, talkerFactory: tf2, validCredential: vc2 } = makePasteTalk();
-      const originalBuild = desc2.capabilities.talker!.build.bind(desc2.capabilities.talker!);
-      desc2.capabilities.talker = {
-        ...desc2.capabilities.talker!,
+      const { descriptor: desc2, transportFactory: tf2, validCredential: vc2 } = makePasteTalk();
+      const originalBuild = desc2.capabilities.transport!.build.bind(desc2.capabilities.transport!);
+      desc2.capabilities.transport = {
+        ...desc2.capabilities.transport!,
         build(creds, kit) {
           capturedKit = kit;
           return originalBuild(creds, kit);
@@ -373,7 +373,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       });
 
       // Suppress unused vars
-      void talker;
+      void transport;
       void initialStopCount;
       void initialBuilds;
       void initialUnlockCount;
@@ -387,12 +387,12 @@ describe("Scenario 13 — kit.persist write-through", () => {
     const { ledger, close } = makeLedger();
     try {
       let capturedKit: import("./types.js").RuntimeKit | null = null;
-      const { descriptor, talkerFactory, validCredential } = makePasteTalk();
-      const originalBuild = descriptor.capabilities.talker!.build.bind(
-        descriptor.capabilities.talker!,
+      const { descriptor, transportFactory, validCredential } = makePasteTalk();
+      const originalBuild = descriptor.capabilities.transport!.build.bind(
+        descriptor.capabilities.transport!,
       );
-      descriptor.capabilities.talker = {
-        ...descriptor.capabilities.talker!,
+      descriptor.capabilities.transport = {
+        ...descriptor.capabilities.transport!,
         build(creds, kit) {
           capturedKit = kit;
           return originalBuild(creds, kit);
@@ -418,8 +418,8 @@ describe("Scenario 13 — kit.persist write-through", () => {
       });
 
       // The latest build should have been called again
-      expect(talkerFactory.instances).toHaveLength(2);
-      const secondInstance = talkerFactory.instances[1];
+      expect(transportFactory.instances).toHaveLength(2);
+      const secondInstance = transportFactory.instances[1];
       // The second build received the re-imported credentials (from importCredential),
       // not the persisted ones — persist only updates in-memory for next build
       // but re-importing overrides it. This confirms rebuild DID happen.
@@ -434,11 +434,11 @@ describe("Scenario 13 — kit.persist write-through", () => {
     try {
       let capturedKit: import("./types.js").RuntimeKit | null = null;
       const { descriptor, validCredential } = makePasteTalk();
-      const originalBuild = descriptor.capabilities.talker!.build.bind(
-        descriptor.capabilities.talker!,
+      const originalBuild = descriptor.capabilities.transport!.build.bind(
+        descriptor.capabilities.transport!,
       );
-      descriptor.capabilities.talker = {
-        ...descriptor.capabilities.talker!,
+      descriptor.capabilities.transport = {
+        ...descriptor.capabilities.transport!,
         build(creds, kit) {
           capturedKit = kit;
           return originalBuild(creds, kit);
@@ -451,7 +451,7 @@ describe("Scenario 13 — kit.persist write-through", () => {
       await registry.importCredential(conn.id, "bot", validCredential());
       expect(capturedKit).not.toBeNull();
 
-      // "user" is not in talker's needs (only "bot" is)
+      // "user" is not in transport's needs (only "bot" is)
       await expect(capturedKit!.persist("user", { token: "x" })).rejects.toThrow(/user/);
     } finally {
       close();
@@ -462,23 +462,23 @@ describe("Scenario 13 — kit.persist write-through", () => {
 // Extra: remove(id) stops instances and cascades the connection's grants
 
 describe("remove(id) — teardown and cascade", () => {
-  it("remove stops talker instance and removes connection from registry", async () => {
+  it("remove stops transport instance and removes connection from registry", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, talkerFactory, validCredential } = makePasteTalk();
+      const { descriptor, transportFactory, validCredential } = makePasteTalk();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.importCredential(conn.id, "bot", validCredential());
 
-      expect(talkerFactory.instances).toHaveLength(1);
-      const talker = talkerFactory.instances[0];
-      expect(talker.state.stopCount).toBe(0);
+      expect(transportFactory.instances).toHaveLength(1);
+      const transport = transportFactory.instances[0];
+      expect(transport.state.stopCount).toBe(0);
 
       await registry.remove(conn.id);
 
       // Instance was stopped
-      expect(talker.state.stopCount).toBe(1);
+      expect(transport.state.stopCount).toBe(1);
       // Connection is no longer in registry
       expect(() => registry.get(conn.id)).toThrow(/unknown connection/);
       expect(registry.all()).toHaveLength(0);
@@ -529,21 +529,21 @@ describe("remove(id) — teardown and cascade", () => {
     }
   });
 
-  it("zero-grant talker is stopped on remove", async () => {
+  it("zero-grant transport is stopped on remove", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, talkerFactory } = makeZeroGrantTalk();
+      const { descriptor, transportFactory } = makeZeroGrantTalk();
       const registry = new ConnectionRegistry({ ledger, backoff: { baseMs: 1, maxMs: 1 } });
       registry.register(descriptor);
       const conn = await registry.connect("fake-webchat");
 
-      // Zero-grant: talker built at connect time
-      expect(talkerFactory.instances).toHaveLength(1);
-      const talker = talkerFactory.instances[0];
-      expect(talker.state.stopCount).toBe(0);
+      // Zero-grant: transport built at connect time
+      expect(transportFactory.instances).toHaveLength(1);
+      const transport = transportFactory.instances[0];
+      expect(transport.state.stopCount).toBe(0);
 
       await registry.remove(conn.id);
-      expect(talker.state.stopCount).toBe(1);
+      expect(transport.state.stopCount).toBe(1);
     } finally {
       close();
     }
@@ -556,17 +556,17 @@ describe("stopAll() awaits each transport drain", () => {
   it("stops every live capability across connections without touching grant state", async () => {
     const { ledger, close } = makeLedger();
     try {
-      const { descriptor, talkerFactory, validCredential } = makePasteTalk();
+      const { descriptor, transportFactory, validCredential } = makePasteTalk();
       const registry = new ConnectionRegistry({ ledger });
       registry.register(descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.importCredential(conn.id, "bot", validCredential());
-      const talker = talkerFactory.instances[0];
-      expect(talker.state.stopCount).toBe(0);
+      const transport = transportFactory.instances[0];
+      expect(transport.state.stopCount).toBe(0);
 
       await registry.stopAll();
 
-      expect(talker.state.stopCount).toBe(1);
+      expect(transport.state.stopCount).toBe(1);
       // Grant state untouched — the next boot's load() rehydrates and rebuilds.
       expect(conn.auth.grants().bot).toBe("authorized");
       // Connection is NOT removed.
@@ -586,14 +586,14 @@ describe("stopAll() awaits each transport drain", () => {
       registry.register(fixture.descriptor);
       const conn = await registry.connect("fake-telegram");
       await registry.importCredential(conn.id, "bot", fixture.validCredential());
-      const talker = fixture.talkerFactory.instances[0];
+      const transport = fixture.transportFactory.instances[0];
 
       const done = registry.stopAll();
       // The drain has not resolved yet (it resolves on a microtask); stopAll's
       // returned promise must not resolve until it has.
-      expect(talker.state.stopResolved).toBe(0);
+      expect(transport.state.stopResolved).toBe(0);
       await done;
-      expect(talker.state.stopResolved).toBe(1);
+      expect(transport.state.stopResolved).toBe(1);
     } finally {
       close();
     }
@@ -657,7 +657,7 @@ describe("external custody", () => {
 
       // Actually, FakeActor.state.invocations is per invoke(), not build().
       // We check via the factory: build() is called with creds, so we can
-      // check the creds snapshot stored in the starts (only for Talker/Watcher).
+      // check the creds snapshot stored in the starts (only for ChannelTransport/Watcher).
       // For Actor, the creds are only captured on invoke(). Let's invoke and check.
       const act = conn.act;
       expect(act).not.toBeNull();

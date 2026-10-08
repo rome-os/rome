@@ -203,7 +203,7 @@ export class TelegramAdapter {
       log.error("polling error", {
         error: err instanceof Error ? err.message : String(err),
       });
-      // The Connection Talker routes terminal polling failures to its fault
+      // The Connection ChannelTransport routes terminal polling failures to its fault
       // channel; ChannelManager passes no callback, so failures are only
       // logged, never surfaced.
       this.onPollingError?.(err);

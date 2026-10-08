@@ -578,7 +578,7 @@ export class WhatsAppAdapter {
   /**
    * Register a terminal-fault sink. The adapter owns transient reconnection
    * internally; only outcomes it cannot recover reach here — today that is
-   * `loggedOut` (device unlinked). the Talker maps `loggedOut` to
+   * `loggedOut` (device unlinked). the ChannelTransport maps `loggedOut` to
    * `CredentialRejected{ session }` and any other terminal to `Disconnected`.
    */
   onFault(callback: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void): void {

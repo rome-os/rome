@@ -1,7 +1,7 @@
 // The WebChat descriptor. WebChat is the zero-grant case
 //: Talk unlocks from birth with no confer/import step, and
 // never faults (in-process, no external transport). Coverage:
-//   1. descriptor shape — zero grants, a talker needing none.
+//   1. descriptor shape — zero grants, a transport needing none.
 //   2. registry-level: connect() unlocks talk immediately.
 //   3. send and history round-trip through the wrapped WebChatAdapter.
 
@@ -27,13 +27,13 @@ function makeLedger(): DrizzleGrantLedger {
 }
 
 describe("webchat descriptor shape", () => {
-  it("declares zero grants and a talker needing none", () => {
+  it("declares zero grants and a transport needing none", () => {
     const testDb = createTestDb();
     const repo = new WebChatRepository(testDb.db);
     const desc = makeWebchatDescriptor({ webchatRepo: repo });
     expect(desc.service).toBe("webchat");
     expect(Object.keys(desc.auth)).toEqual([]);
-    expect(desc.capabilities.talker?.needs).toEqual([]);
+    expect(desc.capabilities.transport?.needs).toEqual([]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
     testDb.close();
@@ -85,9 +85,9 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
   // The flag is what gives the channel a \`messages\` port; the feature is what
   // answers it. A Talk offering one without the other is unreachable or broken.
   it("declares the history its Talk offers", () => {
-    expect(makeWebchatDescriptor({ webchatRepo: {} as never }).capabilities.talker?.history).toBe(
-      true,
-    );
+    expect(
+      makeWebchatDescriptor({ webchatRepo: {} as never }).capabilities.transport?.history,
+    ).toBe(true);
   });
 
   it("forwards history to the wrapped adapter", async () => {
@@ -99,8 +99,8 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
       JSON.stringify([{ type: "text", content: "Hi there" }]),
     );
     const conn = await registry.connect("webchat");
-    const history = await conn.withTalker((talker) =>
-      talker.history?.query({
+    const history = await conn.withTransport((transport) =>
+      transport.history?.query({
         conversationId: "sess-2" as ConversationId,
         limit: 20,
       }),
@@ -136,8 +136,8 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
       JSON.stringify([{ type: "text", content: "Plan drafted" }]),
     );
     const conn = await registry.connect("webchat");
-    const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-3" as ConversationId }),
+    const history = await conn.withTransport((transport) =>
+      transport.history?.query({ conversationId: "sess-3" as ConversationId }),
     );
 
     const rows = await repo.getHistoryMessages("sess-3", new Date(0));
@@ -178,8 +178,8 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     }
     const conn = await registry.connect("webchat");
 
-    const history = await conn.withTalker((talker) =>
-      talker.history?.query({ conversationId: "sess-4" as ConversationId, limit: 2 }),
+    const history = await conn.withTransport((transport) =>
+      transport.history?.query({ conversationId: "sess-4" as ConversationId, limit: 2 }),
     );
     expect(history).toHaveLength(2);
   });

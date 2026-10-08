@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import type { ConversationId } from "@rome-os/app-runtime";
-import type { TalkFeatures } from "../types.js";
+import type { TransportFeatures } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -42,7 +42,7 @@ import type {
   Credential,
   ProfileDisplay,
   ProfileRecord,
-  Talker,
+  ChannelTransport,
 } from "../types.js";
 import { createLogger } from "../../logger.js";
 
@@ -253,7 +253,7 @@ export interface LinkedInDescriptorDeps {
   openLoginTab?: (url: string) => Promise<boolean>;
 }
 
-interface LinkedInTalker extends Talker {
+interface LinkedInTransport extends ChannelTransport {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
@@ -272,12 +272,12 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
       session: sessionScheme,
     },
     capabilities: {
-      talker: {
+      transport: {
         needs: ["session"] as const,
         // The inbox is mirrored into the store by the poller; nothing is
         // delivered as an inbound turn.
         receives: false,
-        build(): Talker {
+        build(): ChannelTransport {
           const poller = new LinkedInInboxPoller({
             sink: deps.syncSink,
             run,
@@ -286,7 +286,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
           });
 
           const sink = deps.syncSink;
-          const features: TalkFeatures = {};
+          const features: TransportFeatures = {};
           if (sink.findReplyTarget) {
             features.directMessaging = {
               async conversationFor(address: string) {
@@ -296,7 +296,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               },
             };
           }
-          const talker: LinkedInTalker = {
+          const transport: LinkedInTransport = {
             // v1 is a mirror: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused until LinkedIn messages join the routed
             // inbound path.
@@ -372,10 +372,10 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               return poller.getRuntimeDegradation();
             },
           };
-          return talker;
+          return transport;
         },
-        degradation(instance: Talker): CapabilityDegradation | null {
-          return (instance as LinkedInTalker).getRuntimeDegradation();
+        degradation(instance: ChannelTransport): CapabilityDegradation | null {
+          return (instance as LinkedInTransport).getRuntimeDegradation();
         },
       },
     },

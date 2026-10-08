@@ -6,11 +6,11 @@ import type {
   ChannelActivity,
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkHistory } from "../connections/types.js";
+import type { TransportDirectory, TransportHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
-import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
+import type { Connection, ConnectionDescriptor, ChannelTransport } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
 import { ChannelNotConnected } from "./channel.js";
@@ -36,14 +36,14 @@ function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   };
 }
 
-/** A pasted-token service whose every talker epoch is recorded. */
+/** A pasted-token service whose every transport epoch is recorded. */
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
   direct: ChannelDirectMessaging | null = null,
   activity: ChannelActivity | null = null,
-  history: TalkHistory | null = null,
-  directory: TalkDirectory | null = null,
+  history: TransportHistory | null = null,
+  directory: TransportDirectory | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
@@ -52,10 +52,10 @@ function talkService(
       service,
       auth: { bot: tokenPaste({ label: "token", validate: async () => {} }) },
       capabilities: {
-        talker: {
+        transport: {
           needs: ["bot"],
           ...ports,
-          build(): Talker {
+          build(): ChannelTransport {
             const epoch: (typeof epochs)[number] = {};
             epochs.push(epoch);
             return {
@@ -92,17 +92,17 @@ describe("channelList", () => {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     for (const descriptor of descriptors) registry.register(descriptor);
-    // The Connection ids the channel ports hear a talker on.
+    // The Connection ids the channel ports hear a transport on.
     const subscribed: string[] = [];
     const tracked = (connection: Connection): Connection =>
       new Proxy(connection, {
         get(target, property, receiver) {
-          if (property !== "hearTalker") {
+          if (property !== "hearTransport") {
             const value = Reflect.get(target, property, receiver);
             return typeof value === "function" ? value.bind(target) : value;
           }
           return (handler: (message: ChannelMessage) => Promise<void>) => {
-            const detach = target.hearTalker(handler);
+            const detach = target.hearTransport(handler);
             if (!detach) return detach;
             subscribed.push(target.id);
             return () => {
@@ -194,7 +194,7 @@ describe("channelList", () => {
       direction: "inbound",
     });
     const now = Date.now();
-    const history: TalkHistory = {
+    const history: TransportHistory = {
       query: async () => [said("older", now - 2_000), said("newer", now - 1_000)],
     };
     const { registry, channels } = setup([
@@ -232,7 +232,7 @@ describe("channelList", () => {
     });
     // Offers a history read but does not declare one, so its channel would
     // never get a `messages` port.
-    const history: TalkHistory = { query: async () => [] };
+    const history: TransportHistory = { query: async () => [] };
     registry.register(talkService("telegram", {}, null, null, history).descriptor);
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
@@ -240,12 +240,15 @@ describe("channelList", () => {
       expiresAt: "never",
     });
 
-    expect(error).toHaveBeenCalledWith("talker history flag disagrees with its history feature", {
-      connectionId: connection.id,
-      service: "telegram",
-      declared: false,
-      offered: true,
-    });
+    expect(error).toHaveBeenCalledWith(
+      "transport history flag disagrees with its history feature",
+      {
+        connectionId: connection.id,
+        service: "telegram",
+        declared: false,
+        offered: true,
+      },
+    );
   });
 
   it("builds a Talk whose history cannot be checked, and says so", async () => {
@@ -257,8 +260,8 @@ describe("channelList", () => {
       logger: logger as never,
     });
     const service = talkService("telegram");
-    const build = service.descriptor.capabilities.talker!.build;
-    service.descriptor.capabilities.talker!.build = (creds, kit) => ({
+    const build = service.descriptor.capabilities.transport!.build;
+    service.descriptor.capabilities.transport!.build = (creds, kit) => ({
       ...build(creds, kit),
       get history(): never {
         throw new Error("not started");
@@ -272,7 +275,7 @@ describe("channelList", () => {
     });
 
     expect(service.epochs).toHaveLength(1);
-    expect(warn).toHaveBeenCalledWith("could not check the talker's history flag", {
+    expect(warn).toHaveBeenCalledWith("could not check the transport's history flag", {
       connectionId: connection.id,
       service: "telegram",
       error: "not started",
@@ -301,7 +304,7 @@ describe("channelList", () => {
       });
     }
     await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
-    // A Connection whose talker offers no direct messaging.
+    // A Connection whose transport offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
   });
 

@@ -314,7 +314,7 @@ describe("People timeline API", () => {
     // The same overlap without a mirror: the transcript outranks the sentinel,
     // so the exchange reads as Rome's own record of it.
     const triaged = await deps.personMappingRepo.create({
-      displayName: "Triaged Talker",
+      displayName: "Triaged ChannelTransport",
       bondLevel: "other",
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: "tg-both" }],
@@ -349,7 +349,7 @@ describe("People timeline API", () => {
 
   it("holds a sentinel row back when the thread it names is a group", async () => {
     const inGroup = await deps.personMappingRepo.create({
-      displayName: "Group Talker",
+      displayName: "Group ChannelTransport",
       bondLevel: "other",
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: "tg-in-group" }],
