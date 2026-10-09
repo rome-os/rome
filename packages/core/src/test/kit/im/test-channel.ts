@@ -7,9 +7,11 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
+import { telegramTransport } from "../../../channels/delivery/transports/telegram.js";
+import type { DeliveryTransport } from "../../../channels/delivery/types.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
-import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";
+import { TELEGRAM_CHAT, TELEGRAM_TOKEN, TelegramPeer } from "./telegram.js";
 import { WECHAT_USER, WechatPeer } from "./wechat.js";
 
 export type Platform = "telegram" | "wechat" | "discord";
@@ -27,6 +29,9 @@ export interface TestChannel {
   send(message: OutgoingMessage): Promise<MessageReceipt>;
   /** The user writes `text`; resolves with the message the adapter delivers. */
   receive(text: string): Promise<ChannelMessage>;
+  /** Writes into the same conversation through the platform's reply delivery
+   *  transport, where one exists. It uses its own client, not the adapter's. */
+  readonly delivery?: DeliveryTransport;
   /** Undoes the setup, latest step first, even where a step fails. */
   stop(): Promise<void>;
 }
@@ -119,6 +124,7 @@ const telegram = () =>
       platform: "telegram",
       peer,
       conversation,
+      delivery: telegramTransport(peer.createBot(TELEGRAM_TOKEN).api),
       send: (message) => adapter.send(conversation, message),
       receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };

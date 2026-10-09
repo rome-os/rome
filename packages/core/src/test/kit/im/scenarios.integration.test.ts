@@ -1,6 +1,13 @@
+import { setTimeout as sleep } from "node:timers/promises";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { Pacer } from "../../../channels/delivery/pacer.js";
+import { ReplyDelivery, type ReplyOutcome } from "../../../channels/delivery/reply.js";
+import { effectiveMode } from "../../../channels/delivery/types.js";
+import { systemClock } from "../../../lib/clock.js";
+import { checkDelivery } from "./invariants.js";
+import { runScenario, type ScenarioContext } from "./scenario.js";
 import { type Platform, TEST_CHANNELS, type TestChannel } from "./test-channel.js";
-import { runScenario } from "./scenario.js";
 
 const platforms = Object.keys(TEST_CHANNELS) as Platform[];
 
@@ -16,13 +23,16 @@ const TODAY: Record<
     /** A 5000-character text: how many characters each message carries, or
      *  the error the send fails with. Null where the peer models no limit. */
     longText: number[] | string | null;
+    /** The test channel carries a reply delivery transport, so a reply can
+     *  stream into the conversation. Discord and WeChat have none. */
+    streams: boolean;
   }
 > = {
-  telegram: { linksReply: true, longText: "message is too long" },
+  telegram: { linksReply: true, longText: "message is too long", streams: true },
   // In a DM the adapter sends a plain message; it threads replies only in guild channels.
-  discord: { linksReply: false, longText: [2000, 2000, 1000] },
+  discord: { linksReply: false, longText: [2000, 2000, 1000], streams: false },
   // iLink has no reply reference, and documents no length limit for the peer to model.
-  wechat: { linksReply: false, longText: null },
+  wechat: { linksReply: false, longText: null, streams: false },
 };
 
 describe.each(platforms)("%s", (platform) => {
@@ -96,4 +106,109 @@ describe.each(platforms)("%s", (platform) => {
       });
     },
   );
+
+  it.skipIf(!TODAY[platform].streams)(
+    "streams a commentary and a long answer as the agent writes them",
+    ({ task }) => {
+      const channel = open();
+      return runScenario(task, channel, async (context) => {
+        const { outcome, inbound, mode } = await streamReply(context, channel);
+
+        await context.step(`The user sees every part, delivered in ${mode} mode`, () => {
+          expect(outcome.status).toBe("delivered");
+          const messages = romeMessages(channel);
+          expect(messages.length).toBeGreaterThanOrEqual(3);
+          expect(messages.some((message) => message.edits > 0)).toBe(mode === "edit");
+        });
+        await context.step("Only the first message answers the user's message", () => {
+          const [first, ...rest] = romeMessages(channel);
+          expect(first?.replyTo).toBe(TODAY[platform].linksReply ? inbound.messageId : undefined);
+          expect(rest.map((message) => message.replyTo)).toEqual(rest.map(() => undefined));
+        });
+        await context.step("The reply keeps every delivery invariant", () =>
+          context.check(
+            checkDelivery({
+              source: COMMENTARY + STORY,
+              outcome,
+              peer: channel.peer,
+              conversation: channel.conversation,
+              maxPartLength: transportOf(channel).capabilities.maxPartLength,
+            }),
+          ),
+        );
+      });
+    },
+  );
 });
+
+const COMMENTARY = "Let me think of a story first.";
+// Long enough for several messages on every platform, with sentence breaks.
+const STORY = Array.from(
+  { length: 180 },
+  (_, i) => `Line ${i + 1}: the quick brown fox jumps over the lazy dog. `,
+).join("");
+
+/**
+ * Streams a commentary and a long answer from a scripted agent through the
+ * test channel's delivery transport, noting what the agent emitted and what
+ * Rome wrote. The pacer is wide open: a platform's real budget is the
+ * transport's, and this scenario does not test it.
+ */
+async function streamReply(
+  { step, note }: ScenarioContext,
+  channel: TestChannel,
+): Promise<{
+  outcome: ReplyOutcome;
+  inbound: Awaited<ReturnType<TestChannel["receive"]>>;
+  mode: ReturnType<typeof effectiveMode>;
+}> {
+  const transport = transportOf(channel);
+  const policy = {
+    mode: "edit" as const,
+    editIntervalMs: 20,
+    blockWaitMs: 30,
+    maxPendingChars: 100_000,
+  };
+  const inbound = await step("The user writes", () => channel.receive("tell me a story"));
+  const delivery = new ReplyDelivery({
+    transport,
+    pacer: new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, systemClock),
+    policy,
+    conversation: channel.conversation,
+    replyTo: inbound.messageId,
+    clock: systemClock,
+    observe: (event) =>
+      note("rome", `${event.write} part ${event.block}.${event.part}: ${event.result}`, event),
+  });
+  const emit = (event: StreamAgentEvent) => {
+    note("agent", event.type, event);
+    delivery.accept(event);
+  };
+
+  await step("The agent streams a commentary, then the answer", async () => {
+    emit({ type: "text", content: COMMENTARY, blockId: "c", turnPhase: "commentary" });
+    for (const chunk of chunks(STORY, 400)) {
+      emit({ type: "text_delta", content: chunk, blockId: "a" });
+      await sleep(2);
+    }
+    emit({ type: "text", content: STORY, blockId: "a", turnPhase: "final" });
+    emit({ type: "result", content: STORY });
+  });
+  const outcome = await step("The reply settles", () => delivery.finish());
+  return { outcome, inbound, mode: effectiveMode(policy, transport.capabilities) };
+}
+
+function transportOf(channel: TestChannel) {
+  if (!channel.delivery) throw new Error(`${channel.platform} has no reply delivery transport`);
+  return channel.delivery;
+}
+
+function romeMessages(channel: TestChannel) {
+  return channel.peer.visible(channel.conversation).filter((message) => message.from === "rome");
+}
+
+function chunks(text: string, size: number): string[] {
+  return Array.from({ length: Math.ceil(text.length / size) }, (_, i) =>
+    text.slice(i * size, (i + 1) * size),
+  );
+}
