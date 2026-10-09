@@ -66,15 +66,37 @@ async function assemble(
   }
 }
 
-/** Hands each delivered message to the oldest waiting `receive`. */
-function inbox(adapter: Adapter) {
-  const waiting: Array<(message: ChannelMessage) => void> = [];
-  adapter.onInbound(async (message) => waiting.shift()?.(message));
-  return (emit: () => void) =>
-    new Promise<ChannelMessage>((resolve) => {
-      waiting.push(resolve);
+/**
+ * The messages the adapter delivers, in arrival order. `receive` takes the
+ * oldest, waiting up to 3 s for one, and teardown fails on any left untaken,
+ * so a duplicate or stray delivery cannot pass unnoticed.
+ */
+function inbox(adapter: Adapter, timeoutMs = 3_000) {
+  const delivered: ChannelMessage[] = [];
+  let wake: (() => void) | undefined;
+  adapter.onInbound(async (message) => {
+    delivered.push(message);
+    wake?.();
+  });
+  return {
+    async receive(emit: () => void): Promise<ChannelMessage> {
       emit();
-    });
+      let timer: NodeJS.Timeout | undefined;
+      while (!delivered.length)
+        await new Promise<void>((resolve, reject) => {
+          wake = resolve;
+          timer = setTimeout(
+            () => reject(new Error(`No inbound message within ${timeoutMs} ms`)),
+            timeoutMs,
+          );
+        }).finally(() => clearTimeout(timer));
+      return delivered.shift()!;
+    },
+    assertTaken() {
+      if (delivered.length)
+        throw new Error(`${delivered.length} inbound messages no scenario received`);
+    },
+  };
 }
 
 const telegram = () =>
@@ -82,22 +104,27 @@ const telegram = () =>
     const peer = await TelegramPeer.start();
     undo(() => peer.close());
     const adapter = peer.createAdapter();
+    const heard = inbox(adapter);
+    undo(() => heard.assertTaken());
     await adapter.start();
     undo(() => adapter.stop());
     await peer.untilPolling();
-    const heard = inbox(adapter);
     const conversation = String(TELEGRAM_CHAT) as ConversationId;
     return {
       platform: "telegram",
       peer,
       conversation,
       send: (message) => adapter.send(conversation, message),
-      receive: (text) => heard(() => peer.emitMessage(text)),
+      receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };
   });
 
 const wechat = () =>
   assemble(async (undo) => {
+    // Made first so it is removed last: closing the peer ends the adapter's
+    // long poll, which then writes its sync state here.
+    const statePath = await mkdtemp(join(tmpdir(), "rome-wechat-peer-"));
+    undo(() => rm(statePath, { recursive: true, force: true }));
     const peer = await WechatPeer.start();
     undo(() => peer.close());
     // Rome's iLink adapter calls the global fetch.
@@ -106,10 +133,9 @@ const wechat = () =>
     undo(() => {
       globalThis.fetch = originalFetch;
     });
-    const statePath = await mkdtemp(join(tmpdir(), "rome-wechat-peer-"));
-    undo(() => rm(statePath, { recursive: true, force: true }));
     const adapter = peer.createAdapter(statePath);
     const heard = inbox(adapter);
+    undo(() => heard.assertTaken());
     await adapter.start();
     undo(() => adapter.stop());
     const conversation = WECHAT_USER as ConversationId;
@@ -118,7 +144,7 @@ const wechat = () =>
       peer,
       conversation,
       send: (message) => adapter.send(conversation, message),
-      receive: (text) => heard(() => peer.emitMessage(text)),
+      receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };
   });
 
@@ -127,6 +153,8 @@ const discord = () =>
     const peer = await DiscordPeer.start();
     undo(() => peer.close());
     const adapter = peer.createAdapter();
+    const heard = inbox(adapter);
+    undo(() => heard.assertTaken());
     await adapter.start();
     undo(() => adapter.stop());
     await peer.server.waitFor((e) => e.request.path.endsWith("/commands") && !!e.response);
@@ -135,13 +163,12 @@ const discord = () =>
     // reaches the adapter. Whether Discord's real DM events avoid this is
     // unverified.
     const conversation = (await adapter.directConversationFor(DISCORD_USER)) as ConversationId;
-    const heard = inbox(adapter);
     return {
       platform: "discord",
       peer,
       conversation,
       send: (message) => adapter.send(conversation, message),
-      receive: (text) => heard(() => peer.emitMessage(text)),
+      receive: (text) => heard.receive(() => peer.emitMessage(text)),
     };
   });
 
