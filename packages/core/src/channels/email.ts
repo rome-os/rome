@@ -11,7 +11,7 @@ import { createLogger } from "../logger.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
-import { InMemoryInboundDedup, type InboundDedup } from "./inbound-dedup.js";
+import { InboundDedup } from "./inbound-dedup.js";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -70,12 +70,6 @@ export interface EmailAdapterDeps {
    * configured. Defaults to the `whoami` lookup; injectable for tests.
    */
   ownerEmailResolver?: () => Promise<string | undefined>;
-  /**
-   * Idempotency guard for at-least-once relay redelivery. Defaults to an
-   * in-memory LRU; injectable so a persistent implementation can be swapped in
-   * (or a deterministic one used in tests).
-   */
-  inboundDedup?: InboundDedup;
 }
 
 /** Default owner-email resolver: the whoami identity carries the
@@ -194,7 +188,7 @@ export class EmailAdapter {
   private readonly settingsRepo: SettingsRepository;
   private readonly personMappingRepo: PersonMappingRepository;
   private readonly ownerEmailResolver: () => Promise<string | undefined>;
-  private readonly inboundDedup: InboundDedup;
+  private readonly inboundDedup = new InboundDedup();
 
   private address: string;
   private inboundSecret: string;
@@ -226,7 +220,6 @@ export class EmailAdapter {
     // (or self-healed from Rome Cloud) in start() — never carried in the grant.
     this.guardianEmail = "";
     this.ownerEmailResolver = deps.ownerEmailResolver ?? resolveOwnerEmailFromCloud;
-    this.inboundDedup = deps.inboundDedup ?? new InMemoryInboundDedup();
   }
 
   /** The provisioned `<slug>@romeos.cc` address, once known. */
@@ -483,7 +476,7 @@ export class EmailAdapter {
     // used below, which would defeat dedup. With neither id present we can't
     // dedup, so fall through and process.
     const dedupKey = event.providerMessageId || event.id;
-    if (dedupKey && (await this.inboundDedup.checkAndRecord(dedupKey))) {
+    if (dedupKey && this.inboundDedup.checkAndRecord(dedupKey)) {
       log.info("inbound email skipped: duplicate redelivery", { dedupKey });
       return { status: "skipped", reason: "duplicate" };
     }

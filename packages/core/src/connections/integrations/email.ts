@@ -38,7 +38,6 @@ import {
 } from "../../channels/email.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { z } from "zod";
 import type { SetupFn } from "../setup/types.js";
@@ -129,8 +128,6 @@ export interface EmailDescriptorDeps {
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
-  /** Defaults to an in-memory LRU (see EmailAdapter). */
-  inboundDedup?: InboundDedup;
   /**
    * Called synchronously right after each fresh `EmailAdapter` is built (every
    * epoch — birth, relock/re-authorize, and Disconnected backoff rebuild).
@@ -251,7 +248,6 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             personMappingRepo: deps.personMappingRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
-            inboundDedup: deps.inboundDedup,
           });
           deps.onAdapterBuilt?.(adapter);
 

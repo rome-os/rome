@@ -8,7 +8,6 @@ import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
-import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS } from "../../lib/oauth-providers.js";
 import {
@@ -67,9 +66,8 @@ export interface BuiltinConnectionDeps {
   onWhatsAppGuardianConnected: (selfJid: string) => void;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
-  /** Optional email deps mirrored from index.ts (whoami resolver, dedup LRU). */
+  /** Optional email dep mirrored from index.ts (whoami resolver). */
   emailOwnerEmailResolver?: () => Promise<string | undefined>;
-  emailInboundDedup?: InboundDedup;
   /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
@@ -125,7 +123,6 @@ export function registerBuiltinConnections(
       settingsRepo: deps.settingsRepo,
       personMappingRepo: deps.personMappingRepo,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
-      inboundDedup: deps.emailInboundDedup,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),
   );
