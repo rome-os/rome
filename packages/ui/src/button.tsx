@@ -112,17 +112,27 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
-      // A glyph at the edge of a centred label sits one `--control-gap` from
-      // that edge, the distance it sits from the label. The glyph names its
-      // side with `data-icon`, because a bare-text label leaves a lone glyph
-      // both first and last element child. Square members hold no padding,
-      // `xs` keeps symmetric padding, and a start-aligned glyph sits on the alignment
-      // edge, so none of those take it.
+      // A glyph at the edge of a centred label carries less visual weight
+      // than the word at the other edge, so equal padding reads as the glyph
+      // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
+      // label's, which reads as centred. `Button` marks the glyph's side with
+      // `data-icon-start` / `data-icon-end` from its children; a glyph inside
+      // `asChild` content, or a `buttonVariants` consumer, names its side with
+      // `data-icon` instead, because CSS cannot tell a lone glyph beside a
+      // text node from a lone glyph. Square members hold no padding, `xs`
+      // keeps symmetric padding, and a start-aligned glyph sits on the
+      // alignment edge, so none of those take it.
       {
         align: "center",
-        size: ["sm", "md", "default"],
+        size: "sm",
         className:
-          "has-data-[icon=inline-start]:pl-[var(--control-gap)] has-data-[icon=inline-end]:pr-[var(--control-gap)]",
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] data-icon-start:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)] data-icon-end:pr-[var(--control-px-icon-sm)]",
+      },
+      {
+        align: "center",
+        size: ["md", "default"],
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] data-icon-start:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)] data-icon-end:pr-[var(--control-px-icon-md)]",
       },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
@@ -138,6 +148,28 @@ const buttonVariants = cva(
   },
 );
 
+/**
+ * A glyph is a childless component element: an icon or a spinner. A label is
+ * anything else, so text, a wrapped `<span>`, and a `Kbd` hint all count. Only
+ * a glyph with a label on the other side sits at an edge worth correcting.
+ */
+function isGlyph(node: React.ReactNode): boolean {
+  return (
+    React.isValidElement<{ children?: React.ReactNode }>(node) &&
+    typeof node.type !== "string" &&
+    node.props.children == null
+  );
+}
+
+function glyphEdges(children: React.ReactNode): { start: boolean; end: boolean } {
+  const items = React.Children.toArray(children);
+  const hasLabel = items.some((item) => !isGlyph(item));
+  return {
+    start: hasLabel && isGlyph(items[0]),
+    end: hasLabel && isGlyph(items.at(-1)),
+  };
+}
+
 function Button({
   className,
   variant = "default",
@@ -151,10 +183,15 @@ function Button({
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";
+  // `asChild` content is the child's own subtree, so its glyph names its side
+  // with `data-icon` rather than being read from here.
+  const edges = asChild ? { start: false, end: false } : glyphEdges(props.children);
 
   return (
     <Comp
       data-slot="button"
+      data-icon-start={edges.start ? "" : undefined}
+      data-icon-end={edges.end ? "" : undefined}
       data-variant={variant}
       data-size={canonicalControlSize(size)}
       data-shape={shape}
