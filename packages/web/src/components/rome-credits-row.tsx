@@ -3,7 +3,7 @@ import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 
 import { RomeLogo } from "@/components/logo";
 
-type RomeCreditsState = "inUse" | "ready" | "standby" | "usedUp" | "paused";
+type RomeCreditsState = "inUse" | "ready" | "standby" | "usedUp" | "usedUpWithClaude" | "paused";
 
 const MICROS_PER_DOLLAR = 1_000_000;
 
@@ -16,6 +16,11 @@ const STATE_TONE: Record<RomeCreditsState, { dot: string; text: string; bar: str
     bar: "bg-border-strong",
   },
   usedUp: { dot: "bg-destructive", text: "text-destructive-fg", bar: "bg-destructive" },
+  usedUpWithClaude: {
+    dot: "bg-muted-foreground/50",
+    text: "text-muted-foreground",
+    bar: "bg-border-strong",
+  },
   paused: { dot: "bg-warning", text: "text-warning-fg", bar: "bg-border-strong" },
 };
 
@@ -38,15 +43,18 @@ export function hasUsableRomeCredits(credits: RomeCreditsView | null | undefined
 }
 
 /** Credits pay for Codex only while ChatGPT is disconnected, so a connected
- *  ChatGPT login leaves them on standby. A tier prefers a connected Claude
- *  login, so with Claude connected they pay only for a chosen ChatGPT model. */
+ *  ChatGPT login leaves them on standby whatever is left. A tier prefers a
+ *  connected Claude login, so with Claude connected they pay only for a chosen
+ *  ChatGPT model, and running out leaves chats working. */
 export function getRomeCreditsState(
   credits: RomeCreditsView,
   { chatgptConnected, claudeConnected }: { chatgptConnected: boolean; claudeConnected: boolean },
 ): RomeCreditsState {
   if (!credits.enabled) return "paused";
-  if (BigInt(credits.availableMicros) <= 0n) return "usedUp";
   if (chatgptConnected) return "standby";
+  if (BigInt(credits.availableMicros) <= 0n) {
+    return claudeConnected ? "usedUpWithClaude" : "usedUp";
+  }
   return claudeConnected ? "ready" : "inUse";
 }
 

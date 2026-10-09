@@ -554,6 +554,7 @@
         "ready": "就绪",
         "standby": "待用",
         "usedUp": "已用完",
+        "usedUpWithClaude": "已用完",
         "paused": "已暂停"
       },
       "detail": {
@@ -561,6 +562,7 @@
         "ready": "连接 Claude 期间由 Claude 处理对话。选择 ChatGPT 模型时由额度支付。",
         "standby": "连接 ChatGPT 期间由你的 ChatGPT 账户支付。",
         "usedUp": "连接 ChatGPT 或 Claude 以继续使用 Rome。",
+        "usedUpWithClaude": "连接 Claude 期间由 Claude 处理对话。连接 ChatGPT 以使用 ChatGPT 模型。",
         "paused": "Rome Cloud 已暂停这些额度。"
       },
       "ofGranted": "共 {{amount}}",

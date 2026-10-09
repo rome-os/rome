@@ -601,6 +601,27 @@ describe("AI Tools Rome credits", () => {
     expect(screen.getByText("$0.00")).toBeTruthy();
   });
 
+  it("puts used-up credits on standby once ChatGPT is connected", async () => {
+    mockPanel(true, { ...credits, balanceMicros: "-12000", availableMicros: "-12000" });
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(screen.queryByText("Used up")).toBeNull();
+  });
+
+  it("does not ask a Claude user to connect an AI when credits run out", async () => {
+    mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Used up")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Claude handles chats while it is connected. Connect ChatGPT to use ChatGPT models.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Connect ChatGPT or Claude to keep using Rome.")).toBeNull();
+  });
+
   it("hides the row for an account that was never granted credits", async () => {
     mockPanel(false, null);
     render(<AiToolsPanel showRomeCredits />);
