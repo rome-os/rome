@@ -184,7 +184,7 @@ function isAutoDismissedCard(b: ChatEntry): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render?.builtin === true &&
-    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId)
   );
 }
 

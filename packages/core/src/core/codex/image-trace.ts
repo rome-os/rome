@@ -27,13 +27,6 @@ export interface ImageTraceSessionState {
   emittedGeneratedImagePaths: Set<string>;
 }
 
-export interface ImageTraceTurnState {
-  /** Synthetic ids allocated for raw image_generation_begin events where Codex
-   * omitted an id. Raw image_generation_end events can omit ids too; pair
-   * those ends FIFO with unmatched begins, but only inside one turn. */
-  pendingIdlessImageGenerationIds: string[];
-}
-
 export interface ToolTraceState {
   /** Tool ids we already emitted a tool_use for; protects against duplicates
    * if codex emits both item.started and item.updated before item.completed. */
@@ -57,12 +50,6 @@ export interface GeneratedImageTracker {
 export function createImageTraceSessionState(): ImageTraceSessionState {
   return {
     emittedGeneratedImagePaths: new Set(),
-  };
-}
-
-export function createImageTraceTurnState(): ImageTraceTurnState {
-  return {
-    pendingIdlessImageGenerationIds: [],
   };
 }
 
@@ -104,59 +91,6 @@ export async function createGeneratedImageTracker(
 /** An image-generation item or event that codex reports as failed. */
 function imageGenerationFailed(value: Record<string, unknown>): boolean {
   return value.status === "failed" || (typeof value.error === "string" && value.error.length > 0);
-}
-
-export function translateImageGenerationBegin(
-  event: Record<string, unknown>,
-  ctx: ToolTraceState,
-  turnState: ImageTraceTurnState,
-): AgentEvent[] {
-  const explicitId = readCodexItemId(event);
-  const id = explicitId ?? syntheticImageGenerationId();
-  if (ctx.emittedToolUseIds.has(id)) return [];
-  if (!explicitId) turnState.pendingIdlessImageGenerationIds.push(id);
-  ctx.emittedToolUseIds.add(id);
-  return [
-    {
-      type: "tool_use",
-      id,
-      tool: "ImageGeneration",
-      input: imageGenerationInputPayload(event),
-      startedAt: timestampFromMs(event.started_at_ms) ?? new Date().toISOString(),
-    },
-  ];
-}
-
-export async function translateImageGenerationEnd(
-  event: Record<string, unknown>,
-  ctx: ToolTraceState & ImageTraceSessionState,
-  turnState: ImageTraceTurnState,
-): Promise<AgentEvent[]> {
-  const id =
-    readCodexItemId(event) ??
-    turnState.pendingIdlessImageGenerationIds.shift() ??
-    syntheticImageGenerationId();
-  const output = await imageGenerationOutputPayload(event);
-  rememberGeneratedImagePath(ctx, event);
-  const backfill = !ctx.emittedToolUseIds.has(id)
-    ? maybeBackfillStarted(
-        { ...event, id },
-        ctx,
-        "ImageGeneration",
-        imageGenerationInputPayload(event),
-      )
-    : [];
-  return [
-    ...backfill,
-    {
-      type: "tool_result",
-      toolUseId: id,
-      tool: "ImageGeneration",
-      output,
-      endedAt: timestampFromMs(event.completed_at_ms) ?? new Date().toISOString(),
-      isError: imageGenerationFailed(event),
-    },
-  ];
 }
 
 export function translateImageGenerationStarted(
@@ -394,11 +328,6 @@ function readCodexItemId(record: Record<string, unknown>): string | undefined {
     if (typeof value === "string" && value.length > 0) return value;
   }
   return undefined;
-}
-
-function timestampFromMs(value: unknown): string | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
-  return new Date(value).toISOString();
 }
 
 function imageGenerationInputPayload(record: Record<string, unknown>): Record<string, unknown> {

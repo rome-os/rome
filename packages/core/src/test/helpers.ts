@@ -428,6 +428,9 @@ export interface TestDeps extends ApiDeps {
    *  the person timeline reads through it — so a test that wants LinkedIn
    *  history seeds it here rather than through the API's own dependencies. */
   linkedInStoreRepo: LinkedInStoreRepository;
+  /** The WhatsApp mirror behind `whatsAppAccounts`. No route reads it either,
+   *  so a test seeds WhatsApp contacts and history here. */
+  whatsAppStoreRepo: WhatsAppStoreRepository;
   /** The address books behind `channels`, kept reachable so a test can rebuild
    *  the list against a different database handle. */
   whatsAppAccounts: WhatsAppAccounts;

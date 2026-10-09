@@ -91,7 +91,7 @@ export function createAction(config, deps) {
             feedback: { send: async () => ({ kind: "ok" }) },
           },
         );
-        expect(loaded.failed).toEqual([]);
+        expect(loaded.loaded).toEqual(["host_probe"]);
         expect(await registry.get("host_probe")?.execute({})).toEqual({
           status: "ok",
           data: { hasHostExecution: appId === "system", hasFeedback: appId === "system" },
@@ -410,7 +410,7 @@ export function createAction(config, deps) {
       services,
     );
 
-    expect(actionLoad).toEqual({ loaded: ["lazy_action"], failed: [] });
+    expect(actionLoad).toEqual({ loaded: ["lazy_action"] });
     expect((globalThis as RuntimeContextGlobal).__lazyActionEvents).toBeUndefined();
 
     const action = registry.get("lazy_action");

@@ -252,24 +252,13 @@ function toolNameForItem(item: ThreadItem): string {
   }
 }
 
-function notificationTokenUsage(
-  notification: ThreadTokenUsageUpdatedNotification,
-): ThreadTokenUsage | undefined {
-  return notification.tokenUsage ?? notification.usage;
-}
-
-/** Compatibility for older local stubs/binaries that predate the field. */
-function cacheWriteTokens(u: TokenUsageBreakdown): number {
-  return u.cacheWriteInputTokens ?? 0;
-}
-
 /** App-server token usage (camelCase) → the snake_case shape buildOpenAiAccounting reads. */
 function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   if (!u) return undefined;
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
-    cache_write_input_tokens: cacheWriteTokens(u),
+    cache_write_input_tokens: u.cacheWriteInputTokens,
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -281,7 +270,7 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
-    cacheWriteTokens(left) === cacheWriteTokens(right) &&
+    left.cacheWriteInputTokens === right.cacheWriteInputTokens &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
@@ -299,13 +288,7 @@ function isMissingRevertBoundary(error: unknown, beforeTurnId: string): boolean 
  * turn instead of replacing the prior value with the newest one.
  */
 function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
-  // Compatibility notifications from older local app-server stubs predate
-  // this 0.153.4 field. Normalize them before arithmetic so a missing value
-  // cannot poison the turn total with NaN.
-  const last: TokenUsageBreakdown = {
-    ...update.last,
-    cacheWriteInputTokens: cacheWriteTokens(update.last),
-  };
+  const last = update.last;
   const usage = turn.usage;
   turn.usage = usage
     ? {
@@ -818,26 +801,21 @@ export class CodexAppServerProvider implements ModelProvider {
         }
         case Notify.tokenUsageUpdated: {
           const p = params2 as ThreadTokenUsageUpdatedNotification;
-          const usage = notificationTokenUsage(p);
+          const usage = p.tokenUsage;
           if (!usage) return;
           // Once turn/started establishes the active id, a delayed snapshot
           // from another turn must not reset this thread's cumulative
           // baseline. Keep accepting updates while the id is still null so
           // notifications that race ahead of turn/started remain buffered.
-          if (p.turnId && activeTurn?.turnId && activeTurn.turnId !== p.turnId) return;
+          if (activeTurn?.turnId && activeTurn.turnId !== p.turnId) return;
           const previousTotal = lastCumulativeUsageByThreadId.get(p.threadId);
           const hasNewRequestUsage =
             previousTotal === undefined || !tokenUsageBreakdownEquals(previousTotal, usage.total);
           lastCumulativeUsageByThreadId.set(p.threadId, usage.total);
-          if (p.turnId) {
-            usageByTurnId.set(p.turnId, { usage, hasNewRequestUsage });
-            if (hasNewRequestUsage && activeTurn?.turnId === p.turnId) {
-              updateTurnUsage(activeTurn, usage);
-            }
-            return;
+          usageByTurnId.set(p.turnId, { usage, hasNewRequestUsage });
+          if (hasNewRequestUsage && activeTurn?.turnId === p.turnId) {
+            updateTurnUsage(activeTurn, usage);
           }
-          // Compatibility for early app-server stubs that omitted turnId.
-          if (hasNewRequestUsage && activeTurn) updateTurnUsage(activeTurn, usage);
           return;
         }
         case Notify.turnCompleted: {
@@ -877,12 +855,9 @@ export class CodexAppServerProvider implements ModelProvider {
           if (p.turnId && (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId))) {
             return;
           }
-          // v2 wraps the structured TurnError under `error`; tolerate older
-          // shapes that put `message` at the top level.
-          const payload = p.error ?? (params2 as { message?: unknown });
-          const classification = classifyCodexFailure(payload, this.options);
+          const classification = classifyCodexFailure(p.error, this.options);
           const message =
-            classification.error ?? codexTurnErrorMessage(payload, "codex app-server error");
+            classification.error ?? codexTurnErrorMessage(p.error, "codex app-server error");
           const code = classification.code;
           if (activeTurn) {
             // Route the terminal through runOne (see turn/completed).
@@ -896,7 +871,6 @@ export class CodexAppServerProvider implements ModelProvider {
             if (classification.pending) activeTurn.pending.push(classification.pending);
             activeTurn.resolveDone();
           } else {
-            if (classification.pending) void classification.pending;
             // Out-of-turn error: no turn to attach to, emit directly.
             sink.push(codexErrorEvent(message, classification));
           }

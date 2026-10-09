@@ -109,15 +109,6 @@ export class SessionManager {
     await this.sessionsRepository.touch(sessionId);
   }
 
-  async completeSession(sessionId: string): Promise<void> {
-    await this.sessionsRepository.complete(sessionId);
-  }
-
-  /** Persist the provider-specific thread id (e.g. codex thread id) for future resume. */
-  async setProviderThreadId(sessionId: string, providerThreadId: string): Promise<void> {
-    await this.sessionsRepository.setProviderThreadId(sessionId, providerThreadId);
-  }
-
   /** Persist which provider owns this conversation (+ its thread id and the
    *  concrete model that ran — the session model pin) so a resumed
    *  session routes back to the same model (Codex→Claude fallback continuity). */

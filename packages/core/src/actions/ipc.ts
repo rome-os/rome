@@ -205,10 +205,6 @@ export class IpcRpc {
     this.handlers.set(method, handler as (p: unknown, c: IpcCallContext) => Promise<unknown>);
   }
 
-  unhandle(method: string): void {
-    this.handlers.delete(method);
-  }
-
   async call<Req = unknown, Res = unknown>(
     method: string,
     params: Req,

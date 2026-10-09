@@ -32,18 +32,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.messageCount).toBe(0);
   });
 
-  it("bounds the address-book read by default and reads it whole on limit: null", async () => {
-    await repo.upsertContacts([
-      { jid: "15550000001@s.whatsapp.net", phoneNumber: "15550000001", name: "Ada" },
-      { jid: "15550000002@s.whatsapp.net", phoneNumber: "15550000002", name: "Bea" },
-      { jid: "15550000003@s.whatsapp.net", phoneNumber: "15550000003", name: "Cy" },
-    ]);
-
-    expect(await repo.listContacts({ limit: 2 })).toHaveLength(2);
-    expect(await repo.listContacts({ limit: null })).toHaveLength(3);
-    expect(await repo.listContacts()).toHaveLength(3);
-  });
-
   it("hides nameless LID-only contacts but keeps LIDs with a phone number", async () => {
     await repo.upsertContacts([
       { jid: "raw-lid@lid" },

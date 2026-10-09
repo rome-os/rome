@@ -105,7 +105,7 @@ export class WhatsAppAccounts implements Accounts {
    * those too — one `Account` per account, whatever the mirror's row shape (I1).
    */
   private async read(): Promise<Snapshot> {
-    const rows = (await this.store.listContacts({ limit: null })).filter(
+    const rows = (await this.store.listContacts()).filter(
       (row) => !row.isGroup && !isGroupJid(row.jid),
     );
 
