@@ -304,12 +304,11 @@ function serve(root) {
       body = gzipCache.get(file);
       headers["Content-Encoding"] = "gzip";
     }
-    if (ext === ".js") {
-      stats.jsBytes += body.length;
-      stats.jsRequests += 1;
-    }
     res.writeHead(200, { ...headers, "Content-Length": body.length });
     for (let offset = 0; offset < body.length; offset += CHUNK_BYTES) {
+      // A closed browser context drops its connections. Stop there, so a dead
+      // response neither holds the link nor counts toward the next run.
+      if (res.destroyed) return;
       const chunk = body.subarray(offset, offset + CHUNK_BYTES);
       const now = performance.now();
       linkFreeAt = Math.max(now, linkFreeAt) + chunk.length / bytesPerMs;
@@ -317,6 +316,10 @@ function serve(root) {
       res.write(chunk);
     }
     res.end();
+    if (ext === ".js") {
+      stats.jsBytes += body.length;
+      stats.jsRequests += 1;
+    }
   });
   server.stats = stats;
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok(server)));
@@ -407,7 +410,12 @@ function summarize(samples) {
           ? values[(values.length - 1) / 2]
           : (values[values.length / 2 - 1] + values[values.length / 2]) / 2
         : null;
-      return [key, { median, min: values[0] ?? null, max: values.at(-1) ?? null }];
+      // n is the number of runs that reported the metric. The report warns when
+      // it falls short of --runs, so a flaky metric does not pass for a stable one.
+      return [
+        key,
+        { median, min: values[0] ?? null, max: values.at(-1) ?? null, n: values.length },
+      ];
     }),
   );
 }
@@ -521,6 +529,11 @@ function report(result, baseline) {
     const spread = Object.entries(result.runtime).map(([name, m]) => {
       return `${name} ready ${ms(m.readyMs.min)}-${ms(m.readyMs.max)}`;
     });
+    for (const [name, metrics] of Object.entries(result.runtime)) {
+      for (const [key, { n }] of Object.entries(metrics)) {
+        if (n < RUNS) console.log(`WARNING: ${name} ${key} was reported by ${n} of ${RUNS} runs.`);
+      }
+    }
     const baseRuns = baseline?.runtime ? ` (baseline: ${baseline.meta.runs} runs)` : "";
     console.log(`\nSpread over ${RUNS} runs${baseRuns}: ${spread.join(", ")}`);
   }
