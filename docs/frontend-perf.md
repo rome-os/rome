@@ -17,11 +17,12 @@ The second run prints each metric beside its baseline value and the change in pe
 
 | Option | Effect |
 |---|---|
-| `--skip-build` | Reuse `dist/` and `dist-mock/` from the last build. |
+| `--skip-build` | Reuse `dist/` and `dist-mock/` from the last build. The result is labeled with the commit those were built from, with a warning when that is not the checked-out commit. |
 | `--bundle-only` | Measure the bundle and skip the browser runs. |
 | `--runs <n>` | Browser runs per scenario. The bench reports the median. The default is 5. |
 | `--cpu-throttle <n>` | Chromium CPU slowdown factor. The default is 4. |
 | `--baseline <file>` | Compare against another result file. |
+| `--save-baseline` | Also write the result as the new baseline. It cannot be combined with `--bundle-only`. |
 | `--out <file>` | Write the result somewhere other than `latest.json`. |
 
 The bench needs a Chromium that the installed `@playwright/test` can launch. When the browser Playwright expects is not installed, point `PERF_CHROMIUM_PATH` at a Chromium binary.

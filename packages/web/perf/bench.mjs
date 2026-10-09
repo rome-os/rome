@@ -55,6 +55,11 @@ if (!Number.isInteger(RUNS) || RUNS < 1) {
 if (!Number.isFinite(CPU_THROTTLE) || CPU_THROTTLE < 1) {
   throw new Error(`--cpu-throttle must be a number >= 1, got ${args["cpu-throttle"]}`);
 }
+// A bundle-only result has no page-load section, so saving it as the baseline
+// would silently drop the page-load numbers every later run compares against.
+if (args["bundle-only"] && args["save-baseline"]) {
+  throw new Error("--save-baseline needs the page-load runs, so drop --bundle-only");
+}
 
 const SCENARIOS = [
   { name: "chat-empty", path: "/chat", ready: "[data-chat-composer-box] textarea" },
@@ -83,12 +88,30 @@ function gitSha() {
   return `${result.stdout.toString().trim()}${dirty ? "-dirty" : ""}`;
 }
 
+// Records which commit dist/ and dist-mock/ were built from, so a --skip-build
+// run reports the commit it measured rather than the one checked out now.
+const buildMarker = join(webDir, "perf", ".results", "build-sha");
+
 function build() {
   run("pnpm", ["build:kit"]);
   // Source maps stay on (the default outside the compiled Docker mode) so the
   // initial chunks can be attributed to the packages that produced them.
   run("pnpm", ["exec", "rsbuild", "build"], { ROME_DOCKER_APP_CODE_MODE: "" });
   run("pnpm", ["exec", "rsbuild", "build", "--config", "mock/rsbuild.static.config.ts"]);
+  mkdirSync(dirname(buildMarker), { recursive: true });
+  writeFileSync(buildMarker, gitSha());
+}
+
+function builtSha() {
+  const current = gitSha();
+  const built = existsSync(buildMarker) ? readFileSync(buildMarker, "utf8").trim() : "unknown";
+  if (built !== current) {
+    console.log(
+      `WARNING: dist/ was built from ${built}, but ${current} is checked out. ` +
+        "The result is labeled with the built commit. Run without --skip-build to measure the checkout.",
+    );
+  }
+  return built;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +521,8 @@ function report(result, baseline) {
     const spread = Object.entries(result.runtime).map(([name, m]) => {
       return `${name} ready ${ms(m.readyMs.min)}-${ms(m.readyMs.max)}`;
     });
-    console.log(`\nSpread over ${RUNS} runs: ${spread.join(", ")}`);
+    const baseRuns = baseline?.runtime ? ` (baseline: ${baseline.meta.runs} runs)` : "";
+    console.log(`\nSpread over ${RUNS} runs${baseRuns}: ${spread.join(", ")}`);
   }
   if (result.bundle.initialTopPackages) {
     console.log("\nLargest packages in the initial JS (minified bytes):");
@@ -514,7 +538,7 @@ if (!args["skip-build"]) build();
 
 const result = {
   meta: {
-    sha: gitSha(),
+    sha: builtSha(),
     date: new Date().toISOString(),
     runs: RUNS,
     cpuThrottle: CPU_THROTTLE,
