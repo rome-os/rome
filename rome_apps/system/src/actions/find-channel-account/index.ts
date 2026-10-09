@@ -3,6 +3,9 @@ import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 
 const log = createAppLogger("find_channel_account");
 
+/** The main agent, as an action context names it. */
+const MAIN_AGENT_NAMES = new Set(["main", "core:main"]);
+
 /** Core's address-book lookup, handed to the system app alone. Declared here
  *  because an app cannot import core, and a worker receives a proxy. */
 export interface ChannelAccountsService {
@@ -43,11 +46,16 @@ export function createAction(
     },
 
     async execute(args): Promise<ActionResult> {
-      // An address book is the guardian's contacts: Rome's agents look in it,
-      // and an installed app calling through runAction does not.
-      const callerAppId = getCurrentActionContext()?.callerAppId;
-      if (callerAppId && callerAppId !== "system") {
+      // An address book is the guardian's contacts, so only Rome's main agent
+      // looks in it. `main` is a name only core may define, so an installed
+      // app can reach it neither through runAction nor by naming this action
+      // in its own agent's allow-list.
+      const context = getCurrentActionContext();
+      if (context?.callerAppId && context.callerAppId !== "system") {
         return { status: "error", error: "app_callers_not_supported" };
+      }
+      if (!context?.agentName || !MAIN_AGENT_NAMES.has(context.agentName)) {
+        return { status: "error", error: "only the main agent can look up accounts" };
       }
       const { channelAccounts } = deps;
       if (!channelAccounts) {

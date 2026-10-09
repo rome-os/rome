@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect } from "@rstest/core";
+import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
 import { createAction, type ChannelAccountsService } from "./index.js";
 
@@ -29,6 +29,7 @@ function makeAction(
   return createAction(actionConfig, { channelAccounts });
 }
 
+beforeEach(() => setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "main" })));
 afterEach(() => setCurrentActionContextResolver(undefined));
 
 describe("find_channel_account", () => {
@@ -43,6 +44,21 @@ describe("find_channel_account", () => {
     expect(await action.execute({ channel: "whatsapp" })).toEqual({
       status: "error",
       error: "app_callers_not_supported",
+    });
+    expect(looked).toBe(false);
+  });
+
+  it("refuses any agent but main, such as one an installed app ships", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "some-app:helper" }));
+    let looked = false;
+    const action = makeAction(async () => {
+      looked = true;
+      return { accounts: [atlas], more: false };
+    });
+
+    expect(await action.execute({ channel: "whatsapp" })).toEqual({
+      status: "error",
+      error: "only the main agent can look up accounts",
     });
     expect(looked).toBe(false);
   });

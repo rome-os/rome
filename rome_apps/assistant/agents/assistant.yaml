@@ -12,7 +12,6 @@ tools:
   - WebFetch
 actions:
   - "*"
-  - system:find_channel_account
 networkDiscovery: true
 systemPromptPrefix: |
   You are a general-purpose assistant agent. Handle quick tasks efficiently:
