@@ -41,6 +41,7 @@ export async function runScenario(
   const started = performance.now();
   const since = (time: number) => time - started;
   const steps: TraceStep[] = [];
+  let passed = false;
 
   try {
     await body({
@@ -70,27 +71,44 @@ export async function runScenario(
         }
       },
     });
+    passed = true;
   } finally {
     const directory = process.env.ROME_CHANNEL_TRACES;
     if (directory) {
-      // Requests answered before the scenario started (login, earlier polls)
-      // belong to the channel's setup, not to it.
-      const exchanges = channel.peer.server.exchanges
-        .filter((exchange) => exchange.answeredAt === undefined || exchange.answeredAt >= started)
-        .map((exchange) => toTrace(exchange, since));
-      const trace = traceSchema.parse({
-        version: TRACE_VERSION,
-        platform: channel.platform,
-        conversation: channel.conversation,
-        steps,
-        exchanges,
-      });
-      const file = resolve(directory, "traces", `${task.id.replace(/[^\w.-]/g, "_")}.json`);
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, `${JSON.stringify(trace, null, 2)}\n`);
-      task.meta[TRACE_META_KEY] = file;
+      try {
+        await writeTrace(directory, task, channel, steps, started);
+      } catch (error) {
+        // A trace that cannot be written must not hide why the scenario failed.
+        if (passed) throw error;
+      }
     }
   }
+}
+
+async function writeTrace(
+  directory: string,
+  task: ScenarioTask,
+  channel: TestChannel,
+  steps: TraceStep[],
+  started: number,
+): Promise<void> {
+  const since = (time: number) => time - started;
+  // Requests answered before the scenario started (login, earlier polls)
+  // belong to the channel's setup, not to it.
+  const exchanges = channel.peer.server.exchanges
+    .filter((exchange) => exchange.answeredAt === undefined || exchange.answeredAt >= started)
+    .map((exchange) => toTrace(exchange, since));
+  const trace = traceSchema.parse({
+    version: TRACE_VERSION,
+    platform: channel.platform,
+    conversation: channel.conversation,
+    steps,
+    exchanges,
+  });
+  const file = resolve(directory, "traces", `${task.id.replace(/[^\w.-]/g, "_")}.json`);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, `${JSON.stringify(trace, null, 2)}\n`);
+  task.meta[TRACE_META_KEY] = file;
 }
 
 function toTrace(exchange: PeerExchange, since: (time: number) => number): TraceExchange {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConversationId } from "@rome-os/app-runtime";
@@ -127,6 +127,28 @@ describe("runScenario", () => {
     ).rejects.toThrow("assertion outside a step");
 
     expect((await readTrace()).steps).toMatchObject([{ label: "The user writes" }]);
+  });
+
+  describe("when the trace cannot be written", () => {
+    beforeEach(async () => {
+      // A directory cannot be made under a file.
+      await writeFile(join(directory, "blocker"), "");
+      process.env.ROME_CHANNEL_TRACES = join(directory, "blocker", "traces");
+    });
+
+    it("still reports why the scenario failed", async () => {
+      await expect(
+        runScenario(task(), channel, async ({ step }) => {
+          await step("Rome answers", () => {
+            throw new Error("boom");
+          });
+        }),
+      ).rejects.toThrow('Step "Rome answers": boom');
+    });
+
+    it("fails a scenario that passed, since its trace is missing", async () => {
+      await expect(runScenario(task(), channel, async () => {})).rejects.toThrow(/ENOTDIR/);
+    });
   });
 
   it("records nothing unless a trace directory is named", async () => {
