@@ -127,7 +127,7 @@ const buttonVariants = cva(
       // than the word at the other edge, so equal padding reads as the glyph
       // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
       // label's, which reads as centred. `Button` reads the glyph's side from
-      // its children and adds a plain padding class (see `GLYPH_EDGE` below),
+      // its children and adds a plain padding class (see `glyph-edge.ts`),
       // so a caller's `px-*` still wins the merge. A glyph inside `asChild`
       // content, or a `buttonVariants` consumer, names its side with
       // `data-icon` instead, because CSS cannot tell a lone glyph beside a
@@ -166,6 +166,13 @@ const buttonVariants = cva(
   },
 );
 
+/**
+ * A centred Button trims the side of a leading or trailing glyph (see
+ * `glyph-edge.ts`). It reads only direct children and fragment members, and
+ * counts any childless component as a glyph. So wrap a label component in a
+ * `<span>` to keep it untrimmed. A `data-icon` marker inside a wrapper element
+ * does nothing here; it applies only to `asChild` content.
+ */
 function Button({
   className,
   variant = "default",
