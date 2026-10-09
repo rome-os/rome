@@ -1697,6 +1697,17 @@ export interface ChannelSummary {
   sendable: boolean;
 }
 
+/** Someone a channel can reach, as {@link ChannelsService.accounts} lists
+ *  them. */
+export interface ChannelAccount {
+  /** What the platform calls the account, or null when it holds no name. */
+  name: string | null;
+  /** Every address the account is reached on, in the channel's own form. On
+   *  the `agents` channel the one address is the agent's id, which is also the
+   *  conversation to send to. */
+  addresses: string[];
+}
+
 /**
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
@@ -1724,6 +1735,12 @@ export interface ChannelsService {
    * `send` may not appear until that read expires.
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  /**
+   * Up to `limit` (default 20) of the accounts the channel can reach, matching
+   * `query` against their names and identifiers when given. Rejects for a
+   * channel that has no address book.
+   */
+  accounts(channel: string, query?: { query?: string; limit?: number }): Promise<ChannelAccount[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

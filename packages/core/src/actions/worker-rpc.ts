@@ -55,6 +55,14 @@ const ChannelsQueryParams = z
   })
   .strict();
 
+const ChannelsAccountsParams = z
+  .object({
+    channel: z.string().min(1),
+    query: z.string().optional(),
+    limit: z.number().int().positive().max(100).optional(),
+  })
+  .strict();
+
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
 });
@@ -301,6 +309,10 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
+      case "channels.accounts": {
+        const { channel, ...query } = parseParams(method, ChannelsAccountsParams, params);
+        return await this.services.channelsService.accounts(channel, query);
+      }
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(
           parseParams(method, ConversationSettingsInput, params) as ListConversationSettingsInput,

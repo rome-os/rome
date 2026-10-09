@@ -51,6 +51,7 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
+  ChannelAccount,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -237,6 +238,13 @@ export class ChannelsServiceProxy implements ChannelsService {
       conversationId,
       message,
     });
+  }
+
+  accounts(
+    channel: string,
+    query: { query?: string; limit?: number } = {},
+  ): Promise<ChannelAccount[]> {
+    return getWorkerRpc().call<ChannelAccount[]>("channels.accounts", { channel, ...query });
   }
 
   async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {

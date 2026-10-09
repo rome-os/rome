@@ -1,0 +1,11 @@
+name: find_channel_account
+type: system
+description: >-
+  Find who a channel can reach, by name. Returns each matching account's
+  name and addresses. On "agents" the one address is the agent's id, which
+  is the threadId send_message takes, so look an agent up here before
+  messaging one that has not written to Rome yet.
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

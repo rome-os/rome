@@ -9,6 +9,7 @@
  */
 
 import type {
+  ChannelAccount,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -94,6 +95,16 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
+
+      async accounts(channel, read = {}): Promise<ChannelAccount[]> {
+        const book = find(channel)?.accounts;
+        if (!book) throw new Error(`Channel "${channel}" has no address book`);
+        const { accounts } = await book.listAccounts({
+          ...(read.query ? { query: read.query } : {}),
+          limit: read.limit ?? 20,
+        });
+        return accounts.map((account) => ({ name: account.name, addresses: account.addresses }));
+      },
     },
     REMOVED_SERVICE_MEMBERS,
   );

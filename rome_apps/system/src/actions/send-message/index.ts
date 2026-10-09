@@ -354,7 +354,7 @@ export function createSendMessageAction(
             "agents",
           ],
           description:
-            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one; its threadId is the agent\'s id (a UUID, the threadId its messages arrive on), never its name.',
+            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one; its threadId is the agent\'s id (a UUID, the threadId its messages arrive on), never its name. To message an agent by name, find its id with find_channel_account first.',
         },
         threadId: {
           type: "string",

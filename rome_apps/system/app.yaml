@@ -28,6 +28,7 @@ actions:
   - actions/email-inbound
   - actions/execute-root-script
   - actions/fetch-channel-history
+  - actions/find-channel-account
   - actions/generate-image
   - actions/manage-root-script
   - actions/publish-event
