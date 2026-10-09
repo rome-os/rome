@@ -61,7 +61,15 @@ Where platforms differ, the test states the difference in a table keyed by platf
 
 ## Traces
 
-When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace holds each step with what the conversation showed after it, every message change the peer applied, and every request the peer answered once the scenario started, on one clock. `trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
+When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace records these on one clock:
+
+- Each step, with what the conversation showed after it.
+- Every message change the peer applied.
+- Every request the peer answered once the scenario started.
+- What the scenario noted about the agent and Rome.
+- The invariants the scenario checked.
+
+`trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
 
 `pnpm test:channels` runs this directory's tests with traces on, into `.channel-traces/`. `pnpm channels:ui` serves a browser UI over them, described in [`packages/channel-test-ui`](../../../../../channel-test-ui/README.md).
 

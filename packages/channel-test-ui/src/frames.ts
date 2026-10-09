@@ -1,35 +1,39 @@
-import type { Trace, TraceExchange, TraceMessage, TraceStep } from "./trace.js";
+import type { Trace, TraceEvent, TraceExchange, TraceMessage, TraceStep } from "./trace.js";
 
 /**
- * One row of a trace's timeline, in one of two lanes: a test step, or a request
- * the platform received. Each carries milliseconds since the scenario started.
+ * One row of a trace's timeline, in one of four lanes: a test step, something
+ * the agent emitted, something Rome did, or a request the platform received.
+ * Each carries milliseconds since the scenario started.
  */
 export type Frame =
   | { kind: "step"; at: number; step: TraceStep }
+  | { kind: "event"; at: number; event: TraceEvent }
   | { kind: "exchange"; at: number; exchange: TraceExchange };
 
-export type Lane = "test" | "platform";
+export type Lane = "test" | "agent" | "rome" | "platform";
 
 export function laneOf(frame: Frame): Lane {
-  return frame.kind === "step" ? "test" : "platform";
+  if (frame.kind === "step") return "test";
+  return frame.kind === "event" ? frame.event.lane : "platform";
 }
 
-/** Every frame in time order. At the same moment the step sorts first, since
- *  the requests are its effect. */
+/** Every frame in time order. At the same moment a step sorts before the
+ *  events it caused, and those before the requests that follow. */
 export function framesOf(trace: Trace): Frame[] {
   const frames: Frame[] = [
     ...trace.steps.map((step): Frame => ({ kind: "step", at: step.startedAt, step })),
+    ...trace.events.map((event): Frame => ({ kind: "event", at: event.at, event })),
     ...trace.exchanges.map(
       (exchange): Frame => ({ kind: "exchange", at: exchange.receivedAt, exchange }),
     ),
   ];
-  const causeFirst = (frame: Frame) => (frame.kind === "step" ? 0 : 1);
+  const causeFirst = (frame: Frame) => ({ step: 0, event: 1, exchange: 2 })[frame.kind];
   return frames.sort((a, b) => a.at - b.at || causeFirst(a) - causeFirst(b));
 }
 
 /**
  * What the conversation shows for `frame`: after its step, or after the step
- * an exchange happened in. An exchange outside every step shows the state the
+ * an event or exchange happened in. One outside every step shows the state the
  * last earlier step left, and one before any step shows nothing yet.
  */
 export function visibleAt(

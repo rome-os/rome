@@ -14,27 +14,37 @@ import {
   visibleAt,
 } from "../src/frames.js";
 import { planReplay } from "../src/replay.js";
-import type { Trace, TraceExchange, TraceStep } from "../src/trace.js";
+import type { Trace, TraceCheck, TraceEvent, TraceExchange, TraceStep } from "../src/trace.js";
 import { Conversation } from "./Conversation.js";
 import { useReplay } from "./useReplay.js";
 import { useReplaySettings } from "./useReplaySettings.js";
 
 const LANES: Array<[Lane, string]> = [
   ["test", "Test"],
+  ["agent", "Agent"],
+  ["rome", "Rome"],
   ["platform", "Platform API"],
 ];
 
-// A frame's columns: the time, then the test lane and the platform lane. A
-// narrow screen keeps one lane column and names each row's lane inline.
+// A frame's columns: the time, then one per lane. A narrow screen keeps one
+// lane column and names each row's lane inline.
 const FRAME_GRID =
-  "grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1.4fr)]";
+  "grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[2.5rem_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,1.3fr)]";
+
+const LANE_COLUMN: Record<Lane, string> = {
+  test: "col-start-2",
+  agent: "col-start-2 sm:col-start-3",
+  rome: "col-start-2 sm:col-start-4",
+  platform: "col-start-2 sm:col-start-5",
+};
 
 const CODE = "max-h-72 overflow-auto rounded-8 bg-surface-muted p-3 font-mono text-aux";
 
 /**
  * A trace in three parts. The conversation, which can be replayed, sits in the
- * middle. On the right, the timeline lists the test's steps and the platform's
- * requests on one clock, and the selected frame's detail sits below it.
+ * middle. On the right, the timeline lists the test's steps, what the agent
+ * and Rome did, and the platform's requests on one clock, with the invariants
+ * the scenario checked above it and the selected frame's detail below.
  * Selecting a frame ends a replay and shows what the conversation looked like
  * after that frame's step.
  */
@@ -55,7 +65,7 @@ export function TraceView({ trace }: { trace: Trace }) {
   const { after, visible } = frame ? visibleAt(trace, frame) : { visible: [] };
 
   return (
-    <div className="grid items-start gap-4 min-[1200px]:grid-cols-[minmax(280px,1fr)_minmax(440px,1.3fr)]">
+    <div className="grid items-start gap-4 min-[1200px]:grid-cols-[minmax(260px,1fr)_minmax(480px,1.6fr)]">
       <Conversation
         trace={trace}
         plan={plan}
@@ -67,6 +77,7 @@ export function TraceView({ trace }: { trace: Trace }) {
         onResetSettings={reset}
       />
       <div className="flex min-w-0 flex-col gap-4">
+        {trace.checks.length > 0 && <Checks checks={trace.checks} />}
         <Card role="region" aria-label="Timeline" className="max-h-[45vh] gap-0 overflow-auto py-0">
           <div
             aria-hidden="true"
@@ -102,9 +113,7 @@ export function TraceView({ trace }: { trace: Trace }) {
                       <span
                         className={cn(
                           "min-w-0 [overflow-wrap:anywhere]",
-                          laneOf(item) === "platform"
-                            ? "col-start-2 sm:col-start-3"
-                            : "col-start-2",
+                          LANE_COLUMN[laneOf(item)],
                         )}
                       >
                         <span className="mr-1.5 text-aux text-muted-foreground sm:hidden">
@@ -133,7 +142,41 @@ export function TraceView({ trace }: { trace: Trace }) {
   );
 }
 
+function Checks({ checks }: { checks: TraceCheck[] }) {
+  return (
+    <Card role="region" aria-label="Invariants" className="gap-0 py-0">
+      <List asChild>
+        <ul>
+          {checks.map((check, index) => (
+            <li key={checkKey(check, index)}>
+              <ListRow asChild size="sm" className="flex flex-wrap items-center gap-x-2">
+                <div>
+                  <Badge variant={check.ok ? "success" : "destructive"}>
+                    {check.ok ? "held" : "broken"}
+                  </Badge>
+                  <span className="font-mono text-aux text-foreground">{check.id}</span>
+                  {check.detail && (
+                    <p className="w-full text-aux text-muted-foreground [overflow-wrap:anywhere]">
+                      {check.detail}
+                    </p>
+                  )}
+                </div>
+              </ListRow>
+            </li>
+          ))}
+        </ul>
+      </List>
+    </Card>
+  );
+}
+
 function FrameSummary({ frame }: { frame: Frame }) {
+  if (frame.kind === "event")
+    return (
+      <span className="font-mono text-aux" title={frame.event.label}>
+        {frame.event.label}
+      </span>
+    );
   if (frame.kind === "step")
     return (
       <span
@@ -151,10 +194,26 @@ function FrameSummary({ frame }: { frame: Frame }) {
 }
 
 function Detail({ frame }: { frame: Frame }) {
-  return frame.kind === "step" ? (
-    <StepDetail step={frame.step} />
+  if (frame.kind === "step") return <StepDetail step={frame.step} />;
+  return frame.kind === "event" ? (
+    <EventDetail event={frame.event} />
   ) : (
     <ExchangeDetail exchange={frame.exchange} />
+  );
+}
+
+function EventDetail({ event }: { event: TraceEvent }) {
+  return (
+    <>
+      <h3 className="flex flex-wrap items-center gap-1.5">
+        <span className="font-mono text-aux font-medium text-foreground">{event.label}</span>
+        <Badge variant="outline">{event.lane}</Badge>
+      </h3>
+      <p className="text-ui text-muted-foreground">At {event.at.toFixed(1)} ms</p>
+      {event.detail !== undefined && (
+        <pre className={CODE}>{JSON.stringify(event.detail, null, 2)}</pre>
+      )}
+    </>
   );
 }
 
@@ -253,4 +312,9 @@ function firstInteresting(frames: Frame[]): number {
 
 function key(frame: Frame, index: number): string {
   return `${frame.kind}-${index}`;
+}
+
+/** A scenario can check the same invariant after several steps. */
+function checkKey(check: TraceCheck, index: number): string {
+  return `${check.id}-${index}`;
 }

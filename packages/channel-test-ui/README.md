@@ -14,7 +14,7 @@ pnpm channels:ui --watch    # also rerun every scenario when packages/core/src c
 
 The page lists every test in `packages/core/src/test/kit/im`, scenario files first, with a name filter and a status filter. **Run all** starts the index over. The button beside a test reruns only that test and merges its result into the index. One run happens at a time.
 
-Selecting a scenario fills three columns. The middle column is the conversation as the user sees it. The right column has the timeline, with the test's steps and the requests the platform received on one clock, and below it the selected frame's detail. For a request, the detail shows the request and answer bodies. A request's tag says where the answer's shape came from: `capture` (a recorded platform response), `synthetic` (hand-written, no capture yet) or `fault` (injected by the test).
+Selecting a scenario fills three columns. The middle column is the conversation as the user sees it. The right column has the timeline, and below it the selected frame's detail. The timeline has four lanes on one clock. They hold the test's steps, what the agent emitted, what Rome did and the requests the platform received. For a request, the detail shows the request and answer bodies. When the scenario checked invariants, a list of them sits above the timeline, each marked held or broken. A request's tag says where the answer's shape came from: `capture` (a recorded platform response), `synthetic` (hand-written, no capture yet) or `fault` (injected by the test).
 
 Selecting a frame shows the conversation as it stood after the step the frame belongs to.
 
