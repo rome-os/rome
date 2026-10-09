@@ -31,3 +31,22 @@ export function isRomeCreditsExhaustedError(error: unknown): boolean {
     )
   );
 }
+
+/**
+ * The gateway's 403 for a model its catalog does not serve. Codex may keep the
+ * code or only its message.
+ */
+export function isRomeCreditsModelNotServedError(error: unknown): boolean {
+  const seen = new Set<object>();
+  const visit = (value: unknown, depth = 0): boolean => {
+    if (typeof value === "string")
+      return value.includes("model_not_allowed") || MODEL_NOT_SERVED_MESSAGE_RE.test(value);
+    if (!value || typeof value !== "object" || depth >= 4 || seen.has(value)) return false;
+    seen.add(value);
+    return Object.values(value).some((child) => visit(child, depth + 1));
+  };
+  return visit(error);
+}
+
+const MODEL_NOT_SERVED_MESSAGE_RE =
+  /\bThis model is not (?:available from Rome credits|enabled for your account)\b/i;

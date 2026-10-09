@@ -1,7 +1,21 @@
 import { describe, expect, it } from "@rstest/core";
-import { isRomeCreditsExhaustedError } from "./rome-credits-error.js";
+import {
+  isRomeCreditsExhaustedError,
+  isRomeCreditsModelNotServedError,
+} from "./rome-credits-error.js";
 
 describe("Rome credits error", () => {
+  it("recognizes the gateway's model_not_allowed by code or message", () => {
+    expect(isRomeCreditsModelNotServedError({ error: { code: "model_not_allowed" } })).toBe(true);
+    expect(
+      isRomeCreditsModelNotServedError({
+        message:
+          "unexpected status 403 Forbidden: This model is not available from Rome credits., url: http://test",
+      }),
+    ).toBe(true);
+    expect(isRomeCreditsModelNotServedError({ message: "403 Forbidden" })).toBe(false);
+  });
+
   it("recognizes #124's insufficient_credits 402", () => {
     expect(
       isRomeCreditsExhaustedError({

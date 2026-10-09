@@ -30,8 +30,8 @@ export interface RomeCreditsPayer {
   refreshServedModels(): Promise<void>;
   /**
    * Settles once the first read after credits start paying, or after a
-   * credential change, has finished. Settles at once while a snapshot is held
-   * or no read is running.
+   * credential change, has finished, and at once otherwise. Later refreshes
+   * never make it wait again.
    */
   servedModelsSettled(): Promise<void>;
   close(): void;
@@ -60,6 +60,8 @@ export function createRomeCreditsPayer(options: {
   let closed = false;
   let served: readonly string[] | null = null;
   let inFlight: { promise: Promise<void> } | null = null;
+  // The first read of a credits period or credential; null once it finished.
+  let firstRead: Promise<void> | null = null;
 
   const isUsingRomeCredits = (): boolean => provider() === ROME_CREDITS_MODEL_PROVIDER_ID;
 
@@ -85,6 +87,13 @@ export function createRomeCreditsPayer(options: {
     return read.promise;
   };
 
+  const startPeriod = (): void => {
+    const pending: Promise<void> = refreshServedModels().then(() => {
+      if (firstRead === pending) firstRead = null;
+    });
+    firstRead = pending;
+  };
+
   return {
     sync() {
       if (closed) return;
@@ -98,6 +107,7 @@ export function createRomeCreditsPayer(options: {
         // snapshot nor a read still in flight describes it.
         served = null;
         inFlight = null;
+        firstRead = null;
       }
       const next =
         !hasChatGptLogin && nextToken && hasRomeCloud() ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
@@ -105,17 +115,24 @@ export function createRomeCreditsPayer(options: {
         // Only the credits provider reads the token, and each spawn re-reads it.
         if (tokenChanged && next === ROME_CREDITS_MODEL_PROVIDER_ID) {
           options.appServerManager.restart();
-          void refreshServedModels();
+          startPeriod();
         }
         return;
       }
       options.appServerManager.setDefaultProvider(next);
-      void refreshServedModels();
+      if (next === ROME_CREDITS_MODEL_PROVIDER_ID) {
+        startPeriod();
+      } else {
+        // A later credits period starts from a fresh read, not this list.
+        served = null;
+        inFlight = null;
+        firstRead = null;
+      }
     },
     isUsingRomeCredits,
     servedModels: () => served,
     refreshServedModels,
-    servedModelsSettled: () => (served === null && inFlight ? inFlight.promise : Promise.resolve()),
+    servedModelsSettled: () => firstRead ?? Promise.resolve(),
     close() {
       closed = true;
     },

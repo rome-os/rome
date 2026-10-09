@@ -85,7 +85,11 @@ import {
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
-import { isRomeCreditsExhaustedError, ROME_CREDITS_USED_UP_MESSAGE } from "./rome-credits-error.js";
+import {
+  isRomeCreditsExhaustedError,
+  isRomeCreditsModelNotServedError,
+  ROME_CREDITS_USED_UP_MESSAGE,
+} from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -377,6 +381,8 @@ interface CodexAppServerProviderOptions {
   onQuotaExhausted?: () => void;
   /** Only the Rome credits payer may classify its 402 as exhausted credits. */
   isUsingRomeCredits?: () => boolean;
+  /** The Rome credits gateway refused a model it no longer serves. */
+  onRomeCreditsModelNotServed?: () => void;
   /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => UsageFunding;
 }
@@ -434,6 +440,12 @@ function classifyCodexFailure(
 ): CodexFailureClassification {
   if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
+  }
+  // The served list is stale. Re-read it so the next resolution falls back or
+  // fails closed instead of choosing the same model again.
+  if (options.isUsingRomeCredits?.() && isRomeCreditsModelNotServedError(turnError)) {
+    options.onRomeCreditsModelNotServed?.();
+    return { code: "model_unavailable", httpStatus: 403 };
   }
   // The turn never started; a retry runs under the new payer.
   if (turnError instanceof PayerChangedError) {

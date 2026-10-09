@@ -196,6 +196,34 @@ describe("Rome credits payer", () => {
       expect(payer.servedModels()).toEqual(["gpt-5.6-terra"]);
     });
 
+    it("waits only for the first read of a credits period", async () => {
+      const answers: Array<(v: RomeCreditsView) => void> = [];
+      const { payer, value } = creditsPayer(
+        () => new Promise<RomeCreditsView>((resolve) => answers.push(resolve)),
+      );
+      value.codex.loggedIn = false;
+      payer.sync();
+      answers[0]?.(view());
+      await payer.servedModelsSettled();
+      const later = payer.refreshServedModels();
+      let settled = false;
+      await payer.servedModelsSettled().then(() => (settled = true));
+      expect(settled).toBe(true);
+      answers[1]?.(view());
+      await later;
+    });
+
+    it("drops the snapshot when ChatGPT starts paying", async () => {
+      const { payer, value } = creditsPayer(async () => view(["gpt-5.6-terra"]));
+      value.codex.loggedIn = false;
+      payer.sync();
+      await payer.servedModelsSettled();
+      expect(payer.servedModels()).toEqual(["gpt-5.6-terra"]);
+      value.codex.loggedIn = true;
+      payer.sync();
+      expect(payer.servedModels()).toBeNull();
+    });
+
     it("treats a gateway that reports no list as unknown", async () => {
       const { payer, value } = creditsPayer(async () => view());
       value.codex.loggedIn = false;
