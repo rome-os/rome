@@ -1213,9 +1213,8 @@ async function main() {
   await reconcileProviderAccounts(connectionRegistry.getLedger(), db, (service) =>
     connectionRegistry.isRegistered(service),
   );
-  // Hydrate connection/grant state without starting provider transports. The
-  // identity/settings migration must commit before any Talk epoch can observe
-  // or admit messages under the new binary.
+  // Hydrate connection/grant state without starting provider transports, so
+  // importChannelSettings commits before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
   await importChannelSettings(connectionRegistry, settingsRepo);
   connectionRegistry.startCapabilities();

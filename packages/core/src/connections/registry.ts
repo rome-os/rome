@@ -250,9 +250,9 @@ export class ConnectionRegistry {
     }
   }
 
-  /** Start every capability hydrated while boot activation was deferred. The
-   * startup cutover uses this barrier so no provider transport can observe
-   * pre-cutover settings state. */
+  /** Start every capability hydrated while boot activation was deferred. Boot
+   * uses this barrier so no provider transport starts before the legacy
+   * channel-settings import commits. */
   startCapabilities(): void {
     this.capabilityActivationPaused = false;
     for (const connection of this.connections.values()) {
