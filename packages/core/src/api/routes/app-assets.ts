@@ -21,13 +21,8 @@ export function appAssetsRoutes(deps: Pick<ApiDeps, "appCatalog">): Hono {
       return c.text("Not found", 404);
     }
 
-    const catalog = deps.appCatalog;
-    if (!catalog) {
-      return c.text("App catalog is not configured", 501);
-    }
-
     try {
-      const view = catalog.get(appId);
+      const view = deps.appCatalog.get(appId);
       if (!view || !isResolvedApp(view) || !view.web) {
         return c.text(`Unknown app "${appId}" or no frontend bundle`, 404);
       }
