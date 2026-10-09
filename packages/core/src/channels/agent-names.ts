@@ -10,7 +10,8 @@
  * one. Nothing is guessed between matches.
  */
 
-import { type AgentMessagingClient, agentLabel } from "../lib/rome-cloud-agents.js";
+import { agentLabel } from "../lib/rome-cloud-agents.js";
+import type { ExternalAgents } from "./agents-accounts.js";
 
 export type AgentNameResolution =
   | { status: "found"; agentId: string }
@@ -22,22 +23,17 @@ export interface AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution>;
 }
 
-export function createAgentNames(deps: {
-  client: Pick<AgentMessagingClient, "agents">;
-  /** Whether the guardian has connected Agents. Until then Cloud is not asked. */
-  isConnected: () => boolean;
-}): AgentNamesService {
+export function createAgentNames(agents: ExternalAgents): AgentNamesService {
   return {
     async resolve(name) {
-      if (!deps.isConnected()) return { status: "not_connected" };
+      if (!agents.connected()) return { status: "not_connected" };
       const wanted = name.trim().toLowerCase();
-      const { self, agents } = await deps.client.agents();
-      const others = agents.filter((agent) => agent.agentId !== self.agentId);
-      const labelled = others.filter((agent) => agentLabel(agent).toLowerCase() === wanted);
+      const listed = await agents.list();
+      const labelled = listed.filter((agent) => agentLabel(agent).toLowerCase() === wanted);
       const matches =
         labelled.length > 0
           ? labelled
-          : others.filter((agent) => agent.name.trim().toLowerCase() === wanted);
+          : listed.filter((agent) => agent.name.trim().toLowerCase() === wanted);
       if (matches.length === 0) return { status: "none" };
       if (matches.length === 1) return { status: "found", agentId: matches[0].agentId };
       return {

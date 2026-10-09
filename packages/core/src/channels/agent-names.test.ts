@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ExternalAgent } from "../lib/rome-cloud-agents.js";
 import { createAgentNames } from "./agent-names.js";
+import { externalAgents } from "./agents-accounts.js";
 
 const HOME = { agentId: "00000000-0000-4000-8000-000000000000", name: "Rome" };
 const ATLAS = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
@@ -13,18 +14,20 @@ function agent(agentId: string, name: string, account = "ouou"): ExternalAgent {
 
 function names(agents: ExternalAgent[], connected = true) {
   let asked = 0;
-  const service = createAgentNames({
-    client: {
-      async agents() {
-        asked += 1;
-        return {
-          self: HOME,
-          agents: [{ ...HOME, kind: "rome", account: "ouou", sameAccount: true }, ...agents],
-        };
+  const service = createAgentNames(
+    externalAgents({
+      client: {
+        async agents() {
+          asked += 1;
+          return {
+            self: HOME,
+            agents: [{ ...HOME, kind: "rome", account: "ouou", sameAccount: true }, ...agents],
+          };
+        },
       },
-    },
-    isConnected: () => connected,
-  });
+      isConnected: () => connected,
+    }),
+  );
   return { service, asked: () => asked };
 }
 
@@ -67,5 +70,18 @@ describe("agent names", () => {
     const { service, asked } = names([agent(ATLAS, "Atlas")], false);
     expect(await service.resolve("Atlas")).toEqual({ status: "not_connected" });
     expect(asked()).toBe(0);
+  });
+  it("fails, rather than finding no one, when Cloud cannot be read", async () => {
+    const service = createAgentNames(
+      externalAgents({
+        client: {
+          async agents() {
+            throw new Error("Cloud is down");
+          },
+        },
+        isConnected: () => true,
+      }),
+    );
+    await expect(service.resolve("Atlas")).rejects.toThrow("Cloud is down");
   });
 });

@@ -4,7 +4,7 @@ import { readAccountDirectory } from "../people/account-directory.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../test/helpers.js";
 import { seedBaseline } from "../test/seeds.js";
 import { createAccountNames } from "./account-names.js";
-import { agentsAccounts } from "./agents-accounts.js";
+import { agentsAccounts, externalAgents } from "./agents-accounts.js";
 import type { Channels } from "./channel.js";
 
 const HOME = { agentId: "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70", name: "home-rome" };
@@ -44,7 +44,9 @@ function cloud(agents: ExternalAgent[]) {
 
 describe("the agents address book", () => {
   it("lists the account's other agents by agent id, leaving out this Rome", async () => {
-    const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
+    const book = agentsAccounts(
+      externalAgents({ client: cloud([atlas]), isConnected: () => true }),
+    );
     const { accounts } = await book.listAccounts({ limit: 100 });
     expect(accounts).toEqual([
       {
@@ -58,7 +60,9 @@ describe("the agents address book", () => {
   });
 
   it("tells apart two accounts' agents that share a name", async () => {
-    const book = agentsAccounts({ client: cloud([atlas, friendAtlas]), isConnected: () => true });
+    const book = agentsAccounts(
+      externalAgents({ client: cloud([atlas, friendAtlas]), isConnected: () => true }),
+    );
     const { accounts } = await book.listAccounts({ limit: 100 });
     expect(accounts.map((account) => [account.id, account.name])).toEqual([
       [FRIEND_ATLAS, "atlas (@friend's dot)"],
@@ -68,7 +72,9 @@ describe("the agents address book", () => {
 
   it("orders same-named agents of one account by id, so paging is stable", async () => {
     const second = { ...atlas, agentId: "00000000-0000-4000-8000-000000000001" };
-    const book = agentsAccounts({ client: cloud([atlas, second]), isConnected: () => true });
+    const book = agentsAccounts(
+      externalAgents({ client: cloud([atlas, second]), isConnected: () => true }),
+    );
     const first = await book.listAccounts({ limit: 1 });
     const rest = await book.listAccounts({ limit: 1, cursor: first.nextCursor });
     expect([...first.accounts, ...rest.accounts].map((account) => account.id)).toEqual([
@@ -80,18 +86,22 @@ describe("the agents address book", () => {
   it("lists no agents, rather than failing the page, when it cannot read Cloud's listing", async () => {
     const client = cloud([atlas]);
     client.agents = async () => ({ self: HOME, agents: null as never });
-    const book = agentsAccounts({ client, isConnected: () => true });
+    const book = agentsAccounts(externalAgents({ client, isConnected: () => true }));
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
   });
 
   it("finds an agent by searching for its id", async () => {
-    const book = agentsAccounts({ client: cloud([atlas, friendAtlas]), isConnected: () => true });
+    const book = agentsAccounts(
+      externalAgents({ client: cloud([atlas, friendAtlas]), isConnected: () => true }),
+    );
     const { accounts } = await book.listAccounts({ query: ATLAS, limit: 100 });
     expect(accounts.map((account) => account.id)).toEqual([ATLAS]);
   });
 
   it("resolves an agent it does not list, such as one answering Rome, but nothing else", async () => {
-    const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
+    const book = agentsAccounts(
+      externalAgents({ client: cloud([atlas]), isConnected: () => true }),
+    );
     expect(await book.resolve(FRIEND_ATLAS)).toEqual({
       id: FRIEND_ATLAS,
       addresses: [FRIEND_ATLAS],
@@ -105,7 +115,7 @@ describe("the agents address book", () => {
 
   it("asks Cloud nothing until Agents is connected", async () => {
     const client = cloud([atlas]);
-    const book = agentsAccounts({ client, isConnected: () => false });
+    const book = agentsAccounts(externalAgents({ client, isConnected: () => false }));
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
     expect(client.calls).toBe(0);
   });
@@ -113,7 +123,9 @@ describe("the agents address book", () => {
   it("shares one read across a page, and refreshes after it ages", async () => {
     let now = 0;
     const client = cloud([atlas]);
-    const book = agentsAccounts({ client, isConnected: () => true, now: () => now });
+    const book = agentsAccounts(
+      externalAgents({ client, isConnected: () => true, now: () => now }),
+    );
     await Promise.all([book.listAccounts({ limit: 100 }), book.resolve(ATLAS)]);
     expect(client.calls).toBe(1);
     now = 60_000;
@@ -125,7 +137,9 @@ describe("the agents address book", () => {
     let now = 0;
     const client = cloud([atlas]);
     client.fail = true;
-    const book = agentsAccounts({ client, isConnected: () => true, now: () => now });
+    const book = agentsAccounts(
+      externalAgents({ client, isConnected: () => true, now: () => now }),
+    );
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
     client.fail = false;
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
@@ -151,7 +165,9 @@ describe("a dot on the People page", () => {
     const channels: Channels = [
       {
         name: "agents",
-        accounts: agentsAccounts({ client: cloud([atlas]), isConnected: () => true }),
+        accounts: agentsAccounts(
+          externalAgents({ client: cloud([atlas]), isConnected: () => true }),
+        ),
         send: null,
         inbound: null,
         messages: null,
@@ -194,10 +210,12 @@ describe("another account's agent on the People page", () => {
     const channels: Channels = [
       {
         name: "agents",
-        accounts: agentsAccounts({
-          client: cloud([friendAtlas]),
-          isConnected: () => true,
-        }),
+        accounts: agentsAccounts(
+          externalAgents({
+            client: cloud([friendAtlas]),
+            isConnected: () => true,
+          }),
+        ),
         send: null,
         inbound: null,
         messages: null,

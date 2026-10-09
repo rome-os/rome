@@ -441,7 +441,28 @@ describe("send_message to an agent by name", () => {
 
     await expect(sent).rejects.toThrow(`"Atlas (dot)" (threadId ${ATLAS})`);
     await expect(sent).rejects.toThrow(`"Atlas (@friend's dot)" (threadId ${FRIEND_ATLAS})`);
+    await expect(sent).rejects.toThrow("full name as `to`");
     expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("offers only the id when the agents share a whole label", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({
+      status: "ambiguous",
+      matches: [
+        { label: "Atlas (dot)", agentId: ATLAS },
+        { label: "Atlas (dot)", agentId: FRIEND_ATLAS },
+      ],
+    });
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    await expect(sent).rejects.toThrow("Send again with the id as `threadId`.");
+    await expect(sent).rejects.not.toThrow("full name");
   });
 
   it("says when no agent has the name, or Agents is not connected", async () => {

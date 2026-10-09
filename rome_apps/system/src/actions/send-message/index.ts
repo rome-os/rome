@@ -271,9 +271,14 @@ async function resolveAgentThreadId(name: string, deps: SendMessageRuntimeDeps):
       const options = found.matches
         .map((match) => `"${match.label}" (threadId ${match.agentId})`)
         .join(", ");
-      throw new Error(
-        `More than one agent is named "${wanted}": ${options}. Send again with the full name as \`to\` or the id as \`threadId\`.`,
-      );
+      // Two agents of one account can share a whole label, which then names
+      // neither, so only distinct labels are offered as a way to pick.
+      const labels = new Set(found.matches.map((match) => match.label.toLowerCase()));
+      const retry =
+        labels.size === found.matches.length
+          ? "Send again with the full name as `to` or the id as `threadId`."
+          : "Send again with the id as `threadId`.";
+      throw new Error(`More than one agent is named "${wanted}": ${options}. ${retry}`);
     }
   }
 }
