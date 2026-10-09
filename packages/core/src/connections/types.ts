@@ -13,6 +13,7 @@ import type {
   ChannelDirectMessaging,
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
+import type { DeliveryTransport } from "../channels/delivery/types.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
@@ -53,6 +54,8 @@ export interface TalkFeatureMap {
   activity: ChannelActivity;
   directory: TalkDirectory;
   directMessaging: ChannelDirectMessaging;
+  /** Writing a reply as it is generated: creating and editing messages. */
+  replyDelivery: DeliveryTransport;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;

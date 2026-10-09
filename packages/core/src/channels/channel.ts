@@ -23,12 +23,28 @@ import type {
   ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
 import type { AddressBooks } from "./account-fold.js";
+import type { Pacer } from "./delivery/pacer.js";
+import type { DeliveryTransport } from "./delivery/types.js";
 import type { Accounts } from "./accounts.js";
 import type { AccountMessages, Messages } from "./messages.js";
+
+/** Streaming a reply into a conversation: the platform's writes, and the
+ *  pacer every write of the channel's account goes through. */
+export interface ChannelReplies {
+  readonly transport: DeliveryTransport;
+  readonly pacer: Pacer;
+}
 
 /** Sending on a channel, as core's channels do it: the SDK's send port, typing
  *  indicator included, and a way to reach one account directly. */
 export interface ChannelSend extends AppChannelSend {
+  /**
+   * Streaming a reply, or null where the channel cannot. It says nothing about
+   * whether streaming is on: that is the reply streaming setting, which the
+   * caller reads. Each write reaches the Connection's live talker when it
+   * runs, and fails `unauthorized` while none is live.
+   */
+  readonly replies?: ChannelReplies | null;
   /**
    * Reaching one account directly rather than replying in a conversation that
    * exists, or null where the channel cannot. When no Connection

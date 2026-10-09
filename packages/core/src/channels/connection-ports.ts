@@ -25,8 +25,15 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import type { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
-import { ChannelNotConnected, type ChannelDirectory, type ChannelSend } from "./channel.js";
+import {
+  ChannelNotConnected,
+  type ChannelDirectory,
+  type ChannelReplies,
+  type ChannelSend,
+} from "./channel.js";
 import { ConversationBuffers } from "./conversation-buffer.js";
+import type { ConnectionPacing } from "./delivery/connection-pacing.js";
+import { DeliveryFailure, type DeliveryTransport } from "./delivery/types.js";
 import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
@@ -48,6 +55,8 @@ export interface ConnectionPortsDeps {
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no port. */
   channelOf: ChannelOf;
+  /** Paces a send while reply streaming is on, and backs the `replies` port. */
+  pacing?: ConnectionPacing;
 }
 
 /** The name of the channel a Connection backs, or null when it backs none.
@@ -277,16 +286,59 @@ function connectionFor(backing: Backing): Connection | null {
   return connectionsOf(backing)[0] ?? null;
 }
 
-/** Sends on `connection`'s live talker. A Connection whose credentials are
- *  locked or degraded has none, and sending on it refuses. */
+/**
+ * Sends on `connection`'s live talker. A Connection whose credentials are
+ * locked or degraded has none, and sending on it refuses. With `pacing`, a
+ * send waits its turn in the Connection's pacer while reply streaming is on,
+ * and resolves once it has run. With streaming off it runs at once.
+ */
 export async function sendThrough(
   connection: Connection,
   conversationId: ConversationId,
   message: OutgoingMessage,
+  pacing?: ConnectionPacing,
 ): Promise<MessageReceipt> {
-  const sent = connection.withTalker((talker) => talker.send(conversationId, message));
-  if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
-  return sent;
+  const send = async () => {
+    const sent = connection.withTalker((talker) => talker.send(conversationId, message));
+    if (!sent) throw new Error(`Talk is unavailable for connection "${connection.id}"`);
+    return sent;
+  };
+  return pacing ? pacing.run(connection, conversationId, send) : send();
+}
+
+/**
+ * The reply port of `connection`, or null when its talker cannot stream. Each
+ * write looks the talker up when it runs, so a reply survives a new credential
+ * epoch and fails `unauthorized` while talk is locked, rather than writing as a
+ * stale epoch.
+ */
+function connectionReplies(
+  connection: Connection,
+  pacing: ConnectionPacing,
+): ChannelReplies | null {
+  const declared = connection.withTalker((talker) => talker.replyDelivery);
+  const pacer = pacing.pacerFor(connection);
+  if (!declared || !pacer) return null;
+  const live = async <T>(write: (transport: DeliveryTransport) => Promise<T> | undefined) => {
+    const called = connection.withTalker((talker) =>
+      talker.replyDelivery ? write(talker.replyDelivery) : undefined,
+    );
+    if (!called)
+      throw new DeliveryFailure("unauthorized", `${connection.service} is not connected`);
+    return called;
+  };
+  return {
+    pacer,
+    transport: {
+      capabilities: declared.capabilities,
+      codec: declared.codec,
+      create: (conversation, text, replyTo) =>
+        live((transport) => transport.create(conversation, text, replyTo)),
+      ...(declared.edit
+        ? { edit: (receipt, text) => live((transport) => transport.edit?.(receipt, text)) }
+        : {}),
+    },
+  };
 }
 
 /** Whether `connection`'s live talker offers `feature` now. */
@@ -317,7 +369,12 @@ function connectionSend(backing: Backing): ChannelSend {
     async send(conversationId, message) {
       const connection = connectionFor(backing);
       if (!connection) throw new ChannelNotConnected(channel);
-      return sendThrough(connection, conversationId, message);
+      return sendThrough(connection, conversationId, message, backing.deps.pacing);
+    },
+    get replies() {
+      const connection = connectionFor(backing);
+      const { pacing } = backing.deps;
+      return connection && pacing ? connectionReplies(connection, pacing) : null;
     },
     get direct() {
       const connection = connectionFor(backing);

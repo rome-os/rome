@@ -21,6 +21,7 @@ import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Connection } from "../connections/types.js";
 import type { Channels } from "./channel.js";
 import { sendThrough, type ChannelOf } from "./connection-ports.js";
+import type { ConnectionPacing } from "./delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 
 // TODO(0.8): remove, with the service's and the proxy's uses.
@@ -44,6 +45,8 @@ export interface ChannelsServiceDeps {
   /** Names the channel each Connection backs. A Connection it answers null
    *  for backs no channel and is skipped. */
   channelOf: ChannelOf;
+  /** Paces a send while reply streaming is on. */
+  pacing?: ConnectionPacing;
 }
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
@@ -96,7 +99,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       ): Promise<MessageReceipt> {
         const backing = backingConnection(deps.registry, channel, deps.channelOf);
         if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
-        return sendThrough(backing, conversationId, message);
+        return sendThrough(backing, conversationId, message, deps.pacing);
       },
 
       query,

@@ -217,6 +217,40 @@ describe("telegram descriptor shape", () => {
     return stopped as Promise<void>;
   });
 
+  it("offers reply delivery over the one bot it sends with", async () => {
+    const factory = new FaultBotFactory(true);
+    const desc = makeTelegramDescriptor({ createBot: factory.createBot });
+    const talker = desc.capabilities.talker!.build(
+      { bot: validCred() },
+      {
+        connectionId: "telegram-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    factory.sendMessage = () => ({
+      ok: true,
+      result: { message_id: 7, date: 0, chat: { id: 55, type: "private", first_name: "c" } },
+    });
+
+    expect(talker.replyDelivery?.capabilities).toMatchObject({ maxPartLength: 4096, edit: true });
+    await expect(talker.replyDelivery?.create("55", "hello", "3")).resolves.toEqual({
+      messageId: "7",
+      conversationId: "55",
+    });
+    expect(factory.sent).toEqual([
+      {
+        method: "sendMessage",
+        payload: expect.objectContaining({
+          chat_id: "55",
+          text: "hello",
+          reply_parameters: { message_id: 3, allow_sending_without_reply: true },
+        }),
+      },
+    ]);
+    expect(factory.tokens).toEqual(["bot-token"]);
+  });
+
   it("reports needs-auth for talk before the bot grant is conferred", async () => {
     const factory = new FaultBotFactory(true);
     const registry = setup(factory);
