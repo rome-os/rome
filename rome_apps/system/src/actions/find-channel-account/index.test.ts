@@ -40,7 +40,7 @@ describe("find_channel_account", () => {
 
     expect(result).toEqual({
       status: "ok",
-      data: { channel: "agents", accounts: [atlas], more: true },
+      data: { channel: "agents", connected: true, accounts: [atlas], more: true },
     });
     expect(calls).toEqual([{ channel: "agents", read: { query: "atlas" } }]);
   });
@@ -77,6 +77,14 @@ describe("find_channel_account", () => {
     const result = await action.execute({ channel: "agents", query: "atlas" });
 
     expect(result).toEqual({ status: "error", error: 'Channel "agents" is not connected.' });
+  });
+
+  it("returns what a channel that is not connected still lists, saying so", async () => {
+    const action = makeAction(async () => ({ accounts: [atlas], more: false }), false);
+
+    const result = await action.execute({ channel: "agents" });
+
+    expect(result).toMatchObject({ status: "ok", data: { connected: false, accounts: [atlas] } });
   });
 
   it("reports a channel the service cannot search as an error", async () => {

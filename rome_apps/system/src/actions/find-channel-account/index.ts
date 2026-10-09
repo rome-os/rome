@@ -62,7 +62,14 @@ export function createAction(
         if (!found.connected && found.accounts.length === 0) {
           return { status: "error", error: `Channel "${channel}" is not connected.` };
         }
-        const data = { channel, accounts: found.accounts, more: found.more };
+        // A locked channel can still answer from a store Rome keeps, so its
+        // accounts come back with `connected: false` rather than as an error.
+        const data = {
+          channel,
+          connected: found.connected,
+          accounts: found.accounts,
+          more: found.more,
+        };
         if (found.accounts.length > 0) return { status: "ok", data };
         return {
           status: "ok",
