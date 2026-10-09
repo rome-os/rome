@@ -247,6 +247,9 @@ interface AiToolsPanelProps {
   showUsage?: boolean;
   /** Show the account's Rome credits above the sign-ins when it has any. */
   showRomeCredits?: boolean;
+  /** Credits the caller already read. The panel then shows these and does not
+   *  read or poll them itself. */
+  romeCredits?: RomeCreditsView | null;
   showHeader?: boolean;
   onConnectedChange?: (connected: boolean) => void;
 }
@@ -463,6 +466,7 @@ export function AiToolsPanel({
   hiddenProviders = [],
   showUsage = false,
   showRomeCredits = false,
+  romeCredits: providedRomeCredits,
   showHeader = true,
   onConnectedChange,
 }: AiToolsPanelProps) {
@@ -494,7 +498,9 @@ export function AiToolsPanel({
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [romeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+  const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+  const fetchesRomeCredits = showRomeCredits && providedRomeCredits === undefined;
+  const romeCredits = providedRomeCredits === undefined ? fetchedRomeCredits : providedRomeCredits;
 
   // Rome Cloud owns the balance. A failed read keeps the last known one rather
   // than hiding the row during a transient outage.
@@ -559,20 +565,20 @@ export function AiToolsPanel({
     fetchAnthropicProviders().catch(() => {
       /* ignore */
     });
-    if (showRomeCredits) {
+    if (fetchesRomeCredits) {
       fetchRomeCredits().catch(() => {
         /* ignore */
       });
     }
-  }, [fetchStatus, fetchAnthropicProviders, fetchRomeCredits, showRomeCredits]);
+  }, [fetchStatus, fetchAnthropicProviders, fetchRomeCredits, fetchesRomeCredits]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       void fetchStatus();
-      if (showRomeCredits) void fetchRomeCredits().catch(() => {});
+      if (fetchesRomeCredits) void fetchRomeCredits().catch(() => {});
     }, AI_TOOLS_STATUS_REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [fetchStatus, fetchRomeCredits, showRomeCredits]);
+  }, [fetchStatus, fetchRomeCredits, fetchesRomeCredits]);
 
   function handleTerminalClose() {
     setTerminalPreset(null);
@@ -668,7 +674,7 @@ export function AiToolsPanel({
   async function handleRefresh() {
     setRefreshPending(true);
     setRefreshError(null);
-    if (showRomeCredits) void fetchRomeCredits().catch(() => {});
+    if (fetchesRomeCredits) void fetchRomeCredits().catch(() => {});
     try {
       const res = await fetch("/api/ai-tools/refresh", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
@@ -846,10 +852,13 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
-          {showRomeCredits && romeCredits && (
+          {showRomeCredits && romeCredits && !loadingStatus && (
             <RomeCreditsRow
               credits={romeCredits}
-              chatgptConnected={toolStatus.codex?.loggedIn === true}
+              // The payer counts an unknown ChatGPT login as connected, so only
+              // an explicit false lets credits pay.
+              chatgptConnected={toolStatus.codex?.loggedIn !== false}
+              claudeConnected={toolStatus.claude?.loggedIn === true}
             />
           )}
           {visibleProviders.map((provider) => {

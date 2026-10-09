@@ -524,11 +524,11 @@ describe("AI Tools provider presentation", () => {
 });
 
 describe("AI Tools Rome credits", () => {
-  function mockPanel(codexLoggedIn: boolean, credits: unknown) {
+  function mockPanel(codexLoggedIn: boolean | undefined, credits: unknown, claudeLoggedIn = false) {
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
       const url = String(input);
       if (url === "/api/ai-tools/status") {
-        return ok({ claude: { loggedIn: false }, codex: { loggedIn: codexLoggedIn } });
+        return ok({ claude: { loggedIn: claudeLoggedIn }, codex: { loggedIn: codexLoggedIn } });
       }
       if (url === "/api/ai-tools/anthropic-compatible-providers") {
         return ok({ providers: [], configured: null });
@@ -560,6 +560,37 @@ describe("AI Tools Rome credits", () => {
     render(<AiToolsPanel showRomeCredits />);
 
     expect(await screen.findByText("Standby")).toBeTruthy();
+  });
+
+  it("puts credits on standby while the ChatGPT login is still unknown", async () => {
+    mockPanel(undefined, credits);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+  });
+
+  it("marks credits ready rather than in use while Claude handles chats", async () => {
+    mockPanel(false, credits, true);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    expect(screen.queryByText("In use")).toBeNull();
+  });
+
+  it("shows credits the caller already read without reading them again", async () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      }
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+    render(<AiToolsPanel showRomeCredits romeCredits={credits} />);
+
+    expect(await screen.findByText("In use")).toBeTruthy();
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("rome-credits"))).toBe(
+      false,
+    );
   });
 
   it("reads an overrun as used up rather than a negative balance", async () => {

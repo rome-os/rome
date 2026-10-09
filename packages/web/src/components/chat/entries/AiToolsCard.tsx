@@ -60,10 +60,15 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     void fetch("/api/ai-tools/status", { credentials: "include" })
       .then((res) => res.json())
       .then(async (status: Record<string, { loggedIn?: boolean } | null>) => {
+        if (hasConnectedAiProvider(status, HIDDEN_PROVIDERS)) {
+          // A connected guardian advances without waiting on Rome Cloud.
+          if (!cancelled) setProbe("connected");
+          return;
+        }
         const nextCredits = await creditsProbe;
         if (cancelled) return;
         setCredits(nextCredits);
-        setProbe(hasConnectedAiProvider(status, HIDDEN_PROVIDERS) ? "connected" : "absent");
+        setProbe("absent");
       })
       .catch(() => {
         // A failed probe offers the panel rather than blocking the step.
@@ -113,6 +118,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
                 showHeader={false}
                 showUsage={false}
                 showRomeCredits={offerCredits}
+                romeCredits={credits}
                 onConnectedChange={(isConnected) => {
                   if (isConnected) setProbe("connected");
                 }}

@@ -3,12 +3,13 @@ import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 
 import { RomeLogo } from "@/components/logo";
 
-type RomeCreditsState = "inUse" | "standby" | "usedUp" | "paused";
+type RomeCreditsState = "inUse" | "ready" | "standby" | "usedUp" | "paused";
 
 const MICROS_PER_DOLLAR = 1_000_000;
 
 const STATE_TONE: Record<RomeCreditsState, { dot: string; text: string; bar: string }> = {
   inUse: { dot: "bg-success", text: "text-success-fg", bar: "bg-success" },
+  ready: { dot: "bg-muted-foreground/50", text: "text-muted-foreground", bar: "bg-success" },
   standby: {
     dot: "bg-muted-foreground/50",
     text: "text-muted-foreground",
@@ -37,25 +38,29 @@ export function hasUsableRomeCredits(credits: RomeCreditsView | null | undefined
 }
 
 /** Credits pay for Codex only while ChatGPT is disconnected, so a connected
- *  ChatGPT login leaves them on standby. */
+ *  ChatGPT login leaves them on standby. A tier prefers a connected Claude
+ *  login, so with Claude connected they pay only for a chosen ChatGPT model. */
 export function getRomeCreditsState(
   credits: RomeCreditsView,
-  chatgptConnected: boolean,
+  { chatgptConnected, claudeConnected }: { chatgptConnected: boolean; claudeConnected: boolean },
 ): RomeCreditsState {
   if (!credits.enabled) return "paused";
   if (BigInt(credits.availableMicros) <= 0n) return "usedUp";
-  return chatgptConnected ? "standby" : "inUse";
+  if (chatgptConnected) return "standby";
+  return claudeConnected ? "ready" : "inUse";
 }
 
 export function RomeCreditsRow({
   credits,
   chatgptConnected,
+  claudeConnected,
 }: {
   credits: RomeCreditsView;
   chatgptConnected: boolean;
+  claudeConnected: boolean;
 }) {
   const { t, i18n } = useTranslation("settings");
-  const state = getRomeCreditsState(credits, chatgptConnected);
+  const state = getRomeCreditsState(credits, { chatgptConnected, claudeConnected });
   const tone = STATE_TONE[state];
   const granted = microsToDollars(credits.grantedMicros);
   const remaining = Math.max(0, microsToDollars(credits.availableMicros));

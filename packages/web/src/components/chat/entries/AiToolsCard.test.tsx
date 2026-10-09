@@ -66,6 +66,24 @@ describe("AiToolsCard", () => {
     expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
   });
 
+  it("advances a connected guardian without waiting on the credits read", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: true }, codex: { loggedIn: false } });
+      }
+      // Rome Cloud never answers.
+      if (url === "/api/ai-tools/rome-credits") return await new Promise<Response>(() => {});
+      return ok({});
+    }) as typeof fetch);
+    const onSubmit = rs.fn();
+
+    render(<AiToolsCard toolUseId="t-slow-credits" onSubmit={onSubmit} />);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit).toHaveBeenCalledWith("t-slow-credits", { connected: true }, "Connected an AI");
+  });
+
   it("falls back to the plain skip once the credits are used up", async () => {
     mockStatus(
       { claude: { loggedIn: false }, codex: { loggedIn: false } },
