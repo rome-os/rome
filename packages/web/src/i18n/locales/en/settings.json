@@ -557,14 +557,6 @@
         "usedUpWithClaude": "Used up",
         "paused": "Paused"
       },
-      "detail": {
-        "inUse": "Free credits that pay for ChatGPT models while ChatGPT is not connected.",
-        "ready": "Claude handles chats while it is connected. Credits pay when a ChatGPT model is chosen.",
-        "standby": "Your ChatGPT account pays while it is connected.",
-        "usedUp": "Connect ChatGPT or Claude to keep using Rome.",
-        "usedUpWithClaude": "Claude handles chats while it is connected. Connect ChatGPT to use ChatGPT models.",
-        "paused": "Rome Cloud has paused these credits."
-      },
       "ofGranted": "of {{amount}}",
       "meterLabel": "Rome credits left"
     },

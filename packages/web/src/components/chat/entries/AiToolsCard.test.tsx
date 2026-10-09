@@ -84,12 +84,35 @@ describe("AiToolsCard", () => {
     expect(onSubmit).toHaveBeenCalledWith("t-slow-credits", { connected: true }, "Connected an AI");
   });
 
+  it("offers credits once a ChatGPT login that was unknown at boot settles", async () => {
+    let reads = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        reads += 1;
+        return ok({ claude: { loggedIn: false }, codex: reads === 1 ? {} : { loggedIn: false } });
+      }
+      if (url === "/api/ai-tools/rome-credits") return ok({ credits: SIGNUP_CREDITS });
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+
+    render(<AiToolsCard toolUseId="t-settling-codex" onSubmit={rs.fn()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Continue with credits" }, { timeout: 3_000 }),
+    ).toBeTruthy();
+    // The card asked twice; the embedded panel then reads status itself.
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
   it("does not offer credits while the ChatGPT login is still unknown", async () => {
     mockStatus({ claude: { loggedIn: false }, codex: {} as { loggedIn: boolean } }, SIGNUP_CREDITS);
 
     render(<AiToolsCard toolUseId="t-unknown-codex" onSubmit={rs.fn()} />);
 
-    expect(await screen.findByRole("button", { name: "Skip for now" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: "Skip for now" }, { timeout: 3_000 }),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
   });
 

@@ -32,6 +32,10 @@ type Probe = "checking" | "connected" | "absent";
  *  with its plain wording. */
 const CREDITS_GRACE_MS = 1_500;
 
+/** How long the card waits before asking again for a ChatGPT login whose
+ *  first probe has not settled. */
+const STATUS_RETRY_MS = 1_000;
+
 export interface AiToolsCardProps {
   toolUseId: string;
   /** Prior submitted output when this instance already resolved. */
@@ -60,9 +64,20 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   useEffect(() => {
     if (result !== undefined) return;
     let cancelled = false;
-    void fetch("/api/ai-tools/status", { credentials: "include" })
-      .then((res) => res.json())
-      .then(async (status: Record<string, { loggedIn?: boolean } | null>) => {
+    type Status = Record<string, { loggedIn?: boolean } | null>;
+    const readStatus = (): Promise<Status> =>
+      fetch("/api/ai-tools/status", { credentials: "include" }).then((res) => res.json());
+    void readStatus()
+      .then(async (first) => {
+        let status = first;
+        // Right after boot the first Codex probe may not have settled. Ask
+        // once more before settling, since only a signed-out ChatGPT lets
+        // credits pay.
+        if (!hasConnectedAiProvider(status, HIDDEN_PROVIDERS) && status.codex?.loggedIn == null) {
+          await new Promise((resolve) => setTimeout(resolve, STATUS_RETRY_MS));
+          if (cancelled) return;
+          status = await readStatus().catch(() => status);
+        }
         if (hasConnectedAiProvider(status, HIDDEN_PROVIDERS)) {
           // A connected guardian advances without waiting on Rome Cloud.
           if (!cancelled) setProbe("connected");

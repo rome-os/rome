@@ -496,8 +496,8 @@ export function AiToolsPanel({
   const [savingAnthropicProvider, setSavingAnthropicProvider] = useState(false);
   const [anthropicProviderMessage, setAnthropicProviderMessage] = useState("");
   const [loadingStatus, setLoadingStatus] = useState(true);
-  // The credits row waits for the first status only; a later re-read keeps it
-  // in place rather than unmounting it.
+  // The credits row waits for the first successful status only, since its
+  // state depends on the ChatGPT login; a later re-read keeps it in place.
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -539,6 +539,7 @@ export function AiToolsPanel({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
       });
+      setStatusLoaded(true);
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -556,7 +557,6 @@ export function AiToolsPanel({
       /* ignore */
     } finally {
       setLoadingStatus(false);
-      setStatusLoaded(true);
     }
   }, []);
 

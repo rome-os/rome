@@ -609,17 +609,27 @@ describe("AI Tools Rome credits", () => {
     expect(screen.queryByText("Used up")).toBeNull();
   });
 
-  it("does not ask a Claude user to connect an AI when credits run out", async () => {
+  it("keeps used-up credits calm while Claude handles chats", async () => {
     mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Used up")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Claude handles chats while it is connected. Connect ChatGPT to use ChatGPT models.",
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByText("Connect ChatGPT or Claude to keep using Rome.")).toBeNull();
+    const status = await screen.findByText("Used up");
+    expect(status.className).toContain("text-muted-foreground");
+    expect(screen.getByText("$0.00").className).not.toContain("text-destructive-fg");
+  });
+
+  it("waits for a status read that succeeds before showing the row", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") throw new Error("offline");
+      if (url === "/api/ai-tools/rome-credits") return ok({ credits });
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
   it("hides the row for an account that was never granted credits", async () => {

@@ -104,9 +104,6 @@ export function RomeCreditsRow({
               {t(`aiTools.romeCredits.status.${state}` as const)}
             </span>
           </div>
-          <p className="text-aux text-muted-foreground">
-            {t(`aiTools.romeCredits.detail.${state}` as const)}
-          </p>
         </div>
         <div className="ml-auto shrink-0 text-right">
           <span className={`text-title ${state === "usedUp" ? tone.text : "text-foreground"}`}>
