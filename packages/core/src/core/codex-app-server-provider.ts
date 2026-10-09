@@ -252,24 +252,13 @@ function toolNameForItem(item: ThreadItem): string {
   }
 }
 
-function notificationTokenUsage(
-  notification: ThreadTokenUsageUpdatedNotification,
-): ThreadTokenUsage | undefined {
-  return notification.tokenUsage ?? notification.usage;
-}
-
-/** Compatibility for older local stubs/binaries that predate the field. */
-function cacheWriteTokens(u: TokenUsageBreakdown): number {
-  return u.cacheWriteInputTokens ?? 0;
-}
-
 /** App-server token usage (camelCase) → the snake_case shape buildOpenAiAccounting reads. */
 function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   if (!u) return undefined;
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
-    cache_write_input_tokens: cacheWriteTokens(u),
+    cache_write_input_tokens: u.cacheWriteInputTokens,
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -281,7 +270,7 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
-    cacheWriteTokens(left) === cacheWriteTokens(right) &&
+    left.cacheWriteInputTokens === right.cacheWriteInputTokens &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
@@ -299,13 +288,7 @@ function isMissingRevertBoundary(error: unknown, beforeTurnId: string): boolean 
  * turn instead of replacing the prior value with the newest one.
  */
 function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
-  // Compatibility notifications from older local app-server stubs predate
-  // this 0.153.4 field. Normalize them before arithmetic so a missing value
-  // cannot poison the turn total with NaN.
-  const last: TokenUsageBreakdown = {
-    ...update.last,
-    cacheWriteInputTokens: cacheWriteTokens(update.last),
-  };
+  const last: TokenUsageBreakdown = { ...update.last };
   const usage = turn.usage;
   turn.usage = usage
     ? {
@@ -818,7 +801,7 @@ export class CodexAppServerProvider implements ModelProvider {
         }
         case Notify.tokenUsageUpdated: {
           const p = params2 as ThreadTokenUsageUpdatedNotification;
-          const usage = notificationTokenUsage(p);
+          const usage = p.tokenUsage;
           if (!usage) return;
           // Once turn/started establishes the active id, a delayed snapshot
           // from another turn must not reset this thread's cumulative
