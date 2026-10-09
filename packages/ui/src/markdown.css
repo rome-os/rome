@@ -353,6 +353,14 @@
   vertical-align: top;
 }
 
+/* CJK text breaks between any two characters, so a cell's min-content width
+   is one glyph and a narrow column shrinks to a vertical strip. A floor on
+   every cell keeps short columns readable. A table whose floors overrun the
+   column overflows into Streamdown's `overflow-x: auto` scroller instead. */
+.rome-markdown :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
+  min-width: 6em;
+}
+
 .rome-markdown
   :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
   padding-inline-start: 0;
@@ -376,6 +384,20 @@
   border-radius: var(--rome-radius-8);
   background-color: var(--surface-elevated);
   box-shadow: var(--rome-shadow-1);
+}
+
+/* A coarse pointer has no hover, so the button row never hides and would sit
+   over the header cells. There it drops the floating card and takes its own
+   line above the table, as plain icons on the inline end. */
+@media (hover: none) {
+  .rome-markdown [data-streamdown="table-wrapper"] > :first-child:not(:has(> table)) {
+    position: static;
+    align-self: flex-end;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 /* ── Fenced block chrome ──────────────────────────────────────────────────
