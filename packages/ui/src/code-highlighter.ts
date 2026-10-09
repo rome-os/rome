@@ -14,10 +14,10 @@ export interface HighlightRequest {
   options: HighlightOptions;
 }
 
-/** The worker's answer to a request. `result` is null when highlighting failed. */
+/** The worker's answer to a request. */
 export interface HighlightResponse {
   id: number;
-  result: HighlightResult | null;
+  result: HighlightResult;
 }
 
 type Callback = (result: HighlightResult) => void;
@@ -27,17 +27,6 @@ interface Pending {
   options: HighlightOptions;
   callbacks: Set<Callback>;
 }
-
-// The stock plugin swallows an async failure, such as a grammar chunk that did
-// not load, and never answers. It also keeps the failed highlighter, so asking
-// the same worker again cannot succeed. A worker that owes answers and sends
-// nothing for this long is retired. The clock restarts on every answer, so a
-// backlog of streamed versions that the worker is still working through does
-// not count as a failure.
-const GIVE_UP_AFTER_MS = 20_000;
-// A streamed block is highlighted once per partial version, each under its own
-// key, so the page keeps only the most recent results.
-const MAX_RESULTS = 200;
 
 function themeName(theme: HighlightOptions["themes"][number]): string {
   return typeof theme === "string" ? theme : (theme.name ?? "custom");
@@ -50,11 +39,8 @@ function cacheKey({ code, language, themes }: HighlightOptions): string {
 /**
  * Creates a Streamdown code plugin that highlights in a worker made by
  * `createWorker`. `highlight` returns a cached result synchronously, or null
- * and calls `callback` once it has an answer. Requests go to `fallback` on the
- * main thread when no worker can be made. A worker that fails to load, answers
- * that it could not highlight a block, or owes answers but sends none for
- * GIVE_UP_AFTER_MS is retired, and its pending and later requests go to
- * `fallback` too.
+ * and calls `callback` once the worker answers. When no worker can be made, or
+ * the worker fails, requests go to `fallback` on the main thread instead.
  */
 export function createWorkerCodePlugin(
   createWorker: () => Worker | null,
@@ -65,38 +51,16 @@ export function createWorkerCodePlugin(
   const pendingById = new Map<number, Pending>();
   let worker: Worker | null | undefined;
   let nextId = 0;
-  let watchdog: ReturnType<typeof setTimeout> | undefined;
-
-  function restartWatchdog() {
-    clearTimeout(watchdog);
-    watchdog = pendingById.size > 0 ? setTimeout(failWorker, GIVE_UP_AFTER_MS) : undefined;
-  }
-
-  function remember(key: string, result: HighlightResult) {
-    results.delete(key);
-    results.set(key, result);
-    if (results.size > MAX_RESULTS) {
-      const oldest = results.keys().next().value;
-      if (oldest !== undefined) results.delete(oldest);
-    }
-  }
-
-  function useFallback(options: HighlightOptions, callback?: Callback) {
-    return fallback.highlight(options, callback);
-  }
 
   function failWorker() {
-    if (!worker) return;
-    clearTimeout(watchdog);
-    worker.terminate();
+    worker?.terminate();
     worker = null;
-    console.warn("[Markdown] Code highlighting moved to the main thread: the worker failed.");
     const stranded = [...pendingById.values()];
     pendingById.clear();
     pendingByKey.clear();
-    for (const pending of stranded) {
-      for (const callback of pending.callbacks) {
-        const result = useFallback(pending.options, callback);
+    for (const { options, callbacks } of stranded) {
+      for (const callback of callbacks) {
+        const result = fallback.highlight(options, callback);
         if (result) callback(result);
       }
     }
@@ -114,18 +78,12 @@ export function createWorkerCodePlugin(
       const { id, result } = event.data;
       const pending = pendingById.get(id);
       if (!pending) return;
-      if (!result) {
-        failWorker();
-        return;
-      }
       pendingById.delete(id);
       pendingByKey.delete(pending.key);
-      restartWatchdog();
-      remember(pending.key, result);
+      results.set(pending.key, result);
       for (const callback of pending.callbacks) callback(result);
     });
     worker.addEventListener("error", failWorker);
-    worker.addEventListener("messageerror", failWorker);
     return worker;
   }
 
@@ -138,13 +96,10 @@ export function createWorkerCodePlugin(
     highlight(options, callback) {
       const key = cacheKey(options);
       const cached = results.get(key);
-      if (cached) {
-        remember(key, cached);
-        return cached;
-      }
+      if (cached) return cached;
 
       const target = getWorker();
-      if (!target) return useFallback(options, callback);
+      if (!target) return fallback.highlight(options, callback);
 
       const pending = pendingByKey.get(key);
       if (pending) {
@@ -153,16 +108,9 @@ export function createWorkerCodePlugin(
       }
       const id = nextId++;
       const entry: Pending = { key, options, callbacks: new Set(callback ? [callback] : []) };
-      try {
-        target.postMessage({ id, options } satisfies HighlightRequest);
-      } catch {
-        // Options the worker cannot receive, such as a theme object that does
-        // not clone, are highlighted on the main thread.
-        return useFallback(options, callback);
-      }
       pendingByKey.set(key, entry);
       pendingById.set(id, entry);
-      if (watchdog === undefined) restartWatchdog();
+      target.postMessage({ id, options } satisfies HighlightRequest);
       return null;
     },
   };

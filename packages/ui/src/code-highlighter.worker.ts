@@ -15,36 +15,16 @@ const scope = globalThis as unknown as {
   postMessage(message: HighlightResponse): void;
 };
 
-type Result = NonNullable<HighlightResponse["result"]>;
-
 const plugin: CodeHighlighterPlugin = code;
 
-function reply(id: number, result: Result | null) {
-  if (!result) {
-    scope.postMessage({ id, result: null });
-    return;
-  }
-  // grammarState carries tokenizer internals the page never reads.
-  const { grammarState: _grammarState, ...rest } = result as Result & { grammarState?: unknown };
-  try {
-    scope.postMessage({ id, result: rest });
-  } catch {
-    // A result that cannot be cloned still answers, so the page falls back.
-    scope.postMessage({ id, result: null });
-  }
-}
-
 scope.addEventListener("message", ({ data: { id, options } }) => {
-  let answered = false;
-  const answer = (result: Result | null) => {
-    if (answered) return;
-    answered = true;
-    reply(id, result);
+  const reply = (result: HighlightResponse["result"]) => {
+    // grammarState carries tokenizer internals the page never reads.
+    const { grammarState: _grammarState, ...rest } = result as typeof result & {
+      grammarState?: unknown;
+    };
+    scope.postMessage({ id, result: rest });
   };
-  try {
-    const result = plugin.highlight(options, answer);
-    if (result) answer(result);
-  } catch {
-    answer(null);
-  }
+  const result = plugin.highlight(options, reply);
+  if (result) reply(result);
 });
