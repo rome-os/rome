@@ -56,5 +56,7 @@ export function useReplay(plan: ReplayPlan): Replay {
     [duration],
   );
   const stop = useCallback(() => setState(null), []);
-  return { state, start, resume, pause, seek, stop };
+  // A plan that got shorter, by a setting change, leaves the time past its end.
+  const clamped = state && state.time > duration ? { ...state, time: duration } : state;
+  return { state: clamped, start, resume, pause, seek, stop };
 }
