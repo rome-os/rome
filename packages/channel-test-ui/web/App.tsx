@@ -1,4 +1,4 @@
-import { Alert, AlertDescription } from "@rome-os/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@rome-os/ui/alert";
 import { Button } from "@rome-os/ui/button";
 import { useEffect, useState } from "react";
 import { startRun, useLive, useTrace } from "./api.js";
@@ -60,14 +60,16 @@ export function App() {
             run.exitCode !== undefined &&
             run.exitCode !== 0 &&
             run.log.length > 0 && (
-              <details className="m-3 text-ui">
-                <summary className="cursor-pointer text-destructive-fg">
-                  Last run exited with {run.exitCode}
-                </summary>
-                <pre className="mt-2 max-h-60 overflow-auto rounded-8 bg-surface-muted p-3 font-mono text-aux whitespace-pre-wrap">
-                  {run.log.join("\n")}
-                </pre>
-              </details>
+              <div className="p-3">
+                <Alert variant="destructive">
+                  <AlertTitle>Last run exited with {run.exitCode}</AlertTitle>
+                  <AlertDescription>
+                    <pre className="max-h-60 overflow-auto font-mono text-aux whitespace-pre-wrap">
+                      {run.log.join("\n")}
+                    </pre>
+                  </AlertDescription>
+                </Alert>
+              </div>
             )}
         </aside>
         <main className="min-w-0 flex-1 overflow-auto p-4">

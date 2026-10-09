@@ -7,13 +7,43 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@rome-os/ui/dialog";
-import { Field, FieldLabel } from "@rome-os/ui/field";
 import { Input } from "@rome-os/ui/input";
+import {
+  FormRow,
+  FormRowControl,
+  FormRowHeading,
+  FormRowLabel,
+  FormRows,
+} from "@rome-os/ui/layout-form";
 import { Switch } from "@rome-os/ui/switch";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 import { REPLAY_LIMITS, type ReplaySettings } from "../src/replay.js";
 
 type NumberKey = keyof typeof REPLAY_LIMITS;
+
+/** One setting: its label, with the control that sets it at the end. */
+function SettingRow({
+  label,
+  htmlFor,
+  disabled,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <FormRow>
+      <FormRowHeading>
+        <FormRowLabel htmlFor={htmlFor} className={disabled ? "text-muted-foreground" : undefined}>
+          {label}
+        </FormRowLabel>
+      </FormRowHeading>
+      <FormRowControl>{children}</FormRowControl>
+    </FormRow>
+  );
+}
 
 /**
  * A number field that lets the text be empty or half typed. While the field
@@ -37,10 +67,7 @@ function NumberField({
   const [min, max] = REPLAY_LIMITS[field];
   const [draft, setDraft] = useState<string | null>(null);
   return (
-    <Field className="flex items-center justify-between gap-3 space-y-0">
-      <FieldLabel htmlFor={id} className={disabled ? "text-muted-foreground" : undefined}>
-        {label}
-      </FieldLabel>
+    <SettingRow label={label} htmlFor={id} disabled={disabled}>
       <Input
         id={id}
         type="number"
@@ -58,7 +85,7 @@ function NumberField({
         }}
         onBlur={() => setDraft(null)}
       />
-    </Field>
+    </SettingRow>
   );
 }
 
@@ -75,12 +102,9 @@ function Toggle({
 }) {
   const id = useId();
   return (
-    <Field className="flex items-center justify-between gap-3 space-y-0">
-      <FieldLabel htmlFor={id} className={disabled ? "text-muted-foreground" : undefined}>
-        {label}
-      </FieldLabel>
+    <SettingRow label={label} htmlFor={id} disabled={disabled}>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onChange} />
-    </Field>
+    </SettingRow>
   );
 }
 
@@ -108,44 +132,46 @@ export function ReplaySettingsDialog({
         <DialogTitle>Replay settings</DialogTitle>
         <DialogDescription>A change applies at once and stays in this browser.</DialogDescription>
       </DialogHeader>
-      <DialogBody className="space-y-3">
-        <NumberField
-          label="Pause before a message (ms)"
-          field="messageDelayMs"
-          settings={settings}
-          onChange={onChange}
-        />
-        <NumberField
-          label="Pause before an edit (ms)"
-          field="editDelayMs"
-          settings={settings}
-          onChange={onChange}
-        />
-        <Toggle
-          label="Typewriter effect"
-          checked={typing}
-          onChange={(typewriter) => onChange({ ...settings, typewriter })}
-        />
-        <NumberField
-          label="Typing speed (characters per second)"
-          field="charsPerSecond"
-          settings={settings}
-          disabled={!typing}
-          onChange={onChange}
-        />
-        <NumberField
-          label="Longest typing time per message (ms)"
-          field="maxTypingMs"
-          settings={settings}
-          disabled={!typing}
-          onChange={onChange}
-        />
-        <Toggle
-          label="Also type the user's messages"
-          checked={settings.typeUserMessages}
-          disabled={!typing}
-          onChange={(typeUserMessages) => onChange({ ...settings, typeUserMessages })}
-        />
+      <DialogBody>
+        <FormRows>
+          <NumberField
+            label="Pause before a message (ms)"
+            field="messageDelayMs"
+            settings={settings}
+            onChange={onChange}
+          />
+          <NumberField
+            label="Pause before an edit (ms)"
+            field="editDelayMs"
+            settings={settings}
+            onChange={onChange}
+          />
+          <Toggle
+            label="Typewriter effect"
+            checked={typing}
+            onChange={(typewriter) => onChange({ ...settings, typewriter })}
+          />
+          <NumberField
+            label="Typing speed (characters per second)"
+            field="charsPerSecond"
+            settings={settings}
+            disabled={!typing}
+            onChange={onChange}
+          />
+          <NumberField
+            label="Longest typing time per message (ms)"
+            field="maxTypingMs"
+            settings={settings}
+            disabled={!typing}
+            onChange={onChange}
+          />
+          <Toggle
+            label="Also type the user's messages"
+            checked={settings.typeUserMessages}
+            disabled={!typing}
+            onChange={(typeUserMessages) => onChange({ ...settings, typeUserMessages })}
+          />
+        </FormRows>
       </DialogBody>
       <DialogFooter className="justify-between">
         <Button variant="outline" onClick={onReset}>

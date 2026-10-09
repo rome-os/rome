@@ -1,5 +1,6 @@
 import { Alert, AlertDescription } from "@rome-os/ui/alert";
 import { Badge } from "@rome-os/ui/badge";
+import { Card, CardContent } from "@rome-os/ui/card";
 import { cn } from "@rome-os/ui/cn";
 import { List, ListRow } from "@rome-os/ui/list-row";
 import { useEffect, useMemo, useState } from "react";
@@ -28,7 +29,6 @@ const LANES: Array<[Lane, string]> = [
 const FRAME_GRID =
   "grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1.4fr)]";
 
-const PANEL = "rounded-lg border border-border bg-surface";
 const CODE = "max-h-72 overflow-auto rounded-8 bg-surface-muted p-3 font-mono text-aux";
 
 /**
@@ -67,7 +67,7 @@ export function TraceView({ trace }: { trace: Trace }) {
         onResetSettings={reset}
       />
       <div className="flex min-w-0 flex-col gap-4">
-        <section aria-label="Timeline" className={cn(PANEL, "max-h-[45vh] overflow-auto")}>
+        <Card role="region" aria-label="Timeline" className="max-h-[45vh] gap-0 overflow-auto py-0">
           <div
             aria-hidden="true"
             className={cn(
@@ -118,14 +118,16 @@ export function TraceView({ trace }: { trace: Trace }) {
               ))}
             </ol>
           </List>
-        </section>
-        <section aria-label="Selected frame" className={cn(PANEL, "flex flex-col gap-2 p-3")}>
-          {frame ? (
-            <Detail frame={frame} />
-          ) : (
-            <p className="text-ui text-muted-foreground">No frames recorded.</p>
-          )}
-        </section>
+        </Card>
+        <Card role="region" aria-label="Selected frame">
+          <CardContent className="flex flex-col gap-2">
+            {frame ? (
+              <Detail frame={frame} />
+            ) : (
+              <p className="text-ui text-muted-foreground">No frames recorded.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
