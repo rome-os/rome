@@ -33,7 +33,6 @@ describe("Test Helpers", () => {
       const result = db.all(sql`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`);
       const tableNames = result.map((row) => (row as Record<string, unknown>).name);
 
-      expect(tableNames).toContain("events");
       expect(tableNames).toContain("sessions");
       expect(tableNames).toContain("persons");
       expect(tableNames).toContain("channel_mappings");

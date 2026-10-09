@@ -2062,9 +2062,6 @@ export default function RoutinesPage() {
   // owns the cache, and mutations invalidate it to re-read server truth rather
   // than hand-merging fields into local state.
   const { routines: routineData, isLoading: loading, error: loadError, refetch } = useRoutines();
-  // The hook types triggers with a wider union (it admits unknown trigger types
-  // for the card view's honest fallback); this page's Timeline/Calendar code uses
-  // the narrower schedule|event discriminated union. Same JSON at runtime.
   const routines = routineData ?? [];
   const invalidate = useInvalidateRoutines();
   const [view, setView] = useState<ViewMode>("table");
