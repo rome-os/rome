@@ -190,6 +190,18 @@ describe("createWorkerCodePlugin", () => {
     expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
   });
 
+  it("highlights on the main thread when the worker cannot receive a request", () => {
+    const { worker, fallback, plugin } = setup();
+    worker.postMessage = () => {
+      throw new DOMException("could not be cloned", "DataCloneError");
+    };
+
+    expect(plugin.highlight(OPTIONS)).toEqual(resultFor(OPTIONS.code));
+    expect(fallback.calls).toEqual([OPTIONS]);
+    expect(plugin.highlight(OPTIONS)).toEqual(resultFor(OPTIONS.code));
+    expect(worker.terminated).toBe(false);
+  });
+
   it("keeps only the most recent results", () => {
     const { worker, plugin } = setup();
     for (let i = 0; i <= 200; i++) {

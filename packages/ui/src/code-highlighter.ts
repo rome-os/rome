@@ -153,9 +153,15 @@ export function createWorkerCodePlugin(
       }
       const id = nextId++;
       const entry: Pending = { key, options, callbacks: new Set(callback ? [callback] : []) };
+      try {
+        target.postMessage({ id, options } satisfies HighlightRequest);
+      } catch {
+        // Options the worker cannot receive, such as a theme object that does
+        // not clone, are highlighted on the main thread.
+        return useFallback(options, callback);
+      }
       pendingByKey.set(key, entry);
       pendingById.set(id, entry);
-      target.postMessage({ id, options } satisfies HighlightRequest);
       if (watchdog === undefined) restartWatchdog();
       return null;
     },
