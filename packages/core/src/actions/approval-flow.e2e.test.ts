@@ -521,17 +521,3 @@ describe("Approval flow E2E — persistence and time", () => {
     h.testDb.close();
   });
 });
-
-// Unimplemented v1 behaviors — kept visible as skipped tests
-
-describe("Approval flow E2E — deferred (not implemented in v1)", () => {
-  it.skip("BRS 4: independent steps in the same session continue while one step is suspended", () => {
-    // No agent-side scheduler models per-step independence yet — the agent
-    // is told to keep working in the tool-result text but parallel branch
-    // semantics are not enforced by the runtime.
-  });
-
-  it.skip("BRS 5: a step depending on a suspended step waits for completion", () => {
-    // Same gap as BRS 4 — completion-dependency is not modeled in v1.
-  });
-});

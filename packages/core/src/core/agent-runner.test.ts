@@ -2019,18 +2019,15 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const sessionInit = messages.find((m) => m.type === "session_init");
-      expect(sessionInit).toBeDefined();
-      expect(
-        (
-          sessionInit as {
-            type: "session_init";
-            sessionId: string;
-            systemPrompt?: string;
-            userPrompt?: string;
-          }
-        ).sessionId,
-      ).toBeDefined();
+      const sessionInit = messages.find((m) => m.type === "session_init") as {
+        type: "session_init";
+        sessionId: string;
+      };
+      const stored = await new SessionsRepository(testDb.db).findByChannelThreadKey(
+        "telegram:thread-new",
+      );
+      expect(stored?.id).toBe(sessionInit.sessionId);
+      expect(stored?.agentName).toBe("test-main");
     });
 
     it("reuses an active session for the same key", async () => {

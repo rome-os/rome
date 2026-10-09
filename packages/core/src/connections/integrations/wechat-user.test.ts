@@ -194,35 +194,42 @@ describe("makeWechatUserSetup", () => {
         READY,
       ],
     });
+    // WeChat's own desktop exists only once ensureDesktop brings it up, and
+    // only that screen shows the login window.
+    let desktopUp = false;
+    rs.mocked(runtime.ensureDesktop).mockImplementation(async () => {
+      desktopUp = true;
+      return ":100";
+    });
+    rs.mocked(runtime.captureLoginQr).mockImplementation(async (display) =>
+      display === ":100" ? "data:image/png;base64,qr" : null,
+    );
+    let finishLogin!: () => void;
+    rs.mocked(runtime.captureKeys).mockImplementation(async (display) => {
+      if (!desktopUp || display !== ":100") throw new Error(`no WeChat desktop on ${display}`);
+      await new Promise<void>((resolve) => (finishLogin = resolve));
+    });
     const { fn } = setupWith(runtime);
     const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
-
     await session.started();
+
+    // The guardian scans the QR from the display the capture launched on, not
+    // the legacy client's that status() reported.
+    await rs.waitFor(() => {
+      const state = session.state;
+      expect(state.status === "presenting" && state.view.qr).toBe("data:image/png;base64,qr");
+    });
+    finishLogin();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(runtime.install).toHaveBeenCalledTimes(1);
-    expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
-    // The capture launches the client on WeChat's own desktop, so it must be
-    // up first, and after the last status read: a legacy client still running
-    // on the shared display would have pulled `display` back there.
-    type Mocked = { mock: { invocationCallOrder: number[] } };
-    const order = (fn: unknown) => (fn as Mocked).mock.invocationCallOrder;
-    const capture = order(runtime.captureKeys)[0]!;
-    const lastStatus = Math.max(...order(runtime.status).filter((at) => at < capture));
-    expect(runtime.ensureDesktop).toHaveBeenCalledTimes(1);
-    expect(order(runtime.ensureDesktop)[0]).toBeGreaterThan(lastStatus);
-    expect(order(runtime.ensureDesktop)[0]).toBeLessThan(capture);
     // The capture launches the client under gdb, not the ordinary start.
     expect(runtime.start).not.toHaveBeenCalled();
-    // The scan step polls the login window so the QR can be shown inline.
-    // It screenshots, and links to, the display the capture launches on, not
-    // the legacy client's that status() reported.
-    expect(runtime.captureLoginQr).toHaveBeenCalled();
-    for (const call of rs.mocked(runtime.captureLoginQr).mock.calls) expect(call[0]).toBe(":100");
-    expect(runtime.captureKeys).toHaveBeenCalledTimes(1);
-    expect(runtime.captureKeys).toHaveBeenCalledWith(":100", expect.any(AbortSignal));
-    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0]?.[0].credential.material).toEqual({
+      custody: "rome-container",
+      wxid: "wxid_guardian",
+    });
   });
 
   it("skips installation when the client is present but signed out", async () => {

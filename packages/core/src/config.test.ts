@@ -218,20 +218,13 @@ describe("loadConfig()", () => {
   it("accepts custom SQLITE_PATH", () => {
     rs.stubEnv("SQLITE_PATH", "/tmp/test.db");
 
-    const config = loadConfig();
-    expect(config.database.type).toBe("sqlite");
-    if (config.database.type === "sqlite") {
-      expect(config.database.sqlitePath).toBe("/tmp/test.db");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", sqlitePath: "/tmp/test.db" });
   });
 
   it("passes through SQLITE_ENCRYPTION_KEY", () => {
     rs.stubEnv("SQLITE_ENCRYPTION_KEY", "secret123");
 
-    const config = loadConfig();
-    if (config.database.type === "sqlite") {
-      expect(config.database.encryptionKey).toBe("secret123");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", encryptionKey: "secret123" });
   });
 
   it("surfaces PANTHEON_SLUG as the instance slug", () => {

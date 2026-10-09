@@ -20,12 +20,6 @@ describe("Database Integration", () => {
     testDb?.close();
   });
 
-  it("createTestDb() creates in-memory SQLite connection", () => {
-    testDb = createTestDb();
-    expect(testDb.db).toBeDefined();
-    expect(testDb.close).toBeInstanceOf(Function);
-  });
-
   it("migrations run successfully on fresh database", async () => {
     testDb = createTestDb();
 

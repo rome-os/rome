@@ -543,13 +543,14 @@ describe("WhatsAppAdapter", () => {
 
     it("reconnects on non-logout disconnect", async () => {
       rs.useFakeTimers();
-      await adapter.start();
+      const socketFactory = rs.fn(() => mockSock);
+      const reconnecting = new WhatsAppAdapter(
+        { authStatePath: "/tmp/auth" },
+        socketFactory as never,
+      );
+      await reconnecting.start();
 
-      const connectionHandler = eventHandlers["connection.update"];
-      expect(connectionHandler).toBeDefined();
-
-      // Simulate a close with a non-logout status code
-      connectionHandler({
+      eventHandlers["connection.update"]({
         connection: "close",
         lastDisconnect: {
           error: {
@@ -559,12 +560,11 @@ describe("WhatsAppAdapter", () => {
         },
       });
 
-      // The adapter should schedule a reconnect via setTimeout
-      // Advance timers to trigger it
-      rs.advanceTimersByTime(1_000);
-      // The reconnect calls start() again, which calls makeWASocket
-      // We just verify it doesn't throw
-      rs.useRealTimers();
+      await rs.advanceTimersByTimeAsync(999);
+      expect(socketFactory).toHaveBeenCalledTimes(1);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(mockEnd).toHaveBeenCalledTimes(1);
+      expect(socketFactory).toHaveBeenCalledTimes(2);
     });
   });
 

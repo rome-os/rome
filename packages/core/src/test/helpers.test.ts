@@ -19,12 +19,6 @@ describe("Test Helpers", () => {
   });
 
   describe("createTestDb", () => {
-    it("creates an in-memory SQLite database with all tables", () => {
-      testDb = createTestDb();
-      expect(testDb.db).toBeDefined();
-      expect(testDb.close).toBeInstanceOf(Function);
-    });
-
     it("has all expected tables", () => {
       testDb = createTestDb();
       const { db } = testDb;
