@@ -2435,7 +2435,13 @@ describe("CodexAppServerProvider", () => {
 
     // The terminal waited for the re-read, so a retry sees the new list.
     expect(refreshed).toBe(true);
-    expect(error).toMatchObject({ type: "error", code: "model_unavailable", httpStatus: 403 });
+    expect(error).toMatchObject({
+      type: "error",
+      code: "model_unavailable",
+      httpStatus: 403,
+      provider: "openai",
+      reason: "model_access_denied",
+    });
     await session.close();
   });
 

@@ -366,6 +366,9 @@ interface ActiveTurn {
   errorCode: AgentErrorCode | null;
   /** HTTP status codex reported for the failed request, if any. */
   errorHttpStatus?: number;
+  /** Provider and cause, for clients that offer recovery (see `TurnErrorEvent`). */
+  errorProvider?: TurnErrorEvent["provider"];
+  errorReason?: TurnErrorEvent["reason"];
   /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
   nativeStatus: string | null;
   /** Last reasoning part each in-flight reasoning item streamed, by item id.
@@ -391,13 +394,15 @@ interface CodexFailureClassification {
   code: AgentErrorCode | null;
   error?: string;
   httpStatus?: number;
+  provider?: TurnErrorEvent["provider"];
+  reason?: TurnErrorEvent["reason"];
   pending?: Promise<void>;
 }
 
 /** Terminal `error` block for a classified codex failure. */
 function codexErrorEvent(
   error: string,
-  classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
+  classification: Pick<CodexFailureClassification, "code" | "httpStatus" | "provider" | "reason">,
   accounting?: TurnErrorEvent["accounting"],
 ): TurnErrorEvent {
   return {
@@ -405,6 +410,8 @@ function codexErrorEvent(
     error,
     ...(classification.code ? { code: classification.code } : {}),
     ...(classification.httpStatus !== undefined ? { httpStatus: classification.httpStatus } : {}),
+    ...(classification.provider ? { provider: classification.provider } : {}),
+    ...(classification.reason ? { reason: classification.reason } : {}),
     ...(accounting ? { accounting } : {}),
   };
 }
@@ -448,6 +455,9 @@ function classifyCodexFailure(
     return {
       code: "model_unavailable",
       httpStatus: 403,
+      // Matches the resolver's refusal, so clients show the same recovery.
+      provider: "openai",
+      reason: "model_access_denied",
       ...(refreshed ? { pending: refreshed } : {}),
     };
   }
@@ -850,6 +860,8 @@ export class CodexAppServerProvider implements ModelProvider {
                 classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
               activeTurn.errorHttpStatus = classification.httpStatus;
+              activeTurn.errorProvider = classification.provider;
+              activeTurn.errorReason = classification.reason;
               if (classification.pending) activeTurn.pending.push(classification.pending);
             } else if (params.outputSchema && p.turn?.status !== "completed") {
               activeTurn.failed = true;
@@ -879,6 +891,8 @@ export class CodexAppServerProvider implements ModelProvider {
             activeTurn.errorMessage = message;
             activeTurn.errorCode = code;
             activeTurn.errorHttpStatus = classification.httpStatus;
+            activeTurn.errorProvider = classification.provider;
+            activeTurn.errorReason = classification.reason;
             if (classification.pending) activeTurn.pending.push(classification.pending);
             activeTurn.resolveDone();
           } else {
@@ -1096,7 +1110,12 @@ export class CodexAppServerProvider implements ModelProvider {
             runtime.sink.push(
               codexErrorEvent(
                 turn.errorMessage,
-                { code: turn.errorCode, httpStatus: turn.errorHttpStatus },
+                {
+                  code: turn.errorCode,
+                  httpStatus: turn.errorHttpStatus,
+                  provider: turn.errorProvider,
+                  reason: turn.errorReason,
+                },
                 failedTurnAccounting(turn),
               ),
             );
