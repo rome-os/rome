@@ -32,8 +32,12 @@ describe("PeerServer", () => {
         response: { status: 200, body: { id: 1 } },
         source: "capture",
         accepted: true,
+        receivedAt: expect.any(Number),
+        answeredAt: expect.any(Number),
       },
     ]);
+    const [exchange] = server.exchanges;
+    expect(exchange?.answeredAt).toBeGreaterThanOrEqual(exchange?.receivedAt ?? Infinity);
     server.assertClean();
   });
 

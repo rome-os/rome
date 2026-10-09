@@ -49,14 +49,20 @@ A response the platform sends, such as iLink's `ret: -3`, belongs in a capture, 
 
 ## What a test reads
 
-- `server.exchanges` lists every request in arrival order with its response, its `source`, and whether it changed what the platform shows (`accepted`).
+- `server.exchanges` lists every request in arrival order with its response, its `source`, whether it changed what the platform shows (`accepted`), and when it arrived and was answered (`receivedAt` and `answeredAt`, from `performance.now()`).
 - `peer.visible(conversation)` lists the messages a person in that conversation sees, with their current text and edit count.
 
 ## Scenarios
 
 A **scenario** is a test written once and run against every platform. It drives a `TestChannel` (`test-channel.ts`): the production adapter started against its peer, with one conversation open between Rome and a user. The scenario sends and receives through the test channel and reads its `peer`, so it never names a platform. `scenarios.integration.test.ts` runs each scenario once per entry in `TEST_CHANNELS`.
 
-Where platforms differ, the test states the difference in a table keyed by platform, beside the scenario, so a change in what an adapter does fails one row. A row whose behavior the peer does not model skips the scenario and says why. `runScenario` runs the body as labelled steps, so a failure names the step it happened in.
+Where platforms differ, the test states the difference in a table keyed by platform, beside the scenario, so a change in what an adapter does fails one row. A row whose behavior the peer does not model skips the scenario and says why. `runScenario(task, channel, body)` runs the body as labelled steps, so a failure names the step it happened in. Put an expected failure, such as a refused send, inside its step, so a passing test shows no failed step.
+
+## Traces
+
+When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace holds each step with what the conversation showed after it, and every request the peer answered once the scenario started, on one clock. `trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
+
+`pnpm test:channels` runs this directory's tests with traces on, into `.channel-traces/`. `pnpm channels:ui` serves a browser UI over them, described in [`packages/channel-test-ui`](../../../../../channel-test-ui/README.md).
 
 ## Add a platform
 

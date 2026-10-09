@@ -47,9 +47,9 @@ describe.each(platforms)("%s", (platform) => {
     }
   });
 
-  it("answers the user in the same conversation", () =>
-    runScenario(async ({ step }) => {
-      const channel = open();
+  it("answers the user in the same conversation", ({ task }) => {
+    const channel = open();
+    return runScenario(task, channel, async ({ step }) => {
       const inbound = await step("The user writes", () => channel.receive("hello"));
       const receipt = await step("Rome answers", () =>
         channel.send({ text: "hi there", replyToMessageId: inbound.messageId }),
@@ -65,31 +65,35 @@ describe.each(platforms)("%s", (platform) => {
         expect(second?.replyTo).toBe(TODAY[platform].linksReply ? inbound.messageId : undefined);
         expect(rest).toEqual([]);
       });
-    }));
+    });
+  });
 
-  it.skipIf(TODAY[platform].longText === null)("handles a text longer than one message", () =>
-    runScenario(async ({ step }) => {
+  it.skipIf(TODAY[platform].longText === null)(
+    "handles a text longer than one message",
+    ({ task }) => {
       const channel = open();
-      const expected = TODAY[platform].longText;
-      // WeChat can answer only after the user writes, so every platform starts there.
-      await step("The user writes", () => channel.receive("tell me everything"));
-      const fromRome = () =>
-        channel.peer.visible(channel.conversation).filter((message) => message.from === "rome");
-      const sending = step("Rome sends 5000 characters", () =>
-        channel.send({ text: "a".repeat(5000) }),
-      );
+      return runScenario(task, channel, async ({ step }) => {
+        const expected = TODAY[platform].longText;
+        // WeChat can answer only after the user writes, so every platform starts there.
+        await step("The user writes", () => channel.receive("tell me everything"));
+        const fromRome = () =>
+          channel.peer.visible(channel.conversation).filter((message) => message.from === "rome");
+        const send = () => channel.send({ text: "a".repeat(5000) });
 
-      if (typeof expected === "string") {
-        await expect(sending).rejects.toThrow(expected);
-        await step("The user sees no answer", () => expect(fromRome()).toEqual([]));
-      } else {
-        const receipt = await sending;
-        await step("The user sees the text in parts, the receipt naming the first", () => {
-          const sent = fromRome();
-          expect(sent.map((message) => message.text.length)).toEqual(expected);
-          expect(receipt.messageId).toBe(sent[0]?.id);
-        });
-      }
-    }),
+        if (typeof expected === "string") {
+          await step("The platform refuses 5000 characters", () =>
+            expect(send()).rejects.toThrow(expected),
+          );
+          await step("The user sees no answer", () => expect(fromRome()).toEqual([]));
+        } else {
+          const receipt = await step("Rome sends 5000 characters", send);
+          await step("The user sees the text in parts, the receipt naming the first", () => {
+            const sent = fromRome();
+            expect(sent.map((message) => message.text.length)).toEqual(expected);
+            expect(receipt.messageId).toBe(sent[0]?.id);
+          });
+        }
+      });
+    },
   );
 });

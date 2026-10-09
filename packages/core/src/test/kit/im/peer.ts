@@ -40,6 +40,10 @@ export interface PeerExchange {
   /** The client never got the answer: a fault cut it off, or the client was
    *  gone. With `accepted`, the platform changed but the client cannot know. */
   dropped?: boolean;
+  /** `performance.now()` when the request arrived, and when it was answered or
+   *  dropped. */
+  receivedAt: number;
+  answeredAt?: number;
 }
 
 /**
@@ -221,6 +225,7 @@ export class PeerServer {
     const exchange: PeerExchange = {
       request: { method, path: url.pathname, body },
       accepted: false,
+      receivedAt: performance.now(),
     };
     this.exchanges.push(exchange);
     this.changed();
@@ -258,11 +263,13 @@ export class PeerServer {
     // The answer never reaches a client that is gone, or one a fault cuts off.
     if (fault?.dropAfterAccept || res.destroyed) {
       exchange.dropped = true;
+      exchange.answeredAt = performance.now();
       this.changed();
       res.destroy();
       return;
     }
     exchange.response = { status, body: answer };
+    exchange.answeredAt = performance.now();
     this.changed();
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(answer));
