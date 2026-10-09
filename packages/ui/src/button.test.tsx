@@ -53,6 +53,16 @@ describe("Button glyph edges", () => {
     }
   });
 
+  it("reads a blank string beside a glyph as no label", () => {
+    render(
+      <Button aria-label="Add">
+        <Plus />
+        {""}
+      </Button>,
+    );
+    expect(edges(screen.getByRole("button"))).toEqual({ start: false, end: false });
+  });
+
   it("does not treat a trailing element with content as a glyph", () => {
     render(
       <Button>
@@ -118,6 +128,8 @@ describe("Button glyph inset", () => {
         Add app
       </Button>,
     );
-    expect(screen.getByRole("button").classList).not.toContain("pl-[var(--control-px-icon-md)]");
+    const button = screen.getByRole("button");
+    expect(button.classList).not.toContain("pl-[var(--control-px-icon-md)]");
+    expect(edges(button)).toEqual({ start: false, end: false });
   });
 });

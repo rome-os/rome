@@ -122,7 +122,9 @@ const buttonVariants = cva(
       // `data-icon` instead, because CSS cannot tell a lone glyph beside a
       // text node from a lone glyph. Square members hold no padding, `xs`
       // keeps symmetric padding, and a start-aligned glyph sits on the
-      // alignment edge, so none of those take it.
+      // alignment edge, so none of those take it. These variants outrank a
+      // caller's `px-*` and the merge cannot drop them, so a marked glyph
+      // keeps this inset even when the caller narrows the button.
       {
         align: "center",
         size: "sm",
@@ -156,7 +158,9 @@ const buttonVariants = cva(
  *
  * The test reads elements, not what they render, so a childless component
  * that renders text reads as a glyph. Such a label opts out by wrapping it in
- * a `<span>`, and a glyph the test misses names its side with `data-icon`.
+ * a `<span>`, and a glyph the test misses names its side with `data-icon`. A
+ * screen-reader-only `<span>` also counts as a label, so a visually lone icon
+ * with one gets the trim.
  */
 function isGlyph(node: React.ReactNode): boolean {
   return (
@@ -166,13 +170,18 @@ function isGlyph(node: React.ReactNode): boolean {
   );
 }
 
-/** Children with fragments opened, so `<><Plus />Add</>` reads as two items. */
+/**
+ * Children with fragments opened, so `<><Plus />Add</>` reads as two items.
+ * Blank strings render nothing, so `{label ?? ""}` beside an icon is no label.
+ */
 function flatten(children: React.ReactNode): React.ReactNode[] {
-  return React.Children.toArray(children).flatMap((child) =>
-    React.isValidElement<{ children?: React.ReactNode }>(child) && child.type === React.Fragment
+  return React.Children.toArray(children).flatMap((child) => {
+    if (typeof child === "string" && child.trim() === "") return [];
+    return React.isValidElement<{ children?: React.ReactNode }>(child) &&
+      child.type === React.Fragment
       ? flatten(child.props.children)
-      : [child],
-  );
+      : [child];
+  });
 }
 
 function glyphEdges(children: React.ReactNode): { start: boolean; end: boolean } {
@@ -211,22 +220,19 @@ function Button({
   // markers below: a variant outranks a caller's `px-*` on specificity, and
   // the merge cannot drop it.
   const inset = align === "center" && size ? GLYPH_EDGE[size] : undefined;
+  const trimStart = edges.start && inset ? inset.start : undefined;
+  const trimEnd = edges.end && inset ? inset.end : undefined;
 
   return (
     <Comp
       data-slot="button"
-      data-icon-start={edges.start ? "" : undefined}
-      data-icon-end={edges.end ? "" : undefined}
+      data-icon-start={trimStart ? "" : undefined}
+      data-icon-end={trimEnd ? "" : undefined}
       data-variant={variant}
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(
-        buttonVariants({ variant, size, shape, align }),
-        edges.start && inset?.start,
-        edges.end && inset?.end,
-        className,
-      )}
+      className={cn(buttonVariants({ variant, size, shape, align }), trimStart, trimEnd, className)}
       {...props}
     />
   );
