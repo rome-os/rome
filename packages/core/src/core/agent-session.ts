@@ -962,8 +962,7 @@ async function openSession(
     : baseSystemPrompt;
 
   // The registry's `getForAgent` is the single resolution point for what this
-  // agent may call — its allow-list plus the globally-granted actions, or
-  // everything for "*". Both the model-facing catalog and the execution gate
+  // agent may call — its allow-list, or everything for "*". Both the model-facing catalog and the execution gate
   // derive from it, so they can't disagree. It's consulted per-request so an
   // action installed mid-conversation by `app_management` is callable in the
   // same session.

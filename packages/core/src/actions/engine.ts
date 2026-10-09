@@ -23,13 +23,7 @@ import type {
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { actionExecutionContext } from "./context.js";
-import {
-  replayContext,
-  ReplayDivergenceError,
-  hashArgs,
-  type JournalEntry,
-  type ReplayStore,
-} from "./replay.js";
+import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
 import { getChannelFromThreadKey } from "../core/session-manager.js";
@@ -141,7 +135,6 @@ export interface ActionRunContext {
   replayJournal?: JournalEntry[];
   /** Original root execution ID to reuse during replay */
   replayRootExecutionId?: string;
-  divergenceMode?: "fallthrough" | "strict";
   /** Session info for agent-level resumption on approval */
   sessionId?: string;
   agentName?: string;
@@ -181,7 +174,15 @@ export interface InterruptedAction {
   rootExecutionId: string;
 }
 
+/** Where the engine records executions, approvals, and replay journals. */
+export interface ActionEngineRepositories {
+  executions: ActionExecutionsRepository;
+  approvals: ApprovalsRepository;
+  journal: ExecutionJournalRepository;
+}
+
 interface ActionEngineOptions {
+  tracer?: Tracer;
   processRole?: "main" | "worker";
   /**
    * Hard cap for every live action-worker process owned by main, including
@@ -308,9 +309,9 @@ export class ActionNotFoundError extends Error {
 
 export class ActionEngine {
   private tracer: Tracer | null;
-  private executionsRepo: ActionExecutionsRepository | null;
-  private approvalsRepo: ApprovalsRepository | null;
-  private journalRepo: ExecutionJournalRepository | null;
+  private executionsRepo: ActionExecutionsRepository;
+  private approvalsRepo: ApprovalsRepository;
+  private journalRepo: ExecutionJournalRepository;
   private activeRootProcesses = new Map<string, ActiveRootProcess>();
   private processRole: "main" | "worker";
   private workerRpcServer: WorkerRpcServer | null = null;
@@ -333,16 +334,13 @@ export class ActionEngine {
 
   constructor(
     private registry: ActionRegistry,
-    tracer?: Tracer,
-    executionsRepo?: ActionExecutionsRepository,
-    approvalsRepo?: ApprovalsRepository,
-    journalRepo?: ExecutionJournalRepository,
+    repos: ActionEngineRepositories,
     options?: ActionEngineOptions,
   ) {
-    this.tracer = tracer ?? null;
-    this.executionsRepo = executionsRepo ?? null;
-    this.approvalsRepo = approvalsRepo ?? null;
-    this.journalRepo = journalRepo ?? null;
+    this.tracer = options?.tracer ?? null;
+    this.executionsRepo = repos.executions;
+    this.approvalsRepo = repos.approvals;
+    this.journalRepo = repos.journal;
     this.processRole = options?.processRole ?? "worker";
     this.onApprovalCreated = options?.onApprovalCreated;
     this.onWorkerInterrupted = options?.onWorkerInterrupted;
@@ -514,7 +512,7 @@ export class ActionEngine {
       return false;
     }
 
-    await this.executionsRepo?.markCancelRequested(rootExecutionId);
+    await this.executionsRepo.markCancelRequested(rootExecutionId);
 
     active.worker.cancelRequested = true;
     this.sendCancelSignal(active.worker.child, "SIGTERM");
@@ -547,7 +545,7 @@ export class ActionEngine {
     // HTTP/WS scope) reuses a root row that already names the accountable
     // requester — inherit it, so children executed during the replay carry
     // the same actor as the root they extend.
-    if (!actor && isReplay && context?.replayRootExecutionId && this.executionsRepo) {
+    if (!actor && isReplay && context?.replayRootExecutionId) {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
     }
@@ -568,7 +566,6 @@ export class ActionEngine {
       nextSequence: 0,
       replayIndex: 0,
       mode: isReplay ? "replay" : "record",
-      divergenceMode: context?.divergenceMode ?? "fallthrough",
     };
 
     let preloadedEntryCount = 0;
@@ -765,10 +762,6 @@ export class ActionEngine {
           actualArgsHash: actual.argsHash,
         });
 
-        if (store.divergenceMode === "strict") {
-          throw new ReplayDivergenceError(expected, actual, store.replayIndex);
-        }
-
         store.mode = "record";
       }
     }
@@ -930,12 +923,12 @@ export class ActionEngine {
             : String(err);
       try {
         if (err instanceof ActionCancelledError) {
-          await this.executionsRepo?.markRootCancelled(
+          await this.executionsRepo.markRootCancelled(
             rootExecutionId,
             this.clock.now(),
             err.message,
           );
-        } else if (isRoot && mode === "subprocess" && this.executionsRepo) {
+        } else if (isRoot && mode === "subprocess") {
           await this.executionsRepo.markRootErrored(
             rootExecutionId,
             this.clock.now(),
@@ -1673,7 +1666,6 @@ export class ActionEngine {
     startedAt: Date;
   }): Promise<void> {
     const repo = this.executionsRepo;
-    if (!repo) return;
 
     const existing = await repo.findById(data.executionId);
     if (existing) {
@@ -1718,7 +1710,6 @@ export class ActionEngine {
     error?: string;
   }): Promise<void> {
     const repo = this.executionsRepo;
-    if (!repo) return;
 
     const existing = await repo.findById(data.executionId);
     if (existing) {
@@ -1763,7 +1754,7 @@ export class ActionEngine {
     parentId?: string;
     startedAt: Date;
   }): Promise<void> {
-    await this.executionsRepo?.update(data.executionId, {
+    await this.executionsRepo.update(data.executionId, {
       status: data.status,
       error: data.error ?? null,
       durationMs: this.clock.now().getTime() - data.startedAt.getTime(),
@@ -1786,7 +1777,7 @@ export class ActionEngine {
   }
 
   private async persistNewEntries(rootExecutionId: string, entries: JournalEntry[]): Promise<void> {
-    if (!this.journalRepo || entries.length === 0) return;
+    if (entries.length === 0) return;
     try {
       await this.journalRepo.saveJournal(rootExecutionId, entries);
     } catch (err) {
@@ -1804,7 +1795,6 @@ export class ActionEngine {
     result: ActionResult,
     status: string,
   ): Promise<void> {
-    if (!this.journalRepo) return;
     try {
       await this.journalRepo.updateEntry(rootExecutionId, sequence, result, status);
     } catch (err) {
@@ -1858,9 +1848,6 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
-    if (!this.approvalsRepo) {
-      return "no-approvals-repo";
-    }
     const approvalId = await this.approvalsRepo.create({
       type: "action_execution",
       requestedBy: context?.initiator ?? "unknown",

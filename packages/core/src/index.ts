@@ -100,11 +100,6 @@ import { AgentLoader } from "./core/agent-loader.js";
 import { SessionManager } from "./core/session-manager.js";
 import { PromptBuilder } from "./core/prompt-builder.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
-import {
-  GLOBALLY_GRANTED_ACTIONS,
-  resolveGlobalActionNames,
-  validateGlobalActions,
-} from "./actions/global-actions.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
@@ -409,10 +404,7 @@ async function main() {
   const agentLoader = new AgentLoader(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
-  const actionRegistry = new ActionRegistryImpl(
-    resolveGlobalActionNames(GLOBALLY_GRANTED_ACTIONS),
-    artifactIdentity,
-  );
+  const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   const favorService = new RomeCloudFavorService();
 
   // Each subscriber re-pulls from the catalog after every event. The event
@@ -544,11 +536,9 @@ async function main() {
 
   const actionEngine = new ActionEngine(
     actionRegistry,
-    tracer,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
+      tracer: tracer,
       processRole: "main",
       onWorkerInterrupted: createHostWorkerRecovery(actionExecutionsRepo),
       maxWorkerProcesses: config.actionWorkerMaxProcesses,
@@ -1093,12 +1083,6 @@ async function main() {
     log.warn("message_handler action is unavailable; inbound channel messages will be ignored");
   }
 
-  // Fail-closed: every globally-granted action must resolve to a registered,
-  // agent-callable action owned by the declared app now that core-required apps
-  // are installed. A misconfiguration aborts startup rather than silently
-  // dropping a grant every agent depends on.
-  validateGlobalActions(actionRegistry, GLOBALLY_GRANTED_ACTIONS);
-
   // NO channel adapter is constructed here. Every Talk channel
   // (telegram, whatsapp, discord, wechat, feishu, email, telegram_user, webchat)
   // is a ConnectionDescriptor and exposes its provider-neutral Talk capability
@@ -1275,8 +1259,7 @@ async function main() {
     hasAgent: (name) => agentLoader.has(name),
     hasRegisteredAction: (name) => actionRegistry.has(name),
     // Resolve capability through the same allow-list path the agent session
-    // uses (`getForAgent` honors the agent's `actions`, `*`, and globally
-    // granted actions), so the inbox channel-control cue can't disagree with
+    // uses (`getForAgent` honors the agent's `actions` and `*`), so the inbox channel-control cue can't disagree with
     // what the routed agent is actually allowed to call. Unknown agent → false.
     hasAction: (agentName, actionName) => {
       let config;

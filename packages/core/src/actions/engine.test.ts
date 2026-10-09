@@ -8,7 +8,7 @@ import {
   type ApprovalCreatedEvent,
 } from "./engine.js";
 import { actionExecutionContext } from "./context.js";
-import { ReplayDivergenceError, hashArgs, replayContext, type JournalEntry } from "./replay.js";
+import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action, ActionResult } from "./types.js";
 import { callAction } from "./call-action.js";
@@ -25,6 +25,7 @@ import {
   FakeClock,
   type TestRome,
 } from "../test/kit/index.js";
+import { createActionEngineRepos } from "../test/helpers.js";
 
 // ActionEngine tests through the real wiring (testkit): the production engine
 // over real repositories on an in-memory DB. Assertions read execution rows,
@@ -172,9 +173,9 @@ describe("ActionEngine", () => {
     }
 
     it("returns successful warm workers to idle and reuses them", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -196,8 +197,8 @@ describe("ActionEngine", () => {
     });
 
     it("recycles idle warm workers on pool restart", async () => {
-      const registry = new ActionRegistryImpl([]);
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const registry = new ActionRegistryImpl();
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -217,8 +218,8 @@ describe("ActionEngine", () => {
     });
 
     it("does not refill pooled workers that exit before becoming idle", async () => {
-      const registry = new ActionRegistryImpl([]);
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const registry = new ActionRegistryImpl();
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -235,9 +236,9 @@ describe("ActionEngine", () => {
     });
 
     it("retires a running warm worker after pool restart", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -267,12 +268,12 @@ describe("ActionEngine", () => {
     });
 
     it("counts warm and delegated workers against the configured process cap", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
       const { children, actionWorkerFork } = installFakeChildProcessFactory({
         autoRespond: false,
       });
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
         maxWorkerProcesses: 1,
@@ -306,12 +307,12 @@ describe("ActionEngine", () => {
     });
 
     it("rejects a second root instead of cold-forking past the process cap", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
       const { children, actionWorkerFork } = installFakeChildProcessFactory({
         autoRespond: false,
       });
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 0,
         maxWorkerProcesses: 1,
@@ -334,12 +335,12 @@ describe("ActionEngine", () => {
       const queue: ActionRunContext = { whenWorkersBusy: "queue" };
 
       function createQueueingEngine(maxWorkerProcesses: number, clock = new FakeClock()) {
-        const registry = new ActionRegistryImpl([]);
+        const registry = new ActionRegistryImpl();
         registry.register(buildAction("root"));
         const { children, actionWorkerFork } = installFakeChildProcessFactory({
           autoRespond: false,
         });
-        const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
           processRole: "main",
           workerWarmPoolSize: 0,
           maxWorkerProcesses,
@@ -472,12 +473,12 @@ describe("ActionEngine", () => {
       });
 
       it("hands a queued root the warm worker, both when it becomes ready and when it returns", async () => {
-        const registry = new ActionRegistryImpl([]);
+        const registry = new ActionRegistryImpl();
         registry.register(buildAction("root"));
         const { children, actionWorkerFork } = installFakeChildProcessFactory({
           autoRespond: false,
         });
-        const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
           processRole: "main",
           workerWarmPoolSize: 1,
           maxWorkerProcesses: 1,
@@ -1156,17 +1157,6 @@ describe("ActionEngine", () => {
       const descendant = await rome.repos.actionExecutions.findById("descendant-1");
       expect(descendant).toMatchObject({ status: "error", error: "worker crashed" });
     });
-
-    it("works without optional repos (no journalRepo, no approvalsRepo)", async () => {
-      const registry = new ActionRegistryImpl([]);
-      registry.register(
-        buildAction("minimal", { execute: async () => ({ status: "ok", data: 42 }) }),
-      );
-      const engine = new ActionEngine(registry);
-
-      const result = await engine.run("minimal", {});
-      expect(result).toEqual({ status: "ok", data: 42 });
-    });
   });
 
   // run() — root call, action requires approval
@@ -1226,18 +1216,6 @@ describe("ActionEngine", () => {
         sessionId: "sess-1",
         agentName: "main",
       });
-    });
-
-    it("returns 'no-approvals-repo' as approvalId when approvalsRepo is missing", async () => {
-      const registry = new ActionRegistryImpl([]);
-      registry.register(buildAction("risky", { requiresApproval: true }));
-      const engine = new ActionEngine(registry);
-
-      const result = await engine.run("risky", {});
-      if (result.status !== "pending_approval") {
-        throw new Error(`expected pending_approval, got ${result.status}`);
-      }
-      expect(result.approval.approvalId).toBe("no-approvals-repo");
     });
 
     it("fires onApprovalCreated with the approval id, action args, and channel context", async () => {
@@ -2077,35 +2055,6 @@ describe("ActionEngine", () => {
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("fresh");
       expect(child.calls).toEqual([{ a: 1 }]);
-    });
-
-    it("throws ReplayDivergenceError on divergence in strict mode", async () => {
-      await setup({
-        actions: [
-          buildAction("child_x"),
-          buildAction("parent", {
-            execute: async () => {
-              await callAction("child_x", {});
-              return { status: "ok" };
-            },
-          }),
-        ],
-      });
-
-      const replayJournal: JournalEntry[] = [
-        {
-          sequence: 0,
-          actionName: "child_y",
-          argsHash: hashArgs({}),
-          args: {},
-          result: { status: "ok" },
-          status: "completed",
-        },
-      ];
-
-      await expect(
-        rome.actionEngine.run("parent", {}, { replayJournal, divergenceMode: "strict" }),
-      ).rejects.toThrow(ReplayDivergenceError);
     });
 
     it("handles divergence when replay journal is exhausted (EOF)", async () => {

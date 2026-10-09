@@ -76,7 +76,7 @@ import { ExecutionJournalRepository } from "../db/repositories/execution-journal
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { ActionEngine } from "../actions/engine.js";
+import { ActionEngine, type ActionEngineRepositories } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionLoader } from "../actions/loader.js";
 import {
@@ -147,6 +147,17 @@ export function createTestDb(): TestDb {
   return {
     db,
     close: () => sqlite.close(),
+  };
+}
+
+/** The repositories an `ActionEngine` records into, backed by `db` or a fresh test DB. */
+export function createActionEngineRepos(
+  db: DrizzleDb = createTestDb().db,
+): ActionEngineRepositories {
+  return {
+    executions: new ActionExecutionsRepository(db),
+    approvals: new ApprovalsRepository(db),
+    journal: new ExecutionJournalRepository(db),
   };
 }
 
@@ -534,13 +545,10 @@ export async function buildTestDeps(
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
 
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     { processRole: "main" },
   );
 
@@ -1019,7 +1027,7 @@ export async function createAppLifecycleHarness(
       bundleFetcher: options.bundleFetcher,
       romeCloudListings: options.romeCloudListings,
     });
-    const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+    const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
     const agentLoader = new AgentLoader(artifactIdentity);
     const skillCatalog = new SkillCatalog(artifactIdentity);
@@ -1059,14 +1067,9 @@ export async function createAppLifecycleHarness(
       }
     });
 
-    const actionEngine = new ActionEngine(
-      actionRegistry,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { processRole: "worker" },
-    );
+    const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(db), {
+      processRole: "worker",
+    });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
     const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });

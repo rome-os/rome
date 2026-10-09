@@ -13,10 +13,10 @@ const log = createLogger("approval-handler");
 interface ApprovalPayload {
   actionName: string;
   args: Record<string, unknown>;
-  rootActionName?: string;
-  rootArgs?: Record<string, unknown>;
-  rootExecutionId?: string;
-  replayJournal?: JournalEntry[];
+  rootActionName: string;
+  rootArgs: Record<string, unknown>;
+  rootExecutionId: string;
+  replayJournal: JournalEntry[];
   channelContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   sessionId?: string;
@@ -122,7 +122,6 @@ export class ApprovalHandler {
     log.info("processing approved action", {
       approvalId,
       actionName: payload.actionName,
-      hasReplayJournal: !!payload.replayJournal,
       hasSessionId: !!payload.sessionId,
     });
 
@@ -160,28 +159,23 @@ export class ApprovalHandler {
         agent: agentName,
       });
 
-      let result: ActionResult;
-      if (payload.replayJournal && payload.rootActionName) {
-        const runContext: ActionRunContext = {
-          initiator: `approval:${approvalId}`,
-          replayJournal: payload.replayJournal,
-          replayRootExecutionId: payload.rootExecutionId,
-          channelContext: payload.channelContext,
-          sharedContext: payload.sharedContext,
-          sessionId: payload.sessionId,
-          agentName: payload.agentName,
-          channelThreadKey: payload.channelThreadKey,
-        };
-        result = await this.actionEngine.run(
-          payload.rootActionName,
-          payload.rootArgs ?? {},
-          runContext,
-        );
-      } else {
-        result = await this.actionEngine.run(payload.actionName, payload.args, {
-          initiator: `approval:${approvalId}`,
-        });
-      }
+      // The engine records the root call and its journal with every approval,
+      // so approving replays the root and resumes at the approved call.
+      const runContext: ActionRunContext = {
+        initiator: `approval:${approvalId}`,
+        replayJournal: payload.replayJournal,
+        replayRootExecutionId: payload.rootExecutionId,
+        channelContext: payload.channelContext,
+        sharedContext: payload.sharedContext,
+        sessionId: payload.sessionId,
+        agentName: payload.agentName,
+        channelThreadKey: payload.channelThreadKey,
+      };
+      const result = await this.actionEngine.run(
+        payload.rootActionName,
+        payload.rootArgs,
+        runContext,
+      );
 
       emit?.({
         type: "tool_result",

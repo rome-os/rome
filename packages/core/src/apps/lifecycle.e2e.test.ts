@@ -20,6 +20,7 @@ import {
   createAppLifecycleHarness,
   MockModelProvider,
   type AppLifecycleHarness,
+  createActionEngineRepos,
 } from "../test/helpers.js";
 import type { ModelSessionParams } from "../core/agent-runner.js";
 import type { AppstoreSource } from "./lockfile.js";
@@ -500,10 +501,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   });
   const actionEngine = new ActionEngine(
     harness.actionRegistry,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    createActionEngineRepos(harness.db),
     { processRole: "worker" },
   );
 

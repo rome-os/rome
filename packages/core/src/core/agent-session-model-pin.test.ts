@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import type { AgentEvent } from "../types.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -93,7 +93,7 @@ describe("agent model pins through AgentSessionManager", () => {
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
   ): AgentSessionManager {
-    const actionRegistry = new ActionRegistryImpl([]);
+    const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
     const manager = createAgentSessionManager(
@@ -102,7 +102,7 @@ describe("agent model pins through AgentSessionManager", () => {
         sessionManager,
         promptBuilder,
         actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry),
+        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
           aiToolState: { get: () => state, refresh: async () => state },

@@ -29,6 +29,7 @@ import {
   FakeTransport,
   noAccounts,
   type TestDb,
+  createActionEngineRepos,
 } from "./helpers.js";
 
 export const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "agents");
@@ -78,8 +79,10 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const sessionsRepo = new SessionsRepository(testDb.db);
   const sessionManager = new SessionManager(sessionsRepo);
   const promptBuilder = new PromptBuilder();
-  const actionRegistry = new ActionRegistryImpl([]);
-  const actionEngine = new ActionEngine(actionRegistry, options.tracer);
+  const actionRegistry = new ActionRegistryImpl();
+  const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
+    tracer: options.tracer,
+  });
 
   const agentLoader = new AgentLoader();
   await agentLoader.loadAll(options.fixturesDir ?? FIXTURES_DIR);

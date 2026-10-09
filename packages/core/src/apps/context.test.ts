@@ -26,6 +26,7 @@ import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";
+import { createActionEngineRepos } from "../test/helpers.js";
 
 type RuntimeContextCapture = {
   surface: "action" | "api";
@@ -77,7 +78,7 @@ export function createAction(config, deps) {
               ],
             ]),
         } as unknown as ActionLoader;
-        const registry = new ActionRegistryImpl([]);
+        const registry = new ActionRegistryImpl();
         const loaded = await register(
           loader,
           registry,
@@ -143,7 +144,7 @@ export function createAction(config, deps) {
             ],
           ]),
       } as unknown as ActionLoader;
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       await register(
         loader,
         registry,
@@ -259,7 +260,7 @@ export function createAction(config, deps) {
       },
     } as unknown as ActionLoader;
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     const actionLoad = await registerAppActions(
       actionLoader,
       registry,
@@ -401,7 +402,7 @@ export function createAction(config, deps) {
       },
     } as unknown as ActionLoader;
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     const actionLoad = registerLazyAppActions(
       actionLoader,
       registry,
@@ -572,11 +573,11 @@ export function createApiHandler(ctx) {
 // with fork-IPC JSON semantics even when the callee runs in-process.
 describe("runAction invocation port", () => {
   function contextWithActions(actions: Action[]) {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     for (const action of actions) {
       registry.register(action);
     }
-    const engine = new ActionEngine(registry);
+    const engine = new ActionEngine(registry, createActionEngineRepos());
     return createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),
       db: {} as RomeAppRuntimeServices["db"],
@@ -597,14 +598,11 @@ describe("runAction invocation port", () => {
   });
 
   it("rejects a detached dispatch before acknowledgement when main does not know the action", async () => {
-    const engine = new ActionEngine(
-      new ActionRegistryImpl([]),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { processRole: "main", workerWarmPoolSize: 0, actionWorkerFork: rs.fn() },
-    );
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      actionWorkerFork: rs.fn(),
+    });
     const context = createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),
       db: {} as RomeAppRuntimeServices["db"],
@@ -626,7 +624,7 @@ describe("runAction invocation port", () => {
     { label: "fails fast by default", option: undefined, expected: "fail" },
     { label: "queues when built for an independent caller", option: "queue", expected: "queue" },
   ] as const)("$label when every worker is busy", async ({ option, expected }) => {
-    const engine = new ActionEngine(new ActionRegistryImpl([]));
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos());
     const run = rs.spyOn(engine, "run").mockResolvedValue({ status: "ok", data: null });
     const context = createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),

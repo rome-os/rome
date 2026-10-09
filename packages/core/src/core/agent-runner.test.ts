@@ -10,6 +10,7 @@ import {
   installTestSpanHarness,
   type SpanHarness,
   type TestDb,
+  createActionEngineRepos,
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
@@ -124,8 +125,8 @@ describe("AgentRunner", () => {
 
     sessionManager = new SessionManager(repo);
     promptBuilder = new PromptBuilder();
-    actionRegistry = new ActionRegistryImpl([]);
-    actionEngine = new ActionEngine(actionRegistry);
+    actionRegistry = new ActionRegistryImpl();
+    actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
     mockProvider = new MockModelProvider();
   });
 
@@ -4919,8 +4920,8 @@ describe("AgentRunner", () => {
       const legacyBindings = createEmptyLegacyArtifactBindings();
       const actionId = formatArtifactId("review-app", "demo_action");
       claimLegacyArtifactName(legacyBindings, "action", "demo_action", actionId);
-      actionRegistry = new ActionRegistryImpl([], { legacyBindings });
-      actionEngine = new ActionEngine(actionRegistry);
+      actionRegistry = new ActionRegistryImpl({ legacyBindings });
+      actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
 
       const executed: unknown[] = [];
       actionRegistry.register(

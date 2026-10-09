@@ -30,6 +30,7 @@ import {
 } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
+import { createActionEngineRepos } from "../test/helpers.js";
 
 interface TransportPair {
   a: IpcTransport;
@@ -184,18 +185,11 @@ describe("main-owned action subprocess", () => {
     const workerRpcAttach = rs.fn();
     const sessionDispose = rs.fn();
     const sessionAttach = rs.fn(() => ({ dispose: sessionDispose }));
-    const engine = new ActionEngine(
-      new ActionRegistryImpl([]),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        processRole: "main",
-        workerWarmPoolSize: 0,
-        actionWorkerFork: processFactory,
-      },
-    );
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      actionWorkerFork: processFactory,
+    });
     engine.setWorkerRpcServer({ attach: workerRpcAttach } as never);
     engine.setAgentSessionBridge({ attach: sessionAttach } as never);
     const events: ActionRuntimeEvent[] = [];
@@ -262,7 +256,7 @@ describe("main-owned action subprocess", () => {
     const coordinator = new ActionWorkerCoordinator(host);
     registerActionSubprocessHost(mainForW1, coordinator, { worker: "w1" });
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     const localB = rs.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
     registry.register(buildAction("action_b", { cancellable: true, execute: localB }));
     registry.register(
@@ -270,7 +264,7 @@ describe("main-owned action subprocess", () => {
         execute: async () => await callAction("action_b", { pullRequest: 42 }),
       }),
     );
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -301,7 +295,7 @@ describe("main-owned action subprocess", () => {
     const w1 = new IpcRpc(link.b, "w1");
     const delegatedPayloads: ActionWorkerPayload[] = [];
 
-    const w2Registry = new ActionRegistryImpl([]);
+    const w2Registry = new ActionRegistryImpl();
     const actionBInW2 = buildAction("action_b", { cancellable: true });
     actionBInW2.execute = async (args, execution) => {
       execution?.emitActionEvent({ type: "progress", sequence: 1 });
@@ -310,7 +304,7 @@ describe("main-owned action subprocess", () => {
       return { status: "ok", data: { echoed: args.input } };
     };
     w2Registry.register(actionBInW2);
-    const w2Engine = new ActionEngine(w2Registry, undefined, undefined, undefined, undefined, {
+    const w2Engine = new ActionEngine(w2Registry, createActionEngineRepos(), {
       processRole: "worker",
     });
     const coordinator = new ActionWorkerCoordinator({
@@ -331,7 +325,7 @@ describe("main-owned action subprocess", () => {
 
     let appContext!: RomeAppContext;
     const localB = rs.fn(async () => ({ status: "ok" as const, data: "wrong-process" }));
-    const w1Registry = new ActionRegistryImpl([]);
+    const w1Registry = new ActionRegistryImpl();
     w1Registry.register(buildAction("action_b", { cancellable: true, execute: localB }));
     w1Registry.register(
       buildAction("action_a", {
@@ -358,7 +352,7 @@ describe("main-owned action subprocess", () => {
         },
       }),
     );
-    const w1Engine = new ActionEngine(w1Registry, undefined, undefined, undefined, undefined, {
+    const w1Engine = new ActionEngine(w1Registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -430,12 +424,12 @@ describe("main-owned action subprocess", () => {
       };
       registerActionSubprocessHost(mainForW1, new ActionWorkerCoordinator(host), { worker: "w1" });
 
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("action_b", { cancellable: true }));
       registry.register(
         buildAction("action_a", { execute: async () => await callAction("action_b", {}) }),
       );
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "worker",
         actionSubprocessRunner: new DelegatedActionClient(w1),
       });
@@ -513,12 +507,12 @@ describe("main-owned action subprocess", () => {
     const coordinator = new ActionWorkerCoordinator(host);
     registerActionSubprocessHost(main, coordinator, { worker: "w1" });
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("action_b", { cancellable: true }));
     registry.register(
       buildAction("action_a", { execute: async () => await callAction("action_b", {}) }),
     );
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -553,9 +547,9 @@ describe("main-owned action subprocess", () => {
     const rootChild = new PendingChild(456_789);
     const delegatedChild = new PendingChild(567_890);
     const children = [rootChild, delegatedChild];
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("action_a"));
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
       workerWarmPoolSize: 0,
       actionWorkerFork: () => children.shift() as unknown as ChildProcess,
@@ -616,9 +610,9 @@ describe("main-owned action subprocess", () => {
     }
 
     const detachedChild = new PendingChild(678_901);
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("action_b"));
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "main",
       workerWarmPoolSize: 0,
       actionWorkerFork: () => detachedChild as unknown as ChildProcess,
@@ -719,7 +713,7 @@ describe("main-owned action subprocess", () => {
     });
     registerActionSubprocessHost(main, coordinator, { worker: "w1" });
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("action_b", { cancellable: true }));
     let appContext!: RomeAppContext;
     registry.register(
@@ -734,7 +728,7 @@ describe("main-owned action subprocess", () => {
         },
       }),
     );
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -792,7 +786,7 @@ describe("main-owned action subprocess", () => {
     });
     registerActionSubprocessHost(main, coordinator, { worker: "w1" });
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(buildAction("action_b", { cancellable: true }));
     let appContext!: RomeAppContext;
     registry.register(
@@ -801,7 +795,7 @@ describe("main-owned action subprocess", () => {
           await appContext.runAction("action_b", { pullRequest: 42 }, { detached: false }),
       }),
     );
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -875,12 +869,12 @@ describe("main-owned action subprocess", () => {
     const w2 = new IpcRpc(w2Link.b, "w2");
     const starts: ActionWorkerPayload[] = [];
 
-    const w2Registry = new ActionRegistryImpl([]);
+    const w2Registry = new ActionRegistryImpl();
     w2Registry.register(buildAction("action_c", { cancellable: true }));
     w2Registry.register(
       buildAction("action_b", { execute: async () => await callAction("action_c", {}) }),
     );
-    const w2Engine = new ActionEngine(w2Registry, undefined, undefined, undefined, undefined, {
+    const w2Engine = new ActionEngine(w2Registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w2),
     });
@@ -903,12 +897,12 @@ describe("main-owned action subprocess", () => {
     registerActionSubprocessHost(mainForW1, coordinator, { worker: "w1" });
     registerActionSubprocessHost(mainForW2, coordinator, { worker: "w2" });
 
-    const w1Registry = new ActionRegistryImpl([]);
+    const w1Registry = new ActionRegistryImpl();
     w1Registry.register(buildAction("action_b", { cancellable: true }));
     w1Registry.register(
       buildAction("action_a", { execute: async () => await callAction("action_b", {}) }),
     );
-    const w1Engine = new ActionEngine(w1Registry, undefined, undefined, undefined, undefined, {
+    const w1Engine = new ActionEngine(w1Registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: new DelegatedActionClient(w1),
     });
@@ -962,15 +956,16 @@ describe("main-owned action subprocess", () => {
       actions: [actionA, actionB, actionC],
       engine: { actionSubprocessRunner: new DelegatedActionClient(w1) },
     });
-    const w2Registry = new ActionRegistryImpl([]);
+    const w2Registry = new ActionRegistryImpl();
     w2Registry.register(actionB);
     w2Registry.register(actionC);
     w2Engine = new ActionEngine(
       w2Registry,
-      undefined,
-      rome.repos.actionExecutions,
-      rome.repos.approvals,
-      rome.repos.executionJournal,
+      {
+        executions: rome.repos.actionExecutions,
+        approvals: rome.repos.approvals,
+        journal: rome.repos.executionJournal,
+      },
       {
         processRole: "worker",
         actionSubprocessRunner: new DelegatedActionClient(w2),
@@ -1036,14 +1031,14 @@ describe("main-owned action subprocess", () => {
 
   it("keeps non-cancellable B inside W1 and sends no delegated request", async () => {
     const runner = { run: rs.fn() };
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(
       buildAction("action_b", { execute: async () => ({ status: "ok", data: "local" }) }),
     );
     registry.register(
       buildAction("action_a", { execute: async () => await callAction("action_b", {}) }),
     );
-    const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
       processRole: "worker",
       actionSubprocessRunner: runner,
     });

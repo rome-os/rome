@@ -71,35 +71,39 @@ function buildHarness() {
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 
-  const registry = new ActionRegistryImpl([]);
+  const registry = new ActionRegistryImpl();
   const channel = new FakeTransport("webchat");
   const cardEmissions: ApprovalCreatedEvent[] = [];
 
-  const engine = new ActionEngine(registry, undefined, executionsRepo, approvalsRepo, journalRepo, {
-    // "worker" keeps everything in-process so the test's in-memory action
-    // registry is visible to root invocations (no child fork).
-    processRole: "worker",
-    onApprovalCreated: async (event) => {
-      cardEmissions.push(event);
-      if (!event.channelContext) return;
-      const msg: OutgoingMessage = {
-        parts: [
-          {
-            type: "approval_card",
-            approvalId: event.approvalId,
-            actionName: event.actionName,
-            preview: event.preview ?? {
-              kind: "generic",
-              title: event.actionName,
-              summary: "Awaiting guardian approval",
+  const engine = new ActionEngine(
+    registry,
+    { executions: executionsRepo, approvals: approvalsRepo, journal: journalRepo },
+    {
+      // "worker" keeps everything in-process so the test's in-memory action
+      // registry is visible to root invocations (no child fork).
+      processRole: "worker",
+      onApprovalCreated: async (event) => {
+        cardEmissions.push(event);
+        if (!event.channelContext) return;
+        const msg: OutgoingMessage = {
+          parts: [
+            {
+              type: "approval_card",
+              approvalId: event.approvalId,
+              actionName: event.actionName,
+              preview: event.preview ?? {
+                kind: "generic",
+                title: event.actionName,
+                summary: "Awaiting guardian approval",
+              },
+              status: "pending",
             },
-            status: "pending",
-          },
-        ],
-      };
-      await channel.send(event.channelContext.threadId as ConversationId, msg);
+          ],
+        };
+        await channel.send(event.channelContext.threadId as ConversationId, msg);
+      },
     },
-  });
+  );
 
   const agentRunner = createMockAgentRunner();
   // No webchat runtime is wired here (BRS 7 exercises the degrade path), so the
@@ -332,13 +336,14 @@ describe("Approval flow E2E — resolving an approval", () => {
       // registry over the shared DB, a mocked agent), then hand it to buildApp.
       // We deliberately do NOT call setStreamHost here — buildApp does, and
       // that is the wiring under test.
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       const engine = new ActionEngine(
         registry,
-        undefined,
-        deps.actionExecutionsRepo,
-        deps.approvalsRepo,
-        deps.executionJournalRepo,
+        {
+          executions: deps.actionExecutionsRepo,
+          approvals: deps.approvalsRepo,
+          journal: deps.executionJournalRepo,
+        },
         { processRole: "worker" },
       );
       const agentRunner = createMockAgentRunner([

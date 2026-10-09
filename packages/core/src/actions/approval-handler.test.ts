@@ -171,7 +171,7 @@ describe("ApprovalHandler", () => {
 
   // onApproved — direct execution + agent session resumption
   describe("onApproved — agent-level session resumption", () => {
-    it("executes the action directly when no replayJournal and marks it executed", async () => {
+    it("executes the approved action and marks it executed", async () => {
       const { sendMessage } = await setup();
       const approvalId = await rome.seed.approvedActionApproval({
         actionName: "send_message",

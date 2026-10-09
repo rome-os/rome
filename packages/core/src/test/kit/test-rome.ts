@@ -246,7 +246,7 @@ async function buildHarness(
     },
   });
 
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   for (const action of options.actions ?? []) {
     actionRegistry.register(action);
   }
@@ -255,11 +255,13 @@ async function buildHarness(
   // fork is the edge the kit avoids.
   const actionEngine = new ActionEngine(
     actionRegistry,
-    options.engine?.tracer,
-    repos.actionExecutions,
-    repos.approvals,
-    repos.executionJournal,
     {
+      executions: repos.actionExecutions,
+      approvals: repos.approvals,
+      journal: repos.executionJournal,
+    },
+    {
+      tracer: options.engine?.tracer,
       processRole: options.engine?.processRole ?? "worker",
       onApprovalCreated: options.engine?.onApprovalCreated,
       clock: options.engine?.clock,
@@ -322,7 +324,14 @@ async function buildHarness(
           typeof payload?.actionName === "string"
             ? `Execute ${payload.actionName}`
             : "test approval",
-        payload,
+        payload: payload && {
+          // The engine records the root call with every approval; a seed that
+          // names only the approved call is its own root, with nothing to replay.
+          rootActionName: payload.actionName,
+          rootArgs: payload.args,
+          replayJournal: [],
+          ...payload,
+        },
       }),
     approvedActionApproval: async (payload) => {
       const id = await seed.pendingActionApproval(payload);

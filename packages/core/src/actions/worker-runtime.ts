@@ -91,9 +91,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const agentLoader = new AgentLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
-  // The worker executes actions dispatched from main; it never resolves
-  // per-agent tool visibility, so it needs no globally-granted action names.
-  const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+  const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
     lockfilePath,
     catalog: appCatalog,
@@ -118,10 +116,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
       onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),

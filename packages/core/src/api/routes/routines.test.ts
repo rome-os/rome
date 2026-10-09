@@ -235,7 +235,7 @@ describe("Routines API", () => {
     // The propose_routine card POSTs here; when actionRegistry is wired (as in
     // production) a routine bound to an unbuilt action is rejected with the
     // remedy, instead of persisting and failing on every fire.
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register({
       config: {
         name: "summon",
@@ -284,7 +284,7 @@ describe("Routines API", () => {
   });
 
   it("rejects re-binding via PATCH to an unregistered action (no guard bypass)", async () => {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register({
       config: {
         name: "summon",
@@ -766,16 +766,17 @@ async function buildFireHarness(testDb: TestDb, retryDelayMs = 0): Promise<FireH
   // Use processRole "worker" so root actions execute in-process — the default
   // "main" path forks a subprocess which has no test entrypoint and can't be
   // observed via captures.
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   // Both engines share one FakeClock, so run durations / lastFiredAt are
   // exact and retry timers fire only when a test advances the clock.
   const clock = new FakeClock();
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    baseDeps.actionExecutionsRepo,
-    baseDeps.approvalsRepo,
-    baseDeps.executionJournalRepo,
+    {
+      executions: baseDeps.actionExecutionsRepo,
+      approvals: baseDeps.approvalsRepo,
+      journal: baseDeps.executionJournalRepo,
+    },
     { processRole: "worker", clock },
   );
   const manualProvider = new ManualTriggerProvider();
