@@ -1,4 +1,5 @@
-import { describe, it, expect } from "@rstest/core";
+import { afterEach, describe, it, expect } from "@rstest/core";
+import { setCurrentActionContextResolver } from "@rome-os/app-runtime";
 import { createAction, type ChannelAccountsService } from "./index.js";
 
 const actionConfig = {
@@ -28,7 +29,24 @@ function makeAction(
   return createAction(actionConfig, { channelAccounts });
 }
 
+afterEach(() => setCurrentActionContextResolver(undefined));
+
 describe("find_channel_account", () => {
+  it("refuses an installed app calling through runAction without looking", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", callerAppId: "some-app" }));
+    let looked = false;
+    const action = makeAction(async () => {
+      looked = true;
+      return { accounts: [atlas], more: false };
+    });
+
+    expect(await action.execute({ channel: "whatsapp" })).toEqual({
+      status: "error",
+      error: "app_callers_not_supported",
+    });
+    expect(looked).toBe(false);
+  });
+
   it("returns the accounts the channel matches, with the address send_message takes", async () => {
     const calls: unknown[] = [];
     const action = makeAction(async (channel, read) => {

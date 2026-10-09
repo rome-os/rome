@@ -1,4 +1,4 @@
-import { createAppLogger } from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
 import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 
 const log = createAppLogger("find_channel_account");
@@ -43,6 +43,12 @@ export function createAction(
     },
 
     async execute(args): Promise<ActionResult> {
+      // An address book is the guardian's contacts: Rome's agents look in it,
+      // and an installed app calling through runAction does not.
+      const callerAppId = getCurrentActionContext()?.callerAppId;
+      if (callerAppId && callerAppId !== "system") {
+        return { status: "error", error: "app_callers_not_supported" };
+      }
       const { channelAccounts } = deps;
       if (!channelAccounts) {
         return { status: "error", error: "Account lookup is not available in this Rome." };
