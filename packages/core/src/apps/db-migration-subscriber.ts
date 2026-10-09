@@ -1,7 +1,7 @@
 import type { DatabaseConfig, DrizzleDb } from "../db/index.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createLogger } from "../logger.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "./state.js";
+import { type CatalogEvent, isResolvedApp, type SubscriberHandler } from "./state.js";
 
 const log = createLogger("app-db-migration");
 
@@ -30,10 +30,8 @@ export function createAppDbMigrationSubscriber(
 ): SubscriberHandler {
   return async function appDbMigrationSubscriber(event: CatalogEvent) {
     if (event.change === "removed") return;
-    const current = event.current;
-    if (current == null) return;
-    const resolved = current as ResolvedApp;
-    if (resolved.manifest === undefined) return;
+    const resolved = event.current;
+    if (!isResolvedApp(resolved)) return;
     if (resolved.state !== "installed") return;
     if (!resolved.enabled) return;
     if (resolved.db == null) return;

@@ -4,7 +4,13 @@ import type { AppStartedEvent, AppStartedHook } from "@rome-os/app-runtime";
 import { Mutex } from "async-mutex";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
-import type { AppId, AppView, ArtifactRef, ResolvedApp } from "../apps/state.js";
+import {
+  type AppId,
+  type AppView,
+  type ArtifactRef,
+  isResolvedApp,
+  type ResolvedApp,
+} from "../apps/state.js";
 import { createLogger } from "../logger.js";
 import { wrapHookSpan } from "../telemetry.js";
 import { loadAppHook } from "./hook-loader.js";
@@ -188,7 +194,7 @@ function activeAppsWithHook(
 }
 
 function isRunnable(app: AppView | ResolvedApp | null): app is ResolvedApp {
-  return app !== null && "manifest" in app && app.state === "installed" && app.enabled;
+  return isResolvedApp(app) && app.state === "installed" && app.enabled;
 }
 
 // The installed hash names the bundle's content, so it changes on an upgrade

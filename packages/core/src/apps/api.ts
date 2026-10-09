@@ -5,7 +5,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { AppRuntimeRepositories } from "@rome-os/app-runtime";
 import type { AppCatalog } from "./catalog.js";
-import type { ResolvedApp } from "./state.js";
+import { type AppView, isResolvedApp, type ResolvedApp } from "./state.js";
 import {
   createRomeAppContext,
   runWithRomeAppApiRequestContext,
@@ -81,7 +81,7 @@ export class AppApiDispatcher {
     context: RomeAppApiDispatchContext = {},
   ): Promise<Response> {
     const view = this.catalog.get(appId);
-    if (!view || !isResolvedWithApi(view)) {
+    if (!isResolvedWithApi(view)) {
       throw new Error(`App "${appId}" has no API entrypoint`);
     }
     const app = view;
@@ -131,10 +131,9 @@ function whenWorkersBusyFor(caller: RomeAppCaller): "fail" | "queue" {
 }
 
 function isResolvedWithApi(
-  view: unknown,
+  view: AppView | null | undefined,
 ): view is ResolvedApp & { api: NonNullable<ResolvedApp["api"]> } {
-  const candidate = view as ResolvedApp;
-  return candidate.manifest !== undefined && candidate.api != null;
+  return isResolvedApp(view) && view.api != null;
 }
 
 export type { AppDbContext, RomeAppContext } from "./context.js";
