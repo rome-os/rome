@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { AiToolsPanel, hasConnectedAiProvider } from "@/components/ai-tools-panel";
-import { formatCreditDollars, hasUsableRomeCredits } from "@/components/rome-credits-row";
+import {
+  formatCreditDollars,
+  hasUsableRomeCredits,
+  readRomeCredits,
+} from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 
 // Core built-in rendering of the welcome conversation's `connect_ai` step. The
@@ -74,10 +78,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
         // card. Wait briefly so the card opens with the right wording, but
         // never hold the step on a slow Rome Cloud. A late read is dropped
         // rather than swapping the buttons under the guardian's cursor.
-        const creditsProbe = fetch("/api/ai-tools/rome-credits", { credentials: "include" })
-          .then((res) => (res.ok ? (res.json() as Promise<RomeCreditsResponse>) : null))
-          .then((data) => data?.credits ?? null)
-          .catch(() => null);
+        const creditsProbe = readRomeCredits().then((credits) => credits ?? null);
         const early = await Promise.race([
           creditsProbe,
           new Promise<null>((resolve) => setTimeout(() => resolve(null), CREDITS_GRACE_MS)),

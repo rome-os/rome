@@ -23,7 +23,7 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { RomeCreditsRow } from "@/components/rome-credits-row";
+import { readRomeCredits, RomeCreditsRow } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -52,7 +52,7 @@ import {
   type AnthropicCompatibleConfigurationId,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
-import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 
 const TerminalModal = lazy(() => import("@/components/terminal-modal"));
 const ChatGPTLoginModal = lazy(() =>
@@ -508,10 +508,8 @@ export function AiToolsPanel({
   // Rome Cloud owns the balance. A failed read keeps the last known one rather
   // than hiding the row during a transient outage.
   const fetchRomeCredits = useCallback(async () => {
-    const res = await fetch("/api/ai-tools/rome-credits");
-    if (!res.ok) return;
-    const data = (await res.json()) as RomeCreditsResponse;
-    setRomeCredits(data.credits ?? null);
+    const credits = await readRomeCredits();
+    if (credits !== undefined) setRomeCredits(credits);
   }, []);
 
   const fetchAnthropicProviders = useCallback(async () => {

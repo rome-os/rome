@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { RomeCreditsView } from "@rome/api-types/rome-credits";
+import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
 
 import { RomeLogo } from "@/components/logo";
 
@@ -34,6 +34,19 @@ export function formatCreditDollars(micros: string, locale?: string): string {
   return new Intl.NumberFormat(locale, { style: "currency", currency: "USD" }).format(
     Math.max(0, microsToDollars(micros)),
   );
+}
+
+/** Reads the account's Rome credits. Null means there are none to show;
+ *  undefined means the read failed, so a caller can keep what it last knew. */
+export async function readRomeCredits(): Promise<RomeCreditsView | null | undefined> {
+  try {
+    const res = await fetch("/api/ai-tools/rome-credits", { credentials: "include" });
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as RomeCreditsResponse;
+    return data.credits ?? null;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether the credits can still pay for a turn. Holds for running requests
