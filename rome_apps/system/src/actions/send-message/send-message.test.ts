@@ -390,6 +390,24 @@ describe("send_message preview", () => {
 
     expect(payload).toMatchObject({ fields: [{ label: "Channel", value: "matrix" }] });
   });
+
+  it("names the agent a message goes to by name, but never shows an agent id", () => {
+    const action = createSendMessageAction(config, makeAdapter("agents"));
+    const id = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+
+    expect(action.preview!({ channel: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
+    expect(action.preview!({ channel: "agents", to: id, text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Agents" }],
+    });
+    expect(
+      JSON.stringify(action.preview!({ channel: "agents", to: id, text: "hi" })),
+    ).not.toContain(id);
+  });
 });
 
 describe("send_message to an agent by name", () => {

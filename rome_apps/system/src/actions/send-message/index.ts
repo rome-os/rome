@@ -501,13 +501,20 @@ export function createSendMessageAction(
     preview(args: Record<string, unknown>): PreviewPayload {
       const input = args as Partial<SendMessageInput>;
       const channel = typeof input.channel === "string" ? input.channel : undefined;
+      // An agent's name given as `to` is already readable, so the card names
+      // the agent. An id stays off the card, as every recipient id does.
+      const to = typeof input.to === "string" ? input.to.trim() : "";
+      const agentName =
+        channel === "agents" && to && to !== "guardian" && !AGENT_ID.test(to) ? to : undefined;
+      const fields = [
+        ...(channel ? [{ label: "Channel", value: CHANNEL_LABELS[channel] ?? channel }] : []),
+        ...(agentName ? [{ label: "To", value: agentName }] : []),
+      ];
       return {
         kind: "generic",
         title: "Send a message",
         summary: typeof input.text === "string" && input.text ? input.text : "(no message text)",
-        ...(channel
-          ? { fields: [{ label: "Channel", value: CHANNEL_LABELS[channel] ?? channel }] }
-          : {}),
+        ...(fields.length > 0 ? { fields } : {}),
       };
     },
   };
