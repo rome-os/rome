@@ -27,7 +27,6 @@ import {
 import { createLogger } from "../../logger.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
-import { addressIsConversationFeature } from "./talk-features.js";
 import type {
   AuthScheme,
   ConnectionDescriptor,
@@ -240,9 +239,15 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
 
   // An agent's id is both how Cloud reaches it and the conversation
   // its messages arrive in, so Rome can write to a dot first, from the People
-  // page, as well as answer one.
+  // page, as well as answer one. An address that is not an agent id, such as
+  // a link left from before agent ids, offers nothing to write to.
   const features: TalkFeatures = {
-    directMessaging: addressIsConversationFeature(),
+    directMessaging: {
+      async conversationFor(channelUserId) {
+        const address = channelUserId.trim();
+        return isAgentId(address) ? (address as ConversationId) : null;
+      },
+    },
   };
   return {
     start(deliver, fault) {

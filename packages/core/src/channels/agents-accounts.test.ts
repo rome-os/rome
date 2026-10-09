@@ -51,7 +51,7 @@ describe("the agents address book", () => {
         id: ATLAS,
         addresses: [ATLAS],
         name: "atlas (dot)",
-        identifiers: { "agents:kind": "dot", "agents:account": "ouou" },
+        identifiers: { "agents:id": ATLAS, "agents:kind": "dot", "agents:account": "ouou" },
       },
     ]);
     expect((await book.resolve(ATLAS))?.name).toBe("atlas (dot)");
@@ -84,13 +84,19 @@ describe("the agents address book", () => {
     expect((await book.listAccounts({ limit: 100 })).accounts).toEqual([]);
   });
 
+  it("finds an agent by searching for its id", async () => {
+    const book = agentsAccounts({ client: cloud([atlas, friendAtlas]), isConnected: () => true });
+    const { accounts } = await book.listAccounts({ query: ATLAS, limit: 100 });
+    expect(accounts.map((account) => account.id)).toEqual([ATLAS]);
+  });
+
   it("resolves an agent it does not list, such as one answering Rome, but nothing else", async () => {
     const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
     expect(await book.resolve(FRIEND_ATLAS)).toEqual({
       id: FRIEND_ATLAS,
       addresses: [FRIEND_ATLAS],
       name: null,
-      identifiers: {},
+      identifiers: { "agents:id": FRIEND_ATLAS },
     });
     expect(await book.resolve("atlas")).toBeNull();
     expect(await book.resolve("@friend/atlas")).toBeNull();

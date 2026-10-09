@@ -41,7 +41,10 @@ function agentAccount(agentId: string, agent?: ExternalAgent): Account {
     id: agentId as AccountId,
     addresses: [agentId],
     name: agent ? agentLabel(agent) : null,
-    identifiers: agent ? { "agents:kind": agent.kind, "agents:account": agent.account } : {},
+    // The id is searchable, since it is the one address a send accepts.
+    identifiers: agent
+      ? { "agents:id": agentId, "agents:kind": agent.kind, "agents:account": agent.account }
+      : { "agents:id": agentId },
   };
 }
 
