@@ -111,7 +111,7 @@ export interface CreateModelResolverOptions {
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
   romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
-    Partial<Pick<RomeCreditsPayer, "servedModels">>;
+    Partial<Pick<RomeCreditsPayer, "servedModels" | "servedModelsSettled">>;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -271,6 +271,10 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   return {
     async getModelProvider(request) {
+      // Credits just started paying and the gateway has not answered yet.
+      // Wait for its list rather than assume Sol and Luna and send a turn the
+      // gateway may refuse. The read is bounded by its request timeout.
+      if (usingRomeCredits()) await options.romeCreditsPayer?.servedModelsSettled?.();
       if (request.exact) {
         const state = resolutionState();
         const { providerId, model } = request.exact;

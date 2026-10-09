@@ -28,6 +28,12 @@ export interface RomeCreditsPayer {
    * otherwise. Never rejects. A failed read keeps the last snapshot.
    */
   refreshServedModels(): Promise<void>;
+  /**
+   * Settles once the first read after credits start paying, or after a
+   * credential change, has finished. Settles at once while a snapshot is held
+   * or no read is running.
+   */
+  servedModelsSettled(): Promise<void>;
   close(): void;
 }
 
@@ -65,7 +71,9 @@ export function createRomeCreditsPayer(options: {
     read.promise = (async () => {
       try {
         const view = await fetchCredits();
-        if (inFlight === read) served = view?.models ? [...view.models] : null;
+        // A null view is a rejected credential or an account with no grant,
+        // not a report of what the gateway serves, so it changes nothing.
+        if (inFlight === read && view) served = view.models ? [...view.models] : null;
       } catch (err) {
         log.warn("Rome credits served models unavailable", {
           error: err instanceof Error ? err.message : String(err),
@@ -107,6 +115,7 @@ export function createRomeCreditsPayer(options: {
     isUsingRomeCredits,
     servedModels: () => served,
     refreshServedModels,
+    servedModelsSettled: () => (served === null && inFlight ? inFlight.promise : Promise.resolve()),
     close() {
       closed = true;
     },

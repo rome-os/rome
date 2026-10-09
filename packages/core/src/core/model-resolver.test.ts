@@ -166,6 +166,33 @@ describe("ModelResolver", () => {
       });
     });
 
+    it("waits for the first served list before resolving", async () => {
+      let served: readonly string[] | null = null;
+      let finish: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        finish = () => {
+          served = ["gpt-5.6-terra"];
+          resolve();
+        };
+      });
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => true,
+          servedModels: () => served,
+          servedModelsSettled: () => settled,
+        },
+      });
+      const resolution = r.getModelProvider({ tier: "large" });
+      finish();
+      await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
+    });
+
     it("ignores the served list while ChatGPT pays", async () => {
       const r = resolver({}, {}, false, []);
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
