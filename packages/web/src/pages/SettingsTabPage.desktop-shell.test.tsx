@@ -32,9 +32,16 @@ afterEach(() => {
 });
 
 function renderAdvanced() {
-  rs.spyOn(globalThis, "fetch").mockImplementation(
-    (async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response) as typeof fetch,
-  );
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const body =
+      url === "/api/public-access"
+        ? { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} }
+        : url === "/api/dashboard-access"
+          ? { cloudEmailAccess: [] }
+          : {};
+    return { ok: true, status: 200, json: async () => body } as Response;
+  }) as typeof fetch);
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

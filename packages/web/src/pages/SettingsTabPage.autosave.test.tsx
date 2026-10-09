@@ -55,7 +55,7 @@ function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
       return ok({ mode: "oauth", configured: false, devices: [] });
     }
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [] });
+      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       return ok({ cloudEmailAccess: [] });
