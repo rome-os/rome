@@ -11,30 +11,41 @@ export function parseEntries(content: string): TranscriptPart[] {
   }
 }
 
-// Core stores the parts a client posts with a user turn without validating
-// them, so this drops or repairs the user-side parts a client could get wrong
-// rather than letting one bad row break the whole transcript.
+// Core stores parts it did not build without validating them: a client's user
+// turn posts its own, and an app's `channels.send` to webchat writes assistant
+// parts as given. So each part with a known type must carry the fields its kind
+// requires, or it is dropped rather than breaking the whole transcript.
+const REQUIRED_FIELDS: Record<string, Record<string, "string" | "object">> = {
+  text: { content: "string" },
+  turn_recap: { turnId: "string", content: "string" },
+  approval_card: {
+    approvalId: "string",
+    actionName: "string",
+    preview: "object",
+    status: "string",
+  },
+  routine_draft_card: { toolUseId: "string", draft: "object" },
+  pending_interaction: { toolUseId: "string", appId: "string", render: "object" },
+  handoff: { toolUseId: "string", appId: "string" },
+  submission_card: { payload: "object" },
+  interaction_result: { toolUseId: "string" },
+  error: { error: "string" },
+};
+
 function wellFormed(part: unknown): TranscriptPart[] {
   if (!part || typeof part !== "object") return [];
   const p = part as Record<string, unknown>;
-  switch (p.type) {
-    case "text":
-      return typeof p.content === "string" ? [part as TranscriptPart] : [];
-    case "interaction_result":
-      if (typeof p.toolUseId !== "string") return [];
-      // Core resolves the interaction whatever `output` holds, and counts only
-      // an object with `dismissed: true` as a dismissal; keep that reading.
-      return [
-        {
-          type: "interaction_result",
-          toolUseId: p.toolUseId,
-          output:
-            p.output && typeof p.output === "object" ? (p.output as Record<string, unknown>) : {},
-        },
-      ];
-    default:
-      return typeof p.type === "string" ? [part as TranscriptPart] : [];
+  if (typeof p.type !== "string") return [];
+  for (const [field, kind] of Object.entries(REQUIRED_FIELDS[p.type] ?? {})) {
+    const value = p[field];
+    if (kind === "object" ? !value || typeof value !== "object" : typeof value !== kind) return [];
   }
+  if (p.type === "interaction_result" && (!p.output || typeof p.output !== "object")) {
+    // Core resolves the interaction whatever `output` holds, and counts only an
+    // object with `dismissed: true` as a dismissal; keep that reading.
+    return [{ type: "interaction_result", toolUseId: p.toolUseId as string, output: {} }];
+  }
+  return [part as TranscriptPart];
 }
 
 // Per-message parse cache. The same message content gets parsed across several

@@ -527,7 +527,9 @@ describe("MessageList Plan placement", () => {
         sessionId: "s-1",
         role: "assistant",
         turnId: "turn-plan",
-        content: JSON.stringify([{ type: "turn_recap", content: "Concise recap" }]),
+        content: JSON.stringify([
+          { type: "turn_recap", turnId: "turn-plan", content: "Concise recap" },
+        ]),
         createdAt: "2026-06-13T00:00:03.000Z",
       },
     ];

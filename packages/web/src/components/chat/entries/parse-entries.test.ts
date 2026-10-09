@@ -23,4 +23,19 @@ describe("parseEntries", () => {
       { type: "interaction_result", toolUseId: "t2", output: { dismissed: true } },
     ]);
   });
+
+  it("drops card parts missing the fields their kind requires", () => {
+    const card = { type: "approval_card", approvalId: "a1", actionName: "send", status: "pending" };
+    const content = JSON.stringify([
+      card,
+      { type: "pending_interaction", toolUseId: "t1", appId: "app" },
+      { type: "routine_draft_card", toolUseId: "t2" },
+      { ...card, preview: { kind: "generic", title: "T", summary: "S" } },
+      { type: "plan_update" },
+    ]);
+    expect(parseEntries(content)).toEqual([
+      { ...card, preview: { kind: "generic", title: "T", summary: "S" } },
+      { type: "plan_update" },
+    ]);
+  });
 });
