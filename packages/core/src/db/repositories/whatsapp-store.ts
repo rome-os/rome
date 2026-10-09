@@ -9,10 +9,6 @@ import type {
   WhatsAppSyncSink,
 } from "../../channels/whatsapp-sync.js";
 
-// Cap on a single address-book read. A WhatsApp account can carry thousands of
-// contacts; the People-tab viewer paginates client-side, so the API hands back
-// a generous-but-bounded slice rather than the entire table in one payload.
-const CONTACTS_READ_LIMIT = 10000;
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
 
@@ -247,15 +243,9 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   /**
    * The synced address book, newest-conversation-first then alphabetical,
    * each row annotated with whether it has been promoted to a `persons` entry.
-   *
-   * `limit` bounds the address-book rows read before grouping folds aliases,
-   * so the returned card count can be smaller. It defaults to a generous cap
-   * that suits a single-payload endpoint. Pass `null` to read the table whole,
-   * which is what a caller that paginates the result itself wants.
+   * Reads the table whole; callers paginate the result themselves.
    */
-  async listContacts(opts: { limit?: number | null } = {}): Promise<WhatsAppContactRow[]> {
-    const limitClause =
-      opts.limit === null ? sql`` : sql`LIMIT ${opts.limit ?? CONTACTS_READ_LIMIT}`;
+  async listContacts(): Promise<WhatsAppContactRow[]> {
     const rows = (await this.db.all(sql`
       WITH wa_threads AS (
         SELECT jid FROM wa_contacts
@@ -297,7 +287,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       )
       ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC,
         lower(coalesce(c.name, c.notify, c.verified_name, ch.name, c.phone_number, t.jid)) ASC
-      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     const mapped = rows.map((r) => ({

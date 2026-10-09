@@ -1401,7 +1401,6 @@ async function main() {
       actionLoader,
       personMappingRepo,
       outboxRepo,
-      whatsAppStoreRepo,
       channels,
       accountNames,
       webchatRepo,
