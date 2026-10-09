@@ -246,7 +246,9 @@ export class PeerServer {
       });
       if (!reply) throw new Error(`Unmodeled request: ${method} ${url.pathname}`);
       status = reply.status ?? 200;
-      answer = reply.body;
+      // A copy, so state the route answers from can change later without
+      // rewriting what this exchange recorded.
+      answer = structuredClone(reply.body);
       exchange.source = reply.source;
       exchange.accepted = reply.accepted === true;
     }

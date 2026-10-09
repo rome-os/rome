@@ -37,6 +37,18 @@ describe("PeerServer", () => {
     server.assertClean();
   });
 
+  it("keeps an exchange's answer as it was sent, whatever the route does later", async () => {
+    const live: number[] = [];
+    const peer = await new PeerServer(() => ({ body: live, source: "synthetic" })).start();
+    try {
+      await peer.fetch(`${peer.url}/updates`, { method: "POST" });
+      live.push(1);
+      expect(peer.exchanges[0]?.response?.body).toEqual([]);
+    } finally {
+      await peer.close();
+    }
+  });
+
   it("fails the test on a request no route models", async () => {
     expect((await post("/unknown")).status).toBe(418);
     expect(() => server.assertClean()).toThrow("Unmodeled request: POST /unknown");

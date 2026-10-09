@@ -40,7 +40,10 @@ describe("TelegramPeer", () => {
       peer.createBot(TELEGRAM_TOKEN).api.sendMessage(TELEGRAM_CHAT, text, { parse_mode: "HTML" });
     try {
       await expect(send("<b>hi</b> &amp; 😀")).resolves.toMatchObject({ text: "hi & 😀" });
-      for (const bad of ["<b>unclosed", "<div>x</div>", "AT&T", "1 > 0"])
+      // Only `<` starts markup: a stray `&` or `>` is literal text.
+      await expect(send("AT&T, 1 > 0")).resolves.toMatchObject({ text: "AT&T, 1 > 0" });
+      await expect(send('<span class="tg-spoiler">x</span>')).resolves.toMatchObject({ text: "x" });
+      for (const bad of ["<b>unclosed", "<div>x</div>", "<b><i>x</b></i>", "<span>x</span>"])
         await expect(send(bad)).rejects.toMatchObject({
           description: "Bad Request: can't parse entities",
         });

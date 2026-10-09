@@ -234,7 +234,7 @@ function readText(
   const html = body.parse_mode === "HTML";
   const text = html ? parseHtml(raw) : raw;
   if (text === null) return badRequest("can't parse entities");
-  if (!text.length) return badRequest("message text is empty");
+  if (!text.trim()) return badRequest("message text is empty");
   if (text.length > TEXT_LIMIT) return badRequest("message is too long");
   return { text, source: html ? "synthetic" : "capture" };
 }
@@ -260,8 +260,18 @@ const HTML_TAGS = new Set([
 ]);
 const HTML_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"' };
 
-/** The text of Telegram HTML, or null where Telegram cannot parse it: an
- *  unsupported or unclosed tag, or a `<`, `>` or `&` outside a tag or entity. */
+// Tags Telegram accepts only with an attribute: a spoiler span and a custom emoji.
+const REQUIRED_ATTRIBUTES: Record<string, RegExp> = {
+  span: /\bclass\s*=\s*"tg-spoiler"/,
+  "tg-emoji": /\bemoji-id\s*=\s*"\d+"/,
+};
+
+/**
+ * The text of Telegram HTML, or null where Telegram cannot parse it: an
+ * unsupported, unclosed or misnested tag, or one missing its required
+ * attribute. As in tdlib's parser, only `<` starts markup: a `&` that starts
+ * no entity, and any `>` outside a tag, are literal text.
+ */
 function parseHtml(html: string): string | null {
   const open: string[] = [];
   let text = "";
@@ -275,17 +285,15 @@ function parseHtml(html: string): string | null {
       const closing = tag.startsWith("/");
       const name = (closing ? tag.slice(1) : tag).split(/\s/)[0]!.toLowerCase();
       if (!HTML_TAGS.has(name)) return null;
+      if (!closing && REQUIRED_ATTRIBUTES[name]?.test(tag) === false) return null;
       if (!closing) open.push(name);
       else if (open.pop() !== name) return null;
       at = end + 1;
     } else if (char === "&") {
       const end = html.indexOf(";", at);
       const decoded = end < 0 ? undefined : decodeEntity(html.slice(at + 1, end));
-      if (decoded === undefined) return null;
-      text += decoded;
-      at = end + 1;
-    } else if (char === ">") {
-      return null;
+      text += decoded ?? "&";
+      at = decoded === undefined ? at + 1 : end + 1;
     } else {
       text += char;
       at += 1;
