@@ -463,9 +463,6 @@ async function main() {
       host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
     }),
   );
-  // Adopts any pre-existing on-disk state (legacy deployment.yaml entries,
-  // stale lockfile) into the v3 lockfile via `discardNonCurrentLockfile` and
-  // `runLegacyMigrationIfNeeded`.
   try {
     const bootResult = await appManager.boot();
     appsLog.info("AppManager.boot completed", {
