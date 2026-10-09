@@ -52,4 +52,4 @@ The page-load numbers come from the mock build, which also ships MSW and its fix
 
 ## Reading the numbers
 
-Results move with the machine, so compare a baseline and a candidate measured on the same machine. The report prints the spread of the ready time across runs. A change smaller than that spread is noise; rerun with more `--runs` before acting on it. Bundle sizes are deterministic for a given commit.
+Results move with the machine, so compare a baseline and a candidate measured on the same machine. The report prints the spread of the ready time across runs. A change smaller than that spread is noise, so rerun with more `--runs` before acting on it. Bundle sizes are deterministic for a given commit.
