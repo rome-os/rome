@@ -164,13 +164,6 @@ export function toWebchatProjectCatalog(
   };
 }
 
-export function getWebchatProjectPath(
-  projectName: string,
-  rootPath: string = getWebchatProjectsRoot(),
-): string {
-  return resolveWebchatProjectPath(projectName, rootPath);
-}
-
 export function normalizeSelectedWebchatProjectPath(projectPath?: string | null): string {
   const trimmed = typeof projectPath === "string" ? projectPath.trim() : "";
   return trimmed ? normalizeWebchatProjectPath(trimmed) : DEFAULT_WEBCHAT_PROJECT_NAME;

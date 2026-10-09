@@ -482,7 +482,8 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   await agentLoader.loadAll(FIXTURES_AGENTS_DIR);
   const agentName = "test-all-actions";
 
-  const sessionManager = new SessionManager(new SessionsRepository(harness.db));
+  const sessionsRepo = new SessionsRepository(harness.db);
+  const sessionManager = new SessionManager(sessionsRepo);
   const promptBuilder = new PromptBuilder();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({
@@ -510,6 +511,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   const manager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry: harness.actionRegistry,
     modelResolver,

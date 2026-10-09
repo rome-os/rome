@@ -104,6 +104,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const manager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry,
     modelResolver,

@@ -3174,7 +3174,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -3513,7 +3513,7 @@ describe("Webchat API", () => {
       const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -3602,7 +3602,7 @@ describe("Webchat API", () => {
       const acquireSource = rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      const exactCheckpoint = rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      const exactCheckpoint = rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: "turn-before-stop",
         provider: "anthropic",
@@ -3675,7 +3675,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue(null);
+      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue(null);
       const app = createWebchatRuntime(deps).routes;
 
       const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
@@ -3725,7 +3725,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",
@@ -3793,7 +3793,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentSessionManager, "acquire").mockResolvedValue({
         sessionId: "live-source-session",
       } as AgentSession);
-      rs.spyOn(deps.sessionManager, "getTurnCheckpoint").mockResolvedValue({
+      rs.spyOn(deps.sessionsRepo, "getTurnCheckpoint").mockResolvedValue({
         sessionId: "live-source-session",
         turnId: TURN_ID,
         provider: "openai",

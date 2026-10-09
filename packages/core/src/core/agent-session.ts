@@ -12,6 +12,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
+import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { getChannelFromThreadKey } from "./session-manager.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
@@ -360,6 +361,7 @@ interface ManagerDeps {
   agentLoader: AgentLoader;
   appCatalog?: Pick<AppCatalog, "get">;
   sessionManager: SessionManager;
+  sessionsRepo: SessionsRepository;
   promptBuilder: PromptBuilder;
   actionRegistry: ActionRegistry;
   modelResolver: ModelResolver;
@@ -493,7 +495,7 @@ export function createAgentSessionManager(
         }
         let preparedSessionId: string | undefined;
         if (decision.due) {
-          const replacement = await deps.sessionManager.rotateProviderGeneration({
+          const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             newSessionId: uuidv4(),
@@ -854,7 +856,7 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumeResult.workingDir,
       });
-      const replacement = await deps.sessionManager.rotateProviderGeneration({
+      const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
         newSessionId: uuidv4(),
@@ -897,7 +899,7 @@ async function openSession(
     };
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
-    await deps.sessionManager.setWorkingDir(sessionId, workingDir);
+    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
   }
 
   if (config.outputSchema && init.handback) {
@@ -1639,7 +1641,7 @@ async function openSession(
   // A resume the caller moved to another dir now writes its transcript there,
   // so the row follows it once the provider has opened.
   if (resumeResult && resumeResult.workingDir !== workingDir) {
-    await deps.sessionManager.setWorkingDir(sessionId, workingDir);
+    await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
   }
 
   impl = new AgentSessionImpl({
@@ -2185,7 +2187,7 @@ class AgentSessionImpl implements AgentSession {
           sink.outputSchemaSuspended = true;
         }
         this.trackTurnMetrics(msg);
-        await this.deps.sessionManager.touchSession(this.sessionId);
+        await this.deps.sessionsRepo.touch(this.sessionId);
 
         if (msg.type === "tool_use" && this.subagentToolNames.has(msg.tool)) {
           sink.pendingSubagentToolUses.set(msg.id, msg);
@@ -2486,7 +2488,7 @@ class AgentSessionImpl implements AgentSession {
   private async maybePersistReasoningEffort(reasoningEffort: string | undefined): Promise<void> {
     if (!reasoningEffort || reasoningEffort === this.storedReasoningEffort) return;
     try {
-      await this.deps.sessionManager.setReasoningEffort(this.sessionId, reasoningEffort);
+      await this.deps.sessionsRepo.setReasoningEffort(this.sessionId, reasoningEffort);
       this.storedReasoningEffort = reasoningEffort;
     } catch (err) {
       log.warn("failed to persist session reasoning effort", {
@@ -2501,7 +2503,7 @@ class AgentSessionImpl implements AgentSession {
     const providerThreadId = session.providerThreadId;
     if (!checkpointId || !providerThreadId) return;
     try {
-      await this.deps.sessionManager.setTurnCheckpoint({
+      await this.deps.sessionsRepo.setTurnCheckpoint({
         sessionId: this.sessionId,
         turnId,
         provider: session.providerId,
@@ -2552,7 +2554,7 @@ class AgentSessionImpl implements AgentSession {
         lastActiveAt: new Date(),
         status: "active",
       });
-      await this.deps.sessionManager.setProviderInfo(
+      await this.deps.sessionsRepo.setProviderInfo(
         forkSessionId,
         forkSession.providerId,
         providerThreadId,
@@ -2570,7 +2572,7 @@ class AgentSessionImpl implements AgentSession {
     const reasoningEffort = forkSession.appliedReasoningEffort;
     if (!reasoningEffort) return;
     try {
-      await this.deps.sessionManager.setReasoningEffort(forkSessionId, reasoningEffort);
+      await this.deps.sessionsRepo.setReasoningEffort(forkSessionId, reasoningEffort);
     } catch (err) {
       log.warn("failed to persist fork reasoning effort", {
         sessionId: this.sessionId,
@@ -2592,7 +2594,7 @@ class AgentSessionImpl implements AgentSession {
       model: this.modelSession.model,
     };
     try {
-      await this.deps.sessionManager.setProviderInfo(
+      await this.deps.sessionsRepo.setProviderInfo(
         this.sessionId,
         identity.providerId,
         identity.providerThreadId,
@@ -3055,7 +3057,7 @@ class AgentSessionImpl implements AgentSession {
       this.lastActiveAt = Date.now();
       this.emitStatus();
       try {
-        await this.deps.sessionManager.touchSession(this.sessionId);
+        await this.deps.sessionsRepo.touch(this.sessionId);
       } catch (err) {
         log.warn("failed to touch source session after fork", {
           sessionId: this.sessionId,
