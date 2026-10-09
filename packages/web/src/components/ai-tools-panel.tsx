@@ -496,6 +496,9 @@ export function AiToolsPanel({
   const [savingAnthropicProvider, setSavingAnthropicProvider] = useState(false);
   const [anthropicProviderMessage, setAnthropicProviderMessage] = useState("");
   const [loadingStatus, setLoadingStatus] = useState(true);
+  // The credits row waits for the first status only; a later re-read keeps it
+  // in place rather than unmounting it.
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
@@ -555,6 +558,7 @@ export function AiToolsPanel({
       /* ignore */
     } finally {
       setLoadingStatus(false);
+      setStatusLoaded(true);
     }
   }, []);
 
@@ -852,7 +856,7 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
-          {showRomeCredits && romeCredits && !loadingStatus && (
+          {showRomeCredits && romeCredits && statusLoaded && (
             <RomeCreditsRow
               credits={romeCredits}
               // The payer counts an unknown ChatGPT login as connected, so only

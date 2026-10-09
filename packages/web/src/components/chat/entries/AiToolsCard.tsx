@@ -24,6 +24,10 @@ const HIDDEN_PROVIDERS = ["gemini", "grok"] as const;
 
 type Probe = "checking" | "connected" | "absent";
 
+/** How long an unconnected card waits for the credits read before opening
+ *  with its plain wording. */
+const CREDITS_GRACE_MS = 1_500;
+
 export interface AiToolsCardProps {
   toolUseId: string;
   /** Prior submitted output when this instance already resolved. */
@@ -65,10 +69,25 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
           if (!cancelled) setProbe("connected");
           return;
         }
-        const nextCredits = await creditsProbe;
+        // The payer counts an unknown ChatGPT login as connected, so credits
+        // are offered only once ChatGPT reads as signed out.
+        if (status.codex?.loggedIn !== false) {
+          if (!cancelled) setProbe("absent");
+          return;
+        }
+        // Wait briefly so the card opens with the right wording, but never
+        // hold the step on a slow Rome Cloud; late credits still upgrade it.
+        const early = await Promise.race([
+          creditsProbe,
+          new Promise<undefined>((resolve) => setTimeout(resolve, CREDITS_GRACE_MS)),
+        ]);
         if (cancelled) return;
-        setCredits(nextCredits);
+        if (early !== undefined) setCredits(early);
         setProbe("absent");
+        if (early === undefined) {
+          const late = await creditsProbe;
+          if (!cancelled) setCredits(late);
+        }
       })
       .catch(() => {
         // A failed probe offers the panel rather than blocking the step.

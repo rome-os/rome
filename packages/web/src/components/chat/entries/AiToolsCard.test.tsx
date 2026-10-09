@@ -84,6 +84,40 @@ describe("AiToolsCard", () => {
     expect(onSubmit).toHaveBeenCalledWith("t-slow-credits", { connected: true }, "Connected an AI");
   });
 
+  it("does not offer credits while the ChatGPT login is still unknown", async () => {
+    mockStatus({ claude: { loggedIn: false }, codex: {} as { loggedIn: boolean } }, SIGNUP_CREDITS);
+
+    render(<AiToolsCard toolUseId="t-unknown-codex" onSubmit={rs.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "Skip for now" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("opens without credits on a slow Rome Cloud and offers them once they arrive", async () => {
+    let release!: (response: Response) => void;
+    const slowCredits = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      }
+      if (url === "/api/ai-tools/rome-credits") return await slowCredits;
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+
+    render(<AiToolsCard toolUseId="t-slow-absent" onSubmit={rs.fn()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Skip for now" }, { timeout: 3_000 }),
+    ).toBeTruthy();
+
+    release(ok({ credits: SIGNUP_CREDITS }));
+
+    expect(await screen.findByRole("button", { name: "Continue with credits" })).toBeTruthy();
+  });
+
   it("falls back to the plain skip once the credits are used up", async () => {
     mockStatus(
       { claude: { loggedIn: false }, codex: { loggedIn: false } },
