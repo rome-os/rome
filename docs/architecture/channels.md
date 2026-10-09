@@ -29,11 +29,12 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 
 ### Channels for app actions
 
-App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels and whether each can send, sends, and reads `messages`, all by channel name. In a worker the same calls cross to the main process over RPC.
+App actions reach channels through one service, `deps.channelsService` ([`ChannelsService`](../../packages/core/src/channels/channels-service.ts)). It lists the channels and whether each can send, sends, reads `messages`, and reads a channel's address book (`accounts`), all by channel name. In a worker the same calls cross to the main process over RPC.
 
 - It is the only path an action sends or reads history by. The main process and a worker answer the same call identically, which a worker's direct Connection lookup could not.
 - It sends through the Connection backing the channel. A service holds one Connection, so an action never names one.
-- `query` is the one read, `fetch_channel_history` included.
+- `query` is the one read of what was said, `fetch_channel_history` included.
+- `accounts` is the one read of who a channel reaches, `find_channel_account` included. It hands an app each account's name and addresses and nothing else, because an address is all a send takes, and the identifiers an address book matches on stay in core. It says whether more matched than the page holds, so a caller looking for one account narrows its query rather than concluding the account is absent.
 - Admission and pairing stay in the channel's inbound port, which runs them once per message on the Connection it arrived through, whether or not anything subscribes yet ([`channels/admission.ts`](../../packages/core/src/channels/admission.ts)). An account directory stays on the Connection. The service adds no path around either.
 - A Connection's talker and its features (history, inbound media, typing, the directory, direct messaging) are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). Only the channel ports reach a talker, through `Connection.withTalker`, which also reports a rejected credential to the registry. No app receives them. An app reaches a channel through this service or a hook's `channels`.
 

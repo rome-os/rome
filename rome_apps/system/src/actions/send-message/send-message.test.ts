@@ -17,7 +17,7 @@ function makeAdapter(service = "discord"): ChannelsService {
     list: rs.fn(async () => [{ name: service, sendable: true }]),
     send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
     query: async () => [],
-    accounts: async () => [],
+    accounts: async () => ({ accounts: [], more: false }),
   };
 }
 

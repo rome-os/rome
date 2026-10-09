@@ -1708,6 +1708,15 @@ export interface ChannelAccount {
   addresses: string[];
 }
 
+/** One page of a channel's accounts. */
+export interface ChannelAccountPage {
+  accounts: ChannelAccount[];
+  /** Whether more accounts matched than `limit` let through, so a caller
+   *  looking for one account narrows its query rather than concluding it is
+   *  absent. */
+  more: boolean;
+}
+
 /**
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
@@ -1738,9 +1747,15 @@ export interface ChannelsService {
   /**
    * Up to `limit` (default 20) of the accounts the channel can reach, matching
    * `query` against their names and identifiers when given. Rejects for a
-   * channel that has no address book.
+   * channel Rome does not have, and for one that has no address book.
+   *
+   * A channel that reaches no one now, because nothing is connected or its
+   * platform cannot be read, answers no accounts rather than rejecting.
    */
-  accounts(channel: string, query?: { query?: string; limit?: number }): Promise<ChannelAccount[]>;
+  accounts(
+    channel: string,
+    query?: { query?: string; limit?: number },
+  ): Promise<ChannelAccountPage>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

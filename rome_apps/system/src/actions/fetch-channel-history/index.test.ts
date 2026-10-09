@@ -54,7 +54,7 @@ function makeDeps(adapters: Map<string, HistoryAdapter>): { channelsService: Cha
         // An adapter answers oldest first, and `query` newest first.
         return [...(await adapter.fetchHistory(conversationId ?? null, hours))].reverse();
       },
-      accounts: async () => [],
+      accounts: async () => ({ accounts: [], more: false }),
     },
   };
 }

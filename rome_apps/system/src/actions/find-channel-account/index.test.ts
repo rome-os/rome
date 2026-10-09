@@ -17,8 +17,10 @@ const atlas: ChannelAccount = {
   addresses: ["0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e"],
 };
 
-function makeAction(accounts: ChannelsService["accounts"]) {
-  return createAction(actionConfig, { channelsService: { accounts } });
+function makeAction(accounts: ChannelsService["accounts"], sendable = true) {
+  return createAction(actionConfig, {
+    channelsService: { accounts, list: async () => [{ name: "agents", sendable }] },
+  });
 }
 
 describe("find_channel_account", () => {
@@ -26,12 +28,15 @@ describe("find_channel_account", () => {
     const calls: unknown[] = [];
     const action = makeAction(async (channel, read) => {
       calls.push({ channel, read });
-      return [atlas];
+      return { accounts: [atlas], more: true };
     });
 
     const result = await action.execute({ channel: "agents", query: "atlas" });
 
-    expect(result).toEqual({ status: "ok", data: { channel: "agents", accounts: [atlas] } });
+    expect(result).toEqual({
+      status: "ok",
+      data: { channel: "agents", accounts: [atlas], more: true },
+    });
     expect(calls).toEqual([{ channel: "agents", read: { query: "atlas", limit: 20 } }]);
   });
 
@@ -39,25 +44,46 @@ describe("find_channel_account", () => {
     const limits: (number | undefined)[] = [];
     const action = makeAction(async (_channel, read) => {
       limits.push(read?.limit);
-      return [];
+      return { accounts: [atlas], more: false };
     });
 
     await action.execute({ channel: "agents", limit: 500 });
     await action.execute({ channel: "agents", limit: 0 });
+    await action.execute({ channel: "agents", limit: "many" });
 
-    expect(limits).toEqual([100, 1]);
+    expect(limits).toEqual([100, 1, 20]);
   });
 
-  it("reports a channel with no address book as an error", async () => {
+  it("says an agent may exist when a connected channel matches no one", async () => {
+    const action = makeAction(async () => ({ accounts: [], more: false }));
+
+    const result = await action.execute({ channel: "agents", query: "atlas" });
+
+    expect(result).toMatchObject({ status: "ok", data: { accounts: [], more: false } });
+    expect(result.status === "ok" && result.data).toHaveProperty(
+      "note",
+      expect.stringContaining("Rome Cloud lists no agents while it is unreachable"),
+    );
+  });
+
+  it("reports a channel nothing connects as not connected, not as no match", async () => {
+    const action = makeAction(async () => ({ accounts: [], more: false }), false);
+
+    const result = await action.execute({ channel: "agents", query: "atlas" });
+
+    expect(result).toEqual({ status: "error", error: 'Channel "agents" is not connected.' });
+  });
+
+  it("reports a channel the service cannot search as an error", async () => {
     const action = makeAction(async (channel) => {
-      throw new Error(`Channel "${channel}" has no address book`);
+      throw new Error(`Unknown channel "${channel}"`);
     });
 
-    const result = await action.execute({ channel: "webchat" });
+    const result = await action.execute({ channel: "agent" });
 
     expect(result).toEqual({
       status: "error",
-      error: 'Could not look up accounts on "webchat": Channel "webchat" has no address book',
+      error: 'Could not look up accounts on "agent": Unknown channel "agent"',
     });
   });
 });
