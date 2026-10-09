@@ -63,8 +63,8 @@ export function getRomeCreditsState(
   credits: RomeCreditsView,
   { chatgptConnected, claudeConnected }: { chatgptConnected: boolean; claudeConnected: boolean },
 ): RomeCreditsState {
-  if (!credits.enabled) return "paused";
   if (chatgptConnected) return "standby";
+  if (!credits.enabled) return "paused";
   if (BigInt(credits.availableMicros) <= 0n) {
     return claudeConnected ? "usedUpWithClaude" : "usedUp";
   }

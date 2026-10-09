@@ -609,6 +609,14 @@ describe("AI Tools Rome credits", () => {
     expect(screen.queryByText("Used up")).toBeNull();
   });
 
+  it("puts paused credits on standby while ChatGPT pays", async () => {
+    mockPanel(true, { ...credits, enabled: false });
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(screen.queryByText("Paused")).toBeNull();
+  });
+
   it("keeps used-up credits calm while Claude handles chats", async () => {
     mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
     render(<AiToolsPanel showRomeCredits />);
