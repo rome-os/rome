@@ -36,7 +36,21 @@ App actions reach channels through one service, `deps.channelsService` ([`Channe
 - `query` is the one read, `fetch_channel_history` included.
 - An address book is not on the service, since it is the guardian's contacts. To message an agent by name, the system app alone receives `deps.agentNames` ([`channels/agent-names.ts`](../../packages/core/src/channels/agent-names.ts)), which resolves a name given as `to` on `agents` against Cloud's listing of the agents this Rome can message. Only the `main` agent, a name only core may define, sends by name. Any other caller, an installed app's `runAction` included, passes the agent's id. A bare name reaches only the guardian's own agent, and a linked account's agent is named by its whole label. A name two agents share is refused with each one's label and id. The worker RPC behind the lookup does not identify its caller, so app code running in a worker could still send it directly, a gap it shares with `feedback.send` and the lifecycle RPCs.
 - Admission and pairing stay in the channel's inbound port, which runs them once per message on the Connection it arrived through, whether or not anything subscribes yet ([`channels/admission.ts`](../../packages/core/src/channels/admission.ts)). An account directory stays on the Connection. The service adds no path around either.
-- A Connection's talker and its features (history, inbound media, typing, the directory, direct messaging) are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). Only the channel ports reach a talker, through `Connection.withTalker`, which also reports a rejected credential to the registry. No app receives them. An app reaches a channel through this service or a hook's `channels`.
+- A Connection's talker and its features (history, inbound media, typing, the directory, direct messaging, reply delivery) are internal to core ([`connections/types.ts`](../../packages/core/src/connections/types.ts)). Only the channel ports reach a talker, through `Connection.withTalker`, which also reports a rejected credential to the registry. No app receives them. An app reaches a channel through this service or a hook's `channels`.
+
+## Reply streaming
+
+A reply can reach a chat as the agent writes it, rather than whole after the run. The host decides for each reply, and an app only asks.
+
+### Invariants
+
+- Reply streaming is off until a developer turns it on in Developer Settings. Off, the app that ran a reply sends it whole, and no send waits on a write budget. The host reads the setting for each reply and each send, so a change applies to the next one.
+- An app asks for streaming and the host decides. The reply streams only when the setting is on and the channel can stream. Otherwise the run reports no delivery, and the app sends the reply itself.
+- Only a guardian's direct conversation asks. Every other sender's reply passes Envoy whole before anything is sent.
+- A reply the host streamed is not sent again by its caller, unless the stream wrote nothing. Any other outcome may already show on the platform, so a reply that failed partway stays unfinished.
+- A Connection's streamed replies and ordinary sends share one write budget, and only a Connection that can stream has one. A write that hangs cannot stall the Connection's other writes, and it is not cut off.
+- A stop reaches the reply before the provider, so nothing new is written after it.
+- A fault in the reply stream never ends the run. The result still reaches its caller, and a reply that wrote nothing is reported as failed, so the caller sends it.
 
 ## Linked agents
 
