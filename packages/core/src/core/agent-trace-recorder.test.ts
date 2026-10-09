@@ -61,6 +61,32 @@ describe("AgentTraceRecorder", () => {
     testDb.close();
   });
 
+  it("persists parent isolation on action-created sessions before their first trace or message", async () => {
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    await repo.ensureRomeSession({
+      id: "isolated-parent",
+      type: "webchat",
+      name: "Executor",
+      agentName: null,
+      sessionMetadata: metadata,
+    });
+    const recorder = new AgentTraceRecorder({
+      webchatRepo: repo,
+      agentName: "researcher",
+      turnId: "child-turn",
+      actionContext: { executionId: "child-execution", sessionId: "isolated-parent" },
+    });
+    await recorder.record({
+      type: "turn_start",
+      turnId: "child-turn",
+      sessionId: "runtime-child",
+      userPrompt: "SECRET-TASK",
+    });
+    const child = await repo.getSession("action:child-execution:researcher");
+    expect(child?.parentSessionId).toBe("isolated-parent");
+    expect(JSON.parse(child!.metadataJson)).toEqual(metadata);
+  });
+
   it("persists non-webchat trace blocks under the canonical channel Rome session", async () => {
     const recorder = new AgentTraceRecorder({
       webchatRepo: repo,

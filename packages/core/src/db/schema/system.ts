@@ -498,6 +498,7 @@ export const romeSessions = sqliteTable(
   {
     id: text("id").primaryKey(),
     name: text("name").notNull(),
+    metadataJson: text("metadata_json").notNull().default("{}"),
     personaId: text("persona_id"),
     largeModelSelection: text("large_model_selection"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
@@ -628,6 +629,7 @@ export const actionExecutions = sqliteTable(
     error: text("error"),
     durationMs: integer("duration_ms"),
     initiator: text("initiator"),
+    sessionId: text("session_id"),
     // Authenticated session identity accountable for this execution (a
     // `SessionActor` — guardian / visitor / anonymous), resolved host-side at the
     // HTTP/WS boundary and inherited down the execution chain. NULL = no
@@ -645,6 +647,7 @@ export const actionExecutions = sqliteTable(
   (table) => [
     // The usage reporter pages through finished root executions in this order.
     index("idx_action_executions_finished").on(table.finishedAt, table.id),
+    index("idx_action_executions_session_id").on(table.sessionId),
   ],
 );
 

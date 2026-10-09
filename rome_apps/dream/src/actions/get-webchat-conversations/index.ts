@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { isolatedSession } from "../../lib/session-privacy.js";
 import {
   createAppLogger,
   type Action,
@@ -124,6 +125,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
                 AND ws.type IN ('webchat', 'webchat_handoff')
+                AND NOT (${isolatedSession(sql`ws.metadata_json`)})
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -135,6 +137,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
                 AND ws.type IN ('webchat', 'webchat_handoff')
+                AND NOT (${isolatedSession(sql`ws.metadata_json`)})
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

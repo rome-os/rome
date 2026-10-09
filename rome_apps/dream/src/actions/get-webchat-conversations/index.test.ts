@@ -302,4 +302,39 @@ describe("get_webchat_conversations against the system schema", () => {
     expect(data.content).toContain("from a");
     expect(data.content).not.toContain("from b");
   });
+  it("excludes executor, judge, and handoff sessions even when explicitly requested", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const cases = [
+      ["executor", "webchat", '{"isolated":true,"purpose":"benchmark","appId":"navi-bench"}'],
+      ["judge", "webchat", '{"isolated":true}'],
+      ["handoff", "webchat_handoff", '{"isolated":true}'],
+      ["normal", "webchat", "{}"],
+      ["legacy", "webchat", "{broken"],
+      ["null", "webchat", "null"],
+      ["numeric", "webchat", '{"isolated":1}'],
+      ["string", "webchat", '{"isolated":"true"}'],
+      ["false", "webchat", '{"isolated":false}'],
+    ];
+    for (const [id, type, metadata] of cases) {
+      seedSession(id, id, type, now - 60);
+      testDb.db.run(sql`UPDATE rome_sessions SET metadata_json = ${metadata} WHERE id = ${id}`);
+      seedMessage(`message-${id}`, id, "user", text(`payload-${id}`), now - 50);
+    }
+    const action = createAction(actionConfig, realDeps());
+    const all = await action.execute({ windowHours: 1 });
+    expect(all.status).toBe("ok");
+    if (all.status !== "ok") return;
+    expect((all.data as { messageCount: number }).messageCount).toBe(6);
+    for (const id of ["executor", "judge", "handoff"]) {
+      expect((all.data as { content: string }).content).not.toContain(`payload-${id}`);
+      const scoped = await action.execute({ sessionId: id });
+      expect(scoped.status).toBe("ok");
+      if (scoped.status === "ok")
+        expect((scoped.data as { messageCount: number }).messageCount).toBe(0);
+    }
+    const scopedLegacy = await action.execute({ sessionId: "legacy" });
+    expect(scopedLegacy.status).toBe("ok");
+    if (scopedLegacy.status === "ok")
+      expect((scopedLegacy.data as { content: string }).content).toContain("payload-legacy");
+  });
 });

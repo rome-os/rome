@@ -54,6 +54,83 @@ describe("Webchat API", () => {
     }
   });
 
+  it("accepts validated guardian metadata at creation and rejects visitor or anonymous metadata", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    const create = (sessionMetadata: unknown) =>
+      app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionMetadata }),
+      });
+    const guardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const response = await runWithSessionActor(guardian, () => create(metadata));
+    expect(response.status).toBe(200);
+    const created = (await response.json()) as { id: string; sessionMetadata: unknown };
+    expect(created.sessionMetadata).toEqual(metadata);
+    expect(JSON.parse((await deps.webchatRepo.getSession(created.id))!.metadataJson)).toEqual(
+      metadata,
+    );
+    expect(await deps.webchatRepo.getMessageCount(created.id)).toBe(0);
+    for (const value of [null, { isolated: "true" }, { isolated: true, extra: true }]) {
+      expect((await runWithSessionActor(guardian, () => create(value))).status).toBe(400);
+    }
+    for (const actor of [
+      { kind: "anonymous" } as const,
+      { kind: "visitor", accountId: "visitor", email: "visitor@example.com" } as const,
+    ]) {
+      expect((await runWithSessionActor(actor, () => create(metadata))).status).toBe(403);
+    }
+    const normal = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(normal.status).toBe(200);
+    expect(((await normal.json()) as { sessionMetadata: unknown }).sessionMetadata).toEqual({});
+  });
+
+  it("omits the guardian memory suffix only for isolated turns", async () => {
+    rs.stubEnv("HOME", projectsRoot);
+    const acquire = rs
+      .spyOn(deps.agentSessionManager, "acquire")
+      .mockRejectedValue(new Error("Stop before opening a provider"));
+    try {
+      const app = createWebchatRuntime(deps).routes;
+      for (const isolated of [false, true]) {
+        const id = `suffix-${isolated}`;
+        await deps.webchatRepo.createSession(
+          id,
+          "Suffix test",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          null,
+          "webchat",
+          null,
+          { isolated },
+        );
+        await app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            text: "task only",
+            inputId: isolated
+              ? "00000000-0000-4000-8000-000000000002"
+              : "00000000-0000-4000-8000-000000000001",
+          }),
+        });
+        const init = acquire.mock.calls.at(-1)![1];
+        if (isolated) expect(init?.contextSuffix).toBeUndefined();
+        else expect(init?.contextSuffix).toContain("## Guardian");
+      }
+    } finally {
+      acquire.mockRestore();
+      rs.unstubAllEnvs();
+    }
+  });
+
   it("persists appended inputs once and keeps one stream owner", async () => {
     let finish!: () => void;
     const terminal = new Promise<void>((resolve) => {
@@ -2794,6 +2871,57 @@ describe("Webchat API", () => {
       const child = await deps.webchatRepo.getSession(childSessionId as string);
       expect(child?.type).toBe("webchat_handoff");
       expect(child?.agentName).toBe("workflow-studio:workflow-planner");
+    });
+
+    it.each([
+      false,
+      true,
+    ])("starts a fresh handoff with inherited metadata without requiring a fork thread (isolated: %s)", async (isolated) => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-metadata-handoff"));
+      const app = createWebchatRuntime(deps).routes;
+      const metadata = isolated
+        ? { isolated: true, purpose: "benchmark", appId: "navi-bench" }
+        : {};
+      const parent = `handoff-parent-${isolated}`;
+      await deps.webchatRepo.createSession(
+        parent,
+        "Handoff parent",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        metadata,
+      );
+      await app.request(`/chat/sessions/${parent}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design" }),
+      });
+      const card = await findCard(parent, "tu-metadata-handoff");
+      const childId = card?.childSessionId as string;
+      const child = await deps.webchatRepo.getSession(childId);
+      expect(JSON.parse(child!.metadataJson)).toEqual(metadata);
+      expect(child?.parentSessionId).toBeNull();
+      ctl.setEvents(() =>
+        (async function* () {
+          yield { type: "result", content: "done" };
+        })(),
+      );
+      const hasAgent = rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      try {
+        const response = await app.request(`/chat/sessions/${childId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "start the design" }),
+        });
+        expect(response.status).toBe(200);
+      } finally {
+        hasAgent.mockRestore();
+      }
     });
 
     it("keeps spawned handoff sessions out of the top-level session list", async () => {

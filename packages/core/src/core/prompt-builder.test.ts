@@ -64,6 +64,59 @@ describe("PromptBuilder", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it.each([
+    false,
+    true,
+  ])("keeps isolated and normal prefixes separate (isolated first: %s)", (isolatedFirst) => {
+    mkdirSync(mockPaths.profileMemoryDir, { recursive: true });
+    writeFileSync(join(mockPaths.profileMemoryDir, "MEMORY.md"), "prior attempt SECRET-MEMORY");
+    writeFileSync(join(mockPaths.profileMemoryDir, "IDENTITY.md"), "SECRET-RELATIONSHIP");
+    const projectDir = join(mockPaths.profileMemoryDir, "projects", "navi-bench");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, "PROJECT.md"), "SECRET-PROJECT");
+    const apps = [
+      { appId: "navi-bench", manifest: { description: "SECRET-BENCH-APP" } },
+      { appId: "notes", manifest: { description: "Available notes" } },
+    ];
+    const catalog = { listResolved: () => apps } as unknown as ConstructorParameters<
+      typeof PromptBuilder
+    >[0];
+    const builder = new PromptBuilder(catalog);
+    const isolatedOptions = {
+      ...corePromptOptions,
+      sessionMetadata: { isolated: true, appId: "navi-bench" },
+      contextSuffix: "Keep explicit instructions",
+    };
+    const buildIsolated = () => builder.build(mainConfig, isolatedOptions);
+    const buildNormal = () => builder.build(mainConfig, corePromptOptions);
+    const first = isolatedFirst ? buildIsolated() : buildNormal();
+    const second = isolatedFirst ? buildNormal() : buildIsolated();
+    const isolated = isolatedFirst ? first : second;
+    const normal = isolatedFirst ? second : first;
+    for (const secret of [
+      "SECRET-MEMORY",
+      "SECRET-RELATIONSHIP",
+      "SECRET-PROJECT",
+      "SECRET-BENCH-APP",
+    ]) {
+      expect(isolated).not.toContain(secret);
+      expect(normal).toContain(secret);
+    }
+    expect(isolated).toContain(mainConfig.systemPromptPrefix);
+    expect(isolated).toContain("Available notes");
+    expect(isolated).toContain("Keep explicit instructions");
+    expect(
+      builder.build(mainConfig, {
+        ...isolatedOptions,
+        sessionMetadata: { isolated: true, appId: "notes" },
+      }),
+    ).toContain("SECRET-BENCH-APP");
+    apps[0].manifest.description = "Updated benchmark description";
+    builder.invalidate("main");
+    expect(buildNormal()).toContain("Updated benchmark description");
+    expect(buildIsolated()).not.toContain("Updated benchmark description");
+  });
+
   it("injects MEMORY.md fresh on each build", () => {
     mkdirSync(mockPaths.profileMemoryDir, { recursive: true });
     writeFileSync(

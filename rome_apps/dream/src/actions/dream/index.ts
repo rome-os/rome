@@ -64,6 +64,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
       const prompt = [
         `Today is ${now.toISOString()}. Perform the scheduled self-review for the past ${windowHours} hours.`,
         "",
+        "Isolated sessions and their action logs are excluded from self-review. Do not read them through filesystem or database fallbacks.",
         "Follow the review process in your instructions:",
         `1. Read memory/MEMORY.md`,
         `2. Call get_webchat_conversations (windowHours: ${windowHours}) to fetch recent conversations`,

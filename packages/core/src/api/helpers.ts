@@ -1,3 +1,4 @@
+import { parseSessionMetadata } from "../lib/session-metadata.js";
 import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentEvent } from "../types.js";
 import type { ActionResult } from "../actions/types.js";
@@ -102,6 +103,7 @@ export function toWebchatSessionResponse(
     id: string;
     name: string;
     personaId: string | null;
+    metadataJson?: string;
     largeModelSelection?: string | null;
     projectName: string;
     projectPath?: string | null;
@@ -123,6 +125,7 @@ export function toWebchatSessionResponse(
     id: session.id,
     name: session.name,
     personaId: session.personaId ?? null,
+    sessionMetadata: parseSessionMetadata(session.metadataJson),
     largeModelSelection: session.largeModelSelection ?? null,
     projectName: session.projectName,
     projectPath: session.projectPath ?? session.projectName,

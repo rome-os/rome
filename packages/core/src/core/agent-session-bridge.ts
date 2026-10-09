@@ -3,6 +3,7 @@
 // workers over IpcRpc. Workers call `agent.session.runTurn` and consume the
 // returned `agent.turn:<turnId>` stream.
 
+import { parseSessionMetadata } from "../lib/session-metadata.js";
 import type { ChildProcess } from "node:child_process";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import type {
@@ -128,6 +129,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
         const init = {
           ...req.init,
+          sessionMetadata: parseSessionMetadata(
+            req.actionContext?.sessionId
+              ? (await this.webchatRepo?.getSession(req.actionContext.sessionId))?.metadataJson
+              : undefined,
+          ),
           workingDir,
           isSubagent: true,
           platformMessageId: req.platformMessageId,

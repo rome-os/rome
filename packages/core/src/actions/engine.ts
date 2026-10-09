@@ -553,9 +553,11 @@ export class ActionEngine {
       const priorRoot = await this.executionsRepo.findById(context.replayRootExecutionId);
       actor = (priorRoot?.actor as SessionActor | null | undefined) ?? undefined;
     }
-    if (actor && context?.actor !== actor) {
-      context = { ...(context ?? {}), actor };
-    }
+    context = {
+      ...(context ?? {}),
+      ...(actor ? { actor } : {}),
+      sessionId: context?.sessionId ?? parentStore?.sessionId,
+    };
     const executionId =
       isReplay && context?.replayRootExecutionId
         ? context.replayRootExecutionId
@@ -623,6 +625,7 @@ export class ActionEngine {
         args,
         initiator,
         actor,
+        sessionId: context?.sessionId ?? parentStore?.sessionId,
         parentId,
         error: undefined,
       });
@@ -855,6 +858,13 @@ export class ActionEngine {
   ): Promise<ActionResult> {
     const { action, name, args, executionId, rootExecutionId, parentId, initiator, actor, isRoot } =
       invocation;
+    if (
+      name === "system:send_user_message" &&
+      args.sessionMetadata !== undefined &&
+      actor?.kind !== "guardian"
+    ) {
+      return { status: "error", error: "Session metadata requires a guardian session" };
+    }
     const mode = this.resolveExecutionMode(action, isRoot);
     const startedAt = this.clock.now();
     await this.ensureExecutionStarted({
@@ -865,6 +875,7 @@ export class ActionEngine {
       args,
       initiator,
       actor,
+      sessionId: invocation.context?.sessionId,
       parentId,
       startedAt,
     });
@@ -900,6 +911,7 @@ export class ActionEngine {
           args,
           initiator,
           actor,
+          sessionId: invocation.context?.sessionId,
           parentId,
           error: undefined,
         });
@@ -914,6 +926,7 @@ export class ActionEngine {
           error: result.status === "error" ? result.error : undefined,
           initiator,
           actor,
+          sessionId: invocation.context?.sessionId,
           parentId,
           startedAt,
         });
@@ -959,6 +972,7 @@ export class ActionEngine {
             error: failureMessage,
             initiator,
             actor,
+            sessionId: invocation.context?.sessionId,
             parentId,
             startedAt,
           });
@@ -1672,6 +1686,7 @@ export class ActionEngine {
     actionType?: string;
     args: Record<string, unknown>;
     initiator: string;
+    sessionId?: string;
     actor?: SessionActor;
     parentId?: string;
     startedAt: Date;
@@ -1702,6 +1717,7 @@ export class ActionEngine {
       status: "running",
       args: data.args,
       initiator: data.initiator,
+      sessionId: data.sessionId,
       actor: data.actor,
       parentId: data.parentId,
       startedAt: data.startedAt,
@@ -1717,6 +1733,7 @@ export class ActionEngine {
     status: ActionExecutionStatus;
     args: Record<string, unknown>;
     initiator: string;
+    sessionId?: string;
     actor?: SessionActor;
     parentId?: string;
     error?: string;
@@ -1732,6 +1749,7 @@ export class ActionEngine {
         status: data.status,
         args: data.args,
         initiator: data.initiator,
+        sessionId: data.sessionId,
         actor: data.actor,
         parentId: data.parentId,
         error: data.error,
@@ -1761,6 +1779,7 @@ export class ActionEngine {
       status: data.status,
       args: data.args,
       initiator: data.initiator,
+      sessionId: data.sessionId,
       actor: data.actor,
       parentId: data.parentId,
       error: data.error,
@@ -1779,6 +1798,7 @@ export class ActionEngine {
     args: Record<string, unknown>;
     error?: string;
     initiator: string;
+    sessionId?: string;
     actor?: SessionActor;
     parentId?: string;
     startedAt: Date;
@@ -1796,6 +1816,7 @@ export class ActionEngine {
         error: data.error,
         durationMs: this.clock.now().getTime() - data.startedAt.getTime(),
         initiator: data.initiator,
+        sessionId: data.sessionId,
         actor: data.actor,
         parentId: data.parentId,
       });

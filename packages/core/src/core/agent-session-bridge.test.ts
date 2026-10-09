@@ -12,6 +12,7 @@ import type {
   AgentSessionManager,
   AgentTurnHandle,
 } from "./agent-session.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 
 class FakeChild extends EventEmitter {
@@ -110,7 +111,7 @@ describe("AgentSessionBridge working dir", () => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(callerWorkingDirs: Record<string, string> = {}) {
+  function setup(callerWorkingDirs: Record<string, string> = {}, webchatRepo?: WebChatRepository) {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
@@ -138,7 +139,7 @@ describe("AgentSessionBridge working dir", () => {
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+    new AgentSessionBridge(manager, webchatRepo, undefined, undefined, projectsRoot).attach(
       child as unknown as ChildProcess,
     );
 
@@ -164,6 +165,19 @@ describe("AgentSessionBridge working dir", () => {
     };
     return { projectsRoot, acquired, runTurn };
   }
+
+  it("inherits parent isolation from storage before acquiring a worker-spawned agent", async () => {
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    const repo = {
+      getSession: async () => ({ metadataJson: JSON.stringify(metadata) }),
+    } as unknown as WebChatRepository;
+    const { acquired, runTurn } = setup({}, repo);
+    await runTurn({
+      actionContext: { ...summonCall, sessionId: "isolated-parent" },
+      init: { sessionMetadata: { isolated: false } },
+    });
+    expect(acquired[0].sessionMetadata).toEqual(metadata);
+  });
 
   it("opens the run in a requested project inside the projects root", async () => {
     const { projectsRoot, acquired, runTurn } = setup();

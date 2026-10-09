@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { actionSessionIds, isolatedSession } from "../../lib/session-privacy.js";
 import {
   createAppLogger,
   type Action,
@@ -112,13 +113,50 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       let rows: ActionExecutionRow[] = [];
       try {
-        const nameCondition = actionNameFilter ? sql`AND action_name = ${actionNameFilter}` : sql``;
+        const nameCondition = actionNameFilter
+          ? sql`AND ae.action_name = ${actionNameFilter}`
+          : sql``;
         rows = appContext.db.connection.all(
           sql`
             SELECT id, action_name, action_type, status, args, error, duration_ms, initiator, actor, started_at, finished_at
-            FROM action_executions
+            FROM action_executions ae
             WHERE started_at >= ${cutoffSeconds}
               ${nameCondition}
+              AND NOT EXISTS (
+                WITH RECURSIVE lineage(id, parent_session_id, metadata_json) AS (
+                  SELECT id, parent_session_id, metadata_json FROM rome_sessions
+                  WHERE id IN (${actionSessionIds(sql`ae`)})
+                  UNION
+                  SELECT parent.id, parent.parent_session_id, parent.metadata_json
+                  FROM rome_sessions parent JOIN lineage child ON parent.id = child.parent_session_id
+                )
+                SELECT 1 FROM lineage WHERE ${isolatedSession(sql`metadata_json`)}
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM rome_sessions isolated
+                WHERE ${isolatedSession(sql`isolated.metadata_json`)}
+                  AND CASE WHEN json_valid(isolated.metadata_json)
+                    THEN json_type(isolated.metadata_json, '$.appId') = 'text'
+                      AND length(json_extract(isolated.metadata_json, '$.appId')) > 0
+                      AND substr(ae.action_name, 1, length(json_extract(isolated.metadata_json, '$.appId')) + 1)
+                        = json_extract(isolated.metadata_json, '$.appId') || ':'
+                    ELSE 0 END
+                  AND NOT EXISTS (
+                    SELECT 1 FROM rome_sessions
+                    WHERE id IN (${actionSessionIds(sql`ae`)})
+                  )
+              )
+              AND NOT (
+                ae.action_name = 'system:send_user_message'
+                AND CASE WHEN json_valid(ae.args) THEN
+                  COALESCE(json_type(ae.args, '$.sessionMetadata.isolated') = 'true', 0)
+                  OR EXISTS (
+                    SELECT 1 FROM rome_sessions target
+                    WHERE target.id = json_extract(ae.args, '$.sessionId')
+                      AND ${isolatedSession(sql`target.metadata_json`)}
+                  )
+                ELSE 0 END
+              )
             ORDER BY started_at ASC
           `,
         ) as ActionExecutionRow[];

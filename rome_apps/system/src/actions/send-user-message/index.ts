@@ -16,6 +16,25 @@ function getInternalApiBaseUrl(): string {
 }
 
 export const sendUserMessageInputSchema = z.object({
+  sessionMetadata: z
+    .strictObject({
+      isolated: z.boolean().optional(),
+      purpose: z.string().trim().min(1).max(200).optional(),
+      appId: z
+        .string()
+        .regex(
+          /^(?:[a-z][a-z0-9-]{0,63}|@[a-z0-9][a-z0-9-]{0,30}[a-z0-9]\/[a-z0-9][a-z0-9_-]{0,62}[a-z0-9])$/,
+        )
+        .max(100)
+        .optional(),
+    })
+    .optional()
+    .describe(
+      "Guardian-only, creation-only metadata: {isolated?: boolean, purpose?: string, appId?: string}. " +
+        "An isolated chat omits memory/project prompt context and is excluded from dream self-review. " +
+        "appId hides the creating app from its prompt catalog. Cannot be changed on an existing session. " +
+        "This is not a filesystem sandbox.",
+    ),
   text: z
     .string()
     .min(1)
@@ -79,6 +98,12 @@ export function createSendUserMessageAction(
     config,
     schema: sendUserMessageInputSchema,
     execute: async (input): Promise<ActionResult> => {
+      if (input.sessionId?.trim() && input.sessionMetadata !== undefined) {
+        return {
+          status: "error",
+          error: "sessionMetadata is only accepted when creating a session",
+        };
+      }
       const fetchImpl = options.fetchImpl ?? fetch;
       const baseUrl = options.baseUrl ?? getInternalApiBaseUrl();
 
@@ -95,6 +120,7 @@ export function createSendUserMessageAction(
           body: JSON.stringify({
             ...(agentName ? { agentName } : {}),
             ...(projectPath ? { projectPath } : {}),
+            ...(input.sessionMetadata ? { sessionMetadata: input.sessionMetadata } : {}),
           }),
         });
         if (!res.ok) {

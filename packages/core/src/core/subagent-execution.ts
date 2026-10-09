@@ -7,6 +7,7 @@ import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-re
 import type { ThreadContext } from "./types.js";
 import type { ActiveSubagentRegistry, ParentSubagentRef } from "./active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { parseSessionMetadata } from "../lib/session-metadata.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 
 const log = createLogger("subagent-execution");
@@ -107,6 +108,7 @@ export function createSubagentExecutionService(deps: {
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
+          sessionMetadata: parseSessionMetadata(parentSession?.metadataJson),
         });
       } else {
         isFresh = true;
@@ -119,6 +121,7 @@ export function createSubagentExecutionService(deps: {
             workingDir: context.workingDir,
             threadContext: context.threadContext,
             sharedContext: context.sharedContext,
+            sessionMetadata: parseSessionMetadata(parentSession?.metadataJson),
             forceNewSession: true,
           },
         );
