@@ -45,7 +45,9 @@ export interface AccountSegment {
  *
  * A WhatsApp jid renders as the phone number it carries, and an agent as its
  * label, since its address is an opaque Cloud id no UI shows. Every other
- * channel shows the address it minted, which is what its own UI shows.
+ * channel shows the address it minted, which is what its own UI shows. The
+ * People list's `rowHandle` applies the same rule, so a reader recognizes the
+ * same account by the same string on both surfaces.
  */
 export function accountHandle(account: {
   channel: string;
