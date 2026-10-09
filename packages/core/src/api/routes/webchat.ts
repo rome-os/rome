@@ -3766,20 +3766,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     };
     const input = { inputId, prompt: promptText, reasoningEffort };
-    let receipt;
-    if (agentSess.submitInput) {
-      receipt = agentSess.submitInput(input, options);
-    } else {
-      const handle = agentSess.sendTurn(input, options);
-      options.onTurn(handle);
-      await options.onInputStatus({
-        type: "input_status",
-        inputId,
-        turnId: handle.turnId,
-        state: "submitted",
-      });
-      receipt = { inputId, turnId: handle.turnId, disposition: "started" as const };
-    }
+    const receipt = agentSess.submitInput(input, options);
     const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
     return c.json({
       ...receipt,

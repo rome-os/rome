@@ -112,7 +112,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     skillCatalog: new SkillCatalog(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
   });
-  const runner = new AgentRunner(manager);
+  const runner = new AgentRunner(manager, agentLoader);
 
   const transports = new Map<string, FakeTransport>();
   for (const name of options.channels) {

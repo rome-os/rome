@@ -14,11 +14,9 @@ import {
   getCurrentHookInvocationContext,
   hookTelemetryAttrs,
   recordHookSkip,
-  resolveHookRecursionConfig,
   runWithHookInvocationContext,
   type HookIdentity,
   type HookInvocationContext,
-  type HookRecursionConfig,
 } from "./hook-recursion.js";
 
 const log = createLogger("app-started");
@@ -61,7 +59,6 @@ export interface AppStartedDispatcher {
 
 export interface AppStartedDispatcherOptions {
   appRuntimeServices: RomeAppRuntimeServices;
-  hookRecursion?: Partial<HookRecursionConfig>;
 }
 
 interface LoadedAppStartedHook {
@@ -77,7 +74,6 @@ interface LoadedAppStartedHook {
 export function createAppStartedDispatcher(
   options: AppStartedDispatcherOptions,
 ): AppStartedDispatcher {
-  const hookRecursion = resolveHookRecursionConfig(options.hookRecursion);
   // Each map is keyed by app id. `seen` holds the start key last loaded for
   // the app. `pending` and `failures` hold entries for that same start only,
   // and are cleared with it.
@@ -102,7 +98,7 @@ export function createAppStartedDispatcher(
       const app = catalog.get(appId);
       if (!isRunnable(app) || startKey(app) !== seen.get(appId)) continue;
       pending.delete(appId);
-      for (const entry of entries) dispatch(entry, hookRecursion);
+      for (const entry of entries) dispatch(entry);
     }
   };
 
@@ -208,7 +204,7 @@ function assertAppStartedHook(
   );
 }
 
-function dispatch(loaded: LoadedAppStartedHook, hookRecursion: HookRecursionConfig): void {
+function dispatch(loaded: LoadedAppStartedHook): void {
   const identity: HookIdentity = {
     hookType: "app",
     appId: loaded.appId,
@@ -219,23 +215,18 @@ function dispatch(loaded: LoadedAppStartedHook, hookRecursion: HookRecursionConf
   const decision = evaluateHookInvocation(
     loaded.cause ?? createRootHookInvocationContext(),
     identity,
-    hookRecursion,
   );
   if (!decision.allowed) {
-    recordHookSkip(log, decision, hookRecursion);
+    recordHookSkip(log, decision);
     return;
   }
 
   void Promise.resolve()
     .then(() =>
       runWithHookInvocationContext(decision.nextContext, () =>
-        wrapHookSpan(
-          APP_STARTED_HOOK_NAME,
-          hookTelemetryAttrs(decision, hookRecursion),
-          async () => {
-            await loaded.hook.onAppStarted(structuredClone(loaded.event));
-          },
-        ),
+        wrapHookSpan(APP_STARTED_HOOK_NAME, hookTelemetryAttrs(decision), async () => {
+          await loaded.hook.onAppStarted(structuredClone(loaded.event));
+        }),
       ),
     )
     .catch((err: unknown) => {

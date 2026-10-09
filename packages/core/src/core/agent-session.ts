@@ -328,11 +328,11 @@ export interface AgentSession {
    * turn actually begins running turn-lock semantics).
    */
   sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle;
-  submitInput?(
+  submitInput(
     input: AgentTurnInput & { inputId: string },
     options: SubmitInputOptions,
   ): AgentInputReceipt;
-  runForkedTurn?(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
+  runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
@@ -341,7 +341,7 @@ export interface AgentSession {
 
 export interface AgentSessionManager {
   acquire(key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
-  acquireBySessionId?(
+  acquireBySessionId(
     sessionId: string,
     agentName: string,
     init?: AgentSessionInit,
@@ -352,7 +352,7 @@ export interface AgentSessionManager {
    * manager's sessions and the subagent sessions they own. Undefined when no
    * open session has the id. Never opens a session.
    */
-  findWorkingDirBySessionId?(sessionId: string): string | undefined;
+  findWorkingDirBySessionId(sessionId: string): string | undefined;
   shutdown(): Promise<void>;
 }
 
@@ -657,7 +657,7 @@ export function createAgentSessionManager(
         if (sess.sessionId === sessionId || sess.hasActiveFork(sessionId)) {
           return sess.workingDirectory;
         }
-        const nested = sess.openedChildManager?.findWorkingDirBySessionId?.(sessionId);
+        const nested = sess.openedChildManager?.findWorkingDirBySessionId(sessionId);
         if (nested) return nested;
       }
       return undefined;

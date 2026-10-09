@@ -100,9 +100,6 @@ export function createSubagentExecutionService(deps: {
             `Subagent session "${input.resumeSessionId}" belongs to a different project`,
           );
         }
-        if (!context.childManager.acquireBySessionId) {
-          throw new Error("Child AgentSessionManager cannot resume by session ID");
-        }
         child = await context.childManager.acquireBySessionId(input.resumeSessionId, name, {
           workingDir: context.workingDir,
           threadContext: context.threadContext,

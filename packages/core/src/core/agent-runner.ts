@@ -471,7 +471,7 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 export class AgentRunner {
   constructor(
     private agentSessionManager: AgentSessionManager,
-    private agentLoader?: AgentLoader,
+    private agentLoader: AgentLoader,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
   ) {}
@@ -479,12 +479,9 @@ export class AgentRunner {
   /**
    * Returns true when the named agent is loaded in the catalog. Lets callers
    * (e.g. the inbox message handler) gracefully fall back when a channel is
-   * configured to route to an agent that has been uninstalled. Returns true
-   * when no AgentLoader was injected (legacy construction paths in tests) so
-   * behaviour is unchanged for those callers.
+   * configured to route to an agent that has been uninstalled.
    */
   hasAgent(name: string): boolean {
-    if (!this.agentLoader) return true;
     return this.agentLoader.has(name);
   }
 
@@ -510,7 +507,7 @@ export class AgentRunner {
       platformMessageId: params.platformMessageId,
     };
     const session = explicitSessionId
-      ? await this.acquireExplicitSession(explicitSessionId, params.agentName, init)
+      ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
       : await this.agentSessionManager.acquire(
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
           init,
@@ -584,17 +581,6 @@ export class AgentRunner {
     });
   }
 
-  private async acquireExplicitSession(
-    sessionId: string,
-    agentName: string,
-    init: Parameters<AgentSessionManager["acquire"]>[1],
-  ) {
-    if (!this.agentSessionManager.acquireBySessionId) {
-      throw new Error("AgentSessionManager cannot resume by explicit session id");
-    }
-    return await this.agentSessionManager.acquireBySessionId(sessionId, agentName, init);
-  }
-
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
     const source = this.agentSessionManager.peek({
       agentName: params.agentName,
@@ -605,11 +591,6 @@ export class AgentRunner {
     }
     if (source.sessionId !== params.sourceSessionId) {
       throw new Error("Cannot fork agent session because the source session id does not match");
-    }
-    if (!source.runForkedTurn) {
-      throw new Error(
-        "Cannot fork agent session because the source session does not support forks",
-      );
     }
 
     log.info("forked agent run started", {

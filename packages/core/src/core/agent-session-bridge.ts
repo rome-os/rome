@@ -138,7 +138,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         let session: AgentSession;
         try {
           session = req.sessionId
-            ? await this.acquireExplicitSession(req.sessionId, req.key.agentName, init)
+            ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
@@ -300,17 +300,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     }
     if (req.sessionId || req.actionContext?.actionName !== SUMMON_ACTION) return undefined;
     const callerSessionId = req.actionContext?.sessionId;
-    return callerSessionId ? this.manager.findWorkingDirBySessionId?.(callerSessionId) : undefined;
-  }
-
-  private async acquireExplicitSession(
-    sessionId: string,
-    agentName: string,
-    init?: AgentSessionInit,
-  ) {
-    if (!this.manager.acquireBySessionId) {
-      throw new Error("AgentSessionManager cannot resume by explicit session id");
-    }
-    return await this.manager.acquireBySessionId(sessionId, agentName, init);
+    return callerSessionId ? this.manager.findWorkingDirBySessionId(callerSessionId) : undefined;
   }
 }
