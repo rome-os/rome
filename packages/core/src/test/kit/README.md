@@ -11,7 +11,7 @@ Fake a dependency only if it crosses the process boundary:
 | Edge | Fake |
 |---|---|
 | Model API | `FakeModel` (scriptable `ModelProvider`) |
-| Chat-network SDK | `FakeChannelEndpoint` (plays the platform behind a channel's Connection); for adapter units, `FakeTelegramApi` (plays the Bot API server behind a real grammy `Bot`) |
+| Chat-network SDK | `FakeChannelEndpoint` (plays the platform behind a channel's Connection); for adapter units, `FakeTelegramApi` (plays the Bot API server behind a real grammy `Bot`); for the HTTP wire and recorded platform responses, the peers in [`im/`](im/README.md) |
 | Wall clock | `FakeClock` (injectable `Clock` seam); `installTestClock()` for ambient-time code |
 | Subprocess fork | avoided via `ActionEngine` `processRole: "worker"` (the harness does this) |
 | Outbound HTTP | `createFetchRecorder()` (inject `recorder.fetch` via a module's `fetch?: typeof fetch` option) |

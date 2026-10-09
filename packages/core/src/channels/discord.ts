@@ -19,7 +19,13 @@ import {
   type AutocompleteInteraction,
 } from "discord.js";
 import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
-import type { APIRequest, RateLimitData, RequestMethod, ResponseLike } from "discord.js";
+import type {
+  APIRequest,
+  RateLimitData,
+  RequestMethod,
+  ResponseLike,
+  RESTOptions,
+} from "discord.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import {
   filterChannelApiResponseHeaders,
@@ -380,6 +386,9 @@ export class DiscordAdapter {
     ) => Promise<Pick<PersonRecord, "id" | "bondLevel"> | null>;
     chatStop?: ChatStopHandler;
     onGatewayFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
+    /** Where the gateway client and the broker send REST requests. Defaults to
+     *  Discord's API; tests point it at a local peer. */
+    rest?: Partial<RESTOptions>;
   }) {
     this.connectionId = config.connectionId;
     this.conversationSettings = config.conversationSettings;
@@ -397,11 +406,13 @@ export class DiscordAdapter {
         GatewayIntentBits.DirectMessageReactions,
       ],
       partials: [Partials.Channel, Partials.Message],
+      ...(config.rest ? { rest: config.rest } : {}),
     });
     this._botToken = config.botToken;
     this.rest = new REST({
       version: DISCORD_API_VERSION,
       userAgentAppendix: "Rome Discord broker/1",
+      ...config.rest,
     }).setToken(config.botToken);
   }
 
