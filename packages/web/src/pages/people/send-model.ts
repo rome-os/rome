@@ -43,12 +43,16 @@ export interface AccountSegment {
 /**
  * The identifier a guardian recognizes an account by.
  *
- * A WhatsApp jid renders as the phone number it carries; every other channel
- * shows the address it minted, which is what its own UI shows. The same rule
- * `rowHandle` applies on the listing — a reader should recognize the same
- * account by the same string on both surfaces.
+ * A WhatsApp jid renders as the phone number it carries, and an agent as its
+ * label, since its address is an opaque Cloud id no UI shows. Every other
+ * channel shows the address it minted, which is what its own UI shows.
  */
-export function accountHandle(account: { channel: string; channelUserId: string }): string {
+export function accountHandle(account: {
+  channel: string;
+  channelUserId: string;
+  displayName: string;
+}): string {
+  if (account.channel === "agents") return account.displayName;
   return account.channel === "whatsapp"
     ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
     : account.channelUserId;
