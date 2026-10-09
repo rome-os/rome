@@ -136,7 +136,6 @@ import { ScheduleTriggerProvider } from "./routines/schedule-trigger-provider.js
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { migrateEventsToRoutines } from "./routines/migrate-events-to-routines.js";
 import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -1462,17 +1461,6 @@ async function main() {
     actionEngine,
     canSync: () => getInstanceToken() !== null,
   });
-
-  // Drains the deprecated events table into routines (one-shot, idempotent).
-  // Runs before the engine starts so migrated routines get activated.
-  try {
-    await migrateEventsToRoutines({ db, routinesRepo, settingsRepo });
-  } catch (err) {
-    log.error("events→routines migration failed", {
-      error: err instanceof Error ? err.message : String(err),
-      stack: err instanceof Error ? err.stack : undefined,
-    });
-  }
 
   await routineEngine.start();
 

@@ -253,7 +253,6 @@ describe("host jobs after action worker loss", () => {
         fire = callback;
       },
       deactivate() {},
-      isActive: () => true,
       stop() {},
     });
     const id = await routines.create({

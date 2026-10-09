@@ -22,6 +22,7 @@ const daily = (extra: Partial<ScheduleTrigger>): ScheduleTrigger => ({
   type: "schedule",
   tzid: "Asia/Tokyo",
   localTime: "09:00",
+  tzMode: "floating",
   rrule: "FREQ=DAILY",
   ...extra,
 });
@@ -34,11 +35,6 @@ describe("describeSchedule timezone suffix", () => {
     const sentence = describeSchedule(daily({ tzMode: "floating" }));
     expect(sentence).toBe("Every day at 9:00 AM");
     expect(sentence).not.toContain("Asia/Tokyo");
-  });
-
-  it("treats an absent tzMode (draft/legacy) as floating — no suffix", () => {
-    mockBrowserTz("UTC");
-    expect(describeSchedule(daily({}))).toBe("Every day at 9:00 AM");
   });
 
   it("keeps the tz suffix for a fixed schedule pinned to a different zone", () => {

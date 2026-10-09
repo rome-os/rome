@@ -68,7 +68,18 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
-import { describeTrigger, describeOutcome, relativeTime } from "@/lib/routine-language";
+import {
+  describeOutcome,
+  describeTrigger,
+  hasOwnName,
+  relativeTime,
+  routineDisplayName,
+  type EventBusTrigger,
+  type ManualTrigger,
+  type Routine,
+  type ScheduleTrigger,
+  type Trigger,
+} from "@/lib/routine-language";
 import { useActionCatalog, type ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { buildArgsTemplate, describeArgType, evaluateArgsText } from "@/lib/action-args";
 import {
@@ -78,48 +89,7 @@ import {
   useStopRoutine,
 } from "@/hooks/use-routines";
 
-interface ScheduleTrigger {
-  type: "schedule";
-  tzid: string;
-  // Floating follows the guardian's timezone; fixed pins `tzid`.
-  tzMode: "fixed" | "floating";
-  localTime: string;
-  date?: string;
-  rrule?: string;
-}
-
-interface EventBusTrigger {
-  type: "event-bus";
-  eventName: string;
-  sourcePattern?: string;
-}
-
-// A routine that never fires on its own — it only runs via "Run now". Carries
-// no config of its own.
-interface ManualTrigger {
-  type: "manual";
-}
-
-type Trigger = ScheduleTrigger | EventBusTrigger | ManualTrigger;
 type TriggerType = Trigger["type"];
-
-type RunStatus = "success" | "error" | "running" | "pending_approval" | "cancelled";
-
-interface Routine {
-  id: string;
-  name: string;
-  // The app that owns this routine, if any. A managed routine can't be deleted
-  // from the dashboard (the server refuses too) — only the owning app removes it.
-  managedBy?: string | null;
-  enabled: boolean;
-  trigger: Trigger;
-  actionName: string;
-  args: Record<string, unknown>;
-  createdAt: string;
-  lastFiredAt: string | null;
-  nextRunAt: string | null;
-  lastRun?: { status: RunStatus; firedAt: string } | null;
-}
 
 type ViewMode = "timeline" | "calendar" | "table";
 type TableFilter = "all" | "active" | "disabled" | "schedule" | "event-bus" | "manual" | "failing";
@@ -174,23 +144,6 @@ function isCompletedOneOff(r: Routine): boolean {
 function scheduleSubtypeLabel(t: TFunction, trigger: ScheduleTrigger): string {
   return trigger.rrule ? t("schedule.subtypeRecurring") : t("schedule.subtypeOneOff");
 }
-// The human-facing name for a routine, used wherever a routine is named (rows,
-// stats, next-up). The guardian-written name headlines the routine; agent-created
-// routines often carry a machine name equal to the action (no real name to show),
-// so the humanized action phrase stands in. Never surfaces the snake_case id.
-function routineDisplayName(routine: Routine): string {
-  const trimmedName = routine.name.trim();
-  if (
-    trimmedName !== "" &&
-    trimmedName !== routine.actionName &&
-    trimmedName !== artifactLocalName(routine.actionName)
-  ) {
-    return trimmedName;
-  }
-  const outcomePhrase = describeOutcome(routine.actionName, routine.args);
-  return outcomePhrase.charAt(0).toUpperCase() + outcomePhrase.slice(1);
-}
-
 // Adapts shadcn's Popover + Calendar recipe to our string-shaped form state.
 // The form stores `YYYY-MM-DD` (Zod string + RRULE expect it); Calendar speaks
 // Date. Parse/format here so the rest of the form stays unchanged. We avoid
@@ -1037,16 +990,8 @@ function RoutineCard({
 
   const triggerPhrase = describeTrigger(routine.trigger);
   const outcomePhrase = describeOutcome(routine.actionName, routine.args);
-  // The guardian-written name is the routine's intent and headlines the row.
-  // Agent-created routines often carry a machine name equal to the action — no
-  // real name to show — so the humanized action phrase becomes the title.
-  const trimmedName = routine.name.trim();
-  const hasMeaningfulName =
-    trimmedName !== "" &&
-    trimmedName !== routine.actionName &&
-    trimmedName !== artifactLocalName(routine.actionName);
   const title = routineDisplayName(routine);
-  const accessibleName = hasMeaningfulName ? trimmedName : `${triggerPhrase}, ${outcomePhrase}`;
+  const accessibleName = hasOwnName(routine) ? title : `${triggerPhrase}, ${outcomePhrase}`;
 
   // Only a truly-running run is stoppable. A pending_approval run has no live
   // process to kill, so it keeps the normal Run-now control.
@@ -1914,7 +1859,6 @@ function CreateRoutineModal({
                             </FieldLabel>
                             <Input
                               id="routine-eventname"
-                              list="routine-event-names"
                               value={field.state.value}
                               onChange={(e) => field.handleChange(e.target.value)}
                               onBlur={field.handleBlur}
@@ -1922,13 +1866,6 @@ function CreateRoutineModal({
                               className="font-mono"
                               aria-invalid={invalid || undefined}
                             />
-                            <datalist id="routine-event-names">
-                              <option value="action:completed" />
-                              <option value="action:failed" />
-                              <option value="message:received" />
-                              <option value="approval:resolved" />
-                              <option value="routine:fired" />
-                            </datalist>
                             <p className="text-aux text-muted-foreground">
                               {t("modal.hints.eventName")}
                             </p>
@@ -2128,7 +2065,7 @@ export default function RoutinesPage() {
   // The hook types triggers with a wider union (it admits unknown trigger types
   // for the card view's honest fallback); this page's Timeline/Calendar code uses
   // the narrower schedule|event discriminated union. Same JSON at runtime.
-  const routines = (routineData ?? []) as Routine[];
+  const routines = routineData ?? [];
   const invalidate = useInvalidateRoutines();
   const [view, setView] = useState<ViewMode>("table");
   const [showCreate, setShowCreate] = useState(false);

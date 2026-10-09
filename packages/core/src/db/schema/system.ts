@@ -20,25 +20,6 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
-// Superseded by `routines`. No code reads or writes this table; kept only
-// pending a removal + drop migration. Do not add new readers/writers.
-export const events = sqliteTable("events", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  type: text("type", { enum: ["one-off", "recurring"] }).notNull(),
-  tzid: text("tzid").notNull(),
-  localTime: text("local_time").notNull(),
-  rrule: text("rrule"),
-  startTime: integer("start_time", { mode: "timestamp" }).notNull(),
-  endTime: integer("end_time", { mode: "timestamp" }),
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastRunAt: integer("last_run_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
-
 export const sessions = sqliteTable("sessions", {
   id: text("id").primaryKey(),
   agentName: text("agent_name").notNull(),

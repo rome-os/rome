@@ -695,7 +695,7 @@ describe("Routines API", () => {
 });
 
 // Routines fire path — exercises POST /routines → engine.activate → provider
-// fires → engine.dispatch → action executes → /runs + /stats reflect outcome.
+// fires → engine.dispatch → action executes → /runs reflects outcome.
 // Uses the same ManualTriggerProvider declared at the top of the file so
 // tests can trigger fires deterministically without waiting on a real
 // schedule.
@@ -1239,64 +1239,6 @@ describe("Routines fire path", () => {
     expect(rows2).toHaveLength(10);
     expect(rows2[0].executionId).toBe("exec-014");
     expect(rows2[9].executionId).toBe("exec-005");
-  });
-
-  it("/stats reports avgDurationMs, lastStatus, and lastFiredAt", async () => {
-    registerStubAction(harness.actionRegistry, "anything");
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "stats",
-      trigger: scheduleTrigger,
-      actionName: "anything",
-    });
-
-    // Same firedAt-collision concern as the pagination test — seed directly
-    // with explicit, spaced timestamps so "last run" is unambiguous.
-    const t1 = new Date("2026-05-25T09:00:00Z");
-    const t2 = new Date("2026-05-25T09:01:00Z");
-    await harness.db.insert(routineRuns).values({
-      id: "run-1",
-      routineId: id,
-      executionId: "e-1",
-      status: "success",
-      payload: null as unknown,
-      firedAt: t1,
-      durationMs: 100,
-      error: null,
-    });
-    await harness.db.insert(routineRuns).values({
-      id: "run-2",
-      routineId: id,
-      executionId: "e-2",
-      status: "error",
-      payload: null as unknown,
-      firedAt: t2,
-      durationMs: 300,
-      error: "nope",
-    });
-
-    const res = await harness.app.request(`/routines/${id}/stats`);
-    expect(res.status).toBe(200);
-    const stats = (await res.json()) as {
-      totalRuns: number;
-      successCount: number;
-      errorCount: number;
-      avgDurationMs: number | null;
-      lastStatus: string | null;
-      lastFiredAt: string | null;
-    };
-    expect(stats.totalRuns).toBe(2);
-    expect(stats.successCount).toBe(1);
-    expect(stats.errorCount).toBe(1);
-    // SQLite avg() returns a float — use toBeCloseTo to avoid IEEE-754 jitter
-    // if seeded durations ever change.
-    expect(stats.avgDurationMs).not.toBeNull();
-    expect(stats.avgDurationMs!).toBeCloseTo(200, 5);
-    // Last run was r2 (error)
-    expect(stats.lastStatus).toBe("error");
-    // lastFiredAt round-trips through Hono JSON as a number (Drizzle timestamp
-    // mode + JSON.stringify of Date). Either way, assert it matches t2 exactly.
-    expect(stats.lastFiredAt).not.toBeNull();
-    expect(new Date(stats.lastFiredAt!).toISOString()).toBe(t2.toISOString());
   });
 
   it("engine.start() hydrates enabled routines persisted in the DB", async () => {

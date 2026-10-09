@@ -1,8 +1,8 @@
-import { and, eq, desc, inArray, sql } from "drizzle-orm";
+import { and, eq, desc, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import type { RoutineRun, RoutineRunStatus, RoutineStats } from "../../routines/types.js";
+import type { RoutineRun, RoutineRunStatus } from "../../routines/types.js";
 
 type RoutineRunRow = typeof routineRuns.$inferSelect;
 
@@ -125,8 +125,7 @@ export class RoutineRunsRepository {
    * cards get Running/Failed/last-run state without an N+1 of per-card queries.
    * Newest-first, keeping the first row seen per routine (id as a deterministic
    * tiebreak when two runs share a fired_at second). Routines with no runs are
-   * simply absent from the map. Mirrors `getStats`'s typed Drizzle style; at
-   * dashboard scale (a handful of routines) reading their run rows is fine. */
+   * simply absent from the map. At dashboard scale (a handful of routines) reading their run rows is fine. */
   async findLatestByRoutineIds(ids: string[]): Promise<Map<string, RoutineLatestRun>> {
     const map = new Map<string, RoutineLatestRun>();
     if (ids.length === 0) return map;
@@ -147,41 +146,5 @@ export class RoutineRunsRepository {
       }
     }
     return map;
-  }
-
-  async getStats(routineId: string): Promise<RoutineStats> {
-    const rows = await this.db
-      .select({
-        totalRuns: sql<number>`count(*)`,
-        successCount: sql<number>`sum(case when ${routineRuns.status} = 'success' then 1 else 0 end)`,
-        errorCount: sql<number>`sum(case when ${routineRuns.status} = 'error' then 1 else 0 end)`,
-        avgDurationMs: sql<number>`avg(${routineRuns.durationMs})`,
-      })
-      .from(routineRuns)
-      .where(eq(routineRuns.routineId, routineId));
-
-    const agg = rows[0];
-
-    const lastRows = await this.db
-      .select()
-      .from(routineRuns)
-      .where(eq(routineRuns.routineId, routineId))
-      .orderBy(desc(routineRuns.firedAt))
-      .limit(1);
-
-    const lastRun = lastRows[0];
-
-    return {
-      totalRuns: Number(agg?.totalRuns ?? 0),
-      successCount: Number(agg?.successCount ?? 0),
-      errorCount: Number(agg?.errorCount ?? 0),
-      lastStatus: lastRun?.status ?? null,
-      lastFiredAt: lastRun?.firedAt ?? null,
-      avgDurationMs: agg?.avgDurationMs ? Number(agg.avgDurationMs) : null,
-    };
-  }
-
-  async deleteByRoutineId(routineId: string) {
-    await this.db.delete(routineRuns).where(eq(routineRuns.routineId, routineId));
   }
 }

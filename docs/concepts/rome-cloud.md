@@ -86,8 +86,8 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 - An action run event covers a finished top-level action execution that a routine fired, that an app called itself, or that a webhook sent to an app's action. An agent's tool calls are not action runs. Turn events count their model work.
 - Turn and action run events carry a trigger, which records what set the work off:
   - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
-  - `schedule`: a schedule or poll trigger fired a routine.
-  - `event`: an event or webhook trigger fired a routine, or a webhook reached an app's action.
+  - `schedule`: a schedule trigger fired a routine.
+  - `event`: an event trigger fired a routine, or a webhook reached an app's action.
   - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page. So does the skill review Rome starts on its own after a main-agent turn with many tool calls.
   - `unknown`: none of the above can be told.
 

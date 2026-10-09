@@ -2,13 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { sql } from "drizzle-orm";
 import { describe, expect, it } from "@rstest/core";
-import { createTestDb } from "../test/helpers.js";
-import { events } from "./schema.js";
-import { RoutinesRepository } from "./repositories/routines.js";
-import { SettingsRepository } from "./repositories/settings.js";
-import { migrateEventsToRoutines } from "../routines/migrate-events-to-routines.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
 
@@ -94,44 +88,6 @@ describe("sentinel_review routine removal migration", () => {
       expect(ids(sqlite, "events")).toEqual(["digest-event"]);
     } finally {
       sqlite.close();
-    }
-  });
-
-  it("leaves no legacy sentinel_review event for the boot-time events conversion to recreate", async () => {
-    const testDb = createTestDb();
-    try {
-      const routinesRepo = new RoutinesRepository(testDb.db);
-      const settingsRepo = new SettingsRepository(testDb.db);
-      for (const [id, actionName] of [
-        ["sentinel-event", "sentinel_review"],
-        ["digest-event", "send_digest"],
-      ]) {
-        await testDb.db.insert(events).values({
-          id,
-          name: actionName,
-          type: "recurring",
-          tzid: "UTC",
-          localTime: "00:00",
-          rrule: "FREQ=HOURLY;INTERVAL=2",
-          startTime: new Date("2026-01-01T00:00:00Z"),
-          actionName,
-          args: [],
-          enabled: true,
-          createdAt: new Date("2026-01-01T00:00:00Z"),
-        });
-      }
-
-      // createTestDb already ran every migration against empty tables, so
-      // replay the removal over the seeded events, then convert as boot does.
-      for (const statement of statements(removalMigration())) {
-        testDb.db.run(sql.raw(statement));
-      }
-      await migrateEventsToRoutines({ db: testDb.db, routinesRepo, settingsRepo });
-
-      const routines = await routinesRepo.findAll();
-      expect(routines.map((routine) => routine.actionName)).toEqual(["send_digest"]);
-    } finally {
-      testDb.close();
     }
   });
 });

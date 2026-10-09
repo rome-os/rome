@@ -9,9 +9,9 @@ import { artifactLocalName } from "./artifact-name";
 export interface ScheduleTrigger {
   type: "schedule";
   tzid: string;
-  // `fixed` pins `tzid`; `floating` (or absent, for drafts/legacy)
-  // follows the guardian's current zone, so `tzid` is just a snapshot.
-  tzMode?: "fixed" | "floating";
+  // `fixed` pins `tzid`; `floating` follows the guardian's current zone, so
+  // `tzid` is just a snapshot.
+  tzMode: "fixed" | "floating";
   localTime: string;
   date?: string;
   rrule?: string;
@@ -23,18 +23,19 @@ export interface EventBusTrigger {
   sourcePattern?: string;
 }
 
-// The list endpoint can also surface webhook/poll triggers; this page only
-// derives rich phrases for schedule + event-bus. Anything else falls through to
-// an honest raw-name rendering rather than a fabricated phrase.
-export type Trigger =
-  | ScheduleTrigger
-  | EventBusTrigger
-  | { type: "manual" }
-  | { type: string; [k: string]: unknown };
+// A routine that never fires on its own; it only runs via "Run now".
+export interface ManualTrigger {
+  type: "manual";
+}
+
+export type Trigger = ScheduleTrigger | EventBusTrigger | ManualTrigger;
 
 export interface Routine {
   id: string;
   name: string;
+  // The app that owns this routine, if any. A managed routine can't be deleted
+  // from the dashboard (the server refuses too); only the owning app removes it.
+  managedBy?: string | null;
   enabled: boolean;
   trigger: Trigger;
   actionName: string;
@@ -136,7 +137,7 @@ export function describeSchedule(trigger: ScheduleTrigger): string {
   const time = formatLocalTime12h(trigger.localTime);
   // Only a `fixed` schedule is pinned to `tzid`; a floating one fires in the
   // guardian's current zone (≈ the browser's), so a zone suffix would lie about
-  // when it runs. Drafts/legacy with no tzMode read as floating.
+  // when it runs.
   const suffix = trigger.tzMode === "fixed" ? tzSuffix(trigger.tzid) : "";
 
   if (trigger.date) {
@@ -196,28 +197,9 @@ export function describeSchedule(trigger: ScheduleTrigger): string {
 
 // Event name → trigger phrase
 
-// Seed map from the explorer's observed event names to plain phrases. Keep the
-// phrase grammatical as the subject of "Whenever <phrase>". When an event isn't
-// here we fall back to a readable transform of the raw name + sourcePattern —
-// honest, not pretty — rather than guessing meaning.
-export const EVENT_LABELS: Record<string, string> = {
-  "message:received": "a new message arrives",
-  "action:completed": "a task finishes",
-  "action:failed": "a task fails",
-  "approval:resolved": "an approval is decided",
-  "routine:fired": "another routine fires",
-  "order.created": "a new order comes in",
-  "connector:GMAIL_NEW_MESSAGE": "a new email arrives",
-  "connector:SLACK_NEW_MESSAGE": "a new Slack message arrives",
-  "github:PR_OPENED": "a pull request opens",
-  "provider:event:gmail.new_message": "a new email arrives",
-  "provider:event:gmail.message_sent": "you send an email",
-  "provider:event:stripe.payment_succeeded": "a payment succeeds",
-};
-
-// Honest fallback: turn "connector:GMAIL_NEW_MESSAGE" into "a gmail new message
-// event happens", "order.created" into "an order created event happens". We do
-// not pretend to know the semantics — we surface the raw name readably.
+// Turn "connector:GMAIL_NEW_MESSAGE" into "a gmail new message event happens",
+// "order.created" into "an order created event happens". We do not pretend to
+// know the semantics; we surface the raw name readably.
 function humanizeEventName(eventName: string): string {
   const tail = eventName.includes(":")
     ? eventName.slice(eventName.lastIndexOf(":") + 1)
@@ -227,12 +209,11 @@ function humanizeEventName(eventName: string): string {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .trim()
     .toLowerCase();
-  return words ? `a ${words} event happens` : `the ${eventName} event happens`;
+  if (!words) return `the ${eventName} event happens`;
+  return `${/^[aeiou]/.test(words) ? "an" : "a"} ${words} event happens`;
 }
 
 export function describeEvent(trigger: EventBusTrigger): string {
-  const known = EVENT_LABELS[trigger.eventName];
-  if (known) return known;
   const base = humanizeEventName(trigger.eventName);
   if (trigger.sourcePattern) return `${base} (from ${trigger.sourcePattern})`;
   return base;
@@ -243,8 +224,7 @@ export function describeEvent(trigger: EventBusTrigger): string {
 export function describeTrigger(trigger: Trigger): string {
   if (isScheduleTrigger(trigger)) return describeSchedule(trigger);
   if (isEventTrigger(trigger)) return `Whenever ${describeEvent(trigger)}`;
-  if (trigger.type === "manual") return "Only when you run it";
-  return `When ${trigger.type} fires`;
+  return "Only when you run it";
 }
 
 // actionName + args → outcome phrase
@@ -293,6 +273,25 @@ export function describeOutcome(actionName: string, args: Record<string, unknown
     return `${base}: "${msg}"`;
   }
   return base;
+}
+
+// Agent-created routines often name themselves after the action they run,
+// which reads as no name at all.
+export function hasOwnName(routine: Pick<Routine, "name" | "actionName">): boolean {
+  const trimmed = routine.name.trim();
+  return (
+    trimmed !== "" &&
+    trimmed !== routine.actionName &&
+    trimmed !== artifactLocalName(routine.actionName)
+  );
+}
+
+/** What the routine is called: its own name, else the humanized outcome. Never
+ * surfaces the snake_case action id. */
+export function routineDisplayName(routine: Pick<Routine, "name" | "actionName" | "args">): string {
+  if (hasOwnName(routine)) return routine.name.trim();
+  const outcome = describeOutcome(routine.actionName, routine.args);
+  return outcome.charAt(0).toUpperCase() + outcome.slice(1);
 }
 
 // Relative time

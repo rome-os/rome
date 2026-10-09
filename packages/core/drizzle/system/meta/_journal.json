@@ -491,6 +491,13 @@
       "when": 1791331736062,
       "tag": "0070_remove_sentinel_review_routines",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1791331737062,
+      "tag": "0071_drop_events",
+      "breakpoints": true
     }
   ]
 }

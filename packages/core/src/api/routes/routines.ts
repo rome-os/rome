@@ -248,12 +248,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const latest = await deps.routineRunsRepo.findLatestByRoutineIds(rows.map((r) => r.id));
     const enriched = rows.map((row) => {
       const lr = latest.get(row.id);
-      // Normalize the trigger so a backfill-escaped schedule never surfaces
-      // `tzMode: undefined` to API/dashboard consumers — the read
-      // contract must match the now-required type, not just the scheduler.
       return {
         ...row,
-        trigger: toRoutine(row).trigger,
         lastRun: lr ? { status: lr.status, firedAt: lr.firedAt } : null,
       };
     });
@@ -510,12 +506,6 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       error: run.error ?? null,
       roots: buildActionTrace(rows),
     });
-  });
-
-  app.get("/routines/:id/stats", async (c) => {
-    const id = c.req.param("id");
-    const stats = await deps.routineRunsRepo.getStats(id);
-    return c.json(stats);
   });
 
   return app;

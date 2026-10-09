@@ -182,10 +182,8 @@ function triggerForRoutineFire(firedBy: string | null): UsageTrigger {
     case "manual":
       return "user";
     case "schedule":
-    case "poll":
       return "schedule";
     case "event-bus":
-    case "webhook":
       return "event";
     default:
       return "unknown";
