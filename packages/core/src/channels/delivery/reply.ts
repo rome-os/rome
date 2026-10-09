@@ -209,8 +209,15 @@ export class ReplyDelivery {
         },
         this.abort.signal,
       )
-      .catch(() => {
+      .catch((error: unknown) => {
         // A write the stop dropped before it ran: nothing happened.
+        if (this.abort.signal.aborted) return;
+        // Anything else escaped the write's own handling of the transport's
+        // errors, such as a codec that throws. Left alone it would plan the
+        // same write again, so the reply fails.
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn("reply write failed outside the transport", { error: message });
+        this.fail({ kind: "rejected", message });
       })
       .finally(() => {
         this.writing = false;

@@ -81,6 +81,15 @@ describe("telegramTransport", () => {
     });
   });
 
+  it("spaces writes to a group three seconds apart and to a private chat one second", () => {
+    const { conversationSpacingMs } = telegramTransport({} as unknown as Api).capabilities.budget;
+    if (typeof conversationSpacingMs !== "function")
+      throw new Error("Telegram's spacing depends on the chat");
+    expect(conversationSpacingMs("-1001234567890")).toBe(3000);
+    expect(conversationSpacingMs("-4242")).toBe(3000);
+    expect(conversationSpacingMs("55")).toBe(1000);
+  });
+
   it("reports a token Telegram no longer accepts as unauthorized", async () => {
     expect(await failureOf(refusal(401, "Unauthorized"))).toMatchObject({ kind: "unauthorized" });
   });

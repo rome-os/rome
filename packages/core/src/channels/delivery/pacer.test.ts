@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { FakeClock } from "../../test/kit/clock.js";
 import { type Budget, Pacer } from "./pacer.js";
@@ -92,23 +93,22 @@ describe("Pacer", () => {
     expect(log).toEqual(["1@0"]);
   });
 
-  it("holds a conversation, or the whole account, when the platform says to slow down", async () => {
+  it("holds every write of the account when the platform says to slow down", async () => {
     const paced = pacer();
-    paced.pause(2000, "a");
+    paced.pause(5000);
     const a = paced.run("a", write("a"));
     const b = paced.run("b", write("b"));
     await advance(0);
-    paced.pause(5000);
-    const c = paced.run("c", write("c"));
+    expect(log).toEqual([]);
     await advance("6s");
-    await Promise.all([a, b, c]);
-    expect(log).toEqual(["b@0", "a@5000", "c@5000"]);
+    await Promise.all([a, b]);
+    expect(log).toEqual(["a@5000", "b@5000"]);
   });
 
   it("keeps a pause the running write asked for", async () => {
     const paced = pacer();
     const limited = paced.run("a", async () => {
-      paced.pause(3000, "a");
+      paced.pause(3000);
       throw new Error("rate limited");
     });
     await expect(limited).rejects.toThrow();
@@ -116,6 +116,27 @@ describe("Pacer", () => {
     await advance("5s");
     await next;
     expect(log).toEqual(["retry@3000"]);
+  });
+
+  it("spaces a conversation's writes by what the budget names for that conversation", async () => {
+    // A group allows fewer writes than a private chat, and its ids are negative.
+    const paced = pacer({ conversationSpacingMs: (chat) => (chat.startsWith("-") ? 3000 : 1000) });
+    const writes = [
+      paced.run("-100", write("group 1")),
+      paced.run("-100", write("group 2")),
+      paced.run("7", write("private 1")),
+      paced.run("7", write("private 2")),
+    ];
+    await advance("10s");
+    await Promise.all(writes);
+    expect(log).toEqual(["group 1@0", "private 1@0", "private 2@1000", "group 2@3000"]);
+  });
+
+  it("stops listening for an abort once a write starts, so a shared signal keeps no listener per write", async () => {
+    const paced = pacer();
+    const controller = new AbortController();
+    for (let i = 0; i < 5; i++) await paced.run("a", write(String(i)), controller.signal);
+    expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
   });
 
   it("forgets a conversation once its queue is empty and its spacing has passed", async () => {

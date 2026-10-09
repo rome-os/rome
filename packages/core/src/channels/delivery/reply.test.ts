@@ -529,6 +529,31 @@ describe("ReplyDelivery", () => {
     expect(platform.shown).toEqual(["hi"]);
   });
 
+  it("fails the reply instead of planning the same write again when a write fails outside the transport", async () => {
+    // Stands in for a fault the write's own handling of the transport's errors
+    // does not cover, such as a codec that throws.
+    const faulty = {
+      run: async () => {
+        throw new Error("codec exploded");
+      },
+      pause: () => {},
+    } as unknown as Pacer;
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer: faulty,
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "c1",
+      clock,
+    });
+    delivery.accept(result("hi"));
+    const outcome = await delivery.finish();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      failure: { kind: "rejected", message: "codec exploded" },
+    });
+  });
+
   it("keeps a delivered message delivered when the observer throws", async () => {
     const delivery = new ReplyDelivery({
       transport: platform,

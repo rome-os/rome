@@ -17,8 +17,9 @@ export interface DeliveryCapabilities {
 }
 
 /**
- * How replies stream. Validated configuration, narrowed by capabilities:
- * `edit` on a platform that cannot edit delivers as `blocks`.
+ * How replies stream, narrowed by capabilities: `edit` on a platform that
+ * cannot edit delivers as `blocks`. Callers build a policy from constants, and
+ * nothing parses one from configuration.
  */
 const deliveryPolicySchema = z.object({
   /**

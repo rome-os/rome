@@ -11,9 +11,14 @@ export function telegramTransport(api: Api): DeliveryTransport {
     capabilities: {
       maxPartLength: 4096,
       edit: true,
-      // Telegram allows a bot about one message a second in a chat, and about
-      // 30 a second across chats.
-      budget: { burst: 30, refillMs: 34, conversationSpacingMs: 1000 },
+      // Telegram allows a bot about 30 messages a second across chats, about
+      // one a second in a private chat, and 20 a minute in a group. Group and
+      // channel chat ids are negative.
+      budget: {
+        burst: 30,
+        refillMs: 34,
+        conversationSpacingMs: (chat) => (chat.startsWith("-") ? 3000 : 1000),
+      },
     },
     codec: plainText,
     create: (chat, text, replyTo) =>

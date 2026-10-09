@@ -6,17 +6,24 @@ export interface Budget {
   burst: number;
   /** How long one write's allowance takes to come back. */
   refillMs: number;
-  /** The least time between two writes to the same conversation. */
-  conversationSpacingMs: number;
+  /**
+   * The least time between two writes to the same conversation. A platform
+   * whose conversations differ, such as private chats and groups, gives a
+   * function of the conversation.
+   */
+  conversationSpacingMs: number | ((conversation: string) => number);
 }
 
 interface Job {
   write: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  /** Stops listening for the caller's abort. Called once the job leaves the queue. */
+  dispose?: () => void;
 }
 
 interface Lane {
+  conversation: string;
   queue: Job[];
   /** When this conversation may next be written to. */
   readyAt: number;
@@ -70,38 +77,31 @@ export class Pacer {
       };
       let lane = this.lanes.get(conversation);
       if (!lane) {
-        lane = { queue: [], readyAt: 0, servedTurn: 0 };
+        lane = { conversation, queue: [], readyAt: 0, servedTurn: 0 };
         this.lanes.set(conversation, lane);
       }
       lane.queue.push(job);
-      signal?.addEventListener(
-        "abort",
-        () => {
+      if (signal) {
+        const onAbort = () => {
           const queue = this.lanes.get(conversation)?.queue;
           const index = queue?.indexOf(job) ?? -1;
           if (index < 0) return;
           queue!.splice(index, 1);
           reject(signal.reason);
           this.pump();
-        },
-        { once: true },
-      );
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        // A job that has started cannot be dropped, so it needs no listener. A
+        // reply shares one signal across all its writes.
+        job.dispose = () => signal.removeEventListener("abort", onAbort);
+      }
       this.pump();
     });
   }
 
-  /**
-   * Holds writes for `ms` after the platform asked to slow down: only those to
-   * `conversation` when the limit was the conversation's, else every write.
-   */
-  pause(ms: number, conversation?: string): void {
-    const until = this.now() + ms;
-    if (conversation === undefined) this.pausedUntil = Math.max(this.pausedUntil, until);
-    else {
-      const lane = this.lanes.get(conversation) ?? { queue: [], readyAt: 0, servedTurn: 0 };
-      lane.readyAt = Math.max(lane.readyAt, until);
-      this.lanes.set(conversation, lane);
-    }
+  /** Holds every write of the account for `ms`, after the platform asked to slow down. */
+  pause(ms: number): void {
+    this.pausedUntil = Math.max(this.pausedUntil, this.now() + ms);
     this.pump();
   }
 
@@ -147,6 +147,7 @@ export class Pacer {
 
   private start(lane: Lane): void {
     const job = lane.queue.shift()!;
+    job.dispose?.();
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
@@ -160,10 +161,16 @@ export class Pacer {
     }
     void written.then(job.resolve, job.reject).finally(() => {
       this.running = false;
-      // A pause the write itself asked for (a rate limit) outlasts the spacing.
-      lane.readyAt = Math.max(lane.readyAt, this.now() + this.budget.conversationSpacingMs);
+      lane.readyAt = this.now() + this.spacing(lane.conversation);
       this.pump();
     });
+  }
+
+  private spacing(conversation: string): number {
+    const { conversationSpacingMs } = this.budget;
+    return typeof conversationSpacingMs === "function"
+      ? conversationSpacingMs(conversation)
+      : conversationSpacingMs;
   }
 
   private refill(now: number): void {
