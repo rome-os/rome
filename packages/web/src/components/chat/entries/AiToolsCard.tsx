@@ -34,6 +34,7 @@ export interface AiToolsCardProps {
 export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   const { t, i18n } = useTranslation("chat");
   const [sent, setSent] = useState(false);
+  const [sentWithCredits, setSentWithCredits] = useState(false);
   const [probe, setProbe] = useState<Probe>("checking");
   const [credits, setCredits] = useState<RomeCreditsView | null>(null);
   const resolved = result !== undefined || sent;
@@ -41,6 +42,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   const submit = useCallback(
     (output: Record<string, unknown>, summary: string) => {
       setSent(true);
+      setSentWithCredits(output.credits === true);
       onSubmit(toolUseId, output, summary);
     },
     [onSubmit, toolUseId],
@@ -78,7 +80,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     }
   }, [probe, resolved, submit, t]);
 
-  const usingCredits = result?.credits === true;
+  const usingCredits = result ? result.credits === true : sentWithCredits;
   const connected =
     !usingCredits && (result?.connected === true || (sent && probe === "connected"));
   const skipped = result?.skip === true || result?.dismissed === true;

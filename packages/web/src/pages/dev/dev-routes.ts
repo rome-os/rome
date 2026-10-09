@@ -97,12 +97,5 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
           "The real OnboardPage on its create-account step. Reachable without an un-onboarded backend, which the route under AuthGate needs.",
         Component: lazy(() => import("./OnboardPreviewPage")),
       },
-      {
-        path: "/dev/rome-credits",
-        title: "Rome credits",
-        description:
-          "The welcome connect step and the used-up chat error with Rome credits, against the mock credits scenario.",
-        Component: lazy(() => import("./RomeCreditsPreviewPage")),
-      },
     ]
   : [];

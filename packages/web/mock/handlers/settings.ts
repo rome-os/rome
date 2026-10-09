@@ -86,29 +86,6 @@ const romeCredits: RomeCreditsView = {
   models: ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-terra"],
 };
 
-// Prototype knob: `localStorage["rome-mock:rome-credits"]` picks a scenario so
-// each credits state is one reload away.
-function romeCreditsScenario(): RomeCreditsView | null {
-  let scenario: string | null = null;
-  try {
-    scenario = globalThis.localStorage?.getItem("rome-mock:rome-credits") ?? null;
-  } catch {
-    /* storage blocked */
-  }
-  switch (scenario) {
-    case "none":
-      return null;
-    case "fresh":
-      return { ...romeCredits, balanceMicros: "10000000", availableMicros: "10000000" };
-    case "usedUp":
-      return { ...romeCredits, balanceMicros: "-12000", availableMicros: "-12000" };
-    case "paused":
-      return { ...romeCredits, enabled: false, models: [] };
-    default:
-      return romeCredits;
-  }
-}
-
 // ── Access control ─────────────────────────────────────
 
 interface PublicAccessConfig {
@@ -337,7 +314,7 @@ export const settingsHandlers = [
     HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
   ),
   http.get("/api/ai-tools/rome-credits", () =>
-    HttpResponse.json({ credits: romeCreditsScenario() } satisfies RomeCreditsResponse),
+    HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),
   ),
   http.get("/api/ai-tools/anthropic-compatible-providers", () =>
     HttpResponse.json({ providers: anthropicProviders, configured: configuredAnthropic }),

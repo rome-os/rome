@@ -18,6 +18,19 @@ afterAll(async () => {
 });
 
 describe("ErrorEventView", () => {
+  it("sends a user whose Rome credits ran out to connect an AI", () => {
+    render(
+      <MemoryRouter>
+        <ErrorEventView error="Rome credits are used up." code="credits_used_up" />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Rome 额度已用完")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /连接 AI/ }).getAttribute("href")).toBe(
+      "/settings/ai-tools",
+    );
+  });
+
   it("guides a logged-out Codex user to AI Tools", () => {
     render(
       <MemoryRouter>
