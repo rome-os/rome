@@ -214,7 +214,7 @@ describe("UsageAttributionResolver.forTurn", () => {
 });
 
 describe("UsageAttributionResolver.forActionRun", () => {
-  const r = resolver({}, {}, { "digest-root": "schedule", "poll-root": "poll" });
+  const r = resolver({}, {}, { "digest-root": "schedule" });
   const run = (actionName: string, initiator: string | null, extra: Partial<Execution> = {}) =>
     r.forActionRun({
       actionName,
@@ -250,10 +250,10 @@ describe("UsageAttributionResolver.forActionRun", () => {
   it("reports what fired a routine run", async () => {
     const fired = (rootExecutionId: string) =>
       run("core.memory", "routine:Digest", { rootExecutionId }).then((a) => a?.trigger);
-    expect(await fired("poll-root")).toBe("schedule");
+    expect(await fired("digest-root")).toBe("schedule");
     expect(await fired("missing-root")).toBe("unknown");
     const manual = resolver({}, {}, { root: "run_now" });
-    const webhook = resolver({}, {}, { root: "webhook" });
+    const eventBus = resolver({}, {}, { root: "event-bus" });
     const row = {
       actionName: "core.memory",
       initiator: "routine:Digest",
@@ -261,7 +261,7 @@ describe("UsageAttributionResolver.forActionRun", () => {
       rootExecutionId: "root",
     };
     expect((await manual.forActionRun(row))?.trigger).toBe("user");
-    expect((await webhook.forActionRun(row))?.trigger).toBe("event");
+    expect((await eventBus.forActionRun(row))?.trigger).toBe("event");
   });
 
   it("calls an app's run from a signed-in session user-initiated", async () => {
