@@ -258,19 +258,42 @@ describe("ReplyDelivery", () => {
   });
 
   describe("blocks mode", () => {
-    it("sends a settled part at once and a waiting part after blockWaitMs", async () => {
+    it("sends a waiting part after blockWaitMs, ending at a break, and the rest once the block completes", async () => {
       const delivery = reply({ mode: "blocks" });
-      delivery.accept(delta("short start"));
+      delivery.accept(delta("First idea. Second"));
       await advance(1000);
       expect(platform.messages).toHaveLength(0);
       await advance(1000);
-      expect(platform.shown).toEqual(["short start"]);
-      delivery.accept(delta(" and the rest"));
-      delivery.accept(text("short start and the rest"));
+      expect(platform.shown).toEqual(["First idea."]);
+      delivery.accept(delta(" idea"));
+      delivery.accept(text("First idea. Second idea"));
       await delivery.finish();
 
-      expect(platform.shown).toEqual(["short start", " and the rest"]);
+      expect(platform.shown).toEqual(["First idea.", " Second idea"]);
       expect(platform.messages.every((m) => m.history.length === 1)).toBe(true);
+    });
+
+    it("never ends a part that waited out blockWaitMs in the middle of a word", async () => {
+      const delivery = reply({ mode: "blocks", blockWaitMs: 1000 });
+      delivery.accept(delta("Hello wor", "a"));
+      await advance(1500);
+      expect(platform.shown).toEqual(["Hello "]);
+
+      delivery.accept(delta("ld, bye", "a"));
+      delivery.accept(text("Hello world, bye", "a"));
+      await delivery.finish();
+      expect(platform.shown).toEqual(["Hello ", "world, bye"]);
+    });
+
+    it("keeps waiting while the text holds no break, and sends at once when one arrives", async () => {
+      const delivery = reply({ mode: "blocks", blockWaitMs: 1000 });
+      delivery.accept(delta("Hel", "a"));
+      await advance(5000);
+      expect(platform.messages).toHaveLength(0);
+
+      delivery.accept(delta("lo wor", "a"));
+      await advance(0);
+      expect(platform.shown).toEqual(["Hello "]);
     });
 
     it("is what edit mode becomes on a platform that cannot edit", async () => {
@@ -289,14 +312,14 @@ describe("ReplyDelivery", () => {
 
     it("reports a part that differs from the final text instead of resending it", async () => {
       const delivery = reply({ mode: "blocks", blockWaitMs: 0 });
-      delivery.accept(delta("Draft"));
+      delivery.accept(delta("Draft. "));
       await advance(0);
       await advance(0);
-      delivery.accept(text("Final"));
+      delivery.accept(text("Final. "));
       const outcome = await delivery.finish();
 
-      expect(platform.shown).toEqual(["Draft"]);
-      expect(outcome.parts).toEqual([expect.objectContaining({ text: "Draft", diverged: true })]);
+      expect(platform.shown).toEqual(["Draft."]);
+      expect(outcome.parts).toEqual([expect.objectContaining({ text: "Draft.", diverged: true })]);
     });
   });
 

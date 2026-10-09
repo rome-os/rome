@@ -24,7 +24,16 @@ export function telegramTransport(api: Api): DeliveryTransport {
     create: (chat, text, replyTo) =>
       call(async () => {
         const sent = await api.sendMessage(chat, text, {
-          ...(replyTo ? { reply_parameters: { message_id: Number(replyTo) } } : {}),
+          // The user can delete the message while a long run streams. The reply
+          // is still worth sending, without the link to it.
+          ...(replyTo
+            ? {
+                reply_parameters: {
+                  message_id: Number(replyTo),
+                  allow_sending_without_reply: true,
+                },
+              }
+            : {}),
         });
         return { messageId: String(sent.message_id), conversationId: String(sent.chat.id) };
       }),
@@ -61,6 +70,8 @@ function classify(error: unknown): DeliveryFailure {
     // Only a 401 means the token is dead. A 403 is a refusal for one chat, such
     // as a user who blocked the bot, and the token still works.
     if (error.error_code === 401) return new DeliveryFailure("unauthorized", error.description);
+    // A server error is a hiccup, and the write may have gone through before it.
+    if (error.error_code >= 500) return new DeliveryFailure("unknown", error.description);
     return new DeliveryFailure("rejected", error.description);
   }
   // The request may have reached Telegram before the connection failed.

@@ -4,6 +4,23 @@ import type { TextCodec } from "./types.js";
 const BREAKS = [/\n\n/g, /\n/g, /[.!?。！？](?=\s|$)|[。！？]/g, /\s/g];
 
 /**
+ * The offset just after the last readable break in `source`, or 0 when it has
+ * none. A stronger break wins when one lies in the second half, as in
+ * `splitPoint`, and otherwise the latest break of any kind does.
+ */
+export function lastBreak(source: string): number {
+  const floor = Math.ceil(source.length / 2);
+  let latest = 0;
+  for (const pattern of BREAKS) {
+    let found = 0;
+    for (const match of source.matchAll(pattern)) found = match.index + match[0].length;
+    if (found > 0 && found >= floor) return found;
+    latest = Math.max(latest, found);
+  }
+  return latest;
+}
+
+/**
  * Where a message holding the start of `source` should end, as a source
  * offset: the longest prefix whose rendering fits `limit` both as a preview
  * and settled, moved back to a readable break when one lies in its second

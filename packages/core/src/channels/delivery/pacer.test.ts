@@ -1,7 +1,7 @@
 import { getEventListeners } from "node:events";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { FakeClock } from "../../test/kit/clock.js";
-import { type Budget, Pacer } from "./pacer.js";
+import { type Budget, Pacer, SKIPPED } from "./pacer.js";
 
 describe("Pacer", () => {
   let clock: FakeClock;
@@ -156,6 +156,26 @@ describe("Pacer", () => {
     await expect(thrown).rejects.toThrow("sync");
     await expect(paced.run("b", write("next"))).resolves.toBe("next");
     expect(log).toEqual(["next@0"]);
+  });
+
+  it("gives back the budget and the spacing when a write chose not to write", async () => {
+    // One token that never refills, and a second between writes to a conversation.
+    const paced = pacer({ burst: 1, refillMs: 1_000_000, conversationSpacingMs: 1000 });
+    await expect(paced.run("a", async () => SKIPPED)).resolves.toBe(SKIPPED);
+    await expect(paced.run("a", write("real"))).resolves.toBe("real");
+    expect(log).toEqual(["real@0"]);
+  });
+
+  it("rejects, instead of throwing, when its signal is already aborted", async () => {
+    const paced = pacer();
+    const controller = new AbortController();
+    controller.abort(new Error("stopped"));
+    let returned: Promise<string> | undefined;
+    expect(() => {
+      returned = paced.run("a", write("never"), controller.signal);
+    }).not.toThrow();
+    await expect(returned).rejects.toThrow("stopped");
+    expect(log).toEqual([]);
   });
 
   it("keeps going after a write fails", async () => {

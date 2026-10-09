@@ -29,7 +29,10 @@ describe("telegramTransport", () => {
     });
 
     expect(await create("7", "hello", "12")).toEqual({ messageId: "41", conversationId: "-100" });
-    expect(sent).toEqual([["7", "hello", { reply_parameters: { message_id: 12 } }]]);
+    // The reply still goes out if the user deleted the message it answers.
+    expect(sent).toEqual([
+      ["7", "hello", { reply_parameters: { message_id: 12, allow_sending_without_reply: true } }],
+    ]);
   });
 
   it("points a message at nothing unless it answers one", async () => {
@@ -111,6 +114,17 @@ describe("telegramTransport", () => {
       kind: "rejected",
       message: "Bad Request: message to edit not found",
     });
+  });
+
+  it("reports a server error as unknown, since the write may have gone through", async () => {
+    for (const [code, description] of [
+      [500, "Internal Server Error"],
+      [502, "Bad Gateway"],
+    ] as const)
+      expect(await failureOf(refusal(code, description))).toMatchObject({
+        kind: "unknown",
+        message: description,
+      });
   });
 
   it("reports a failed connection as unknown, since the write may have arrived", async () => {

@@ -14,6 +14,13 @@ export interface Budget {
   conversationSpacingMs: number | ((conversation: string) => number);
 }
 
+/**
+ * What a write returns when it decided not to write after all. Its turn then
+ * costs nothing: the pacer gives back the budget and leaves the conversation's
+ * spacing alone.
+ */
+export const SKIPPED = Symbol("skipped");
+
 interface Job {
   write: () => Promise<unknown>;
   resolve: (value: unknown) => void;
@@ -68,8 +75,11 @@ export class Pacer {
 
   /** Runs `write` for `conversation` when the budget allows. */
   run<T>(conversation: string, write: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-    signal?.throwIfAborted();
     return new Promise<T>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
       const job: Job = {
         write,
         resolve: resolve as (value: unknown) => void,
@@ -148,6 +158,7 @@ export class Pacer {
   private start(lane: Lane): void {
     const job = lane.queue.shift()!;
     job.dispose?.();
+    const readyBefore = lane.readyAt;
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
@@ -159,11 +170,20 @@ export class Pacer {
     } catch (error) {
       written = Promise.reject(error);
     }
-    void written.then(job.resolve, job.reject).finally(() => {
-      this.running = false;
-      lane.readyAt = this.now() + this.spacing(lane.conversation);
-      this.pump();
-    });
+    let skipped = false;
+    void written
+      .then((value) => {
+        skipped = value === SKIPPED;
+        job.resolve(value);
+      }, job.reject)
+      .finally(() => {
+        this.running = false;
+        if (skipped) {
+          this.tokens = Math.min(this.budget.burst, this.tokens + 1);
+          lane.readyAt = readyBefore;
+        } else lane.readyAt = this.now() + this.spacing(lane.conversation);
+        this.pump();
+      });
   }
 
   private spacing(conversation: string): number {

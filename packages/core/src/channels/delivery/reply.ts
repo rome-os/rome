@@ -2,8 +2,8 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
-import type { Pacer } from "./pacer.js";
-import { splitPoint } from "./split.js";
+import { type Pacer, SKIPPED } from "./pacer.js";
+import { lastBreak, splitPoint } from "./split.js";
 import {
   asDeliveryFailure,
   type DeliveryFailure,
@@ -103,8 +103,8 @@ const MAX_UNKNOWN_EDITS = 3;
  * - In `edit` mode a message appears once its first text exists and keeps
  *   being replaced, at most once per `editIntervalMs`, until it is full or its
  *   block complete. In `blocks` mode a message is sent once its text is
- *   settled or has waited `blockWaitMs`. In `final` mode nothing is sent before
- *   `finish()`.
+ *   settled, or has waited `blockWaitMs` and ends at a readable break. In
+ *   `final` mode nothing is sent before `finish()`.
  * - One write runs at a time, through the account's Pacer. When the Pacer
  *   lets it run, the write carries the latest text, so a preview that went
  *   stale while it waited is never sent. A write whose target is gone, or that
@@ -198,14 +198,15 @@ export class ReplyDelivery {
     void this.options.pacer
       .run(
         this.conversation,
-        () => {
+        async (): Promise<void | typeof SKIPPED> => {
           // The reply can change while a write waits its turn. Its text may
           // have grown, it may have failed, and the write may have become
           // unnecessary. Only a write for the same target runs, with the
-          // latest text.
-          if (this.failure) return Promise.resolve();
+          // latest text. A write that does not run costs the pacer nothing.
+          if (this.failure) return SKIPPED;
           const fresh = this.planSafely(this.now(), true);
-          return fresh && sameTarget(fresh, plan) ? this.write(fresh) : Promise.resolve();
+          if (!fresh || !sameTarget(fresh, plan)) return SKIPPED;
+          return this.write(fresh);
         },
         this.abort.signal,
       )
@@ -310,8 +311,21 @@ export class ReplyDelivery {
         state.waitingSince ??= now;
         const due = state.waitingSince + this.options.policy.blockWaitMs;
         if (now < due && !ignoreWaits) return { waitUntil: due };
+        // The wait is over, but the text may stop mid-word, and a part cannot be
+        // edited back together. It ends at the last readable break, and what
+        // follows waits. With no break yet, all of it keeps waiting, and the
+        // text that completes a break sends the part at once.
+        const cut = lastBreak(source);
+        if (cut === 0 || !codec.render(source.slice(0, cut), true).trim()) return null;
         state.waitingSince = undefined;
-        return { write: "create", block: index, start, end, source, settle: true };
+        return {
+          write: "create",
+          block: index,
+          start,
+          end: start + cut,
+          source: source.slice(0, cut),
+          settle: true,
+        };
       }
     }
     return null;
