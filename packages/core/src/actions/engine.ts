@@ -514,9 +514,7 @@ export class ActionEngine {
       return false;
     }
 
-    if (this.hasExecutionCancelSupport()) {
-      await this.executionsRepo!.markCancelRequested(rootExecutionId);
-    }
+    await this.executionsRepo?.markCancelRequested(rootExecutionId);
 
     active.worker.cancelRequested = true;
     this.sendCancelSignal(active.worker.child, "SIGTERM");
@@ -932,20 +930,18 @@ export class ActionEngine {
             : String(err);
       try {
         if (err instanceof ActionCancelledError) {
-          if (this.hasExecutionCancelSupport()) {
-            await this.executionsRepo!.markRootCancelled(
-              rootExecutionId,
-              this.clock.now(),
-              err.message,
-            );
-          }
-        } else if (isRoot && mode === "subprocess" && this.hasExecutionRootErrorSupport()) {
-          await this.executionsRepo!.markRootErrored(
+          await this.executionsRepo?.markRootCancelled(
+            rootExecutionId,
+            this.clock.now(),
+            err.message,
+          );
+        } else if (isRoot && mode === "subprocess" && this.executionsRepo) {
+          await this.executionsRepo.markRootErrored(
             rootExecutionId,
             this.clock.now(),
             failureMessage,
           );
-          await this.executionsRepo!.update(executionId, {
+          await this.executionsRepo.update(executionId, {
             durationMs: this.clock.now().getTime() - startedAt.getTime(),
           });
         } else {
@@ -1676,9 +1672,9 @@ export class ActionEngine {
     parentId?: string;
     startedAt: Date;
   }): Promise<void> {
-    if (!this.hasExecutionLifecycleSupport()) return;
+    const repo = this.executionsRepo;
+    if (!repo) return;
 
-    const repo = this.executionsRepo!;
     const existing = await repo.findById(data.executionId);
     if (existing) {
       await repo.update(data.executionId, {
@@ -1721,25 +1717,9 @@ export class ActionEngine {
     parentId?: string;
     error?: string;
   }): Promise<void> {
-    if (!this.executionsRepo) return;
+    const repo = this.executionsRepo;
+    if (!repo) return;
 
-    if (!this.hasExecutionLifecycleSupport()) {
-      await this.executionsRepo!.create({
-        id: data.executionId,
-        rootExecutionId: data.rootExecutionId,
-        actionName: data.actionName,
-        actionType: data.actionType,
-        status: data.status,
-        args: data.args,
-        initiator: data.initiator,
-        actor: data.actor,
-        parentId: data.parentId,
-        error: data.error,
-      });
-      return;
-    }
-
-    const repo = this.executionsRepo!;
     const existing = await repo.findById(data.executionId);
     if (existing) {
       await repo.update(data.executionId, {
@@ -1783,58 +1763,12 @@ export class ActionEngine {
     parentId?: string;
     startedAt: Date;
   }): Promise<void> {
-    if (!this.executionsRepo) return;
-
-    if (!this.hasExecutionLifecycleSupport()) {
-      await this.executionsRepo!.create({
-        id: data.executionId,
-        rootExecutionId: data.rootExecutionId,
-        actionName: data.actionName,
-        actionType: data.actionType,
-        status: data.status,
-        args: data.args,
-        error: data.error,
-        durationMs: this.clock.now().getTime() - data.startedAt.getTime(),
-        initiator: data.initiator,
-        actor: data.actor,
-        parentId: data.parentId,
-      });
-      return;
-    }
-
-    await this.executionsRepo!.update(data.executionId, {
+    await this.executionsRepo?.update(data.executionId, {
       status: data.status,
       error: data.error ?? null,
       durationMs: this.clock.now().getTime() - data.startedAt.getTime(),
       finishedAt: this.clock.now(),
     });
-  }
-
-  private hasExecutionLifecycleSupport(): boolean {
-    return (
-      !!this.executionsRepo &&
-      typeof (this.executionsRepo as { findById?: unknown }).findById === "function" &&
-      typeof (this.executionsRepo as { update?: unknown }).update === "function"
-    );
-  }
-
-  private hasExecutionCancelSupport(): boolean {
-    return (
-      !!this.executionsRepo &&
-      typeof (this.executionsRepo as { markCancelRequested?: unknown }).markCancelRequested ===
-        "function" &&
-      typeof (this.executionsRepo as { markRootCancelled?: unknown }).markRootCancelled ===
-        "function"
-    );
-  }
-
-  private hasExecutionRootErrorSupport(): boolean {
-    return (
-      !!this.executionsRepo &&
-      typeof (this.executionsRepo as { markRootErrored?: unknown }).markRootErrored ===
-        "function" &&
-      typeof (this.executionsRepo as { update?: unknown }).update === "function"
-    );
   }
 
   private sendCancelSignal(child: ChildProcess, signal: NodeJS.Signals): void {

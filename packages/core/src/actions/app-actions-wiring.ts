@@ -51,25 +51,6 @@ export function assertNoAppActionLoadFailures(
   );
 }
 
-export function assertRequiredActionRegistered(
-  registry: { has(name: string): boolean },
-  actionName: string,
-): void {
-  if (registry.has(actionName)) {
-    return;
-  }
-
-  throw new Error(`Required action "${actionName}" is not registered`);
-}
-
-export function assertRequiredHookPresent<T>(hook: T | null, hookName: string): T {
-  if (hook) {
-    return hook;
-  }
-
-  throw new Error(`Required hook "${hookName}" is not registered`);
-}
-
 export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
@@ -246,16 +227,11 @@ export function registerLazyAppActions(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
-  options: { onlyAppId?: string } = {},
-): { loaded: string[]; failed: AppActionLoadFailure[] } {
+): { loaded: string[] } {
   const loaded: string[] = [];
-  const failed: AppActionLoadFailure[] = [];
 
   for (const [name, record] of actionLoader.getAllRecords()) {
     if (record.metadata.ownerType !== "app") {
-      continue;
-    }
-    if (options.onlyAppId !== undefined && record.metadata.ownerId !== options.onlyAppId) {
       continue;
     }
 
@@ -263,7 +239,7 @@ export function registerLazyAppActions(
     loaded.push(name);
   }
 
-  return { loaded, failed };
+  return { loaded };
 }
 
 /**

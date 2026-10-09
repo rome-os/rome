@@ -142,7 +142,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     actionRegistry,
   });
 
-  const appActionReload = registerLazyAppActions(
+  registerLazyAppActions(
     actionLoader,
     actionRegistry,
     appCatalog,
@@ -209,11 +209,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   if (actionLoader.getRegistryLoadFailures().length > 0) {
     log.warn("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
-    });
-  }
-  if (appActionReload.failed.length > 0) {
-    log.warn("some app actions failed to initialize", {
-      failures: appActionReload.failed,
     });
   }
 

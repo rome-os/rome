@@ -15,8 +15,6 @@ import {
 } from "../apps/artifact-id.js";
 
 export class ActionLoader {
-  private configs = new Map<string, ActionConfig>();
-  private actionDirs = new Map<string, string>();
   private records = new Map<
     string,
     { config: ActionConfig; metadata: ArtifactMetadata; directory: string }
@@ -25,7 +23,7 @@ export class ActionLoader {
 
   constructor(private readonly identity?: ArtifactIdentityContext) {}
 
-  async loadFromCatalog(catalog: AppCatalog): Promise<Map<string, ActionConfig>> {
+  async loadFromCatalog(catalog: AppCatalog): Promise<void> {
     const coreRefs = await listCoreArtifactsByKind("action");
     const appRefs = catalog.listArtifacts("action");
     const sources = [...coreRefs, ...appRefs].map((ref) => {
@@ -36,25 +34,11 @@ export class ActionLoader {
         metadata,
       };
     });
-    return this.loadRecords(sources);
+    await this.loadRecords(sources);
   }
 
   get(name: string): ActionConfig | undefined {
-    return this.configs.get(this.resolveName(name));
-  }
-
-  getAll(): Map<string, ActionConfig> {
-    return new Map(this.configs);
-  }
-
-  getDirectory(name: string): string | undefined {
-    return this.actionDirs.get(this.resolveName(name));
-  }
-
-  getRecord(
-    name: string,
-  ): { config: ActionConfig; metadata: ArtifactMetadata; directory: string } | undefined {
-    return this.records.get(this.resolveName(name));
+    return this.records.get(this.resolveName(name))?.config;
   }
 
   getAllRecords(): Map<
@@ -70,7 +54,7 @@ export class ActionLoader {
 
   private async loadRecords(
     sources: Array<{ yamlPath: string; directory: string; metadata: ArtifactMetadata }>,
-  ): Promise<Map<string, ActionConfig>> {
+  ): Promise<void> {
     const nextRecords = new Map<
       string,
       { config: ActionConfig; metadata: ArtifactMetadata; directory: string }
@@ -150,14 +134,7 @@ export class ActionLoader {
     }
 
     this.records = nextRecords;
-    this.configs = new Map(
-      Array.from(nextRecords.entries()).map(([name, record]) => [name, record.config]),
-    );
-    this.actionDirs = new Map(
-      Array.from(nextRecords.entries()).map(([name, record]) => [name, record.directory]),
-    );
     this.registryLoadFailures = registryLoadFailures;
-    return this.getAll();
   }
 
   private resolveName(name: string): string {
