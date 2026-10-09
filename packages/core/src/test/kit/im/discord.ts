@@ -16,7 +16,7 @@ export const DISCORD_TOKEN = "MTAwMDAwMDAwMDAwMDAwMDAx.fixture.fixture";
 /** The guild text channel the capture was recorded in. */
 const DISCORD_CHANNEL = "100000000000000003";
 /** The one person the bot can open a DM with, and that DM. */
-const DISCORD_USER = "100000000000000002";
+export const DISCORD_USER = "100000000000000002";
 export const DISCORD_DM = "100000000000000004";
 
 const capture = loadCapture(textCapture);

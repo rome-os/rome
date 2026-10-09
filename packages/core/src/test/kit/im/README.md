@@ -26,7 +26,7 @@ A case no capture covers yet answers with `source: "synthetic"`, and the peer's 
 | `WechatPeer` | Rome's iLink adapter | send, send with a substituted context token, send to an unknown recipient | `getupdates` |
 | `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message |
 
-Known gap: the Discord peer's `MESSAGE_CREATE` frames are synthetic, and discord.js 14.26.2 builds no channel for a DM it has not cached from such a frame. So a test cannot yet deliver a user's first DM before the bot has written to them; it has to send first. A recorded DM gateway event would close the gap.
+Known gap: the Discord peer's `MESSAGE_CREATE` frames are synthetic, and discord.js 14.26.2 builds no channel for a DM it has not cached from such a frame. So a test opens the DM first (`adapter.directConversationFor`), which caches the channel, before the user writes; whether a real first DM reaches the adapter without that is unverified. A recorded DM gateway event would close the gap.
 
 ## Strictness
 
