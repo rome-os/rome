@@ -17,7 +17,6 @@ tools:
   - TodoWrite
 actions:
   - "*"
-  - system:find_channel_account
 networkDiscovery: true
 allowedSubagents:
   - assistant:assistant

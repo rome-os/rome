@@ -3,7 +3,7 @@ import type { Channels } from "./channel.js";
 import { createChannelAccounts } from "./channel-accounts.js";
 import type { Connection } from "../connections/types.js";
 
-// The system-only lookup behind find_channel_account, over each channel's
+// The system-only lookup send_message resolves agent names with, over each channel's
 // address book.
 
 const atlas = {

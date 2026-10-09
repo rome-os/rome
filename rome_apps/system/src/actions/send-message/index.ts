@@ -39,9 +39,23 @@ interface PersonMappingResolver {
   findByBondLevel(bondLevel: "guardian"): Promise<GuardianPerson[]>;
 }
 
+/** Core's address-book lookup, handed to the system app alone. Declared here
+ *  because an app cannot import core, and a worker receives a proxy. */
+export interface ChannelAccountsService {
+  find(
+    channel: string,
+    read?: { query?: string; limit?: number },
+  ): Promise<{
+    connected: boolean;
+    accounts: { name: string | null; addresses: string[] }[];
+    more: boolean;
+  }>;
+}
+
 interface SendMessageRuntimeDeps {
   personMappingRepo?: PersonMappingResolver;
   conversations?: ConversationRepository;
+  channelAccounts?: ChannelAccountsService;
 }
 
 function outboundContent(input: SendMessageInput): string {
@@ -222,10 +236,64 @@ async function resolveGuardianThreadId(
   return mapping.channelUserId;
 }
 
+const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * An agent's id from its name in the Agents address book. A listed name is a
+ * label such as `Atlas (dot)` or `Atlas (@ouou's dot)`, so `to` matches a
+ * whole label first and otherwise the name before it. Two agents can share a
+ * name, so more than one match is refused with each match's label and id
+ * rather than guessed between.
+ */
+async function resolveAgentThreadId(name: string, deps: SendMessageRuntimeDeps): Promise<string> {
+  const wanted = name.trim();
+  if (AGENT_ID.test(wanted)) return wanted;
+  // The address book lists the guardian's agents and linked accounts' agents,
+  // so an installed app that calls this action passes an id instead.
+  const callerAppId = getCurrentActionContext()?.callerAppId;
+  if (callerAppId && callerAppId !== "system") {
+    throw new Error("An app sends to an agent by its id as `threadId`, not by name in `to`");
+  }
+  if (!deps.channelAccounts) {
+    throw new Error(
+      "Sending to an agent by name is not available in this Rome; pass its id as `threadId`",
+    );
+  }
+  const lookup = await deps.channelAccounts.find("agents", { query: wanted, limit: 100 });
+  if (!lookup.connected) throw new Error('Channel "agents" is not connected');
+
+  const lower = wanted.toLowerCase();
+  const listed = lookup.accounts.filter(
+    (account): account is { name: string; addresses: string[] } =>
+      account.name !== null && account.addresses.length > 0,
+  );
+  const whole = listed.filter((account) => account.name.toLowerCase() === lower);
+  const matches =
+    whole.length > 0
+      ? whole
+      : listed.filter((account) => account.name.toLowerCase().startsWith(`${lower} (`));
+
+  if (matches.length === 1) return matches[0].addresses[0];
+  if (matches.length === 0) {
+    throw new Error(
+      `No agent named "${wanted}". Rome Cloud lists no agents while it is unreachable, so the agent may exist; pass its id as \`threadId\` if you have it.`,
+    );
+  }
+  const options = matches
+    .map((account) => `"${account.name}" (threadId ${account.addresses[0]})`)
+    .join(", ");
+  throw new Error(
+    `More than one agent is named "${wanted}": ${options}. Send again with the full name as \`to\` or the id as \`threadId\`.`,
+  );
+}
+
 async function resolveChatThreadId(
   chat: SendMessageChatInput,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
+  if (chat.channel === "agents" && typeof chat.to === "string" && chat.to !== "guardian") {
+    return resolveAgentThreadId(chat.to, deps);
+  }
   if (chat.to !== undefined && chat.to !== "guardian") {
     throw new Error(
       `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
@@ -354,7 +422,7 @@ export function createSendMessageAction(
             "agents",
           ],
           description:
-            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one; its threadId is the agent\'s id (a UUID, the threadId its messages arrive on), never its name. To message an agent by name, look its id up with find_channel_account first if you have it, or ask the guardian for it.',
+            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its name as `to`, or its id (a UUID, the threadId its messages arrive on) as `threadId`.',
         },
         threadId: {
           type: "string",
@@ -379,7 +447,7 @@ export function createSendMessageAction(
           type: ["string", "array"],
           items: { type: "string" },
           description:
-            'Recipient alias/address. For chat channels, only the literal "guardian" is supported and resolves through the guardian\'s channel mapping. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
+            'Recipient alias/address. For chat channels, the literal "guardian" resolves through the guardian\'s channel mapping, and on "agents" an agent\'s name resolves to its id. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
         },
         subject: {
           type: "string",

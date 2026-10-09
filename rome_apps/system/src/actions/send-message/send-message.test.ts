@@ -3,9 +3,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ActionConfig, ChannelsService } from "@rome-os/app-runtime";
+import {
+  setCurrentActionContextResolver,
+  type ActionConfig,
+  type ChannelsService,
+} from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
-import type { SendMessageInput } from "./index.js";
+import type { ChannelAccountsService, SendMessageInput } from "./index.js";
 
 let tempDir = "";
 let projectsRoot = "";
@@ -385,5 +389,143 @@ describe("send_message preview", () => {
     const payload = action.preview!({ channel: "matrix", threadId: "t1", text: "hi" });
 
     expect(payload).toMatchObject({ fields: [{ label: "Channel", value: "matrix" }] });
+  });
+});
+
+describe("send_message to an agent by name", () => {
+  const ATLAS = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+  const FRIEND_ATLAS = "1c7a7f9e-9b5d-4a4f-8d0e-3a2b4c5d6e7f";
+  const ORION = "2d8b8a0f-0c6e-4b5a-9e1f-4b3c5d6e7f80";
+  type Listed = { name: string | null; addresses: string[] };
+
+  function book(accounts: Listed[], connected = true) {
+    const find = rs.fn<ChannelAccountsService["find"]>(async (_channel, read) => ({
+      connected,
+      accounts: accounts.filter((account) =>
+        (account.name ?? "").toLowerCase().includes((read?.query ?? "").toLowerCase()),
+      ),
+      more: false,
+    }));
+    return { find };
+  }
+
+  afterEach(() => setCurrentActionContextResolver(null));
+
+  it("sends to the one agent the name matches", async () => {
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([
+      { name: "Atlas (dot)", addresses: [ATLAS] },
+      { name: "Orion (dot)", addresses: [ORION] },
+    ]);
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: "atlas", text: "hi" },
+      { channelAccounts },
+    );
+
+    expect(channelAccounts.find).toHaveBeenCalledWith("agents", { query: "atlas", limit: 100 });
+    expect(adapter.send).toHaveBeenCalledWith(
+      "agents",
+      ATLAS,
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a name two agents share, naming each with its id", async () => {
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([
+      { name: "Atlas (dot)", addresses: [ATLAS] },
+      { name: "Atlas (@friend's dot)", addresses: [FRIEND_ATLAS] },
+    ]);
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { channelAccounts },
+    );
+
+    await expect(sent).rejects.toThrow(`"Atlas (dot)" (threadId ${ATLAS})`);
+    await expect(sent).rejects.toThrow(`"Atlas (@friend's dot)" (threadId ${FRIEND_ATLAS})`);
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("takes a full label to pick between agents that share a name", async () => {
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([
+      { name: "Atlas (dot)", addresses: [ATLAS] },
+      { name: "Atlas (@friend's dot)", addresses: [FRIEND_ATLAS] },
+    ]);
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas (@friend's dot)", text: "hi" },
+      { channelAccounts },
+    );
+
+    expect(adapter.send).toHaveBeenCalledWith("agents", FRIEND_ATLAS, expect.anything());
+  });
+
+  it("does not take a name that only contains the one asked for", async () => {
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([{ name: "Atlasia (dot)", addresses: [ATLAS] }]);
+
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "agents", to: "Atlas", text: "hi" },
+        { channelAccounts },
+      ),
+    ).rejects.toThrow('No agent named "Atlas"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("says when Agents is not connected", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "agents", to: "Atlas", text: "hi" },
+        { channelAccounts: book([], false) },
+      ),
+    ).rejects.toThrow('Channel "agents" is not connected');
+  });
+
+  it("sends to an id given as `to` without looking it up", async () => {
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([]);
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: ATLAS, text: "hi" },
+      { channelAccounts },
+    );
+
+    expect(channelAccounts.find).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+  });
+
+  it("refuses a name from an installed app without looking", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", callerAppId: "some-app" }));
+    const adapter = makeAdapter("agents");
+    const channelAccounts = book([{ name: "Atlas (dot)", addresses: [ATLAS] }]);
+
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "agents", to: "Atlas", text: "hi" },
+        { channelAccounts },
+      ),
+    ).rejects.toThrow("An app sends to an agent by its id");
+    expect(channelAccounts.find).not.toHaveBeenCalled();
+  });
+
+  it("says names need the lookup when this Rome has none", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }),
+    ).rejects.toThrow("Sending to an agent by name is not available");
   });
 });

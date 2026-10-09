@@ -97,7 +97,7 @@ interface AppActionServices {
   /** System-only: reporter provenance must come from system:send_feedback. */
   feedback?: FeedbackService;
   /** System-only: an address book is the guardian's contacts, so only
-   *  system:find_channel_account searches one. */
+   *  system:send_message searches one, to send to an agent by name. */
   channelAccounts?: ChannelAccountsService;
 }
 

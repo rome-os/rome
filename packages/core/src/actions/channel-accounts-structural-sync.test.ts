@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChannelAccountsService as Core } from "../channels/channel-accounts.js";
-import type { ChannelAccountsService as Action } from "../../../../rome_apps/system/src/actions/find-channel-account/index.js";
+import type { ChannelAccountsService as Action } from "../../../../rome_apps/system/src/actions/send-message/index.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true

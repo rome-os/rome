@@ -1,7 +1,7 @@
 /**
  * Who a channel can reach, by name, for the one action that turns a name into
- * an address: `system:find_channel_account`. It is handed to the system app
- * alone, since a channel's address book holds the guardian's contacts (phone
+ * an address: `system:send_message`, when it sends to an agent by name. It is
+ * handed to the system app alone, since a channel's address book holds the guardian's contacts (phone
  * numbers, LinkedIn members), and no other app gets a searchable list of them.
  *
  * It reads the channel's own address book (`Channel.accounts`), the one the

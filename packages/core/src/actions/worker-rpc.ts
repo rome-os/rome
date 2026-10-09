@@ -247,7 +247,7 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
-  /** System-only: the address books behind `system:find_channel_account`. */
+  /** System-only: the address books `system:send_message` resolves agent names in. */
   channelAccounts: ChannelAccountsService;
 }
 
