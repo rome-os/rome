@@ -725,6 +725,11 @@
       "title": "身份模拟",
       "toggleLabel": "在聊天中启用身份模拟"
     },
+    "replyStreaming": {
+      "title": "回复流式输出",
+      "description": "适用于守护者在 Telegram 的私聊。回复以纯文本显示。回复中途失败时不会重发，可能停在未完成的状态。",
+      "toggleLabel": "在 Telegram 中流式输出回复"
+    },
     "aiToolUsage": {
       "title": "AI 工具用量",
       "description": "用量窗口会显示在 AI 工具标签页。",

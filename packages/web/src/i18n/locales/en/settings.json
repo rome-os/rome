@@ -725,6 +725,11 @@
       "title": "Impersonation",
       "toggleLabel": "Enable impersonation in chat"
     },
+    "replyStreaming": {
+      "title": "Reply streaming",
+      "description": "Applies to the guardian's direct chats on Telegram. Replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
+      "toggleLabel": "Stream replies in Telegram"
+    },
     "aiToolUsage": {
       "title": "AI tool usage",
       "description": "Usage windows appear on the AI Tools tab.",

@@ -132,6 +132,32 @@ describe("SettingsPage Advanced autosave", () => {
     );
   });
 
+  it("keeps reply streaming off until it is switched on, and autosaves the change", async () => {
+    const calls = mockSettingsBackend();
+    const user = userEvent.setup();
+    renderAdvancedSettings();
+
+    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    await user.click(toggle);
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: "/api/settings",
+        method: "PUT",
+        body: { enableReplyStreaming: true },
+      }),
+    );
+  });
+
+  it("shows reply streaming on when the instance has it on", async () => {
+    mockSettingsBackend({ enableReplyStreaming: true });
+    renderAdvancedSettings();
+
+    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
   it("saves trimmed, per-provider tier model mappings", async () => {
     const calls = mockSettingsBackend({
       tierModelMappings: { openai: { large: "gpt-6-astra" } },

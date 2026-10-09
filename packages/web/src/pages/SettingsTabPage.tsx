@@ -134,6 +134,7 @@ interface SettingsData {
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
+  enableReplyStreaming?: boolean;
   showAiToolUsage?: boolean;
   tierModelMappings?: TierModelMappings;
 }
@@ -1114,6 +1115,7 @@ function DeveloperSettingsSection({
           <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
+          <ReplyStreamingAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
         {open && <RelayHealthSection />}
@@ -1534,6 +1536,38 @@ function ImpersonationAdvancedSection({
     <SettingsToggleRow
       title={t("advanced.impersonation.title")}
       label={t("advanced.impersonation.toggleLabel")}
+      checked={enabled}
+      onChange={toggle}
+      disabled={saving}
+    />
+  );
+}
+
+/** Off until a developer turns it on: with it off, Rome sends each reply whole,
+ *  as it did before streaming existed. The setting is `enableReplyStreaming`,
+ *  read by the host on every reply. */
+function ReplyStreamingAdvancedSection({
+  settings,
+  onSave,
+  saving,
+}: {
+  settings: SettingsData;
+  onSave: (p: Record<string, unknown>) => Promise<void>;
+  saving: boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [enabled, setEnabled] = useState(settings.enableReplyStreaming ?? false);
+
+  function toggle(next: boolean) {
+    setEnabled(next);
+    void onSave({ enableReplyStreaming: next });
+  }
+
+  return (
+    <SettingsToggleRow
+      title={t("advanced.replyStreaming.title")}
+      description={t("advanced.replyStreaming.description")}
+      label={t("advanced.replyStreaming.toggleLabel")}
       checked={enabled}
       onChange={toggle}
       disabled={saving}
