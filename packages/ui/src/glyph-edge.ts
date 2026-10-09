@@ -23,8 +23,8 @@ type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
  * with `data-icon`. Only direct children and fragment members are read, so
  * a marked glyph inside a wrapper element is not seen. A screen-reader-only
  * `<span>` or a label hidden at some breakpoints (`hidden sm:inline`) also
- * counts as a label, so a visually lone icon beside one gets the trim; give
- * such a button `max-sm:px-[var(--control-px-center-*)]` or similar.
+ * counts as a label, so a visually lone icon beside one gets the trim. Give
+ * such a button symmetric padding at the breakpoints where its label hides.
  */
 function isGlyph(node: React.ReactNode): boolean {
   if (!React.isValidElement<{ children?: React.ReactNode; "data-icon"?: string }>(node)) {
