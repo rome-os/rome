@@ -50,6 +50,8 @@ describe("TelegramAdapter.send against the peer", () => {
   afterEach(async () => {
     await adapter.stop();
     await peer.close();
+    // Every test, teardown included, made only requests the peer models.
+    peer.server.assertClean();
   });
 
   async function receive(text: string): Promise<ChannelMessage> {

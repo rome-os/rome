@@ -22,15 +22,15 @@ A case no capture covers yet answers with `source: "synthetic"`, and the peer's 
 
 | Peer | Client | Recorded | Synthetic |
 |---|---|---|---|
-| `TelegramPeer` | grammy 1.40.0 | send, edit, reply, edit of a missing message | `getMe`, `getUpdates`, `deleteWebhook`, `sendChatAction`; empty or too-long text; reply to a missing message; edit with unchanged text; edit of a user's message |
+| `TelegramPeer` | grammy 1.40.0 | send, edit, reply, edit of a missing message | `getMe`, `getUpdates`, `deleteWebhook`, `sendChatAction`; send to an unknown chat; empty or too-long text; reply to a missing message; edit with unchanged text; edit of a user's message |
 | `WechatPeer` | Rome's iLink adapter | send, send with a substituted context token, send to an unknown recipient | `getupdates` |
-| `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, DM creation; empty or too-long content; reply to a message elsewhere; edit of a user's message |
+| `DiscordPeer` | discord.js 14.26.2 | create, read, edit, reply, read of a missing message, all in a guild text channel | gateway frames; `GET /gateway/bot`, `/users/@me`, command registration, channel lookup, DM creation; edit of a missing message; empty or too-long content; reply to a message elsewhere; edit of a user's message |
 
 ## Strictness
 
 A peer is stricter than the platform, never looser, so a wrong id or reference fails the test instead of passing silently.
 
-- A request no route models is answered 500 and recorded in `server.errors`. `server.assertClean()` throws on it.
+- A request no route models is answered 418, which no platform uses and no SDK retries, and recorded in `server.errors`. `server.assertClean()` throws on it.
 - A reply must point at a message in the same conversation. An edit must name an existing message.
 - `DiscordPeer` opens a DM only with the one user it models. A DM with anyone else is unmodeled, so a wrong recipient fails the test.
 - `PeerServer.fetch` reaches only the peer's own origin. `WechatPeer.fetch` maps the iLink origin to the peer and refuses every other origin.

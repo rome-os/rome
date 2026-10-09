@@ -39,6 +39,8 @@ interface Update {
 export class TelegramPeer implements Peer {
   readonly server = new PeerServer((request) => this.route(request));
   private readonly store = new MessageStore();
+  /** Chats the bot can write to: the recorded one and any a user wrote from. */
+  private readonly chats = new Set([String(TELEGRAM_CHAT)]);
   private readonly dates = new Map<string, { date: number; edit_date?: number }>();
   private updates: Update[] = [];
   private nextMessageId = 1;
@@ -94,6 +96,7 @@ export class TelegramPeer implements Peer {
 
   /** A user's text message, delivered on the bot's next getUpdates. */
   emitMessage(text: string, chatId = TELEGRAM_CHAT): VisibleMessage {
+    this.chats.add(String(chatId));
     const message = this.store.add({
       id: String(this.nextMessageId++),
       conversation: String(chatId),
@@ -146,6 +149,7 @@ export class TelegramPeer implements Peer {
 
   private sendMessage(body: Record<string, unknown>): Reply {
     const chat = String(body.chat_id);
+    if (!this.chats.has(chat)) return badRequest("chat not found");
     const text = String(body.text ?? "");
     const length = visibleLength(text, body.parse_mode);
     if (length === 0) return badRequest("message text is empty");
@@ -222,5 +226,18 @@ function badRequest(reason: string): Reply {
  *  UTF-16 code units. */
 function visibleLength(text: string, parseMode: unknown): number {
   if (parseMode !== "HTML") return text.length;
-  return text.replace(/<[^>]*>/g, "").replace(/&(lt|gt|amp|quot|#\d+|#x[\da-f]+);/gi, "_").length;
+  // Count what is outside tags, with each entity as one character.
+  let length = 0;
+  let inTag = false;
+  let inEntity = false;
+  for (const char of text) {
+    if (inTag) inTag = char !== ">";
+    else if (char === "<") inTag = true;
+    else if (inEntity) inEntity = char !== ";";
+    else {
+      length += 1;
+      inEntity = char === "&";
+    }
+  }
+  return length;
 }

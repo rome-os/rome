@@ -59,6 +59,8 @@ describe("WechatAdapter.send against the peer", () => {
     await peer.close();
     rs.unstubAllGlobals();
     await rm(statePath, { recursive: true, force: true });
+    // Every test, teardown included, made only requests the peer models.
+    peer.server.assertClean();
   });
 
   it("sends with the user's context token and reports the message id iLink answers", async () => {

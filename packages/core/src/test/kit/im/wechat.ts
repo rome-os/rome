@@ -38,9 +38,10 @@ export class WechatPeer implements Peer {
   readonly server = new PeerServer((request) => this.route(request));
   private readonly store = new MessageStore();
   private readonly reachable = new Set([WECHAT_USER]);
-  private pending: Record<string, unknown>[] = [];
+  /** Every message users sent, in order. A client's `get_updates_buf` counts
+   *  how many it has, so a lost answer is delivered again on the next poll. */
+  private readonly updates: Record<string, unknown>[] = [];
   private nextMessageId = exemplar<{ message_id: number }>(capture, "send").message_id;
-  private cursor = 0;
   private readonly polling = deferred();
   private readonly wake = new Set<() => void>();
 
@@ -67,7 +68,8 @@ export class WechatPeer implements Peer {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.origin !== WECHAT_ORIGIN)
       return Promise.reject(new Error(`WeChat peer blocked a request to ${url.origin}`));
-    return this.server.fetch(`${this.server.url}${url.pathname}${url.search}`, init);
+    const local = `${this.server.url}${url.pathname}${url.search}`;
+    return this.server.fetch(input instanceof Request ? new Request(local, input) : local, init);
   };
 
   createAdapter(statePath: string): WechatAdapter {
@@ -90,7 +92,7 @@ export class WechatPeer implements Peer {
       from: "user",
       text,
     });
-    this.pending.push({
+    this.updates.push({
       message_id: message.id,
       from_user_id: userId,
       to_user_id: WECHAT_BOT,
@@ -114,14 +116,15 @@ export class WechatPeer implements Peer {
     if (method !== "POST") return undefined;
     if (headers.get("authorization") !== `Bearer ${WECHAT_TOKEN}`)
       throw new Error(`WeChat request without the bot token: ${path}`);
-    if (path === "/ilink/bot/getupdates") return this.getUpdates(signal);
+    if (path === "/ilink/bot/getupdates") return this.getUpdates(body.get_updates_buf, signal);
     if (path === "/ilink/bot/sendmessage") return this.sendMessage(body.msg as WireMessage);
     return undefined;
   }
 
-  private async getUpdates(signal: AbortSignal): Promise<Reply> {
+  private async getUpdates(cursor: unknown, signal: AbortSignal): Promise<Reply> {
     this.polling.resolve();
-    if (!this.pending.length && !signal.aborted) {
+    const from = Number(cursor) || 0;
+    if (this.updates.length <= from && !signal.aborted) {
       await new Promise<void>((resolve) => {
         const finish = () => {
           this.wake.delete(finish);
@@ -132,9 +135,11 @@ export class WechatPeer implements Peer {
         signal.addEventListener("abort", finish, { once: true });
       });
     }
-    const msgs = this.pending.splice(0);
-    this.cursor += msgs.length;
-    return { body: { ret: 0, msgs, get_updates_buf: String(this.cursor) }, source: "synthetic" };
+    const msgs = this.updates.slice(from);
+    return {
+      body: { ret: 0, msgs, get_updates_buf: String(this.updates.length) },
+      source: "synthetic",
+    };
   }
 
   private sendMessage(message: WireMessage | undefined): Reply {

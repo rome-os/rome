@@ -81,7 +81,7 @@ export function requestBarrier() {
 /**
  * A strict loopback HTTP server standing in for a platform API. A request no
  * route answers is a test failure, never a guess: it is recorded in `errors`,
- * answered 500, and `assertClean()` throws.
+ * answered 418, and `assertClean()` throws.
  */
 export class PeerServer {
   readonly exchanges: PeerExchange[] = [];
@@ -93,7 +93,12 @@ export class PeerServer {
   private readonly server = createServer((req, res) => {
     void this.handle(req, res).catch((error: unknown) => {
       this.errors.push(String(error));
-      if (!res.headersSent) res.writeHead(500).end();
+      // 418: no platform answers with it and no SDK retries it, so the test
+      // fails once, on the request at fault.
+      if (!res.headersSent)
+        res
+          .writeHead(418, { "content-type": "application/json" })
+          .end(JSON.stringify({ error: String(error) }));
       else res.destroy();
     });
   });

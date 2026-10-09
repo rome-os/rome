@@ -38,7 +38,7 @@ describe("PeerServer", () => {
   });
 
   it("fails the test on a request no route models", async () => {
-    expect((await post("/unknown")).status).toBe(500);
+    expect((await post("/unknown")).status).toBe(418);
     expect(() => server.assertClean()).toThrow("Unmodeled request: POST /unknown");
   });
 

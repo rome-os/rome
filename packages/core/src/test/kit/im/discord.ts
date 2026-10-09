@@ -172,9 +172,10 @@ export class DiscordPeer implements Peer {
     if (method === "POST" && !messageId) return this.create(channel, body);
     const message = messageId ? this.store.get(messageId) : undefined;
     if (!message || message.conversation !== channelId) {
-      return method === "GET" || method === "PATCH"
-        ? { status: 404, body: exemplar(capture, "get-missing"), source: "capture" }
-        : undefined;
+      // Only a GET of a missing message is recorded; a PATCH reuses its body.
+      if (method !== "GET" && method !== "PATCH") return undefined;
+      const source = method === "GET" ? "capture" : "synthetic";
+      return { status: 404, body: exemplar(capture, "get-missing"), source };
     }
     if (method === "GET") return { body: this.wire(message), source: "capture" };
     if (method === "PATCH") return this.edit(message, body);

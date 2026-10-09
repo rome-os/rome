@@ -12,6 +12,7 @@ const SECRET_SHAPES: Array<[string, RegExp]> = [
   ["Telegram bot token", /\d{6,}:[\w-]{30,}/],
   ["bearer credential", /bearer\s+[\w.~+/-]{16,}/i],
   ["JWT", /eyJ[\w-]{10,}\.[\w-]{10,}/],
+  ["Discord bot token", /[\w-]{23,28}\.[\w-]{6,7}\.[\w-]{27,}/],
   ["long opaque run", /[A-Za-z0-9+_=-]{40,}/],
 ];
 
@@ -25,6 +26,16 @@ function strings(value: unknown, path = "$"): Array<[string, string]> {
     ]);
   return [];
 }
+
+it("recognizes a Telegram and a Discord bot token", () => {
+  // Built from repeated characters, so no token-shaped literal is committed.
+  const tokens = [
+    `${"1".repeat(10)}:${"A".repeat(35)}`,
+    `${"M".repeat(26)}.${"G".repeat(6)}.${"a".repeat(38)}`,
+  ];
+  for (const token of tokens)
+    expect(SECRET_SHAPES.some(([, shape]) => shape.test(token))).toBe(true);
+});
 
 describe.each(files)("%s", (file) => {
   const raw: unknown = JSON.parse(readFileSync(join(directory, file), "utf8"));
