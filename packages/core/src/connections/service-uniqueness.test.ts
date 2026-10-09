@@ -3,12 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
-import type { SqliteExec } from "../db/index.js";
+import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { ConnectionRecord, GrantLedger } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk, makeZeroGrantTalk } from "./test-fixtures.js";
+import type { ConnectionId } from "./types.js";
 
 describe("ConnectionRegistry Service uniqueness", () => {
   it("rejects a second connection for a Service with an actionable error", async () => {
@@ -29,34 +29,27 @@ describe("ConnectionRegistry Service uniqueness", () => {
   });
 
   it("serializes concurrent creation attempts so only one connection is minted", async () => {
-    const records: ConnectionRecord[] = [];
-    const ledger = {
-      createConnection: async (record) => {
-        await Promise.resolve();
-        records.push(record);
-      },
-      listConnections: async () => records,
-      deleteConnection: async () => {},
-      ensureGrant: async () => {},
-      getGrant: async () => null,
-      listGrants: async () => [],
-      updateGrant: async () => {},
-    } satisfies GrantLedger;
-    const registry = new ConnectionRegistry({ ledger });
-    registry.register(makeZeroGrantTalk().descriptor);
+    const { db, close } = createTestDb();
+    try {
+      const ledger = new DrizzleGrantLedger(db);
+      const registry = new ConnectionRegistry({ ledger });
+      registry.register(makeZeroGrantTalk().descriptor);
 
-    const results = await Promise.allSettled([
-      registry.connect("fake-webchat"),
-      registry.connect("fake-webchat"),
-    ]);
+      const results = await Promise.allSettled([
+        registry.connect("fake-webchat"),
+        registry.connect("fake-webchat"),
+      ]);
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    const rejected = results.find((result) => result.status === "rejected");
-    expect(rejected).toMatchObject({ status: "rejected" });
-    expect(rejected?.status === "rejected" ? rejected.reason.message : "").toMatch(
-      /exactly one connection per Service/i,
-    );
-    expect(records).toHaveLength(1);
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const rejected = results.find((result) => result.status === "rejected");
+      expect(rejected).toMatchObject({ status: "rejected" });
+      expect(rejected?.status === "rejected" ? rejected.reason.message : "").toMatch(
+        /exactly one connection per Service/i,
+      );
+      await expect(ledger.listConnections()).resolves.toHaveLength(1);
+    } finally {
+      close();
+    }
   });
 
   it("rolls back the connection row when initial grant creation fails", async () => {
@@ -94,24 +87,23 @@ describe("ConnectionRegistry Service uniqueness", () => {
 
   it("keeps a live connection registered when durable deletion fails so removal can retry", async () => {
     const { db, close } = createTestDb();
+    class FailingDeleteLedger extends DrizzleGrantLedger {
+      private failNextDelete = true;
+
+      override async deleteConnection(
+        id: ConnectionId,
+        inTx?: (tx: DrizzleTx) => void,
+      ): Promise<void> {
+        if (this.failNextDelete) {
+          this.failNextDelete = false;
+          throw new Error("injected connection deletion failure");
+        }
+        await super.deleteConnection(id, inTx);
+      }
+    }
+
     try {
-      const inner = new DrizzleGrantLedger(db);
-      let failNextDelete = true;
-      const ledger = {
-        createConnection: (record) => inner.createConnection(record),
-        listConnections: () => inner.listConnections(),
-        async deleteConnection(id) {
-          if (failNextDelete) {
-            failNextDelete = false;
-            throw new Error("injected connection deletion failure");
-          }
-          await inner.deleteConnection(id);
-        },
-        ensureGrant: (custody, name) => inner.ensureGrant(custody, name),
-        getGrant: (custody, name) => inner.getGrant(custody, name),
-        listGrants: (custody) => inner.listGrants(custody),
-        updateGrant: (custody, name, patch) => inner.updateGrant(custody, name, patch),
-      } satisfies GrantLedger;
+      const ledger = new FailingDeleteLedger(db);
       const fixture = makePasteTalk();
       const registry = new ConnectionRegistry({ ledger });
       registry.register(fixture.descriptor);
@@ -124,11 +116,11 @@ describe("ConnectionRegistry Service uniqueness", () => {
       );
       expect(registry.get(connection.id)).toBe(connection);
       expect(connection.isUnlocked("talk")).toBe(true);
-      await expect(inner.listConnections()).resolves.toHaveLength(1);
+      await expect(ledger.listConnections()).resolves.toHaveLength(1);
 
       await registry.remove(connection.id);
       expect(registry.all()).toEqual([]);
-      await expect(inner.listConnections()).resolves.toEqual([]);
+      await expect(ledger.listConnections()).resolves.toEqual([]);
     } finally {
       close();
     }

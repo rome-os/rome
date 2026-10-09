@@ -13,9 +13,9 @@ import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { GrantLedger } from "./ledger.js";
+import type { GrantLedger, GrantPatch } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
-import type { Act, Connection, ConnectionDescriptor, Credential } from "./types.js";
+import type { Act, Connection, ConnectionDescriptor, Credential, GrantName } from "./types.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -36,6 +36,18 @@ function flush(): Promise<void> {
 // A fresh drizzle-backed ledger per test.
 function makeLedger(): GrantLedger {
   return new DrizzleGrantLedger(createTestDb().db);
+}
+
+/** A ledger whose `updateGrant` rejects (a transient DB error) whenever
+ *  `shouldFail` matches the patch. */
+function makeFailingLedger(shouldFail: (patch: GrantPatch) => boolean): GrantLedger {
+  class FailingLedger extends DrizzleGrantLedger {
+    override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
+      if (shouldFail(patch)) throw new Error("LEDGER_WRITE_FAILED");
+      return super.updateGrant(custody, name, patch);
+    }
+  }
+  return new FailingLedger(createTestDb().db);
 }
 
 describe("registry faults", () => {
@@ -162,24 +174,10 @@ describe("registry faults", () => {
     // with its epoch alive — a DB blip must not half-degrade. A subsequent
     // CredentialRejected with the ledger healthy again degrades normally.
     it("a ledger write failure during degrade leaves the grant authorized (memory + ledger, epoch alive) and does not crash; a later degrade succeeds", async () => {
-      const base = makeLedger();
-      // Wrap the ledger so the degrade write rejects (transient DB error) only
-      // while `failDegrade` is set; flip it off to let a later degrade land.
+      // The degrade write rejects (transient DB error) only while `failDegrade`
+      // is set; flip it off to let a later degrade land.
       let failDegrade = true;
-      const failing: GrantLedger = {
-        createConnection: (rec) => base.createConnection(rec),
-        listConnections: () => base.listConnections(),
-        deleteConnection: (id) => base.deleteConnection(id),
-        ensureGrant: (c, n) => base.ensureGrant(c, n),
-        getGrant: (c, n) => base.getGrant(c, n),
-        listGrants: (c) => base.listGrants(c),
-        updateGrant: async (c, n, patch) => {
-          if (patch.state === "degraded" && failDegrade) {
-            throw new Error("LEDGER_WRITE_FAILED");
-          }
-          return base.updateGrant(c, n, patch);
-        },
-      };
+      const failing = makeFailingLedger((patch) => patch.state === "degraded" && failDegrade);
       const registry = new ConnectionRegistry({ ledger: failing });
       // successCount:0 → renew always re-confers → degrade attempt → write throws.
       const fx = makeRenewableAct({ successCount: 0 });
@@ -216,7 +214,7 @@ describe("registry faults", () => {
       expect(conn.auth.grants().user).toBe("authorized");
       expect(conn.act).not.toBeNull();
       // And the ledger row is unchanged — still authorized, not degraded.
-      const rec = await base.getGrant(conn.id, "user");
+      const rec = await failing.getGrant(conn.id, "user");
       expect(rec?.state).toBe("authorized");
       expect(rec?.degraded).toBeUndefined();
 
@@ -233,7 +231,7 @@ describe("registry faults", () => {
 
       expect(conn.auth.grants().user).toBe("degraded");
       expect(conn.act).toBeNull();
-      const rec2 = await base.getGrant(conn.id, "user");
+      const rec2 = await failing.getGrant(conn.id, "user");
       expect(rec2?.state).toBe("degraded");
       expect(rec2?.degraded?.reason).toBeTruthy();
     });
@@ -243,22 +241,8 @@ describe("registry faults", () => {
     // the grant stays in its PRIOR state with no split-brain (status(), the
     // capability handle, and the ledger row all agree), and no rebuild happens.
     it("a ledger write failure during importCredential rejects and leaves the prior state coherent", async () => {
-      const base = makeLedger();
       let failImport = false;
-      const failing: GrantLedger = {
-        createConnection: (rec) => base.createConnection(rec),
-        listConnections: () => base.listConnections(),
-        deleteConnection: (id) => base.deleteConnection(id),
-        ensureGrant: (c, n) => base.ensureGrant(c, n),
-        getGrant: (c, n) => base.getGrant(c, n),
-        listGrants: (c) => base.listGrants(c),
-        updateGrant: async (c, n, patch) => {
-          if (patch.state === "authorized" && failImport) {
-            throw new Error("LEDGER_WRITE_FAILED");
-          }
-          return base.updateGrant(c, n, patch);
-        },
-      };
+      const failing = makeFailingLedger((patch) => patch.state === "authorized" && failImport);
       const registry = new ConnectionRegistry({ ledger: failing });
       const fx = makePasteTalk();
       registry.register(fx.descriptor);
@@ -281,7 +265,7 @@ describe("registry faults", () => {
       expect(conn.isUnlocked("talk")).toBe(false);
       expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
       expect(fx.talkerFactory.instances.length).toBe(buildsBefore);
-      const rec = await base.getGrant(conn.id, "bot");
+      const rec = await failing.getGrant(conn.id, "bot");
       expect(rec?.state).toBe("unauthorized");
       expect(rec?.credential).toBeUndefined();
 
@@ -856,31 +840,25 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
    *  conferral can complete INSIDE the fault flow's awaited ledger call. All
    *  other calls (including the conferral's own writes and any repair write)
    *  pass straight through. */
-  function makeGatedLedger(
-    inner: GrantLedger,
-    shouldGate: (patch: Record<string, unknown>) => boolean,
-  ): { ledger: GrantLedger; release: () => void } {
+  function makeGatedLedger(shouldGate: (patch: GrantPatch) => boolean): {
+    ledger: GrantLedger;
+    release: () => void;
+  } {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     let gatedOnce = false;
-    const ledger: GrantLedger = {
-      createConnection: (rec) => inner.createConnection(rec),
-      listConnections: () => inner.listConnections(),
-      deleteConnection: (id) => inner.deleteConnection(id),
-      ensureGrant: (custody, name) => inner.ensureGrant(custody, name),
-      getGrant: (custody, name) => inner.getGrant(custody, name),
-      listGrants: (custody) => inner.listGrants(custody),
-      async updateGrant(custody, name, patch) {
-        if (!gatedOnce && shouldGate(patch as Record<string, unknown>)) {
+    class GatedLedger extends DrizzleGrantLedger {
+      override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
+        if (!gatedOnce && shouldGate(patch)) {
           gatedOnce = true;
           await gate;
         }
-        return inner.updateGrant(custody, name, patch);
-      },
-    };
-    return { ledger, release };
+        return super.updateGrant(custody, name, patch);
+      }
+    }
+    return { ledger: new GatedLedger(createTestDb().db), release };
   }
 
   function makeSessionDescriptor(
@@ -906,10 +884,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
   it("a re-login completing while the degrade LEDGER WRITE is in flight leaves the fresh grant and epoch intact", async () => {
     // Gate the degrade row write itself — the supersession window AFTER the
     // pre-write stillCurrent check passed.
-    const { ledger, release } = makeGatedLedger(
-      makeLedger(),
-      (patch) => patch.state === "degraded",
-    );
+    const { ledger, release } = makeGatedLedger((patch) => patch.state === "degraded");
     const registry = new ConnectionRegistry({ ledger });
     const talkerFactory = makeFakeTalkerFactory();
     registry.register(makeSessionDescriptor(talkerFactory, async () => "re-confer"));
@@ -954,10 +929,7 @@ describe("credential-rejected flow vs. a conferral completing mid-flow", () => {
 
   it("a re-login completing while a SUCCESSFUL RENEWAL's ledger write is in flight is not overwritten by the stale renewal", async () => {
     // Gate the renewal row write (the only fault-path write with lastRenewedAt).
-    const { ledger, release } = makeGatedLedger(
-      makeLedger(),
-      (patch) => patch.lastRenewedAt !== undefined,
-    );
+    const { ledger, release } = makeGatedLedger((patch) => patch.lastRenewedAt !== undefined);
     const registry = new ConnectionRegistry({ ledger });
     const talkerFactory = makeFakeTalkerFactory();
     registry.register(

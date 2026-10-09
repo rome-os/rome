@@ -15,18 +15,15 @@
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { GrantLedger, GrantRecord } from "./ledger.js";
+import type { GrantLedger, GrantPatch, GrantRecord } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk, makeTwoGrant } from "./test-fixtures.js";
+import type { GrantName } from "./types.js";
 
 // A macrotask flush: lets the queued mutation bodies (which run on microtasks
 // off the promise chain) reach their first awaited ledger write before we act.
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function makeLedger(): GrantLedger {
-  return new DrizzleGrantLedger(createTestDb().db);
 }
 
 /** Wrap a ledger so the FIRST `updateGrant` whose (custody, name, patch) matches
@@ -36,30 +33,23 @@ function makeLedger(): GrantLedger {
  *  a competing mutation can complete INSIDE the gated one's awaited ledger call
  *  (the exact window the per-grant lock closes). */
 function makeGatedLedger(
-  inner: GrantLedger,
-  shouldGate: (custody: string, name: string, patch: Record<string, unknown>) => boolean,
+  shouldGate: (custody: string, name: GrantName, patch: GrantPatch) => boolean,
 ): { ledger: GrantLedger; release: () => void } {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   let gatedOnce = false;
-  const ledger: GrantLedger = {
-    createConnection: (rec) => inner.createConnection(rec),
-    listConnections: () => inner.listConnections(),
-    deleteConnection: (id) => inner.deleteConnection(id),
-    ensureGrant: (custody, name) => inner.ensureGrant(custody, name),
-    getGrant: (custody, name) => inner.getGrant(custody, name),
-    listGrants: (custody) => inner.listGrants(custody),
-    async updateGrant(custody, name, patch) {
-      if (!gatedOnce && shouldGate(custody, name, patch as Record<string, unknown>)) {
+  class GatedLedger extends DrizzleGrantLedger {
+    override async updateGrant(custody: string, name: GrantName, patch: GrantPatch) {
+      if (!gatedOnce && shouldGate(custody, name, patch)) {
         gatedOnce = true;
         await gate;
       }
-      return inner.updateGrant(custody, name, patch);
-    },
-  };
-  return { ledger, release };
+      return super.updateGrant(custody, name, patch);
+    }
+  }
+  return { ledger: new GatedLedger(createTestDb().db), release };
 }
 
 describe("per-grant lock: same-grant mutations serialize", () => {
@@ -71,10 +61,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
     // completion during the park, then the released conferral write lands LAST
     // and the grant ends (wrongly) authorized. With the lock the revoke is
     // queued behind the conferral and applies last — revoke wins.
-    const { ledger, release } = makeGatedLedger(
-      makeLedger(),
-      (_c, _n, patch) => patch.state === "authorized",
-    );
+    const { ledger, release } = makeGatedLedger((_c, _n, patch) => patch.state === "authorized");
     const registry = new ConnectionRegistry({ ledger });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
@@ -103,10 +90,7 @@ describe("per-grant lock: same-grant mutations serialize", () => {
   // conferral's complete outcome (the later-issued one), with no field mixing
   // and no split between the ledger row and the live in-memory credential.
   it("two conferrals: the later-issued one's complete outcome wins, no field mixing", async () => {
-    const { ledger, release } = makeGatedLedger(
-      makeLedger(),
-      (_c, _n, patch) => patch.state === "authorized",
-    );
+    const { ledger, release } = makeGatedLedger((_c, _n, patch) => patch.state === "authorized");
     // Monotonic clock so the two conferrals stamp distinct conferredAt values:
     // connect() takes tick 1 (createdAt), conferral #1 tick 2, conferral #2 tick 3.
     let tick = 0;
@@ -154,7 +138,6 @@ describe("per-grant lock: independent grants do not serialize", () => {
   // conferral on another. A global (mis-keyed) lock would hang the second call.
   it("a parked conferral on one grant does not block a conferral on another grant", async () => {
     const { ledger, release } = makeGatedLedger(
-      makeLedger(),
       (_c, name, patch) => name === "bot" && patch.state === "authorized",
     );
     const registry = new ConnectionRegistry({ ledger });
@@ -181,11 +164,9 @@ describe("per-grant lock: independent grants do not serialize", () => {
   // exactly one connection per Service.)
   it("a parked conferral on one connection does not block another connection's conferral", async () => {
     const fx = makePasteTalk();
-    const base = makeLedger();
     // Gate only connection A's authorize write.
     let connAId = "";
     const { ledger, release } = makeGatedLedger(
-      base,
       (custody, _n, patch) => custody === connAId && patch.state === "authorized",
     );
     const registry = new ConnectionRegistry({ ledger });
@@ -214,10 +195,7 @@ describe("per-grant lock: profile backfill serializes with conferral", () => {
   // after a conferral must apply after it (FIFO), leaving the conferral's
   // credential intact and the backfilled profile on the row.
   it("a conferral then a profile backfill on the same grant apply in issue order", async () => {
-    const { ledger, release } = makeGatedLedger(
-      makeLedger(),
-      (_c, _n, patch) => patch.state === "authorized",
-    );
+    const { ledger, release } = makeGatedLedger((_c, _n, patch) => patch.state === "authorized");
     const registry = new ConnectionRegistry({ ledger });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
