@@ -114,15 +114,41 @@ describe("createWorkerCodePlugin", () => {
     expect(fallback.calls).toEqual([OPTIONS, later]);
   });
 
-  it("leaves the block unhighlighted when the worker could not highlight it", () => {
+  it("asks again for a block whose request the worker never answered", () => {
+    rstest.useFakeTimers();
+    try {
+      const { worker, plugin } = setup();
+      const first = rstest.fn();
+      plugin.highlight(OPTIONS, first);
+
+      rstest.advanceTimersByTime(19_999);
+      expect(plugin.highlight(OPTIONS)).toBeNull();
+      expect(worker.posted).toHaveLength(1);
+
+      rstest.advanceTimersByTime(1);
+      const second = rstest.fn();
+      expect(plugin.highlight(OPTIONS, second)).toBeNull();
+      expect(worker.posted.map((request) => request.id)).toEqual([0, 1]);
+
+      worker.answer(1, resultFor("retry"));
+      expect(second).toHaveBeenCalledWith(resultFor("retry"));
+      // A late answer to the first request still reaches its caller.
+      worker.answer(0, resultFor("late"));
+      expect(first).toHaveBeenCalledWith(resultFor("late"));
+    } finally {
+      rstest.useRealTimers();
+    }
+  });
+
+  it("keeps only the most recent results", () => {
     const { worker, plugin } = setup();
-    const callback = rstest.fn();
-    plugin.highlight(OPTIONS, callback);
+    for (let i = 0; i <= 200; i++) {
+      plugin.highlight({ ...OPTIONS, code: `line ${i}` });
+      worker.answer(i, resultFor(`line ${i}`));
+    }
 
-    worker.answer(0, null);
-
-    expect(callback).not.toHaveBeenCalled();
-    expect(plugin.highlight(OPTIONS)).toBeNull();
-    expect(worker.posted).toHaveLength(2);
+    expect(plugin.highlight({ ...OPTIONS, code: "line 200" })).toEqual(resultFor("line 200"));
+    expect(plugin.highlight({ ...OPTIONS, code: "line 0" })).toBeNull();
+    expect(worker.posted).toHaveLength(202);
   });
 });
