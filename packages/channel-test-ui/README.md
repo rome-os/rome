@@ -2,6 +2,8 @@
 
 A browser UI for channel scenario tests. It reads the traces that scenarios write. The scenarios, the platform peers they run against and the trace format are in [`packages/core/src/test/kit/im`](../core/src/test/kit/im/README.md). This package depends on core for the trace format. It is a development tool: nothing in Rome's runtime depends on it or serves it.
 
+The page is built from [`@rome-os/ui`](../ui/README.md), the shared component kit, with Tailwind 4 and `lucide-react` icons. The kit ships token names and the dashboard owns their values, so `web/theme.ts` applies the dashboard's default theme through `packages/web/src/lib/theme.ts` and follows the system's light or dark mode.
+
 ## Use it
 
 ```sh
@@ -20,9 +22,9 @@ The page follows the server's events, so a run started anywhere, including `pnpm
 
 ## Replay
 
-**Replay** plays the conversation from the start: each message appears, and an edit changes a message already shown. The user's messages appear whole, and the typewriter types out Rome's. An edit types only the text that differs from what the message showed, so a streamed reply grows. Pause, resume or drag the position bar to move through it. Selecting a frame or pressing **Stop** ends the replay.
+**Replay** and **Settings** are icon buttons at the top of the conversation. Hover or focus one to see its name. Replay plays the conversation from the start: each message appears, and an edit changes a message already shown. The user's messages appear whole, and the typewriter types out Rome's. An edit types only the text that differs from what the message showed, so a streamed reply grows. Pause, resume or drag the position bar to move through it. Selecting a frame or pressing **Stop** ends the replay.
 
-A scenario runs in milliseconds, so a replay keeps the order of the recorded changes and spaces them with its own delays. **Settings** holds them, and the browser keeps them between visits:
+A scenario runs in milliseconds, so a replay keeps the order of the recorded changes and spaces them with its own delays. **Settings** opens a dialog with them. A change applies at once, and the browser keeps them between visits:
 
 | Setting | Default |
 |---|---|
@@ -42,6 +44,8 @@ A scenario runs in milliseconds, so a replay keeps the order of the recorded cha
 `src/trace.ts` is the one place this package imports the trace format from core.
 
 ## Develop it
+
+The page has no stylesheet of its own beyond `web/globals.css`, which imports Tailwind and the kit stylesheet. Write styles as Tailwind utilities on kit tokens, and reach for a kit component before writing a control by hand.
 
 To work on the UI itself, start `pnpm channels:ui` and run `pnpm --filter @rome/channel-test-ui dev:web`, which serves the page with hot reload and sends API calls to the running server.
 

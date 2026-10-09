@@ -1,3 +1,7 @@
+import { Alert, AlertDescription } from "@rome-os/ui/alert";
+import { Badge } from "@rome-os/ui/badge";
+import { cn } from "@rome-os/ui/cn";
+import { List, ListRow } from "@rome-os/ui/list-row";
 import { useEffect, useMemo, useState } from "react";
 import {
   abbreviateExchange,
@@ -18,6 +22,14 @@ const LANES: Array<[Lane, string]> = [
   ["test", "Test"],
   ["platform", "Platform API"],
 ];
+
+// A frame's columns: the time, then the test lane and the platform lane. A
+// narrow screen keeps one lane column and names each row's lane inline.
+const FRAME_GRID =
+  "grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1.4fr)]";
+
+const PANEL = "rounded-lg border border-border bg-surface";
+const CODE = "max-h-72 overflow-auto rounded-8 bg-surface-muted p-3 font-mono text-aux";
 
 /**
  * A trace in three parts. The conversation, which can be replayed, sits in the
@@ -43,7 +55,7 @@ export function TraceView({ trace }: { trace: Trace }) {
   const { after, visible } = frame ? visibleAt(trace, frame) : { visible: [] };
 
   return (
-    <div className="trace">
+    <div className="grid items-start gap-4 min-[1200px]:grid-cols-[minmax(280px,1fr)_minmax(440px,1.3fr)]">
       <Conversation
         trace={trace}
         plan={plan}
@@ -54,41 +66,65 @@ export function TraceView({ trace }: { trace: Trace }) {
         onSettings={update}
         onResetSettings={reset}
       />
-      <div className="trace-side">
-        <section className="timeline" aria-label="Timeline">
-          <div className="timeline-head" aria-hidden="true">
+      <div className="flex min-w-0 flex-col gap-4">
+        <section aria-label="Timeline" className={cn(PANEL, "max-h-[45vh] overflow-auto")}>
+          <div
+            aria-hidden="true"
+            className={cn(
+              FRAME_GRID,
+              "border-b border-border px-3 py-2 text-aux text-muted-foreground max-sm:hidden",
+            )}
+          >
             <span>ms</span>
             {LANES.map(([lane, label]) => (
               <span key={lane}>{label}</span>
             ))}
           </div>
-          <ol>
-            {frames.map((item, index) => (
-              <li key={key(item, index)}>
-                <button
-                  type="button"
-                  className={`frame${index === selected ? " selected" : ""}`}
-                  aria-current={index === selected}
-                  onClick={() => select(index)}
-                >
-                  <span className="frame-time">{item.at.toFixed(1)}</span>
-                  {LANES.map(([lane, label]) =>
-                    lane === laneOf(item) ? (
-                      <span key={lane} className={`frame-cell lane-${lane}`}>
-                        <span className="lane-name">{label}</span>
+          <List asChild>
+            <ol>
+              {frames.map((item, index) => (
+                <li key={key(item, index)}>
+                  <ListRow
+                    asChild
+                    interactive
+                    size="sm"
+                    selected={index === selected}
+                    className={FRAME_GRID}
+                  >
+                    <button
+                      type="button"
+                      aria-current={index === selected}
+                      onClick={() => select(index)}
+                    >
+                      <span className="text-right font-mono text-aux text-muted-foreground">
+                        {item.at.toFixed(1)}
+                      </span>
+                      <span
+                        className={cn(
+                          "min-w-0 [overflow-wrap:anywhere]",
+                          laneOf(item) === "platform"
+                            ? "col-start-2 sm:col-start-3"
+                            : "col-start-2",
+                        )}
+                      >
+                        <span className="mr-1.5 text-aux text-muted-foreground sm:hidden">
+                          {LANES.find(([lane]) => lane === laneOf(item))?.[1]}
+                        </span>
                         <FrameSummary frame={item} />
                       </span>
-                    ) : (
-                      <span key={lane} className="frame-cell vacant" />
-                    ),
-                  )}
-                </button>
-              </li>
-            ))}
-          </ol>
+                    </button>
+                  </ListRow>
+                </li>
+              ))}
+            </ol>
+          </List>
         </section>
-        <section className="inspector" aria-label="Selected frame">
-          {frame ? <Detail frame={frame} /> : <p className="muted">No frames recorded.</p>}
+        <section aria-label="Selected frame" className={cn(PANEL, "flex flex-col gap-2 p-3")}>
+          {frame ? (
+            <Detail frame={frame} />
+          ) : (
+            <p className="text-ui text-muted-foreground">No frames recorded.</p>
+          )}
         </section>
       </div>
     </div>
@@ -97,7 +133,18 @@ export function TraceView({ trace }: { trace: Trace }) {
 
 function FrameSummary({ frame }: { frame: Frame }) {
   if (frame.kind === "step")
-    return <span className={`frame-step ${frame.step.status}`}>{frame.step.label}</span>;
+    return (
+      <span
+        className={cn(
+          "border-l-[3px] pl-2",
+          frame.step.status === "failed"
+            ? "border-destructive text-destructive-fg"
+            : "border-success",
+        )}
+      >
+        {frame.step.label}
+      </span>
+    );
   return <ExchangeSummary exchange={frame.exchange} />;
 }
 
@@ -111,27 +158,29 @@ function Detail({ frame }: { frame: Frame }) {
 
 function StepDetail({ step }: { step: TraceStep }) {
   return (
-    <div className="exchange">
-      <h3>
-        {step.label}{" "}
-        <span className={`tag ${step.status === "failed" ? "bad" : "good"}`}>{step.status}</span>
+    <>
+      <h3 className="flex flex-wrap items-center gap-1.5 text-ui font-medium text-foreground">
+        {step.label}
+        <Badge variant={step.status === "failed" ? "destructive" : "success"}>{step.status}</Badge>
       </h3>
-      <p className="muted">
+      <p className="text-ui text-muted-foreground">
         Started at {step.startedAt.toFixed(1)} ms, took {step.durationMs.toFixed(1)} ms
       </p>
       {step.error && (
-        <pre className="error" role="alert">
-          {step.error}
-        </pre>
+        <Alert variant="destructive">
+          <AlertDescription className="font-mono text-aux whitespace-pre-wrap">
+            {step.error}
+          </AlertDescription>
+        </Alert>
       )}
-    </div>
+    </>
   );
 }
 
 function ExchangeSummary({ exchange }: { exchange: TraceExchange }) {
   return (
-    <span className="frame-exchange">
-      <span className="mono" title={describeExchange(exchange)}>
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
+      <span className="font-mono text-aux" title={describeExchange(exchange)}>
         {abbreviateExchange(exchange)}
       </span>
       <Outcome exchange={exchange} />
@@ -140,40 +189,43 @@ function ExchangeSummary({ exchange }: { exchange: TraceExchange }) {
 }
 
 function Outcome({ exchange }: { exchange: TraceExchange }) {
-  if (exchange.dropped) return <span className="tag warn">dropped</span>;
-  if (exchange.status === undefined) return <span className="tag">pending</span>;
+  if (exchange.dropped) return <Badge variant="warning">dropped</Badge>;
+  if (exchange.status === undefined) return <Badge variant="muted">pending</Badge>;
   return (
     <>
-      <span className={`tag ${exchange.status >= 400 ? "bad" : ""}`}>{exchange.status}</span>
-      {exchange.accepted && <span className="tag good">changed</span>}
+      <Badge variant={exchange.status >= 400 ? "destructive" : "outline"}>{exchange.status}</Badge>
+      {exchange.accepted && <Badge variant="success">changed</Badge>}
     </>
   );
 }
 
 function ExchangeDetail({ exchange }: { exchange: TraceExchange }) {
   return (
-    <div className="exchange">
-      <h3>
-        <span className="mono">{describeExchange(exchange)}</span> <Outcome exchange={exchange} />
+    <>
+      <h3 className="flex flex-wrap items-center gap-1.5">
+        <span className="font-mono text-aux font-medium text-foreground">
+          {describeExchange(exchange)}
+        </span>
+        <Outcome exchange={exchange} />
         {exchange.source && (
-          <span className={`tag source-${exchange.source}`} title={SOURCE_HINTS[exchange.source]}>
+          <Badge variant={SOURCE_VARIANTS[exchange.source]} title={SOURCE_HINTS[exchange.source]}>
             {exchange.source}
-          </span>
+          </Badge>
         )}
       </h3>
-      <p className="muted">
+      <p className="text-ui text-muted-foreground">
         Received at {exchange.receivedAt.toFixed(1)} ms
         {exchange.answeredAt !== undefined && `, answered at ${exchange.answeredAt.toFixed(1)} ms`}
       </p>
-      <h4>Request</h4>
-      <pre>{JSON.stringify(exchange.requestBody, null, 2)}</pre>
+      <h4 className="text-aux text-muted-foreground">Request</h4>
+      <pre className={CODE}>{JSON.stringify(exchange.requestBody, null, 2)}</pre>
       {"responseBody" in exchange && (
         <>
-          <h4>Response</h4>
-          <pre>{JSON.stringify(exchange.responseBody, null, 2)}</pre>
+          <h4 className="text-aux text-muted-foreground">Response</h4>
+          <pre className={CODE}>{JSON.stringify(exchange.responseBody, null, 2)}</pre>
         </>
       )}
-    </div>
+    </>
   );
 }
 
@@ -181,6 +233,12 @@ const SOURCE_HINTS = {
   capture: "Shaped by a recorded, sanitized platform response",
   synthetic: "Hand-written: no capture covers this case yet",
   fault: "Injected by the test",
+} as const;
+
+const SOURCE_VARIANTS = {
+  capture: "info",
+  synthetic: "warning",
+  fault: "outline",
 } as const;
 
 /** The first failed step, else the first platform write, else the first frame. */

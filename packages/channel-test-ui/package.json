@@ -11,14 +11,19 @@
     "typecheck": "tsc --noEmit && tsc -p web --noEmit"
   },
   "devDependencies": {
+    "@rome-os/ui": "workspace:*",
     "@rome/core": "workspace:*",
     "@rsbuild/core": "2.2.3",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rstest/core": "^0.11.11",
+    "@tailwindcss/postcss": "^4.1.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "rome-web": "workspace:*",
+    "tailwindcss": "^4.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }

@@ -1,3 +1,8 @@
+import { IconButton } from "@rome-os/ui/icon-button";
+import { Input } from "@rome-os/ui/input";
+import { List, ListRow } from "@rome-os/ui/list-row";
+import { SegmentedControl } from "@rome-os/ui/segmented-control";
+import { RotateCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { TraceIndex } from "../src/trace.js";
 
@@ -42,64 +47,93 @@ export function TestList({
   }, [tests, query, status]);
 
   return (
-    <nav className="list" aria-label="Tests">
-      <div className="list-filters">
-        <input
+    <nav aria-label="Tests" className="flex flex-col">
+      <div className="sticky top-0 z-10 flex flex-col gap-2 border-b border-border bg-surface p-3">
+        <Input
           type="search"
+          size="sm"
           placeholder="Filter by name"
           aria-label="Filter by name"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div className="segmented" role="radiogroup" aria-label="Filter by status">
-          {FILTERS.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={status === value}
-              onClick={() => setStatus(value)}
-            >
-              {label} <span className="count">{countOf(tests, value)}</span>
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          size="sm"
+          aria-label="Filter by status"
+          value={status}
+          onValueChange={setStatus}
+          options={FILTERS.map(([value, label]) => ({
+            value,
+            label: (
+              <>
+                {label} <span className="text-muted-foreground">{countOf(tests, value)}</span>
+              </>
+            ),
+          }))}
+        />
       </div>
-      {files.length === 0 && <p className="muted list-empty">No tests match.</p>}
+      {files.length === 0 && <p className="p-3 text-ui text-muted-foreground">No tests match.</p>}
       {files.map(([file, fileTests]) => (
         <section key={file}>
-          <h2 className="list-file" title={file}>
+          <h2 className="truncate px-3 pt-3 pb-1 text-aux text-muted-foreground" title={file}>
             {file.split("/").at(-1)}
           </h2>
-          <ul>
-            {fileTests.map((test) => (
-              <li key={test.id} className={test.id === selected ? "selected" : undefined}>
-                <button type="button" className="list-test" onClick={() => onSelect(test.id)}>
-                  <StatusDot status={test.status} />
-                  <span className="list-name">{test.name}</span>
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  disabled={running}
-                  aria-label={`Run ${test.name}`}
-                  title="Run this test"
-                  onClick={() => onRun(test)}
+          <List asChild>
+            <ul>
+              {fileTests.map((test) => (
+                <ListRow
+                  key={test.id}
+                  asChild
+                  interactive
+                  selected={test.id === selected}
+                  className="py-1 pr-1"
                 >
-                  ↻
-                </button>
-              </li>
-            ))}
-          </ul>
+                  <li>
+                    {/* A bare button: a test's name wraps over several lines, and `Button` is a
+                        single-line control of fixed height. */}
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none outline-1 -outline-offset-4 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                      onClick={() => onSelect(test.id)}
+                    >
+                      <StatusDot status={test.status} />
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{test.name}</span>
+                    </button>
+                    <IconButton
+                      size="sm"
+                      label={`Run ${test.name}`}
+                      icon={<RotateCw />}
+                      disabled={running}
+                      onClick={() => onRun(test)}
+                    />
+                  </li>
+                </ListRow>
+              ))}
+            </ul>
+          </List>
         </section>
       ))}
     </nav>
   );
 }
 
+const DOT_CLASSES: Record<Test["status"], string> = {
+  pass: "bg-success",
+  fail: "bg-destructive",
+  skip: "bg-muted-foreground/50",
+  todo: "bg-muted-foreground/50",
+};
+
 export function StatusDot({ status }: { status: Test["status"] }) {
   const label = { pass: "Passed", fail: "Failed", skip: "Skipped", todo: "To do" }[status];
-  return <span className={`dot dot-${status}`} role="img" aria-label={label} title={label} />;
+  return (
+    <span
+      className={`inline-block size-2 flex-none rounded-full ${DOT_CLASSES[status]}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  );
 }
 
 function countOf(tests: Test[], status: StatusFilter): number {

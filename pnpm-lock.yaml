@@ -233,6 +233,9 @@ importers:
 
   packages/channel-test-ui:
     devDependencies:
+      '@rome-os/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@rome/core':
         specifier: workspace:*
         version: link:../core
@@ -245,18 +248,30 @@ importers:
       '@rstest/core':
         specifier: ^0.11.11
         version: 0.11.11(@module-federation/runtime-tools@2.5.0(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.46.0)(jsdom@29.1.1)
+      '@tailwindcss/postcss':
+        specifier: ^4.1.0
+        version: 4.3.0
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.15)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@19.2.6)
       react:
         specifier: 19.2.6
         version: 19.2.6
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
+      rome-web:
+        specifier: workspace:*
+        version: link:../web
+      tailwindcss:
+        specifier: ^4.1.0
+        version: 4.3.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
