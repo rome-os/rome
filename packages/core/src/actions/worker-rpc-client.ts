@@ -4,9 +4,12 @@
 // and related services. Worker processes reach them over the worker's IpcRpc
 // channel; `WorkerRpcServer` answers on the main side.
 
-import { getWorkerIpc, IpcRpcDisconnectError, IpcRpcTimeoutError } from "./ipc.js";
-
-const DEFAULT_TIMEOUT_MS = 30_000;
+import {
+  DEFAULT_RPC_TIMEOUT_MS,
+  getWorkerIpc,
+  IpcRpcDisconnectError,
+  IpcRpcTimeoutError,
+} from "./ipc.js";
 
 /** Call a main-process service method from an action body. */
 export async function callMain<T = unknown>(
@@ -23,7 +26,7 @@ export async function callMain<T = unknown>(
   if (!dispatcher) {
     throw new Error(`WorkerRPC: not running in a Node.js child process (method=${method})`);
   }
-  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new IpcRpcTimeoutError(method, timeoutMs)), timeoutMs);
