@@ -38,15 +38,28 @@ export function isRomeCreditsExhaustedError(error: unknown): boolean {
  */
 export function isRomeCreditsModelNotServedError(error: unknown): boolean {
   const seen = new Set<object>();
-  const visit = (value: unknown, depth = 0): boolean => {
-    if (typeof value === "string")
-      return value.includes("model_not_allowed") || MODEL_NOT_SERVED_MESSAGE_RE.test(value);
-    if (!value || typeof value !== "object" || depth >= 4 || seen.has(value)) return false;
+  const strings: string[] = [];
+  const collectStrings = (value: unknown, depth = 0): void => {
+    if (typeof value === "string") {
+      strings.push(value);
+      return;
+    }
+    if (!value || typeof value !== "object" || depth >= 4 || seen.has(value)) return;
     seen.add(value);
-    return Object.values(value).some((child) => visit(child, depth + 1));
+    for (const child of Object.values(value)) collectStrings(child, depth + 1);
   };
-  return visit(error);
+  collectStrings(error);
+  const has403 =
+    classifyCodexErrorInfo(error).httpStatus === 403 ||
+    strings.some((value) => FORBIDDEN_RE.test(value));
+  return (
+    has403 &&
+    strings.some(
+      (value) => value.includes("model_not_allowed") || MODEL_NOT_SERVED_MESSAGE_RE.test(value),
+    )
+  );
 }
 
+const FORBIDDEN_RE = /\b(?:status\s+)?403\s+Forbidden\b/i;
 const MODEL_NOT_SERVED_MESSAGE_RE =
   /\bThis model is not (?:available from Rome credits|enabled for your account)\b/i;

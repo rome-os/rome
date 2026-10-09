@@ -6,7 +6,13 @@ import {
 
 describe("Rome credits error", () => {
   it("recognizes the gateway's model_not_allowed by code or message", () => {
-    expect(isRomeCreditsModelNotServedError({ error: { code: "model_not_allowed" } })).toBe(true);
+    expect(
+      isRomeCreditsModelNotServedError({
+        error: { code: "model_not_allowed" },
+        codexErrorInfo: { httpConnectionFailed: { httpStatusCode: 403 } },
+      }),
+    ).toBe(true);
+    expect(isRomeCreditsModelNotServedError({ error: { code: "model_not_allowed" } })).toBe(false);
     expect(
       isRomeCreditsModelNotServedError({
         message:
