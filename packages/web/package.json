@@ -18,7 +18,8 @@
     "test:desktop-vnc": "playwright test --config playwright.desktop-vnc.config.ts",
     "test:desktop-vnc:docker": "playwright test --config playwright.desktop-vnc.docker.config.ts",
     "test:storybook": "playwright test --config playwright.storybook.config.ts",
-    "test:layout": "playwright test"
+    "test:layout": "playwright test",
+    "perf": "node perf/bench.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

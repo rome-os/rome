@@ -12,7 +12,7 @@ Durable design documentation for Rome. For the rules used when writing docs, see
 - [`northstars/`](northstars/CLAUDE.md) — ideal-state docs, one per area: what should be true, checked against the codebase by the `loop-reconcile` skill.
 - [`ui/`](ui/CLAUDE.md) — the design token docs, one directory per kind of token. [authoring/ui-tokens.md](authoring/ui-tokens.md) holds the rules they share.
 
-Other top-level files in `docs/` are operational references paired with the surface they document — [`design-system.md`](design-system.md), [`ui-kit.md`](ui-kit.md), [`dashboard-mock-mode.md`](dashboard-mock-mode.md), [`releases.md`](releases.md), [`observability/`](observability/). Rome Cloud deployment operations live in the private [`amantru/rome-cloud`](https://github.com/amantru/rome-cloud) repository.
+Other top-level files in `docs/` are operational references paired with the surface they document — [`design-system.md`](design-system.md), [`ui-kit.md`](ui-kit.md), [`dashboard-mock-mode.md`](dashboard-mock-mode.md), [`frontend-perf.md`](frontend-perf.md), [`releases.md`](releases.md), [`observability/`](observability/). Rome Cloud deployment operations live in the private [`amantru/rome-cloud`](https://github.com/amantru/rome-cloud) repository.
 
 ## Why docs
 

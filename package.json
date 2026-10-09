@@ -13,6 +13,7 @@
     "start:web": "pnpm --filter rome-web dev",
     "start:web:mock": "pnpm --filter rome-web dev:mock",
     "start:web:mock:e2e": "pnpm --filter rome-web dev:mock:e2e",
+    "perf:web": "pnpm --filter rome-web perf",
     "build:web:mock": "pnpm --filter rome-web build:mock",
     "storybook": "pnpm --filter rome-web storybook",
     "build:storybook": "pnpm --filter rome-web build:storybook",

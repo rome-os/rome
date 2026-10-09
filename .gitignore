@@ -5,6 +5,8 @@ node_modules/
 dist/
 # rome-web mock-mode build output (dev tool; see packages/web/mock/)
 dist-mock/
+# rome-web perf bench results (see docs/frontend-perf.md)
+packages/web/perf/.results/
 storybook-static/
 # UX audit report build output (see .claude/skills/ux-semantics-audit/report/)
 dist-report/
