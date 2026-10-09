@@ -70,35 +70,70 @@ export function useShadowRootScroll(): (node: HTMLElement | null) => void {
     const root = content.getRootNode();
     if (!(root instanceof ShadowRoot)) return;
 
+    const inContent = (event: Event) =>
+      event.target instanceof Node && content.contains(event.target);
     const letThrough = (event: Event, deltaX: number, deltaY: number) => {
-      const target = event.target;
-      if (!(target instanceof Node) || !content.contains(target)) return;
-      if (canScrollWithin(target, content, deltaX, deltaY)) event.stopPropagation();
+      if (inContent(event) && canScrollWithin(event.target, content, deltaX, deltaY)) {
+        event.stopPropagation();
+      }
     };
-    const onWheel = (event: WheelEvent) => letThrough(event, event.deltaX, event.deltaY);
-    let lastTouch: { x: number; y: number } | null = null;
-    const onTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      lastTouch = touch ? { x: touch.clientX, y: touch.clientY } : null;
+    // Gestures the lock always allows in the plain document. Radix Dialog sets
+    // `allowPinchZoom`, so a pinch (ctrl+wheel, two fingers) over the dialog
+    // zooms the page, and a horizontal drag on a range input moves the slider.
+    // They must not reach the lock here: it would see the shadow host and
+    // cancel them.
+    const allowGesture = (event: Event) => {
+      if (inContent(event)) event.stopPropagation();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) allowGesture(event);
+      else letThrough(event, event.deltaX, event.deltaY);
+    };
+
+    // The baseline is one tracked finger. It is reset whenever the set of
+    // fingers changes, so a move never measures from another finger's point.
+    let lastTouch: { id: number; x: number; y: number } | null = null;
+    const resetTouch = (event: TouchEvent) => {
+      const touch = event.touches.length === 1 ? event.touches[0] : undefined;
+      lastTouch = touch ? { id: touch.identifier, x: touch.clientX, y: touch.clientY } : null;
     };
     const onTouchMove = (event: TouchEvent) => {
+      if (event.touches.length !== 1) {
+        lastTouch = null;
+        if (event.touches.length === 2) allowGesture(event);
+        return;
+      }
       const touch = event.touches[0];
       const last = lastTouch;
-      if (!touch || event.touches.length > 1) return;
-      lastTouch = { x: touch.clientX, y: touch.clientY };
-      if (!last) return;
+      lastTouch = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+      if (!last || last.id !== touch.identifier) return;
       // A finger moving up scrolls content down, like a positive wheel delta.
-      letThrough(event, last.x - touch.clientX, last.y - touch.clientY);
+      const deltaX = last.x - touch.clientX;
+      const deltaY = last.y - touch.clientY;
+      const target = event.target;
+      if (
+        Math.abs(deltaX) > Math.abs(deltaY) &&
+        target instanceof HTMLInputElement &&
+        target.type === "range"
+      ) {
+        allowGesture(event);
+        return;
+      }
+      letThrough(event, deltaX, deltaY);
     };
 
     const options: AddEventListenerOptions = { passive: true };
-    root.addEventListener("wheel", onWheel as EventListener, options);
-    root.addEventListener("touchstart", onTouchStart as EventListener, options);
-    root.addEventListener("touchmove", onTouchMove as EventListener, options);
+    const listeners: [string, EventListener][] = [
+      ["wheel", onWheel as EventListener],
+      ["touchstart", resetTouch as EventListener],
+      ["touchend", resetTouch as EventListener],
+      ["touchcancel", resetTouch as EventListener],
+      ["touchmove", onTouchMove as EventListener],
+    ];
+    for (const [type, listener] of listeners) root.addEventListener(type, listener, options);
     return () => {
-      root.removeEventListener("wheel", onWheel as EventListener);
-      root.removeEventListener("touchstart", onTouchStart as EventListener);
-      root.removeEventListener("touchmove", onTouchMove as EventListener);
+      for (const [type, listener] of listeners) root.removeEventListener(type, listener);
     };
   }, [content]);
   return setContent;

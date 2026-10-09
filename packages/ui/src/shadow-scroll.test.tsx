@@ -62,6 +62,47 @@ function touchScroll(target: Element, fromY: number, toY: number) {
   return move;
 }
 
+type Point = { id: number; x?: number; y: number };
+
+function touchEvent(type: string, target: Element, points: Point[]) {
+  const touches = points.map(
+    ({ id, x = 10, y }) => ({ identifier: id, target, clientX: x, clientY: y }) as unknown as Touch,
+  );
+  const event = new TouchEvent(type, {
+    touches,
+    changedTouches: touches,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function ctrlWheel(target: Element) {
+  const event = new WheelEvent("wheel", {
+    deltaY: 3,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function shortDialog() {
+  return (
+    <Dialog open onClose={() => {}}>
+      <DialogTitle>Rename</DialogTitle>
+      <DialogBody>
+        <p data-testid="item">Short</p>
+        <input data-testid="range" type="range" />
+      </DialogBody>
+    </Dialog>
+  );
+}
+
 function tallDialog() {
   return (
     <Dialog open onClose={() => {}}>
@@ -229,9 +270,73 @@ describe("Dialog scroll lock inside a shadow root", () => {
     expect(wheel(find(shadowRoot, "item"), 100).defaultPrevented).toBe(false);
     expect(outerCalls).toBe(1);
   });
+
+  it("allows a pinch over the dialog, as Radix's allowPinchZoom does in the plain document", () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    render(shortDialog(), { container: mountRoot });
+    const item = find(shadowRoot, "item");
+
+    // Nothing can scroll, yet a zoom gesture must not be cancelled.
+    expect(ctrlWheel(item).defaultPrevented).toBe(false);
+    touchEvent("touchstart", item, [
+      { id: 1, y: 100 },
+      { id: 2, y: 200 },
+    ]);
+    const pinch = touchEvent("touchmove", item, [
+      { id: 1, y: 90 },
+      { id: 2, y: 210 },
+    ]);
+    expect(pinch.defaultPrevented).toBe(false);
+  });
+
+  it("allows a horizontal touch drag on a range input", () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    render(shortDialog(), { container: mountRoot });
+    const range = find(shadowRoot, "range");
+
+    touchEvent("touchstart", range, [{ id: 1, x: 10, y: 100 }]);
+    expect(touchEvent("touchmove", range, [{ id: 1, x: 60, y: 100 }]).defaultPrevented).toBe(false);
+    // A vertical drag on it is still a scroll, and here nothing can scroll.
+    expect(touchEvent("touchmove", range, [{ id: 1, x: 60, y: 50 }]).defaultPrevented).toBe(true);
+  });
+
+  it("measures a touch from the finger still down after another lifts", () => {
+    const { shadowRoot, mountRoot } = mountShadowApp();
+    render(tallDialog(), { container: mountRoot });
+    setScrollGeometry(find(shadowRoot, "body"), 0); // at the top
+    const item = find(shadowRoot, "item");
+
+    touchEvent("touchstart", item, [{ id: 1, y: 100 }]);
+    touchEvent("touchstart", item, [
+      { id: 1, y: 100 },
+      { id: 2, y: 500 },
+    ]);
+    touchEvent("touchmove", item, [
+      { id: 1, y: 100 },
+      { id: 2, y: 500 },
+    ]);
+    touchEvent("touchend", item, [{ id: 2, y: 500 }]); // finger 1 lifts
+    // Finger 2 moves up 10px: content scrolls down. Measured from finger 1's
+    // old point it would look like a 390px scroll up at the top, and be cancelled.
+    expect(touchEvent("touchmove", item, [{ id: 2, y: 490 }]).defaultPrevented).toBe(false);
+  });
 });
 
 describe("Dialog scroll lock in the plain document", () => {
+  it("allows a pinch over the dialog (parity reference for the shadow-root case)", () => {
+    render(shortDialog());
+    const item = find(document, "item");
+    expect(ctrlWheel(item).defaultPrevented).toBe(false);
+    touchEvent("touchstart", item, [
+      { id: 1, y: 100 },
+      { id: 2, y: 200 },
+    ]);
+    const pinch = touchEvent("touchmove", item, [
+      { id: 1, y: 90 },
+      { id: 2, y: 210 },
+    ]);
+    expect(pinch.defaultPrevented).toBe(false);
+  });
   it("leaves wheel events to the lock unchanged", () => {
     render(tallDialog());
     setScrollGeometry(find(document, "body"), 0);
