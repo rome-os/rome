@@ -712,9 +712,6 @@ export function appsRoutes(deps: ApiDeps): Hono {
     }
     const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be published');
     if (systemBlock) return systemBlock;
-    if (!deps.appCatalog) {
-      return c.json({ error: "App catalog is not configured" }, 501);
-    }
     const view = deps.appCatalog.get(appId);
     if (!view) {
       return c.json({ error: `App "${appId}" is not installed` }, 404);
