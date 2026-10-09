@@ -1,4 +1,9 @@
 import * as React from "react";
+import type { VariantProps } from "class-variance-authority";
+
+import type { buttonVariants } from "./button.js";
+
+type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
 
 /*
  * Internal — no subpath export, so this is not published API. `Button` and
@@ -52,7 +57,7 @@ function glyphEdges(children: React.ReactNode): { start: boolean; end: boolean }
 }
 
 /** The glyph-side inset, per step that takes it. Steps not listed take none. */
-const GLYPH_EDGE: Partial<Record<string, { start: string; end: string }>> = {
+const GLYPH_EDGE: Partial<Record<ButtonSize, { start: string; end: string }>> = {
   sm: { start: "pl-[var(--control-px-icon-sm)]", end: "pr-[var(--control-px-icon-sm)]" },
   md: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
   default: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
@@ -65,7 +70,7 @@ const GLYPH_EDGE: Partial<Record<string, { start: string; end: string }>> = {
  */
 export function glyphTrim(
   children: React.ReactNode,
-  size: string | null | undefined,
+  size: ButtonSize | null | undefined,
   align: string | null | undefined = "center",
 ): { start?: string; end?: string } {
   const inset = align === "center" && size ? GLYPH_EDGE[size] : undefined;
