@@ -394,6 +394,7 @@ layer rules behind this, and the test that enforces it in this repo, are in
 - `packages/web` — the Rome dashboard.
 - `rome_apps/*` — first-party apps, through their web bundles.
 - Scaffolded external apps — via the app template.
+- `packages/channel-test-ui` — the browser UI for the channel scenario tests, a development tool. It imports the kit as published and shapes none of its API.
 
 Explicit non-goals: `packages/desktop-base-web` and the
 mobile app. They are not on this design system and pulling them in would fix the
