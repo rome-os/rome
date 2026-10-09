@@ -98,6 +98,57 @@ describe("SubagentExecutionService", () => {
 
   afterEach(() => db.close());
 
+  it("inherits isolation before a fresh or resumed child can run", async () => {
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    await repo.ensureRomeSession({
+      id: "isolated-parent",
+      type: "webchat",
+      name: "Benchmark",
+      agentName: null,
+      sessionMetadata: metadata,
+    });
+    const child = fakeChildSession("isolated-child", ["fresh-turn", "resumed-turn"]);
+    const childManager = {
+      acquire: rs.fn(async () => child.session),
+      acquireBySessionId: rs.fn(async () => child.session),
+    } as unknown as AgentSessionManager;
+    const service = createSubagentExecutionService({
+      webchatRepo: repo,
+      activeRegistry: createActiveSubagentRegistry(),
+      turnStreams: createAgentTurnStreamRegistry(),
+    });
+    const context = {
+      parentSessionId: "isolated-parent",
+      parentAgentSessionId: "parent-runtime",
+      parentTurnId: "parent-turn",
+      parentToolUseId: "tool-1",
+      parentAgentName: "main",
+      parentChannelThreadKey: "webchat:isolated-parent",
+      childManager,
+      workingDir: "/tmp/project",
+    };
+    const fresh = await service.startSubagent("researcher", { prompt: "task" }, context);
+    expect(childManager.acquire).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ sessionMetadata: metadata }),
+    );
+    expect(JSON.parse((await repo.getSession("isolated-child"))!.metadataJson)).toEqual(metadata);
+    child.releases[0].resolve();
+    await fresh.completion;
+    const resumed = await service.startSubagent(
+      "researcher",
+      { prompt: "continue", resumeSessionId: "isolated-child" },
+      { ...context, parentToolUseId: "tool-2" },
+    );
+    expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
+      "isolated-child",
+      "researcher",
+      expect.objectContaining({ sessionMetadata: metadata }),
+    );
+    child.releases[1].resolve();
+    await resumed.completion;
+  });
+
   it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);

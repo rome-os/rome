@@ -620,6 +620,7 @@ export async function buildTestDeps(
     turnStreams: agentTurnStreamRegistry,
   });
   const agentSessionManager = createAgentSessionManager({
+    webchatRepo,
     agentLoader,
     sessionManager,
     promptBuilder,

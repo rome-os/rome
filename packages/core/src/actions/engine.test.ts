@@ -847,6 +847,57 @@ describe("ActionEngine", () => {
       expect(row.durationMs).toBe(2000);
     });
 
+    it("requires a guardian actor to set session metadata even through a nested action", async () => {
+      const execute = rs.fn(async () => ({ status: "ok" as const }));
+      await setup({
+        actions: [
+          buildAction("system:send_user_message", { execute }),
+          buildAction("wrapper", {
+            execute: () =>
+              callAction("system:send_user_message", { sessionMetadata: { isolated: true } }),
+          }),
+        ],
+      });
+      for (const actor of [
+        undefined,
+        { kind: "anonymous" } as const,
+        { kind: "visitor", accountId: "visitor", email: "visitor@example.com" } as const,
+      ]) {
+        expect((await rome.actionEngine.run("wrapper", {}, { actor })).status).toBe("error");
+      }
+      expect(execute).not.toHaveBeenCalled();
+      expect(
+        (
+          await rome.actionEngine.run(
+            "wrapper",
+            {},
+            { actor: { kind: "guardian", userId: "seat", via: "cookie" } },
+          )
+        ).status,
+      ).toBe("ok");
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(
+        (await rome.actionEngine.run("system:send_user_message", { text: "normal" })).status,
+      ).toBe("ok");
+    });
+
+    it("records session provenance on root and nested actions including errors", async () => {
+      await setup({
+        actions: [
+          buildAction("session-child", {
+            execute: async () => ({ status: "error", error: "failed" }),
+          }),
+          buildAction("session-root", { execute: () => callAction("session-child", {}) }),
+        ],
+      });
+      await rome.actionEngine.run("session-root", {}, { sessionId: "isolated-session" });
+      const [root] = await rome.repos.actionExecutions.findByAction("session-root");
+      const [child] = await rome.repos.actionExecutions.findByAction("session-child");
+      expect(root.sessionId).toBe("isolated-session");
+      expect(child.sessionId).toBe("isolated-session");
+      expect(child.status).toBe("error");
+    });
+
     it("stamps the ambient session actor on root and nested execution rows", async () => {
       const actor: SessionActor = {
         kind: "guardian",

@@ -142,6 +142,7 @@ export class AgentTraceRecorder {
       sourceThreadName,
       sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
+      parentSessionId: this.currentActionContext()?.sessionId,
     });
     this.ensured = true;
   }

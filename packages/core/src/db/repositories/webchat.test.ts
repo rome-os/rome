@@ -51,6 +51,85 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("persists immutable metadata before messages and inherits it across child session kinds", async () => {
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    await repo.createSession(
+      "isolated",
+      "Executor",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      metadata,
+    );
+    expect(await repo.getMessageCount("isolated")).toBe(0);
+    await repo.updateSessionName("isolated", "Renamed");
+    await repo.ensureRomeSession({
+      id: "isolated",
+      name: "Changed",
+      type: "webchat",
+      agentName: null,
+      sessionMetadata: { isolated: false },
+    });
+    const reloaded = new WebChatRepository(testDb.db);
+    expect(JSON.parse((await reloaded.getSession("isolated"))!.metadataJson)).toEqual(metadata);
+    for (const type of ["subagent", "fork", "action"] as const) {
+      await repo.ensureRomeSession({
+        id: type,
+        type,
+        name: type,
+        agentName: "worker",
+        parentSessionId: "isolated",
+        sessionMetadata: { isolated: false },
+      });
+      expect(JSON.parse((await reloaded.getSession(type))!.metadataJson)).toEqual(metadata);
+    }
+    await repo.createSession(
+      "handoff",
+      "Handoff",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat_handoff",
+      "{}",
+      { isolated: false },
+      "isolated",
+    );
+    expect(JSON.parse((await reloaded.getSession("handoff"))!.metadataJson)).toEqual(metadata);
+    expect((await reloaded.getSession("handoff"))!.parentSessionId).toBe("isolated");
+    await repo.createSession("normal", "Normal");
+    expect((await reloaded.getSession("normal"))!.metadataJson).toBe("{}");
+  });
+
+  it("inherits metadata on native channel-thread creation and preserves it on admission", async () => {
+    const metadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    const parentId = channelConversationId("discord", "isolation-parent");
+    await repo.ensureRomeSession({
+      id: parentId,
+      name: "Parent",
+      type: "channel",
+      agentName: null,
+      sourceChannel: "discord",
+      sourceThreadId: "isolation-parent",
+      sessionMetadata: metadata,
+    });
+    const input = {
+      channel: "discord",
+      threadId: "isolation-child",
+      parentThreadId: "isolation-parent",
+      agentName: "main",
+    };
+    const child = await repo.ensureChannelConversation(input);
+    expect(JSON.parse((await repo.getSession(child.id))!.metadataJson)).toEqual(metadata);
+    await repo.ensureChannelConversation(input);
+    expect(JSON.parse((await repo.getSession(child.id))!.metadataJson)).toEqual(metadata);
+  });
+
   it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
     await repo.createSession("input-session", "Inputs");
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);

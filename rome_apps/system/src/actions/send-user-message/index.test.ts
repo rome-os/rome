@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
-import { createSendUserMessageAction } from "./index.js";
+import { createSendUserMessageAction, sendUserMessageInputSchema } from "./index.js";
 
 const config = { name: "send_user_message" } as unknown as ActionConfig;
 const BASE = "http://127.0.0.1:4141";
@@ -24,6 +24,43 @@ function requestBody(impl: ReturnType<typeof rs.fn>, call: number): Record<strin
 }
 
 describe("send_user_message", () => {
+  it("persists isolated metadata in the create request before posting the first turn", async () => {
+    const fetchImpl = makeFetch(
+      jsonResponse(200, { id: "isolated" }),
+      jsonResponse(200, { turnId: "turn" }),
+    );
+    const action = createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE });
+    const sessionMetadata = { isolated: true, purpose: "benchmark", appId: "navi-bench" };
+    expect((await action.execute({ text: "task only", sessionMetadata })).status).toBe("ok");
+    expect(requestBody(fetchImpl, 0)).toEqual({ sessionMetadata });
+    expect(requestBody(fetchImpl, 1)).toEqual({ text: "task only" });
+  });
+
+  it("rejects metadata on existing chats without making a request", async () => {
+    const fetchImpl = makeFetch();
+    const action = createSendUserMessageAction(config, { fetchImpl, baseUrl: BASE });
+    for (const sessionMetadata of [{ isolated: false }, {}]) {
+      expect(
+        (await action.execute({ text: "task", sessionId: "existing", sessionMetadata })).status,
+      ).toBe("error");
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("validates the documented metadata shape", () => {
+    for (const sessionMetadata of [
+      null,
+      { isolated: "true" },
+      { purpose: "" },
+      { appId: "bad:id" },
+      { extra: true },
+    ]) {
+      expect(sendUserMessageInputSchema.safeParse({ text: "task", sessionMetadata }).success).toBe(
+        false,
+      );
+    }
+  });
+
   it("defaults to creating a new chat, then posts the text as a guardian turn", async () => {
     const fetchImpl = makeFetch(
       jsonResponse(200, { id: "sess-1" }),

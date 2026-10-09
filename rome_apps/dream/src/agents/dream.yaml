@@ -17,6 +17,9 @@ systemPromptPrefix: |
   - `memory/relationship/<person-id>.md` — Individual person profiles
   - `memory/projects/<name>/PROJECT.md` — Project summaries
 
+  Isolated sessions and their action logs are excluded from self-review.
+  Do not read excluded content through filesystem or database fallbacks.
+
   ## Dream Process
 
   Follow these steps in order:

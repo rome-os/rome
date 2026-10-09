@@ -1,5 +1,6 @@
 // Long-lived, serialized agent sessions. Session model: docs/concepts/sessions.md.
 
+import { parseSessionMetadata, type SessionMetadata } from "../lib/session-metadata.js";
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { Mutex } from "async-mutex";
@@ -38,6 +39,7 @@ import type {
   ConversationRef,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
+import { getCurrentActionContext } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
 import { runDefer, type DeferInput } from "./defer.js";
 import type {
@@ -194,6 +196,7 @@ export interface AgentSessionKey {
 }
 
 export interface AgentSessionInit {
+  sessionMetadata?: SessionMetadata;
   workingDir?: string;
   threadContext?: ThreadContext;
   /** Stable Rome conversation bound to this provider/runtime session. */
@@ -944,10 +947,27 @@ async function openSession(
   const supportsInteractiveSurface =
     key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
 
+  const actionContext = getCurrentActionContext();
+  const metadataSessionIds = [
+    requestedRomeSessionId,
+    init.threadContext?.romeSessionId,
+    resumeResult?.id,
+    actionContext?.sessionId,
+  ];
+  let sessionMetadata = init.sessionMetadata;
+  for (const id of metadataSessionIds) {
+    if (!id) continue;
+    const stored = await deps.webchatRepo?.getSession(id);
+    if (!stored) continue;
+    sessionMetadata = parseSessionMetadata(stored.metadataJson);
+    break;
+  }
+
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
       ownerType: metadata.ownerType,
       contextSuffix: init.contextSuffix,
+      sessionMetadata,
     }),
     supportsInteractiveSurface && metadata.ownerType === "core"
       ? buildInteractiveSurfaceGuidanceSection()
@@ -1654,6 +1674,7 @@ async function openSession(
     workingDir,
     buildForkOpenParams,
     threadContext: init.threadContext,
+    isolated: sessionMetadata?.isolated === true,
     sharedContext: init.sharedContext,
     isNewSession,
     isSubagent: opts.isSubagent,
@@ -1683,6 +1704,7 @@ async function openSession(
 }
 
 interface ImplArgs {
+  isolated?: boolean;
   key: AgentSessionKey;
   sessionId: string;
   romeSessionId?: string;
@@ -1917,6 +1939,7 @@ class AgentSessionImpl implements AgentSession {
   private workingDir: string;
   private buildForkOpenParams: BuildForkOpenParams;
   private threadContext?: ThreadContext;
+  private readonly isolated: boolean;
   private sharedContext?: Record<string, unknown>;
   private subscribers = new Map<string, AgentSessionSubscriber>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
@@ -1978,6 +2001,7 @@ class AgentSessionImpl implements AgentSession {
   private closingPromise?: Promise<void>;
 
   constructor(args: ImplArgs) {
+    this.isolated = args.isolated ?? false;
     this.key = args.key;
     this.sessionId = args.sessionId;
     this.romeSessionId = args.romeSessionId;
@@ -3333,7 +3357,10 @@ class AgentSessionImpl implements AgentSession {
       }
       if (!this.isSubagent && this.isNewSession && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
-        const block = buildThreadContextBlock(tc, this.workingDir);
+        const block = buildThreadContextBlock(
+          this.isolated ? { ...tc, projectName: undefined, projectPath: undefined } : tc,
+          this.workingDir,
+        );
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }

@@ -24,6 +24,7 @@ export class ActionExecutionsRepository {
     error?: string;
     durationMs?: number;
     initiator?: string;
+    sessionId?: string;
     actor?: SessionActor;
     parentId?: string;
     startedAt?: Date;
@@ -45,6 +46,7 @@ export class ActionExecutionsRepository {
       error: data.error ?? null,
       durationMs: data.durationMs ?? null,
       initiator: data.initiator ?? null,
+      sessionId: data.sessionId ?? null,
       actor: data.actor ?? null,
       parentId: data.parentId ?? null,
       startedAt,

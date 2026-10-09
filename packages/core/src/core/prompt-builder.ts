@@ -3,6 +3,7 @@ import { isAbsolute, join, relative } from "node:path";
 import type { AgentConfig } from "../types.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactOwnerType } from "../apps/types.js";
+import type { SessionMetadata } from "../lib/session-metadata.js";
 import type { ThreadContext } from "./types.js";
 import {
   getCoreRoot,
@@ -44,6 +45,7 @@ export const WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT = 2000;
 export const PROJECT_SUMMARY_CHAR_LIMIT = 160;
 
 export interface PromptBuildOptions {
+  sessionMetadata?: SessionMetadata;
   /**
    * Core agents inherit Rome's platform prompt. App-owned agents start from
    * their declared systemPromptPrefix so the app author controls their base
@@ -268,11 +270,16 @@ export class PromptBuilder {
   }
 
   build(config: AgentConfig, options: PromptBuildOptions): string {
-    const prefix = this.buildPrefix(config, options.ownerType);
+    const prefix = this.buildPrefix(config, options.ownerType, options.sessionMetadata);
     const sections = [prefix];
-    const memory = options.ownerType === "core" ? this.buildMemorySection(config) : null;
+    const memory =
+      options.ownerType === "core" && !options.sessionMetadata?.isolated
+        ? this.buildMemorySection(config)
+        : null;
     const projectSummaries =
-      options.ownerType === "core" ? this.buildProjectSummariesSection(config) : null;
+      options.ownerType === "core" && !options.sessionMetadata?.isolated
+        ? this.buildProjectSummariesSection(config)
+        : null;
 
     if (memory) {
       sections.push(memory);
@@ -293,8 +300,12 @@ export class PromptBuilder {
    * Build and cache the fixed prefix for an agent.
    * This portion never changes mid-session and is cache-friendly.
    */
-  buildPrefix(config: AgentConfig, ownerType: ArtifactOwnerType): string {
-    const cacheKey = this.cacheKey(config.name, ownerType);
+  buildPrefix(
+    config: AgentConfig,
+    ownerType: ArtifactOwnerType,
+    sessionMetadata?: SessionMetadata,
+  ): string {
+    const cacheKey = this.cacheKey(config.name, ownerType, sessionMetadata);
     const cached = this.prefixCache.get(cacheKey);
     if (cached) return cached;
 
@@ -338,7 +349,7 @@ export class PromptBuilder {
     }
 
     const identity = this.readFileGracefully(join(this.profileMemoryDir, "IDENTITY.md"));
-    if (identity) {
+    if (identity && !sessionMetadata?.isolated) {
       sections.push(this.formatMarkdownSection("Identity", identity));
     }
 
@@ -354,7 +365,9 @@ export class PromptBuilder {
     // Installed-app catalog — shown to every core agent (incl. subagents),
     // not just main, so they can see what's installed and reach the connector
     // catalog that lives in the connector app's description.
-    const installedApps = this.buildInstalledAppsSection();
+    const installedApps = this.buildInstalledAppsSection(
+      sessionMetadata?.isolated ? sessionMetadata.appId : undefined,
+    );
     if (installedApps) {
       sections.push(installedApps);
     }
@@ -365,16 +378,23 @@ export class PromptBuilder {
   }
 
   invalidate(agentName: string): void {
-    this.prefixCache.delete(this.cacheKey(agentName, "core"));
-    this.prefixCache.delete(this.cacheKey(agentName, "app"));
+    for (const key of this.prefixCache.keys()) {
+      if (key.startsWith(`core:${agentName}:`) || key.startsWith(`app:${agentName}:`)) {
+        this.prefixCache.delete(key);
+      }
+    }
   }
 
   invalidateAll(): void {
     this.prefixCache.clear();
   }
 
-  private cacheKey(agentName: string, ownerType: ArtifactOwnerType): string {
-    return `${ownerType}:${agentName}`;
+  private cacheKey(
+    agentName: string,
+    ownerType: ArtifactOwnerType,
+    metadata?: SessionMetadata,
+  ): string {
+    return `${ownerType}:${agentName}:${JSON.stringify([metadata?.isolated === true, metadata?.isolated ? (metadata.appId ?? null) : null])}`;
   }
 
   /**
@@ -476,8 +496,10 @@ export class PromptBuilder {
    * toolkits and their `connector_proxy` API hosts, so an agent that can't see
    * this section can't pick connectors. Returns null when nothing is installed.
    */
-  private buildInstalledAppsSection(): string | null {
-    const apps = this.appCatalog?.listResolved() ?? [];
+  private buildInstalledAppsSection(excludedAppId?: string): string | null {
+    const apps = (this.appCatalog?.listResolved() ?? []).filter(
+      (app) => app.appId !== excludedAppId,
+    );
     if (apps.length === 0) {
       return null;
     }

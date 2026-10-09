@@ -75,6 +75,7 @@ import {
   fallbackConversationTitle,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
+import { parseSessionMetadata, sessionMetadataSchema } from "../../lib/session-metadata.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
@@ -1287,7 +1288,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           workingDir,
           threadContext,
           romeSessionId: input.session.id,
-          contextSuffix: buildWebchatContextSuffix(),
+          contextSuffix: parseSessionMetadata(input.session.metadataJson).isolated
+            ? undefined
+            : buildWebchatContextSuffix(),
           handback: resolveSessionHandback(input.session),
           selectionId: modelSelection?.id,
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
@@ -2098,6 +2101,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         largeModelSelection?: string;
         reasoningEffort?: string;
         agentName?: string | null;
+        sessionMetadata?: unknown;
       }>()
       .catch(
         () =>
@@ -2109,8 +2113,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             largeModelSelection?: string;
             reasoningEffort?: string;
             agentName?: string | null;
+            sessionMetadata?: unknown;
           },
       );
+    if (body.sessionMetadata !== undefined && (await currentSessionActor())?.kind !== "guardian") {
+      return c.json({ error: "Session metadata requires a guardian session" }, 403);
+    }
+    const metadata = sessionMetadataSchema.safeParse(
+      body.sessionMetadata === undefined ? {} : body.sessionMetadata,
+    );
+    if (!metadata.success) {
+      return c.json({ error: "Invalid sessionMetadata", details: metadata.error.issues }, 400);
+    }
     const id = randomUUID();
     const name = body.name || "New Chat";
     let project;
@@ -2147,6 +2161,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       modelSelection?.id ?? null,
       project.path,
       storedAgentName,
+      "webchat",
+      null,
+      metadata.data,
     );
     const createdSession = await deps.webchatRepo.getSession(id);
     if (!createdSession) {
@@ -3147,7 +3164,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       senderBondLevel: "guardian",
     };
 
-    const contextSuffix = buildWebchatContextSuffix();
+    const contextSuffix = parseSessionMetadata(session.metadataJson).isolated
+      ? undefined
+      : buildWebchatContextSuffix();
     // A branch resumes by recomputing its channel-thread key, and
     // `persistForkThread` stored that key without a model-selection suffix. Pin
     // the selection to null so the two derivations cannot drift: a suffix here
@@ -3585,6 +3604,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // turn of the child conversation (including after a
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
+                        {},
+                        sessionId,
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {

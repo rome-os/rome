@@ -15,8 +15,27 @@ A Rome session is the durable product boundary around one continuous body of age
 **Not to be confused with:**
 
 - **[Turn](#turn)** — a turn is one unit of work inside a session. A session is the durable boundary around many turns.
+- **[Isolated session](#isolated-session)** — a guardian-authorized session excludes personal context and dream self-review.
 - **[Forked turn](#forked-turns)** — a fork branches from a session's context but can never mutate it.
 - **Provider execution state** — the provider-side thread is an implementation resource the session resumes. The session is the product boundary.
+
+## Isolated session
+
+An **isolated session** is a guardian-authorized session that omits personal memory and project context from its prompt. Dream self-review cannot read its conversations or attributable action logs.
+
+**Contracts:**
+
+- The guardian sets `sessionMetadata` at creation, before the first message. It accepts `isolated`, `purpose`, and `appId`. Later calls cannot change it.
+- Child sessions inherit the parent’s isolation, purpose, and creating app identity. Renames, handoffs, and provider resumes preserve them.
+- Isolated prompts omit memory, relationship context, and project summaries. The creating app stays out of the prompt catalog, while other apps, tools, and safety instructions remain available.
+- Dream excludes isolated conversations even when a caller requests their session id. It excludes actions by session provenance and uses the creating app’s action prefix when that provenance is absent.
+- Logs without session provenance or a known creating app cannot be attributed reliably. App-prefix exclusion can also hide unrelated work by that app.
+- A deleted session has no metadata to consult. A failed dispatch has no creating-app fallback until an isolated session records that app identity.
+
+**Not to be confused with:**
+
+- **Filesystem sandbox** — isolation prevents automatic context injection and self-review ingestion, not deliberate file or tool reads.
+- **Fork tool isolation** — a fork can restrict tools without excluding its content from self-review.
 
 ## Model pin
 

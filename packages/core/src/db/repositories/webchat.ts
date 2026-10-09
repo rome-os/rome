@@ -29,6 +29,7 @@ import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
 import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
+import { parseSessionMetadata, type SessionMetadata } from "../../lib/session-metadata.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 
 export interface StoredTurnFeedback {
@@ -229,6 +230,7 @@ export interface AddTurnRecapMessageInput {
 }
 
 export interface EnsureRomeSessionInput {
+  sessionMetadata?: SessionMetadata;
   id: string;
   type: RomeSessionType;
   name: string;
@@ -876,15 +878,20 @@ export class WebChatRepository {
     type: "webchat" | "webchat_handoff" = "webchat",
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
+    sessionMetadata: SessionMetadata = {},
+    parentSessionId: string | null = null,
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
       await this.ensureProject(projectPath, projectName);
     }
 
+    const parent = parentSessionId ? await this.getSession(parentSessionId) : null;
     await this.db.insert(romeSessions).values({
       id,
       name,
+      metadataJson: parent ? parent.metadataJson : JSON.stringify(sessionMetadata),
+      parentSessionId,
       personaId: personaId ?? null,
       projectName,
       projectPath,
@@ -904,11 +911,13 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
+    const parent = input.parentSessionId ? await this.getSession(input.parentSessionId) : null;
     await this.db
       .insert(romeSessions)
       .values({
         id: input.id,
         name: input.name,
+        metadataJson: parent ? parent.metadataJson : JSON.stringify(input.sessionMetadata ?? {}),
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
         projectPath: input.projectPath ?? null,
@@ -955,6 +964,7 @@ export class WebChatRepository {
             threadType: "group",
           })
         : null;
+    const parentSession = parent ? await this.getSession(parent.id) : null;
     const existing = await this.findChannelConversation(input.channel, input.threadId);
     if (existing) {
       if (!parent) return existing;
@@ -962,7 +972,13 @@ export class WebChatRepository {
       // policy. Keep the derived row in sync with the parent on admission.
       await this.db
         .update(romeSessions)
-        .set({ parentSessionId: parent.id, agentName: parent.agentName })
+        .set({
+          parentSessionId: parent.id,
+          agentName: parent.agentName,
+          ...(parseSessionMetadata(parentSession?.metadataJson).isolated
+            ? { metadataJson: parentSession!.metadataJson }
+            : {}),
+        })
         .where(eq(romeSessions.id, existing.id));
       return { ...existing, agentName: parent.agentName };
     }
@@ -989,6 +1005,7 @@ export class WebChatRepository {
         sourceThreadName: input.threadName ?? null,
         sourceThreadType: input.threadType ?? null,
         parentSessionId: parent?.id ?? null,
+        metadataJson: parentSession?.metadataJson ?? "{}",
         createdAt: now,
         activityAt: now,
         lastSeenActivityAt: null,
