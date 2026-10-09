@@ -123,7 +123,7 @@ export function ErrorEventView({
               <div className="truncate text-aux text-muted-foreground">{copy.description}</div>
             </div>
           </div>
-          <Button asChild size="sm" className="w-full shadow-1 sm:w-auto">
+          <Button asChild size="sm" press="none" className="w-full shadow-1 sm:w-auto">
             <Link to="/settings/ai-tools">
               {copy.action}
               <ArrowRight data-icon="inline-end" />

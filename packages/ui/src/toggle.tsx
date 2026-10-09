@@ -71,7 +71,11 @@ export function Toggle({
       type="button"
       data-slot="toggle"
       data-size={canonicalControlSize(size)}
-      className={cn(buttonVariants({ variant, size }), pressed && pressedClasses, className)}
+      className={cn(
+        buttonVariants({ variant, size, press: "none" }),
+        pressed && pressedClasses,
+        className,
+      )}
       onClick={() => onPressedChange(!pressed)}
       {...rest}
       // After the spread on purpose. The props type already refuses

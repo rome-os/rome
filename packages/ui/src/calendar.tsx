@@ -50,7 +50,7 @@ function Calendar({
           // which is the same 28px as `--control-h-sm`, so naming the step it
           // already measures is what gets the glyph and the radius off the
           // scale instead of off a step the button does not occupy.
-          buttonVariants({ variant: buttonVariant, size: "icon-sm" }),
+          buttonVariants({ variant: buttonVariant, size: "icon-sm", press: "none" }),
           "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_previous,
         ),
@@ -59,7 +59,7 @@ function Calendar({
           // which is the same 28px as `--control-h-sm`, so naming the step it
           // already measures is what gets the glyph and the radius off the
           // scale instead of off a step the button does not occupy.
-          buttonVariants({ variant: buttonVariant, size: "icon-sm" }),
+          buttonVariants({ variant: buttonVariant, size: "icon-sm", press: "none" }),
           "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_next,
         ),
@@ -180,6 +180,7 @@ function CalendarDayButton({
       ref={ref}
       variant="ghost"
       size="icon"
+      press="none"
       data-day={day.date.toLocaleDateString(locale?.code)}
       data-selected-single={
         modifiers.selected &&
