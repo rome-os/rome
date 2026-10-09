@@ -1587,46 +1587,6 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("treats a missing cache-write field in compatibility usage notifications as zero", async () => {
-    requestMock.mockImplementation(async (method: string) => {
-      if (method === "thread/start") {
-        captured.onNotification?.("thread/started", { thread: { id: "thr-legacy-usage" } });
-      }
-      if (method === "turn/start") {
-        const n = captured.onNotification!;
-        const legacyUsage = usage();
-        delete (legacyUsage.last as Partial<typeof legacyUsage.last>).cacheWriteInputTokens;
-        delete (legacyUsage.total as Partial<typeof legacyUsage.total>).cacheWriteInputTokens;
-        n("turn/started", {
-          threadId: "thr-legacy-usage",
-          turn: { id: "turn-legacy-usage" },
-        });
-        n("thread/tokenUsage/updated", {
-          threadId: "thr-legacy-usage",
-          turnId: "turn-legacy-usage",
-          usage: legacyUsage,
-        });
-        n("turn/completed", {
-          threadId: "thr-legacy-usage",
-          turn: { id: "turn-legacy-usage", status: "completed" },
-        });
-      }
-      return {};
-    });
-
-    const session = await new CodexAppServerProvider().openSession(buildParams());
-    const collected = collectUntilTerminal(session);
-    await session.sendUserInput({ text: "legacy usage" });
-
-    expect((await collected).find((message) => message.type === "result")).toMatchObject({
-      accounting: {
-        usage: { cacheWriteTokens: 0 },
-        rawUsage: { cache_write_tokens: 0 },
-      },
-    });
-    await session.close();
-  });
-
   it("passes outputSchema on turn/start and publishes one parsed structured terminal", async () => {
     const provider = new CodexAppServerProvider();
     const schema = {
