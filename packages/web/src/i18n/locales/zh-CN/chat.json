@@ -149,7 +149,7 @@
     },
     "creditsUsedUp": {
       "title": "Rome 额度已用完",
-      "description": "连接 ChatGPT 或 Claude 以继续。",
+      "description": "连接 ChatGPT 或 Claude，或选择已连接服务的模型。",
       "action": "连接 AI"
     },
     "openAiTools": "打开 AI Tools"

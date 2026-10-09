@@ -149,7 +149,7 @@
     },
     "creditsUsedUp": {
       "title": "Rome credits used up",
-      "description": "Connect ChatGPT or Claude to keep going.",
+      "description": "Connect ChatGPT or Claude, or choose a model from one already connected.",
       "action": "Connect an AI"
     },
     "openAiTools": "Open AI Tools"
