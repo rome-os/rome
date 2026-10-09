@@ -182,15 +182,14 @@ describe("main-owned action subprocess", () => {
     const processFactory = rs.fn(
       (_entryPath: string, _options: ForkOptions) => child as unknown as ChildProcess,
     );
-    const workerRpcAttach = rs.fn();
-    const sessionDispose = rs.fn();
-    const sessionAttach = rs.fn(() => ({ dispose: sessionDispose }));
+    const workerRpcRegister = rs.fn();
+    const sessionAttach = rs.fn();
     const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
       processRole: "main",
       workerWarmPoolSize: 0,
       actionWorkerFork: processFactory,
     });
-    engine.setWorkerRpcServer({ attach: workerRpcAttach } as never);
+    engine.setWorkerRpcServer({ register: workerRpcRegister } as never);
     engine.setAgentSessionBridge({ attach: sessionAttach } as never);
     const events: ActionRuntimeEvent[] = [];
 
@@ -201,8 +200,10 @@ describe("main-owned action subprocess", () => {
     await expect(execution.result).resolves.toEqual({ status: "ok", data: "w2-result" });
     expect(processFactory).toHaveBeenCalledTimes(1);
     expect(processFactory.mock.calls[0][1]).toMatchObject({ detached: false });
-    expect(workerRpcAttach).toHaveBeenCalledWith(child);
-    expect(sessionAttach).toHaveBeenCalledWith(child);
+    // Both services share the one IPC channel to the worker.
+    const rpc = workerRpcRegister.mock.calls[0][0];
+    expect(rpc).toBeInstanceOf(IpcRpc);
+    expect(sessionAttach).toHaveBeenCalledWith(rpc, child);
     expect(events).toEqual([
       { type: "agent_message", message: { type: "text", content: "from-w2" } },
     ]);

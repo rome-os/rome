@@ -53,10 +53,6 @@ export function normalizeConversationTitle(source: string): string | null {
   return `${segments.slice(0, CONVERSATION_TITLE_MAX_LENGTH - 1).join("")}…`;
 }
 
-export function fallbackConversationTitle(firstMessage: string): string | null {
-  return normalizeConversationTitle(firstMessage);
-}
-
 export function createConversationTitleGenerator(
   modelResolver: ModelResolver,
   options: { timeoutMs?: number } = {},

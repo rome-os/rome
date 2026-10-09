@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { PeerServer, requestBarrier } from "./peer.js";
+import { MessageStore, PeerServer, requestBarrier } from "./peer.js";
 
 describe("PeerServer", () => {
   let server: PeerServer;
@@ -32,8 +32,12 @@ describe("PeerServer", () => {
         response: { status: 200, body: { id: 1 } },
         source: "capture",
         accepted: true,
+        receivedAt: expect.any(Number),
+        answeredAt: expect.any(Number),
       },
     ]);
+    const [exchange] = server.exchanges;
+    expect(exchange?.answeredAt).toBeGreaterThanOrEqual(exchange?.receivedAt ?? Infinity);
     server.assertClean();
   });
 
@@ -100,5 +104,26 @@ describe("PeerServer", () => {
     server.once({ method: "POST", path: "/messages", dropAfterAccept: true });
 
     expect(() => server.assertClean()).toThrow("1 scripted faults never fired");
+  });
+});
+
+describe("MessageStore", () => {
+  it("logs each create and edit with the message as it was then, apart from what it shows now", () => {
+    const store = new MessageStore();
+    store.add({ id: "1", conversation: "c", from: "rome", text: "hi" });
+    store.add({ id: "2", conversation: "other", from: "user", text: "elsewhere" });
+    store.edit("1", "hi there");
+
+    const changes = store.changes("c");
+
+    expect(changes.map((change) => [change.message.text, change.message.edits])).toEqual([
+      ["hi", 0],
+      ["hi there", 1],
+    ]);
+    expect(changes[1]?.at).toBeGreaterThanOrEqual(changes[0]?.at ?? Infinity);
+    // The log keeps its own copies: reading it cannot change what the platform shows.
+    changes[0]!.message.text = "tampered";
+    expect(store.changes("c")[0]?.message.text).toBe("hi");
+    expect(store.visible("c")[0]?.text).toBe("hi there");
   });
 });

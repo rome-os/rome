@@ -20,7 +20,7 @@ describe("Session continuity (integration)", () => {
       lastActiveAt: new Date(),
       status: "active",
     });
-    await firstManager.setProviderInfo("runtime-session", "openai", "provider-thread", "gpt-5");
+    await repo.setProviderInfo("runtime-session", "openai", "provider-thread", "gpt-5");
 
     const restartedManager = new SessionManager(new SessionsRepository(testDb.db));
     await expect(restartedManager.findReusableSession("telegram:chat-1", "main")).resolves.toEqual({

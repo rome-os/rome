@@ -5,7 +5,6 @@ import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
-import { isTransactionalLedger, type TransactionalGrantLedger } from "./ledger-db.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -282,7 +281,7 @@ export class ConnectionRegistry {
       const createdAt = this.clock();
       const record = { id, service, label: label ?? service, createdAt };
       try {
-        await this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
+        this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
       } catch (error) {
         if (error instanceof ServiceConnectionWriteConflict) {
           throw await this.duplicateServiceError(service);
@@ -297,36 +296,13 @@ export class ConnectionRegistry {
   }
 
   /** Persist a connection and all of its initial grant placeholders as one
-   *  durable unit. Production ledgers use the same transaction seam as
-   *  confer(); the compensating fallback keeps lightweight test ledgers from
-   *  stranding a connection row if their grant initialization fails. */
-  private async createConnectionWithGrants(
-    record: ConnectionRecord,
-    grants: GrantName[],
-  ): Promise<void> {
+   *  durable unit, in the same transaction seam as confer(). */
+  private createConnectionWithGrants(record: ConnectionRecord, grants: GrantName[]): void {
     const ledger = this.ledger;
-    if (isTransactionalLedger(ledger)) {
-      ledger.runInTransaction((tx) => {
-        ledger.writeConnection(tx, record);
-        for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
-      });
-      return;
-    }
-
-    await ledger.createConnection(record);
-    try {
-      for (const grant of grants) await ledger.ensureGrant(record.id, grant);
-    } catch (error) {
-      try {
-        await ledger.deleteConnection(record.id);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          `Failed to initialize connection "${record.id}" and remove its partial record`,
-        );
-      }
-      throw error;
-    }
+    ledger.runInTransaction((tx) => {
+      ledger.writeConnection(tx, record);
+      for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
+    });
   }
 
   private async duplicateServiceError(service: string): Promise<DuplicateServiceConnectionsError> {
@@ -376,20 +352,15 @@ export class ConnectionRegistry {
    *  mirrored for teardown) enlisted in the SAME transaction as the connection/
    *  grant deletes — e.g. the guardian channel-mapping cleanup, so it can never
    *  be left stranded by a failure after the connection is already committed as
-   *  deleted. A participant requires a transactional ledger. The in-memory
-   *  teardown (`teardownAll`) and map eviction run only AFTER that transaction
-   *  commits. */
+   *  deleted. The in-memory teardown (`teardownAll`) and map eviction run only
+   *  AFTER that transaction commits. */
   async remove(id: ConnectionId, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
     await this.connectionMutex.runExclusive(conn.service, async () => {
       const current = this.connections.get(id);
       if (!current) throw new Error(`unknown connection "${id}"`);
-      if (opts.inTx) {
-        await this.txLedger.deleteConnection(id, opts.inTx);
-      } else {
-        await this.ledger.deleteConnection(id);
-      }
+      await this.ledger.deleteConnection(id, opts.inTx);
       current.teardownAll();
       this.connections.delete(id);
     });
@@ -467,7 +438,7 @@ export class ConnectionRegistry {
     const id = conn?.id ?? crypto.randomUUID();
     const createdAt = this.clock();
     const patch = conferralPatch(this.now(), credential, profile);
-    const ledger = this.txLedger;
+    const ledger = this.ledger;
 
     // One transaction spanning every durable write of the conferral: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
@@ -503,15 +474,6 @@ export class ConnectionRegistry {
       });
     }
     return conn as Connection;
-  }
-
-  /** The ledger viewed as transaction-capable — required by `confer`. Throws for
-   *  the in-memory test fakes, which never reach `confer`. */
-  private get txLedger(): TransactionalGrantLedger {
-    if (!isTransactionalLedger(this.ledger)) {
-      throw new Error("confer() requires a transactional ledger");
-    }
-    return this.ledger;
   }
 
   /** Headless conferral: skip confer(), inject a caller-supplied credential.
@@ -1345,8 +1307,6 @@ class ConnectionImpl implements Connection {
     };
     if (opts.inTx) {
       const ledger = this.ledger;
-      if (!isTransactionalLedger(ledger))
-        throw new Error("Grant cleanup requires a transactional ledger");
       ledger.runInTransaction((tx) => {
         ledger.writeGrant(tx, this.id, grant, patch);
         opts.inTx!(tx);

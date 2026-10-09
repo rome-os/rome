@@ -138,10 +138,6 @@ export function getProjectDisplayName(projectName: string): string {
   return segments.at(-1) ?? projectName;
 }
 
-export function formatProjectLabel(projectName: string): string {
-  return getProjectDisplayName(projectName);
-}
-
 export function buildOptimisticUserText(
   text: string,
   uploads: Pick<PendingUpload, "file">[],

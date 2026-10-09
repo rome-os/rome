@@ -4,6 +4,7 @@ import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/telegram-text.capture.json" with { type: "json" };
 import {
   MessageStore,
+  type MessageChange,
   PeerServer,
   deferred,
   type Peer,
@@ -65,6 +66,10 @@ export class TelegramPeer implements Peer {
 
   visible(chatId: string | number = TELEGRAM_CHAT): VisibleMessage[] {
     return this.store.visible(String(chatId));
+  }
+
+  changes(chatId: string | number = TELEGRAM_CHAT): MessageChange[] {
+    return this.store.changes(String(chatId));
   }
 
   readonly createBot = (token: string) =>
