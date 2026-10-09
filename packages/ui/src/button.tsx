@@ -26,7 +26,7 @@ const SIZE_ICON_MD = "size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
 // it and the reservation shows up as a canvas-colored ring on every filled
 // variant.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-[color,background-color,border-color,outline-color,opacity,scale] outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-[color,background-color,border-color,outline-color,opacity,scale] outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 active:not-aria-[haspopup]:scale-[0.96] disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // `outline` and `ghost` name their resting foreground, which the page
