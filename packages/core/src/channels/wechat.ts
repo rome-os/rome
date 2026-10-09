@@ -49,8 +49,6 @@ const MEDIA_TYPE_VOICE = 4;
 
 const UPLOAD_MAX_RETRIES = 3;
 
-export const WECHAT_SETTINGS_KEY = "wechat";
-
 export interface WechatSettings {
   token: string;
   baseUrl: string;

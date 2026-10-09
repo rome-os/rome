@@ -200,8 +200,7 @@ import {
   ConversationSettingsRepository,
   ConversationSettingsService,
 } from "./conversation-settings/index.js";
-import { importChannelSettings } from "./connections/settings-import.js";
-import { reconcileProviderAccounts } from "./connections/providers-import.js";
+import { ensureZeroGrantConnections } from "./connections/zero-grant.js";
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
@@ -372,12 +371,10 @@ async function main() {
   // deps (agentLoader, mail provider, emailAdapterRef, …) that don't exist yet
   // here. All that matters is registration precedes load()/import.
 
-  // Every Talk channel is owned by the ConnectionRegistry: each service's
-  // settings row is rehydrated into the grant ledger by importChannelSettings()
-  // further down; the Connection registry starts each transport. Only
-  // `emailSettings` is read here, for the prompt-builder's "our own provisioned
-  // inbox address" hint (the emailAdapterRef fallback below); the grant material
-  // itself is imported from the same row by the settings import.
+  // Every Talk channel is owned by the ConnectionRegistry, which starts each
+  // transport from its grant. Only `emailSettings` is read here, for the
+  // prompt-builder's "our own provisioned inbox address" hint (the
+  // emailAdapterRef fallback below).
   const emailSettings = await settingsRepo.get<EmailSettings>("email");
   if (emailSettings?.enabled) {
     log.info("Loaded Email config from database");
@@ -1194,17 +1191,10 @@ async function main() {
       })
     : null;
 
-  // Fold the legacy providerAccounts rows into the grant ledger
-  // BEFORE load(), so rehydration re-materializes each provider grant exactly
-  // once at its final state. Must precede load() — see reconcileProviderAccounts
-  // for the per-row shapes and why the single pre-load pass matters.
-  await reconcileProviderAccounts(connectionRegistry.getLedger(), db, (service) =>
-    connectionRegistry.isRegistered(service),
-  );
   // Hydrate connection/grant state without starting provider transports, so
-  // importChannelSettings commits before any Talk epoch can admit messages.
+  // the zero-grant connections exist before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
-  await importChannelSettings(connectionRegistry, settingsRepo);
+  await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
 
   try {

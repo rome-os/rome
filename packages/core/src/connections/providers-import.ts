@@ -1,54 +1,11 @@
-// Provider OAuth bundle-to-grant imports, shared by live writes and boot reconciliation.
+// Provider OAuth bundle-to-grant imports for the `/oauth/redeem` route.
 //
-// TRANSITIONAL MODULE. The whole `provider_accounts` bridge — this reconciler,
-// the shared bundle→(material, profile) mappers, and the table itself — is
-// deleted together once the grant ledger is the sole OAuth store.
-//
-// Two callers turn a provider's OAuth bundle into a grant with identical shape:
-// the `/oauth/redeem` route (live conferral, via `importProviderBundle`) and the
-// boot reconciler (`reconcileProviderAccounts`, rehydrating a pre-registry row).
 // The bundle→(material, profile) mappers (`credentialFromBundle` /
-// `grantProfileFromBundle`) live in exactly one place so the material and
-// profile shapes are identical regardless of which path filled them.
-//
-// Boot reconcile (`reconcileProviderAccounts`): a `providerAccounts` table row
-// predates the registry and the grant ledger — a legacy artifact on an instance
-// that connected before the ledger was the OAuth store. The reconciler folds each
-// such row into the grant ledger so connection state is live at boot WITHOUT the
-// guardian re-connecting — the
-// providerAccounts analogue of `importChannelSettings` (which reads the settings
-// table). NOT gated on the connect-UI provider list (`getEnabledOAuthProviders`):
-// a row that exists gets reconciled regardless; a missing row is a no-op anyway.
-//
-// It runs BEFORE `registry.load()` and writes the ledger tables directly (the
-// registry isn't loaded yet), so rehydration sees every provider grant already
-// at its FINAL state (authorized + credential + profile) and re-materializes
-// custody exactly once, with complete material and profile — no half-imported
-// grant is ever observable. Per row it applies whichever shape fits, the union
-// of "import a fresh credential" and "backfill a missing profile":
-//   - Grant absent or `unauthorized` → full import: credential + profile +
-//     conferral timestamp, state `authorized`.
-//   - Grant `authorized` with no profile → fill the profile only; the credential
-//     is untouched (backfill for instances connected before profiles existed,
-//     which a pure ledger-wins skip would strand without identity).
-//   - Grant `degraded` → fill the profile only if absent; NEVER touch the
-//     credential. Importing the same still-bad token would flip degraded →
-//     authorized only to re-degrade; degrade-until-reconnect stays intact.
-//   - A non-null profile is never overwritten: the ledger's own conferrals are
-//     always newer than the legacy row, so a revoked-then-reconnected grant
-//     keeps its fresh profile.
-// Missing/empty row ⇒ no-op, never a revoke: a genuine disconnect deletes the
-// row (getProviderTokenBundle returns null), so nothing resurrects.
+// `grantProfileFromBundle`) turn a provider's OAuth bundle into the grant's
+// material and profile shapes.
 
-import type { DrizzleDb } from "../db/index.js";
-import { OAUTH_PROVIDERS, type OAuthProvider } from "../lib/oauth-providers.js";
-import {
-  getProviderAccountProfile,
-  getProviderTokenBundle,
-  normalizeScopes,
-  type OAuthTokenBundle,
-} from "../lib/provider-accounts.js";
-import type { GrantLedger } from "./ledger.js";
+import type { OAuthProvider } from "../lib/oauth-providers.js";
+import { normalizeScopes, type OAuthTokenBundle } from "../lib/provider-accounts.js";
 import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
@@ -56,9 +13,8 @@ import {
   slackGrantProfileSchema,
   type OAuthProviderGrantProfile,
 } from "./integrations/oauth-providers.js";
-import { toPersisted } from "./registry.js";
 import type { ConnectionRegistry } from "./registry.js";
-import type { Credential, GrantName, SecretRecord } from "./types.js";
+import type { Credential, SecretRecord } from "./types.js";
 
 /**
  * Flatten a provider's `OAuthTokenBundle` into its grant's `Credential`, or
@@ -201,96 +157,4 @@ export async function importProviderBundle(
     account !== undefined ? grantProfileFromBundle(provider, bundle, account) : undefined;
   await registry.importCredential(conn.id, OAUTH_PROVIDER_GRANTS[provider], credential, profile);
   return true;
-}
-
-/**
- * Full import: authorize the grant with the bundle's credential + profile and a
- * fresh conferral timestamp. Written straight to the ledger (the reconciler runs
- * before the registry loads), mirroring `applyNewCredential`'s single update. A
- * sparse profile (no identity captured) is omitted rather than written as `{}`.
- */
-async function authorizeGrantFromBundle(
-  ledger: GrantLedger,
-  custody: string,
-  grant: GrantName,
-  credential: Credential,
-  profile: OAuthProviderGrantProfile,
-): Promise<void> {
-  await ledger.ensureGrant(custody, grant);
-  await ledger.updateGrant(custody, grant, {
-    state: "authorized",
-    credential: toPersisted(credential),
-    ...(hasProfile(profile) ? { profile } : {}),
-    conferredAt: new Date(),
-    degraded: undefined,
-  });
-}
-
-function hasProfile(profile: OAuthProviderGrantProfile): boolean {
-  return Object.keys(profile).length > 0;
-}
-
-/**
- * Boot-time PRE-LOAD reconciler: fold the legacy `provider_accounts` rows into
- * the grant ledger BEFORE `registry.load()`, so rehydration re-materializes each
- * provider grant once at its final state (authorized + credential + profile).
- * See the module header for the per-row shapes and why one pass is required.
- *
- * Reads the ledger tables directly through `ledger` (the registry isn't loaded
- * yet). `isRegistered` gates on the descriptor set so a provider with no
- * descriptor (a test wiring a subset) is skipped rather than minting an orphan
- * connection `load()` would only warn-and-drop.
- */
-export async function reconcileProviderAccounts(
-  ledger: GrantLedger,
-  db: DrizzleDb,
-  isRegistered: (service: string) => boolean,
-): Promise<void> {
-  const connections = await ledger.listConnections();
-  for (const provider of OAUTH_PROVIDERS) {
-    if (!isRegistered(provider)) continue;
-
-    const bundle = await getProviderTokenBundle(db, provider);
-    if (!bundle) continue;
-    const credential = credentialFromBundle(provider, bundle);
-    if (!credential) continue;
-
-    const account = (await getProviderAccountProfile(db, provider)) ?? {};
-    const profile = grantProfileFromBundle(provider, bundle, account);
-    const grant = OAUTH_PROVIDER_GRANTS[provider];
-    const existing = connections.find((c) => c.service === provider);
-
-    // Fresh instance: a legacy row but no ledger connection yet. Mint the
-    // connection row directly, then `ensureGrant` + authorize its single grant. Each
-    // OAuth provider descriptor declares exactly one grant (OAUTH_PROVIDER_GRANTS),
-    // so that one grant is the whole set — `load()` then rehydrates a
-    // complete connection with no separate import step.
-    if (!existing) {
-      const id = crypto.randomUUID();
-      await ledger.createConnection({
-        id,
-        service: provider,
-        label: provider,
-        createdAt: new Date(),
-      });
-      await authorizeGrantFromBundle(ledger, id, grant, credential, profile);
-      continue;
-    }
-
-    const current = await ledger.getGrant(existing.id, grant);
-    const state = current?.state ?? "unauthorized";
-
-    // Absent or unauthorized (never conferred, or revoked): full import.
-    if (state === "unauthorized") {
-      await authorizeGrantFromBundle(ledger, existing.id, grant, credential, profile);
-      continue;
-    }
-
-    // Authorized or degraded: the ledger's credential wins — never replace an
-    // authorized token, never resurrect a degraded one. Only backfill a MISSING
-    // profile; a non-null profile is a newer conferral and is never clobbered.
-    if (current?.profile == null && hasProfile(profile)) {
-      await ledger.updateGrant(existing.id, grant, { profile });
-    }
-  }
 }

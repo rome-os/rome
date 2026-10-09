@@ -1,7 +1,5 @@
 // Provider OAuth bundle → grant ledger imports (github/slack/
-// google): the credential mapper, the shared connection import, and the
-// PRE-LOAD reconciler that folds the legacy providerAccounts table into the
-// ledger before the registry loads.
+// google): the credential mapper and the shared connection import.
 //
 // Covers:
 //   credentialFromBundle:
@@ -12,17 +10,7 @@
 //   importProviderBundle: mints a connection + imports on first call, reuses on
 //     re-import (idempotent no-op), no-ops when the descriptor isn't registered
 //     or the bundle carries no token
-//   reconcileProviderAccounts (pre-load boot reconciler), one test per shape:
-//     fresh ledger + row → connection created, grant authorized with credential
-//       + profile (Slack teamId present), observable after load()
-//     authorized grant with no profile → profile backfilled, credential untouched
-//     degraded grant → stays degraded through load(), only the null profile filled
-//     authorized grant with a newer profile → legacy row never clobbers it
-//     no providerAccounts row → no-op (no connection minted)
-//     descriptor not registered → no-op
-//     idempotent: a second reconcile is a no-op
 
-import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The real OAuth descriptor's custody hook (added/5c) writes the tmpfs
@@ -43,19 +31,13 @@ rs.mock("../lib/provider-token-files.js", () => ({
 import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
-import { providerAccounts } from "../db/schema.js";
-import {
-  normalizeScopes,
-  type LegacyOAuthAccountProfile,
-  type OAuthTokenBundle,
-} from "../lib/provider-accounts.js";
+import type { OAuthTokenBundle } from "../lib/provider-accounts.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
   credentialFromBundle,
   grantProfileFromBundle,
   importProviderBundle,
-  reconcileProviderAccounts,
 } from "./providers-import.js";
 import {
   OAUTH_PROVIDER_GRANTS,
@@ -82,42 +64,6 @@ function makeRegistry(
   const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
   for (const provider of providers) registry.register(makeOAuthProviderDescriptor(provider));
   return registry;
-}
-
-async function seedAccount(
-  db: DrizzleDb,
-  provider: OAuthProvider,
-  tokens: OAuthTokenBundle,
-  profile: LegacyOAuthAccountProfile = { login: "someone", displayName: "someone" },
-): Promise<void> {
-  // Nothing in production writes this legacy table any more, so the row is
-  // written the way older builds left it.
-  const now = new Date();
-  await db.insert(providerAccounts).values({
-    id: randomUUID(),
-    provider,
-    providerAccountId: profile.subject ?? null,
-    displayName: profile.displayName ?? profile.login ?? profile.email ?? null,
-    email: profile.email ?? null,
-    login: profile.login ?? null,
-    avatarUrl: profile.avatarUrl ?? null,
-    scopes: normalizeScopes(tokens.scope),
-    tokenCiphertext: JSON.stringify(tokens),
-    tokenExpiresAt: tokens.expiresAt ? new Date(tokens.expiresAt) : null,
-    createdAt: now,
-    updatedAt: now,
-    lastSyncedAt: now,
-  });
-}
-
-/** Run the pre-load reconciler over a test db, gating on the given descriptor
- *  set (mirrors `connectionRegistry.isRegistered` at boot). */
-async function reconcile(
-  db: DrizzleDb,
-  providers: OAuthProvider[] = ["github", "slack", "google"],
-): Promise<void> {
-  const registered = new Set<string>(providers);
-  await reconcileProviderAccounts(new DrizzleGrantLedger(db), db, (s) => registered.has(s));
 }
 
 describe("credentialFromBundle", () => {
@@ -417,207 +363,5 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
     const registry = makeRegistry(freshDb(), []);
     const imported = await importProviderBundle(registry, provider, bundle);
     expect(imported).toBe(false);
-  });
-});
-
-describe("reconcileProviderAccounts (pre-load boot)", () => {
-  it("fresh ledger: a legacy row becomes an authorized grant with credential + profile after load", async () => {
-    const db = freshDb();
-    for (const [provider, , bundle] of BUNDLES) await seedAccount(db, provider, bundle);
-
-    // Pre-load: fold the rows into the ledger, THEN boot the registry.
-    await reconcile(db);
-    const registry = makeRegistry(db);
-    await registry.load();
-
-    for (const [provider, grant] of BUNDLES) {
-      const conn = registry.find(provider)[0];
-      expect(conn, provider).toBeDefined();
-      expect(conn.auth.grants()[grant], provider).toBe("authorized");
-      const rec = await grantProfile(registry, provider);
-      // Profile lands in the SAME rehydration — identity from the legacy row.
-      // displayName is the one identity key every service's schema keeps.
-      expect(rec?.profile?.displayName, provider).toBe("someone");
-    }
-  });
-
-  it("fresh Slack row: the workspace grant carries teamId on the first rehydration", async () => {
-    const db = freshDb();
-    await seedAccount(db, "slack", {
-      accessToken: "xoxb-bot",
-      raw: { authed_user: { access_token: "xoxp-user" }, team: { id: "T-workspace" } },
-    });
-
-    await reconcile(db);
-    const registry = makeRegistry(db);
-    await registry.load();
-
-    const conn = registry.find("slack")[0];
-    expect(conn.auth.grants().workspace).toBe("authorized");
-    const rec = await grantProfile(registry, "slack");
-    // teamId is profile (workspace identity), the two tokens are the material.
-    expect(rec?.profile?.teamId).toBe("T-workspace");
-    expect(rec?.credential?.material).toEqual({
-      kind: "inline",
-      record: { botToken: "xoxb-bot", userToken: "xoxp-user" },
-    });
-  });
-
-  it("migrates the FULL legacy identity, including the avatar the row persists", async () => {
-    const db = freshDb();
-    // The legacy row holds every identity field, avatar included. Migration is a
-    // one-shot (a later boot sees a non-null profile and won't overwrite), so a
-    // dropped field is lost forever — the reconstructed profile must be complete.
-    await seedAccount(
-      db,
-      "github",
-      { accessToken: "gho", scope: ["repo"] },
-      {
-        subject: "42",
-        login: "octocat",
-        displayName: "Octo Cat",
-        email: "octo@example.com",
-        avatarUrl: "https://avatars.example/octocat.png",
-      },
-    );
-
-    await reconcile(db);
-    const registry = makeRegistry(db);
-    await registry.load();
-
-    const rec = await grantProfile(registry, "github");
-    expect(rec?.profile).toEqual({
-      subject: "42",
-      login: "octocat",
-      displayName: "Octo Cat",
-      email: "octo@example.com",
-      avatarUrl: "https://avatars.example/octocat.png",
-      scopes: ["repo"],
-    });
-  });
-
-  it("authorized grant with no profile: backfills the profile, leaves the credential untouched", async () => {
-    const db = freshDb();
-    // Existing instance: connected before profiles existed — authorized, no profile.
-    const seed = makeRegistry(db);
-    await importProviderBundle(seed, "github", { accessToken: "gho_existing" });
-    const before = await grantProfile(seed, "github");
-    expect(before?.state).toBe("authorized");
-    expect(before?.profile).toBeUndefined();
-
-    // The legacy row carries the identity the ledger is missing.
-    await seedAccount(db, "github", { accessToken: "gho_existing" }, { login: "octocat" });
-    await reconcile(db);
-
-    const registry = makeRegistry(db);
-    await registry.load();
-    expect(registry.find("github")).toHaveLength(1);
-    expect(registry.find("github")[0].auth.grants().user).toBe("authorized");
-    const rec = await grantProfile(registry, "github");
-    expect(rec?.profile?.login).toBe("octocat");
-    // The credential was never rewritten — the same token the ledger already held.
-    expect(rec?.credential?.material).toEqual({
-      kind: "inline",
-      record: { accessToken: "gho_existing" },
-    });
-  });
-
-  it("degraded grant: stays degraded through boot, only the null profile is filled", async () => {
-    const db = freshDb();
-    // Seed an authorized google grant whose token already expired (no profile).
-    const seed = makeRegistry(db);
-    await importProviderBundle(seed, "google", {
-      accessToken: "ya29.stale",
-      expiresAt: new Date(Date.now() - 60_000).toISOString(),
-    });
-    // Boot once: load() renews-once (romeCloudOAuth re-confers) → the grant degrades.
-    const degradeBoot = makeRegistry(db);
-    await degradeBoot.load();
-    expect(degradeBoot.find("google")[0].auth.grants().user).toBe("degraded");
-    const degradedCred = (await grantProfile(degradeBoot, "google"))?.credential;
-
-    // The legacy row still holds the same stale token, plus an identity.
-    await seedAccount(
-      db,
-      "google",
-      { accessToken: "ya29.stale" },
-      { displayName: "u", email: "u@g.com" },
-    );
-    await reconcile(db);
-
-    // Next boot: the grant is STILL degraded (the credential was never touched, so
-    // load() re-degrades it), but the previously-null profile is now filled.
-    const registry = makeRegistry(db);
-    await registry.load();
-    expect(registry.find("google")).toHaveLength(1);
-    expect(registry.find("google")[0].auth.grants().user).toBe("degraded");
-    const rec = await grantProfile(registry, "google");
-    expect(rec?.profile).toEqual({ displayName: "u", email: "u@g.com" });
-    // The credential is byte-for-byte what the degraded grant already held — the
-    // reconciler filled the profile without resurrecting or rewriting the token.
-    expect(rec?.credential).toEqual(degradedCred);
-  });
-
-  it("never clobbers a non-null profile: a reconnect's newer identity survives the legacy row", async () => {
-    const db = freshDb();
-    // The ledger holds a freshly reconnected grant with the NEW identity.
-    const seed = makeRegistry(db);
-    await importProviderBundle(
-      seed,
-      "github",
-      { accessToken: "gho_new" },
-      { login: "new-login", email: "new@example.com" },
-    );
-    // The legacy row still carries the OLD identity from before the reconnect.
-    await seedAccount(db, "github", { accessToken: "gho_old" }, { login: "old-login" });
-    await reconcile(db);
-
-    const registry = makeRegistry(db);
-    await registry.load();
-    const rec = await grantProfile(registry, "github");
-    // The ledger's newer conferral wins — identity AND credential untouched.
-    expect(rec?.profile).toEqual({ login: "new-login", email: "new@example.com" });
-    expect(rec?.credential?.material).toEqual({
-      kind: "inline",
-      record: { accessToken: "gho_new" },
-    });
-  });
-
-  it("no-ops when there is no providerAccounts row (no connection minted)", async () => {
-    const db = freshDb();
-    await reconcile(db);
-    const registry = makeRegistry(db);
-    await registry.load();
-    for (const [provider] of BUNDLES) expect(registry.find(provider)).toHaveLength(0);
-  });
-
-  it("skips providers whose descriptor isn't registered", async () => {
-    const db = freshDb();
-    await seedAccount(db, "github", { accessToken: "gho_seed" });
-    await seedAccount(db, "slack", { accessToken: "xoxb-seed" });
-    // Only slack is registered — the github row must be left alone (no orphan).
-    await reconcile(db, ["slack"]);
-    const registry = makeRegistry(db, ["slack"]);
-    await registry.load();
-    expect(registry.find("github")).toHaveLength(0);
-    expect(registry.find("slack")).toHaveLength(1);
-    expect(registry.find("slack")[0].auth.grants().workspace).toBe("authorized");
-  });
-
-  it("is idempotent across repeated reconciles", async () => {
-    const db = freshDb();
-    for (const [provider, , bundle] of BUNDLES) await seedAccount(db, provider, bundle);
-
-    await reconcile(db);
-    await reconcile(db);
-
-    const registry = makeRegistry(db);
-    await registry.load();
-    for (const [provider, grant] of BUNDLES) {
-      expect(registry.find(provider), provider).toHaveLength(1);
-      expect(registry.find(provider)[0].auth.grants()[grant], provider).toBe("authorized");
-      const rec = await grantProfile(registry, provider);
-      expect(rec?.profile?.displayName, provider).toBe("someone");
-    }
   });
 });

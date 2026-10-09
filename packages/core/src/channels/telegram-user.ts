@@ -13,7 +13,6 @@ import {
 } from "./attachment-files.js";
 
 const log = createLogger("telegram-user");
-const TELEGRAM_USER_SETTINGS_KEY = "telegram_user";
 type SimpleEntity = string | number;
 
 /**
@@ -504,10 +503,6 @@ function toTelegramUserAuthError(
   if (err instanceof TelegramUserAuthError) return err;
   const message = safeErrorMessage(err);
   return new TelegramUserAuthError(message || fallback, statusCode);
-}
-
-export function telegramUserSettingsKey(): string {
-  return TELEGRAM_USER_SETTINGS_KEY;
 }
 
 function createTelegramClient(

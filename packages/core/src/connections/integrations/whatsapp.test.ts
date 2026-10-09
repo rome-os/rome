@@ -1,7 +1,7 @@
 // The WhatsApp descriptor. The transport (WhatsAppAdapter)
 // is injected as a fake through `deps.createAdapter`, so these tests exercise
 // the descriptor's wiring — kit.persist write-through, fault mapping, deps
-// threading, migration — without a real Baileys socket.
+// threading — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { sendThrough } from "../../channels/connection-ports.js";
@@ -16,8 +16,8 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, Credential, RuntimeKit, SecretRecord, StreamFault } from "../types.js";
-import { createWhatsAppDescriptor, importWhatsAppSessionFromDirectory } from "./whatsapp.js";
+import type { Credential, RuntimeKit, SecretRecord, StreamFault } from "../types.js";
+import { createWhatsAppDescriptor } from "./whatsapp.js";
 import { createWhatsAppAuthState } from "./whatsapp-auth-state.js";
 
 function flush(): Promise<void> {
@@ -400,86 +400,5 @@ describe("whatsapp inbound delivery", () => {
     } satisfies ChannelMessage;
 
     await expect(talker.inboundMedia?.materialize(message)).resolves.toBe(message.attachments);
-  });
-});
-
-describe("importWhatsAppSessionFromDirectory (migration helper)", () => {
-  function fakeConnection(sessionState: "unauthorized" | "authorized" | "degraded"): Connection {
-    return {
-      auth: { grants: () => ({ session: sessionState }) },
-    } as unknown as Connection;
-  }
-
-  it("imports serialized material read from a legacy directory", async () => {
-    // A directory the migration reader turns into non-null material.
-    const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { BufferJSON, initAuthCreds } = await import("@whiskeysockets/baileys");
-    const dir = await mkdtemp(join(tmpdir(), "rome-wa-mig-"));
-    try {
-      await writeFile(
-        join(dir, "creds.json"),
-        JSON.stringify(initAuthCreds(), BufferJSON.replacer),
-      );
-
-      const imported: Array<{ grant: string; cred: Credential }> = [];
-      await importWhatsAppSessionFromDirectory({
-        connection: fakeConnection("unauthorized"),
-        authStatePath: dir,
-        importCredential: async (grant, cred) => {
-          imported.push({ grant, cred });
-        },
-      });
-
-      expect(imported).toHaveLength(1);
-      expect(imported[0].grant).toBe("session");
-      // The imported material rehydrates into a working auth state.
-      const material = imported[0].cred.material as { creds: string; keys: string };
-      const auth = createWhatsAppAuthState(material, async () => {});
-      expect(typeof auth.state.creds.registrationId).toBe("number");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it.each([
-    "authorized",
-    "degraded",
-  ] as const)("ledger wins: no import when the session is already %s", async (sessionState) => {
-    const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { BufferJSON, initAuthCreds } = await import("@whiskeysockets/baileys");
-    const dir = await mkdtemp(join(tmpdir(), "rome-wa-mig-"));
-    try {
-      await writeFile(
-        join(dir, "creds.json"),
-        JSON.stringify(initAuthCreds(), BufferJSON.replacer),
-      );
-      const imported: unknown[] = [];
-      await importWhatsAppSessionFromDirectory({
-        connection: fakeConnection(sessionState),
-        authStatePath: dir,
-        importCredential: async (grant, cred) => {
-          imported.push({ grant, cred });
-        },
-      });
-      expect(imported).toHaveLength(0);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("no directory → no import", async () => {
-    const imported: unknown[] = [];
-    await importWhatsAppSessionFromDirectory({
-      connection: fakeConnection("unauthorized"),
-      authStatePath: "/tmp/definitely-not-a-wa-dir-xyz",
-      importCredential: async (grant, cred) => {
-        imported.push({ grant, cred });
-      },
-    });
-    expect(imported).toHaveLength(0);
   });
 });

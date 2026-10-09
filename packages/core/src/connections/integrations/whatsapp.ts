@@ -33,7 +33,6 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
   AuthScheme,
-  Connection,
   ConnectionDescriptor,
   Credential,
   GuardianInteraction,
@@ -43,11 +42,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  createWhatsAppAuthState,
-  readWhatsAppAuthStateFromDirectory,
-  type WhatsAppAuthMaterial,
-} from "./whatsapp-auth-state.js";
+import { createWhatsAppAuthState, type WhatsAppAuthMaterial } from "./whatsapp-auth-state.js";
 import { addressIsConversationFeature } from "./talk-features.js";
 
 /** Runtime deps the WhatsApp adapter needs that `kit` cannot supply: the
@@ -348,27 +343,4 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
       },
     },
   };
-}
-
-/**
- * One-time settings→ledger migration for WhatsApp. If the ledger
- * has no `session` credential yet but the legacy settings row points at a
- * `useMultiFileAuthState` directory with a `creds.json`, read the directory ONCE
- * into serialized material and importCredential. The directory is NOT deleted
- * (rollback safety). If the ledger already holds an authorized or degraded
- * session, it wins — this is a no-op. The wire stage calls this from the
- * settings-import table row.
- */
-export async function importWhatsAppSessionFromDirectory(opts: {
-  connection: Connection;
-  authStatePath: string;
-  importCredential: (grant: "session", cred: Credential) => Promise<void>;
-}): Promise<void> {
-  // Ledger wins after the first import. In particular, degraded retains the
-  // last credential as inert material; re-reading the preserved legacy
-  // directory would otherwise resurrect a rejected session on every reboot.
-  if (opts.connection.auth.grants().session !== "unauthorized") return;
-  const material = await readWhatsAppAuthStateFromDirectory(opts.authStatePath);
-  if (!material) return;
-  await opts.importCredential("session", { material, expiresAt: "never" });
 }

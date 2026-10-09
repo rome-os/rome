@@ -62,9 +62,7 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 /** Persist a live Credential's envelope. External-custody credentials (function
- *  material) persist as `{ kind: "external" }` — the ledger stores no secret.
- *  Exported so the pre-load providerAccounts reconciler, which writes the ledger
- *  directly (before the registry loads), shares this one envelope transform. */
+ *  material) persist as `{ kind: "external" }` — the ledger stores no secret. */
 export function toPersisted(cred: Credential): PersistedCredential {
   if (typeof cred.material === "function") {
     return { material: { kind: "external" }, expiresAt: cred.expiresAt };
@@ -209,7 +207,7 @@ export class ConnectionRegistry {
   }
 
   /** True iff a descriptor has been registered for `service`. Lets callers
-   *  (settings-import's zero-grant path) skip services this registry does not
+   *  (the zero-grant boot path) skip services this registry does not
    *  know about — e.g. a test that registers only a subset. */
   isRegistered(service: string): boolean {
     return this.descriptors.has(service);
@@ -250,8 +248,8 @@ export class ConnectionRegistry {
   }
 
   /** Start every capability hydrated while boot activation was deferred. Boot
-   * uses this barrier so no provider transport starts before the legacy
-   * channel-settings import commits. */
+   * uses this barrier so no provider transport starts before the zero-grant
+   * connections exist. */
   startCapabilities(): void {
     this.capabilityActivationPaused = false;
     for (const connection of this.connections.values()) {
@@ -477,7 +475,7 @@ export class ConnectionRegistry {
   }
 
   /** Headless conferral: skip confer(), inject a caller-supplied credential.
-   *  The settings-import / API-shim path (phase 3). Idempotent: re-importing
+   *  The API-shim path (phase 3). Idempotent: re-importing
    *  identical inline material over an authorized grant is a no-op.
    *
    *  `profile` is the non-secret conferral outcome: when supplied it
@@ -495,21 +493,6 @@ export class ConnectionRegistry {
     const conn = this.connections.get(connectionId);
     if (!conn) throw new Error(`unknown connection "${connectionId}"`);
     await conn.importCredential(grant, credential, profile);
-  }
-
-  /** Fill a MISSING profile on an already-authorized/degraded grant WITHOUT
-   *  touching the credential or rebuilding the grant epoch — the boot bridge's
-   *  profile-only backfill. The credential column is
-   *  never in the patch, so a bridge-era install that connected before profiles
-   *  existed gains its identity with no credential write and no onUnlocked. */
-  async backfillProfile(
-    connectionId: ConnectionId,
-    grant: GrantName,
-    profile: ProfileRecord,
-  ): Promise<void> {
-    const conn = this.connections.get(connectionId);
-    if (!conn) throw new Error(`unknown connection "${connectionId}"`);
-    await conn.backfillProfile(grant, profile);
   }
 
   /** In-memory subscription gate for subscription-gated Watchers (phase 6
@@ -538,8 +521,7 @@ export class ConnectionRegistry {
    *  each other.
    *
    *  Composition is deadlock-free by construction: a registry grant mutation
-   *  invoked from inside the section (`importCredential`, `revoke`,
-   *  `backfillProfile`) acquires only the per-connection grant lock — a
+   *  invoked from inside the section (`importCredential`, `revoke`) acquires only the per-connection grant lock — a
    *  DISTINCT lock this section never holds and which is uncontended while the
    *  section runs — so it runs without re-queueing behind other section work and
    *  cannot deadlock against the section (reentrancy by scope falls out of the
@@ -1226,24 +1208,6 @@ class ConnectionImpl implements Connection {
     await this.applyNewCredential(grant, credential, profile);
   }
 
-  /** Fill a MISSING profile on an already-authorized/degraded grant without
-   *  touching the credential, grant state, or the capability epoch.
-   *  Ledger-only write; then re-sync custody so a profile-derived
-   *  artifact reflects the new identity (no-op for a channel — no custody — and
-   *  for a degraded grant whose live credential was cleared at load). */
-  backfillProfile(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    return this.withGrantLock(grant, () => this.backfillProfileLocked(grant, profile));
-  }
-
-  private async backfillProfileLocked(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    if (!this.descriptor.auth[grant]) {
-      throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    }
-    await this.ledger.updateGrant(this.id, grant, { profile });
-    const cred = this.liveCreds.get(grant);
-    if (cred) await this.syncCustody(grant, cred);
-  }
-
   /** Persist a freshly minted/imported credential, mark the grant authorized,
    *  clear the renewed flag, and rebuild every dependent capability. Ledger
    *  first (the ledger is authoritative): if the durable write throws,
@@ -1298,10 +1262,8 @@ class ConnectionImpl implements Connection {
       credential: undefined,
       // An unauthorized grant records no conferral outcome — clear the profile
       // with the credential so a revoked grant carries no stale identity.
-      // `conferredAt` is deliberately NOT cleared: an unauthorized grant with a
-      // conferral on record is the explicit-revoke marker (isExplicitlyRevoked)
-      // the boot settings bridge reads to refuse resurrecting a disconnected
-      // credential from a retained legacy settings row.
+      // `conferredAt` is deliberately NOT cleared, so the grant keeps a record
+      // of its last conferral.
       profile: undefined,
       degraded: undefined,
     };

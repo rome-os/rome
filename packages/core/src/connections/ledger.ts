@@ -38,26 +38,10 @@ export interface GrantRecord {
    *  SAME update as `credential` — never through a separate setter. Absent until
    *  a conferral supplies one; degrade preserves it (no wipe), revoke clears it. */
   profile?: ProfileRecord;
-  /** When the last conferral filled this grant. Retained through `revoke()` —
-   *  see {@link isExplicitlyRevoked}. */
+  /** When the last conferral filled this grant. Retained through `revoke()`. */
   conferredAt?: Date;
   lastRenewedAt?: Date;
   degraded?: { at: Date; reason: string };
-}
-
-/**
- * True iff this grant was explicitly revoked by the guardian. `revoke()` is the
- * only conferred→unauthorized transition, and it clears the credential/profile
- * but deliberately RETAINS `conferredAt` — so an unauthorized grant with a
- * conferral on record is a guardian-initiated disconnect, distinguishable from a
- * never-conferred grant (a fresh `ensureGrant` row has no `conferredAt`). The
- * boot settings bridge reads this to refuse resurrecting a disconnected
- * credential from a retained legacy settings row; a NEW conferral
- * (`importCredential`) stamps a fresh `conferredAt` and clears the marker's
- * meaning by flipping the state back to authorized.
- */
-export function isExplicitlyRevoked(rec: GrantRecord | null | undefined): boolean {
-  return rec?.state === "unauthorized" && rec.conferredAt !== undefined;
 }
 
 /** The fields a grant update may change. */

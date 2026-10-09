@@ -152,8 +152,8 @@ export function registerBuiltinConnections(
   // surface: begin-redirect → guardian consents on the broker → the return leg
   // resumes the coroutine → redeem → terminal confer (which re-materializes the
   // tmpfs token file + gh/git shell auth via custody). Registration is NOT gated
-  // on the connect-UI provider list (google is env-gated there): state for an
-  // existing providerAccounts row must import regardless. A `reconnect` hint is
+  // on the connect-UI provider list (google is env-gated there), so an existing
+  // grant still loads. A `reconnect` hint is
   // always sent — every setup run is an explicit re-authorization, so it forces
   // fresh consent (correct for a degraded grant; a no-op-shaped extra on first
   // connect, where consent is shown anyway). This subsumes the legacy

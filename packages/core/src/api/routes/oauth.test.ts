@@ -15,9 +15,6 @@
 
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
-  rstest: "importActual",
-};
 
 const {
   redeemRomeCloudOAuthHandoff,
@@ -33,14 +30,6 @@ rs.mock("../../lib/rome-cloud-oauth.js", () => ({
   redeemRomeCloudOAuthHandoff,
   createRomeCloudOAuthStartRedirect: rs.fn(),
   createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
-}));
-// Spread the real module so exports the route path relies on transitively
-// (e.g. `normalizeScopes`, consumed by the connections bundle mapper) resolve
-// against the actual implementation; only the network/disk side effects below
-// are stubbed.
-rs.mock("../../lib/provider-accounts.js", () => ({
-  ...providerAccountsModule,
-  getProviderTokenBundle: rs.fn(async () => null),
 }));
 rs.mock("../../lib/provider-token-files.js", () => ({
   syncProviderTokenFile,

@@ -90,24 +90,6 @@ export function emailGrantProfile(address: string): EmailGrantProfile {
   return emailGrantProfileSchema.parse({ address });
 }
 
-/** The identity field a LEGACY (pre-4c) email settings row carries — the
- *  provisioned address a pre-direct-conferral connect wrote next to the secret.
- *  Only the boot bridge reads this shape; fresh rows are pure config and carry
- *  no address. */
-export interface EmailProfileSource {
-  address?: string;
-}
-
-/** Build the parsed grant profile from a legacy settings row, or null when the
- *  row carries no provisioned address (fresh config-only rows). */
-export function emailProfileFromSettings(settings: EmailProfileSource): EmailGrantProfile | null {
-  // null / undefined / "" are the absent cases; any other present value flows
-  // through untouched so the strict parse rejects a wrong-typed address loudly
-  // instead of silently dropping it.
-  if (settings.address == null || settings.address === "") return null;
-  return emailGrantProfileSchema.parse({ address: settings.address });
-}
-
 /** The `inbox` grant material (grant table): exactly the
  *  Rome Cloud-provisioned coordinates the connect route confers. `guardianEmail`
  *  is NOT here — it is durable settings config that survives revoke, sourced
