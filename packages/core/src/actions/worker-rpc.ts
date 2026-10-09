@@ -27,6 +27,7 @@ import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
+import { MAX_ACCOUNT_LOOKUP, type ChannelAccountsService } from "../channels/channel-accounts.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -55,11 +56,11 @@ const ChannelsQueryParams = z
   })
   .strict();
 
-const ChannelsAccountsParams = z
+const ChannelAccountsFindParams = z
   .object({
     channel: z.string().min(1),
     query: z.string().optional(),
-    limit: z.number().int().positive().max(100).optional(),
+    limit: z.number().int().positive().max(MAX_ACCOUNT_LOOKUP).optional(),
   })
   .strict();
 
@@ -245,6 +246,8 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
+  /** System-only: the address books behind `system:find_channel_account`. */
+  channelAccounts: ChannelAccountsService;
 }
 
 export class WorkerRpcServer {
@@ -309,9 +312,9 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
-      case "channels.accounts": {
-        const { channel, ...query } = parseParams(method, ChannelsAccountsParams, params);
-        return await this.services.channelsService.accounts(channel, query);
+      case "channelAccounts.find": {
+        const { channel, ...read } = parseParams(method, ChannelAccountsFindParams, params);
+        return await this.services.channelAccounts.find(channel, read);
       }
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(

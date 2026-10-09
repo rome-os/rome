@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   AppManagerProxy,
   BackendTurnRunnerProxy,
+  ChannelAccountsProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
   FeedbackServiceProxy,
@@ -91,6 +92,30 @@ describe("ChannelsServiceProxy", () => {
     expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
       "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
     );
+  });
+});
+
+describe("ChannelAccountsProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  it("sends the channel and the read as one set of params", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const answer = { connected: true, accounts: [], more: false };
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return answer;
+    });
+
+    expect(await new ChannelAccountsProxy().find("agents", { query: "atlas" })).toEqual(answer);
+    expect(calls).toEqual([
+      { method: "channelAccounts.find", params: { channel: "agents", query: "atlas" } },
+    ]);
   });
 });
 

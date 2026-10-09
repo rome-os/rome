@@ -23,6 +23,7 @@ import {
 } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type { ChannelAccountLookup, ChannelAccountsService } from "../channels/channel-accounts.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -51,7 +52,6 @@ import type {
   EventPublisher,
   Routine,
   RoutineEngine,
-  ChannelAccountPage,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
@@ -240,13 +240,6 @@ export class ChannelsServiceProxy implements ChannelsService {
     });
   }
 
-  accounts(
-    channel: string,
-    query: { query?: string; limit?: number } = {},
-  ): Promise<ChannelAccountPage> {
-    return getWorkerRpc().call<ChannelAccountPage>("channels.accounts", { channel, ...query });
-  }
-
   async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
     return fromWire(
       await getWorkerRpc().call<WireChannelMessage[]>("channels.query", {
@@ -342,6 +335,15 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 }
 
 /** Feedback leaves the instance only in main; an IPC failure can follow a send. */
+export class ChannelAccountsProxy implements ChannelAccountsService {
+  find(
+    channel: string,
+    read: { query?: string; limit?: number } = {},
+  ): Promise<ChannelAccountLookup> {
+    return getWorkerRpc().call<ChannelAccountLookup>("channelAccounts.find", { channel, ...read });
+  }
+}
+
 export class FeedbackServiceProxy implements FeedbackService {
   async send(input: AgentFeedback): Promise<FeedbackOutcome> {
     try {

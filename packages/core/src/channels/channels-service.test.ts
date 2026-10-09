@@ -129,34 +129,6 @@ describe("createChannelsService", () => {
     );
   });
 
-  it("finds a channel's accounts by name, and says when it cannot", async () => {
-    const listAccounts = rs.fn(async () => ({
-      nextCursor: "1",
-      accounts: [
-        {
-          id: "a1",
-          name: "atlas (dot)",
-          addresses: ["a1"],
-          identifiers: { "agents:id": "a1" },
-        },
-      ],
-    }));
-    const { channelsService } = service([
-      { name: "agents", accounts: { listAccounts, resolve: async () => null } },
-      { name: "discord", accounts: null },
-    ]);
-
-    expect(await channelsService.accounts("agents", { query: "atlas" })).toEqual({
-      accounts: [{ name: "atlas (dot)", addresses: ["a1"] }],
-      more: true,
-    });
-    expect(listAccounts).toHaveBeenCalledWith({ query: "atlas", limit: 20 });
-    await expect(channelsService.accounts("discord")).rejects.toThrow(
-      'Channel "discord" has no address book',
-    );
-    await expect(channelsService.accounts("agent")).rejects.toThrow('Unknown channel "agent"');
-  });
-
   // TODO(0.8): remove with the migration getters.
   it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
     const { channelsService } = service();

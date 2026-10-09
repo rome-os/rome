@@ -1,6 +1,5 @@
 import { describe, it, expect } from "@rstest/core";
-import type { ChannelAccount, ChannelsService } from "@rome-os/app-runtime";
-import { createAction } from "./index.js";
+import { createAction, type ChannelAccountsService } from "./index.js";
 
 const actionConfig = {
   name: "find_channel_account",
@@ -12,15 +11,21 @@ const actionConfig = {
   sideEffects: "read-only",
 } as const;
 
-const atlas: ChannelAccount = {
+const atlas = {
   name: "atlas (dot)",
   addresses: ["0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e"],
 };
 
-function makeAction(accounts: ChannelsService["accounts"], sendable = true) {
-  return createAction(actionConfig, {
-    channelsService: { accounts, list: async () => [{ name: "agents", sendable }] },
-  });
+type Page = { accounts: (typeof atlas)[]; more: boolean };
+
+function makeAction(
+  find: (channel: string, read?: { query?: string; limit?: number }) => Promise<Page>,
+  connected = true,
+) {
+  const channelAccounts: ChannelAccountsService = {
+    find: async (channel, read) => ({ connected, ...(await find(channel, read)) }),
+  };
+  return createAction(actionConfig, { channelAccounts });
 }
 
 describe("find_channel_account", () => {
@@ -51,7 +56,7 @@ describe("find_channel_account", () => {
     await action.execute({ channel: "agents", limit: 0 });
     await action.execute({ channel: "agents", limit: "many" });
 
-    expect(limits).toEqual([100, 1, 20]);
+    expect(limits).toEqual([100, 1, undefined]);
   });
 
   it("says an agent may exist when a connected channel matches no one", async () => {

@@ -282,6 +282,26 @@ describe("wechatUserAccounts", () => {
     });
   });
 
+  it("fills a page past the groups it skips, and says when more matched", async () => {
+    const accounts = wechatUserAccounts(
+      fakeReader({
+        conversations: [
+          convo({ id: "room@chatroom", name: "Team", isGroup: true }),
+          convo({ id: "wxid_a", name: "Alice" }),
+          convo({ id: "wxid_b", name: "Bob" }),
+          convo({ id: "wxid_c", name: "Carol" }),
+        ],
+      }),
+    );
+
+    const first = await accounts.listAccounts({ limit: 2 });
+    expect(first.accounts.map((a) => a.id)).toEqual(["wxid_a", "wxid_b"]);
+    expect(first.nextCursor).toBeDefined();
+    const rest = await accounts.listAccounts({ limit: 2, cursor: first.nextCursor });
+    expect(rest.accounts.map((a) => a.id)).toEqual(["wxid_c"]);
+    expect(rest.nextCursor).toBeUndefined();
+  });
+
   it("resolves a wxid to its account and misses a group", async () => {
     const accounts = wechatUserAccounts(
       fakeReader({

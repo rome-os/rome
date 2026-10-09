@@ -81,6 +81,7 @@ import { agentsAccounts } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { backingConnection, createChannelsService } from "./channels/channels-service.js";
+import { createChannelAccounts } from "./channels/channel-accounts.js";
 import { WechatUserReader, WechatUserRuntime } from "./channels/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
@@ -354,6 +355,10 @@ async function main() {
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
   const channelsService = createChannelsService({
+    channels: () => builtChannels,
+    registry: connectionRegistry,
+  });
+  const channelAccounts = createChannelAccounts({
     channels: () => builtChannels,
     registry: connectionRegistry,
   });
@@ -922,6 +927,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      channelAccounts,
     },
   );
 
@@ -934,6 +940,7 @@ async function main() {
       favorService,
       hostExecution,
       feedback: feedbackClient,
+      channelAccounts,
     }),
   );
   appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
@@ -1290,6 +1297,7 @@ async function main() {
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,
+    channelAccounts,
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();

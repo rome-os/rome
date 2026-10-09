@@ -1697,26 +1697,6 @@ export interface ChannelSummary {
   sendable: boolean;
 }
 
-/** Someone a channel can reach, as {@link ChannelsService.accounts} lists
- *  them. */
-export interface ChannelAccount {
-  /** What the platform calls the account, or null when it holds no name. */
-  name: string | null;
-  /** Every address the account is reached on, in the channel's own form. On
-   *  the `agents` channel the one address is the agent's id, which is also the
-   *  conversation to send to. */
-  addresses: string[];
-}
-
-/** One page of a channel's accounts. */
-export interface ChannelAccountPage {
-  accounts: ChannelAccount[];
-  /** Whether more accounts matched than `limit` let through, so a caller
-   *  looking for one account narrows its query rather than concluding it is
-   *  absent. */
-  more: boolean;
-}
-
 /**
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
@@ -1744,18 +1724,6 @@ export interface ChannelsService {
    * `send` may not appear until that read expires.
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
-  /**
-   * Up to `limit` (default 20) of the accounts the channel can reach, matching
-   * `query` against their names and identifiers when given. Rejects for a
-   * channel Rome does not have, and for one that has no address book.
-   *
-   * A channel that reaches no one now, because nothing is connected or its
-   * platform cannot be read, answers no accounts rather than rejecting.
-   */
-  accounts(
-    channel: string,
-    query?: { query?: string; limit?: number },
-  ): Promise<ChannelAccountPage>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

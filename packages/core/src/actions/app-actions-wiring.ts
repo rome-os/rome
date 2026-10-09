@@ -23,6 +23,7 @@ import {
 import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../lib/feedback-client.js";
+import type { ChannelAccountsService } from "../channels/channel-accounts.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 
 export interface AppActionLoadFailure {
@@ -95,6 +96,9 @@ interface AppActionServices {
   hostExecution?: HostExecutionService;
   /** System-only: reporter provenance must come from system:send_feedback. */
   feedback?: FeedbackService;
+  /** System-only: an address book is the guardian's contacts, so only
+   *  system:find_channel_account searches one. */
+  channelAccounts?: ChannelAccountsService;
 }
 
 interface AppLookup {
@@ -145,6 +149,9 @@ function createAppActionRuntimeDeps(
         : {}),
       ...(record.metadata.ownerId === "system" && services.feedback
         ? { feedback: services.feedback }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.channelAccounts
+        ? { channelAccounts: services.channelAccounts }
         : {}),
       appContext: createRomeAppContext(app, {
         catalog,

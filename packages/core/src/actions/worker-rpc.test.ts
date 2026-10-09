@@ -86,6 +86,7 @@ function makeServer(
     feedback?: { send: ReturnType<typeof rs.fn> };
     channelsService?: unknown;
     connectionRegistry?: unknown;
+    channelAccounts?: unknown;
   } = {},
 ) {
   const eventBus = overrides.eventBus ?? new EventBus();
@@ -119,6 +120,7 @@ function makeServer(
     feedback: overrides.feedback ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
+    channelAccounts: overrides.channelAccounts,
   } as unknown as WorkerRpcServices;
   return {
     server: new WorkerRpcServer(services),
@@ -307,6 +309,27 @@ describe("WorkerRpcServer param validation", () => {
 
       expect(response.error).toMatch(/channels\.query: invalid params/);
       expect(query).not.toHaveBeenCalled();
+    });
+
+    it("looks up a channel's accounts, and refuses a limit past the cap", async () => {
+      const find = rs.fn(async () => ({ connected: true, accounts: [], more: false }));
+      const { server } = makeServer({ channelAccounts: { find } });
+      const fake = makeFakeWorker();
+      server.attach(fake.worker);
+
+      const found = await rpc(fake, "channelAccounts.find", {
+        channel: "agents",
+        query: "atlas",
+        limit: 5,
+      });
+      const tooMany = await rpc(fake, "channelAccounts.find", { channel: "agents", limit: 101 });
+      const stray = await rpc(fake, "channelAccounts.find", { channel: "agents", cursor: "1" });
+
+      expect(found.result).toEqual({ connected: true, accounts: [], more: false });
+      expect(find).toHaveBeenCalledWith("agents", { query: "atlas", limit: 5 });
+      expect(tooMany.error).toMatch(/channelAccounts\.find: invalid params/);
+      expect(stray.error).toMatch(/channelAccounts\.find: invalid params/);
+      expect(find).toHaveBeenCalledTimes(1);
     });
   });
 
