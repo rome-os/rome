@@ -1,4 +1,4 @@
-import { describe, expect, it, rstest } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rstest } from "@rstest/core";
 import type { CodeHighlighterPlugin, HighlightOptions } from "streamdown";
 import {
   createWorkerCodePlugin,
@@ -56,6 +56,13 @@ function setup() {
 }
 
 describe("createWorkerCodePlugin", () => {
+  beforeEach(() => {
+    rstest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    rstest.restoreAllMocks();
+  });
+
   it("highlights in the worker and answers through the callback", () => {
     const { worker, fallback, plugin } = setup();
     const callback = rstest.fn();
@@ -128,9 +135,10 @@ describe("createWorkerCodePlugin", () => {
       expect(fallback.calls).toEqual([OPTIONS]);
       expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
 
-      // A late answer is ignored; the main thread already settled the request.
-      worker.answer(0, resultFor("late"));
-      expect(callback).toHaveBeenCalledTimes(1);
+      expect(worker.terminated).toBe(true);
+      const later = { ...OPTIONS, code: "let b = 2;" };
+      expect(plugin.highlight(later)).toEqual(resultFor(later.code));
+      expect(worker.posted).toHaveLength(1);
     } finally {
       rstest.useRealTimers();
     }
@@ -143,6 +151,19 @@ describe("createWorkerCodePlugin", () => {
 
     worker.answer(0, null);
 
+    expect(fallback.calls).toEqual([OPTIONS]);
+    expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
+    expect(worker.terminated).toBe(true);
+  });
+
+  it("moves to the main thread when the page cannot read the worker's answer", () => {
+    const { worker, fallback, plugin } = setup();
+    const callback = rstest.fn();
+    plugin.highlight(OPTIONS, callback);
+
+    worker.dispatchEvent(new MessageEvent("messageerror"));
+
+    expect(worker.terminated).toBe(true);
     expect(fallback.calls).toEqual([OPTIONS]);
     expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
   });

@@ -26,7 +26,12 @@ function reply(id: number, result: Result | null) {
   }
   // grammarState carries tokenizer internals the page never reads.
   const { grammarState: _grammarState, ...rest } = result as Result & { grammarState?: unknown };
-  scope.postMessage({ id, result: rest });
+  try {
+    scope.postMessage({ id, result: rest });
+  } catch {
+    // A result that cannot be cloned still answers, so the page falls back.
+    scope.postMessage({ id, result: null });
+  }
 }
 
 scope.addEventListener("message", ({ data: { id, options } }) => {
