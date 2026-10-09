@@ -144,6 +144,28 @@ describe("createWorkerCodePlugin", () => {
     }
   });
 
+  it("keeps a worker that is still answering a backlog", () => {
+    rstest.useFakeTimers();
+    try {
+      const { worker, fallback, plugin } = setup();
+      const second = rstest.fn();
+      plugin.highlight(OPTIONS);
+      plugin.highlight({ ...OPTIONS, code: "let b = 2;" }, second);
+
+      rstest.advanceTimersByTime(15_000);
+      worker.answer(0, resultFor("first"));
+      rstest.advanceTimersByTime(15_000);
+      expect(worker.terminated).toBe(false);
+
+      rstest.advanceTimersByTime(5_000);
+      expect(worker.terminated).toBe(true);
+      expect(fallback.calls).toEqual([{ ...OPTIONS, code: "let b = 2;" }]);
+      expect(second).toHaveBeenCalledWith(resultFor("let b = 2;"));
+    } finally {
+      rstest.useRealTimers();
+    }
+  });
+
   it("highlights on the main thread when the worker could not highlight a block", () => {
     const { worker, fallback, plugin } = setup();
     const callback = rstest.fn();
