@@ -126,7 +126,7 @@ export const DialogTitle = forwardRef<HTMLHeadingElement, HTMLAttributes<HTMLHea
     return (
       <DialogPrimitive.Title
         ref={ref}
-        className={cn("text-title text-foreground", className)}
+        className={cn("text-title text-balance text-foreground", className)}
         {...rest}
       />
     );
@@ -140,7 +140,7 @@ export const DialogDescription = forwardRef<
   return (
     <DialogPrimitive.Description
       ref={ref}
-      className={cn("text-ui text-muted-foreground", className)}
+      className={cn("text-ui text-pretty text-muted-foreground", className)}
       {...rest}
     />
   );

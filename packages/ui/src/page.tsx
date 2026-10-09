@@ -96,7 +96,7 @@ export function PageTitle({ className, ...props }: ComponentProps<"h1">) {
     <h1
       data-slot="page-title"
       className={cn(
-        "text-title text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
+        "text-title text-balance text-foreground max-md:[--text-title:var(--rome-font-size-28)] max-md:[--text-title--line-height:var(--rome-line-height-129)] max-md:[--text-title--font-weight:700]",
         className,
       )}
       {...props}
@@ -108,7 +108,7 @@ export function PageDescription({ className, ...props }: ComponentProps<"p">) {
   return (
     <p
       data-slot="page-description"
-      className={cn("text-ui text-muted-foreground", className)}
+      className={cn("text-ui text-pretty text-muted-foreground", className)}
       {...props}
     />
   );
@@ -255,7 +255,7 @@ export function SectionTitle({ className, ...props }: ComponentProps<"h2">) {
   return (
     <h2
       data-slot="section-title"
-      className={cn("text-section text-foreground", className)}
+      className={cn("text-section text-balance text-foreground", className)}
       {...props}
     />
   );
@@ -265,7 +265,7 @@ export function SectionDescription({ className, ...props }: ComponentProps<"p">)
   return (
     <p
       data-slot="section-description"
-      className={cn("text-ui text-muted-foreground", className)}
+      className={cn("text-ui text-pretty text-muted-foreground", className)}
       {...props}
     />
   );

@@ -65,7 +65,7 @@ export const AlertDescription = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDi
         ref={ref}
         data-slot="alert-description"
         className={cn(
-          "col-start-2 text-ui text-[color:var(--alert-description-color,var(--muted-foreground))]",
+          "col-start-2 text-ui text-pretty text-[color:var(--alert-description-color,var(--muted-foreground))]",
           className,
         )}
         {...rest}

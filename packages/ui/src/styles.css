@@ -764,9 +764,13 @@
     border-color: var(--border);
   }
 
+  /* macOS renders subpixel text heavier than the type scale intends. Set once
+     at the root so every host gets the same weight; other platforms ignore it. */
   body {
     background-color: var(--background);
     color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Kill image-drag ghosts everywhere. */
