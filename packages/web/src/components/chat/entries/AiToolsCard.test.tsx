@@ -93,7 +93,7 @@ describe("AiToolsCard", () => {
     expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
   });
 
-  it("opens without credits on a slow Rome Cloud and offers them once they arrive", async () => {
+  it("opens with the plain card on a slow Rome Cloud and keeps it", async () => {
     let release!: (response: Response) => void;
     const slowCredits = new Promise<Response>((resolve) => {
       release = resolve;
@@ -114,8 +114,23 @@ describe("AiToolsCard", () => {
     ).toBeTruthy();
 
     release(ok({ credits: SIGNUP_CREDITS }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(await screen.findByRole("button", { name: "Continue with credits" })).toBeTruthy();
+    // A late read never swaps the button the guardian may be reaching for.
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("does not read credits for a guardian who is already connected", async () => {
+    const fetchSpy = mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } });
+    const onSubmit = rs.fn();
+
+    render(<AiToolsCard toolUseId="t-no-credits-read" onSubmit={onSubmit} />);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("rome-credits"))).toBe(
+      false,
+    );
   });
 
   it("falls back to the plain skip once the credits are used up", async () => {

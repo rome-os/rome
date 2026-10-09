@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, CircleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -23,6 +24,68 @@ function providerName(provider?: ChatErrorProvider): string {
   return "AI tool";
 }
 
+interface GuidedErrorCopy {
+  title: string;
+  description: string;
+  action: string;
+}
+
+/** Copy for the errors that point the guardian at AI Tools. */
+function getGuidedErrorCopy(
+  t: TFunction<"chat">,
+  code: ChatErrorCode | undefined,
+  provider: ChatErrorProvider | undefined,
+  reason: ChatErrorReason | undefined,
+): GuidedErrorCopy {
+  const name = providerName(provider);
+  if (code === "credits_used_up") {
+    return {
+      title: t("errors.creditsUsedUp.title"),
+      description: t("errors.creditsUsedUp.description"),
+      action: t("errors.creditsUsedUp.action"),
+    };
+  }
+  if (code === "auth_revoked") {
+    return {
+      title: t("errors.providerAuthRevoked.title", { provider: name }),
+      description: t("errors.providerAuthRevoked.description", { provider: name }),
+      action: t("errors.providerAuthRevoked.action"),
+    };
+  }
+  if (reason === "not_logged_in") {
+    return {
+      title: t("errors.providerNotLoggedIn.title", { provider: name }),
+      description: t("errors.providerNotLoggedIn.description", { provider: name }),
+      action: t("errors.providerNotLoggedIn.action"),
+    };
+  }
+  if (reason === "quota_exhausted") {
+    return provider
+      ? {
+          title: t("errors.providerQuotaExhausted.title", { provider: name }),
+          description: t("errors.providerQuotaExhausted.description", { provider: name }),
+          action: t("errors.openAiTools"),
+        }
+      : {
+          title: t("errors.allProvidersQuotaExhausted.title"),
+          description: t("errors.allProvidersQuotaExhausted.description"),
+          action: t("errors.openAiTools"),
+        };
+  }
+  if (reason === "model_access_denied") {
+    return {
+      title: t("errors.modelUnavailable.title"),
+      description: t("errors.modelUnavailable.description"),
+      action: t("errors.openAiTools"),
+    };
+  }
+  return {
+    title: t("errors.noProvider.title"),
+    description: t("errors.noProvider.description"),
+    action: t("errors.openAiTools"),
+  };
+}
+
 export function ErrorEventView({
   error,
   code,
@@ -40,48 +103,7 @@ export function ErrorEventView({
   const isCreditsUsedUpError = code === "credits_used_up";
 
   if (isModelResolutionError || isAuthRevokedError || isCreditsUsedUpError) {
-    const name = providerName(provider);
-    const copy = isCreditsUsedUpError
-      ? {
-          title: t("errors.creditsUsedUp.title"),
-          description: t("errors.creditsUsedUp.description"),
-          action: t("errors.creditsUsedUp.action"),
-        }
-      : isAuthRevokedError
-        ? {
-            title: t("errors.providerAuthRevoked.title", { provider: name }),
-            description: t("errors.providerAuthRevoked.description", { provider: name }),
-            action: t("errors.providerAuthRevoked.action"),
-          }
-        : reason === "not_logged_in"
-          ? {
-              title: t("errors.providerNotLoggedIn.title", { provider: name }),
-              description: t("errors.providerNotLoggedIn.description", { provider: name }),
-              action: t("errors.providerNotLoggedIn.action"),
-            }
-          : reason === "quota_exhausted"
-            ? provider
-              ? {
-                  title: t("errors.providerQuotaExhausted.title", { provider: name }),
-                  description: t("errors.providerQuotaExhausted.description", { provider: name }),
-                  action: t("errors.openAiTools"),
-                }
-              : {
-                  title: t("errors.allProvidersQuotaExhausted.title"),
-                  description: t("errors.allProvidersQuotaExhausted.description"),
-                  action: t("errors.openAiTools"),
-                }
-            : reason === "model_access_denied"
-              ? {
-                  title: t("errors.modelUnavailable.title"),
-                  description: t("errors.modelUnavailable.description"),
-                  action: t("errors.openAiTools"),
-                }
-              : {
-                  title: t("errors.noProvider.title"),
-                  description: t("errors.noProvider.description"),
-                  action: t("errors.openAiTools"),
-                };
+    const copy = getGuidedErrorCopy(t, code, provider, reason);
 
     if (presentation === "status") {
       return (

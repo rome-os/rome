@@ -56,11 +56,6 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
   useEffect(() => {
     if (result !== undefined) return;
     let cancelled = false;
-    // Credits only change the wording, so a failed read shows the plain card.
-    const creditsProbe = fetch("/api/ai-tools/rome-credits", { credentials: "include" })
-      .then((res) => (res.ok ? (res.json() as Promise<RomeCreditsResponse>) : null))
-      .then((data) => data?.credits ?? null)
-      .catch(() => null);
     void fetch("/api/ai-tools/status", { credentials: "include" })
       .then((res) => res.json())
       .then(async (status: Record<string, { loggedIn?: boolean } | null>) => {
@@ -75,19 +70,21 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
           if (!cancelled) setProbe("absent");
           return;
         }
-        // Wait briefly so the card opens with the right wording, but never
-        // hold the step on a slow Rome Cloud; late credits still upgrade it.
+        // Credits only change the wording, so a failed read shows the plain
+        // card. Wait briefly so the card opens with the right wording, but
+        // never hold the step on a slow Rome Cloud. A late read is dropped
+        // rather than swapping the buttons under the guardian's cursor.
+        const creditsProbe = fetch("/api/ai-tools/rome-credits", { credentials: "include" })
+          .then((res) => (res.ok ? (res.json() as Promise<RomeCreditsResponse>) : null))
+          .then((data) => data?.credits ?? null)
+          .catch(() => null);
         const early = await Promise.race([
           creditsProbe,
-          new Promise<undefined>((resolve) => setTimeout(resolve, CREDITS_GRACE_MS)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), CREDITS_GRACE_MS)),
         ]);
         if (cancelled) return;
-        if (early !== undefined) setCredits(early);
+        setCredits(early);
         setProbe("absent");
-        if (early === undefined) {
-          const late = await creditsProbe;
-          if (!cancelled) setCredits(late);
-        }
       })
       .catch(() => {
         // A failed probe offers the panel rather than blocking the step.
