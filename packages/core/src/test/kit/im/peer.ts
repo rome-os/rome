@@ -305,13 +305,22 @@ export interface VisibleMessage {
   edits: number;
 }
 
+/** A message as the platform showed it right after it was created or edited. */
+export interface MessageChange {
+  /** `performance.now()` when the platform applied the change. */
+  at: number;
+  message: VisibleMessage;
+}
+
 /** What a platform holds, independent of how its API spells it. */
 export class MessageStore {
   private readonly messages = new Map<string, VisibleMessage>();
+  private readonly log: MessageChange[] = [];
 
   add(message: Omit<VisibleMessage, "edits">): VisibleMessage {
     const stored = { ...message, edits: 0 };
     this.messages.set(message.id, stored);
+    this.record(stored);
     return stored;
   }
 
@@ -324,7 +333,12 @@ export class MessageStore {
     if (!message) throw new Error(`No message ${id}`);
     message.text = text;
     message.edits += 1;
+    this.record(message);
     return message;
+  }
+
+  private record(message: VisibleMessage) {
+    this.log.push({ at: performance.now(), message: { ...message } });
   }
 
   /** The conversation's messages in the order they were created. */
@@ -333,11 +347,19 @@ export class MessageStore {
       .filter((message) => message.conversation === conversation)
       .map((message) => ({ ...message }));
   }
+
+  /** Every create and edit in the conversation, in the order the platform applied them. */
+  changes(conversation: string): MessageChange[] {
+    return this.log
+      .filter((change) => change.message.conversation === conversation)
+      .map((change) => ({ at: change.at, message: { ...change.message } }));
+  }
 }
 
 /** A platform stand-in: an API server plus what the platform shows. */
 export interface Peer {
   readonly server: PeerServer;
   visible(conversation: string): VisibleMessage[];
+  changes(conversation: string): MessageChange[];
   close(): Promise<void>;
 }

@@ -4,7 +4,7 @@
 // reads both through these schemas.
 import { z } from "zod";
 
-export const TRACE_VERSION = 1;
+export const TRACE_VERSION = 2;
 
 /** The `task.meta` key under which a test names its trace file. */
 export const TRACE_META_KEY = "channelTrace";
@@ -16,6 +16,13 @@ const messageSchema = z.object({
   text: z.string(),
   replyTo: z.string().optional(),
   edits: z.number().int(),
+});
+
+/** A message the moment the platform created or edited it. */
+const changeSchema = z.object({
+  /** Milliseconds since the scenario started. */
+  at: z.number(),
+  message: messageSchema,
 });
 
 /** One request the platform stand-in received, and its answer. */
@@ -59,6 +66,10 @@ export const traceSchema = z.object({
   /** Every request the platform answered after the scenario started, or still
    *  held when it ended, in arrival order. Steps and exchanges share one clock. */
   exchanges: z.array(exchangeSchema),
+  /** Every create and edit of a message in the conversation, in the order the
+   *  platform applied them. A step's `visible` is the last change of each
+   *  message up to the step's end. The browser UI replays these. */
+  changes: z.array(changeSchema),
 });
 
 export const traceIndexSchema = z.object({
@@ -83,4 +94,5 @@ export type Trace = z.infer<typeof traceSchema>;
 export type TraceStep = Trace["steps"][number];
 export type TraceExchange = Trace["exchanges"][number];
 export type TraceMessage = TraceStep["visible"][number];
+export type TraceChange = Trace["changes"][number];
 export type TraceIndex = z.infer<typeof traceIndexSchema>;

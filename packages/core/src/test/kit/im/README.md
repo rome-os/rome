@@ -51,6 +51,7 @@ A response the platform sends, such as iLink's `ret: -3`, belongs in a capture, 
 
 - `server.exchanges` lists every request in arrival order with its response, its `source`, whether it changed what the platform shows (`accepted`), and when it arrived and was answered (`receivedAt` and `answeredAt`, from `performance.now()`).
 - `peer.visible(conversation)` lists the messages a person in that conversation sees, with their current text and edit count.
+- `peer.changes(conversation)` lists every create and edit of those messages in the order the platform applied them, each with the message as it read then and when it changed.
 
 ## Scenarios
 
@@ -60,7 +61,7 @@ Where platforms differ, the test states the difference in a table keyed by platf
 
 ## Traces
 
-When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace holds each step with what the conversation showed after it, and every request the peer answered once the scenario started, on one clock. `trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
+When `ROME_CHANNEL_TRACES` names a directory, `runScenario` writes a **trace** of the scenario there. A trace holds each step with what the conversation showed after it, every message change the peer applied, and every request the peer answered once the scenario started, on one clock. `trace.ts` defines the format. The reporter in `trace-reporter.ts` writes an `index.json` of the run beside the traces.
 
 `pnpm test:channels` runs this directory's tests with traces on, into `.channel-traces/`. `pnpm channels:ui` serves a browser UI over them, described in [`packages/channel-test-ui`](../../../../../channel-test-ui/README.md).
 

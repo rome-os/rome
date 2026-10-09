@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ConversationId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { type Peer, PeerServer, type VisibleMessage } from "./peer.js";
+import { MessageStore, type Peer, PeerServer } from "./peer.js";
 import { runScenario } from "./scenario.js";
 import type { TestChannel } from "./test-channel.js";
 import { TRACE_META_KEY, traceSchema } from "./trace.js";
@@ -13,7 +13,7 @@ const CONVERSATION = "chat-1" as ConversationId;
 describe("runScenario", () => {
   let directory: string;
   let server: PeerServer;
-  let shown: VisibleMessage[];
+  let store: MessageStore;
   let channel: TestChannel;
   let meta: Record<string, unknown>;
 
@@ -36,13 +36,14 @@ describe("runScenario", () => {
     directory = await mkdtemp(join(tmpdir(), "scenario-traces-"));
     process.env.ROME_CHANNEL_TRACES = directory;
     meta = {};
-    shown = [];
+    store = new MessageStore();
     server = await new PeerServer(({ path }) =>
       path === "/messages" ? { body: { ok: true }, source: "capture", accepted: true } : undefined,
     ).start();
     const peer: Peer = {
       server,
-      visible: (conversation) => shown.filter((message) => message.conversation === conversation),
+      visible: (conversation) => store.visible(conversation),
+      changes: (conversation) => store.changes(conversation),
       close: () => server.close(),
     };
     channel = {
@@ -68,10 +69,8 @@ describe("runScenario", () => {
     await runScenario(task(), channel, async ({ step }) => {
       await step("The user writes", async () => {
         await post("/messages");
-        shown = [
-          { id: "1", conversation: CONVERSATION, from: "user", text: "hello", edits: 0 },
-          { id: "9", conversation: "elsewhere", from: "user", text: "other", edits: 0 },
-        ];
+        store.add({ id: "1", conversation: CONVERSATION, from: "user", text: "hello" });
+        store.add({ id: "9", conversation: "elsewhere", from: "user", text: "other" });
       });
     });
 
@@ -101,6 +100,43 @@ describe("runScenario", () => {
     expect(trace.exchanges[0]?.receivedAt).toBeGreaterThanOrEqual(step?.startedAt ?? Infinity);
     expect(trace.exchanges[0]?.answeredAt).toBeLessThanOrEqual(
       (step?.startedAt ?? 0) + (step?.durationMs ?? 0),
+    );
+  });
+
+  it("records every create and edit of a message, in the order the platform applied them", async () => {
+    await runScenario(task(), channel, async ({ step }) => {
+      await step("The user writes", () => {
+        store.add({ id: "1", conversation: CONVERSATION, from: "user", text: "hello" });
+      });
+      await step("Rome streams an answer", () => {
+        store.add({ id: "2", conversation: CONVERSATION, from: "rome", text: "hi" });
+        store.edit("2", "hi there");
+        store.edit("2", "hi there, friend");
+        store.add({ id: "9", conversation: "elsewhere", from: "rome", text: "other" });
+      });
+    });
+
+    const { changes, steps } = await readTrace();
+    expect(
+      changes.map((change) => [change.message.id, change.message.text, change.message.edits]),
+    ).toEqual([
+      ["1", "hello", 0],
+      ["2", "hi", 0],
+      ["2", "hi there", 1],
+      ["2", "hi there, friend", 2],
+    ]);
+    // Each step's `visible` is where its changes end up.
+    expect(steps.at(-1)?.visible.map((message) => message.text)).toEqual([
+      "hello",
+      "hi there, friend",
+    ]);
+    // One clock, in order, and each change inside the step that made it.
+    const times = changes.map((change) => change.at);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    const [, second] = steps;
+    expect(changes[1]?.at).toBeGreaterThanOrEqual(second?.startedAt ?? Infinity);
+    expect(changes.at(-1)?.at).toBeLessThanOrEqual(
+      (second?.startedAt ?? 0) + (second?.durationMs ?? 0),
     );
   });
 

@@ -328,16 +328,29 @@ pre {
 
 .trace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(280px, 1fr) minmax(440px, 1.3fr);
   gap: 16px;
   align-items: start;
 }
 
+.trace-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
 .timeline,
-.inspector {
+.inspector,
+.conversation {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.timeline {
+  max-height: 45vh;
+  overflow: auto;
 }
 
 .timeline ol {
@@ -413,13 +426,9 @@ pre {
 }
 
 .inspector {
-  position: sticky;
-  top: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 96px);
-  overflow: auto;
   padding: 12px;
 }
 
@@ -451,10 +460,40 @@ pre {
   max-height: 280px;
 }
 
+.conversation {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 96px);
+  padding: 12px;
+}
+
+.conversation-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conversation h3 {
+  font-size: 13px;
+}
+
 .conversation-id {
-  margin: 0 0 6px;
+  margin: 0;
   color: var(--muted);
   font-size: 12px;
+}
+
+.conversation-step {
+  font-size: 12px;
+}
+
+.conversation-scroll {
+  min-height: 96px;
+  overflow: auto;
 }
 
 .conversation ol {
@@ -464,6 +503,117 @@ pre {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+.button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--selected);
+}
+
+.button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--selected);
+}
+
+.replay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-position {
+  flex: 1;
+  min-width: 96px;
+  accent-color: var(--accent);
+}
+
+.replay-time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.replay-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.replay-settings .button {
+  justify-self: start;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.setting input[type="number"] {
+  width: 92px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: right;
+}
+
+.setting-toggle {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.setting:has(:disabled) {
+  color: var(--muted);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
 }
 
 .bubble {
@@ -497,9 +647,13 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .inspector {
+  .conversation {
     position: static;
     max-height: none;
+  }
+
+  .conversation-scroll {
+    max-height: 60vh;
   }
 }
 

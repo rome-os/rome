@@ -36,13 +36,16 @@ export function visibleAt(
   trace: Trace,
   frame: Frame,
 ): { after?: TraceStep; visible: TraceMessage[] } {
-  const step =
-    frame.kind === "step"
-      ? frame.step
-      : (trace.steps.find(
-          (s) => s.startedAt <= frame.at && frame.at <= s.startedAt + s.durationMs,
-        ) ?? trace.steps.filter((s) => s.startedAt + s.durationMs <= frame.at).at(-1));
+  const step = frame.kind === "step" ? frame.step : stepAt(trace, frame.at);
   return step ? { after: step, visible: step.visible } : { visible: [] };
+}
+
+/** The step running at `at` milliseconds, else the last one that ended before it. */
+export function stepAt(trace: Trace, at: number): TraceStep | undefined {
+  return (
+    trace.steps.find((s) => s.startedAt <= at && at <= s.startedAt + s.durationMs) ??
+    trace.steps.filter((s) => s.startedAt + s.durationMs <= at).at(-1)
+  );
 }
 
 /** A request's method and path, with a bot token in the path elided. */

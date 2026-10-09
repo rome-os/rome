@@ -12,9 +12,26 @@ pnpm channels:ui --watch    # also rerun every scenario when packages/core/src c
 
 The page lists every test in `packages/core/src/test/kit/im`, scenario files first, with a name filter and a status filter. **Run all** starts the index over. The button beside a test reruns only that test and merges its result into the index. One run happens at a time.
 
-Selecting a scenario shows its timeline: the test's steps and the requests the platform received, on one clock, one row per frame and one column per lane. Selecting a frame shows what the conversation looked like after the step the frame belongs to. For a request, it also shows the request and answer bodies. A request's tag says where the answer's shape came from: `capture` (a recorded platform response), `synthetic` (hand-written, no capture yet) or `fault` (injected by the test).
+Selecting a scenario fills three columns. The middle column is the conversation as the user sees it. The right column has the timeline, with the test's steps and the requests the platform received on one clock, and below it the selected frame's detail. For a request, the detail shows the request and answer bodies. A request's tag says where the answer's shape came from: `capture` (a recorded platform response), `synthetic` (hand-written, no capture yet) or `fault` (injected by the test).
+
+Selecting a frame shows the conversation as it stood after the step the frame belongs to.
 
 The page follows the server's events, so a run started anywhere, including `pnpm test:channels` in a terminal, refreshes it.
+
+## Replay
+
+**Replay** plays the conversation from the start: each message appears, and an edit changes a message already shown. The user's messages appear whole, and the typewriter types out Rome's. An edit types only the text that differs from what the message showed, so a streamed reply grows. Pause, resume or drag the position bar to move through it. Selecting a frame or pressing **Stop** ends the replay.
+
+A scenario runs in milliseconds, so a replay keeps the order of the recorded changes and spaces them with its own delays. **Settings** holds them, and the browser keeps them between visits:
+
+| Setting | Default |
+|---|---|
+| Pause before a message | 600 ms |
+| Pause before an edit | 250 ms |
+| Typewriter effect | On, or off when the system asks for reduced motion |
+| Typing speed | 40 characters per second |
+| Longest typing time per message | 2000 ms, counting all its edits. A longer message types faster to fit |
+| Also type the user's messages | Off |
 
 ## How data flows
 

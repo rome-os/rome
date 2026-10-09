@@ -8,7 +8,11 @@ import {
   laneOf,
   visibleAt,
 } from "../src/frames.js";
-import type { Trace, TraceExchange, TraceMessage } from "../src/trace.js";
+import { planReplay } from "../src/replay.js";
+import type { Trace, TraceExchange, TraceStep } from "../src/trace.js";
+import { Conversation } from "./Conversation.js";
+import { useReplay } from "./useReplay.js";
+import { useReplaySettings } from "./useReplaySettings.js";
 
 const LANES: Array<[Lane, string]> = [
   ["test", "Test"],
@@ -16,9 +20,11 @@ const LANES: Array<[Lane, string]> = [
 ];
 
 /**
- * A trace as a timeline: test steps and the platform's requests on one clock,
- * one row per frame, one column per lane. Selecting a frame shows what the
- * conversation looked like then, and the frame's own detail.
+ * A trace in three parts. The conversation, which can be replayed, sits in the
+ * middle. On the right, the timeline lists the test's steps and the platform's
+ * requests on one clock, and the selected frame's detail sits below it.
+ * Selecting a frame ends a replay and shows what the conversation looked like
+ * after that frame's step.
  */
 export function TraceView({ trace }: { trace: Trace }) {
   const frames = useMemo(() => framesOf(trace), [trace]);
@@ -26,47 +32,65 @@ export function TraceView({ trace }: { trace: Trace }) {
   useEffect(() => setSelected(firstInteresting(frames)), [frames]);
   const frame = frames[selected];
 
+  const { settings, update, reset } = useReplaySettings();
+  const plan = useMemo(() => planReplay(trace.changes, settings), [trace.changes, settings]);
+  const replay = useReplay(plan);
+  const { stop } = replay;
+  const select = (index: number) => {
+    setSelected(index);
+    stop();
+  };
+  const { after, visible } = frame ? visibleAt(trace, frame) : { visible: [] };
+
   return (
     <div className="trace">
-      <section className="timeline" aria-label="Timeline">
-        <div className="timeline-head" aria-hidden="true">
-          <span>ms</span>
-          {LANES.map(([lane, label]) => (
-            <span key={lane}>{label}</span>
-          ))}
-        </div>
-        <ol>
-          {frames.map((item, index) => (
-            <li key={key(item, index)}>
-              <button
-                type="button"
-                className={`frame${index === selected ? " selected" : ""}`}
-                aria-current={index === selected}
-                onClick={() => setSelected(index)}
-              >
-                <span className="frame-time">{item.at.toFixed(1)}</span>
-                {LANES.map(([lane, label]) =>
-                  lane === laneOf(item) ? (
-                    <span key={lane} className={`frame-cell lane-${lane}`}>
-                      <span className="lane-name">{label}</span>
-                      <FrameSummary frame={item} />
-                    </span>
-                  ) : (
-                    <span key={lane} className="frame-cell vacant" />
-                  ),
-                )}
-              </button>
-            </li>
-          ))}
-        </ol>
-      </section>
-      <section className="inspector" aria-label="Selected frame">
-        {frame ? (
-          <Inspector trace={trace} frame={frame} />
-        ) : (
-          <p className="muted">No frames recorded.</p>
-        )}
-      </section>
+      <Conversation
+        trace={trace}
+        plan={plan}
+        replay={replay}
+        step={after}
+        messages={visible}
+        settings={settings}
+        onSettings={update}
+        onResetSettings={reset}
+      />
+      <div className="trace-side">
+        <section className="timeline" aria-label="Timeline">
+          <div className="timeline-head" aria-hidden="true">
+            <span>ms</span>
+            {LANES.map(([lane, label]) => (
+              <span key={lane}>{label}</span>
+            ))}
+          </div>
+          <ol>
+            {frames.map((item, index) => (
+              <li key={key(item, index)}>
+                <button
+                  type="button"
+                  className={`frame${index === selected ? " selected" : ""}`}
+                  aria-current={index === selected}
+                  onClick={() => select(index)}
+                >
+                  <span className="frame-time">{item.at.toFixed(1)}</span>
+                  {LANES.map(([lane, label]) =>
+                    lane === laneOf(item) ? (
+                      <span key={lane} className={`frame-cell lane-${lane}`}>
+                        <span className="lane-name">{label}</span>
+                        <FrameSummary frame={item} />
+                      </span>
+                    ) : (
+                      <span key={lane} className="frame-cell vacant" />
+                    ),
+                  )}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <section className="inspector" aria-label="Selected frame">
+          {frame ? <Detail frame={frame} /> : <p className="muted">No frames recorded.</p>}
+        </section>
+      </div>
     </div>
   );
 }
@@ -77,53 +101,28 @@ function FrameSummary({ frame }: { frame: Frame }) {
   return <ExchangeSummary exchange={frame.exchange} />;
 }
 
-function Inspector({ trace, frame }: { trace: Trace; frame: Frame }) {
-  const { after, visible } = visibleAt(trace, frame);
-  return (
-    <>
-      {frame.kind === "step" && frame.step.error && (
-        <pre className="error" role="alert">
-          {frame.step.error}
-        </pre>
-      )}
-      {frame.kind === "exchange" && <ExchangeDetail exchange={frame.exchange} />}
-      <h3>
-        {after ? `On the platform after “${after.label}”` : "On the platform before the first step"}
-      </h3>
-      <Conversation id={trace.conversation} platform={trace.platform} messages={visible} />
-    </>
+function Detail({ frame }: { frame: Frame }) {
+  return frame.kind === "step" ? (
+    <StepDetail step={frame.step} />
+  ) : (
+    <ExchangeDetail exchange={frame.exchange} />
   );
 }
 
-function Conversation({
-  id,
-  platform,
-  messages,
-}: {
-  id: string;
-  platform: string;
-  messages: TraceMessage[];
-}) {
+function StepDetail({ step }: { step: TraceStep }) {
   return (
-    <div className="conversation">
-      <p className="conversation-id">
-        {platform} conversation {id}
+    <div className="exchange">
+      <h3>
+        {step.label}{" "}
+        <span className={`tag ${step.status === "failed" ? "bad" : "good"}`}>{step.status}</span>
+      </h3>
+      <p className="muted">
+        Started at {step.startedAt.toFixed(1)} ms, took {step.durationMs.toFixed(1)} ms
       </p>
-      {messages.length === 0 ? (
-        <p className="muted">No messages yet.</p>
-      ) : (
-        <ol>
-          {messages.map((message) => (
-            <li key={message.id} className={`bubble ${message.from}`}>
-              {message.replyTo && <span className="bubble-meta">↪ reply to {message.replyTo}</span>}
-              <span className="bubble-text">{message.text}</span>
-              <span className="bubble-meta">
-                #{message.id}
-                {message.edits > 0 && ` · edited ${message.edits}×`}
-              </span>
-            </li>
-          ))}
-        </ol>
+      {step.error && (
+        <pre className="error" role="alert">
+          {step.error}
+        </pre>
       )}
     </div>
   );

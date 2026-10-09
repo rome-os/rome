@@ -28,10 +28,11 @@ export interface ScenarioContext {
  * failure names the step it happened in, not only the assertion.
  *
  * When `ROME_CHANNEL_TRACES` names a directory, the scenario is also recorded:
- * each step and what the conversation shows after it, and every request the
- * platform answered, on one clock. The trace is written under that directory
- * and named in `task.meta`, whether the scenario passes or fails, for the
- * reporter and the browser UI (packages/channel-test-ui).
+ * each step and what the conversation shows after it, every message the
+ * platform created or edited, and every request the platform answered, on one
+ * clock. The trace is written under that directory and named in `task.meta`,
+ * whether the scenario passes or fails, for the reporter and the browser UI
+ * (packages/channel-test-ui).
  */
 export async function runScenario(
   task: ScenarioTask,
@@ -104,6 +105,9 @@ async function writeTrace(
     conversation: channel.conversation,
     steps,
     exchanges,
+    changes: channel.peer
+      .changes(channel.conversation)
+      .map((change) => ({ at: since(change.at), message: change.message })),
   });
   const file = resolve(directory, "traces", `${task.id.replace(/[^\w.-]/g, "_")}.json`);
   await mkdir(dirname(file), { recursive: true });

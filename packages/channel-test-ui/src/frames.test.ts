@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
-import { abbreviateExchange, describeExchange, type Frame, framesOf, visibleAt } from "./frames.js";
-import type { Trace, TraceExchange } from "./trace.js";
+import {
+  abbreviateExchange,
+  describeExchange,
+  type Frame,
+  framesOf,
+  stepAt,
+  visibleAt,
+} from "./frames.js";
+import { TRACE_VERSION, type Trace, type TraceExchange } from "./trace.js";
 
 const exchange = (path: string, receivedAt: number, answeredAt?: number): TraceExchange => ({
   method: "POST",
@@ -20,7 +27,7 @@ const message = (id: string, text: string) => ({
 });
 
 const trace: Trace = {
-  version: 1,
+  version: TRACE_VERSION,
   platform: "telegram",
   conversation: "c",
   steps: [
@@ -40,6 +47,7 @@ const trace: Trace = {
     },
   ],
   exchanges: [exchange("/a", -1, 2), exchange("/b", 10, 12), exchange("/c", 20)],
+  changes: [],
 };
 
 const label = (frame: Frame) => (frame.kind === "step" ? frame.step.label : frame.exchange.path);
@@ -68,6 +76,21 @@ describe("visibleAt", () => {
 
   it("shows nothing for an exchange before the first step", () => {
     expect(at("/a")).toEqual({ visible: [] });
+  });
+});
+
+describe("stepAt", () => {
+  it("finds the step running at a moment", () => {
+    expect(stepAt(trace, 12)?.label).toBe("answer");
+  });
+
+  it("finds the last step that ended before a moment between or after steps", () => {
+    expect(stepAt(trace, 7)?.label).toBe("write");
+    expect(stepAt(trace, 99)?.label).toBe("answer");
+  });
+
+  it("finds none before the first step", () => {
+    expect(stepAt(trace, -1)).toBeUndefined();
   });
 });
 

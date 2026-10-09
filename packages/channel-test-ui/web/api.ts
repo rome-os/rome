@@ -22,7 +22,10 @@ export function useLive(): { index: TraceIndex | null; run: RunState; revision: 
     const load = async () => {
       const raw: unknown = await (await fetch("/api/index")).json();
       if (cancelled) return;
-      setIndex(raw === null ? null : traceIndexSchema.parse(raw));
+      // An index from another trace version is the same as no run: running the
+      // tests again writes a current one.
+      const parsed = raw === null ? undefined : traceIndexSchema.safeParse(raw);
+      setIndex(parsed?.success ? parsed.data : null);
       setRevision((value) => value + 1);
     };
     void load();
@@ -38,23 +41,29 @@ export function useLive(): { index: TraceIndex | null; run: RunState; revision: 
   return { index, run, revision };
 }
 
-/** The trace at `path` under the traces directory, read again on `revision`. */
+/**
+ * The trace at `path` under the traces directory, read again on `revision`.
+ * It is `null` until the trace for this path and revision has arrived, so a
+ * view never shows the trace of the test selected before.
+ */
 export function useTrace(path: string | undefined, revision: number): Trace | null {
-  const [trace, setTrace] = useState<Trace | null>(null);
+  const [loaded, setLoaded] = useState<{ path: string; revision: number; trace: Trace } | null>(
+    null,
+  );
   useEffect(() => {
-    setTrace(null);
     if (!path) return;
     let cancelled = false;
     void fetch(`/api/trace?path=${encodeURIComponent(path)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((raw: unknown) => {
-        if (!cancelled) setTrace(raw === null ? null : traceSchema.parse(raw));
+        if (!cancelled && raw !== null)
+          setLoaded({ path, revision, trace: traceSchema.parse(raw) });
       });
     return () => {
       cancelled = true;
     };
   }, [path, revision]);
-  return trace;
+  return loaded && loaded.path === path && loaded.revision === revision ? loaded.trace : null;
 }
 
 /** Asks the server to run every scenario, or only the tests named. */
