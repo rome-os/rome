@@ -68,11 +68,10 @@ function indexHandoffs(
   for (const msg of msgs) {
     for (const b of parseMessageEntries(msg)) {
       if (msg.role === "user") {
-        // Core stores client-posted parts unvalidated, so `output` can be missing.
         if (b.type === "interaction_result") {
           const node = openByToolUseId.get(b.toolUseId);
           if (node) {
-            node.status = b.output?.dismissed === true ? "cancelled" : "done";
+            node.status = b.output.dismissed === true ? "cancelled" : "done";
             openByToolUseId.delete(b.toolUseId);
           }
         }
@@ -198,7 +197,7 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
           open.add(b.toolUseId);
           openCards.set(msg.sessionId, open);
         }
-      } else if (msg.role === "user" && b.type === "interaction_result" && b.output) {
+      } else if (msg.role === "user" && b.type === "interaction_result") {
         map.set(interactionResultKey(msg.sessionId, b.toolUseId), b.output);
         openCards.get(msg.sessionId)?.delete(b.toolUseId);
       } else if (msg.role === "user" && b.type === "text" && b.content.trim()) {

@@ -5,9 +5,25 @@ import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 export function parseEntries(content: string): TranscriptPart[] {
   try {
     const parsed = JSON.parse(content);
-    return Array.isArray(parsed) ? parsed : [{ type: "text", content }];
+    return Array.isArray(parsed) ? parsed.filter(isWellFormed) : [{ type: "text", content }];
   } catch {
     return [{ type: "text", content }];
+  }
+}
+
+// Core stores the parts a client posts with a user turn without validating
+// them, so this drops the user-side parts a client could get wrong rather than
+// letting one bad row break the whole transcript.
+function isWellFormed(part: unknown): part is TranscriptPart {
+  if (!part || typeof part !== "object") return false;
+  const p = part as Record<string, unknown>;
+  switch (p.type) {
+    case "text":
+      return typeof p.content === "string";
+    case "interaction_result":
+      return typeof p.toolUseId === "string" && !!p.output && typeof p.output === "object";
+    default:
+      return typeof p.type === "string";
   }
 }
 
