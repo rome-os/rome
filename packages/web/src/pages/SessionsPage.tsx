@@ -1276,7 +1276,7 @@ function SessionDetailsSheet({
             <h3 className="text-section uppercase text-muted-foreground">Lineage</h3>
             <div className="mt-3 space-y-2">
               {session.lineage.parent ? (
-                <Button asChild variant="outline" press="none" className="w-full justify-start">
+                <Button asChild variant="outline" className="w-full justify-start">
                   <Link
                     to={`../${encodeURIComponent(session.lineage.parent.id)}`}
                     relative="path"
@@ -1288,13 +1288,7 @@ function SessionDetailsSheet({
                 </Button>
               ) : null}
               {session.lineage.children.map((child) => (
-                <Button
-                  key={child.id}
-                  asChild
-                  variant="outline"
-                  press="none"
-                  className="w-full justify-start"
-                >
+                <Button key={child.id} asChild variant="outline" className="w-full justify-start">
                   <Link
                     to={`../${encodeURIComponent(child.id)}`}
                     relative="path"

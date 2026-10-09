@@ -183,13 +183,7 @@ function AccountStep() {
 
         <form.Subscribe<boolean> selector={(state) => state.isSubmitting}>
           {(isSubmitting) => (
-            <Button
-              type="submit"
-              size="md"
-              press="none"
-              disabled={isSubmitting}
-              className="w-full touch-target"
-            >
+            <Button type="submit" size="md" disabled={isSubmitting} className="w-full touch-target">
               {isSubmitting ? t("account.submitting") : t("account.submit")}
             </Button>
           )}

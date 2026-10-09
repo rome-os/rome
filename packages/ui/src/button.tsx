@@ -112,14 +112,16 @@ const buttonVariants = cva(
       },
       /**
        * Press feedback. `scale` shrinks the control to 0.96 while held, which
-       * reads as a press on a control-sized box. `none` is for boxes where a
-       * proportional shrink reads as a jump or breaks a shape: a full-width
-       * button, a calendar day inside a range band, a toggle that already
-       * paints its pressed state. A trigger that opens a popup never scales,
-       * since the popup is its feedback.
+       * reads as a press on a control-sized box. Three boxes never scale,
+       * whatever the caller passes: a popup trigger, whose popup is its
+       * feedback; a ButtonGroup segment, which would pull away from the
+       * neighbours it shares an edge with; and a `w-full` button, where 4% of
+       * the row is a jump rather than a press. `none` is for any other box a
+       * shrink would break, such as a calendar day inside a range band.
        */
       press: {
-        scale: "active:not-aria-[haspopup]:scale-[0.96]",
+        scale:
+          "active:not-aria-[haspopup]:not-in-data-[slot=button-group]:not-[.w-full]:scale-[0.96]",
         none: "",
       },
     },

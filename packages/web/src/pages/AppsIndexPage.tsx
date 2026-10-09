@@ -560,12 +560,9 @@ export default function AppsIndexPage() {
                 onClick={() => setQuery("")}
                 aria-label={t("search.clear")}
                 title={t("search.clear")}
-                // Centered with `inset-y-0 my-auto`, not `-translate-y-1/2`:
-                // Button's base carries an active-press `translate-y-px` on a
-                // different variant prefix, so a centering transform survives
-                // the merge and the glyph drops half its height while pressed.
-                // Auto margins split the 36px field's spare 12px evenly around
-                // the 24px button without naming an off-scale 6px offset.
+                // Centered with `inset-y-0 my-auto`: auto margins split the
+                // 36px field's spare 12px evenly around the 24px button
+                // without naming an off-scale 6px offset.
                 className="absolute inset-y-0 right-2 my-auto text-subtle-foreground hover:bg-surface-muted hover:text-foreground dark:hover:bg-surface-muted"
               >
                 <X className="size-3.5" aria-hidden />
