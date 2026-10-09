@@ -13,9 +13,11 @@ export function parseEntries(content: string): TranscriptPart[] {
 
 // Core stores parts it did not build without validating them: a client's user
 // turn posts its own, and an app's `channels.send` to webchat writes assistant
-// parts as given. So each part with a known type must carry the fields its kind
-// requires, or it is dropped rather than breaking the whole transcript.
-const REQUIRED_FIELDS: Record<string, Record<string, "string" | "object">> = {
+// parts as given. So a part must be of a known kind and carry the fields that
+// kind requires, or it is dropped rather than breaking the whole transcript.
+// Keyed by every TranscriptPart kind, so a new kind or a renamed field fails to
+// compile here.
+const REQUIRED_FIELDS = {
   text: { content: "string" },
   turn_recap: { turnId: "string", content: "string" },
   approval_card: {
@@ -29,14 +31,20 @@ const REQUIRED_FIELDS: Record<string, Record<string, "string" | "object">> = {
   handoff: { toolUseId: "string", appId: "string" },
   submission_card: { payload: "object" },
   interaction_result: { toolUseId: "string" },
+  handback_approved: {},
   error: { error: "string" },
+} satisfies {
+  [K in TranscriptPart["type"]]: Partial<
+    Record<Exclude<keyof Extract<TranscriptPart, { type: K }>, "type">, "string" | "object">
+  >;
 };
 
 function wellFormed(part: unknown): TranscriptPart[] {
   if (!part || typeof part !== "object") return [];
   const p = part as Record<string, unknown>;
-  if (typeof p.type !== "string") return [];
-  for (const [field, kind] of Object.entries(REQUIRED_FIELDS[p.type] ?? {})) {
+  if (typeof p.type !== "string" || !Object.hasOwn(REQUIRED_FIELDS, p.type)) return [];
+  const required: Record<string, string> = REQUIRED_FIELDS[p.type as TranscriptPart["type"]];
+  for (const [field, kind] of Object.entries(required)) {
     const value = p[field];
     if (kind === "object" ? !value || typeof value !== "object" : typeof value !== kind) return [];
   }
