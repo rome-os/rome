@@ -4,6 +4,7 @@ import { Slot } from "@radix-ui/react-slot";
 
 import { cn } from "./cn.js";
 import { canonicalControlSize } from "./control-size.js";
+import { glyphTrim } from "./glyph-edge.js";
 
 // The 36px step, held in a const because two names resolve to it: `md`, the
 // shared control vocabulary's name for the step, and `default`, the shadcn
@@ -165,56 +166,6 @@ const buttonVariants = cva(
   },
 );
 
-/**
- * A glyph is a childless component element, such as an icon or a spinner, or
- * an element marked with `data-icon`. A label is anything else, so text, a
- * wrapped `<span>`, and a `Kbd` hint all count. Only a glyph with a label on
- * the other side sits at an edge worth correcting.
- *
- * The test reads elements, not what they render, so a childless component
- * that renders text reads as a glyph. Such a label opts out by wrapping it in
- * a `<span>`, and a glyph the test misses (an inline `<svg>`, say) opts in
- * with `data-icon`. A screen-reader-only `<span>` also counts as a label, so
- * a visually lone icon with one gets the trim.
- */
-function isGlyph(node: React.ReactNode): boolean {
-  if (!React.isValidElement<{ children?: React.ReactNode; "data-icon"?: string }>(node)) {
-    return false;
-  }
-  if (node.props["data-icon"] != null) return true;
-  return typeof node.type !== "string" && node.props.children == null;
-}
-
-/**
- * Children with fragments opened, so `<><Plus />Add</>` reads as two items.
- * Blank strings render nothing, so `{label ?? ""}` beside an icon is no label.
- */
-function flatten(children: React.ReactNode): React.ReactNode[] {
-  return React.Children.toArray(children).flatMap((child) => {
-    if (typeof child === "string" && child.trim() === "") return [];
-    return React.isValidElement<{ children?: React.ReactNode }>(child) &&
-      child.type === React.Fragment
-      ? flatten(child.props.children)
-      : [child];
-  });
-}
-
-function glyphEdges(children: React.ReactNode): { start: boolean; end: boolean } {
-  const items = flatten(children);
-  const hasLabel = items.some((item) => !isGlyph(item));
-  return {
-    start: hasLabel && isGlyph(items[0]),
-    end: hasLabel && isGlyph(items.at(-1)),
-  };
-}
-
-/** The glyph-side inset, per step that takes it. Steps not listed take none. */
-const GLYPH_EDGE: Partial<Record<string, { start: string; end: string }>> = {
-  sm: { start: "pl-[var(--control-px-icon-sm)]", end: "pr-[var(--control-px-icon-sm)]" },
-  md: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
-  default: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
-};
-
 function Button({
   className,
   variant = "default",
@@ -229,28 +180,20 @@ function Button({
   }) {
   const Comp = asChild ? Slot : "button";
   // `asChild` content is the child's own subtree, so its glyph names its side
-  // with `data-icon` rather than being read from here.
-  const edges = asChild ? { start: false, end: false } : glyphEdges(props.children);
-  // Plain classes placed before `className`, rather than variants on the
-  // markers below: a variant outranks a caller's `px-*` on specificity, and
-  // the merge cannot drop it.
-  const inset = align === "center" && size ? GLYPH_EDGE[size] : undefined;
-  const trimStart = edges.start && inset ? inset.start : undefined;
-  const trimEnd = edges.end && inset ? inset.end : undefined;
+  // with `data-icon` and the `marked` CSS path, rather than being read here.
+  const trim = asChild ? {} : glyphTrim(props.children, size, align);
 
   return (
     <Comp
       data-slot="button"
-      data-icon-start={trimStart ? "" : undefined}
-      data-icon-end={trimEnd ? "" : undefined}
       data-variant={variant}
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
       className={cn(
         buttonVariants({ variant, size, shape, align, glyphs: asChild ? "marked" : "read" }),
-        trimStart,
-        trimEnd,
+        trim.start,
+        trim.end,
         className,
       )}
       {...props}

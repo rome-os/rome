@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { ArrowRight, Plus } from "lucide-react";
 
 import { Button } from "./button.js";
+import { Toggle } from "./toggle.js";
 
 afterEach(cleanup);
 
@@ -11,15 +12,17 @@ function Kbd({ children }: { children: React.ReactNode }) {
   return <kbd>{children}</kbd>;
 }
 
+/** Which sides took the plain glyph-side trim class. */
 function edges(node: HTMLElement) {
+  const tokens = [...node.classList];
   return {
-    start: node.hasAttribute("data-icon-start"),
-    end: node.hasAttribute("data-icon-end"),
+    start: tokens.some((token) => token.startsWith("pl-[var(--control-px-icon-")),
+    end: tokens.some((token) => token.startsWith("pr-[var(--control-px-icon-")),
   };
 }
 
 describe("Button glyph edges", () => {
-  it("marks a leading glyph beside a label", () => {
+  it("trims a leading glyph beside a label", () => {
     render(
       <Button>
         <Plus />
@@ -29,7 +32,7 @@ describe("Button glyph edges", () => {
     expect(edges(screen.getByRole("button"))).toEqual({ start: true, end: false });
   });
 
-  it("marks a trailing glyph beside a label", () => {
+  it("trims a trailing glyph beside a label", () => {
     render(
       <Button>
         Continue
@@ -39,7 +42,7 @@ describe("Button glyph edges", () => {
     expect(edges(screen.getByRole("button"))).toEqual({ start: false, end: true });
   });
 
-  it("marks nothing on a lone glyph or a bare label", () => {
+  it("trims nothing on a lone glyph or a bare label", () => {
     render(
       <>
         <Button aria-label="Add">
@@ -157,5 +160,25 @@ describe("Button glyph inset", () => {
     const button = screen.getByRole("button");
     expect(button.classList).not.toContain("pl-[var(--control-px-icon-md)]");
     expect(edges(button)).toEqual({ start: false, end: false });
+  });
+});
+
+describe("Toggle glyph inset", () => {
+  it("trims the glyph side the same way Button does", () => {
+    render(
+      <>
+        <Button size="sm">
+          <Plus />
+          Bold
+        </Button>
+        <Toggle size="sm" pressed={false} onPressedChange={() => {}}>
+          <Plus />
+          Bold
+        </Toggle>
+      </>,
+    );
+    const [button, toggle] = screen.getAllByRole("button") as [HTMLElement, HTMLElement];
+    expect(edges(toggle)).toEqual({ start: true, end: false });
+    expect(edges(toggle)).toEqual(edges(button));
   });
 });

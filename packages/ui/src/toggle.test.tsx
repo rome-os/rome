@@ -31,15 +31,10 @@ const SIZES = [
  * height on one toolbar row" is pinned here as "same geometry classes". The
  * rendered result is measured in a real browser on the gallery.
  */
-/** Geometry classes. The `has-data-[icon=…]` trims are left out: Toggle takes
- * them from `buttonVariants`, Button reads its children instead, and neither
- * applies without a glyph. */
 function boxClasses(node: Element): Set<string> {
   return new Set(
-    [...node.classList].filter(
-      (token) =>
-        !token.startsWith("has-data-[icon=") &&
-        /(^|:)(h-|w-|size-|p[xlrty]?-|gap-|rounded-|text-\[length:)/.test(token),
+    [...node.classList].filter((token) =>
+      /(^|:)(h-|w-|size-|p[xlrty]?-|gap-|rounded-|text-\[length:)/.test(token),
     ),
   );
 }
