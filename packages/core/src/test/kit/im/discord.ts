@@ -119,7 +119,13 @@ export class DiscordPeer implements Peer {
     socket.on("close", () => this.sessions.delete(socket));
     socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 45_000 } }));
     socket.on("message", (raw) => {
-      const frame = JSON.parse(String(raw)) as { op: number; d: Record<string, unknown> };
+      let frame: { op: number; d: Record<string, unknown> };
+      try {
+        frame = JSON.parse(String(raw));
+      } catch {
+        this.server.errors.push(`Unmodeled gateway frame: ${String(raw).slice(0, 80)}`);
+        return;
+      }
       if (frame.op === 1) return socket.send(JSON.stringify({ op: 11, d: null }));
       if (frame.op === 3) return;
       if (frame.op === 2) {
@@ -170,7 +176,9 @@ export class DiscordPeer implements Peer {
     if (!messages) return method === "GET" ? synthetic(channel) : undefined;
 
     if (method === "POST" && !messageId) return this.create(channel, body);
-    const message = messageId ? this.store.get(messageId) : undefined;
+    // Other requests on the whole collection are unmodeled.
+    if (!messageId) return undefined;
+    const message = this.store.get(messageId);
     if (!message || message.conversation !== channelId) {
       // Only a GET of a missing message is recorded; a PATCH reuses its body.
       if (method !== "GET" && method !== "PATCH") return undefined;
@@ -217,8 +225,9 @@ export class DiscordPeer implements Peer {
     return { body: this.wire(message), source: "capture", accepted: true };
   }
 
-  /** A stored message as Discord spells it, from the recorded messages. */
-  private wire(message: VisibleMessage): WireMessage {
+  /** A stored message as Discord spells it, from the recorded messages. The
+   *  message a reply points at carries no `referenced_message` of its own. */
+  private wire(message: VisibleMessage, nested = false): WireMessage {
     const parent = message.replyTo ? this.store.get(message.replyTo) : undefined;
     const guild = this.channels.get(message.conversation)?.guild_id;
     return {
@@ -237,7 +246,7 @@ export class DiscordPeer implements Peer {
               message_id: parent.id,
               ...(guild ? { guild_id: guild } : {}),
             },
-            referenced_message: this.wire(parent),
+            ...(nested ? {} : { referenced_message: this.wire(parent, true) }),
           }
         : {}),
     };

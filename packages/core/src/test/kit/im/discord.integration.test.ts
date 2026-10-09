@@ -33,7 +33,7 @@ describe("DiscordPeer", () => {
         ...(request.method === "GET" ? {} : { body: request.body }),
       });
       // discord.js resolves only what Discord accepted.
-      if (response.status === undefined) await call;
+      if (response.status === undefined || response.status < 400) await call;
       else await expect(call).rejects.toMatchObject({ status: response.status });
       const answered = peer.server.exchanges.at(-1)?.response ?? { body: undefined };
       expect({ label, ...comparable(capture, answered, response) }).toEqual({

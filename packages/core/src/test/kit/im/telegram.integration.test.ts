@@ -18,7 +18,7 @@ describe("TelegramPeer", () => {
         const method = request.path.slice(request.path.lastIndexOf("/") + 1);
         const call = bot.api.raw[method as "sendMessage"](request.body as never);
         // grammy resolves only what Telegram accepted.
-        if (response.status === 200) await call;
+        if (response.status === undefined || response.status < 400) await call;
         else await expect(call).rejects.toMatchObject({ error_code: response.status });
         const answered = peer.server.exchanges.at(-1)?.response ?? { body: undefined };
         expect({ label, ...comparable(capture, answered, response) }).toEqual({
@@ -30,6 +30,24 @@ describe("TelegramPeer", () => {
         capture.exchanges.map(() => "capture"),
       );
       peer.server.assertClean();
+    } finally {
+      await peer.close();
+    }
+  });
+  it("parses HTML as Telegram does, and refuses what Telegram cannot parse", async () => {
+    const peer = await TelegramPeer.start();
+    const send = (text: string) =>
+      peer.createBot(TELEGRAM_TOKEN).api.sendMessage(TELEGRAM_CHAT, text, { parse_mode: "HTML" });
+    try {
+      await expect(send("<b>hi</b> &amp; 😀")).resolves.toMatchObject({ text: "hi & 😀" });
+      for (const bad of ["<b>unclosed", "<div>x</div>", "AT&T", "1 > 0"])
+        await expect(send(bad)).rejects.toMatchObject({
+          description: "Bad Request: can't parse entities",
+        });
+      // An emoji is two UTF-16 units, so 2049 of them exceed 4096.
+      await expect(send(`<b>${"😀".repeat(2049)}</b>`)).rejects.toMatchObject({
+        description: "Bad Request: message is too long",
+      });
     } finally {
       await peer.close();
     }
@@ -74,7 +92,7 @@ describe("TelegramAdapter.send against the peer", () => {
       expect.objectContaining({
         id: receipt.messageId,
         from: "rome",
-        text: "<b>hi</b> there",
+        text: "hi there",
         replyTo: inbound.messageId,
       }),
     ]);

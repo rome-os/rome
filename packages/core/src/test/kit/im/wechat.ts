@@ -142,13 +142,15 @@ export class WechatPeer implements Peer {
     };
   }
 
-  private sendMessage(message: WireMessage | undefined): Reply {
+  private sendMessage(message: WireMessage | undefined): Reply | undefined {
     const to = message?.to_user_id ?? "";
     if (!this.reachable.has(to))
       return { body: exemplar(capture, "send-invalid-recipient"), source: "capture" };
-    const text = (message?.item_list ?? [])
-      .map((item) => (item.type === MSG_ITEM_TEXT ? (item.text_item?.text ?? "") : ""))
-      .join("");
+    // Only text items are modeled; anything else fails the test as unmodeled.
+    const items = message?.item_list ?? [];
+    if (!items.length || items.some((item) => item.type !== MSG_ITEM_TEXT || !item.text_item))
+      return undefined;
+    const text = items.map((item) => item.text_item?.text ?? "").join("");
     const stored = this.store.add({
       id: String(this.nextMessageId++),
       conversation: to,

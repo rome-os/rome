@@ -34,6 +34,21 @@ describe("WechatPeer", () => {
       await peer.close();
     }
   });
+
+  it("fails the test on a message item it does not model", async () => {
+    const peer = await WechatPeer.start();
+    try {
+      const answer = await peer.fetch(`${WECHAT_ORIGIN}/ilink/bot/sendmessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${WECHAT_TOKEN}` },
+        body: JSON.stringify({ msg: { to_user_id: WECHAT_USER, item_list: [{ type: 999 }] } }),
+      });
+      expect(answer.status).toBe(418);
+      expect(() => peer.server.assertClean()).toThrow("Unmodeled request");
+    } finally {
+      await peer.close();
+    }
+  });
 });
 
 describe("WechatAdapter.send against the peer", () => {

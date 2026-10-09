@@ -150,10 +150,9 @@ export class TelegramPeer implements Peer {
   private sendMessage(body: Record<string, unknown>): Reply {
     const chat = String(body.chat_id);
     if (!this.chats.has(chat)) return badRequest("chat not found");
-    const text = String(body.text ?? "");
-    const length = visibleLength(text, body.parse_mode);
-    if (length === 0) return badRequest("message text is empty");
-    if (length > TEXT_LIMIT) return badRequest("message is too long");
+    const read = readText(body);
+    if (!("text" in read)) return read;
+    const { text, source } = read;
     const replyTo = (body.reply_parameters as { message_id?: number } | undefined)?.message_id;
     if (replyTo !== undefined && this.store.get(String(replyTo))?.conversation !== chat)
       return badRequest("message to be replied not found");
@@ -166,7 +165,7 @@ export class TelegramPeer implements Peer {
       ...(replyTo !== undefined ? { replyTo: String(replyTo) } : {}),
     });
     this.dates.set(message.id, { date: now() });
-    return { body: { ok: true, result: this.wire(message) }, source: "capture", accepted: true };
+    return { body: { ok: true, result: this.wire(message) }, source, accepted: true };
   }
 
   private editMessageText(body: Record<string, unknown>): Reply {
@@ -174,21 +173,21 @@ export class TelegramPeer implements Peer {
     if (!message || message.conversation !== String(body.chat_id))
       return { status: 400, body: exemplar(capture, "edit-missing"), source: "capture" };
     if (message.from !== "rome") return badRequest("message can't be edited");
-    const text = String(body.text ?? "");
-    const length = visibleLength(text, body.parse_mode);
-    if (length === 0) return badRequest("message text is empty");
-    if (length > TEXT_LIMIT) return badRequest("message is too long");
+    const read = readText(body);
+    if (!("text" in read)) return read;
+    const { text, source } = read;
     if (text === message.text)
       return badRequest(
         "message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message",
       );
     this.store.edit(message.id, text);
     this.dates.set(message.id, { ...this.dates.get(message.id)!, edit_date: now() });
-    return { body: { ok: true, result: this.wire(message) }, source: "capture", accepted: true };
+    return { body: { ok: true, result: this.wire(message) }, source, accepted: true };
   }
 
-  /** A stored message as the Bot API spells it, from the recorded message. */
-  private wire(message: VisibleMessage): Record<string, unknown> {
+  /** A stored message as the Bot API spells it, from the recorded message. The
+   *  message a reply points at carries no reply of its own, as in the Bot API. */
+  private wire(message: VisibleMessage, nested = false): Record<string, unknown> {
     const parent = message.replyTo ? this.store.get(message.replyTo) : undefined;
     return {
       ...structuredClone(sent),
@@ -199,7 +198,7 @@ export class TelegramPeer implements Peer {
       chat: { ...sent.chat, id: Number(message.conversation) },
       ...this.dates.get(message.id),
       text: message.text,
-      ...(parent ? { reply_to_message: this.wire(parent) } : {}),
+      ...(parent && !nested ? { reply_to_message: this.wire(parent, true) } : {}),
     };
   }
 }
@@ -222,22 +221,84 @@ function badRequest(reason: string): Reply {
   };
 }
 
-/** Telegram limits the text a user sees: after HTML entities are parsed, in
- *  UTF-16 code units. */
-function visibleLength(text: string, parseMode: unknown): number {
-  if (parseMode !== "HTML") return text.length;
-  // Count what is outside tags, with each entity as one character.
-  let length = 0;
-  let inTag = false;
-  let inEntity = false;
-  for (const char of text) {
-    if (inTag) inTag = char !== ">";
-    else if (char === "<") inTag = true;
-    else if (inEntity) inEntity = char !== ";";
-    else {
-      length += 1;
-      inEntity = char === "&";
+/**
+ * The text a user would see for a send or edit, or Telegram's refusal. HTML is
+ * parsed as Telegram parses it, and refused where Telegram would refuse it.
+ * The limit counts UTF-16 code units of the parsed text. No capture records an
+ * HTML send, so its answer is synthetic.
+ */
+function readText(
+  body: Record<string, unknown>,
+): { text: string; source: "capture" | "synthetic" } | Reply {
+  const raw = String(body.text ?? "");
+  const html = body.parse_mode === "HTML";
+  const text = html ? parseHtml(raw) : raw;
+  if (text === null) return badRequest("can't parse entities");
+  if (!text.length) return badRequest("message text is empty");
+  if (text.length > TEXT_LIMIT) return badRequest("message is too long");
+  return { text, source: html ? "synthetic" : "capture" };
+}
+
+// The Bot API's HTML formatting: https://core.telegram.org/bots/api#html-style
+const HTML_TAGS = new Set([
+  "a",
+  "b",
+  "blockquote",
+  "code",
+  "del",
+  "em",
+  "i",
+  "ins",
+  "pre",
+  "s",
+  "span",
+  "strike",
+  "strong",
+  "tg-emoji",
+  "tg-spoiler",
+  "u",
+]);
+const HTML_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"' };
+
+/** The text of Telegram HTML, or null where Telegram cannot parse it: an
+ *  unsupported or unclosed tag, or a `<`, `>` or `&` outside a tag or entity. */
+function parseHtml(html: string): string | null {
+  const open: string[] = [];
+  let text = "";
+  let at = 0;
+  while (at < html.length) {
+    const char = html[at]!;
+    if (char === "<") {
+      const end = html.indexOf(">", at);
+      if (end < 0) return null;
+      const tag = html.slice(at + 1, end);
+      const closing = tag.startsWith("/");
+      const name = (closing ? tag.slice(1) : tag).split(/\s/)[0]!.toLowerCase();
+      if (!HTML_TAGS.has(name)) return null;
+      if (!closing) open.push(name);
+      else if (open.pop() !== name) return null;
+      at = end + 1;
+    } else if (char === "&") {
+      const end = html.indexOf(";", at);
+      const decoded = end < 0 ? undefined : decodeEntity(html.slice(at + 1, end));
+      if (decoded === undefined) return null;
+      text += decoded;
+      at = end + 1;
+    } else if (char === ">") {
+      return null;
+    } else {
+      text += char;
+      at += 1;
     }
   }
-  return length;
+  return open.length ? null : text;
+}
+
+function decodeEntity(name: string): string | undefined {
+  if (Object.hasOwn(HTML_ENTITIES, name)) return HTML_ENTITIES[name];
+  const decimal = /^#(\d+)$/.exec(name)?.[1];
+  const hex = /^#x([\da-f]+)$/i.exec(name)?.[1];
+  if (decimal === undefined && hex === undefined) return undefined;
+  const code = decimal ? Number(decimal) : Number.parseInt(hex!, 16);
+  return code <= 0x10ffff ? String.fromCodePoint(code) : undefined;
 }
