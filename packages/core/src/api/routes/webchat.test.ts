@@ -178,8 +178,11 @@ describe("Webchat API", () => {
       close: async () => {},
     });
     deps.agentSessionManager = {
-      ...fakeSessionManager(async () => agent),
+      acquire: rs.fn(async () => agent),
+      acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
+      findWorkingDirBySessionId: () => undefined,
+      shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
     const created = await app.request("/chat/sessions", {
@@ -1800,26 +1803,22 @@ describe("Webchat API", () => {
       script: () => AsyncGenerator<never>,
       onEvent?: (evt: { event: string; data: string }) => void,
     ) => {
-      deps.agentSessionManager = {
-        acquire: rs.fn(async (key) => ({
-          key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
-          sessionId: "agent-session",
-          status: "idle",
-          sendTurn() {
-            return {
-              turnId: "turn-stream-1",
-              events: script(),
-              turnContext: otelContext.active(),
-            };
-          },
-          subscribe: () => () => undefined,
-          onStatusChange: () => () => undefined,
-          interrupt: async () => undefined,
-          close: async () => undefined,
-        })),
-        peek: () => undefined,
-        shutdown: async () => undefined,
-      } as unknown as typeof deps.agentSessionManager;
+      deps.agentSessionManager = fakeSessionManager(async (key) => ({
+        key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
+        sessionId: "agent-session",
+        status: "idle",
+        sendTurn() {
+          return {
+            turnId: "turn-stream-1",
+            events: script(),
+            turnContext: otelContext.active(),
+          };
+        },
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: async () => undefined,
+        close: async () => undefined,
+      }));
       const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
       deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
       const app = createWebchatRuntime(deps).routes;
@@ -2334,54 +2333,51 @@ describe("Webchat API", () => {
       });
       const interrupt = rs.fn(async () => undefined);
       const wrongTurnInterrupt = rs.fn(async () => undefined);
-      deps.agentSessionManager = {
-        acquire: rs.fn(async () => ({
-          key: { agentName: "main" },
-          sessionId: "runtime",
-          status: "running",
-          sendTurn: () => ({
-            turnId: "cancel-turn",
-            interrupt,
-            turnContext: otelContext.active(),
-            events: (async function* () {
-              yield {
-                type: "turn_start",
-                turnId: "cancel-turn",
-                sessionId: "runtime",
-                userPrompt: "work",
-              };
-              yield {
-                type: "tool_use",
-                id: "edit-1",
-                tool: "Edit",
-                input: { file_path: "test.txt" },
-              };
-              yield {
-                type: "tool_result",
-                toolUseId: "edit-1",
-                tool: "Edit",
-                output: "File changed",
-              };
-              if (tail === "partial")
-                yield { type: "text_delta", content: "Already changed the file" };
-              await gate;
-              if (tail === "result") yield { type: "result", content: "Already changed the file" };
-              if (tail === "error") yield { type: "error", error: "Actual provider failure" };
-              yield {
-                type: "turn_end",
-                turnId: "cancel-turn",
-                status: tail === "error" ? "error" : "interrupted",
-                durationMs: 10,
-              };
-            })(),
-          }),
-          subscribe: () => () => undefined,
-          onStatusChange: () => () => undefined,
-          interrupt: wrongTurnInterrupt,
-        })),
-        peek: rs.fn(),
-        shutdown: async () => undefined,
-      } as unknown as typeof deps.agentSessionManager;
+      deps.agentSessionManager = fakeSessionManager(async () => ({
+        key: { agentName: "main", channelThreadKey: "webchat:cancel" },
+        sessionId: "runtime",
+        status: "running",
+        sendTurn: () => ({
+          turnId: "cancel-turn",
+          interrupt,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield {
+              type: "turn_start",
+              turnId: "cancel-turn",
+              sessionId: "runtime",
+              userPrompt: "work",
+            };
+            yield {
+              type: "tool_use",
+              id: "edit-1",
+              tool: "Edit",
+              input: { file_path: "test.txt" },
+            };
+            yield {
+              type: "tool_result",
+              toolUseId: "edit-1",
+              tool: "Edit",
+              output: "File changed",
+            };
+            if (tail === "partial")
+              yield { type: "text_delta", content: "Already changed the file" };
+            await gate;
+            if (tail === "result") yield { type: "result", content: "Already changed the file" };
+            if (tail === "error") yield { type: "error", error: "Actual provider failure" };
+            yield {
+              type: "turn_end",
+              turnId: "cancel-turn",
+              status: tail === "error" ? "error" : "interrupted",
+              durationMs: 10,
+            };
+          })(),
+        }),
+        subscribe: () => () => undefined,
+        onStatusChange: () => () => undefined,
+        interrupt: wrongTurnInterrupt,
+        close: async () => undefined,
+      }));
       const sendMessageRun = rs.fn(async () => ({ status: "ok" }));
       deps.actionEngine = { run: sendMessageRun } as unknown as typeof deps.actionEngine;
       const app = createWebchatRuntime(deps).routes;
