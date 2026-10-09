@@ -1,6 +1,6 @@
 "use client";
 
-import { code } from "@streamdown/code";
+import { code } from "./code-highlighter.js";
 import { math } from "@streamdown/math";
 import { mermaid, type MermaidConfig } from "@streamdown/mermaid";
 import {
