@@ -29,9 +29,10 @@ interface Pending {
 }
 
 // The stock plugin swallows an async failure, such as a grammar chunk that did
-// not load, and never answers. A request with no answer by then stops absorbing
-// new callers, so the block's next render asks again.
-const RETRY_AFTER_MS = 20_000;
+// not load, and never answers. It also keeps the failed highlighter, so asking
+// the same worker again cannot succeed. A request with no answer by then goes
+// to the main thread instead.
+const GIVE_UP_AFTER_MS = 20_000;
 // A streamed block is highlighted once per partial version, each under its own
 // key, so the page keeps only the most recent results.
 const MAX_RESULTS = 200;
@@ -47,10 +48,10 @@ function cacheKey({ code, language, themes }: HighlightOptions): string {
 /**
  * Creates a Streamdown code plugin that highlights in a worker made by
  * `createWorker`. `highlight` returns a cached result synchronously, or null
- * and calls `callback` once the worker answers. A request still unanswered
- * after RETRY_AFTER_MS is sent again by the next call for the same block. When
- * no worker can be made, or the worker fails to load, every request goes to
- * `fallback` on the main thread instead.
+ * and calls `callback` once it has an answer. A request the worker could not
+ * highlight, or left unanswered for GIVE_UP_AFTER_MS, moves to `fallback` on
+ * the main thread. When no worker can be made, or the worker fails to load,
+ * every request goes to `fallback`.
  */
 export function createWorkerCodePlugin(
   createWorker: () => Worker | null,
@@ -75,18 +76,19 @@ export function createWorkerCodePlugin(
     return fallback.highlight(options, callback);
   }
 
+  function settleOnMainThread(id: number, pending: Pending) {
+    pendingById.delete(id);
+    if (pendingByKey.get(pending.key) === pending) pendingByKey.delete(pending.key);
+    for (const callback of pending.callbacks) {
+      const result = useFallback(pending.options, callback);
+      if (result) callback(result);
+    }
+  }
+
   function failWorker() {
     worker?.terminate();
     worker = null;
-    const stranded = [...pendingById.values()];
-    pendingById.clear();
-    pendingByKey.clear();
-    for (const { options, callbacks } of stranded) {
-      for (const callback of callbacks) {
-        const result = useFallback(options, callback);
-        if (result) callback(result);
-      }
-    }
+    for (const [id, pending] of [...pendingById]) settleOnMainThread(id, pending);
   }
 
   function getWorker(): Worker | null {
@@ -98,12 +100,15 @@ export function createWorkerCodePlugin(
     }
     if (!worker) return null;
     worker.addEventListener("message", (event: MessageEvent<HighlightResponse>) => {
-      const pending = pendingById.get(event.data.id);
+      const { id, result } = event.data;
+      const pending = pendingById.get(id);
       if (!pending) return;
-      pendingById.delete(event.data.id);
-      if (pendingByKey.get(pending.key) === pending) pendingByKey.delete(pending.key);
-      const { result } = event.data;
-      if (!result) return;
+      if (!result) {
+        settleOnMainThread(id, pending);
+        return;
+      }
+      pendingById.delete(id);
+      pendingByKey.delete(pending.key);
       remember(pending.key, result);
       for (const callback of pending.callbacks) callback(result);
     });
@@ -139,8 +144,8 @@ export function createWorkerCodePlugin(
       pendingById.set(id, entry);
       target.postMessage({ id, options } satisfies HighlightRequest);
       setTimeout(() => {
-        if (pendingByKey.get(key) === entry) pendingByKey.delete(key);
-      }, RETRY_AFTER_MS);
+        if (pendingById.get(id) === entry) settleOnMainThread(id, entry);
+      }, GIVE_UP_AFTER_MS);
       return null;
     },
   };

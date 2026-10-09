@@ -114,30 +114,37 @@ describe("createWorkerCodePlugin", () => {
     expect(fallback.calls).toEqual([OPTIONS, later]);
   });
 
-  it("asks again for a block whose request the worker never answered", () => {
+  it("highlights on the main thread when the worker leaves a request unanswered", () => {
     rstest.useFakeTimers();
     try {
-      const { worker, plugin } = setup();
-      const first = rstest.fn();
-      plugin.highlight(OPTIONS, first);
+      const { worker, fallback, plugin } = setup();
+      const callback = rstest.fn();
+      plugin.highlight(OPTIONS, callback);
 
       rstest.advanceTimersByTime(19_999);
-      expect(plugin.highlight(OPTIONS)).toBeNull();
-      expect(worker.posted).toHaveLength(1);
+      expect(callback).not.toHaveBeenCalled();
 
       rstest.advanceTimersByTime(1);
-      const second = rstest.fn();
-      expect(plugin.highlight(OPTIONS, second)).toBeNull();
-      expect(worker.posted.map((request) => request.id)).toEqual([0, 1]);
+      expect(fallback.calls).toEqual([OPTIONS]);
+      expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
 
-      worker.answer(1, resultFor("retry"));
-      expect(second).toHaveBeenCalledWith(resultFor("retry"));
-      // A late answer to the first request still reaches its caller.
+      // A late answer is ignored; the main thread already settled the request.
       worker.answer(0, resultFor("late"));
-      expect(first).toHaveBeenCalledWith(resultFor("late"));
+      expect(callback).toHaveBeenCalledTimes(1);
     } finally {
       rstest.useRealTimers();
     }
+  });
+
+  it("highlights on the main thread when the worker could not highlight a block", () => {
+    const { worker, fallback, plugin } = setup();
+    const callback = rstest.fn();
+    plugin.highlight(OPTIONS, callback);
+
+    worker.answer(0, null);
+
+    expect(fallback.calls).toEqual([OPTIONS]);
+    expect(callback).toHaveBeenCalledWith(resultFor(OPTIONS.code));
   });
 
   it("keeps only the most recent results", () => {
