@@ -3545,7 +3545,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
-                    ?.listResolved()
+                    .listResolved()
                     .find((a) => a.appId === suspension.appId);
                   if (!resolvedApp) {
                     log.warn("rejected suspension: app not installed", {
@@ -3624,7 +3624,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 const place = readPlaceWidgetFromOutput(msg.output);
                 if (place) {
                   const resolvedApp = deps.appCatalog
-                    ?.listResolved()
+                    .listResolved()
                     .find((a) => a.appId === place.appId);
                   const isHostApp = place.appId === SESSIONS_HOST_APP_ID;
                   if (!resolvedApp && !isHostApp) {

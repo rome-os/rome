@@ -561,7 +561,7 @@ export function resolveMentions(
   mentions: Array<{ key?: string; name?: string }>,
 ): string {
   let text = content;
-  for (const mention of mentions ?? []) {
+  for (const mention of mentions) {
     if (mention.key && mention.name) text = text.split(mention.key).join(mention.name);
   }
   return text.trim();
@@ -572,7 +572,7 @@ function stripMentionPlaceholders(
   mentions: Array<{ key?: string; name?: string }>,
 ): string {
   let text = content;
-  for (const mention of mentions ?? []) {
+  for (const mention of mentions) {
     if (mention.key) text = text.split(mention.key).join("");
   }
   return text.trim();

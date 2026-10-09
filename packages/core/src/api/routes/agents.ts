@@ -15,7 +15,7 @@ export function agentsRoutes(deps: ApiDeps): Hono {
     const agents = Array.from(records.entries()).map(([name, record]) => ({
       name,
       localName: record.config.name,
-      description: record.config.description ?? null,
+      description: record.config.description,
       ownerType: record.metadata.ownerType,
       ownerId: record.metadata.ownerId,
     }));

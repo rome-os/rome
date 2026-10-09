@@ -212,7 +212,7 @@ function rankSession(session: ChatSession, normalizedQuery: string): number | nu
   if (!normalizedQuery) return 0;
 
   const name = normalizeSearchText(session.name);
-  const projectName = normalizeSearchText(session.projectName ?? "");
+  const projectName = normalizeSearchText(session.projectName);
   const projectPath = normalizeSearchText(session.projectPath ?? "");
   const haystack = `${name}\n${projectName}\n${projectPath}`;
   const terms = normalizedQuery.split(/\s+/);

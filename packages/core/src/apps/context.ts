@@ -208,7 +208,7 @@ export function createRomeAppContext(
     args: Record<string, unknown>,
     actionEventObserver?: ActionInvocationObserver,
   ): Promise<ActionResult> => {
-    const wireArgs = toWireShape(args ?? {}, name, "args");
+    const wireArgs = toWireShape(args, name, "args");
     let result: ActionResult;
     try {
       const store = actionExecutionContext.getStore();
@@ -268,7 +268,7 @@ export function createRomeAppContext(
   ): Promise<ActionResult | ActionDispatchReceipt> {
     if (!options.detached) return await invokeActionResult(name, args);
 
-    const wireArgs = toWireShape(args ?? {}, name, "args");
+    const wireArgs = toWireShape(args, name, "args");
     try {
       const store = actionExecutionContext.getStore();
       const engine = store?.engine ?? services.actionEngine;

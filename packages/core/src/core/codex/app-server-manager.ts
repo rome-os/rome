@@ -200,8 +200,8 @@ export class CodexAppServerManager {
     }
     listeners.add(listener);
     return () => {
-      listeners?.delete(listener);
-      if (listeners?.size === 0) this.notificationListeners.delete(method);
+      listeners.delete(listener);
+      if (listeners.size === 0) this.notificationListeners.delete(method);
     };
   }
 
