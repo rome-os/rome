@@ -739,7 +739,7 @@ export class DiscordAdapter {
 
       // ── Layer 2: Bot filter ───────────────────────────────────────────────
       if (message.author.bot) {
-        const allowBots = cfg?.allowBots ?? "none";
+        const allowBots = cfg.allowBots ?? "none";
         if (allowBots === "none") {
           log.debug("ignoring bot message (allowBots=none)", { from: message.author.id });
           return;
@@ -757,7 +757,7 @@ export class DiscordAdapter {
       }
 
       // ── Layer 3: Intent recognition ───────────────────────────────────────
-      const ignoreNoMention = cfg?.ignoreNoMention ?? true;
+      const ignoreNoMention = cfg.ignoreNoMention ?? true;
       if (!isDm && ignoreNoMention && message.mentions.users.size > 0) {
         const botId = this.client.user?.id;
         if (!botId || !message.mentions.users.has(botId)) {
@@ -796,7 +796,7 @@ export class DiscordAdapter {
         isStopCommand(normalizeDiscordMessageText(message.content, botId));
 
       // ── Layer 4: Channel permission ───────────────────────────────────────
-      if (cfg?.mode === "ignore" && !directedStop) {
+      if (cfg.mode === "ignore" && !directedStop) {
         log.debug("ignoring message in channel with mode=ignore", {
           channelId: message.channelId,
         });
@@ -807,7 +807,7 @@ export class DiscordAdapter {
       // Threads the bot itself started (e.g. auto-thread replies) are treated
       // as ongoing conversations and skip the mention requirement. Threads
       // created by other users still need an @mention or a reply-to-bot.
-      const requireMention = cfg?.requireMention ?? true;
+      const requireMention = cfg.requireMention ?? true;
       if (requireMention && addressing === "ambient") {
         log.debug("ignoring guild message not directed at bot", {
           from: message.author.id,
