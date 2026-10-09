@@ -11,9 +11,9 @@ export function telegramTransport(api: Api): DeliveryTransport {
     capabilities: {
       maxPartLength: 4096,
       edit: true,
-      // Telegram allows a bot about one message a second in a chat, and bursts
-      // of about 30 a second across chats.
-      budget: { burst: 20, refillMs: 1000, conversationSpacingMs: 1000 },
+      // Telegram allows a bot about one message a second in a chat, and about
+      // 30 a second across chats.
+      budget: { burst: 30, refillMs: 34, conversationSpacingMs: 1000 },
     },
     codec: plainText,
     create: (chat, text, replyTo) =>
@@ -53,8 +53,9 @@ function classify(error: unknown): DeliveryFailure {
         error.description,
         (error.parameters.retry_after ?? 1) * 1000,
       );
-    if (error.error_code === 401 || error.error_code === 403)
-      return new DeliveryFailure("unauthorized", error.description);
+    // Only a 401 means the token is dead. A 403 is a refusal for one chat, such
+    // as a user who blocked the bot, and the token still works.
+    if (error.error_code === 401) return new DeliveryFailure("unauthorized", error.description);
     return new DeliveryFailure("rejected", error.description);
   }
   // The request may have reached Telegram before the connection failed.

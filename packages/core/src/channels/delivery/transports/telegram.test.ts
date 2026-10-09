@@ -81,11 +81,20 @@ describe("telegramTransport", () => {
     });
   });
 
-  it("reports a credential Telegram no longer accepts as unauthorized", async () => {
+  it("reports a token Telegram no longer accepts as unauthorized", async () => {
     expect(await failureOf(refusal(401, "Unauthorized"))).toMatchObject({ kind: "unauthorized" });
-    expect(await failureOf(refusal(403, "Forbidden: bot was blocked by the user"))).toMatchObject({
-      kind: "unauthorized",
-    });
+  });
+
+  it("reports a refusal for one chat as rejected, since the token still works", async () => {
+    for (const description of [
+      "Forbidden: bot was blocked by the user",
+      "Forbidden: bot was kicked from the group chat",
+      "Forbidden: not enough rights to send text messages to the chat",
+    ])
+      expect(await failureOf(refusal(403, description))).toMatchObject({
+        kind: "rejected",
+        message: description,
+      });
   });
 
   it("reports any other refusal as rejected, which Telegram will repeat", async () => {
