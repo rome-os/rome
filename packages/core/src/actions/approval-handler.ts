@@ -107,6 +107,15 @@ export class ApprovalHandler {
       return;
     }
 
+    if (typeof rawPayload.rootActionName !== "string" || !Array.isArray(rawPayload.replayJournal)) {
+      log.error("approval payload missing its root call", { approvalId });
+      await this.approvalsRepo.markExecutionFailed(
+        approvalId,
+        "approval payload missing required fields: rootActionName, replayJournal",
+      );
+      return;
+    }
+
     const payload = rawPayload as unknown as ApprovalPayload;
 
     // Claim execution atomically (queued -> running) so only one worker runs it.

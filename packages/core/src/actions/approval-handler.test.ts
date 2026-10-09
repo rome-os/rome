@@ -352,6 +352,25 @@ describe("ApprovalHandler", () => {
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toBe("approval payload missing required field: actionName");
     });
+
+    it("marks execution failed when the payload has no recorded root call", async () => {
+      const { sendMessage } = await setup();
+      const approvalId = await rome.seed.approvedActionApproval({
+        actionName: "send_message",
+        args: { to: "user-1", text: "hello" },
+        rootActionName: undefined,
+        replayJournal: undefined,
+      });
+
+      await rome.approvalHandler.onApproved(approvalId);
+
+      expect(sendMessage.calls).toEqual([]);
+      const row = await rome.repos.approvals.findById(approvalId);
+      expect(row!.executionState).toBe("failed");
+      expect(row!.executionError).toBe(
+        "approval payload missing required fields: rootActionName, replayJournal",
+      );
+    });
   });
 
   // onRejected
