@@ -1,11 +1,5 @@
 import type { TranscriptPart } from "@rome/api-types/chat";
-import type {
-  TraceErrorEvent,
-  TraceEventDto,
-  RomeSessionRefDto,
-  TraceAccounting,
-  TraceSummary,
-} from "@rome/api-types/trace-segments";
+import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
   RomeSessionExplorerRecord,
