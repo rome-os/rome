@@ -95,7 +95,7 @@ import {
   type RomeCloudListingClient,
 } from "../apps/rome-cloud-listing-client.js";
 import { createAppStoreService } from "../apps/store-service.js";
-import type { CatalogEvent } from "../apps/state.js";
+import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
@@ -957,8 +957,6 @@ export function clearTestTelemetryBridge(): void {
   setTelemetryBridgeOnSdk(null);
 }
 
-import type { ResolvedApp } from "../apps/state.js";
-
 export interface AppLifecycleHarness {
   profileRoot: string;
   appsRoot: string;
@@ -1047,8 +1045,8 @@ export async function createAppLifecycleHarness(
     // their DB tables.
     appCatalog.subscribe(async function migrationSubscriber(event: CatalogEvent) {
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined || current.db == null) return;
+      const current = event.current;
+      if (!isResolvedApp(current) || current.db == null) return;
       try {
         await migrateAppByMetadata(db, current.db);
       } catch {
@@ -1071,8 +1069,8 @@ export async function createAppLifecycleHarness(
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
       actionRegistry.unregisterOwnedBy("app", event.appId);
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined) return;
+      const current = event.current;
+      if (!isResolvedApp(current)) return;
       const result = await registerAppActions(
         actionLoader,
         actionRegistry,
