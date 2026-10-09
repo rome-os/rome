@@ -1,11 +1,10 @@
 "use client";
 
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid, type MermaidConfig } from "@streamdown/mermaid";
+import type { MermaidConfig } from "@streamdown/mermaid";
 import {
   memo,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
@@ -19,6 +18,11 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import { cn } from "./cn.js";
+import {
+  getMarkdownPlugins,
+  requestMarkdownPlugins,
+  subscribeToMarkdownPlugins,
+} from "./markdown-plugins.js";
 import { MermaidDownloadMenuLayer } from "./mermaid-download-menu.js";
 
 export type { Components, MermaidConfig, MermaidOptions, StreamdownProps };
@@ -142,8 +146,6 @@ export interface MarkdownProps {
   lineNumbers?: StreamdownProps["lineNumbers"];
   urlTransform?: StreamdownProps["urlTransform"];
 }
-
-const STREAMDOWN_PLUGINS = { code, math, mermaid };
 
 interface MdastNode {
   type: string;
@@ -418,6 +420,12 @@ function MarkdownImpl({
   const setRootFromMarker = useCallback((marker: HTMLSpanElement | null) => {
     setRoot(marker?.previousElementSibling as HTMLDivElement | null);
   }, []);
+  useEffect(() => requestMarkdownPlugins(children), [children]);
+  const plugins = useSyncExternalStore(
+    subscribeToMarkdownPlugins,
+    getMarkdownPlugins,
+    getMarkdownPlugins,
+  );
   const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme);
   const mermaidOptions = useMemo<MermaidOptions>(() => {
     const baseConfig: MermaidConfig = {
@@ -464,7 +472,7 @@ function MarkdownImpl({
         controls={controls}
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
-        plugins={STREAMDOWN_PLUGINS}
+        plugins={plugins}
         remarkPlugins={REMARK_PLUGINS}
         // Streamdown caps a table at 300px by default and scrolls the rest
         // inside the table. Rome sets a table as text in the column, so it
