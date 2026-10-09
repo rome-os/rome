@@ -28,7 +28,7 @@ describe("ConnectionRegistry Service uniqueness", () => {
     }
   });
 
-  it("serializes concurrent creation attempts so only one connection is minted", async () => {
+  it("mints only one connection when two connects for a Service race", async () => {
     const { db, close } = createTestDb();
     try {
       const ledger = new DrizzleGrantLedger(db);
