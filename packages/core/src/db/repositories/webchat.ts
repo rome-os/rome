@@ -879,19 +879,20 @@ export class WebChatRepository {
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
     sessionMetadata: SessionMetadata = {},
-    parentSessionId: string | null = null,
+    metadataParentSessionId: string | null = null,
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
       await this.ensureProject(projectPath, projectName);
     }
 
-    const parent = parentSessionId ? await this.getSession(parentSessionId) : null;
+    // The handoff card owns the parent relation. Setting parentSessionId here
+    // would make the chat routes require a fork's existing provider thread.
+    const parent = metadataParentSessionId ? await this.getSession(metadataParentSessionId) : null;
     await this.db.insert(romeSessions).values({
       id,
       name,
       metadataJson: parent ? parent.metadataJson : JSON.stringify(sessionMetadata),
-      parentSessionId,
       personaId: personaId ?? null,
       projectName,
       projectPath,

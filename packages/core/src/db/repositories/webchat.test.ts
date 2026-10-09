@@ -101,7 +101,7 @@ describe("WebChatRepository", () => {
       "isolated",
     );
     expect(JSON.parse((await reloaded.getSession("handoff"))!.metadataJson)).toEqual(metadata);
-    expect((await reloaded.getSession("handoff"))!.parentSessionId).toBe("isolated");
+    expect((await reloaded.getSession("handoff"))!.parentSessionId).toBeNull();
     await repo.createSession("normal", "Normal");
     expect((await reloaded.getSession("normal"))!.metadataJson).toBe("{}");
   });

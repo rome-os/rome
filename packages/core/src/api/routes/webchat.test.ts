@@ -2873,6 +2873,57 @@ describe("Webchat API", () => {
       expect(child?.agentName).toBe("workflow-studio:workflow-planner");
     });
 
+    it.each([
+      false,
+      true,
+    ])("starts a fresh handoff with inherited metadata without requiring a fork thread (isolated: %s)", async (isolated) => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-metadata-handoff"));
+      const app = createWebchatRuntime(deps).routes;
+      const metadata = isolated
+        ? { isolated: true, purpose: "benchmark", appId: "navi-bench" }
+        : {};
+      const parent = `handoff-parent-${isolated}`;
+      await deps.webchatRepo.createSession(
+        parent,
+        "Handoff parent",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        metadata,
+      );
+      await app.request(`/chat/sessions/${parent}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design" }),
+      });
+      const card = await findCard(parent, "tu-metadata-handoff");
+      const childId = card?.childSessionId as string;
+      const child = await deps.webchatRepo.getSession(childId);
+      expect(JSON.parse(child!.metadataJson)).toEqual(metadata);
+      expect(child?.parentSessionId).toBeNull();
+      ctl.setEvents(() =>
+        (async function* () {
+          yield { type: "result", content: "done" };
+        })(),
+      );
+      const hasAgent = rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      try {
+        const response = await app.request(`/chat/sessions/${childId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "start the design" }),
+        });
+        expect(response.status).toBe(200);
+      } finally {
+        hasAgent.mockRestore();
+      }
+    });
+
     it("keeps spawned handoff sessions out of the top-level session list", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-hidden-1"));
