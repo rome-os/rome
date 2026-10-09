@@ -273,9 +273,13 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     async getModelProvider(request) {
       // Credits just started paying and the gateway has not answered yet.
       // Wait for its list rather than assume Sol and Luna and send a turn the
-      // gateway may refuse. The read is bounded by its request timeout.
-      if (usingRomeCredits()) await options.romeCreditsPayer?.servedModelsSettled?.();
+      // gateway may refuse. Only a Codex resolution can spend credits, so only
+      // that waits. The read is bounded by its request timeout.
+      const settleServedModels = async (): Promise<void> => {
+        if (usingRomeCredits()) await options.romeCreditsPayer?.servedModelsSettled?.();
+      };
       if (request.exact) {
+        if (request.exact.providerId === "openai") await settleServedModels();
         const state = resolutionState();
         const { providerId, model } = request.exact;
         const provider = providers.get(providerId);
@@ -285,8 +289,9 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
-        const state = resolutionState();
         const selection = WEBCHAT_LARGE_MODEL_SELECTIONS[request.selectionId];
+        if (selection.providerId === "openai") await settleServedModels();
+        const state = resolutionState();
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
@@ -300,6 +305,15 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const tierModelMappings = await options.settingsRepo?.get<unknown>(
         TIER_MODEL_MAPPINGS_SETTING_KEY,
       );
+      // A tier reaches credits only when no subscription can serve it, and a
+      // provider pin ignores the served list.
+      if (!request.providerId) {
+        const current = options.aiToolState.get();
+        const subscriptionServes =
+          (providers.has("openai") && providerUsable("openai", current.codex)) ||
+          (providers.has("anthropic") && providerUsable("anthropic", current.claude));
+        if (!subscriptionServes) await settleServedModels();
+      }
       // Settings reads can yield while account state changes. Read the payer
       // and provider state after the final await so this resolution sees the
       // current login-selected payer.

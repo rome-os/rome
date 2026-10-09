@@ -193,6 +193,28 @@ describe("ModelResolver", () => {
       await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
     });
 
+    it("does not wait for the served list when Claude serves the turn", async () => {
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => true,
+          servedModels: () => null,
+          servedModelsSettled: () => new Promise<void>(() => {}),
+        },
+      });
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        modelProvider: claude,
+      });
+      await expect(
+        r.getModelProvider({ exact: { providerId: "anthropic", model: "claude-sonnet-5-5" } }),
+      ).resolves.toMatchObject({ modelProvider: claude });
+    });
+
     it("ignores the served list while ChatGPT pays", async () => {
       const r = resolver({}, {}, false, []);
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
