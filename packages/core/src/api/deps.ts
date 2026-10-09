@@ -84,8 +84,8 @@ export interface ApiDeps {
   db: DrizzleDb;
   personMappingRepo: PersonMappingRepository;
   /** Every channel Rome reads, each carrying its address book and what was said
-   *  on it. LinkedIn reaches the API only through here — no route reads its
-   *  store directly. */
+   *  on it. WhatsApp and LinkedIn reach the API only through here — no route
+   *  reads either store directly. */
   channels: Channels;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
