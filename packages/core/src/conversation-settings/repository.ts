@@ -73,8 +73,8 @@ export class ConversationSettingsRepository {
       settings: StoredConversationSettings | null;
       agentName: string | null | undefined;
     },
-  ): StoredConversationRow {
-    return this.db.transaction((tx) => {
+  ): void {
+    this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent
         ? (rowByAddress(tx, descriptor.service, descriptor.parent.conversationId)?.id ?? null)
@@ -122,10 +122,6 @@ export class ConversationSettingsRepository {
         })
         .where(eq(romeSessions.id, current.id))
         .run();
-
-      const saved = rowByAddress(tx, descriptor.service, descriptor.ref.conversationId);
-      if (!saved) throw new Error(`Conversation ${current.id} disappeared during settings update`);
-      return saved;
     });
   }
 }

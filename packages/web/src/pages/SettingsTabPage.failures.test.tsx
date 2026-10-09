@@ -55,6 +55,14 @@ function defaultResponse(url: string): Response {
       apps: { total: 0, failed: [], broken: [] },
     });
   }
+  if (url === "/api/public-access") {
+    return response(true, 200, {
+      enableAccessControl: false,
+      allowedApps: [],
+      cloudEmailAccess: {},
+    });
+  }
+  if (url === "/api/dashboard-access") return response(true, 200, { cloudEmailAccess: [] });
   return response(true, 200, {});
 }
 

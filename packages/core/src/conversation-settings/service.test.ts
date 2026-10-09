@@ -111,7 +111,6 @@ describe("ConversationSettingsService", () => {
       containerName: "Rome",
       parent,
     };
-    service.observe(childDescriptor);
     return {
       registry,
       repository,
@@ -384,12 +383,6 @@ describe("ConversationSettingsService", () => {
       connectionId: feishu.id,
       conversationId: "oc_group" as ConversationId,
     };
-    service.observe({
-      ref: feishuRef,
-      service: "feishu",
-      kind: "group",
-      displayName: "Feishu group",
-    });
     await expect(
       service.update({
         ref: feishuRef,
@@ -403,12 +396,6 @@ describe("ConversationSettingsService", () => {
       connectionId: wechat.id,
       conversationId: "wechat-contact" as ConversationId,
     };
-    service.observe({
-      ref: wechatRef,
-      service: "wechat",
-      kind: "group",
-      displayName: "WeChat conversation",
-    });
     await expect(service.get(wechatRef)).resolves.toMatchObject({
       supportedFields: ["enabled", "routing.agentName", "session.reset"],
     });
@@ -481,12 +468,6 @@ describe("ConversationSettingsService", () => {
       connectionId: wechat.id,
       conversationId: "wechat-group" as ConversationId,
     };
-    service.observe({
-      ref: wechatRef,
-      service: "wechat",
-      kind: "group",
-      displayName: "WeChat group",
-    });
     await service.update({
       ref: wechatRef,
       set: { enabled: false },
@@ -558,6 +539,7 @@ describe("ConversationSettingsService", () => {
       connections: registry,
       channels: channelsOver(registry),
       listAgents: () => [],
+      onChanged: () => {},
     });
 
     const first = await service.list({ limit: 2 });
@@ -610,6 +592,7 @@ describe("ConversationSettingsService", () => {
       connections: registry,
       channels: channelsOver(registry),
       listAgents: () => [],
+      onChanged: () => {},
     });
 
     const first = await service.list({ limit: 2 });

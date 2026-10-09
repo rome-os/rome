@@ -42,7 +42,7 @@ function mockSettingsBackend(options?: {
         : ok({ mode: "oauth", configured: false, devices: [] });
     }
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [] });
+      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       if (init?.method === "PUT") {

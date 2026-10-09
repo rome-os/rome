@@ -2236,25 +2236,6 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-function normalizePublicAccessConfigPayload(raw: unknown): PublicAccessConfig {
-  const body = (raw ?? {}) as Partial<PublicAccessConfig>;
-  return {
-    enableAccessControl: body.enableAccessControl === true,
-    allowedApps: Array.isArray(body.allowedApps) ? body.allowedApps : [],
-    cloudEmailAccess:
-      body.cloudEmailAccess && typeof body.cloudEmailAccess === "object"
-        ? body.cloudEmailAccess
-        : {},
-  };
-}
-
-function normalizeDashboardAccessConfigPayload(raw: unknown): DashboardAccessConfig {
-  const body = (raw ?? {}) as Partial<DashboardAccessConfig>;
-  return {
-    cloudEmailAccess: Array.isArray(body.cloudEmailAccess) ? body.cloudEmailAccess : [],
-  };
-}
-
 function AllowedCloudEmailsSection() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
@@ -2264,13 +2245,11 @@ function AllowedCloudEmailsSection() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard-access")
-      .then((response) => response.json())
-      .catch(() => ({ cloudEmailAccess: [] }))
-      .then((dashboardAccess) => {
-        const normalized = normalizeDashboardAccessConfigPayload(dashboardAccess);
-        setEmails(normalized.cloudEmailAccess);
-      })
+    fetchJson<DashboardAccessConfig>("/api/dashboard-access", {
+      fallback: "Failed to load dashboard access.",
+    })
+      .catch((): DashboardAccessConfig => ({ cloudEmailAccess: [] }))
+      .then((dashboardAccess) => setEmails(dashboardAccess.cloudEmailAccess))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -2500,18 +2479,19 @@ function TailnetRestrictionSection() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/public-access")
-        .then((response) => response.json())
-        .catch(() => ({
+      fetchJson<PublicAccessConfig>("/api/public-access", {
+        fallback: "Failed to load public access.",
+      }).catch(
+        (): PublicAccessConfig => ({
           enableAccessControl: false,
           allowedApps: [],
           cloudEmailAccess: {},
-        })),
+        }),
+      ),
       fetchTailnetStatus(),
     ])
       .then(([publicAccess, tailnetStatus]) => {
-        const normalized = normalizePublicAccessConfigPayload(publicAccess);
-        setConfig(normalized);
+        setConfig(publicAccess);
         setTailnetDns(tailnetStatus.tailnetDns);
         setHttpsEnabled(tailnetStatus.httpsEnabled);
         setCertReady(tailnetStatus.certReady);
