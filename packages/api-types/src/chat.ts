@@ -2,6 +2,7 @@
 // content, re-exported so web reads the same union core writes.
 
 import type { MessagePart } from "@rome-os/app-runtime";
+import type { TraceErrorEvent } from "./trace-segments.js";
 
 export type {
   ApprovalCardStatus,
@@ -17,5 +18,12 @@ export interface HandbackApprovedPart {
   type: "handback_approved";
 }
 
+/** Error core stores as a turn's assistant content when model resolution fails
+ * before the turn runs. It carries the trace error event's fields. */
+export type StoredErrorPart = Pick<
+  TraceErrorEvent,
+  "type" | "error" | "code" | "provider" | "reason"
+>;
+
 /** One part of a stored WebChat message's content. */
-export type TranscriptPart = MessagePart | HandbackApprovedPart;
+export type TranscriptPart = MessagePart | HandbackApprovedPart | StoredErrorPart;

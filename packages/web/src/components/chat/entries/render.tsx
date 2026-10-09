@@ -265,7 +265,7 @@ export function renderSingleEntry(
         <ErrorRunView
           key={key}
           error={block.error}
-          accounting={block.accounting}
+          accounting={"accounting" in block ? block.accounting : undefined}
           code={block.code}
           provider={block.provider}
           reason={block.reason}
