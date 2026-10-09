@@ -20,6 +20,7 @@ import {
   type ExternalAgent,
   type AgentMessagingClient,
   agentLabel,
+  isAgentId,
 } from "../lib/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
@@ -31,10 +32,6 @@ const log = createLogger("agents-accounts");
  *  whole listing and resolves every stored address at once, so this keeps that
  *  to one request. */
 const READ_TTL_MS = 30_000;
-
-/** Cloud's agent ids are lowercase UUIDs, and only that spelling resolves, so
- *  one agent never has two accounts. */
-const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** An agent's account, named when Cloud has listed it. Names are labels two
  *  agents can share, so each carries its kind and, for another account's
@@ -92,7 +89,7 @@ export function agentsAccounts(deps: {
       return pageAccounts(await agents(), input);
     },
     async resolve(address) {
-      if (!AGENT_ID.test(address)) return null;
+      if (!isAgentId(address)) return null;
       const listed = (await agents()).find((account) => account.id === address);
       return listed ?? agentAccount(address);
     },

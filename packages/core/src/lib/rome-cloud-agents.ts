@@ -58,6 +58,12 @@ export function agentLabel(agent: {
     : `${agent.name} (@${agent.account}'s ${agent.kind})`;
 }
 
+/** Whether `value` is an agent id as Cloud spells it: a lowercase UUID. Only
+ *  that spelling is accepted, so one agent never has two accounts. */
+export function isAgentId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+}
+
 /** Cloud's refusal for an agent it will not deliver to, the same for one
  *  that does not exist and one no link allows, so a stranger cannot learn
  *  which agents exist. */

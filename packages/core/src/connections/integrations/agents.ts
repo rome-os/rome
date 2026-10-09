@@ -21,6 +21,7 @@ import {
   AgentMessagingError,
   agentLabel,
   createRomeCloudAgentsClient,
+  isAgentId,
   isNotReachable,
 } from "../../lib/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
@@ -250,6 +251,9 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       // from being reported, and recorded, as if the files went too.
       if (msg.attachments?.length) {
         throw new Error("Agent messages carry text only; send the files another way.");
+      }
+      if (!isAgentId(conversationId)) {
+        throw new Error("Address an agent by its agent id (a UUID), not its name.");
       }
       const text = outgoingText(msg);
       if (!text.trim()) throw new Error("An agent message needs text.");

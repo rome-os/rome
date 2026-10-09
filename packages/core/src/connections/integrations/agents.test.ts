@@ -258,6 +258,14 @@ describe("agents channel", () => {
     );
   });
 
+  it("refuses a name in place of an agent id without asking Cloud", async () => {
+    const client = fakeClient([]);
+    await expect(
+      createAgentsTalker(client).send("atlas" as ConversationId, { text: "Hi" }),
+    ).rejects.toThrow("Address an agent by its agent id (a UUID), not its name.");
+    expect(client.sent).toEqual([]);
+  });
+
   it("reaches a dot directly at its agent id, so People can write to it first", async () => {
     const direct = createAgentsTalker(fakeClient([])).directMessaging;
     expect(await direct?.conversationFor(ATLAS)).toBe(ATLAS);
