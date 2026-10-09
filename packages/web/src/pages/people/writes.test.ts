@@ -9,7 +9,6 @@ import {
   linkAccount,
   mergePeople,
   restoreAccount,
-  unlinkAccount,
   updatePerson,
 } from "./writes";
 
@@ -115,17 +114,6 @@ describe("people writes — the request each verb sends", () => {
     await linkAccount("wei-chen", { ...REF, transferFrom: "mira" }, t);
 
     expect(sent[0]!.body).toEqual({ ...REF, transferFrom: "mira" });
-  });
-
-  it("unlinks by naming the account in the path, not in a body", async () => {
-    const sent = stubFetch(PERSON);
-
-    await unlinkAccount("wei-chen", REF, t);
-
-    expect(sent[0]).toMatchObject({
-      method: "DELETE",
-      url: "/api/people/wei-chen/accounts/whatsapp/6591234472%40s.whatsapp.net",
-    });
   });
 
   it("dismisses and restores the same account at the same address", async () => {

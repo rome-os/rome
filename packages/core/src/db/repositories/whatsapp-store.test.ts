@@ -41,7 +41,6 @@ describe("WhatsAppStoreRepository", () => {
 
     expect(await repo.listContacts({ limit: 2 })).toHaveLength(2);
     expect(await repo.listContacts({ limit: null })).toHaveLength(3);
-    // The no-argument call is what `/api/whatsapp/contacts` makes.
     expect(await repo.listContacts()).toHaveLength(3);
   });
 
@@ -252,7 +251,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     expect(msgs.map((m) => m.text)).toEqual(["first", "second"]);
     expect(msgs[0].fromMe).toBe(false);
     expect(msgs[0].senderName).toBe("Bob");
@@ -396,7 +395,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     const text = msgs.find((m) => m.id === "m1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
@@ -434,7 +433,7 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.lastMessageAt).toBe(Math.floor(1_700_000_000_000 / 1000));
 
     // ...but the chat view still gets it, carrying its emoji + target id.
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
   });
