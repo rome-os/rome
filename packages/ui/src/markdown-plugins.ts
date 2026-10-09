@@ -17,7 +17,13 @@ const loaders: {
 let mermaidPlugin: Promise<DiagramPlugin> | null = null;
 
 function loadMermaidPlugin(): Promise<DiagramPlugin> {
-  mermaidPlugin ??= import("@streamdown/mermaid").then((module) => module.mermaid);
+  mermaidPlugin ??= import("@streamdown/mermaid")
+    .then((module) => module.mermaid)
+    .catch((error: unknown) => {
+      // The next diagram retries, so a dropped chunk request is not permanent.
+      mermaidPlugin = null;
+      throw error;
+    });
   return mermaidPlugin;
 }
 

@@ -179,10 +179,13 @@ describe("Markdown", () => {
     expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
   });
 
-  it("does not interpret single dollar signs as math", () => {
-    const { container } = renderMd("The first item costs $5 and the second costs $10.");
+  it("does not interpret single dollar signs as math", async () => {
+    // The $$ loads the math plugin, so the single dollars are parsed with it.
+    const { container } = renderMd(
+      "The first item costs $5 and the second costs $10, unlike $$x$$.",
+    );
 
-    expect(container.querySelector(".katex")).toBeNull();
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(1));
     expect(container.textContent).toContain("$5");
     expect(container.textContent).toContain("$10");
   });
