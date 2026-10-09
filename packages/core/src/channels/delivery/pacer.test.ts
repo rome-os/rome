@@ -178,6 +178,46 @@ describe("Pacer", () => {
     expect(log).toEqual([]);
   });
 
+  it("stops a write that hangs from holding the queue, and still delivers its result", async () => {
+    const paced = pacer();
+    let finishSlow!: (value: string) => void;
+    const slow = paced.run("a", () => new Promise<string>((resolve) => (finishSlow = resolve)));
+    const other = paced.run("b", write("other"));
+    await advance("29s");
+    expect(log).toEqual([]);
+
+    await advance("2s");
+    await expect(other).resolves.toBe("other");
+    expect(log).toEqual(["other@30000"]);
+
+    // The hung write ends later. Its caller gets the result, and the queue
+    // still serves a write that started after it was passed over.
+    const later = paced.run("c", write("later"));
+    finishSlow("late result");
+    await expect(slow).resolves.toBe("late result");
+    await advance(0);
+    await expect(later).resolves.toBe("later");
+  });
+
+  it("does not let a passed-over write release the write that replaced it", async () => {
+    const paced = pacer();
+    let finishSlow!: () => void;
+    void paced.run("a", () => new Promise<void>((resolve) => (finishSlow = resolve)));
+    let finishSecond!: () => void;
+    const second = paced.run("b", () => new Promise<void>((resolve) => (finishSecond = resolve)));
+    const third = paced.run("c", write("third"));
+    await advance("31s");
+    // `b` replaced the hung `a` and is running. When `a` ends, `c` still waits.
+    finishSlow();
+    await advance(0);
+    expect(log).toEqual([]);
+
+    finishSecond();
+    await second;
+    await advance(0);
+    await expect(third).resolves.toBe("third");
+  });
+
   it("keeps going after a write fails", async () => {
     const paced = pacer();
     const failed = paced.run("a", async () => {

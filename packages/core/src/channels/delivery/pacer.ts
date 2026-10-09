@@ -21,6 +21,9 @@ export interface Budget {
  */
 export const SKIPPED = Symbol("skipped");
 
+/** How long a write may run before it stops holding the queue. */
+const SLOW_WRITE_MS = 30_000;
+
 interface Job {
   write: () => Promise<unknown>;
   resolve: (value: unknown) => void;
@@ -51,10 +54,13 @@ interface Lane {
  * - A caller awaits the write itself, not its place in the queue.
  * - A write whose signal aborts before it starts is dropped and never runs.
  *   One already running finishes, and its result reaches the caller.
+ * - A write that runs longer than `slowWriteMs` stops holding the queue, so a
+ *   request that hangs cannot stall the account. It is not cut off, and its
+ *   result still reaches its caller.
  *
- * At most one timer is pending, for the earliest moment something becomes
- * ready. A conversation's state is dropped once its queue is empty and its
- * spacing window has passed.
+ * At most one timer is pending for the earliest moment something becomes
+ * ready, plus one for the write that is running. A conversation's state is
+ * dropped once its queue is empty and its spacing window has passed.
  */
 export class Pacer {
   private readonly lanes = new Map<string, Lane>();
@@ -68,6 +74,7 @@ export class Pacer {
   constructor(
     private readonly budget: Budget,
     private readonly clock: Clock,
+    private readonly slowWriteMs = SLOW_WRITE_MS,
   ) {
     this.tokens = budget.burst;
     this.refilledAt = this.now();
@@ -162,6 +169,22 @@ export class Pacer {
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
+    // Whichever comes first, the write ending or the watchdog, hands the queue
+    // on. The other finds it already handed on and does nothing, so a slow
+    // write that ends later cannot release the write that replaced it.
+    let released = false;
+    let skipped = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.running = false;
+      if (skipped) {
+        this.tokens = Math.min(this.budget.burst, this.tokens + 1);
+        lane.readyAt = readyBefore;
+      } else lane.readyAt = this.now() + this.spacing(lane.conversation);
+      this.pump();
+    };
+    const watchdog = this.clock.setTimeout(release, this.slowWriteMs);
     // A write that throws before it returns a promise rejects its caller. It
     // must not leave `running` set, which would stop every write of the account.
     let written: Promise<unknown>;
@@ -170,19 +193,14 @@ export class Pacer {
     } catch (error) {
       written = Promise.reject(error);
     }
-    let skipped = false;
     void written
       .then((value) => {
         skipped = value === SKIPPED;
         job.resolve(value);
       }, job.reject)
       .finally(() => {
-        this.running = false;
-        if (skipped) {
-          this.tokens = Math.min(this.budget.burst, this.tokens + 1);
-          lane.readyAt = readyBefore;
-        } else lane.readyAt = this.now() + this.spacing(lane.conversation);
-        this.pump();
+        this.clock.clearTimeout(watchdog);
+        release();
       });
   }
 
