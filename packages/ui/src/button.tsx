@@ -115,9 +115,10 @@ const buttonVariants = cva(
       // A glyph at the edge of a centred label carries less visual weight
       // than the word at the other edge, so equal padding reads as the glyph
       // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
-      // label's, which reads as centred. `Button` marks the glyph's side with
-      // `data-icon-start` / `data-icon-end` from its children; a glyph inside
-      // `asChild` content, or a `buttonVariants` consumer, names its side with
+      // label's, which reads as centred. `Button` reads the glyph's side from
+      // its children and adds a plain padding class (see `GLYPH_EDGE` below),
+      // so a caller's `px-*` still wins the merge. A glyph inside `asChild`
+      // content, or a `buttonVariants` consumer, names its side with
       // `data-icon` instead, because CSS cannot tell a lone glyph beside a
       // text node from a lone glyph. Square members hold no padding, `xs`
       // keeps symmetric padding, and a start-aligned glyph sits on the
@@ -126,13 +127,13 @@ const buttonVariants = cva(
         align: "center",
         size: "sm",
         className:
-          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] data-icon-start:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)] data-icon-end:pr-[var(--control-px-icon-sm)]",
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
       },
       {
         align: "center",
         size: ["md", "default"],
         className:
-          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] data-icon-start:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)] data-icon-end:pr-[var(--control-px-icon-md)]",
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
@@ -152,6 +153,10 @@ const buttonVariants = cva(
  * A glyph is a childless component element: an icon or a spinner. A label is
  * anything else, so text, a wrapped `<span>`, and a `Kbd` hint all count. Only
  * a glyph with a label on the other side sits at an edge worth correcting.
+ *
+ * The test reads elements, not what they render, so a childless component
+ * that renders text reads as a glyph. Such a label opts out by wrapping it in
+ * a `<span>`, and a glyph the test misses names its side with `data-icon`.
  */
 function isGlyph(node: React.ReactNode): boolean {
   return (
@@ -161,14 +166,30 @@ function isGlyph(node: React.ReactNode): boolean {
   );
 }
 
+/** Children with fragments opened, so `<><Plus />Add</>` reads as two items. */
+function flatten(children: React.ReactNode): React.ReactNode[] {
+  return React.Children.toArray(children).flatMap((child) =>
+    React.isValidElement<{ children?: React.ReactNode }>(child) && child.type === React.Fragment
+      ? flatten(child.props.children)
+      : [child],
+  );
+}
+
 function glyphEdges(children: React.ReactNode): { start: boolean; end: boolean } {
-  const items = React.Children.toArray(children);
+  const items = flatten(children);
   const hasLabel = items.some((item) => !isGlyph(item));
   return {
     start: hasLabel && isGlyph(items[0]),
     end: hasLabel && isGlyph(items.at(-1)),
   };
 }
+
+/** The glyph-side inset, per step that takes it. Steps not listed take none. */
+const GLYPH_EDGE: Partial<Record<string, { start: string; end: string }>> = {
+  sm: { start: "pl-[var(--control-px-icon-sm)]", end: "pr-[var(--control-px-icon-sm)]" },
+  md: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
+  default: { start: "pl-[var(--control-px-icon-md)]", end: "pr-[var(--control-px-icon-md)]" },
+};
 
 function Button({
   className,
@@ -186,6 +207,10 @@ function Button({
   // `asChild` content is the child's own subtree, so its glyph names its side
   // with `data-icon` rather than being read from here.
   const edges = asChild ? { start: false, end: false } : glyphEdges(props.children);
+  // Plain classes placed before `className`, rather than variants on the
+  // markers below: a variant outranks a caller's `px-*` on specificity, and
+  // the merge cannot drop it.
+  const inset = align === "center" && size ? GLYPH_EDGE[size] : undefined;
 
   return (
     <Comp
@@ -196,7 +221,12 @@ function Button({
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(buttonVariants({ variant, size, shape, align, className }))}
+      className={cn(
+        buttonVariants({ variant, size, shape, align }),
+        edges.start && inset?.start,
+        edges.end && inset?.end,
+        className,
+      )}
       {...props}
     />
   );

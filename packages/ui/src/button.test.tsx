@@ -75,3 +75,49 @@ describe("Button glyph edges", () => {
     expect(edges(screen.getByRole("link"))).toEqual({ start: false, end: false });
   });
 });
+
+describe("Button glyph inset", () => {
+  it("trims the glyph side on a centred step", () => {
+    render(
+      <Button size="md">
+        <Plus />
+        Add app
+      </Button>,
+    );
+    expect(screen.getByRole("button").className).toContain("pl-[var(--control-px-icon-md)]");
+  });
+
+  it("reads a glyph through a fragment", () => {
+    render(
+      <Button size="sm">
+        <>
+          <Plus />
+          Add app
+        </>
+      </Button>,
+    );
+    expect(screen.getByRole("button").className).toContain("pl-[var(--control-px-icon-sm)]");
+  });
+
+  it("lets a caller's px win on the glyph side", () => {
+    render(
+      <Button size="sm" className="px-2">
+        View all
+        <ArrowRight />
+      </Button>,
+    );
+    const { classList } = screen.getByRole("button");
+    expect(classList).toContain("px-2");
+    expect(classList).not.toContain("pr-[var(--control-px-icon-sm)]");
+  });
+
+  it("leaves start-aligned buttons on their alignment inset", () => {
+    render(
+      <Button align="start">
+        <Plus />
+        Add app
+      </Button>,
+    );
+    expect(screen.getByRole("button").classList).not.toContain("pl-[var(--control-px-icon-md)]");
+  });
+});
