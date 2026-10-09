@@ -32,11 +32,13 @@ export interface Reply {
 /** One request the peer received and what became of it, in arrival order. */
 export interface PeerExchange {
   request: { method: string; path: string; body: Record<string, unknown> };
-  /** Absent while the route runs, and when a fault dropped the response. */
+  /** Absent while the route runs, and when the answer never reached the client. */
   response?: { status: number; body: unknown };
   source?: Reply["source"] | "fault";
+  /** The platform applied the request. */
   accepted: boolean;
-  /** The platform applied the request, but the client never got the answer. */
+  /** The client never got the answer: a fault cut it off, or the client was
+   *  gone. With `accepted`, the platform changed but the client cannot know. */
   dropped?: boolean;
 }
 
@@ -253,7 +255,8 @@ export class PeerServer {
       exchange.accepted = reply.accepted === true;
     }
 
-    if (fault?.dropAfterAccept) {
+    // The answer never reaches a client that is gone, or one a fault cuts off.
+    if (fault?.dropAfterAccept || res.destroyed) {
       exchange.dropped = true;
       this.changed();
       res.destroy();
@@ -261,7 +264,6 @@ export class PeerServer {
     }
     exchange.response = { status, body: answer };
     this.changed();
-    if (res.destroyed) return;
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(answer));
   }

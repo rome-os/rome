@@ -43,7 +43,13 @@ describe("TelegramPeer", () => {
       // Only `<` starts markup: a stray `&` or `>` is literal text.
       await expect(send("AT&T, 1 > 0")).resolves.toMatchObject({ text: "AT&T, 1 > 0" });
       await expect(send('<span class="tg-spoiler">x</span>')).resolves.toMatchObject({ text: "x" });
-      for (const bad of ["<b>unclosed", "<div>x</div>", "<b><i>x</b></i>", "<span>x</span>"])
+      for (const bad of [
+        "<b>unclosed",
+        "<div>x</div>",
+        "<b><i>x</b></i>",
+        "<span>x</span>",
+        '<code class="language-js"broken">x</code>',
+      ])
         await expect(send(bad)).rejects.toMatchObject({
           description: "Bad Request: can't parse entities",
         });
@@ -51,6 +57,25 @@ describe("TelegramPeer", () => {
       await expect(send(`<b>${"😀".repeat(2049)}</b>`)).rejects.toMatchObject({
         description: "Bad Request: message is too long",
       });
+    } finally {
+      await peer.close();
+    }
+  });
+});
+
+describe("TelegramPeer edits", () => {
+  it("refuses an edit that changes nothing shown, and accepts one that changes only formatting", async () => {
+    const peer = await TelegramPeer.start();
+    const api = peer.createBot(TELEGRAM_TOKEN).api;
+    try {
+      const sent = await api.sendMessage(TELEGRAM_CHAT, "hi");
+      // Telegram drops trailing whitespace, so this edit changes nothing.
+      await expect(
+        api.editMessageText(TELEGRAM_CHAT, sent.message_id, "hi\n\n"),
+      ).rejects.toMatchObject({ description: expect.stringContaining("message is not modified") });
+      await expect(
+        api.editMessageText(TELEGRAM_CHAT, sent.message_id, "<b>hi</b>", { parse_mode: "HTML" }),
+      ).resolves.toMatchObject({ text: "hi" });
     } finally {
       await peer.close();
     }
@@ -114,6 +139,17 @@ describe("TelegramAdapter.send against the peer", () => {
     const sends = peer.server.exchanges.filter((e) => e.request.path.endsWith("/sendMessage"));
     expect(sends.map((e) => e.request.body.parse_mode)).toEqual(["HTML", undefined]);
     expect(peer.visible().filter((m) => m.from === "rome")).toEqual([]);
+  });
+
+  it("sends plain text when Telegram cannot parse the HTML its Markdown became", async () => {
+    // The fence's language ends up unescaped inside a class attribute.
+    const receipt = await adapter.send(chat, { text: '```js"broken\nx\n```' });
+
+    const sends = peer.server.exchanges.filter((e) => e.request.path.endsWith("/sendMessage"));
+    expect(sends.map((e) => e.request.body.parse_mode)).toEqual(["HTML", undefined]);
+    expect(peer.visible().find((m) => m.id === receipt.messageId)?.text).toBe(
+      '```js"broken\nx\n```',
+    );
   });
 
   it("rejects a reply to a message in another chat", async () => {
