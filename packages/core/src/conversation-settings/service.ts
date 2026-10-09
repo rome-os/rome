@@ -224,6 +224,23 @@ export class ConversationSettingsService implements ConversationSettingsControl 
 
   constructor(private readonly deps: ConversationSettingsServiceDeps) {}
 
+  /** Remember provider-native discovery metadata without changing settings. */
+  observe(descriptor: ConversationDescriptor): void {
+    this.remember(descriptor);
+    if (descriptor.parent) {
+      const existing = this.descriptors.get(this.key(descriptor.parent));
+      if (!existing) {
+        this.remember({
+          ref: descriptor.parent,
+          service: descriptor.service,
+          kind: "channel",
+          displayName: descriptor.containerName ?? descriptor.parent.conversationId,
+          containerName: descriptor.containerName,
+        });
+      }
+    }
+  }
+
   async list(input: ListConversationSettingsInput = {}): Promise<ConversationSettingsPage> {
     const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
     const offset = cursorOffset(input.cursor);

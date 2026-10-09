@@ -111,6 +111,7 @@ describe("ConversationSettingsService", () => {
       containerName: "Rome",
       parent,
     };
+    service.observe(childDescriptor);
     return {
       registry,
       repository,
@@ -203,6 +204,26 @@ describe("ConversationSettingsService", () => {
     expect(reset.effective.routing.agentName).toBeNull();
     expect(reset.effective.session.reset).toEqual({ mode: "idle", idleMinutes: 10_080 });
     expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves an observed thread with no session row through its parent", async () => {
+    const { service, discord, parent } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const thread: ConversationRef = {
+      connectionId: discord.id,
+      conversationId: "new-thread" as ConversationId,
+    };
+    service.observe({ ref: thread, service: "discord", kind: "topic", displayName: "new", parent });
+
+    await expect(service.get(thread)).resolves.toMatchObject({
+      inheritedFrom: parent,
+      effective: { enabled: false },
+    });
   });
 
   it("reconciles a first-seen topic placeholder with its persisted parent", async () => {
@@ -383,6 +404,12 @@ describe("ConversationSettingsService", () => {
       connectionId: feishu.id,
       conversationId: "oc_group" as ConversationId,
     };
+    service.observe({
+      ref: feishuRef,
+      service: "feishu",
+      kind: "group",
+      displayName: "Feishu group",
+    });
     await expect(
       service.update({
         ref: feishuRef,
@@ -396,6 +423,12 @@ describe("ConversationSettingsService", () => {
       connectionId: wechat.id,
       conversationId: "wechat-contact" as ConversationId,
     };
+    service.observe({
+      ref: wechatRef,
+      service: "wechat",
+      kind: "group",
+      displayName: "WeChat conversation",
+    });
     await expect(service.get(wechatRef)).resolves.toMatchObject({
       supportedFields: ["enabled", "routing.agentName", "session.reset"],
     });
@@ -468,6 +501,12 @@ describe("ConversationSettingsService", () => {
       connectionId: wechat.id,
       conversationId: "wechat-group" as ConversationId,
     };
+    service.observe({
+      ref: wechatRef,
+      service: "wechat",
+      kind: "group",
+      displayName: "WeChat group",
+    });
     await service.update({
       ref: wechatRef,
       set: { enabled: false },
