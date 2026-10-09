@@ -56,7 +56,7 @@ A response the platform sends, such as iLink's `ret: -3`, belongs in a capture, 
 
 A **scenario** is a test written once and run against every platform. It drives a `TestChannel` (`test-channel.ts`): the production adapter started against its peer, with one conversation open between Rome and a user. The scenario sends and receives through the test channel and reads its `peer`, so it never names a platform. `scenarios.integration.test.ts` runs each scenario once per entry in `TEST_CHANNELS`.
 
-Where platforms differ, the test states the difference in a table keyed by platform, beside the scenario, so a change in what an adapter does fails one row. A row whose behavior no capture pins down skips the scenario and says why. `runScenario` runs the body as labelled steps, so a failure names the step it happened in.
+Where platforms differ, the test states the difference in a table keyed by platform, beside the scenario, so a change in what an adapter does fails one row. A row whose behavior the peer does not model skips the scenario and says why. `runScenario` runs the body as labelled steps, so a failure names the step it happened in.
 
 ## Add a platform
 

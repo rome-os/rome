@@ -55,7 +55,11 @@ async function assemble(
         errors.push(error);
       }
     }
-    if (errors.length) throw new AggregateError(errors, "Test channel teardown failed");
+    if (errors.length)
+      throw new AggregateError(
+        errors,
+        `Test channel teardown failed: ${errors.map((error) => (error instanceof Error ? error.message : String(error))).join("; ")}`,
+      );
   };
   try {
     return { ...(await setup((step) => steps.push(step))), stop };
@@ -106,8 +110,9 @@ const telegram = () =>
     const adapter = peer.createAdapter();
     const heard = inbox(adapter);
     undo(() => heard.assertTaken());
-    await adapter.start();
+    // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
+    await adapter.start();
     await peer.untilPolling();
     const conversation = String(TELEGRAM_CHAT) as ConversationId;
     return {
@@ -121,8 +126,9 @@ const telegram = () =>
 
 const wechat = () =>
   assemble(async (undo) => {
-    // Made first so it is removed last: closing the peer ends the adapter's
-    // long poll, which then writes its sync state here.
+    // Made first so it is removed last, after the peer closes. The adapter's
+    // last long poll can still write its sync state here after that, which
+    // at worst leaves this temp dir behind.
     const statePath = await mkdtemp(join(tmpdir(), "rome-wechat-peer-"));
     undo(() => rm(statePath, { recursive: true, force: true }));
     const peer = await WechatPeer.start();
@@ -136,8 +142,9 @@ const wechat = () =>
     const adapter = peer.createAdapter(statePath);
     const heard = inbox(adapter);
     undo(() => heard.assertTaken());
-    await adapter.start();
+    // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
+    await adapter.start();
     const conversation = WECHAT_USER as ConversationId;
     return {
       platform: "wechat",
@@ -155,8 +162,9 @@ const discord = () =>
     const adapter = peer.createAdapter();
     const heard = inbox(adapter);
     undo(() => heard.assertTaken());
-    await adapter.start();
+    // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
+    await adapter.start();
     await peer.server.waitFor((e) => e.request.path.endsWith("/commands") && !!e.response);
     // discord.js 14.26 drops a DM whose channel it has not cached, and READY
     // caches none. Opening the DM caches it, so the user's first message

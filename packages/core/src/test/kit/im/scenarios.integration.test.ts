@@ -5,21 +5,23 @@ import { runScenario } from "./scenario.js";
 const platforms = Object.keys(TEST_CHANNELS) as Platform[];
 
 // What each adapter does today, recorded so a change to it fails one row. The
-// platform's side of each answer comes from the peers, and so from captures.
+// platform's side of each answer comes from the peers: captured shapes, and
+// for these limits, synthetic refusals modeled on the platform's documentation.
+// Null where a peer models no limit.
 const TODAY: Record<
   Platform,
   {
     /** The reply points at the user's message. */
     linksReply: boolean;
     /** A 5000-character text: how many characters each message carries, or
-     *  the error the send fails with. Null where no capture records a limit. */
+     *  the error the send fails with. Null where the peer models no limit. */
     longText: number[] | string | null;
   }
 > = {
   telegram: { linksReply: true, longText: "message is too long" },
   // In a DM the adapter sends a plain message; it threads replies only in guild channels.
   discord: { linksReply: false, longText: [2000, 2000, 1000] },
-  // iLink has no reply reference, and no capture records its length limit.
+  // iLink has no reply reference, and documents no length limit for the peer to model.
   wechat: { linksReply: false, longText: null },
 };
 
@@ -38,8 +40,11 @@ describe.each(platforms)("%s", (platform) => {
   afterEach(async () => {
     const stopping = channel;
     channel = undefined;
-    await stopping?.stop();
-    stopping?.peer.server.assertClean();
+    try {
+      await stopping?.stop();
+    } finally {
+      stopping?.peer.server.assertClean();
+    }
   });
 
   it("answers the user in the same conversation", () =>
@@ -52,6 +57,8 @@ describe.each(platforms)("%s", (platform) => {
 
       await step("The user sees the answer after their message", () => {
         const [first, second, ...rest] = channel.peer.visible(channel.conversation);
+        expect(inbound.conversationId).toBe(channel.conversation);
+        expect(receipt.conversationId).toBe(channel.conversation);
         expect(first).toMatchObject({ id: inbound.messageId, from: "user", text: "hello" });
         expect(second).toMatchObject({ id: receipt.messageId, from: "rome" });
         expect(second?.text).toContain("hi there");

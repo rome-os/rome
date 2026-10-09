@@ -17,8 +17,11 @@ export async function runScenario(
       try {
         return await run();
       } catch (error) {
-        if (error instanceof Error) error.message = `Step "${label}": ${error.message}`;
-        throw error;
+        const message = `Step "${label}": ${error instanceof Error ? error.message : String(error)}`;
+        // Rewriting the message keeps an assertion's diff. A DOMException's
+        // message cannot be rewritten, so it is wrapped instead.
+        if (error instanceof Error && Reflect.set(error, "message", message)) throw error;
+        throw new Error(message, { cause: error });
       }
     },
   });
