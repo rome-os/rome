@@ -74,30 +74,6 @@ export async function postJson<T>(
   return { response, body: json as T, setCookies };
 }
 
-export async function postBinary<T>(
-  host: string,
-  path: string,
-  body: Uint8Array,
-  headers: Record<string, string>,
-  bearer: CliBearer,
-): Promise<T> {
-  const finalHeaders: Record<string, string> = {
-    "content-type": "application/octet-stream",
-    accept: "application/json",
-    ...headers,
-    ...authHeaders(bearer),
-  };
-  const response = await fetch(urlFor(host, path), {
-    method: "POST",
-    headers: finalHeaders,
-    body: body as unknown as BodyInit,
-  });
-  if (!response.ok) {
-    throw new CliError(`${response.status} ${await readError(response)}`);
-  }
-  return (await response.json()) as T;
-}
-
 export async function postMultipart<T>(
   host: string,
   path: string,
