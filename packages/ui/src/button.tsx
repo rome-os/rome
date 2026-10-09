@@ -116,6 +116,9 @@ const buttonVariants = cva(
        * reads `data-icon` in CSS, for `asChild` content and direct
        * `buttonVariants` consumers. `read` turns that off, because `Button`
        * reads the side from its children and adds the trim itself.
+       *
+       * @internal Only `Button` and `Toggle` pass `read`, alongside the classes
+       * from `glyph-edge.ts`. Passed alone, it drops the correction.
        */
       glyphs: {
         marked: "",
