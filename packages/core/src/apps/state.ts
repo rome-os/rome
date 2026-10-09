@@ -63,6 +63,11 @@ export interface ResolvedApp extends AppView {
   db: ResolvedRomeAppDbMetadata | null;
 }
 
+/** Whether a catalog view is a {@link ResolvedApp}: its manifest resolved, so the app can run. */
+export function isResolvedApp(view: AppView | ResolvedApp | null | undefined): view is ResolvedApp {
+  return view != null && (view as ResolvedApp).manifest !== undefined;
+}
+
 export interface InFlightOp {
   kind: "install" | "uninstall";
   source?: SpecSource;

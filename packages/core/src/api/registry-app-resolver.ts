@@ -6,7 +6,7 @@ import type {
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { ResolvedApp } from "../apps/state.js";
+import { isResolvedApp } from "../apps/state.js";
 import {
   BUILTIN_TOOL_APPS,
   DISCOVERY_SHIM_TOOLS,
@@ -37,10 +37,6 @@ function readActionName(input: unknown): string | undefined {
     if (typeof value === "string" && value.length > 0) return value;
   }
   return undefined;
-}
-
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }
 
 export function createRegistryAppResolver(deps: RegistryAppResolverDeps): AppResolver {

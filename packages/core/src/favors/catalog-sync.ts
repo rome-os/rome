@@ -1,5 +1,5 @@
 import type { AppCatalog } from "../apps/catalog.js";
-import type { CatalogEvent, ResolvedApp } from "../apps/state.js";
+import { isResolvedApp, type CatalogEvent, type ResolvedApp } from "../apps/state.js";
 import type { Action } from "../actions/types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import type { Logger } from "../logger.js";
@@ -11,10 +11,6 @@ interface ActionCatalogForFavorSync {
   list(): string[];
   get(name: string): Action | undefined;
   getMetadata(name: string): ArtifactMetadata | undefined;
-}
-
-function isResolvedApp(value: unknown): value is ResolvedApp {
-  return !!value && typeof value === "object" && (value as ResolvedApp).manifest !== undefined;
 }
 
 export function favorActionRequirementsForApp(

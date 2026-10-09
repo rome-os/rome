@@ -23,7 +23,7 @@ import type { AppManager } from "../../apps/manager.js";
 import { AppManagerError, SYSTEM_APP_ID } from "../../apps/manager.js";
 import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscriber.js";
 import { SpecSourceSchema } from "../../apps/lockfile.js";
-import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
+import { isResolvedApp, type ArtifactRef } from "../../apps/state.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
@@ -49,10 +49,6 @@ function getErrorMessage(err: unknown): string {
 
 function formatCount(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? "" : "s"}`;
-}
-
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }
 
 // Provenance for the dashboard's grouped apps page. `firstParty` wins over the

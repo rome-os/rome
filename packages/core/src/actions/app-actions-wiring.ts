@@ -12,7 +12,12 @@ import type {
   ChannelMessageHookDeps,
 } from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
+import {
+  isResolvedApp,
+  type CatalogEvent,
+  type ResolvedApp,
+  type SubscriberHandler,
+} from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import { createRomeAppContext, type RomeAppContext } from "../apps/context.js";
 import {
@@ -108,9 +113,8 @@ interface AppLookup {
 function makeAppLookup(catalog: AppCatalog): AppLookup {
   return (appId: string) => {
     const view = catalog.get(appId);
-    if (!view) return null;
-    if ((view as ResolvedApp).manifest === undefined) return null;
-    return view as ResolvedApp;
+    if (!isResolvedApp(view)) return null;
+    return view;
   };
 }
 
@@ -281,8 +285,7 @@ export function createAppActionsSubscriber(
     actionRegistry.unregisterOwnedBy("app", event.appId);
     if (event.change === "removed") return;
     const current = event.current;
-    if (current == null) return;
-    if ((current as ResolvedApp).manifest === undefined) return;
+    if (!isResolvedApp(current)) return;
     await registerAppActions(actionLoader, actionRegistry, catalog, deps, services, {
       onlyAppId: event.appId,
     });

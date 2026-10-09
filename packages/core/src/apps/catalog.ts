@@ -14,6 +14,7 @@ import type {
   SubscriberHandler,
   Unsubscribe,
 } from "./state.js";
+import { isResolvedApp } from "./state.js";
 
 const log = createLogger("app-catalog");
 
@@ -78,7 +79,7 @@ export class AppCatalog {
   listResolved(): readonly ResolvedApp[] {
     const out: ResolvedApp[] = [];
     for (const view of this.internalMap.values()) {
-      if (isResolved(view) && view.state === "installed" && view.enabled) {
+      if (isResolvedApp(view) && view.state === "installed" && view.enabled) {
         out.push(view);
       }
     }
@@ -276,8 +277,4 @@ function buildAppView(
     lastError: entry.lastError,
     updatedAt: entry.updatedAt,
   };
-}
-
-function isResolved(view: AppView | ResolvedApp): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }

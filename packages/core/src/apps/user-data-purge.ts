@@ -17,7 +17,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import type { AppCatalog } from "./catalog.js";
-import type { ResolvedApp } from "./state.js";
+import { isResolvedApp, type ResolvedApp } from "./state.js";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { getProfileAppDataDir, getProfileAppsDir } from "../paths.js";
@@ -127,8 +127,7 @@ export async function resolveTablePrefixForPurge(
   options: ResolveTablePrefixForPurgeOptions,
 ): Promise<string | null> {
   const view = options.catalog?.get(options.appId);
-  if (!view) return null;
-  if ((view as ResolvedApp).manifest === undefined) return null;
+  if (!isResolvedApp(view)) return null;
   const resolved = view as ResolvedApp;
   if (resolved.db) return resolved.db.tablePrefix;
   // App has no db: block — nothing to purge at the table level.

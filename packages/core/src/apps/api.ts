@@ -5,7 +5,7 @@ import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import type { AppRuntimeRepositories } from "@rome-os/app-runtime";
 import type { AppCatalog } from "./catalog.js";
-import type { ResolvedApp } from "./state.js";
+import { isResolvedApp, type AppView, type ResolvedApp } from "./state.js";
 import {
   createRomeAppContext,
   runWithRomeAppApiRequestContext,
@@ -131,10 +131,9 @@ function whenWorkersBusyFor(caller: RomeAppCaller): "fail" | "queue" {
 }
 
 function isResolvedWithApi(
-  view: unknown,
+  view: AppView | ResolvedApp | null | undefined,
 ): view is ResolvedApp & { api: NonNullable<ResolvedApp["api"]> } {
-  const candidate = view as ResolvedApp;
-  return candidate.manifest !== undefined && candidate.api != null;
+  return isResolvedApp(view) && view.api != null;
 }
 
 export type { AppDbContext, RomeAppContext } from "./context.js";
