@@ -13,6 +13,7 @@ import type {
   AgentTurnHandle,
 } from "./agent-session.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
+import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -59,6 +60,7 @@ describe("AgentSessionBridge turn routing", () => {
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, undefined, undefined, turns).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
 
@@ -139,6 +141,7 @@ describe("AgentSessionBridge working dir", () => {
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
     new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
 

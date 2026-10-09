@@ -4,7 +4,7 @@
 // returned `agent.turn:<turnId>` stream.
 
 import type { ChildProcess } from "node:child_process";
-import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
+import type { IpcRpc } from "../actions/ipc.js";
 import type {
   ConversationId,
   CurrentActionContext,
@@ -33,8 +33,6 @@ import {
   type ActionWorkerCoordinator,
   registerActionSubprocessHost,
 } from "../actions/action-subprocess.js";
-import { actionExecutionContext } from "../actions/context.js";
-import { replayContext } from "../actions/replay.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 
@@ -64,16 +62,15 @@ export const AGENT_SESSION_RUN_TURN_TIMEOUT_MS = 10 * 60_000;
 
 /** A process that can expose the agent-session IPC surface to a child. */
 export interface AgentSessionChildBridge {
-  attach(child: ChildProcess): IpcRpc;
+  attach(rpc: IpcRpc, child: ChildProcess): void;
 }
 
 /**
  * Bridge wires `AgentSessionManager` into a worker child's IPC channel.
- * Constructed once in main; call `attach(child)` for each forked worker.
+ * Constructed once in main; call `attach(rpc, child)` for each forked worker.
  *
- * The bridge installs an IpcRpc on the child and registers
- * `agent.session.runTurn`. The handler resolves to
- * `{ turnId, sessionId, romeSession }`, and the worker subscribes to the named
+ * The bridge registers `agent.session.runTurn` on the child's IpcRpc. The
+ * handler resolves to `{ turnId, sessionId, romeSession }`, and the worker subscribes to the named
  * stream `agent.turn:<turnId>` to receive AgentMessages.
  */
 export class AgentSessionBridge implements AgentSessionChildBridge {
@@ -86,13 +83,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     private projectsRoot?: string,
   ) {}
 
-  attach(child: ChildProcess): IpcRpc {
-    const transport = createChildProcessTransport(child);
-    const rpc = new IpcRpc(transport, "main", {
-      runInbound: async (callback) =>
-        await replayContext.exit(() => actionExecutionContext.exit(callback)),
-    });
-
+  attach(rpc: IpcRpc, child: ChildProcess): void {
     if (this.actionWorkerCoordinator) {
       registerActionSubprocessHost(rpc, this.actionWorkerCoordinator, child);
     }
@@ -279,8 +270,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         return { ok: true };
       },
     );
-
-    return rpc;
   }
 
   /**

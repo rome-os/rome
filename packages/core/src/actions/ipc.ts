@@ -56,9 +56,6 @@ export type IpcMessage =
 export function isIpcMessage(message: unknown): message is IpcMessage {
   if (typeof message !== "object" || message === null) return false;
   const m = message as { type?: unknown; reqId?: unknown; channelId?: unknown };
-  // Distinguish from legacy worker-rpc messages (which use `clientId`/`id`,
-  // not `reqId`/`channelId`). A message qualifies as IPC only if it uses
-  // the new field names.
   switch (m.type) {
     case "rpc_request":
     case "rpc_response":
@@ -477,7 +474,10 @@ export function createWorkerProcessTransport(): IpcTransport {
       if (!process.send) {
         throw new Error("createWorkerProcessTransport: not running in a Node child process");
       }
-      process.send(message);
+      // A failed write is followed by `disconnect`, which rejects pending
+      // calls. The callback keeps the failure from surfacing as an unhandled
+      // `error` event.
+      process.send(message, () => undefined);
     },
     onMessage(listener) {
       const handler = (message: unknown) => {
