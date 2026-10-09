@@ -83,6 +83,9 @@ import { claimChannels } from "./channels/claim-channels.js";
 import { linkedAgentResolver } from "./channels/linked-agents.js";
 import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
+import { ConnectionPacing } from "./channels/delivery/connection-pacing.js";
+import { ReplyStreams } from "./channels/delivery/streams.js";
+import { replyStreamingSwitch } from "./channels/delivery/streaming-switch.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { backingConnection, createChannelsService } from "./channels/channels-service.js";
 import { createAgentNames } from "./channels/agent-names.js";
@@ -386,10 +389,25 @@ async function main() {
   // channels by name. The channel list is built further down, and the service
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
+  // Reply streaming (issue #427) is off until the guardian turns it on under
+  // Developer Settings. Off, sends go out unpaced and replies go out whole. On,
+  // a channel that can stream paces every write of its Connection, and the
+  // session bridge streams a guardian's direct replies through its replies port.
+  const replyStreamingOn = replyStreamingSwitch(settingsRepo);
+  const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
+  const replyStreams = new ReplyStreams({
+    streaming: replyStreamingOn,
+    replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
+    clock: systemClock,
+    ...(appRuntimeRepositories.conversations
+      ? { conversations: appRuntimeRepositories.conversations }
+      : {}),
+  });
   const channelsService = createChannelsService({
     channels: () => builtChannels,
     registry: connectionRegistry,
     channelOf,
+    pacing: replyPacing,
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
@@ -813,6 +831,8 @@ async function main() {
     webchatRepo,
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
+    undefined,
+    replyStreams,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1187,7 +1207,7 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, admit, channelOf },
+    connections: { registry: connectionRegistry, admit, channelOf, pacing: replyPacing },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts(listedAgents),
     },
@@ -1268,7 +1288,7 @@ async function main() {
   // a hook that takes added channels subscribes to it.
   connectionRegistry.onUnlocked("talk", (connection) => {
     const channel = joinLaterChannel(
-      { registry: connectionRegistry, admit, channelOf, channels },
+      { registry: connectionRegistry, admit, channelOf, pacing: replyPacing, channels },
       connection,
     );
     if (!channel) return;

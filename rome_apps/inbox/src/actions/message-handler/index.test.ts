@@ -1147,3 +1147,80 @@ describe("linked agent", () => {
     expect(conversations.addMessage).not.toHaveBeenCalled();
   });
 });
+
+describe("streamed guardian replies", () => {
+  beforeEach(() => {
+    rs.clearAllMocks();
+  });
+
+  const guardianPerson: PersonRecord = {
+    id: "guardian",
+    displayName: "Guardian",
+    bondLevel: "guardian",
+    channelMappings: [{ channel: "telegram", channelUserId: "g-telegram" }],
+    profilePath: null,
+  };
+
+  const reply = (threadType: "private" | "group", delivered?: "delivered" | "failed") => {
+    const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
+      personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
+      agentResponses: [
+        [
+          { type: "result", content: "Here it is." },
+          {
+            type: "turn_end",
+            turnId: "turn-1",
+            status: "completed",
+            durationMs: 1,
+            ...(delivered
+              ? {
+                  replyDelivery: {
+                    status: delivered,
+                    messageIds: delivered === "failed" ? [] : ["m1"],
+                  },
+                }
+              : {}),
+          },
+        ],
+      ],
+    });
+    const run = createAction(actionConfig, deps).execute({
+      channel: "telegram",
+      channelUserId: "g-telegram",
+      threadId: "chat-1",
+      threadType,
+      displayName: "Guardian",
+      text: "tell me",
+      messageId: "msg-1",
+    });
+    return { run, agentRunner, sentMessages, approvals };
+  };
+
+  it("asks the host to stream a guardian's direct reply, and sends nothing once it is streamed", async () => {
+    const { run, agentRunner, sentMessages, approvals } = reply("private", "delivered");
+
+    const result = await run;
+
+    expect(agentRunner.calls[0]).toMatchObject({ streamReply: true });
+    expect(sentMessages).toEqual([]);
+    expect(result).toMatchObject({ status: "ok", data: { action: "streamed" } });
+    expect(approvals[0]).toMatchObject({ status: "auto_approved" });
+  });
+
+  it("sends the reply itself when the stream sent nothing", async () => {
+    const { run, sentMessages } = reply("private", "failed");
+
+    await run;
+
+    expect(sentMessages).toHaveLength(1);
+  });
+
+  it("does not ask to stream into a group", async () => {
+    const { run, agentRunner, sentMessages } = reply("group");
+
+    await run;
+
+    expect(agentRunner.calls[0]?.streamReply).toBeUndefined();
+    expect(sentMessages).toHaveLength(1);
+  });
+});

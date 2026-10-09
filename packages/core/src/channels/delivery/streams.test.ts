@@ -1,0 +1,115 @@
+import type { ConversationRepository } from "@rome-os/app-runtime";
+import { describe, expect, it, rs } from "@rstest/core";
+import { systemClock } from "../../lib/clock.js";
+import { Pacer } from "./pacer.js";
+import { ReplyStreams } from "./streams.js";
+import { DeliveryFailure, type DeliveryTransport, plainText } from "./types.js";
+
+const budget = { burst: 100, refillMs: 1, conversationSpacingMs: 0 };
+const transport: DeliveryTransport = {
+  capabilities: { maxPartLength: 5, edit: false, budget },
+  codec: plainText,
+  create: async (conversation, text) => ({
+    messageId: `id-${text.trim()}`,
+    conversationId: conversation,
+  }),
+};
+const target = {
+  channel: "telegram",
+  conversationId: "chat-1",
+  replyToMessageId: "msg-1",
+  agentName: "main",
+  turnId: "turn-1",
+};
+const replies = () => ({ transport, pacer: new Pacer(budget, systemClock) });
+
+describe("ReplyStreams", () => {
+  it("opens no stream while reply streaming is off, and does not look at the channel", async () => {
+    const lookup = rs.fn(replies);
+    const streams = new ReplyStreams({
+      streaming: async () => false,
+      replies: lookup,
+      clock: systemClock,
+    });
+
+    expect(await streams.open(target)).toBeNull();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("opens no stream on a channel that cannot stream", async () => {
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => null,
+      clock: systemClock,
+    });
+    expect(await streams.open(target)).toBeNull();
+  });
+
+  it("reads the switch each time a reply opens", async () => {
+    let on = false;
+    const streams = new ReplyStreams({
+      streaming: async () => on,
+      replies,
+      clock: systemClock,
+    });
+
+    expect(await streams.open(target)).toBeNull();
+    on = true;
+    expect(await streams.open(target)).not.toBeNull();
+  });
+
+  it("records the delivered reply once, as the text the user was shown", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = {
+      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies,
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "result", content: "one two" });
+    const outcome = await stream.settle(false);
+
+    expect(outcome.status).toBe("delivered");
+    expect(recordOutboundMessage).toHaveBeenCalledTimes(1);
+    expect(recordOutboundMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "conversation-1",
+        content: JSON.stringify([{ type: "text", content: "one two" }]),
+        platformMessageId: "id-one",
+        replyToPlatformMessageId: "msg-1",
+        turnId: "turn-1",
+      }),
+    );
+  });
+
+  it("records nothing when no message was written, so a failed stream leaves no history", async () => {
+    const recordOutboundMessage = rs.fn(async () => undefined);
+    const conversations = {
+      ensureChannelConversation: rs.fn(async () => ({ id: "conversation-1" })),
+      recordOutboundMessage,
+    } as unknown as ConversationRepository;
+    const refusing: DeliveryTransport = {
+      ...transport,
+      create: async () => {
+        throw new DeliveryFailure("rejected", "refused");
+      },
+    };
+    const streams = new ReplyStreams({
+      streaming: async () => true,
+      replies: () => ({ transport: refusing, pacer: new Pacer(budget, systemClock) }),
+      clock: systemClock,
+      conversations,
+    });
+    const stream = (await streams.open(target))!;
+
+    stream.accept({ type: "result", content: "one" });
+    expect((await stream.settle(false)).status).toBe("failed");
+    expect(recordOutboundMessage).not.toHaveBeenCalled();
+  });
+});

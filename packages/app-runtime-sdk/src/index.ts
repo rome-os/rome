@@ -788,6 +788,25 @@ export interface TurnEndEvent {
    *  `accounting.durationMs` on the terminal event, which is the
    *  provider's self-reported per-call duration. */
   durationMs: number;
+  /**
+   * How the host delivered the reply as it was written, for a run started
+   * with `streamReply`, and only when the host streamed it. Absent, the host
+   * did not stream the reply and its caller sends it.
+   */
+  replyDelivery?: ReplyDeliveryReport;
+}
+
+/** A streamed reply's outcome, as `turn_end` reports it. */
+export interface ReplyDeliveryReport {
+  /**
+   * `delivered`: every message settled. `partial`: some messages were sent
+   * before a failure. `failed`: none was. `unknown`: a message may or may not
+   * have been sent. `stopped`: the run was stopped. Only `failed` leaves the
+   * reply safe to send again.
+   */
+  status: "delivered" | "partial" | "failed" | "unknown" | "stopped";
+  /** The platform ids of the messages the reply shows, in order. */
+  messageIds: string[];
 }
 
 export interface TextBlockEvent {
@@ -1188,6 +1207,14 @@ export interface RunParams {
   platformMessageId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /**
+   * Ask the host to deliver the reply into `threadContext`'s conversation as
+   * it is written, answering `platformMessageId`. The host does so only when
+   * the instance has reply streaming on and the channel can stream, and then
+   * reports the outcome in `turn_end.replyDelivery`. Without that report, the
+   * caller sends the reply.
+   */
+  streamReply?: boolean;
   /** Explicit session ID to continue */
   sessionId?: string;
   /** Variable content appended to the end of the system prompt */
