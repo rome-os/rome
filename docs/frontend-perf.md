@@ -30,7 +30,7 @@ The bench needs a Chromium that the installed `@playwright/test` can launch. Whe
 
 **Bundle.** The bench reads `dist/index.html` and sums every script and stylesheet it loads from `/static` — the assets the browser fetches before anything renders. It reports their raw, gzip, and brotli sizes. It also reads the source maps of those scripts and lists the packages with the most minified bytes in them, so the report names what to split out next.
 
-**Page load.** The bench serves `dist-mock/` with gzip, opens a fresh browser context for each run, and throttles it to a 40 ms round trip, 10 Mbps down, and the CPU factor above. One unmeasured run per scenario warms the file cache. It loads two scenarios:
+**Page load.** The bench serves `dist-mock/` with gzip and opens a fresh browser context for each run, with Chromium's CPU slowed by the factor above. The bench's server applies the network profile itself: each response waits a 40 ms round trip, and all responses share one 10 Mbps link. Chromium's own network emulation would miss the requests the MSW service worker makes for the page, which include every lazy chunk. Hosts other than the local server do not resolve, so the Google Fonts stylesheet in `index.html` fails at once and the page renders with fallback fonts. One unmeasured run per scenario warms the file cache. It loads two scenarios:
 
 | Scenario | Page | Ready when |
 |---|---|---|
@@ -45,11 +45,11 @@ For each scenario it reports:
 | ready | Time until the ready element first appears. |
 | TBT | Total blocking time from first paint until the page settles: the part of each long task beyond 50 ms. |
 | longest task | The longest single main-thread task, including script evaluation before first paint. |
-| JS transferred | Bytes of script the page downloaded, compressed. |
+| JS transferred | Gzipped bytes of script the server sent for the page, lazy chunks included. |
 | JS heap | Used JS heap after the page settles and a forced garbage collection. |
 
 The page-load numbers come from the mock build, which also ships MSW and its fixtures and waits for the MSW service worker before rendering. Compare them between runs of the bench, not with production. The bundle numbers come from the production build.
 
 ## Reading the numbers
 
-Results move with the machine, so compare a baseline and a candidate measured on the same machine. The report prints the spread of the ready time across runs. A change smaller than that spread is noise, so rerun with more `--runs` before acting on it. Bundle sizes are deterministic for a given commit.
+Results move with the machine, so compare a baseline and a candidate measured on the same machine. When the baseline was measured with a different CPU factor, network profile, scenario list, or run count, the report prints a warning above the table. The report prints the spread of the ready time across runs. A change smaller than that spread is noise, so rerun with more `--runs` before acting on it. Bundle sizes are deterministic for a given commit.

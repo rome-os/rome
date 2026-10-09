@@ -43,12 +43,18 @@ if (args.help) {
   process.exit(0);
 }
 
-// Fixed so numbers from different machines and days stay comparable. The
-// network profile is roughly a home broadband connection: the bundle's
-// transfer size shows up in load timings without dominating them.
-const NETWORK = { latencyMs: 40, downloadKbps: 10_000, uploadKbps: 5_000 };
+// Fixed so a baseline and a candidate run on the same machine see the same
+// conditions. The network profile is roughly a home broadband connection: the
+// bundle's transfer size shows up in load timings without dominating them.
+const NETWORK = { latencyMs: 40, downloadKbps: 10_000 };
 const RUNS = Number(args.runs);
 const CPU_THROTTLE = Number(args["cpu-throttle"]);
+if (!Number.isInteger(RUNS) || RUNS < 1) {
+  throw new Error(`--runs must be a positive integer, got ${args.runs}`);
+}
+if (!Number.isFinite(CPU_THROTTLE) || CPU_THROTTLE < 1) {
+  throw new Error(`--cpu-throttle must be a number >= 1, got ${args["cpu-throttle"]}`);
+}
 
 const SCENARIOS = [
   { name: "chat-empty", path: "/chat", ready: "[data-chat-composer-box] textarea" },
@@ -242,13 +248,24 @@ const MIME = {
   ".webmanifest": "application/manifest+json",
 };
 
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, Math.max(0, ms)));
+const CHUNK_BYTES = 16 * 1024;
+
 // Serves dist-mock the way production does: gzip on text assets, and the SPA's
-// index.html for any path that is not a file.
+// index.html for any path that is not a file. The server also applies the
+// network profile itself. Chromium's network emulation is per page, so it
+// misses the requests MSW's service worker makes on the page's behalf, and
+// those include every lazy chunk. Each response waits one round trip, then
+// sends its body in chunks paced against one link shared by all responses.
 function serve(root) {
   const gzipCache = new Map();
-  const server = createServer((req, res) => {
+  const bytesPerMs = (NETWORK.downloadKbps * 1000) / 8 / 1000;
+  let linkFreeAt = 0;
+  const stats = { jsBytes: 0, jsRequests: 0 };
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     let file = join(root, decodeURIComponent(url.pathname));
+    await sleep(NETWORK.latencyMs);
     if (!file.startsWith(root) || !existsSync(file) || statSync(file).isDirectory()) {
       if (extname(url.pathname)) {
         res.writeHead(404).end();
@@ -264,8 +281,21 @@ function serve(root) {
       body = gzipCache.get(file);
       headers["Content-Encoding"] = "gzip";
     }
-    res.writeHead(200, headers).end(body);
+    if (ext === ".js") {
+      stats.jsBytes += body.length;
+      stats.jsRequests += 1;
+    }
+    res.writeHead(200, { ...headers, "Content-Length": body.length });
+    for (let offset = 0; offset < body.length; offset += CHUNK_BYTES) {
+      const chunk = body.subarray(offset, offset + CHUNK_BYTES);
+      const now = performance.now();
+      linkFreeAt = Math.max(now, linkFreeAt) + chunk.length / bytesPerMs;
+      await sleep(linkFreeAt - now);
+      res.write(chunk);
+    }
+    res.end();
   });
+  server.stats = stats;
   return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok(server)));
 }
 
@@ -300,20 +330,16 @@ function collectorScript(readySelector) {
   });
 }
 
-async function measureOnce(browser, origin, scenario) {
+async function measureOnce(browser, server, scenario) {
+  const origin = `http://127.0.0.1:${server.address().port}`;
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
-  await cdp.send("Network.enable");
-  await cdp.send("Network.emulateNetworkConditions", {
-    offline: false,
-    latency: NETWORK.latencyMs,
-    downloadThroughput: (NETWORK.downloadKbps * 1000) / 8,
-    uploadThroughput: (NETWORK.uploadKbps * 1000) / 8,
-  });
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: CPU_THROTTLE });
   await page.addInitScript(collectorScript, scenario.ready);
 
+  server.stats.jsBytes = 0;
+  server.stats.jsRequests = 0;
   await page.goto(`${origin}${scenario.path}`, { waitUntil: "load" });
   await page.waitForFunction(() => window.__perf?.ready !== null, null, { timeout: 60_000 });
   // Let lazy chunks, queries and the work they trigger settle so long tasks
@@ -321,20 +347,8 @@ async function measureOnce(browser, origin, scenario) {
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(1000);
 
-  const perf = await page.evaluate(() => {
-    const p = window.__perf;
-    const scripts = performance
-      .getEntriesByType("resource")
-      .filter((e) => e.initiatorType === "script" || e.name.endsWith(".js"));
-    return {
-      fcp: p.fcp,
-      lcp: p.lcp,
-      ready: p.ready,
-      longTasks: p.longTasks,
-      jsTransferred: scripts.reduce((acc, e) => acc + e.transferSize, 0),
-      jsRequests: scripts.length,
-    };
-  });
+  const perf = await page.evaluate(() => window.__perf);
+  const { jsBytes, jsRequests } = server.stats;
   await cdp.send("HeapProfiler.collectGarbage");
   const heap = await cdp.send("Runtime.getHeapUsage");
   await context.close();
@@ -351,8 +365,8 @@ async function measureOnce(browser, origin, scenario) {
     readyMs: perf.ready,
     tbtMs: tbt,
     longestTaskMs: longestTask,
-    jsTransferredBytes: perf.jsTransferred,
-    jsRequests: perf.jsRequests,
+    jsTransferredBytes: jsBytes,
+    jsRequests,
     heapUsedBytes: heap.usedSize,
   };
 }
@@ -382,18 +396,24 @@ async function measureRuntime() {
   }
   const { chromium } = await import("@playwright/test");
   const executablePath = process.env.PERF_CHROMIUM_PATH || undefined;
-  const browser = await chromium.launch({ executablePath });
+  // Only the local server resolves. index.html loads a render-blocking Google
+  // Fonts stylesheet, and timing a live round trip to Google would add noise
+  // the repo does not control, so external hosts fail fast and the page
+  // renders with fallback fonts.
+  const browser = await chromium.launch({
+    executablePath,
+    args: ["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"],
+  });
   const server = await serve(mockDir);
-  const origin = `http://127.0.0.1:${server.address().port}`;
   const results = {};
   try {
     for (const scenario of SCENARIOS) {
       // One unmeasured warm-up so the OS file cache and the server's gzip cache
       // do not make the first measured run an outlier.
-      await measureOnce(browser, origin, scenario);
+      await measureOnce(browser, server, scenario);
       const samples = [];
       for (let i = 0; i < RUNS; i++) {
-        samples.push(await measureOnce(browser, origin, scenario));
+        samples.push(await measureOnce(browser, server, scenario));
         console.error(`  ${scenario.name} run ${i + 1}/${RUNS}`);
       }
       results[scenario.name] = summarize(samples);
@@ -445,8 +465,24 @@ function headline(result) {
   return rows;
 }
 
+// Settings that change what the page-load numbers mean. A baseline measured
+// under different ones still prints, behind a warning naming each difference.
+function settingsMismatch(result, baseline) {
+  const keys = ["cpuThrottle", "network", "scenarios", "runs"];
+  return keys.filter(
+    (key) => JSON.stringify(result.meta[key]) !== JSON.stringify(baseline.meta[key]),
+  );
+}
+
 function report(result, baseline) {
   const rows = headline(result);
+  const mismatched = baseline && result.runtime ? settingsMismatch(result, baseline) : [];
+  if (mismatched.length) {
+    console.log(
+      `\nWARNING: the baseline was measured with different settings (${mismatched.join(", ")}). ` +
+        "Page-load deltas below are not comparable. Save a new baseline with these settings.",
+    );
+  }
   const baseRows = baseline ? new Map(headline(baseline).map(([n, v]) => [n, v])) : null;
   const width = Math.max(...rows.map(([n]) => n.length));
   console.log(
@@ -483,6 +519,7 @@ const result = {
     runs: RUNS,
     cpuThrottle: CPU_THROTTLE,
     network: NETWORK,
+    scenarios: SCENARIOS,
   },
   bundle: measureBundle(),
   runtime: args["bundle-only"] ? null : await measureRuntime(),
