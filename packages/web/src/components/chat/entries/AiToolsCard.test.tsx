@@ -50,7 +50,7 @@ describe("AiToolsCard", () => {
 
     const proceed = await screen.findByRole("button", { name: "Continue with credits" });
     expect(screen.getByText("Start with free Rome credits")).toBeTruthy();
-    expect(screen.getByText("Rome credits")).toBeTruthy();
+    expect(await screen.findByText("Rome credits")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
 
     await userEvent.setup().click(proceed);
