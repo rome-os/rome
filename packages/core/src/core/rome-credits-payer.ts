@@ -1,7 +1,12 @@
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import type { AIToolState } from "./ai-tool-state.js";
 import { ROME_CREDITS_MODEL_PROVIDER_ID } from "./codex/rome-credits-provider.js";
 import { getInstanceToken } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { fetchRomeCredits } from "../lib/rome-credits.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("rome-credits-payer");
 
 export interface CodexPayerManager {
   getDefaultProvider(): string | null;
@@ -12,6 +17,17 @@ export interface CodexPayerManager {
 export interface RomeCreditsPayer {
   sync(): void;
   isUsingRomeCredits(): boolean;
+  /**
+   * The Codex models the Rome credits gateway last reported serving, or null
+   * while unknown: not fetched yet, the gateway does not report them, or the
+   * instance credential changed since the last report.
+   */
+  servedModels(): readonly string[] | null;
+  /**
+   * Re-reads the served models while Rome credits pay, and does nothing
+   * otherwise. Never rejects. A failed read keeps the last snapshot.
+   */
+  refreshServedModels(): Promise<void>;
   close(): void;
 }
 
@@ -19,19 +35,47 @@ export interface RomeCreditsPayer {
  * Selects Codex's process-wide payer from login state. The guardian's ChatGPT
  * login wins; Rome credits are only used when ChatGPT is disconnected and this
  * instance has a Rome Cloud origin and credential. `setDefaultProvider`
- * deliberately hard-restarts Codex when this selection changes.
+ * deliberately hard-restarts Codex when this selection changes. Switching to
+ * Rome credits, or changing the credential while they pay, also re-reads the
+ * models the gateway serves.
  */
 export function createRomeCreditsPayer(options: {
   aiToolState: Pick<AIToolState, "get">;
   appServerManager: CodexPayerManager;
   getInstanceToken?: () => string | null;
   hasRomeCloud?: () => boolean;
+  fetchRomeCredits?: () => Promise<RomeCreditsView | null>;
 }): RomeCreditsPayer {
   const token = options.getInstanceToken ?? getInstanceToken;
   const hasRomeCloud = options.hasRomeCloud ?? (() => getRomeCloudOrigin() !== null);
   const provider = (): string | null => options.appServerManager.getDefaultProvider();
+  const fetchCredits = options.fetchRomeCredits ?? (() => fetchRomeCredits());
   let instanceToken = token();
   let closed = false;
+  let served: readonly string[] | null = null;
+  let inFlight: { promise: Promise<void> } | null = null;
+
+  const isUsingRomeCredits = (): boolean => provider() === ROME_CREDITS_MODEL_PROVIDER_ID;
+
+  const refreshServedModels = (): Promise<void> => {
+    if (closed || !isUsingRomeCredits()) return Promise.resolve();
+    if (inFlight) return inFlight.promise;
+    const read = { promise: Promise.resolve() };
+    inFlight = read;
+    read.promise = (async () => {
+      try {
+        const view = await fetchCredits();
+        if (inFlight === read) served = view?.models ? [...view.models] : null;
+      } catch (err) {
+        log.warn("Rome credits served models unavailable", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        if (inFlight === read) inFlight = null;
+      }
+    })();
+    return read.promise;
+  };
 
   return {
     sync() {
@@ -41,20 +85,28 @@ export function createRomeCreditsPayer(options: {
       const nextToken = token();
       const tokenChanged = nextToken !== instanceToken;
       instanceToken = nextToken;
+      if (tokenChanged) {
+        // Another credential can belong to another account, so neither the
+        // snapshot nor a read still in flight describes it.
+        served = null;
+        inFlight = null;
+      }
       const next =
         !hasChatGptLogin && nextToken && hasRomeCloud() ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
       if (next === provider()) {
         // Only the credits provider reads the token, and each spawn re-reads it.
         if (tokenChanged && next === ROME_CREDITS_MODEL_PROVIDER_ID) {
           options.appServerManager.restart();
+          void refreshServedModels();
         }
         return;
       }
       options.appServerManager.setDefaultProvider(next);
+      void refreshServedModels();
     },
-    isUsingRomeCredits() {
-      return provider() === ROME_CREDITS_MODEL_PROVIDER_ID;
-    },
+    isUsingRomeCredits,
+    servedModels: () => served,
+    refreshServedModels,
     close() {
       closed = true;
     },

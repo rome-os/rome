@@ -36,10 +36,32 @@ describe("fetchRomeCredits", () => {
       balanceMicros: "7250000",
       availableMicros: "6750000",
       enabled: true,
+      models: ["gpt-5.6-terra"],
     });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
     expect(url.toString()).toBe("https://cloud.example/v1/inference/usage");
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("reads an empty served list as empty, not unknown", async () => {
+    enroll();
+    const disabled = { ...balance, enabled: false, models: [] };
+    expect(await fetchRomeCredits(respond(200, disabled) as unknown as typeof fetch)).toMatchObject(
+      { enabled: false, models: [] },
+    );
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["not an array", "gpt-5.6-terra"],
+    ["not all strings", ["gpt-5.6-terra", 5]],
+  ])("leaves the served models unknown when the list is %s", async (_label, models) => {
+    enroll();
+    const view = await fetchRomeCredits(
+      respond(200, { ...balance, models }) as unknown as typeof fetch,
+    );
+    expect(view).toMatchObject({ grantedMicros: "10000000" });
+    expect(view).not.toHaveProperty("models");
   });
 
   it("shows nothing for an instance not signed in to Rome Cloud", async () => {

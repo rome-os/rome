@@ -9,6 +9,7 @@ import {
 } from "./ai-tool-state.js";
 import { WEBCHAT_LARGE_MODEL_SELECTIONS, type ModelSelectionId } from "./model-selector.js";
 import { matchesModelAlias } from "./model-alias.js";
+import { stripLegacyReasoningSuffix } from "./codex/common.js";
 import { createLogger } from "../logger.js";
 import type { RomeCreditsPayer } from "./rome-credits-payer.js";
 
@@ -109,7 +110,8 @@ export interface CreateModelResolverOptions {
   aiToolState: Pick<AIToolState, "get" | "refresh">;
   providers: ModelProvider[];
   settingsRepo?: Pick<SettingsRepository, "get">;
-  romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits">;
+  romeCreditsPayer?: Pick<RomeCreditsPayer, "isUsingRomeCredits"> &
+    Partial<Pick<RomeCreditsPayer, "servedModels">>;
 }
 
 const CLAUDE_TIER_TO_MODEL: Record<ModelTier, string> = {
@@ -126,6 +128,10 @@ const TEST_TIER_TO_MODEL: Record<ModelTier, string> = {
 
 const FABLE_MODEL = "claude-fable-5-1[1m]";
 
+const CODEX_SOL_MODEL = "gpt-6.1-sol";
+const CODEX_LUNA_MODEL = "gpt-6-luna";
+const CODEX_TERRA_MODEL = "gpt-5.6-terra";
+
 function providerQuotaExhausted(providerId: ProviderId, state: ProviderState): boolean {
   return state.quotaExhausted && !(providerId === "anthropic" && claudeUsesApiKey(state));
 }
@@ -135,9 +141,8 @@ function providerUsable(providerId: ProviderId, state: ProviderState): boolean {
 }
 
 function codexModel(tier: ModelTier, state: AIToolStateValue["codex"]): string {
-  if (tier === "large") return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
-  if (tier === "small") return state.lunaAccess ? "gpt-6-luna" : "gpt-5.6-terra";
-  return state.solAccess ? "gpt-6.1-sol" : "gpt-5.6-terra";
+  if (tier === "small") return state.lunaAccess ? CODEX_LUNA_MODEL : CODEX_TERRA_MODEL;
+  return state.solAccess ? CODEX_SOL_MODEL : CODEX_TERRA_MODEL;
 }
 
 function claudeModel(tier: ModelTier, enableFable: boolean): string {
@@ -205,21 +210,25 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
 
   /**
    * Throws when the model is entitlement-gated and access is lost. Astra ships
-   * to the same paid plans as Sol, so it rides the Sol entitlement.
+   * to the same paid plans as Sol, so it rides the Sol entitlement. With a
+   * known `served` list, the Rome credits gateway decides instead: it accepts
+   * only the exact model names it serves.
    */
   const requireModelAccess = (
     providerId: ProviderId,
     model: string,
     codex: AIToolStateValue["codex"],
+    served: ReadonlySet<string> | null,
   ): void => {
     if (providerId !== "openai") return;
-    const denied =
-      (model === "gpt-6-astra" && !codex.solAccess) ||
-      (matchesModelAlias(model, "gpt-6.1-sol") && !codex.solAccess) ||
-      (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
-      (matchesModelAlias(model, "gpt-6-luna") && !codex.lunaAccess) ||
-      (model === "gpt-5.6-sol" && !codex.solAccess) ||
-      (model === "gpt-5.6-luna" && !codex.lunaAccess);
+    const denied = served
+      ? !served.has(stripLegacyReasoningSuffix(model))
+      : (model === "gpt-6-astra" && !codex.solAccess) ||
+        (matchesModelAlias(model, CODEX_SOL_MODEL) && !codex.solAccess) ||
+        (matchesModelAlias(model, "gpt-6-sol") && !codex.solAccess) ||
+        (matchesModelAlias(model, CODEX_LUNA_MODEL) && !codex.lunaAccess) ||
+        (model === "gpt-5.6-sol" && !codex.solAccess) ||
+        (model === "gpt-5.6-luna" && !codex.lunaAccess);
     if (!denied) return;
     refreshAfterFailure("openai");
     throw new ModelResolutionError(`Selected model is unavailable: ${model}`, {
@@ -229,22 +238,33 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
     });
   };
 
+  const usingRomeCredits = (): boolean => options.romeCreditsPayer?.isUsingRomeCredits() === true;
+  /**
+   * The models the Rome credits gateway reports serving while credits pay.
+   * Null when ChatGPT pays, or when the gateway has not reported a list, in
+   * which case credits are assumed to serve Sol and Luna.
+   */
+  const creditsServedModels = (): ReadonlySet<string> | null => {
+    if (!usingRomeCredits()) return null;
+    const served = options.romeCreditsPayer?.servedModels?.();
+    return served ? new Set(served) : null;
+  };
   /**
    * Account state as seen by resolution. Rome credits are another way to pay
-   * for Codex: while they pay, Codex runs every model a ChatGPT plan with Sol
-   * and Luna would, so a model resolves the same way under either payer.
+   * for Codex: while they pay, Codex has Sol and Luna access when the gateway
+   * serves them, without a plan entitlement.
    */
-  const usingRomeCredits = (): boolean => options.romeCreditsPayer?.isUsingRomeCredits() === true;
   const resolutionState = (state = options.aiToolState.get()): AIToolStateValue => {
     if (!usingRomeCredits()) return state;
+    const served = creditsServedModels();
     return {
       ...state,
       codex: {
         ...state.codex,
         loggedIn: true,
         quotaExhausted: false,
-        solAccess: true,
-        lunaAccess: true,
+        solAccess: served?.has(CODEX_SOL_MODEL) ?? true,
+        lunaAccess: served?.has(CODEX_LUNA_MODEL) ?? true,
       },
     };
   };
@@ -257,7 +277,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(providerId);
         if (!provider) throw new Error(`Unknown model provider: ${providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(provider.id, model, state.codex);
+        requireModelAccess(provider.id, model, state.codex, creditsServedModels());
         return { modelProvider: provider, model };
       }
       if (request.selectionId) {
@@ -266,7 +286,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         const provider = providers.get(selection.providerId);
         if (!provider) throw new Error(`Unknown model provider: ${selection.providerId}`);
         requireUsableProvider(provider, state);
-        requireModelAccess(provider.id, selection.model, state.codex);
+        requireModelAccess(provider.id, selection.model, state.codex, creditsServedModels());
         return { modelProvider: provider, model: selection.model };
       }
 
@@ -282,9 +302,14 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       const accountState = options.aiToolState.get();
       const creditsPay = usingRomeCredits();
       const state = resolutionState(accountState);
+      const creditsServed = creditsServedModels();
       const useFable = state.claude.authMethod !== "stored-compatible" && fableEnabled;
 
-      const resolveTierModel = (provider: ModelProvider, providerState = state): string => {
+      const resolveTierModel = (
+        provider: ModelProvider,
+        providerState = state,
+        served = creditsServed,
+      ): string => {
         const configured = configuredTierModel(tierModelMappings, provider.id, request.tier);
         const model =
           configured ??
@@ -296,7 +321,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         // A configured model is intentional, but known Codex entitlement
         // restrictions still fail with the same recoverable error as an exact
         // model selection instead of reaching the provider with a bad request.
-        requireModelAccess(provider.id, model, providerState.codex);
+        requireModelAccess(provider.id, model, providerState.codex, served);
         return model;
       };
 
@@ -307,7 +332,10 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
         // Codex pin, image_gen, needs ChatGPT's hosted image tool, which the
         // Rome credits gateway rejects.
         requireUsableProvider(provider, accountState);
-        return { modelProvider: provider, model: resolveTierModel(provider, accountState) };
+        return {
+          modelProvider: provider,
+          model: resolveTierModel(provider, accountState, null),
+        };
       }
 
       const claude = providers.get("anthropic");
@@ -321,8 +349,14 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       if (claude && providerUsable("anthropic", state.claude)) {
         return { modelProvider: claude, model: resolveTierModel(claude) };
       }
-      // Rome credits pay only when no subscription can serve the tier.
-      if (codex && creditsPay) {
+      // Rome credits pay only when no subscription can serve the tier, and only
+      // for a tier whose default model the gateway serves. A configured model
+      // the gateway does not serve still fails with model_unavailable.
+      const creditsServeTier =
+        !creditsServed ||
+        configuredTierModel(tierModelMappings, "openai", request.tier) !== null ||
+        creditsServed.has(codexModel(request.tier, state.codex));
+      if (codex && creditsPay && creditsServeTier) {
         return { modelProvider: codex, model: resolveTierModel(codex) };
       }
 

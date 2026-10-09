@@ -554,6 +554,7 @@ async function main() {
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
   let syncRomeCreditsPayer = (): void => {};
+  let refreshRomeCreditsModels = (): void => {};
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
@@ -561,12 +562,14 @@ async function main() {
       codexUsage: () => codexAccountService.getUsage(),
     },
     onCodexLoginChanged: () => syncRomeCreditsPayer(),
+    onCodexRefreshed: () => refreshRomeCreditsModels(),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
     aiToolState,
     appServerManager: codexAppServerManager,
   });
   syncRomeCreditsPayer = () => romeCreditsPayer.sync();
+  refreshRomeCreditsModels = () => void romeCreditsPayer.refreshServedModels();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {

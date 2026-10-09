@@ -988,6 +988,7 @@ describe("Rome credits API", () => {
           balanceMicros: "9000000",
           availableMicros: "9000000",
           enabled: true,
+          models: [],
         },
       },
     });

@@ -109,6 +109,29 @@ describe("AIToolState", () => {
     expect(onCodexLoginChanged).toHaveBeenCalledTimes(2);
   });
 
+  it("notifies after every Codex refresh, including a failed probe", async () => {
+    let fail = false;
+    const onCodexRefreshed = rs.fn();
+    const state = createAIToolState({
+      probes: probes({
+        codexStatus: async () => {
+          if (fail) throw new Error("down");
+          return { loggedIn: true };
+        },
+      }),
+      onCodexRefreshed,
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+
+    await state.refresh("anthropic");
+    expect(onCodexRefreshed).not.toHaveBeenCalled();
+    await state.refresh("openai");
+    fail = true;
+    await state.refresh();
+    expect(onCodexRefreshed).toHaveBeenCalledTimes(2);
+  });
+
   it("notifies a Codex login change before unrelated full-refresh probes settle", async () => {
     let releaseClaude!: () => void;
     const claudeGate = new Promise<void>((resolve) => {

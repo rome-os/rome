@@ -54,6 +54,8 @@ export interface CreateAIToolStateOptions {
   startRefresh?: boolean;
   /** Called when a Codex login is connected or disconnected. */
   onCodexLoginChanged?: () => void;
+  /** Called after each Codex refresh settles, whether or not its probes succeeded. */
+  onCodexRefreshed?: () => void;
 }
 
 function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
@@ -156,6 +158,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       value.codex.usage = usage.value;
       value.codex.quotaExhausted = usageShowsExhaustion(usage.value);
     }
+    options.onCodexRefreshed?.();
   };
 
   // Deduplicate refreshes per provider. A single global lock would incorrectly
