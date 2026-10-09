@@ -59,6 +59,12 @@ describe("createChannelAccounts", () => {
     expect((await lookup(null).channelAccounts.find("agents")).connected).toBe(false);
   });
 
+  it("says so while the channel list is still being built", async () => {
+    const early = createChannelAccounts({ channels: () => undefined, registry: { all: () => [] } });
+
+    await expect(early.find("agents")).rejects.toThrow("Channels are still starting");
+  });
+
   it("refuses an unknown channel and one with no address book", async () => {
     const { channelAccounts } = lookup("unlocked");
 

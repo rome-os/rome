@@ -44,7 +44,9 @@ export function createChannelAccounts(deps: {
 }): ChannelAccountsService {
   return {
     async find(name, read = {}) {
-      const channel = deps.channels()?.find((candidate) => candidate.name === name);
+      const channels = deps.channels();
+      if (!channels) throw new Error("Channels are still starting; try again shortly");
+      const channel = channels.find((candidate) => candidate.name === name);
       if (!channel) throw new Error(`Unknown channel "${name}"`);
       if (!channel.accounts) throw new Error(`Channel "${name}" has no address book`);
       const requested = Math.floor(read.limit ?? DEFAULT_ACCOUNT_LOOKUP);

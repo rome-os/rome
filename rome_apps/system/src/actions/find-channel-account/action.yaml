@@ -9,3 +9,6 @@ complexity: simple
 speed: fast
 reliability: high
 sideEffects: read-only
+# An address book is the guardian's contacts, so a "*" allow-list does not
+# reach it: an agent names this action to get it.
+visibility: explicit
