@@ -1310,7 +1310,3 @@ function buildSubmitOutputFacadeTool(
     },
   ];
 }
-
-// Maximum search-result limit is shared between facade tools and any caller
-// (e.g. anthropic adapter's zod `.max()`) that needs to advertise the cap.
-export const MCP_FACADE_MAX_SEARCH_LIMIT = MAX_SEARCH_LIMIT;

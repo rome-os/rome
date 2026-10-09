@@ -122,10 +122,6 @@ export class SessionsRepository {
       .where(eq(sessions.id, id));
   }
 
-  async setProviderThreadId(id: string, providerThreadId: string): Promise<void> {
-    await this.db.update(sessions).set({ providerThreadId }).where(eq(sessions.id, id));
-  }
-
   /** Persist which provider owns this conversation (+ its thread id and the
    *  concrete model that ran — the session model pin) so a resumed
    *  session routes back to the same model. Always writes ALL columns together:
