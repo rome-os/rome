@@ -53,6 +53,7 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import { useHorizontalScrollRail } from "./HorizontalScrollRail";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -254,6 +255,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const people = peopleData ?? [];
   const modelSelectorEnabled = settings?.enableModelSelector === true;
   const impersonationEnabled = settings?.enableImpersonation === true;
+  const toolbarRail = useHorizontalScrollRail(
+    `${showProjectSelector}:${impersonationEnabled}:${showModelSelector && modelSelectorEnabled}`,
+  );
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   // Persisted preferences are seeded from settings on first load, then owned
   // locally so the picker reflects the user's in-session choice immediately
@@ -1024,7 +1028,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         )}
         <WorkspaceContextChips />
       </div>
-      <div data-chat-composer-box className={cn("relative z-10", boxClassName)}>
+      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
         {disabledHint && (
           <div className="mb-3 flex items-center gap-2 rounded-8 border border-border bg-surface-muted px-3 py-2 text-ui text-muted-foreground">
             <Lock className="size-4 shrink-0" />
@@ -1053,164 +1057,173 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             uploadProgress={uploadInFlight ? uploadProgress : undefined}
           />
         </div>
-        <SlashSkillMenu
-          ref={slashMenuRef}
-          open={slashMenuOpen && !isComposerBusy}
-          onOpenChange={(next) => {
-            if (uploadInFlightRef.current) return;
-            setSlashMenuOpen(next);
-            if (!next) setSlashQuery("");
-          }}
-          query={slashQuery}
-          onSelect={acceptSlashSkill}
-          anchor={
-            <div>
-              <AgentMentionMenu
-                ref={mentionMenuRef}
-                open={mentionMenuOpen && !agentMentionLocked && !isComposerBusy}
-                onOpenChange={(next) => {
+        {/* A wide composer keeps Send at the end of the toolbar row. A narrow
+            one moves Send up beside the input and gives the toolbar a whole
+            row that scrolls sideways, so no control wraps onto a row of its
+            own. */}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
+          <div className="[grid-area:input] @max-[28rem]/composer:self-center">
+            <SlashSkillMenu
+              ref={slashMenuRef}
+              open={slashMenuOpen && !isComposerBusy}
+              onOpenChange={(next) => {
+                if (uploadInFlightRef.current) return;
+                setSlashMenuOpen(next);
+                if (!next) setSlashQuery("");
+              }}
+              query={slashQuery}
+              onSelect={acceptSlashSkill}
+              anchor={
+                <div>
+                  <AgentMentionMenu
+                    ref={mentionMenuRef}
+                    open={mentionMenuOpen && !agentMentionLocked && !isComposerBusy}
+                    onOpenChange={(next) => {
+                      if (uploadInFlightRef.current) return;
+                      setMentionMenuOpen(next);
+                      if (!next) {
+                        setMentionAnchorIndex(null);
+                        setMentionQuery("");
+                      }
+                    }}
+                    query={mentionQuery}
+                    onSelect={acceptMention}
+                    anchor={
+                      <textarea
+                        ref={textareaRef}
+                        value={inputText}
+                        onChange={handleTextareaChange}
+                        onSelect={handleTextareaSelect}
+                        onKeyDown={handleKeyDown}
+                        onPaste={handlePaste}
+                        placeholder={
+                          pendingUploads.length > 0
+                            ? t("composer.placeholderWithUploads")
+                            : t("composer.placeholderDefault")
+                        }
+                        rows={1}
+                        className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                        style={{
+                          minHeight: TEXTAREA_MIN_HEIGHT,
+                          maxHeight: `${textareaMaxHeight}px`,
+                        }}
+                        onInput={(e) =>
+                          clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
+                        }
+                        disabled={isComposerBusy}
+                      />
+                    }
+                  />
+                </div>
+              }
+            />
+          </div>
+          <div
+            {...toolbarRail.props}
+            data-chat-composer-toolbar
+            className="flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1"
+          >
+            {showProjectSelector && (
+              <ProjectSelector
+                ref={projectMenuRef}
+                disabled={isComposerBusy}
+                t={t}
+                projectCatalog={projectCatalog}
+                projectsLoading={projectsLoading}
+                projectsError={projectsError}
+                draftProjectName={draftProjectName}
+                draftProjectLabel={draftProjectLabel}
+                defaultProjectName={DEFAULT_PROJECT_NAME}
+                menuOpen={draftProjectMenuOpen}
+                searchQuery={projectSearchQuery}
+                setSearchQuery={setProjectSearchQuery}
+                createFormOpen={createProjectFormOpen}
+                setCreateFormOpen={setCreateProjectFormOpen}
+                newProjectName={newProjectName}
+                setNewProjectName={setNewProjectName}
+                creatingProject={creatingProject}
+                connectOnCreate={connectOnCreate}
+                setConnectOnCreate={setConnectOnCreate}
+                onToggleMenu={async () => {
                   if (uploadInFlightRef.current) return;
-                  setMentionMenuOpen(next);
-                  if (!next) {
-                    setMentionAnchorIndex(null);
-                    setMentionQuery("");
+                  const nextOpen = !draftProjectMenuOpen;
+                  setDraftProjectMenuOpen(nextOpen);
+                  setProjectsError(null);
+                  if (!nextOpen) {
+                    setProjectSearchQuery("");
+                    setCreateProjectFormOpen(false);
+                  } else if (!projectCatalog) {
+                    await loadProjects();
                   }
                 }}
-                query={mentionQuery}
-                onSelect={acceptMention}
-                anchor={
-                  <textarea
-                    ref={textareaRef}
-                    value={inputText}
-                    onChange={handleTextareaChange}
-                    onSelect={handleTextareaSelect}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
-                    placeholder={
-                      pendingUploads.length > 0
-                        ? t("composer.placeholderWithUploads")
-                        : t("composer.placeholderDefault")
-                    }
-                    rows={1}
-                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
-                    style={{
-                      minHeight: TEXTAREA_MIN_HEIGHT,
-                      maxHeight: `${textareaMaxHeight}px`,
-                    }}
-                    onInput={(e) =>
-                      clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
-                    }
-                    disabled={isComposerBusy}
-                  />
-                }
-              />
-            </div>
-          }
-        />
-        <div
-          data-chat-composer-toolbar
-          className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2"
-        >
-          {showProjectSelector && (
-            <ProjectSelector
-              ref={projectMenuRef}
-              disabled={isComposerBusy}
-              t={t}
-              projectCatalog={projectCatalog}
-              projectsLoading={projectsLoading}
-              projectsError={projectsError}
-              draftProjectName={draftProjectName}
-              draftProjectLabel={draftProjectLabel}
-              defaultProjectName={DEFAULT_PROJECT_NAME}
-              menuOpen={draftProjectMenuOpen}
-              searchQuery={projectSearchQuery}
-              setSearchQuery={setProjectSearchQuery}
-              createFormOpen={createProjectFormOpen}
-              setCreateFormOpen={setCreateProjectFormOpen}
-              newProjectName={newProjectName}
-              setNewProjectName={setNewProjectName}
-              creatingProject={creatingProject}
-              connectOnCreate={connectOnCreate}
-              setConnectOnCreate={setConnectOnCreate}
-              onToggleMenu={async () => {
-                if (uploadInFlightRef.current) return;
-                const nextOpen = !draftProjectMenuOpen;
-                setDraftProjectMenuOpen(nextOpen);
-                setProjectsError(null);
-                if (!nextOpen) {
+                onPickProject={(name) => {
+                  if (uploadInFlightRef.current) return;
+                  setDraftProjectName(name);
+                  setDraftProjectMenuOpen(false);
                   setProjectSearchQuery("");
                   setCreateProjectFormOpen(false);
-                } else if (!projectCatalog) {
-                  await loadProjects();
-                }
-              }}
-              onPickProject={(name) => {
-                if (uploadInFlightRef.current) return;
-                setDraftProjectName(name);
-                setDraftProjectMenuOpen(false);
-                setProjectSearchQuery("");
-                setCreateProjectFormOpen(false);
-              }}
-              onCreateProject={() => {
-                if (!uploadInFlightRef.current) void createProjectAndSelect();
-              }}
-            />
-          )}
-          {pendingConnectPath ? (
-            <SourceConnect
-              mode="link"
-              projectPath={pendingConnectPath}
-              open={!!pendingConnectPath}
-              onClose={() => setPendingConnectPath(null)}
-            />
-          ) : null}
-          {impersonationEnabled && (
-            <ImpersonationMenu
+                }}
+                onCreateProject={() => {
+                  if (!uploadInFlightRef.current) void createProjectAndSelect();
+                }}
+              />
+            )}
+            {pendingConnectPath ? (
+              <SourceConnect
+                mode="link"
+                projectPath={pendingConnectPath}
+                open={!!pendingConnectPath}
+                onClose={() => setPendingConnectPath(null)}
+              />
+            ) : null}
+            {impersonationEnabled && (
+              <ImpersonationMenu
+                disabled={isComposerBusy}
+                open={impersonationMenuOpen}
+                onOpenChange={(next) => {
+                  if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
+                }}
+                selectedPersonId={selectedPersonId}
+                onSelectPersonId={(id) => {
+                  if (!uploadInFlightRef.current) setSelectedPersonId(id);
+                }}
+                options={impersonationOptions}
+                selectedPerson={selectedPerson}
+                selectedPersonLabel={selectedPersonLabel}
+                guardianLabel={guardianLabel}
+              />
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => fileInputRef.current?.click()}
               disabled={isComposerBusy}
-              open={impersonationMenuOpen}
-              onOpenChange={(next) => {
-                if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
-              }}
-              selectedPersonId={selectedPersonId}
-              onSelectPersonId={(id) => {
-                if (!uploadInFlightRef.current) setSelectedPersonId(id);
-              }}
-              options={impersonationOptions}
-              selectedPerson={selectedPerson}
-              selectedPersonLabel={selectedPersonLabel}
-              guardianLabel={guardianLabel}
-            />
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isComposerBusy}
-            aria-label={t("composer.uploadFiles")}
-            title={t("composer.uploadFiles")}
-            className="touch-target"
-          >
-            <Paperclip aria-hidden />
-          </Button>
-          {showModelSelector && modelSelectorEnabled && (
-            <ModelSelectorMenu
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              value={largeModelSelection}
-              onChange={(next) => void updateLargeModelSelection(next)}
+              aria-label={t("composer.uploadFiles")}
+              title={t("composer.uploadFiles")}
+              className="touch-target"
+            >
+              <Paperclip aria-hidden />
+            </Button>
+            {showModelSelector && modelSelectorEnabled && (
+              <ModelSelectorMenu
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
+                value={largeModelSelection}
+                onChange={(next) => void updateLargeModelSelection(next)}
+                disabled={isComposerBusy}
+              />
+            )}
+            <ReasoningEffortMenu
+              open={reasoningMenuOpen}
+              onOpenChange={setReasoningMenuOpen}
+              value={reasoningEffort}
+              onChange={(next) => void updateReasoningEffort(next)}
               disabled={isComposerBusy}
             />
-          )}
-          <ReasoningEffortMenu
-            open={reasoningMenuOpen}
-            onOpenChange={setReasoningMenuOpen}
-            value={reasoningEffort}
-            onChange={(next) => void updateReasoningEffort(next)}
-            disabled={isComposerBusy}
-          />
-          {/* Stop + Send cluster on the right; Stop sits just left of Send. */}
-          <div className="ml-auto flex items-center gap-2">
+          </div>
+          {/* Stop sits just left of Send. */}
+          <div className="flex items-center gap-2 self-end [grid-area:send]">
             {isStreaming && onStop && (
               <Button
                 type="button"
