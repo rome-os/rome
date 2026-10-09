@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
+import { removeProviderAccount } from "../../lib/provider-accounts.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantRecord } from "../../connections/ledger.js";
 import type { DrizzleTx } from "../../db/index.js";
@@ -277,6 +278,13 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     });
   });
 
+  /** Tearing down an OAuth provider also drops its legacy `provider_accounts`
+   *  row, so the plaintext token it holds does not outlive the disconnect.
+   *  Remove this along with the table. */
+  const removeLegacyProviderRow = async (service: string): Promise<void> => {
+    if (isOAuthProvider(service)) await removeProviderAccount(deps.db, service);
+  };
+
   /** Enlist pairing and mapping cleanup in connection deletion or Talk-grant
    *  revocation. Unrelated grants have no cleanup participant. */
   const guardianMappingTeardown = (
@@ -311,6 +319,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // the two can never interleave.
     await deps.setupManager?.cancelActive(conn.id, name);
     await registry.withGrantSection(conn.service, name, async () => {
+      await removeLegacyProviderRow(conn.service);
       await registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) });
     });
     c.header("Cache-Control", "no-store");
@@ -327,6 +336,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
+    await removeLegacyProviderRow(conn.service);
     await registry.remove(conn.id, { inTx: guardianMappingTeardown(registry, conn) });
     return c.json({ ok: true });
   });

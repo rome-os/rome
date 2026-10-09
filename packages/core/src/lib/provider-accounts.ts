@@ -1,3 +1,8 @@
+import { eq } from "drizzle-orm";
+import { providerAccounts } from "../db/schema.js";
+import type { DrizzleDb } from "../db/index.js";
+import type { OAuthProvider } from "./oauth-providers.js";
+
 export interface OAuthTokenBundle {
   accessToken?: string | null;
   refreshToken?: string | null;
@@ -21,4 +26,8 @@ export function normalizeScopes(value: string[] | string | null | undefined): st
   }
 
   return [];
+}
+
+export async function removeProviderAccount(db: DrizzleDb, provider: OAuthProvider): Promise<void> {
+  await db.delete(providerAccounts).where(eq(providerAccounts.provider, provider));
 }
