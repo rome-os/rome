@@ -93,9 +93,7 @@ export interface MessageListProps {
 // approval-resolution turn (interaction_result only, no text) does NOT count,
 // so it can't supersede the card it's resolving.
 function isHumanReply(msg: ChatMessage): boolean {
-  return parseMessageEntries(msg).some(
-    (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0,
-  );
+  return parseMessageEntries(msg).some((b) => b.type === "text" && b.content.trim().length > 0);
 }
 
 // The newest still-actionable submission: the specialist's latest submit_output
@@ -108,9 +106,7 @@ export function findActiveSubmission(
   for (const msg of messages) {
     if (msg.role === "assistant") {
       const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
-      if (card?.payload && typeof card.payload === "object") {
-        active = { messageId: msg.id, payload: card.payload as Record<string, unknown> };
-      }
+      if (card) active = { messageId: msg.id, payload: card.payload };
     } else if (msg.role === "user" && active && isHumanReply(msg)) {
       active = null;
     }
@@ -126,9 +122,7 @@ export function findLastSubmission(messages: ChatMessage[]): Record<string, unkn
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
     const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
-    if (card?.payload && typeof card.payload === "object") {
-      return card.payload as Record<string, unknown>;
-    }
+    if (card) return card.payload;
   }
   return null;
 }
@@ -199,7 +193,7 @@ function turnCopyText(messages: ChatMessage[]): string {
   const parts: string[] = [];
   for (const m of messages) {
     for (const b of parseMessageEntries(m)) {
-      if (b.type === "text" && typeof b.content === "string" && b.content.trim()) {
+      if (b.type === "text" && b.content.trim()) {
         parts.push(b.content);
       }
     }
@@ -349,7 +343,7 @@ const RowView = memo(function RowView({
               recap={
                 recap?.type === "turn_recap"
                   ? {
-                      content: recap.content ?? "",
+                      content: recap.content,
                       audioUrl: recap.audioUrl,
                       audioMimeType: recap.audioMimeType,
                       audioDurationMs: recap.audioDurationMs,

@@ -84,7 +84,6 @@ import type {
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
-  ChatEntry,
 } from "@/lib/chat-types";
 import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
@@ -1975,13 +1974,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           onClose={closeTraceDrawer}
           hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
               live,

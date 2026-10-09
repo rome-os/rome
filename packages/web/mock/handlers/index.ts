@@ -21,7 +21,7 @@ import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
-  ChatEntry,
+  TranscriptPart,
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
@@ -84,7 +84,7 @@ const skills: SkillSummary[] = [
   },
 ];
 
-const text = (content: string, turnPhase?: "commentary" | "final"): ChatEntry =>
+const text = (content: string, turnPhase?: "commentary" | "final"): TranscriptPart =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -231,8 +231,8 @@ const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | ChatEntry[],
-  reply: ChatEntry[],
+  prompt: string | TranscriptPart[],
+  reply: TranscriptPart[],
   traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
@@ -473,6 +473,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         // without audio: an audioUrl would need a real asset behind it.
         {
           type: "turn_recap",
+          turnId: "mock-chat-2-t2",
           content: "Rewrote the closing paragraph and handed over a themed banner component.",
         },
       ],
@@ -586,6 +587,7 @@ const transcripts: Record<string, ChatMessage[]> = {
             trigger: {
               type: "schedule",
               tzid: "America/Los_Angeles",
+              tzMode: "floating",
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=MO",
             },
@@ -713,9 +715,8 @@ const chatSessions: ChatSession[] = [
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as ChatEntry[])
-    .filter((b) => b.type === "text" && typeof b.content === "string")
-    .map((b) => b.content)
+  (JSON.parse(message.content) as TranscriptPart[])
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
     .join(" ");
 
 /** Elided window around the hit, mirroring the snippet the real route returns. */

@@ -39,6 +39,7 @@ const scheduleDraft: RoutineDraftSpec = {
   trigger: {
     type: "schedule",
     tzid: "America/Los_Angeles",
+    tzMode: "floating",
     localTime: "09:00",
     rrule: "FREQ=WEEKLY;BYDAY=FR",
   },

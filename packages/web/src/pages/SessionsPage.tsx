@@ -58,12 +58,7 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
-import type {
-  ChatMessage,
-  RomeSessionRecord,
-  RomeSessionsPageResult,
-  ChatEntry,
-} from "@/lib/chat-types";
+import type { ChatMessage, RomeSessionRecord, RomeSessionsPageResult } from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -1167,13 +1162,13 @@ function ReadOnlySessionChat({
           allowSubagentUsage
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,

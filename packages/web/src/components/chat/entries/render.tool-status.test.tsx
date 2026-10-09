@@ -8,7 +8,9 @@ import { toolCallDotClass } from "./ToolCallView";
 
 afterEach(cleanup);
 
-function dotClassFor(result: Partial<ChatEntry>): string | undefined {
+function dotClassFor(
+  result: Pick<Extract<ChatEntry, { type: "tool_result" }>, "output" | "isError">,
+): string | undefined {
   const blocks: ChatEntry[] = [
     { type: "tool_use", id: "use-1", tool: "Bash", input: { command: "ls" } },
     { type: "tool_result", toolUseId: "use-1", tool: "Bash", ...result },

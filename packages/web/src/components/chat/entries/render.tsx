@@ -1,4 +1,4 @@
-import type { ApprovalCardStatus, ChatEntry } from "@/lib/chat-types";
+import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
 import { ChatBubble } from "@/components/chat/ChatBubble";
@@ -89,7 +89,7 @@ export function renderSingleEntry(
         />
       );
     case "thinking":
-      return <ThinkingBlock key={key} content={block.content ?? ""} />;
+      return <ThinkingBlock key={key} content={block.content} />;
     case "tool_use":
       return <ToolUseBlock key={key} tool={block.tool} input={block.input} />;
     case "tool_result":
@@ -97,7 +97,6 @@ export function renderSingleEntry(
         <ToolResultBlock key={key} tool={block.tool} output={block.output} input={toolUseInput} />
       );
     case "subagent_start":
-      if (!block.agentName || !block.sessionId || !block.turnId) return null;
       return (
         <SubagentCallView
           key={key}
@@ -110,30 +109,28 @@ export function renderSingleEntry(
         />
       );
     case "subagent_result":
-      if (!block.agentName || !block.sessionId || !block.turnId || !block.status) return null;
       return (
         <SubagentCallView
           key={key}
           agentName={block.agentName}
           sessionId={block.sessionId}
           turnId={block.turnId}
-          status={block.status as "completed" | "failed" | "cancelled"}
-          output={block.output}
-          error={typeof block.error === "object" ? block.error : undefined}
+          status={block.status}
+          output={block.status === "completed" ? block.output : undefined}
+          error={block.status === "completed" ? undefined : block.error}
         />
       );
     case "text": {
+      const blockIx = textBlockIx(block);
       const disclosureStateKey =
-        turnId !== undefined && block.blockIx !== undefined
-          ? `${turnId}:${block.blockIx}`
-          : undefined;
+        turnId !== undefined && blockIx !== undefined ? `${turnId}:${blockIx}` : undefined;
       // In the transcript every text block is its own bubble, so consecutive
       // narration reads as separate utterances under one speaker.
       if (transcript) {
         return (
           <ChatBubble key={key} tone="received">
             <TextBlock
-              content={block.content ?? ""}
+              content={block.content}
               compact={compact}
               disclosureStateKey={disclosureStateKey}
             />
@@ -147,7 +144,7 @@ export function renderSingleEntry(
       return block.turnPhase === "commentary" ? (
         <div key={key} className="mb-3">
           <TextBlock
-            content={block.content ?? ""}
+            content={block.content}
             compact={compact}
             disclosureStateKey={disclosureStateKey}
           />
@@ -155,7 +152,7 @@ export function renderSingleEntry(
       ) : (
         <TextBlock
           key={key}
-          content={block.content ?? ""}
+          content={block.content}
           compact={compact}
           disclosureStateKey={disclosureStateKey}
         />
@@ -165,15 +162,14 @@ export function renderSingleEntry(
       return (
         <TurnRecapView
           key={key}
-          content={block.content ?? ""}
+          content={block.content}
           audioUrl={block.audioUrl}
           audioMimeType={block.audioMimeType}
           audioDurationMs={block.audioDurationMs}
         />
       );
     case "routine_draft_card":
-      if (!block.draft) return null;
-      return <RoutineDraftCard key={`routine-${block.toolUseId ?? key}`} draft={block.draft} />;
+      return <RoutineDraftCard key={`routine-${block.toolUseId}`} draft={block.draft} />;
     case "submission_card":
       // The borrowed agent's submit_output is not rendered in the conversation
       // flow — the result already lives on the app's own surface beside the
@@ -182,7 +178,6 @@ export function renderSingleEntry(
       // pending (read by findActiveSubmission to drive that button).
       return null;
     case "pending_interaction": {
-      if (!block.toolUseId || !block.appId || !block.render) return null;
       // Host built-in components (the ask_question card, the connect_ai card):
       // rendered directly by rome-web, no app bundle to mount. They resolve
       // through the same interaction_result path as an app component.
@@ -225,7 +220,6 @@ export function renderSingleEntry(
       // The @mention seam in the flat transcript; the specialist's turns render
       // inline as ordinary rows right below it (their child session is merged in
       // by Chat). The brief is shown here as the calling agent's mention.
-      if (!block.toolUseId || !block.appId) return null;
       const agentLabel =
         typeof block.payload?.agentLabel === "string" ? block.payload.agentLabel : undefined;
       const summary =
@@ -251,7 +245,6 @@ export function renderSingleEntry(
       // handoff's visible outcome is the calling agent's reply.
       return null;
     case "approval_card":
-      if (!block.approvalId || !block.preview) return null;
       // Keying on approvalId rather than index keeps internal state
       // (polling, form fields) glued to the right block when surrounding
       // blocks reorder.
@@ -261,7 +254,7 @@ export function renderSingleEntry(
           approvalId={block.approvalId}
           actionName={block.actionName}
           preview={block.preview}
-          status={(block.status as ApprovalCardStatus | undefined) ?? "pending"}
+          status={block.status}
           onResolved={onApprovalResolved ?? (() => {})}
         />
       );
@@ -271,7 +264,7 @@ export function renderSingleEntry(
       return (
         <ErrorRunView
           key={key}
-          error={typeof block.error === "string" ? block.error : (block.error?.message ?? "")}
+          error={block.error}
           accounting={block.accounting}
           code={block.code}
           provider={block.provider}
@@ -291,19 +284,17 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
   const { live = false } = options;
   // Index results by provider tool-use ID (or ordinary tool name as a legacy
   // fallback) so each paired step renders once.
-  const resultsByUseId = new Map<string, ChatEntry>();
-  const resultsByTool = new Map<string, ChatEntry[]>();
-  const subagentResultsByUseId = new Map<string, ChatEntry>();
+  const resultsByUseId = new Map<string, ToolResultEntry>();
+  const resultsByTool = new Map<string, ToolResultEntry[]>();
+  const subagentResultsByUseId = new Map<string, SubagentResultEntry>();
   for (const block of blocks) {
     if (block.type === "subagent_result") {
-      if (block.toolUseId) subagentResultsByUseId.set(block.toolUseId, block);
+      subagentResultsByUseId.set(block.toolUseId, block);
     } else if (block.type === "tool_result") {
       if (block.toolUseId) resultsByUseId.set(block.toolUseId, block);
-      if (block.tool) {
-        const bucket = resultsByTool.get(block.tool);
-        if (bucket) bucket.push(block);
-        else resultsByTool.set(block.tool, [block]);
-      }
+      const bucket = resultsByTool.get(block.tool);
+      if (bucket) bucket.push(block);
+      else resultsByTool.set(block.tool, [block]);
     }
   }
 
@@ -321,7 +312,7 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
           key={i}
           tool={block.tool}
           input={block.input}
-          output={paired?.type === "tool_result" ? paired.output : undefined}
+          output={paired?.output}
           status={toolCallStatus(paired)}
           durationMs={toolCallDurationMs(block, paired)}
           hasResult={paired !== null}
@@ -332,13 +323,8 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
     }
 
     if (block.type === "subagent_start") {
-      const paired = block.toolUseId ? (subagentResultsByUseId.get(block.toolUseId) ?? null) : null;
+      const paired = subagentResultsByUseId.get(block.toolUseId) ?? null;
       if (paired) consumedResults.add(paired);
-      if (!block.agentName || !block.sessionId || !block.turnId) continue;
-      const status =
-        paired?.type === "subagent_result" && paired.status
-          ? (paired.status as "completed" | "failed" | "cancelled")
-          : "running";
       nodes.push(
         <SubagentCallView
           key={i}
@@ -346,13 +332,9 @@ export function renderFlatEntries(blocks: ChatEntry[], options: RenderEntryOptio
           input={block.input}
           sessionId={block.sessionId}
           turnId={block.turnId}
-          status={status}
-          output={paired?.type === "subagent_result" ? paired.output : undefined}
-          error={
-            paired?.type === "subagent_result" && typeof paired.error === "object"
-              ? paired.error
-              : undefined
-          }
+          status={paired?.status ?? "running"}
+          output={paired?.status === "completed" ? paired.output : undefined}
+          error={paired && paired.status !== "completed" ? paired.error : undefined}
           durationMs={subagentCallDurationMs(block, paired)}
           live={live}
         />,
@@ -387,8 +369,8 @@ function transcriptEntry(
   if (!transcript || node === null || node === undefined) return node;
   const id =
     block.type === "text"
-      ? `text:${block.blockIx ?? index}`
-      : `${block.type}:${block.toolUseId ?? index}`;
+      ? `text:${textBlockIx(block) ?? index}`
+      : `${block.type}:${("toolUseId" in block ? block.toolUseId : undefined) ?? index}`;
   return (
     <TranscriptEntry
       key={`entry:${id}`}
@@ -401,13 +383,22 @@ function transcriptEntry(
   );
 }
 
+type ToolUseEntry = Extract<ChatEntry, { type: "tool_use" }>;
+type ToolResultEntry = Extract<ChatEntry, { type: "tool_result" }>;
+type SubagentStartEntry = Extract<ChatEntry, { type: "subagent_start" }>;
+type SubagentResultEntry = Extract<ChatEntry, { type: "subagent_result" }>;
+
+// Only stored WebChat text parts carry a block index; trace text does not.
+function textBlockIx(block: Extract<ChatEntry, { type: "text" }>): number | undefined {
+  return "blockIx" in block ? block.blockIx : undefined;
+}
+
 function pickResult(
-  use: ChatEntry,
-  resultsByUseId: Map<string, ChatEntry>,
-  resultsByTool: Map<string, ChatEntry[]>,
+  use: ToolUseEntry,
+  resultsByUseId: Map<string, ToolResultEntry>,
+  resultsByTool: Map<string, ToolResultEntry[]>,
   consumedResults: Set<ChatEntry>,
-): ChatEntry | null {
-  if (use.type !== "tool_use") return null;
+): ToolResultEntry | null {
   if (use.id) {
     const byId = resultsByUseId.get(use.id);
     if (byId && !consumedResults.has(byId)) return byId;
@@ -416,18 +407,14 @@ function pickResult(
   // the first result that hasn't already been paired (either by id above or
   // by an earlier same-tool fallback), so a mixed id + non-id run can't end
   // up with two tool_use rows attached to the same result.
-  if (use.tool) {
-    const bucket = resultsByTool.get(use.tool);
-    if (!bucket) return null;
-    for (const candidate of bucket) {
-      if (!consumedResults.has(candidate)) return candidate;
-    }
+  for (const candidate of resultsByTool.get(use.tool) ?? []) {
+    if (!consumedResults.has(candidate)) return candidate;
   }
   return null;
 }
 
-function toolCallStatus(result: ChatEntry | null): ToolCallStatus {
-  if (!result || result.type !== "tool_result") return "running";
+function toolCallStatus(result: ToolResultEntry | null): ToolCallStatus {
+  if (!result) return "running";
   if (result.isError !== undefined) return result.isError ? "error" : "ok";
   return isLegacyErrorOutput(result.output) ? "error" : "ok";
 }
@@ -469,9 +456,8 @@ function hasErrorPayload(value: unknown): boolean {
   return true;
 }
 
-function toolCallDurationMs(use: ChatEntry, result: ChatEntry | null): number | undefined {
-  if (use.type !== "tool_use") return undefined;
-  if (!result || result.type !== "tool_result") return undefined;
+function toolCallDurationMs(use: ToolUseEntry, result: ToolResultEntry | null): number | undefined {
+  if (!result) return undefined;
   const start = parseTimestamp(use.startedAt);
   const end = parseTimestamp(result.endedAt);
   if (start === null || end === null) return undefined;
@@ -479,9 +465,11 @@ function toolCallDurationMs(use: ChatEntry, result: ChatEntry | null): number | 
   return delta >= 0 ? delta : undefined;
 }
 
-function subagentCallDurationMs(start: ChatEntry, result: ChatEntry | null): number | undefined {
-  if (start.type !== "subagent_start") return undefined;
-  if (!result || result.type !== "subagent_result") return undefined;
+function subagentCallDurationMs(
+  start: SubagentStartEntry,
+  result: SubagentResultEntry | null,
+): number | undefined {
+  if (!result) return undefined;
   const startedAt = parseTimestamp(start.startedAt);
   const endedAt = parseTimestamp(result.endedAt);
   if (startedAt === null || endedAt === null) return undefined;

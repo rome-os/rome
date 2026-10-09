@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
-import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
+import type { ChatMessage } from "@/lib/chat-types";
+import { parseEntries } from "@/components/chat/entries/parse-entries";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 import { useSendFlight } from "@/components/chat/use-chat-motion";
@@ -20,17 +21,8 @@ export const UserMessage = memo(
     const bubbleRef = useRef<HTMLDivElement>(null);
     useSendFlight(msg.id, rowRef, bubbleRef);
     const text = useMemo(() => {
-      let blocks: ChatEntry[];
-      try {
-        const parsed = JSON.parse(msg.content);
-        blocks = Array.isArray(parsed) ? parsed : [{ type: "text", content: msg.content }];
-      } catch {
-        blocks = [{ type: "text", content: msg.content }];
-      }
-      return blocks
-        .filter((b) => b.type === "text")
-        .map((b) => b.content)
-        .join("\n");
+      const blocks = parseEntries(msg.content);
+      return blocks.flatMap((b) => (b.type === "text" ? [b.content] : [])).join("\n");
     }, [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
     const undelivered =
