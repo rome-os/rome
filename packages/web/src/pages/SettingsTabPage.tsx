@@ -434,7 +434,7 @@ export default function SettingsPage() {
             </Measure>
           )}
           {activeTab === "AI Tools" && (
-            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+            <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? false} />
           )}
           {activeTab === "Advanced" && (
             <AdvancedSection

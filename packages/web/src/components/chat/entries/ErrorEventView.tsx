@@ -37,44 +37,51 @@ export function ErrorEventView({
     code === "model_unavailable" ||
     code === "no_model_provider_available";
   const isAuthRevokedError = code === "auth_revoked";
+  const isCreditsUsedUpError = code === "credits_used_up";
 
-  if (isModelResolutionError || isAuthRevokedError) {
+  if (isModelResolutionError || isAuthRevokedError || isCreditsUsedUpError) {
     const name = providerName(provider);
-    const copy = isAuthRevokedError
+    const copy = isCreditsUsedUpError
       ? {
-          title: t("errors.providerAuthRevoked.title", { provider: name }),
-          description: t("errors.providerAuthRevoked.description", { provider: name }),
-          action: t("errors.providerAuthRevoked.action"),
+          title: t("errors.creditsUsedUp.title"),
+          description: t("errors.creditsUsedUp.description"),
+          action: t("errors.creditsUsedUp.action"),
         }
-      : reason === "not_logged_in"
+      : isAuthRevokedError
         ? {
-            title: t("errors.providerNotLoggedIn.title", { provider: name }),
-            description: t("errors.providerNotLoggedIn.description", { provider: name }),
-            action: t("errors.providerNotLoggedIn.action"),
+            title: t("errors.providerAuthRevoked.title", { provider: name }),
+            description: t("errors.providerAuthRevoked.description", { provider: name }),
+            action: t("errors.providerAuthRevoked.action"),
           }
-        : reason === "quota_exhausted"
-          ? provider
-            ? {
-                title: t("errors.providerQuotaExhausted.title", { provider: name }),
-                description: t("errors.providerQuotaExhausted.description", { provider: name }),
-                action: t("errors.openAiTools"),
-              }
-            : {
-                title: t("errors.allProvidersQuotaExhausted.title"),
-                description: t("errors.allProvidersQuotaExhausted.description"),
-                action: t("errors.openAiTools"),
-              }
-          : reason === "model_access_denied"
-            ? {
-                title: t("errors.modelUnavailable.title"),
-                description: t("errors.modelUnavailable.description"),
-                action: t("errors.openAiTools"),
-              }
-            : {
-                title: t("errors.noProvider.title"),
-                description: t("errors.noProvider.description"),
-                action: t("errors.openAiTools"),
-              };
+        : reason === "not_logged_in"
+          ? {
+              title: t("errors.providerNotLoggedIn.title", { provider: name }),
+              description: t("errors.providerNotLoggedIn.description", { provider: name }),
+              action: t("errors.providerNotLoggedIn.action"),
+            }
+          : reason === "quota_exhausted"
+            ? provider
+              ? {
+                  title: t("errors.providerQuotaExhausted.title", { provider: name }),
+                  description: t("errors.providerQuotaExhausted.description", { provider: name }),
+                  action: t("errors.openAiTools"),
+                }
+              : {
+                  title: t("errors.allProvidersQuotaExhausted.title"),
+                  description: t("errors.allProvidersQuotaExhausted.description"),
+                  action: t("errors.openAiTools"),
+                }
+            : reason === "model_access_denied"
+              ? {
+                  title: t("errors.modelUnavailable.title"),
+                  description: t("errors.modelUnavailable.description"),
+                  action: t("errors.openAiTools"),
+                }
+              : {
+                  title: t("errors.noProvider.title"),
+                  description: t("errors.noProvider.description"),
+                  action: t("errors.openAiTools"),
+                };
 
     if (presentation === "status") {
       return (

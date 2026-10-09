@@ -547,6 +547,23 @@
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshFailed": "无法刷新 AI 工具，请重试。",
+    "romeCredits": {
+      "name": "Rome 额度",
+      "status": {
+        "inUse": "使用中",
+        "standby": "待用",
+        "usedUp": "已用完",
+        "paused": "已暂停"
+      },
+      "detail": {
+        "inUse": "免费额度，在未连接 ChatGPT 时用于支付 ChatGPT 模型。",
+        "standby": "连接 ChatGPT 期间由你的 ChatGPT 账户支付。",
+        "usedUp": "连接 ChatGPT 或 Claude 以继续使用 Rome。",
+        "paused": "Rome Cloud 已暂停这些额度。"
+      },
+      "ofGranted": "共 {{amount}}",
+      "meterLabel": "Rome 剩余额度"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"

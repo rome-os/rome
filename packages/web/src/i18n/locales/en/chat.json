@@ -147,6 +147,11 @@
       "title": "No AI provider is available",
       "description": "Connect an AI tool or review its current status."
     },
+    "creditsUsedUp": {
+      "title": "Rome credits used up",
+      "description": "Connect ChatGPT or Claude to keep going.",
+      "action": "Connect an AI"
+    },
     "openAiTools": "Open AI Tools"
   },
   "usage": {
@@ -259,7 +264,16 @@
     "connectedSummary": "Connected an AI",
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",
-    "checking": "Checking your AI connections…"
+    "checking": "Checking your AI connections…",
+    "credits": {
+      "title": "Start with free Rome credits",
+      "hint": "Your account has {{amount}} in Rome credits, so I can start now. Sign in to Claude or ChatGPT any time to use your own subscription instead.",
+      "continue": "Continue with credits",
+      "summary": "Continued with Rome credits",
+      "usingTitle": "Using Rome credits",
+      "using": "Rome credits in use",
+      "ready": "Rome credits ready"
+    }
   },
   "modelSelector": {
     "label": "Model",

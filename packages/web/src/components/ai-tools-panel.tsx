@@ -23,6 +23,7 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { RomeCreditsRow } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -51,6 +52,7 @@ import {
   type AnthropicCompatibleConfigurationId,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
+import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
 
 const TerminalModal = lazy(() => import("@/components/terminal-modal"));
 const ChatGPTLoginModal = lazy(() =>
@@ -243,6 +245,8 @@ type LogoutProvider = keyof typeof LOGOUT_PROVIDER_CONFIG;
 interface AiToolsPanelProps {
   hiddenProviders?: readonly AiToolProviderId[];
   showUsage?: boolean;
+  /** Show the account's Rome credits above the sign-ins when it has any. */
+  showRomeCredits?: boolean;
   showHeader?: boolean;
   onConnectedChange?: (connected: boolean) => void;
 }
@@ -458,6 +462,7 @@ export function shouldShowAiToolUsage(
 export function AiToolsPanel({
   hiddenProviders = [],
   showUsage = false,
+  showRomeCredits = false,
   showHeader = true,
   onConnectedChange,
 }: AiToolsPanelProps) {
@@ -489,6 +494,16 @@ export function AiToolsPanel({
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [romeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+
+  // Rome Cloud owns the balance. A failed read keeps the last known one rather
+  // than hiding the row during a transient outage.
+  const fetchRomeCredits = useCallback(async () => {
+    const res = await fetch("/api/ai-tools/rome-credits");
+    if (!res.ok) return;
+    const data = (await res.json()) as RomeCreditsResponse;
+    setRomeCredits(data.credits ?? null);
+  }, []);
 
   const fetchAnthropicProviders = useCallback(async () => {
     const res = await fetch("/api/ai-tools/anthropic-compatible-providers");
@@ -544,14 +559,20 @@ export function AiToolsPanel({
     fetchAnthropicProviders().catch(() => {
       /* ignore */
     });
-  }, [fetchStatus, fetchAnthropicProviders]);
+    if (showRomeCredits) {
+      fetchRomeCredits().catch(() => {
+        /* ignore */
+      });
+    }
+  }, [fetchStatus, fetchAnthropicProviders, fetchRomeCredits, showRomeCredits]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       void fetchStatus();
+      if (showRomeCredits) void fetchRomeCredits().catch(() => {});
     }, AI_TOOLS_STATUS_REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [fetchStatus]);
+  }, [fetchStatus, fetchRomeCredits, showRomeCredits]);
 
   function handleTerminalClose() {
     setTerminalPreset(null);
@@ -647,6 +668,7 @@ export function AiToolsPanel({
   async function handleRefresh() {
     setRefreshPending(true);
     setRefreshError(null);
+    if (showRomeCredits) void fetchRomeCredits().catch(() => {});
     try {
       const res = await fetch("/api/ai-tools/refresh", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
@@ -824,6 +846,12 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+          {showRomeCredits && romeCredits && (
+            <RomeCreditsRow
+              credits={romeCredits}
+              chatgptConnected={toolStatus.codex?.loggedIn === true}
+            />
+          )}
           {visibleProviders.map((provider) => {
             const status = toolStatus[provider.statusKey];
             const isLoggedIn = status?.loggedIn === true;

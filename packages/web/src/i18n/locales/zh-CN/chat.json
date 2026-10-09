@@ -147,6 +147,11 @@
       "title": "没有可用的 AI Provider",
       "description": "请连接 AI Tool，或检查当前登录和额度状态。"
     },
+    "creditsUsedUp": {
+      "title": "Rome 额度已用完",
+      "description": "连接 ChatGPT 或 Claude 以继续。",
+      "action": "连接 AI"
+    },
     "openAiTools": "打开 AI Tools"
   },
   "usage": {
@@ -259,7 +264,16 @@
     "connectedSummary": "已连接 AI",
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",
-    "checking": "正在检查你的 AI 连接…"
+    "checking": "正在检查你的 AI 连接…",
+    "credits": {
+      "title": "使用免费 Rome 额度开始",
+      "hint": "你的账户有 {{amount}} 的 Rome 额度，我现在就可以开始。你也可以随时登录 Claude 或 ChatGPT，改用自己的订阅。",
+      "continue": "使用额度继续",
+      "summary": "使用 Rome 额度继续",
+      "usingTitle": "正在使用 Rome 额度",
+      "using": "Rome 额度使用中",
+      "ready": "Rome 额度可用"
+    }
   },
   "modelSelector": {
     "label": "模型",
