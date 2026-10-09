@@ -110,6 +110,16 @@ const buttonVariants = cva(
         start: "justify-start",
         between: "justify-between",
       },
+      /**
+       * Where the glyph-edge trim learns which side holds a glyph. `marked`
+       * reads `data-icon` in CSS, for `asChild` content and direct
+       * `buttonVariants` consumers. `read` turns that off, because `Button`
+       * reads the side from its children and adds the trim itself.
+       */
+      glyphs: {
+        marked: "",
+        read: "",
+      },
     },
     compoundVariants: [
       // A glyph at the edge of a centred label carries less visual weight
@@ -124,16 +134,19 @@ const buttonVariants = cva(
       // keeps symmetric padding, and a start-aligned glyph sits on the
       // alignment edge, so none of those take it. These variants outrank a
       // caller's `px-*` and the merge cannot drop them, so a marked glyph
-      // keeps this inset even when the caller narrows the button.
+      // keeps this inset even when the caller narrows the button. That is
+      // why only the `marked` path takes them.
       {
         align: "center",
         size: "sm",
+        glyphs: "marked",
         className:
           "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
       },
       {
         align: "center",
         size: ["md", "default"],
+        glyphs: "marked",
         className:
           "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
@@ -147,27 +160,29 @@ const buttonVariants = cva(
       size: "md",
       shape: "square",
       align: "center",
+      glyphs: "marked",
     },
   },
 );
 
 /**
- * A glyph is a childless component element: an icon or a spinner. A label is
- * anything else, so text, a wrapped `<span>`, and a `Kbd` hint all count. Only
- * a glyph with a label on the other side sits at an edge worth correcting.
+ * A glyph is a childless component element, such as an icon or a spinner, or
+ * an element marked with `data-icon`. A label is anything else, so text, a
+ * wrapped `<span>`, and a `Kbd` hint all count. Only a glyph with a label on
+ * the other side sits at an edge worth correcting.
  *
  * The test reads elements, not what they render, so a childless component
  * that renders text reads as a glyph. Such a label opts out by wrapping it in
- * a `<span>`, and a glyph the test misses names its side with `data-icon`. A
- * screen-reader-only `<span>` also counts as a label, so a visually lone icon
- * with one gets the trim.
+ * a `<span>`, and a glyph the test misses (an inline `<svg>`, say) opts in
+ * with `data-icon`. A screen-reader-only `<span>` also counts as a label, so
+ * a visually lone icon with one gets the trim.
  */
 function isGlyph(node: React.ReactNode): boolean {
-  return (
-    React.isValidElement<{ children?: React.ReactNode }>(node) &&
-    typeof node.type !== "string" &&
-    node.props.children == null
-  );
+  if (!React.isValidElement<{ children?: React.ReactNode; "data-icon"?: string }>(node)) {
+    return false;
+  }
+  if (node.props["data-icon"] != null) return true;
+  return typeof node.type !== "string" && node.props.children == null;
 }
 
 /**
@@ -209,7 +224,7 @@ function Button({
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
-  VariantProps<typeof buttonVariants> & {
+  Omit<VariantProps<typeof buttonVariants>, "glyphs"> & {
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";
@@ -232,7 +247,12 @@ function Button({
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(buttonVariants({ variant, size, shape, align }), trimStart, trimEnd, className)}
+      className={cn(
+        buttonVariants({ variant, size, shape, align, glyphs: asChild ? "marked" : "read" }),
+        trimStart,
+        trimEnd,
+        className,
+      )}
       {...props}
     />
   );

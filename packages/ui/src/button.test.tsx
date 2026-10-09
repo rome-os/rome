@@ -121,6 +121,32 @@ describe("Button glyph inset", () => {
     expect(classList).not.toContain("pr-[var(--control-px-icon-sm)]");
   });
 
+  it("lets a caller's px win over a marked glyph too", () => {
+    render(
+      <Button size="sm" className="px-2">
+        <Plus data-icon="inline-start" />
+        Add app
+      </Button>,
+    );
+    const { className } = screen.getByRole("button");
+    expect(className).toContain("px-2");
+    expect(className).not.toContain("control-px-icon-sm");
+  });
+
+  it("keeps the marker trim for asChild content", () => {
+    render(
+      <Button asChild size="sm">
+        <a href="/apps">
+          <Plus data-icon="inline-start" />
+          Apps
+        </a>
+      </Button>,
+    );
+    expect(screen.getByRole("link").className).toContain(
+      "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)]",
+    );
+  });
+
   it("leaves start-aligned buttons on their alignment inset", () => {
     render(
       <Button align="start">

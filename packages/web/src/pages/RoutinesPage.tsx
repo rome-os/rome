@@ -183,7 +183,8 @@ function DatePickerInput({
           id={id}
           onBlur={onBlur}
           aria-invalid={invalid || undefined}
-          className="w-full justify-between"
+          align="between"
+          className="w-full"
         >
           <span className={date ? "" : "text-muted-foreground"}>
             {date ? format(date, "PPP") : placeholder}
@@ -1240,8 +1241,9 @@ function ActionPicker({
           role="combobox"
           aria-expanded={open}
           aria-invalid={invalid || undefined}
+          align="between"
           className={cn(
-            "w-full justify-between",
+            "w-full",
             invalid && "border-destructive focus-visible:ring-destructive/20",
           )}
         >
@@ -1915,7 +1917,8 @@ function CreateRoutineModal({
                             variant="outline"
                             disabled
                             aria-label={t("modal.actionPicker.loading")}
-                            className="w-full justify-between"
+                            align="between"
+                            className="w-full"
                           >
                             <span aria-hidden className="text-muted-foreground">
                               {t("modal.actionPicker.loading")}
@@ -2213,7 +2216,7 @@ export default function RoutinesPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="justify-between gap-2">
+                      <Button variant="outline" align="between" className="gap-2">
                         <span className="flex items-center gap-2 text-muted-foreground">
                           <Filter className="size-4" aria-hidden />
                           <span className="text-foreground">

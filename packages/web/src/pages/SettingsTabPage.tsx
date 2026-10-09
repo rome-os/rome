@@ -866,7 +866,7 @@ function FavorsSection() {
                 key={pack.id}
                 type="button"
                 variant="outline"
-                className="justify-between"
+                align="between"
                 onClick={() => void startRecharge(pack)}
                 disabled={busyPack !== null}
                 aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
