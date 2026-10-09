@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } 
 import { setupServer } from "msw/node";
 import type { TFunction } from "i18next";
 import i18n from "@/i18n";
-import { channelMirrorHandlers } from "../../../mock/handlers/people";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
 import type { OutboxPage, TimelinePage } from "@rome/api-types/people";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
@@ -17,7 +16,6 @@ import {
   restoreAccount,
   retrySend,
   sendMessage,
-  unlinkAccount,
   updatePerson,
 } from "./writes";
 
@@ -31,7 +29,7 @@ import {
 // decoding have to agree, and a test that asserts a URL string proves only that
 // the client is self-consistent.
 
-const server = setupServer(...peopleHandlers, ...channelMirrorHandlers);
+const server = setupServer(...peopleHandlers);
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -64,13 +62,6 @@ describe("People writes, against the contract's own handlers", () => {
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     expect(created.value.accounts).toContainEqual(expect.objectContaining(DEVIKA));
-
-    // And the same identifier addresses the account for the unlink that undoes
-    // it, through a route that takes it from the path rather than a body.
-    const unlinked = await unlinkAccount(created.value.id, DEVIKA, t);
-    expect(unlinked.ok).toBe(true);
-    if (!unlinked.ok) return;
-    expect(unlinked.value.accounts).toHaveLength(0);
   });
 
   it("refuses a link the contract holds, and takes it on the transfer", async () => {

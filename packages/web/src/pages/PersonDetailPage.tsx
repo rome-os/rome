@@ -1,7 +1,7 @@
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { formatWhatsAppPhone, normalizeBondLevel } from "@rome/api-types/people";
+import { normalizeBondLevel } from "@rome/api-types/people";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { PersonConversation } from "./people/conversation";
 import { PersonManagement } from "./people/manage";
 import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
 import { levelLabelKey } from "./people/rows";
+import { accountHandle } from "./people/send-model";
 import { usePerson } from "./people/use-roster";
 
 /**
@@ -148,11 +149,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                     key={`${account.channel}:${account.channelUserId}`}
                     channel={account.channel}
                   >
-                    <span className="font-mono tabular-nums">
-                      {account.channel === "whatsapp"
-                        ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
-                        : account.channelUserId}
-                    </span>
+                    <span className="font-mono tabular-nums">{accountHandle(account)}</span>
                   </ChannelPill>
                 ))
               )}

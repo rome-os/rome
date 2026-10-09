@@ -44,7 +44,6 @@ import { appKeysHandlers } from "./app-keys";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
-import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
@@ -1257,10 +1256,6 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...activityHandlers,
-  // The WhatsApp mirror, and the /people contract over the same fixture store.
-  // Disjoint path families (/api/whatsapp against /api/people and
-  // /api/accounts), so the order between them is free.
-  ...channelMirrorHandlers,
   ...peopleHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded

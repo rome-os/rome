@@ -1,5 +1,4 @@
-import { useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { PeopleList, PersonResource } from "@rome/api-types/people";
 import { fetchJson } from "@/lib/fetch-json";
 
@@ -15,8 +14,7 @@ const PEOPLE_QUERY_KEY = ["people"] as const;
  * fetch is a menu with nothing in it, not a chatbox that will not mount.
  *
  * One cache, so several subscribers do not each fire their own mount-time
- * fetch. Writes (the People page's create/link/mark-stranger) call
- * {@link useInvalidatePeople} after landing.
+ * fetch.
  */
 export function usePeople() {
   return useQuery<PersonResource[]>({
@@ -27,13 +25,4 @@ export function usePeople() {
         .then((listing) => listing.people)
         .catch(() => []),
   });
-}
-
-export function useInvalidatePeople() {
-  const qc = useQueryClient();
-  // Memoized so the reference is stable across renders. PeoplePage feeds this
-  // into a useCallback(fetchData) → useEffect([fetchData]) chain; an unstable
-  // reference makes that effect re-fire every render, which turns the page into
-  // an unbounded refetch loop.
-  return useCallback(() => qc.invalidateQueries({ queryKey: PEOPLE_QUERY_KEY }), [qc]);
 }

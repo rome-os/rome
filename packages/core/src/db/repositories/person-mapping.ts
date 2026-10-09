@@ -598,18 +598,12 @@ export class PersonMappingRepository {
    * Remove only guardian accounts for a channel after its Talk grant is
    * explicitly disconnected. Other people mappings remain curated data, and
    * transient transport faults never call this path.
-   */
-  async deleteGuardianChannelMappings(channel: string): Promise<void> {
-    this.writeDeleteGuardianChannelMappings(this.db, channel);
-  }
-
-  /**
-   * Synchronous form of {@link deleteGuardianChannelMappings} for enlistment in
-   * a better-sqlite3 transaction (e.g. connection teardown), so the guardian
-   * mapping cleanup commits atomically with the connection/grant deletion rather
-   * than as a separate best-effort write that can strand the mapping on failure.
-   * The guardian-id lookup is inlined as a subquery, so nothing executes outside
-   * `exec`.
+   *
+   * Synchronous, for enlistment in a better-sqlite3 transaction (e.g.
+   * connection teardown), so the cleanup commits atomically with the
+   * connection/grant deletion rather than as a separate best-effort write that
+   * can strand the mapping on failure. The guardian-id lookup is inlined as a
+   * subquery, so nothing executes outside `exec`.
    */
   writeDeleteGuardianChannelMappings(exec: SqliteExec, channel: string): void {
     const guardianIds = this.db

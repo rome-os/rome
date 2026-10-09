@@ -144,31 +144,6 @@ describe("PersonMappingRepository", () => {
     expect(found).toBeNull();
   });
 
-  it("deleteGuardianChannelMappings() removes only guardian mappings for that channel", async () => {
-    const guardianId = await repo.create({
-      displayName: "Guardian",
-      bondLevel: "guardian",
-      channelMappings: [
-        { channel: "feishu", channelUserId: "ou-old" },
-        { channel: "telegram", channelUserId: "tg-guardian" },
-      ],
-    });
-    const friendId = await repo.create({
-      displayName: "Friend",
-      bondLevel: "inner-circle",
-      channelMappings: [{ channel: "feishu", channelUserId: "ou-friend" }],
-    });
-
-    await repo.deleteGuardianChannelMappings("feishu");
-
-    expect((await repo.findById(guardianId))!.channelMappings).toEqual([
-      { channel: "telegram", channelUserId: "tg-guardian" },
-    ]);
-    expect((await repo.findById(friendId))!.channelMappings).toEqual([
-      { channel: "feishu", channelUserId: "ou-friend" },
-    ]);
-  });
-
   it("writeDeleteGuardianChannelMappings() removes only guardian mappings inside a caller transaction", async () => {
     const guardianId = await repo.create({
       displayName: "Guardian",

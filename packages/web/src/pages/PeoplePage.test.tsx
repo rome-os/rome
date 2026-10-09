@@ -558,15 +558,6 @@ describe("PeoplePage stream", () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes("level=inner-circle"))).toBe(true));
   });
 
-  it("reads no channel mirror for a roster the contract already answers", async () => {
-    const { calls } = mockApi({ people: [FRIEND], accounts: [UNKNOWN_SENDER] });
-    renderPage();
-
-    await screen.findByText("Wei Chen");
-    const reads = calls.filter((call) => call.method === "GET").map((call) => call.url);
-    expect(reads.filter((url) => url.includes("/api/whatsapp/contacts"))).toEqual([]);
-  });
-
   it("opens a person's dossier from their row", async () => {
     const user = userEvent.setup();
     mockApi({ people: [FRIEND] });
@@ -957,10 +948,8 @@ describe("PeoplePage folds LinkedIn into the general surface", () => {
 
     await screen.findByText("Wei Chen");
     const reads = calls.filter((call) => call.method === "GET").map((call) => call.url);
-    // The same thing already true of WhatsApp: the contract answers the roster,
-    // so no channel mirror is read to build it.
+    // The contract answers the roster, so no channel mirror is read to build it.
     expect(reads.filter((url) => url.includes("/api/linkedin/"))).toEqual([]);
-    expect(reads.filter((url) => url.includes("/api/whatsapp/contacts"))).toEqual([]);
   });
 
   it("streams a LinkedIn sender the way it streams a WhatsApp one", async () => {
