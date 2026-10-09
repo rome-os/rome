@@ -7,7 +7,9 @@
  * Names are labels two agents can share, so a name resolves only when one
  * agent has it. A whole label, such as `Atlas (@ouou's dot)`, is matched
  * before a bare name, which is how a caller picks between agents that share
- * one. Nothing is guessed between matches.
+ * one. A bare name resolves only to the guardian's own agent; a linked
+ * account's agent is reached by its whole label. Nothing is guessed between
+ * matches.
  */
 
 import { agentLabel } from "../lib/rome-cloud-agents.js";
@@ -35,7 +37,13 @@ export function createAgentNames(agents: ExternalAgents): AgentNamesService {
           ? labelled
           : listed.filter((agent) => agent.name.trim().toLowerCase() === wanted);
       if (matches.length === 0) return { status: "none" };
-      if (matches.length === 1) return { status: "found", agentId: matches[0].agentId };
+      // A bare name reaches only the guardian's own agent. Another account's
+      // agent takes its whole label, so a message to someone else's agent
+      // never goes out under a name that reads as the guardian's.
+      const [only] = matches;
+      if (matches.length === 1 && (labelled.length > 0 || only.sameAccount)) {
+        return { status: "found", agentId: only.agentId };
+      }
       return {
         status: "ambiguous",
         matches: matches.map((agent) => ({ label: agentLabel(agent), agentId: agent.agentId })),

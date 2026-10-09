@@ -56,6 +56,18 @@ describe("agent names", () => {
     });
   });
 
+  it("reaches another account's agent only by its whole label", async () => {
+    const { service } = names([agent(FRIEND_ATLAS, "Atlas", "friend")]);
+    expect(await service.resolve("Atlas")).toEqual({
+      status: "ambiguous",
+      matches: [{ label: "Atlas (@friend's dot)", agentId: FRIEND_ATLAS }],
+    });
+    expect(await service.resolve("Atlas (@friend's dot)")).toEqual({
+      status: "found",
+      agentId: FRIEND_ATLAS,
+    });
+  });
+
   it("matches a name exactly, not one that only starts with it", async () => {
     const { service } = names([agent(BETA, "Atlas (beta)"), agent(ATLAS, "Atlasia")]);
     expect(await service.resolve("Atlas")).toEqual({ status: "none" });

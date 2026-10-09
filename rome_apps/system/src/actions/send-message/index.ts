@@ -278,14 +278,16 @@ async function resolveAgentThreadId(name: string, deps: SendMessageRuntimeDeps):
         labels.size === found.matches.length
           ? "Send again with the full name as `to` or the id as `threadId`."
           : "Send again with the id as `threadId`.";
-      throw new Error(`More than one agent is named "${wanted}": ${options}. ${retry}`);
+      throw new Error(`"${wanted}" does not name one of your agents: ${options}. ${retry}`);
     }
   }
 }
 
 /** The agent a send on "agents" names in `to`, read the same way for the
  *  send and for its approval card, so the card never shows less than the
- *  send acts on. "guardian" keeps its alias meaning. */
+ *  send acts on. "guardian" keeps its alias meaning. The card shows the name
+ *  as given: a bare name reaches only the guardian's own agent, and another
+ *  account's agent is named by its whole label, such as `Atlas (@ouou's dot)`. */
 function agentRecipient(channel: unknown, to: unknown): string | undefined {
   if (channel !== "agents" || typeof to !== "string") return undefined;
   const name = to.trim();
@@ -298,12 +300,16 @@ async function resolveChatThreadId(
 ): Promise<string> {
   const agent = agentRecipient(chat.channel, chat.to);
   if (agent) return resolveAgentThreadId(agent, deps);
-  if (chat.to !== undefined && chat.to !== "guardian") {
+  // Trimmed as `agentRecipient` trims, so the alias reads the same here.
+  const to = typeof chat.to === "string" ? chat.to.trim() : chat.to;
+  if (to !== undefined && to !== "guardian") {
     throw new Error(
-      `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
+      chat.channel === "agents"
+        ? 'Channel "agents" takes an agent\'s name or "guardian" as `to`, or an agent\'s id as `threadId`'
+        : `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
     );
   }
-  if (chat.to === "guardian") return resolveGuardianThreadId(chat.channel, deps);
+  if (to === "guardian") return resolveGuardianThreadId(chat.channel, deps);
   if (chat.threadId) return chat.threadId;
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
