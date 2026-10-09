@@ -55,8 +55,9 @@ describe("find_channel_account", () => {
     await action.execute({ channel: "agents", limit: 500 });
     await action.execute({ channel: "agents", limit: 0 });
     await action.execute({ channel: "agents", limit: "many" });
+    await action.execute({ channel: "agents", limit: null });
 
-    expect(limits).toEqual([500, 0, undefined]);
+    expect(limits).toEqual([500, 0, undefined, undefined]);
   });
 
   it("says an agent may exist when a connected channel matches no one", async () => {

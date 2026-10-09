@@ -50,7 +50,7 @@ export function createAction(
       const channel = args.channel as string;
       const query = args.query as string | undefined;
       // Core clamps the limit; one that is not a number takes its default.
-      const requested = Number(args.limit);
+      const requested = typeof args.limit === "number" ? args.limit : Number.NaN;
 
       try {
         const found = await channelAccounts.find(channel, {
