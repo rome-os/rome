@@ -80,8 +80,8 @@ export interface SendMessageChatInput extends SendMessageBase {
   /** The thread/chat ID to send the message to. Required unless `to: "guardian"` is used. */
   threadId?: string;
   /**
-   * Recipient alias for chat channels: `"guardian"`, or on `agents` an agent's
-   * name, which core resolves to the agent's id.
+   * Recipient alias for chat channels: `"guardian"`, or on `agents`, from the main
+   * agent, an agent's name, which core resolves to the agent's id.
    */
   to?: string;
   /** The recipient user ID. Defaults to threadId if not provided. */

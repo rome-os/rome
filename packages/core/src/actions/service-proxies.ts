@@ -23,7 +23,7 @@ import {
 } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
-import type { ChannelAccountLookup, ChannelAccountsService } from "../channels/channel-accounts.js";
+import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
 import type {
   AppStoreGetParams,
@@ -334,13 +334,10 @@ export class EmailInboundControlProxy implements EmailInboundControl {
   }
 }
 
-/** The system-only address-book lookup, answered by main's channel list. */
-export class ChannelAccountsProxy implements ChannelAccountsService {
-  find(
-    channel: string,
-    read: { query?: string; limit?: number } = {},
-  ): Promise<ChannelAccountLookup> {
-    return getWorkerRpc().call<ChannelAccountLookup>("channelAccounts.find", { channel, ...read });
+/** The system-only agent-name lookup, answered in main. */
+export class AgentNamesProxy implements AgentNamesService {
+  resolve(name: string): Promise<AgentNameResolution> {
+    return getWorkerRpc().call<AgentNameResolution>("agentNames.resolve", { name });
   }
 }
 

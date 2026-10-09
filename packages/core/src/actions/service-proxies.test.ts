@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   AppManagerProxy,
   BackendTurnRunnerProxy,
-  ChannelAccountsProxy,
+  AgentNamesProxy,
   ChannelsServiceProxy,
   NotifyServiceProxy,
   FeedbackServiceProxy,
@@ -95,7 +95,7 @@ describe("ChannelsServiceProxy", () => {
   });
 });
 
-describe("ChannelAccountsProxy", () => {
+describe("AgentNamesProxy", () => {
   const originalSend = process.send;
 
   afterEach(() => {
@@ -103,19 +103,17 @@ describe("ChannelAccountsProxy", () => {
     setWorkerRpcInProcessDispatcher(null);
   });
 
-  it("sends the channel and the read as one set of params", async () => {
+  it("asks main to resolve the name", async () => {
     process.send = undefined;
     const calls: Array<{ method: string; params: unknown }> = [];
-    const answer = { connected: true, accounts: [], more: false };
+    const answer = { status: "none" };
     setWorkerRpcInProcessDispatcher(async (method, params) => {
       calls.push({ method, params });
       return answer;
     });
 
-    expect(await new ChannelAccountsProxy().find("agents", { query: "atlas" })).toEqual(answer);
-    expect(calls).toEqual([
-      { method: "channelAccounts.find", params: { channel: "agents", query: "atlas" } },
-    ]);
+    expect(await new AgentNamesProxy().resolve("atlas")).toEqual(answer);
+    expect(calls).toEqual([{ method: "agentNames.resolve", params: { name: "atlas" } }]);
   });
 });
 

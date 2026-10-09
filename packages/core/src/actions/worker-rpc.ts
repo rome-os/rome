@@ -27,7 +27,7 @@ import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
-import type { ChannelAccountsService } from "../channels/channel-accounts.js";
+import type { AgentNamesService } from "../channels/agent-names.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -56,14 +56,7 @@ const ChannelsQueryParams = z
   })
   .strict();
 
-const ChannelAccountsFindParams = z
-  .object({
-    channel: z.string().min(1),
-    query: z.string().optional(),
-    // Core clamps the limit, so both paths answer the same call alike.
-    limit: z.number().finite().optional(),
-  })
-  .strict();
+const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
 const ConversationRefParams = z.object({
   ref: z.object({ connectionId: z.string().min(1), conversationId: z.string() }),
@@ -247,8 +240,8 @@ export interface WorkerRpcServices {
    * returns only the classified `SendOutcome`. */
   notify: NotifyService;
   feedback: FeedbackService;
-  /** System-only: the address books `system:send_message` resolves agent names in. */
-  channelAccounts: ChannelAccountsService;
+  /** System-only: how `system:send_message` turns an agent's name into its id. */
+  agentNames: AgentNamesService;
 }
 
 export class WorkerRpcServer {
@@ -313,9 +306,9 @@ export class WorkerRpcServer {
         return await this.handleChannelsSend(params);
       case "channels.query":
         return await this.handleChannelsQuery(params);
-      case "channelAccounts.find": {
-        const { channel, ...read } = parseParams(method, ChannelAccountsFindParams, params);
-        return await this.services.channelAccounts.find(channel, read);
+      case "agentNames.resolve": {
+        const { name } = parseParams(method, AgentNamesResolveParams, params);
+        return await this.services.agentNames.resolve(name);
       }
       case "conversationSettings.list":
         return await this.services.conversationSettings.list(

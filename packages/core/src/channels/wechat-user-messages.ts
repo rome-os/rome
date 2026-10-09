@@ -14,7 +14,6 @@
 
 import { compareMessages, isAfterMessageCursor, type Message } from "@rome/api-types/message";
 import type { Account, AccountId, Accounts } from "./accounts.js";
-import { pageAccounts } from "./account-paging.js";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import {
   channelMessageDetail,
@@ -207,17 +206,14 @@ export function wechatUserAccounts(reader: WechatUserReader): Accounts {
     }
   }
   return {
-    async listAccounts({ query, cursor, limit }) {
-      // Groups are dropped after the reader answers, so a read of `limit`
-      // conversations can come back short of `limit` accounts. Read every
-      // conversation, as the reader does before it slices, and page the
-      // direct ones, so a full page says when more matched.
+    async listAccounts({ query, limit }): Promise<{ accounts: Account[] }> {
       const rows = await conversations({
         ...(query ? { query } : {}),
-        limit: Number.MAX_SAFE_INTEGER,
+        limit,
       });
-      const accounts = rows.filter((conversation) => !conversation.isGroup).map(toAccount);
-      return pageAccounts(accounts, { ...(cursor ? { cursor } : {}), limit });
+      return {
+        accounts: rows.filter((conversation) => !conversation.isGroup).map(toAccount),
+      };
     },
 
     async resolve(address: string): Promise<Account | null> {
