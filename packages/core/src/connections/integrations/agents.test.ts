@@ -142,6 +142,21 @@ describe("agents channel", () => {
     await talker.stop();
   });
 
+  it("keeps a message whose sender id is not in Cloud's spelling, and reports the connection broken", async () => {
+    const odd = envelope({ from: { ...envelope().from, agentId: ATLAS.toUpperCase() } });
+    const client = fakeClient([[odd]]);
+    const talker = createAgentsTalker(client);
+    const faults: unknown[] = [];
+    talker.start(
+      () => {},
+      (fault) => faults.push(fault),
+    );
+    await until(() => faults.length > 0);
+    expect(faults[0]).toBeInstanceOf(Disconnected);
+    expect(client.acknowledged).toEqual([]);
+    await talker.stop();
+  });
+
   it("delivers polled messages, then acknowledges them", async () => {
     const client = fakeClient([[envelope(), envelope({ messageId: "msg_2" })]]);
     const talker = createAgentsTalker(client);

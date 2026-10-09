@@ -111,6 +111,12 @@ function isRejectedToken(err: unknown): boolean {
   return err.status === 401 || err.status === 403 || err.code === "no_token";
 }
 
+/** Whether the sender is a live agent id, or null for a removed agent. */
+function hasContractSender(message: AgentMessageEnvelope): boolean {
+  const agentId = message.from?.agentId;
+  return agentId === null || (typeof agentId === "string" && isAgentId(agentId));
+}
+
 export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
   return async (interact, ctx) => {
     interact.show({
@@ -184,12 +190,13 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
       try {
         const { messages } = await client.poll();
         if (current !== generation) return;
-        // A sender without `agentId` is a Cloud on another contract, not a
-        // removed agent. Acknowledging would lose the messages, so Cloud keeps
-        // them and the connection reports itself broken.
-        if (messages.some((message) => message.from?.agentId === undefined)) {
+        // A sender without an `agentId` in Cloud's spelling is a Cloud on
+        // another contract, not a removed agent: Rome could neither answer nor
+        // place it. Acknowledging would lose the messages, so Cloud keeps them
+        // and the connection reports itself broken.
+        if (messages.some((message) => !hasContractSender(message))) {
           const err = new AgentMessagingError(
-            "Rome Cloud sent messages without a sender agentId; this Rome cannot read them.",
+            "Rome Cloud sent messages whose sender has no agentId this Rome can read.",
             undefined,
             "unexpected_shape",
           );
