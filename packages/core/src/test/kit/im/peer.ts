@@ -229,7 +229,11 @@ export class PeerServer {
     const fault = index < 0 ? undefined : this.faults.splice(index, 1)[0];
     if (fault?.before) {
       await Promise.race([fault.before(), once(controller.signal, "abort")]);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        exchange.dropped = true;
+        this.changed();
+        return;
+      }
     }
 
     let status: number;

@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { PeerServer, requestBarrier } from "./peer.js";
 
@@ -75,6 +76,42 @@ describe("PeerServer", () => {
     expect(created).toBe(1);
     expect(server.exchanges[0]).toMatchObject({ accepted: true, dropped: true });
     expect(server.exchanges[0]?.response).toBeUndefined();
+  });
+
+  it("records an answer as dropped when the client left while the route ran", async () => {
+    const peer = await new PeerServer(async ({ signal }) => {
+      await once(signal, "abort");
+      return { body: {}, source: "synthetic", accepted: true };
+    }).start();
+    try {
+      const client = new AbortController();
+      const request = peer.fetch(`${peer.url}/messages`, { method: "POST", signal: client.signal });
+      await peer.waitFor(() => true);
+      client.abort();
+      await expect(request).rejects.toThrow();
+
+      const exchange = await peer.waitFor((e) => e.dropped === true);
+      expect(exchange).toMatchObject({ accepted: true, dropped: true });
+      expect(exchange.response).toBeUndefined();
+    } finally {
+      await peer.close();
+    }
+  });
+
+  it("records a held request as dropped when the client leaves before it runs", async () => {
+    const barrier = requestBarrier();
+    server.once({ method: "POST", path: "/messages", before: barrier.wait });
+    const client = new AbortController();
+    const request = server.fetch(`${server.url}/messages`, {
+      method: "POST",
+      signal: client.signal,
+    });
+    await barrier.entered;
+    client.abort();
+    await expect(request).rejects.toThrow();
+
+    const exchange = await server.waitFor((e) => e.dropped === true);
+    expect([exchange.accepted, exchange.response, created]).toEqual([false, undefined, 0]);
   });
 
   it("holds a request until the test releases it", async () => {

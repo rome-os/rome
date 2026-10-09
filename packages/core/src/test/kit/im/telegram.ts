@@ -42,7 +42,8 @@ export class TelegramPeer implements Peer {
   /** Chats the bot can write to: the recorded one and any a user wrote from. */
   private readonly chats = new Set([String(TELEGRAM_CHAT)]);
   private readonly dates = new Map<string, { date: number; edit_date?: number }>();
-  private readonly markup = new Map<string, string>();
+  /** Each message's entities, serialized for the "not modified" check. */
+  private readonly formatting = new Map<string, string>();
   private updates: Update[] = [];
   private nextMessageId = 1;
   private nextUpdateId = 1;
@@ -153,7 +154,7 @@ export class TelegramPeer implements Peer {
     if (!this.chats.has(chat)) return badRequest("chat not found");
     const read = readText(body);
     if (!("text" in read)) return read;
-    const { text, markup, source } = read;
+    const { text, formatting, source } = read;
     const replyTo = (body.reply_parameters as { message_id?: number } | undefined)?.message_id;
     if (replyTo !== undefined && this.store.get(String(replyTo))?.conversation !== chat)
       return badRequest("message to be replied not found");
@@ -166,7 +167,7 @@ export class TelegramPeer implements Peer {
       ...(replyTo !== undefined ? { replyTo: String(replyTo) } : {}),
     });
     this.dates.set(message.id, { date: now() });
-    this.markup.set(message.id, markup);
+    this.formatting.set(message.id, formatting);
     return { body: { ok: true, result: this.wire(message) }, source, accepted: true };
   }
 
@@ -177,13 +178,13 @@ export class TelegramPeer implements Peer {
     if (message.from !== "rome") return badRequest("message can't be edited");
     const read = readText(body);
     if (!("text" in read)) return read;
-    const { text, markup, source } = read;
-    if (text === message.text && markup === this.markup.get(message.id))
+    const { text, formatting, source } = read;
+    if (text === message.text && formatting === this.formatting.get(message.id))
       return badRequest(
         "message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message",
       );
     this.store.edit(message.id, text);
-    this.markup.set(message.id, markup);
+    this.formatting.set(message.id, formatting);
     this.dates.set(message.id, { ...this.dates.get(message.id)!, edit_date: now() });
     return { body: { ok: true, result: this.wire(message) }, source, accepted: true };
   }
@@ -232,18 +233,42 @@ function badRequest(reason: string): Reply {
  */
 function readText(
   body: Record<string, unknown>,
-): { text: string; markup: string; source: "capture" | "synthetic" } | Reply {
+): { text: string; formatting: string; source: "capture" | "synthetic" } | Reply {
   const raw = String(body.text ?? "");
   const html = body.parse_mode === "HTML";
-  // Telegram drops leading and trailing whitespace from what it shows.
-  const text = (html ? parseHtml(raw) : raw)?.trim();
-  if (text === undefined) return badRequest("can't parse entities");
+  const parsed = html ? parseHtml(raw) : { text: raw, entities: [] };
+  if (!parsed) return badRequest("can't parse entities");
+  const { text, entities } = trim(parsed);
   if (!text) return badRequest("message text is empty");
   if (text.length > TEXT_LIMIT) return badRequest("message is too long");
-  // Stands in for Telegram's entities: an edit that only changes formatting
-  // changes this, not the text.
-  const markup = html ? raw.trim() : "";
-  return { text, markup, source: html ? "synthetic" : "capture" };
+  // Telegram compares entities, not the HTML that spelled them, so `<b>` and
+  // `<strong>` are the same formatting.
+  const formatting = JSON.stringify(entities);
+  return { text, formatting, source: html ? "synthetic" : "capture" };
+}
+
+/** A formatted span: its canonical kind and the attributes that matter. */
+interface Entity {
+  type: string;
+  offset: number;
+  length: number;
+}
+
+/**
+ * Drops the whitespace Telegram drops: before the first entity and after the
+ * last, so the indentation inside a `<pre>` survives.
+ */
+function trim({ text, entities }: { text: string; entities: Entity[] }) {
+  const first = Math.min(text.length, ...entities.map((e) => e.offset));
+  const last = Math.max(0, ...entities.map((e) => e.offset + e.length));
+  let start = 0;
+  while (start < first && /\s/.test(text[start]!)) start += 1;
+  let end = text.length;
+  while (end > Math.max(last, start) && /\s/.test(text[end - 1]!)) end -= 1;
+  return {
+    text: text.slice(start, end),
+    entities: entities.map((e) => ({ ...e, offset: e.offset - start })),
+  };
 }
 
 // The Bot API's HTML formatting: https://core.telegram.org/bots/api#html-style
@@ -265,12 +290,22 @@ const HTML_TAGS = new Set([
   "tg-spoiler",
   "u",
 ]);
+// Tags that spell the same entity as another.
+const SAME_AS: Record<string, string> = {
+  strong: "b",
+  em: "i",
+  ins: "u",
+  strike: "s",
+  del: "s",
+  span: "tg-spoiler",
+};
 const HTML_ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"' };
 
-// A well-formed tag: a name, then `name=value` attributes with matched quotes.
-// A closing tag carries no attributes.
-const OPENING_TAG = /^[a-z-]+(\s+[a-z-]+\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))*\s*$/i;
+// A well-formed tag: a name, then attributes with matched quotes. A closing tag
+// carries no attributes.
+const OPENING_TAG = /^[a-z-]+(\s+[a-z-]+(\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*$/i;
 const CLOSING_TAG = /^\/[a-z-]+\s*$/i;
+const ATTRIBUTE = /([a-z-]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/gi;
 
 // Tags Telegram accepts only with an attribute: a spoiler span and a custom emoji.
 const REQUIRED_ATTRIBUTES: Record<string, RegExp> = {
@@ -279,13 +314,15 @@ const REQUIRED_ATTRIBUTES: Record<string, RegExp> = {
 };
 
 /**
- * The text of Telegram HTML, or null where Telegram cannot parse it: a
- * malformed, unsupported, unclosed or misnested tag, or one missing its
- * required attribute. As in tdlib's parser, only `<` starts markup: a `&` that starts
- * no entity, and any `>` outside a tag, are literal text.
+ * The text and entities of Telegram HTML, or null where Telegram cannot parse
+ * it: a malformed, unsupported, unclosed or misnested tag, one missing its
+ * required attribute, or an attribute without a value other than
+ * `<blockquote expandable>`. As in tdlib's parser, only `<` starts markup: a
+ * `&` that starts no entity, and any `>` outside a tag, are literal text.
  */
-function parseHtml(html: string): string | null {
-  const open: string[] = [];
+function parseHtml(html: string): { text: string; entities: Entity[] } | null {
+  const open: { name: string; type: string; offset: number }[] = [];
+  const entities: Entity[] = [];
   let text = "";
   let at = 0;
   while (at < html.length) {
@@ -298,9 +335,37 @@ function parseHtml(html: string): string | null {
       if (!(closing ? CLOSING_TAG : OPENING_TAG).test(tag)) return null;
       const name = (closing ? tag.slice(1) : tag).split(/\s/)[0]!.toLowerCase();
       if (!HTML_TAGS.has(name)) return null;
-      if (!closing && REQUIRED_ATTRIBUTES[name]?.test(tag) === false) return null;
-      if (!closing) open.push(name);
-      else if (open.pop() !== name) return null;
+      if (closing) {
+        const entity = open.pop();
+        if (entity?.name !== name) return null;
+        // Telegram keeps no entity that covers nothing.
+        if (text.length > entity.offset)
+          entities.push({
+            type: entity.type,
+            offset: entity.offset,
+            length: text.length - entity.offset,
+          });
+      } else {
+        if (REQUIRED_ATTRIBUTES[name]?.test(tag) === false) return null;
+        const attributes = [...tag.slice(name.length).matchAll(ATTRIBUTE)].map(
+          ([, key, value]) => [key!.toLowerCase(), value?.replace(/^["']|["']$/g, "")] as const,
+        );
+        if (
+          attributes.some(
+            ([key, value]) =>
+              value === undefined && !(name === "blockquote" && key === "expandable"),
+          )
+        )
+          return null;
+        // A spoiler span's class only says what it is.
+        const kept =
+          name === "span" ? [] : attributes.map(([key, value]) => `${key}=${value ?? ""}`);
+        open.push({
+          name,
+          type: [SAME_AS[name] ?? name, ...kept.sort()].join(" "),
+          offset: text.length,
+        });
+      }
       at = end + 1;
     } else if (char === "&") {
       const end = html.indexOf(";", at);
@@ -312,7 +377,14 @@ function parseHtml(html: string): string | null {
       at += 1;
     }
   }
-  return open.length ? null : text;
+  return open.length
+    ? null
+    : {
+        text,
+        entities: entities.sort(
+          (a, b) => a.offset - b.offset || b.length - a.length || a.type.localeCompare(b.type),
+        ),
+      };
 }
 
 function decodeEntity(name: string): string | undefined {

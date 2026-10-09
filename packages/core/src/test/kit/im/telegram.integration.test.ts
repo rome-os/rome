@@ -43,12 +43,20 @@ describe("TelegramPeer", () => {
       // Only `<` starts markup: a stray `&` or `>` is literal text.
       await expect(send("AT&T, 1 > 0")).resolves.toMatchObject({ text: "AT&T, 1 > 0" });
       await expect(send('<span class="tg-spoiler">x</span>')).resolves.toMatchObject({ text: "x" });
+      await expect(send("<blockquote expandable>x</blockquote>")).resolves.toMatchObject({
+        text: "x",
+      });
+      // Whitespace is dropped only outside the formatting, so code keeps its indentation.
+      await expect(send("\n<pre>  indented</pre>\n")).resolves.toMatchObject({
+        text: "  indented",
+      });
       for (const bad of [
         "<b>unclosed",
         "<div>x</div>",
         "<b><i>x</b></i>",
         "<span>x</span>",
         '<code class="language-js"broken">x</code>',
+        "<b bold>x</b>",
       ])
         await expect(send(bad)).rejects.toMatchObject({
           description: "Bad Request: can't parse entities",
@@ -73,9 +81,21 @@ describe("TelegramPeer edits", () => {
       await expect(
         api.editMessageText(TELEGRAM_CHAT, sent.message_id, "hi\n\n"),
       ).rejects.toMatchObject({ description: expect.stringContaining("message is not modified") });
+      // Formatting is compared as entities, not as the HTML that spells them.
+      for (const same of ["hi", "<b></b>hi"])
+        await expect(
+          api.editMessageText(TELEGRAM_CHAT, sent.message_id, same, { parse_mode: "HTML" }),
+        ).rejects.toMatchObject({
+          description: expect.stringContaining("message is not modified"),
+        });
       await expect(
         api.editMessageText(TELEGRAM_CHAT, sent.message_id, "<b>hi</b>", { parse_mode: "HTML" }),
       ).resolves.toMatchObject({ text: "hi" });
+      await expect(
+        api.editMessageText(TELEGRAM_CHAT, sent.message_id, "<strong>hi</strong>", {
+          parse_mode: "HTML",
+        }),
+      ).rejects.toMatchObject({ description: expect.stringContaining("message is not modified") });
     } finally {
       await peer.close();
     }
