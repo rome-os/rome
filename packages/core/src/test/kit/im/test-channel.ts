@@ -18,7 +18,7 @@ import { WECHAT_USER, WechatPeer } from "./wechat.js";
  * conversation open between Rome and a user. A scenario drives any platform
  * through this, so it never names one.
  */
-export interface ChannelHarness {
+export interface TestChannel {
   readonly platform: string;
   readonly peer: Peer;
   readonly conversation: ConversationId;
@@ -46,7 +46,7 @@ function inbox(adapter: Adapter) {
     });
 }
 
-async function telegram(): Promise<ChannelHarness> {
+async function telegram(): Promise<TestChannel> {
   const peer = await TelegramPeer.start();
   const adapter = peer.createAdapter();
   await adapter.start();
@@ -66,7 +66,7 @@ async function telegram(): Promise<ChannelHarness> {
   };
 }
 
-async function wechat(): Promise<ChannelHarness> {
+async function wechat(): Promise<TestChannel> {
   const peer = await WechatPeer.start();
   // Rome's iLink adapter calls the global fetch.
   const originalFetch = globalThis.fetch;
@@ -91,7 +91,7 @@ async function wechat(): Promise<ChannelHarness> {
   };
 }
 
-async function discord(): Promise<ChannelHarness> {
+async function discord(): Promise<TestChannel> {
   const peer = await DiscordPeer.start();
   const adapter = peer.createAdapter();
   await adapter.start();
@@ -115,10 +115,10 @@ async function discord(): Promise<ChannelHarness> {
   };
 }
 
-/** Starts each platform's harness, by platform name. */
-export const HARNESSES = { telegram, wechat, discord } satisfies Record<
+/** Starts each platform's test channel, by platform name. */
+export const TEST_CHANNELS = { telegram, wechat, discord } satisfies Record<
   string,
-  () => Promise<ChannelHarness>
+  () => Promise<TestChannel>
 >;
 
-export type Platform = keyof typeof HARNESSES;
+export type Platform = keyof typeof TEST_CHANNELS;

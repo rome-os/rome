@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { type ChannelHarness, HARNESSES, type Platform } from "./harness.js";
+import { type TestChannel, TEST_CHANNELS, type Platform } from "./test-channel.js";
 import { runScenario } from "./scenario.js";
 
-const platforms = Object.keys(HARNESSES) as Platform[];
+const platforms = Object.keys(TEST_CHANNELS) as Platform[];
 
 // What each adapter does today, recorded so a change to it fails one row. The
 // platform's side of each answer comes from the peers, and so from captures.
@@ -24,10 +24,10 @@ const TODAY: Record<
 };
 
 describe.each(platforms)("%s", (platform) => {
-  let channel: ChannelHarness;
+  let channel: TestChannel;
 
   beforeEach(async () => {
-    channel = await HARNESSES[platform]();
+    channel = await TEST_CHANNELS[platform]();
   });
 
   afterEach(() => channel.stop());

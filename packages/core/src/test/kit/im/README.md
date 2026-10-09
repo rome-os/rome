@@ -54,7 +54,7 @@ A response the platform sends, such as iLink's `ret: -3`, belongs in a capture, 
 
 ## Scenarios
 
-A **scenario** is a test written once and run against every platform. It drives a `ChannelHarness` (`harness.ts`): the production adapter started against its peer, with one conversation open between Rome and a user. The scenario sends and receives through the harness and reads `harness.peer`, so it never names a platform. `scenarios.integration.test.ts` runs each scenario once per entry in `HARNESSES`.
+A **scenario** is a test written once and run against every platform. It drives a `TestChannel` (`test-channel.ts`): the production adapter started against its peer, with one conversation open between Rome and a user. The scenario sends and receives through the test channel and reads its `peer`, so it never names a platform. `scenarios.integration.test.ts` runs each scenario once per entry in `TEST_CHANNELS`.
 
 Where platforms differ, the test states the difference in a table keyed by platform, beside the scenario, so a change in what an adapter does fails one row. A row whose behavior no capture pins down skips the scenario and says why. `runScenario` runs the body as labelled steps, so a failure names the step it happened in.
 
@@ -63,4 +63,4 @@ Where platforms differ, the test states the difference in a table keyed by platf
 1. Record a capture with a dedicated test account, sanitize it, and commit it to `captures/`.
 2. Write the peer: a `PeerServer` whose routes build responses from the capture's exemplars and keep state in a `MessageStore`.
 3. Replay the capture against the peer in the peer's test, then test the adapter through it.
-4. Add a harness to `HARNESSES` and a row to each scenario's table. Every scenario then runs on the new platform.
+4. Add a test channel to `TEST_CHANNELS` and a row to each scenario's table. Every scenario then runs on the new platform.
