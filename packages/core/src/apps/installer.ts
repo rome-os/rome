@@ -117,7 +117,6 @@ const BuildManifestSchema = z.object({
   assetVersion: z.string().regex(/^[0-9a-f]{12}$/),
   displayName: z.string().min(1),
   navLabel: z.string().min(1).optional(),
-  routing: z.literal("client"),
 });
 
 function normalizeArtifactEntry(entry: z.infer<typeof ArtifactEntrySchema>): RomeAppArtifactEntry {

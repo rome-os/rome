@@ -52,7 +52,6 @@ const MANIFEST = `${JSON.stringify(
     assetVersion: "000000000001",
     displayName: "User Skills",
     navLabel: "User Skills",
-    routing: "client",
   },
   null,
   2,

@@ -271,7 +271,7 @@ describe("ApprovalHandler", () => {
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(rome.model.sessions).toHaveLength(1);
-      expect(rome.model.sessions[0].agentName).toBe("main");
+      expect(rome.model.sessions[0].agentName).toBe("core:main");
     });
 
     it("skips session resumption when payload has no sessionId", async () => {
@@ -373,7 +373,7 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain('"send_message"');
       expect(rome.model.lastPrompt()).toContain("rejected by the guardian");
       expect(rome.model.lastPrompt()).not.toContain("feedback");
-      expect(rome.model.sessions[0].agentName).toBe("assistant");
+      expect(rome.model.sessions[0].agentName).toBe("core:assistant");
     });
 
     it("preserves the journal for the audit trail", async () => {

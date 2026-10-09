@@ -15,6 +15,7 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 
 const AGENT = "worker";
 
@@ -40,7 +41,8 @@ describe("AgentSessionManager working dirs", () => {
         permissionMode: "default",
       }),
     );
-    const loader = new AgentLoader();
+    const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
     sessionsRepo = new SessionsRepository(testDb.db);
@@ -67,7 +69,7 @@ describe("AgentSessionManager working dirs", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo),
+        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),
@@ -76,7 +78,7 @@ describe("AgentSessionManager working dirs", () => {
           aiToolState: { get: () => state, refresh: async () => state },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(),
+        skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
       },
       { keepAliveAcrossTurns: true },

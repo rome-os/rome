@@ -1,15 +1,10 @@
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
-import { listCoreArtifactsByKind } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
-import {
-  claimLegacyArtifactNames,
-  formatArtifactId,
-  resolveArtifactId,
-  type ArtifactIdentityContext,
-} from "../apps/artifact-id.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
+import { loadArtifactRecords } from "../apps/artifact-records.js";
 import { parseSkillFrontmatterResult } from "../apps/packaging/skill-frontmatter.js";
 export {
   parseSkillFrontmatter,
@@ -45,74 +40,33 @@ export class SkillCatalog {
   private skills: LoadedSkill[] = [];
   private registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
 
-  constructor(private readonly identity?: ArtifactIdentityContext) {}
+  constructor(private readonly identity: ArtifactIdentityContext) {}
 
   async loadFromCatalog(catalog: AppCatalog): Promise<LoadedSkill[]> {
-    const coreRefs = await listCoreArtifactsByKind("skill");
-    const appRefs = catalog.listArtifacts("skill");
-    const refs = [...coreRefs, ...appRefs];
-    const registryLoadFailures: AppOwnedArtifactLoadFailure[] = [];
-    const loaded = refs
-      .map((ref) => toArtifactMetadata(ref))
-      .flatMap((metadata) => {
+    const { records, failures } = await loadArtifactRecords({
+      kind: "skill",
+      sources: catalog.listArtifacts("skill").map(toArtifactMetadata),
+      identity: this.identity,
+      read: async (metadata) => {
         const skillFile = join(metadata.sourcePath, "SKILL.md");
-        try {
-          const content = readFileSync(skillFile, "utf-8").trim();
-          const parsed = parseSkillFrontmatterResult(content);
-          if (!parsed.ok) {
-            throw new Error(`Skill ${skillFile} has invalid frontmatter: ${parsed.message}`);
-          }
-          const meta = parsed.value;
-          const artifactId = this.identity
-            ? formatArtifactId(metadata.ownerId, meta.name)
-            : meta.name;
-          if (this.identity && (metadata.ownerType === "core" || metadata.formatVersion !== 2)) {
-            const claim = claimLegacyArtifactNames(
-              this.identity.legacyBindings,
-              "skill",
-              [meta.name, metadata.publicName, ...metadata.aliases],
-              artifactId as ReturnType<typeof formatArtifactId>,
-            );
-            if (claim.conflicts.length > 0) {
-              throw new Error(
-                `Legacy skill name conflict: ${claim.conflicts
-                  .map(
-                    ({ legacyName, artifactId: owner }) =>
-                      `${JSON.stringify(legacyName)} is bound to ${owner}`,
-                  )
-                  .join(", ")}`,
-              );
-            }
-          }
-          return [
-            {
-              metadata,
-              name: artifactId,
-              localName: meta.name,
-              description: meta.description,
-              tools: meta.tools,
-              content,
-            },
-          ];
-        } catch (err) {
-          if (metadata.ownerType !== "app") {
-            throw err;
-          }
-
-          registryLoadFailures.push({
-            kind: metadata.kind,
-            ownerId: metadata.ownerId,
-            publicName: metadata.publicName,
-            sourcePath: metadata.sourcePath,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return [];
+        const content = (await readFile(skillFile, "utf-8")).trim();
+        const parsed = parseSkillFrontmatterResult(content);
+        if (!parsed.ok) {
+          throw new Error(`Skill ${skillFile} has invalid frontmatter: ${parsed.message}`);
         }
-      })
-      .sort((left, right) => left.name.localeCompare(right.name));
+        return { ...parsed.value, content };
+      },
+    });
 
-    this.skills = loaded;
-    this.registryLoadFailures = registryLoadFailures;
+    this.skills = Array.from(records, ([artifactId, { config, metadata }]) => ({
+      metadata,
+      name: artifactId,
+      localName: config.name,
+      description: config.description,
+      tools: config.tools,
+      content: config.content,
+    })).sort((left, right) => left.name.localeCompare(right.name));
+    this.registryLoadFailures = failures;
     return this.getAll();
   }
 
@@ -141,7 +95,6 @@ export class SkillCatalog {
   }
 
   private resolveName(name: string): string {
-    if (!this.identity) return name;
     try {
       return resolveArtifactId({
         kind: "skill",

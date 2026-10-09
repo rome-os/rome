@@ -544,9 +544,10 @@ export async function buildTestDeps(
     { processRole: "main" },
   );
 
-  const actionLoader = new ActionLoader();
-  const agentLoader = new AgentLoader();
-  const skillCatalog = new SkillCatalog();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const actionLoader = new ActionLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity);
+  const skillCatalog = new SkillCatalog(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -563,7 +564,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionManager = new SessionManager(sessionsRepo);
+  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {

@@ -28,6 +28,7 @@ import {
   claimLegacyArtifactName,
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
+  type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import * as pathsModule from "../paths.js" with { rstest: "importActual" };
 
@@ -57,6 +58,7 @@ import {
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
+  subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain } from "./turn-middleware.js";
@@ -93,6 +95,7 @@ function makeOpenSessionFromRun(
 }
 
 const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
+const EXPLORE_TOOL = subagentToolName("core:test-explore");
 
 /** Collect all messages from an async iterable into an array. */
 async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
@@ -106,6 +109,7 @@ async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<Age
 describe("AgentRunner", () => {
   let testDb: TestDb;
   let agentLoader: AgentLoader;
+  let artifactIdentity: ArtifactIdentityContext;
   let sessionManager: SessionManager;
   let promptBuilder: PromptBuilder;
   let actionRegistry: ActionRegistryImpl;
@@ -119,10 +123,11 @@ describe("AgentRunner", () => {
     testDb = createTestDb();
     const repo = new SessionsRepository(testDb.db);
 
-    agentLoader = new AgentLoader();
+    artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionManager = new SessionManager(repo);
+    sessionManager = new SessionManager(repo, artifactIdentity);
     promptBuilder = new PromptBuilder();
     actionRegistry = new ActionRegistryImpl([]);
     actionEngine = new ActionEngine(actionRegistry);
@@ -559,7 +564,7 @@ describe("AgentRunner", () => {
               yield {
                 type: "tool_input_delta",
                 toolUseId: "tu-explore-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 content: "{",
               };
               yield {
@@ -1054,7 +1059,7 @@ describe("AgentRunner", () => {
       );
       await expect(
         forkOpen!.executeSubagent(
-          "test-explore",
+          EXPLORE_TOOL,
           { prompt: "x" },
           { toolUseId: "isolated-subagent" },
         ),
@@ -1065,7 +1070,7 @@ describe("AgentRunner", () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
-        if (name !== "test-main") return record;
+        if (record.config.name !== "test-main") return record;
         return {
           ...record,
           metadata: {
@@ -1136,7 +1141,7 @@ describe("AgentRunner", () => {
       expect(forkOpen!.getSkillCatalog).toBe(sourceOpen.getSkillCatalog);
       expect(forkOpen!.getActionCatalog().map((a) => a.name)).toEqual(["demo_action"]);
       expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
-      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain("test-explore");
+      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
       expect(forkOpen!.builtinTools).toBe(sourceOpen.builtinTools);
       expect(forkOpen!.builtinTools).toEqual(["Read", "Edit"]);
@@ -1211,18 +1216,18 @@ describe("AgentRunner", () => {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 input: { prompt: "dig" },
               };
               const completion = (await openParams.executeSubagent(
-                "test-explore",
+                EXPLORE_TOOL,
                 { prompt: "dig" },
                 { toolUseId: "fork-subagent-1" },
               )) as { output: string };
               yield {
                 type: "tool_result",
                 toolUseId: "fork-subagent-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 output: completion,
               };
               yield { type: "result", content: completion.output };
@@ -1234,7 +1239,7 @@ describe("AgentRunner", () => {
       const start = messages.find((m) => m.type === "subagent_start");
       expect(start).toMatchObject({
         toolUseId: "fork-subagent-1",
-        agentName: "test-explore",
+        agentName: "core:test-explore",
       });
       const childResult = messages.find((m) => m.type === "subagent_result");
       expect(childResult).toMatchObject({
@@ -1245,7 +1250,8 @@ describe("AgentRunner", () => {
       expect(
         messages.some(
           (m) =>
-            m.type === "text" && (m as AgentEvent & { agent?: string }).agent === "test-explore",
+            m.type === "text" &&
+            (m as AgentEvent & { agent?: string }).agent === "core:test-explore",
         ),
       ).toBe(false);
       const terminal = messages.find((m) => m.type === "result");
@@ -1491,18 +1497,18 @@ describe("AgentRunner", () => {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-2",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 input: { prompt: "fork dig" },
               };
               const completion = (await openParams.executeSubagent(
-                "test-explore",
+                EXPLORE_TOOL,
                 { prompt: "fork dig" },
                 { toolUseId: "fork-subagent-2" },
               )) as { output: string };
               yield {
                 type: "tool_result",
                 toolUseId: "fork-subagent-2",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 output: completion,
               };
               yield { type: "result", content: completion.output };
@@ -1530,7 +1536,7 @@ describe("AgentRunner", () => {
       );
 
       // The fork's subagent is always a fresh session owned by the fork.
-      const childOpens = provider.sessions.filter((s) => s.agentName === "test-explore");
+      const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
       expect(childOpens).toHaveLength(1);
       expect(childOpens[0].sessionId).not.toBe(start.sessionId);
       expect(childOpens[0].isNewSession).toBe(true);
@@ -1585,7 +1591,7 @@ describe("AgentRunner", () => {
       actionEngine,
       webchatRepo: new WebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
@@ -2027,7 +2033,7 @@ describe("AgentRunner", () => {
         "telegram:thread-new",
       );
       expect(stored?.id).toBe(sessionInit.sessionId);
-      expect(stored?.agentName).toBe("test-main");
+      expect(stored?.agentName).toBe("core:test-main");
     });
 
     it("reuses an active session for the same key", async () => {
@@ -2065,7 +2071,7 @@ describe("AgentRunner", () => {
       const repo = new SessionsRepository(testDb.db);
       const existingId = await repo.create({
         id: "expired-generation",
-        agentName: "test-main",
+        agentName: "core:test-main",
         channelThreadKey: "telegram:thread-reset",
       });
       await testDb.db
@@ -2102,12 +2108,12 @@ describe("AgentRunner", () => {
         existingId,
       );
       expect((await repo.findById(existingId))?.status).toBe("completed");
-      expect(await repo.findByChannelThreadKey("telegram:thread-reset", "test-main")).toMatchObject(
-        {
-          id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
-          status: "active",
-        },
-      );
+      expect(
+        await repo.findByChannelThreadKey("telegram:thread-reset", "core:test-main"),
+      ).toMatchObject({
+        id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
+        status: "active",
+      });
     });
 
     it("resumes a keyless run by explicit sessionId", async () => {
@@ -2541,7 +2547,7 @@ describe("AgentRunner", () => {
         await collectMessages(runner.run({ agentName: "test-main", prompt: "Fail" }));
 
         const spans = await harness.finishedSpans();
-        const agentSpan = spans.find((s) => s.name === "agent:test-main");
+        const agentSpan = spans.find((s) => s.name === "agent:core:test-main");
         const modelSpan = spans.find((s) => s.name === "model.turn");
         expect(agentSpan?.status.code).toBe(SpanStatusCode.ERROR);
         expect(modelSpan?.status.code).toBe(SpanStatusCode.ERROR);
@@ -2554,7 +2560,7 @@ describe("AgentRunner", () => {
         await collectMessages(runner.run({ agentName: "test-main", prompt: "Hello" }));
 
         const spans = await harness.finishedSpans();
-        const agentSpan = spans.find((s) => s.name === "agent:test-main");
+        const agentSpan = spans.find((s) => s.name === "agent:core:test-main");
         const modelSpan = spans.find((s) => s.name === "model.turn");
         expect(agentSpan?.status.code).toBe(SpanStatusCode.OK);
         expect(modelSpan?.status.code).toBe(SpanStatusCode.OK);
@@ -2686,7 +2692,7 @@ describe("AgentRunner", () => {
         turn: {
           sessionId: expect.any(String),
           turnId: expect.any(String),
-          agentName: "test-main",
+          agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
           threadContext: {
             channel: "webchat",
@@ -2708,7 +2714,7 @@ describe("AgentRunner", () => {
         turn: {
           sessionId: lifecycle.started[0].turn.sessionId,
           turnId: lifecycle.started[0].turn.turnId,
-          agentName: "test-main",
+          agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
         },
         status: "completed",
@@ -2876,15 +2882,15 @@ describe("AgentRunner", () => {
           yield {
             type: "tool_use",
             id,
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: `Inspect ${nestedCalls.length}` },
           };
           const output = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: `Inspect ${nestedCalls.length}` },
             { toolUseId: id },
           );
-          yield { type: "tool_result", toolUseId: id, tool: "test-explore", output };
+          yield { type: "tool_result", toolUseId: id, tool: EXPLORE_TOOL, output };
           yield { type: "result", content: `Delegated ${nestedCalls.length}` };
           return;
         }
@@ -2930,8 +2936,10 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "test-main");
-      const childFinished = lifecycle.finished.filter((e) => e.turn.agentName === "test-explore");
+      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "core:test-main");
+      const childFinished = lifecycle.finished.filter(
+        (e) => e.turn.agentName === "core:test-explore",
+      );
 
       expect(nestedCalls[0].systemPrompt).toContain("```mermaid");
       expect(nestedCalls[1].systemPrompt).not.toContain("```mermaid");
@@ -2941,12 +2949,12 @@ describe("AgentRunner", () => {
       expect(childFinished[0].turn.parent).toEqual({
         sessionId: rootFinished[0].turn.sessionId,
         turnId: rootFinished[0].turn.turnId,
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(childFinished[1].turn.parent).toEqual({
         sessionId: rootFinished[1].turn.sessionId,
         turnId: rootFinished[1].turn.turnId,
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(childFinished[0].turn.parent?.turnId).not.toBe(childFinished[1].turn.parent?.turnId);
       expect(childFinished.map((e) => e.turn.threadContext?.channelUserId)).toEqual([
@@ -3150,7 +3158,7 @@ describe("AgentRunner", () => {
       expect(call.systemPrompt).toContain("You are a test main agent.");
       expect(call.systemPrompt).toContain("Extra context");
       expect(provider.sessions[0]).toMatchObject({
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(provider.sessions[0].appStoreListingId).toBeUndefined();
     });
@@ -3159,7 +3167,7 @@ describe("AgentRunner", () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
-        if (name !== "test-main") return record;
+        if (record.config.name !== "test-main") return record;
         return {
           ...record,
           metadata: {
@@ -3201,7 +3209,7 @@ describe("AgentRunner", () => {
             "App-supplied session context.",
         );
         expect(provider.sessions[0]).toMatchObject({
-          agentName: "test-main",
+          agentName: "core:test-main",
           appStoreListingId: "@publisher/test-app",
         });
 
@@ -5022,9 +5030,9 @@ describe("AgentRunner", () => {
       expect(provider.calls).toHaveLength(1);
       const toolNames = provider.calls[0].subagentTools.map((t) => t.name);
       // test-main has allowedSubagents: ["test-explore"]
-      expect(toolNames).toContain("test-explore");
+      expect(toolNames).toContain(EXPLORE_TOOL);
 
-      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === "test-explore");
+      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === EXPLORE_TOOL);
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
@@ -5051,21 +5059,21 @@ describe("AgentRunner", () => {
         yield {
           type: "tool_input_delta",
           toolUseId: "tu-explore-1",
-          tool: "test-explore",
+          tool: EXPLORE_TOOL,
           content: '{"prompt":',
         };
         yield {
           type: "tool_use",
           id: "tu-explore-1",
-          tool: "test-explore",
+          tool: EXPLORE_TOOL,
           input: { prompt: "Inspect" },
         };
         const output = await params.executeSubagent(
-          "test-explore",
+          EXPLORE_TOOL,
           { prompt: "Inspect" },
           { toolUseId: "tu-explore-1" },
         );
-        yield { type: "tool_result", toolUseId: "tu-explore-1", tool: "test-explore", output };
+        yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
         yield { type: "result", content: "Delegated" };
       };
       const provider: ModelProvider = {
@@ -5102,31 +5110,31 @@ describe("AgentRunner", () => {
           yield {
             type: "tool_use",
             id: "tu-explore-1",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: "Inspect" },
           };
           const output = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: "Inspect" },
             { toolUseId: "tu-explore-1" },
           );
           delegatedOutput = output;
-          yield { type: "tool_result", toolUseId: "tu-explore-1", tool: "test-explore", output };
+          yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
           const earlyOutput = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: "Inspect before provider event" },
             { toolUseId: "tu-explore-2" },
           );
           yield {
             type: "tool_use",
             id: "tu-explore-2",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: "Inspect before provider event" },
           };
           yield {
             type: "tool_result",
             toolUseId: "tu-explore-2",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             output: earlyOutput,
           };
           yield { type: "result", content: "Delegated" };
@@ -5170,47 +5178,47 @@ describe("AgentRunner", () => {
           expect.objectContaining({
             type: "subagent_start",
             toolUseId: "tu-explore-1",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             input: { prompt: "Inspect" },
             sessionId: expect.any(String),
             turnId: expect.any(String),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_result",
             toolUseId: "tu-explore-1",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             status: "completed",
             sessionId: expect.any(String),
             turnId: expect.any(String),
             output: "Explore complete",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_start",
             toolUseId: "tu-explore-2",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             sessionId: expect.any(String),
             turnId: expect.any(String),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_result",
             toolUseId: "tu-explore-2",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             status: "completed",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "result",
             content: "Delegated",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "turn_end",
             status: "completed",
             durationMs: expect.any(Number),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
         ]),
       );
@@ -5230,10 +5238,10 @@ describe("AgentRunner", () => {
       const storedChild = await new WebChatRepository(testDb.db).getSession(firstChild!.sessionId);
       expect(storedChild).toMatchObject({
         type: "subagent",
-        parentSessionId: "action:exec-1:test-main",
+        parentSessionId: "action:exec-1:core:test-main",
       });
       expect(
-        messages.some((message) => "agent" in message && message.agent === "test-explore"),
+        messages.some((message) => "agent" in message && message.agent === "core:test-explore"),
       ).toBe(false);
       expect(observerEvents).toEqual([]);
     });

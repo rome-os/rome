@@ -45,6 +45,7 @@ import type { RunParams } from "../../core/types.js";
 import type { AgentConfig, AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
+import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
 
 // createTestRome — boot the real runtime wiring over an in-memory DB and a
 // temp profile, faking only genuine process edges (model provider, channel
@@ -228,7 +229,8 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const agentLoader = new AgentLoader();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(agentsDir);
 
   const model = new FakeModel();
@@ -267,7 +269,7 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions);
+  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
   const promptBuilder = new PromptBuilder();
   const agentSessionManager = createAgentSessionManager(
     {
@@ -280,7 +282,7 @@ async function buildHarness(
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: createAgentLifecycleDispatcher(),
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },

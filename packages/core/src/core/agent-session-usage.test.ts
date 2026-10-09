@@ -20,6 +20,7 @@ import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
+import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -61,7 +62,8 @@ describe("AgentSession turn usage", () => {
         permissionMode: "default",
       }),
     );
-    const loader = new AgentLoader();
+    const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
     recorded = [];
@@ -117,7 +119,7 @@ describe("AgentSession turn usage", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(new SessionsRepository(testDb.db)),
+        sessionManager: new SessionManager(new SessionsRepository(testDb.db), artifactIdentity),
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),
@@ -127,7 +129,7 @@ describe("AgentSession turn usage", () => {
           romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(),
+        skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
@@ -163,7 +165,7 @@ describe("AgentSession turn usage", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
       turnId: handle.turnId,
-      agentName: AGENT,
+      agentName: `core:${AGENT}`,
       status: "completed",
       provider: "openai",
       funding: "byok",

@@ -8,7 +8,7 @@ import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifac
 export class SessionManager {
   constructor(
     private sessionsRepository: SessionsRepository,
-    private readonly identity?: ArtifactIdentityContext,
+    private readonly identity: ArtifactIdentityContext,
   ) {}
 
   /**
@@ -31,12 +31,11 @@ export class SessionManager {
       }
     | undefined
   > {
-    const row =
-      this.identity && agentName
-        ? (await this.sessionsRepository.findActiveByChannelThreadKey(channelThreadKey)).find(
-            (candidate) => this.sameAgent(candidate.agentName, agentName),
-          )
-        : await this.sessionsRepository.findByChannelThreadKey(channelThreadKey, agentName);
+    const row = agentName
+      ? (await this.sessionsRepository.findActiveByChannelThreadKey(channelThreadKey)).find(
+          (candidate) => this.sameAgent(candidate.agentName, agentName),
+        )
+      : await this.sessionsRepository.findByChannelThreadKey(channelThreadKey);
     if (!row) return undefined;
     return {
       id: row.id,
@@ -140,7 +139,7 @@ export class SessionManager {
   }
 
   private sameAgent(storedName: string, requestedName: string): boolean {
-    if (!this.identity) return storedName === requestedName;
+    if (storedName === requestedName) return true;
     try {
       return (
         resolveArtifactId({
