@@ -163,6 +163,38 @@ describe("Button glyph inset", () => {
   });
 });
 
+describe("Button glyph paths", () => {
+  // The read path (`glyph-edge.ts`) and the marked path (the compound rows)
+  // each carry the step-to-token table, so they are pinned to agree.
+  it.each([
+    "sm",
+    "md",
+    "default",
+    "xs",
+    "icon-md",
+  ] as const)("trims the same token on both paths at size %s", (size) => {
+    render(
+      <>
+        <Button size={size}>
+          <Plus />
+          Read
+        </Button>
+        <Button asChild size={size}>
+          <a href="/marked">
+            <Plus data-icon="inline-start" />
+            Marked
+          </a>
+        </Button>
+      </>,
+    );
+    const token = (className: string) =>
+      className.match(/pl-\[var\((--control-px-icon-[a-z]+)\)\]/)?.[1] ?? null;
+    expect(token(screen.getByRole("link").className)).toBe(
+      token(screen.getByRole("button").className),
+    );
+  });
+});
+
 describe("Toggle glyph inset", () => {
   it("trims the glyph side the same way Button does", () => {
     render(

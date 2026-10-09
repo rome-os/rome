@@ -2159,7 +2159,12 @@ export default function RoutinesPage() {
         <PageHeader
           title={t("header.title")}
           actions={
-            <Button onClick={() => setShowCreate(true)}>
+            <Button
+              onClick={() => setShowCreate(true)}
+              // Below `sm` the label hides and the icon stands alone, so it
+              // keeps symmetric padding there instead of the glyph-side trim.
+              className="max-sm:px-[var(--control-px-center-md)]"
+            >
               <Plus className="size-4" aria-hidden />
               <span className="hidden sm:inline">{t("header.createButton")}</span>
             </Button>
