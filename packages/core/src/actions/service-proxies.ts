@@ -334,7 +334,7 @@ export class EmailInboundControlProxy implements EmailInboundControl {
   }
 }
 
-/** Feedback leaves the instance only in main; an IPC failure can follow a send. */
+/** The system-only address-book lookup, answered by main's channel list. */
 export class ChannelAccountsProxy implements ChannelAccountsService {
   find(
     channel: string,
@@ -344,6 +344,7 @@ export class ChannelAccountsProxy implements ChannelAccountsService {
   }
 }
 
+/** Feedback leaves the instance only in main; an IPC failure can follow a send. */
 export class FeedbackServiceProxy implements FeedbackService {
   async send(input: AgentFeedback): Promise<FeedbackOutcome> {
     try {

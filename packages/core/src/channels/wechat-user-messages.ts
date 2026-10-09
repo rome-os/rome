@@ -209,12 +209,12 @@ export function wechatUserAccounts(reader: WechatUserReader): Accounts {
   return {
     async listAccounts({ query, cursor, limit }) {
       // Groups are dropped after the reader answers, so a read of `limit`
-      // conversations can come back short of `limit` accounts. Read the
-      // bounded window and page the direct conversations in it, so a full
-      // page says when more matched.
+      // conversations can come back short of `limit` accounts. Read every
+      // conversation, as the reader does before it slices, and page the
+      // direct ones, so a full page says when more matched.
       const rows = await conversations({
         ...(query ? { query } : {}),
-        limit: WINDOW_CAP,
+        limit: Number.MAX_SAFE_INTEGER,
       });
       const accounts = rows.filter((conversation) => !conversation.isGroup).map(toAccount);
       return pageAccounts(accounts, { ...(cursor ? { cursor } : {}), limit });

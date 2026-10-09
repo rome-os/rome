@@ -27,7 +27,7 @@ import type { AppLifecycleService } from "../apps/lifecycle-service.js";
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { SystemUpgradeChecker } from "../system-upgrade/service.js";
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
-import { MAX_ACCOUNT_LOOKUP, type ChannelAccountsService } from "../channels/channel-accounts.js";
+import type { ChannelAccountsService } from "../channels/channel-accounts.js";
 import type { NotifyService } from "../lib/notify-client.js";
 import { SpecSourceSchema } from "../apps/lockfile.js";
 import { parseRemixSource } from "../apps/remix-source.js";
@@ -60,7 +60,8 @@ const ChannelAccountsFindParams = z
   .object({
     channel: z.string().min(1),
     query: z.string().optional(),
-    limit: z.number().int().positive().max(MAX_ACCOUNT_LOOKUP).optional(),
+    // Core clamps the limit, so both paths answer the same call alike.
+    limit: z.number().finite().optional(),
   })
   .strict();
 

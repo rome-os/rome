@@ -311,7 +311,7 @@ describe("WorkerRpcServer param validation", () => {
       expect(query).not.toHaveBeenCalled();
     });
 
-    it("looks up a channel's accounts, and refuses a limit past the cap", async () => {
+    it("looks up a channel's accounts, leaving the limit for core to clamp", async () => {
       const find = rs.fn(async () => ({ connected: true, accounts: [], more: false }));
       const { server } = makeServer({ channelAccounts: { find } });
       const fake = makeFakeWorker();
@@ -323,13 +323,16 @@ describe("WorkerRpcServer param validation", () => {
         limit: 5,
       });
       const tooMany = await rpc(fake, "channelAccounts.find", { channel: "agents", limit: 101 });
+      const notANumber = await rpc(fake, "channelAccounts.find", { channel: "agents", limit: "5" });
       const stray = await rpc(fake, "channelAccounts.find", { channel: "agents", cursor: "1" });
 
       expect(found.result).toEqual({ connected: true, accounts: [], more: false });
       expect(find).toHaveBeenCalledWith("agents", { query: "atlas", limit: 5 });
-      expect(tooMany.error).toMatch(/channelAccounts\.find: invalid params/);
+      expect(find).toHaveBeenLastCalledWith("agents", { limit: 101 });
+      expect(tooMany.error).toBeUndefined();
+      expect(notANumber.error).toMatch(/channelAccounts\.find: invalid params/);
       expect(stray.error).toMatch(/channelAccounts\.find: invalid params/);
-      expect(find).toHaveBeenCalledTimes(1);
+      expect(find).toHaveBeenCalledTimes(2);
     });
   });
 

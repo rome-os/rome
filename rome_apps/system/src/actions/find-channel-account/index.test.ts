@@ -42,10 +42,10 @@ describe("find_channel_account", () => {
       status: "ok",
       data: { channel: "agents", accounts: [atlas], more: true },
     });
-    expect(calls).toEqual([{ channel: "agents", read: { query: "atlas", limit: 20 } }]);
+    expect(calls).toEqual([{ channel: "agents", read: { query: "atlas" } }]);
   });
 
-  it("keeps the limit within what the service accepts", async () => {
+  it("passes a numeric limit to core to clamp, and drops one that is not a number", async () => {
     const limits: (number | undefined)[] = [];
     const action = makeAction(async (_channel, read) => {
       limits.push(read?.limit);
@@ -56,7 +56,7 @@ describe("find_channel_account", () => {
     await action.execute({ channel: "agents", limit: 0 });
     await action.execute({ channel: "agents", limit: "many" });
 
-    expect(limits).toEqual([100, 1, undefined]);
+    expect(limits).toEqual([500, 0, undefined]);
   });
 
   it("says an agent may exist when a connected channel matches no one", async () => {

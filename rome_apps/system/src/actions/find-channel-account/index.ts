@@ -49,14 +49,13 @@ export function createAction(
       }
       const channel = args.channel as string;
       const query = args.query as string | undefined;
-      const requested = Number(args.limit ?? 20);
+      // Core clamps the limit; one that is not a number takes its default.
+      const requested = Number(args.limit);
 
       try {
         const found = await channelAccounts.find(channel, {
           ...(query ? { query } : {}),
-          ...(Number.isFinite(requested)
-            ? { limit: Math.min(Math.max(Math.floor(requested), 1), 100) }
-            : {}),
+          ...(Number.isFinite(requested) ? { limit: requested } : {}),
         });
         // A channel that is not connected lists no one, so its empty answer
         // would read as nobody matching.
