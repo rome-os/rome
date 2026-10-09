@@ -382,7 +382,7 @@ interface CodexAppServerProviderOptions {
   /** Only the Rome credits payer may classify its 402 as exhausted credits. */
   isUsingRomeCredits?: () => boolean;
   /** The Rome credits gateway refused a model it no longer serves. */
-  onRomeCreditsModelNotServed?: () => void;
+  onRomeCreditsModelNotServed?: () => Promise<void> | void;
   /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => UsageFunding;
 }
@@ -441,11 +441,15 @@ function classifyCodexFailure(
   if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
     return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
   }
-  // The served list is stale. Re-read it so the next resolution falls back or
-  // fails closed instead of choosing the same model again.
+  // The served list is stale. Re-read it before the terminal block, so a retry
+  // falls back or fails closed instead of choosing the same model again.
   if (options.isUsingRomeCredits?.() && isRomeCreditsModelNotServedError(turnError)) {
-    options.onRomeCreditsModelNotServed?.();
-    return { code: "model_unavailable", httpStatus: 403 };
+    const refreshed = options.onRomeCreditsModelNotServed?.();
+    return {
+      code: "model_unavailable",
+      httpStatus: 403,
+      ...(refreshed ? { pending: refreshed } : {}),
+    };
   }
   // The turn never started; a retry runs under the new payer.
   if (turnError instanceof PayerChangedError) {

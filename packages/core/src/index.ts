@@ -589,7 +589,7 @@ async function main() {
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
-    onRomeCreditsModelNotServed: () => void romeCreditsPayer.refreshServedModels(),
+    onRomeCreditsModelNotServed: () => romeCreditsPayer.refreshServedModels(),
     funding: () => {
       const account = aiToolState.get().codex;
       return codexFunding({

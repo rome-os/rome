@@ -2397,6 +2397,48 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("re-reads the served models before exposing a Rome credits model refusal", async () => {
+    let refreshed = false;
+    const provider = new CodexAppServerProvider({
+      isUsingRomeCredits: () => true,
+      onRomeCreditsModelNotServed: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        refreshed = true;
+      },
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: "turn-1",
+            status: "failed",
+            error: {
+              message:
+                "unexpected status 403 Forbidden: This model is not available from Rome credits.",
+            },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    // The terminal waited for the re-read, so a retry sees the new list.
+    expect(refreshed).toBe(true);
+    expect(error).toMatchObject({ type: "error", code: "model_unavailable", httpStatus: 403 });
+    await session.close();
+  });
+
   it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
     let funding: UsageFunding = "byok";
     const provider = new CodexAppServerProvider({ funding: () => funding });
