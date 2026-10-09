@@ -1,5 +1,6 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
+import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
 import type { Pacer } from "./pacer.js";
 import { splitPoint } from "./split.js";
@@ -12,6 +13,8 @@ import {
   effectiveMode,
   type PartReceipt,
 } from "./types.js";
+
+const log = createLogger("reply-delivery");
 
 /** A write the reply made, reported as it finishes. */
 export interface DeliveryEvent {
@@ -104,7 +107,10 @@ const MAX_UNKNOWN_EDITS = 3;
  *   `finish()`.
  * - One write runs at a time, through the account's Pacer. When the Pacer
  *   lets it run, the write carries the latest text, so a preview that went
- *   stale while it waited is never sent.
+ *   stale while it waited is never sent. A write whose target is gone, or that
+ *   waited past the reply's failure, is dropped.
+ * - A message is never created for text with nothing visible in it, since a
+ *   platform refuses one. The reply waits for visible text instead.
  * - A message never receives text older than what it shows.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
@@ -139,7 +145,8 @@ export class ReplyDelivery {
     if (this.closed || this.failure) return;
     this.sourceChars += this.assembler.apply(event);
     const waiting = this.sourceChars - this.settledChars;
-    if (waiting > this.options.policy.maxPendingChars)
+    // A `final` reply waits for its end by design, so nothing bounds its text.
+    if (this.mode !== "final" && waiting > this.options.policy.maxPendingChars)
       this.fail({ kind: "overflow", message: `${waiting} characters wait unsent` });
     this.pump();
   }
@@ -178,7 +185,7 @@ export class ReplyDelivery {
     if (this.writing) return;
     if (this.timer) this.options.clock.clearTimeout(this.timer);
     this.timer = undefined;
-    const plan = this.failure || this.abort.signal.aborted ? null : this.plan(this.now());
+    const plan = this.failure || this.abort.signal.aborted ? null : this.planSafely(this.now());
     if (plan === null) {
       if (this.closed) for (const done of this.idle.splice(0)) done();
       return;
@@ -192,9 +199,13 @@ export class ReplyDelivery {
       .run(
         this.conversation,
         () => {
-          // The text may have grown while the write waited its turn.
-          const fresh = this.plan(this.now(), true);
-          return this.write(fresh && sameTarget(fresh, plan) ? fresh : plan);
+          // The reply can change while a write waits its turn. Its text may
+          // have grown, it may have failed, and the write may have become
+          // unnecessary. Only a write for the same target runs, with the
+          // latest text.
+          if (this.failure) return Promise.resolve();
+          const fresh = this.planSafely(this.now(), true);
+          return fresh && sameTarget(fresh, plan) ? this.write(fresh) : Promise.resolve();
         },
         this.abort.signal,
       )
@@ -205,6 +216,20 @@ export class ReplyDelivery {
         this.writing = false;
         this.pump();
       });
+  }
+
+  /** `plan`, where a fault in planning fails the reply instead of throwing
+   *  into whoever fed it text, or into the pacer. */
+  private planSafely(now: number, ignoreWaits = false): Plan {
+    try {
+      return this.plan(now, ignoreWaits);
+    } catch (error) {
+      this.fail({
+        kind: "rejected",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /** The next write, or when to look again, or null when there is nothing
@@ -241,7 +266,10 @@ export class ReplyDelivery {
         const active = last && !last.settled ? last : undefined;
         const start = active ? active.start : (last?.end ?? 0);
         const remaining = block.text.slice(start);
-        if (!remaining) {
+        // Nothing visible yet, or only a whitespace tail after a split. A
+        // platform refuses a message with no visible text, and one refusal
+        // ends the reply.
+        if (!remaining || !codec.render(remaining, true).trim()) {
           if (complete) break;
           return null;
         }
@@ -286,15 +314,23 @@ export class ReplyDelivery {
     const { transport, observe } = this.options;
     const state = this.blocks[plan.block]!;
     const rendered = transport.codec.render(plan.source, plan.settle);
-    const report = (result: DeliveryEvent["result"], part: number) =>
-      observe?.({
-        at: this.now(),
-        write: plan.write,
-        block: plan.block,
-        part,
-        text: rendered,
-        result,
-      });
+    const report = (result: DeliveryEvent["result"], part: number) => {
+      try {
+        observe?.({
+          at: this.now(),
+          write: plan.write,
+          block: plan.block,
+          part,
+          text: rendered,
+          result,
+        });
+      } catch (error) {
+        // An observer is a diagnostic. It cannot change what a write did.
+        log.warn("delivery observer threw", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
 
     if (plan.write === "create") {
       const first = this.blocks.every((block) => block.parts.length === 0);
@@ -364,7 +400,9 @@ export class ReplyDelivery {
 
   private handle(failure: DeliveryFailure): void {
     if (failure.kind === "rate-limited") {
-      this.options.pacer.pause(failure.retryAfterMs ?? 1000, this.conversation);
+      // A platform's answer does not say whose limit it hit, so the whole
+      // account waits.
+      this.options.pacer.pause(failure.retryAfterMs ?? 1000);
       return;
     }
     this.fail({ kind: failure.kind, message: failure.message });

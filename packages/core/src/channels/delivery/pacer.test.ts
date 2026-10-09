@@ -127,6 +127,16 @@ describe("Pacer", () => {
     expect(clock.pendingTimerCount()).toBe(0);
   });
 
+  it("rejects a write that throws before it returns, and keeps serving the account", async () => {
+    const paced = pacer();
+    const thrown = paced.run("a", () => {
+      throw new Error("sync");
+    });
+    await expect(thrown).rejects.toThrow("sync");
+    await expect(paced.run("b", write("next"))).resolves.toBe("next");
+    expect(log).toEqual(["next@0"]);
+  });
+
   it("keeps going after a write fails", async () => {
     const paced = pacer();
     const failed = paced.run("a", async () => {

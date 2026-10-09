@@ -22,6 +22,8 @@ class MemoryPlatform implements DeliveryTransport {
     [];
   /** Resolves the next create only when released, to model a slow platform. */
   hold?: Promise<void>;
+  /** Refuses text with nothing visible in it, as Telegram does. */
+  rejectBlank = false;
   readonly edit?: (receipt: PartReceipt, text: string) => Promise<void>;
 
   constructor(
@@ -37,6 +39,8 @@ class MemoryPlatform implements DeliveryTransport {
 
   async create(_conversation: string, text: string, replyTo?: string): Promise<PartReceipt> {
     await this.hold;
+    if (this.rejectBlank && !text.trim())
+      throw new DeliveryFailure("rejected", "message text is empty");
     this.fail("create");
     const id = `m${this.messages.length + 1}`;
     this.messages.push({ id, ...(replyTo ? { replyTo } : {}), history: [text] });
@@ -370,10 +374,191 @@ describe("ReplyDelivery", () => {
   });
 
   it("fails rather than holding more unsent text than its bound", async () => {
-    const delivery = reply({ mode: "final", maxPendingChars: 10 });
+    const delivery = reply({ mode: "edit", maxPendingChars: 10 });
     delivery.accept(delta("more than ten characters"));
     const outcome = await delivery.finish();
     expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
     expect(platform.messages).toHaveLength(0);
+  });
+
+  it("delivers a reply longer than the unsent-text bound in final mode, which waits by design", async () => {
+    const delivery = reply({ mode: "final", maxPendingChars: 10 });
+    delivery.accept(result("more than ten characters"));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(platform.shown.join("")).toBe("more than ten characters");
+  });
+
+  describe("text with nothing visible in it", () => {
+    beforeEach(() => {
+      platform.rejectBlank = true;
+    });
+
+    it("waits for visible text before it creates a message", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("\n\n", "a"));
+      await advance(0);
+      expect(platform.messages).toHaveLength(0);
+
+      delivery.accept(delta("Hello", "a"));
+      delivery.accept(text("\n\nHello", "a"));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual(["\n\nHello"]);
+    });
+
+    it("writes nothing for a block that is only whitespace", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(text("  \n", "a"));
+      const outcome = await delivery.finish();
+
+      expect(platform.messages).toHaveLength(0);
+      expect(outcome).toMatchObject({ status: "delivered", parts: [] });
+    });
+
+    it("drops a whitespace tail that a split leaves instead of sending it", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(text(`${"a".repeat(20)}\n`, "a"));
+      const outcome = await delivery.finish();
+
+      expect(platform.shown).toEqual(["a".repeat(20)]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("waits in blocks mode too, however long its block has waited", async () => {
+      const delivery = reply({ mode: "blocks", blockWaitMs: 0 });
+      delivery.accept(delta(" ", "a"));
+      await advance(0);
+      await advance(0);
+      expect(platform.messages).toHaveLength(0);
+
+      delivery.accept(delta("x", "a"));
+      delivery.accept(text(" x", "a"));
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown).toEqual([" x"]);
+    });
+  });
+
+  describe("a write that waits in a paced queue", () => {
+    const paused = (policy: Partial<DeliveryPolicy> = {}) => {
+      const pacer = new Pacer(OPEN_BUDGET, clock);
+      pacer.pause(1000);
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: {
+          mode: "edit",
+          editIntervalMs: 0,
+          blockWaitMs: 0,
+          maxPendingChars: 10_000,
+          ...policy,
+        },
+        conversation: "c1",
+        clock,
+      });
+      return { pacer, delivery };
+    };
+
+    it("does not send a preview the reply no longer holds", async () => {
+      const { delivery } = paused();
+      delivery.accept(delta("Draft", "a"));
+      delivery.accept(text("", "a"));
+      const finished = delivery.finish();
+      await advance(2000);
+      const outcome = await finished;
+
+      expect(platform.messages).toHaveLength(0);
+      expect(outcome).toMatchObject({ status: "delivered", parts: [] });
+    });
+
+    it("does not send once the reply has failed", async () => {
+      const { delivery } = paused({ maxPendingChars: 10 });
+      delivery.accept(delta("small", "a"));
+      delivery.accept(delta(" too much", "a"));
+      const finished = delivery.finish();
+      await advance(2000);
+      const outcome = await finished;
+
+      expect(platform.messages).toHaveLength(0);
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
+    });
+
+    it("still sends the latest text when only the text changed", async () => {
+      const { delivery } = paused();
+      delivery.accept(delta("Draft", "a"));
+      delivery.accept(delta(" and more", "a"));
+      const finished = delivery.finish();
+      await advance(2000);
+      await finished;
+
+      expect(platform.shown).toEqual(["Draft and more"]);
+    });
+  });
+
+  it("pauses every conversation of the account when the platform rate-limits one", async () => {
+    const pacer = new Pacer(OPEN_BUDGET, clock);
+    platform.failures.push({
+      write: "create",
+      failure: new DeliveryFailure("rate-limited", "slow down", 5000),
+    });
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer,
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "c1",
+      clock,
+    });
+    delivery.accept(result("hi"));
+    await advance(0);
+
+    let otherRan = false;
+    void pacer.run("c2", async () => {
+      otherRan = true;
+    });
+    await advance(4000);
+    expect(otherRan).toBe(false);
+
+    const finished = delivery.finish();
+    await advance(2000);
+    await finished;
+    expect(otherRan).toBe(true);
+    expect(platform.shown).toEqual(["hi"]);
+  });
+
+  it("keeps a delivered message delivered when the observer throws", async () => {
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer: new Pacer(OPEN_BUDGET, clock),
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "c1",
+      clock,
+      // Throws only for an accepted write, so a faulty hook cannot also fail
+      // the failure path and hide what it did to the outcome.
+      observe: (event) => {
+        if (event.result === "accepted") throw new Error("observer");
+      },
+    });
+    delivery.accept(result("hi"));
+    const outcome = await delivery.finish();
+
+    expect(outcome).toMatchObject({ status: "delivered" });
+    expect(platform.messages).toHaveLength(1);
+  });
+
+  it("fails the reply, and never throws into its caller, when it cannot split text", async () => {
+    const unsplittable = new MemoryPlatform({ maxPartLength: 0, edit: true, budget: OPEN_BUDGET });
+    const delivery = reply({}, unsplittable);
+
+    expect(() => delivery.accept(delta("hello"))).not.toThrow();
+    const outcome = await delivery.finish();
+
+    expect(outcome).toMatchObject({
+      status: "failed",
+      failure: { kind: "rejected", message: expect.stringContaining("one character") },
+    });
   });
 });

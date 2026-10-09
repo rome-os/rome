@@ -112,7 +112,7 @@ describe.each(platforms)("%s", (platform) => {
     ({ task }) => {
       const channel = open();
       return runScenario(task, channel, async (context) => {
-        const { outcome, inbound, mode } = await streamReply(context, channel);
+        const { outcome, inbound, mode, source } = await streamReply(context, channel);
 
         await context.step(`The user sees every part, delivered in ${mode} mode`, () => {
           expect(outcome.status).toBe("delivered");
@@ -128,7 +128,36 @@ describe.each(platforms)("%s", (platform) => {
         await context.step("The reply keeps every delivery invariant", () =>
           context.check(
             checkDelivery({
-              source: COMMENTARY + STORY,
+              source,
+              outcome,
+              peer: channel.peer,
+              conversation: channel.conversation,
+              maxPartLength: transportOf(channel).capabilities.maxPartLength,
+            }),
+          ),
+        );
+      });
+    },
+  );
+
+  // A platform refuses a message with no visible text, and the refusal would end
+  // the reply. The agent's first delta is often only a line break.
+  it.skipIf(!TODAY[platform].streams)(
+    "waits for visible text when the agent opens with a blank line",
+    ({ task }) => {
+      const channel = open();
+      return runScenario(task, channel, async (context) => {
+        const { outcome, source } = await streamReply(context, channel, { lead: "\n\n" });
+
+        await context.step("The reply delivers, and no message opens blank", () => {
+          expect(outcome.status).toBe("delivered");
+          const [first] = romeMessages(channel);
+          expect(first?.text).toBe(COMMENTARY);
+        });
+        await context.step("The reply keeps every delivery invariant", () =>
+          context.check(
+            checkDelivery({
+              source,
               outcome,
               peer: channel.peer,
               conversation: channel.conversation,
@@ -157,10 +186,13 @@ const STORY = Array.from(
 async function streamReply(
   { step, note }: ScenarioContext,
   channel: TestChannel,
+  { lead = "" }: { lead?: string } = {},
 ): Promise<{
   outcome: ReplyOutcome;
   inbound: Awaited<ReturnType<TestChannel["receive"]>>;
   mode: ReturnType<typeof effectiveMode>;
+  /** The reply's full text: every block, in order. */
+  source: string;
 }> {
   const transport = transportOf(channel);
   const policy = {
@@ -186,7 +218,13 @@ async function streamReply(
   };
 
   await step("The agent streams a commentary, then the answer", async () => {
-    emit({ type: "text", content: COMMENTARY, blockId: "c", turnPhase: "commentary" });
+    // With a `lead`, the commentary opens with it, and nothing else arrives
+    // for a while, so the engine has seen only whitespace.
+    if (lead) {
+      emit({ type: "text_delta", content: lead, blockId: "c" });
+      await sleep(30);
+    }
+    emit({ type: "text", content: lead + COMMENTARY, blockId: "c", turnPhase: "commentary" });
     for (const chunk of chunks(STORY, 400)) {
       emit({ type: "text_delta", content: chunk, blockId: "a" });
       await sleep(2);
@@ -195,7 +233,12 @@ async function streamReply(
     emit({ type: "result", content: STORY });
   });
   const outcome = await step("The reply settles", () => delivery.finish());
-  return { outcome, inbound, mode: effectiveMode(policy, transport.capabilities) };
+  return {
+    outcome,
+    inbound,
+    mode: effectiveMode(policy, transport.capabilities),
+    source: lead + COMMENTARY + STORY,
+  };
 }
 
 function transportOf(channel: TestChannel) {

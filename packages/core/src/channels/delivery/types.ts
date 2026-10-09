@@ -31,8 +31,10 @@ const deliveryPolicySchema = z.object({
   editIntervalMs: z.number().int().nonnegative(),
   /** How long a `blocks` part may wait for more text before it is sent. */
   blockWaitMs: z.number().int().nonnegative(),
-  /** The most source text that may wait unsent. A reply that exceeds it fails
-   *  rather than dropping text. */
+  /** The most source text that may wait unsent in `edit` and `blocks` mode,
+   *  which includes the text of a preview still open. It must exceed the
+   *  platform's longest message. A reply that exceeds it fails rather than
+   *  dropping text. A `final` reply waits by design and has no bound. */
   maxPendingChars: z.number().int().positive(),
 });
 
@@ -87,7 +89,8 @@ export interface DeliveryTransport {
  * - `rejected`: the platform refused it and will refuse it again.
  * - `unauthorized`: the credential no longer works. Never answered with a
  *   new message instead.
- * - `rate-limited`: try again after `retryAfterMs`.
+ * - `rate-limited`: try again after `retryAfterMs`. The whole account waits,
+ *   since the platform does not say whose limit it hit.
  * - `unsupported`: the platform cannot do this at all (an edit it does not
  *   allow).
  * - `unknown`: the write may or may not have happened (a timeout, a lost

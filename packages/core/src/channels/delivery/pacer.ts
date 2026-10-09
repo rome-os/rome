@@ -150,15 +150,20 @@ export class Pacer {
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
-    void job
-      .write()
-      .then(job.resolve, job.reject)
-      .finally(() => {
-        this.running = false;
-        // A pause the write itself asked for (a rate limit) outlasts the spacing.
-        lane.readyAt = Math.max(lane.readyAt, this.now() + this.budget.conversationSpacingMs);
-        this.pump();
-      });
+    // A write that throws before it returns a promise rejects its caller. It
+    // must not leave `running` set, which would stop every write of the account.
+    let written: Promise<unknown>;
+    try {
+      written = job.write();
+    } catch (error) {
+      written = Promise.reject(error);
+    }
+    void written.then(job.resolve, job.reject).finally(() => {
+      this.running = false;
+      // A pause the write itself asked for (a rate limit) outlasts the spacing.
+      lane.readyAt = Math.max(lane.readyAt, this.now() + this.budget.conversationSpacingMs);
+      this.pump();
+    });
   }
 
   private refill(now: number): void {
