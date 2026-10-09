@@ -72,7 +72,6 @@ import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
-  fallbackConversationTitle,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
@@ -1294,7 +1293,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       sourceSessionId = source.sessionId;
-      const storedCheckpoint = await deps.sessionManager.getTurnCheckpoint(
+      const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
         source.sessionId,
         input.turnId,
       );
@@ -1379,7 +1378,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // every type-keyed gate grants ordinary-chat behavior from the 201 on.
       // The send guard in handleChatSend keeps "visible" from outrunning
       // "continuable" until persistForkThread lands the provider thread.
-      const fallbackTitle = fallbackConversationTitle(input.prompt);
+      const fallbackTitle = normalizeConversationTitle(input.prompt);
       const current = await deps.webchatRepo.getSession(forkSessionId);
       if (current && fallbackTitle) {
         await deps.webchatRepo.updateSessionNameIfCurrent(
@@ -1794,7 +1793,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    title ??= fallbackConversationTitle(firstMessage);
+    title ??= normalizeConversationTitle(firstMessage);
     if (!title) return;
 
     // The model runs in parallel with the main turn. Do not overwrite a title

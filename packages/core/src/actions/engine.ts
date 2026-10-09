@@ -47,6 +47,7 @@ import {
 } from "./runtime-events.js";
 import type { ThreadContext } from "../core/types.js";
 import type { WorkerRpcServer } from "./worker-rpc.js";
+import { IpcRpc, createChildProcessTransport } from "./ipc.js";
 import type { AgentSessionChildBridge } from "../core/agent-session-bridge.js";
 import { actionDurationMetric } from "../telemetry.js";
 import { systemClock, type Clock, type ClockTimer } from "../lib/clock.js";
@@ -293,7 +294,7 @@ interface ActionWorkerProcess {
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
-  sessionRpc?: { dispose(): void };
+  rpc?: IpcRpc;
 }
 
 /** Thrown by {@link ActionEngine.run} when `name` is not in the registry.
@@ -1466,7 +1467,7 @@ export class ActionEngine {
     this.liveWorkers.add(worker);
     this.attachWorkerServices(worker);
     child.once("exit", () => {
-      worker.sessionRpc?.dispose();
+      worker.rpc?.dispose();
       this.warmWorkers.delete(worker);
       this.liveWorkers.delete(worker);
       this.admitQueuedRoots();
@@ -1479,11 +1480,18 @@ export class ActionEngine {
 
   private attachWorkerServices(worker: ActionWorkerProcess): void {
     if (worker.attached) return;
-    this.workerRpcServer?.attach(worker.child);
-    const sessionRpc = this.agentSessionBridge?.attach(worker.child);
-    if (sessionRpc) {
-      worker.sessionRpc = sessionRpc;
-    }
+    // A pooled ChildProcess keeps the async resource created by fork(). If
+    // that fork happened while an action replay/execution context was active,
+    // every later `message` callback on the reused worker re-enters that old
+    // context. Worker IPC is an independent ingress boundary, so never let a
+    // creator action's ALS state leak into a main-process service call.
+    const rpc = new IpcRpc(createChildProcessTransport(worker.child), "main", {
+      runInbound: async (callback) =>
+        await replayContext.exit(() => actionExecutionContext.exit(callback)),
+    });
+    this.workerRpcServer?.register(rpc);
+    this.agentSessionBridge?.attach(rpc, worker.child);
+    worker.rpc = rpc;
     worker.attached = true;
   }
 

@@ -5,7 +5,7 @@
 // those own in-memory state (trigger timers, subscriber sets, child-process
 // handles) that cannot be duplicated across processes. Each proxy below
 // presents the action-facing surface of one service but forwards every call to
-// the main process over the WorkerRPC IPC channel (see `getWorkerRpc`), where
+// the main process over the worker's IPC channel (see `callMain`), where
 // the real service does the work.
 //
 // They are one half of a pair: in the main process an action receives the real
@@ -15,12 +15,7 @@
 // keeping that stringly-typed seam in one typed place instead of scattered
 // across action bodies.
 
-import {
-  getWorkerRpc,
-  WorkerRpcDisconnectError,
-  WorkerRpcSendError,
-  WorkerRpcTimeoutError,
-} from "./worker-rpc-client.js";
+import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
 import type { AgentNameResolution, AgentNamesService } from "../channels/agent-names.js";
@@ -73,7 +68,7 @@ const BACKEND_TURN_RPC_TIMEOUT_MS = 30 * 60 * 1000;
 /** Push notify: NotifyClient bounds the main-to-Rome Cloud request at 120s,
  * including Rome Cloud's server-side APNs fan-out (~100s worst case). Keep this
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
- * WorkerRpcClient's 30s default. */
+ * callMain's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
 
 /**
@@ -86,12 +81,12 @@ export class RoutineEngineProxy implements RoutineEngine {
   /** Bring a persisted routine live. The main process re-reads the row by id
    * and activates it, so only the id needs to cross the wire. */
   async activate(routine: Routine): Promise<void> {
-    await getWorkerRpc().call("routines.schedule", { routineId: routine.id });
+    await callMain("routines.schedule", { routineId: routine.id });
   }
 
   /** Tear down a routine's triggers in the main process. */
   async deactivate(routineId: string): Promise<void> {
-    await getWorkerRpc().call("routines.cancel", { routineId });
+    await callMain("routines.cancel", { routineId });
   }
 }
 
@@ -103,7 +98,7 @@ export class RoutineEngineProxy implements RoutineEngine {
  */
 export class ActionRegistryProxy {
   async has(actionName: string): Promise<boolean> {
-    const result = await getWorkerRpc().call<{ hasAction: boolean }>("actions.has", { actionName });
+    const result = await callMain<{ hasAction: boolean }>("actions.has", { actionName });
     return result.hasAction;
   }
 }
@@ -122,7 +117,7 @@ export class EventBusProxy implements EventPublisher {
     // No `?? {}` here: the `events.publish` Zod schema defaults a missing
     // payload to `{}` at the (validated) wire boundary, so defaulting again on
     // the way in is redundant.
-    return await getWorkerRpc().call<{ accepted: true }>("events.publish", {
+    return await callMain<{ accepted: true }>("events.publish", {
       name: event.name,
       source: event.source,
       payload: event.payload,
@@ -138,10 +133,10 @@ export class EventCatalogProxy implements EventCatalogReader {
     query: string,
     limit: number,
   ): Promise<{ entries: EventCatalogEntry[]; total: number }> {
-    return await getWorkerRpc().call<{ entries: EventCatalogEntry[]; total: number }>(
-      "events.searchCatalog",
-      { query, limit },
-    );
+    return await callMain<{ entries: EventCatalogEntry[]; total: number }>("events.searchCatalog", {
+      query,
+      limit,
+    });
   }
 }
 
@@ -153,7 +148,7 @@ export class EventCatalogProxy implements EventCatalogReader {
  */
 export class AppManagerProxy implements AppLifecycle {
   async create(params: AppLifecycleCreateParams): Promise<unknown> {
-    return await getWorkerRpc().call("apps.create", params, {
+    return await callMain("apps.create", params, {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
@@ -161,19 +156,19 @@ export class AppManagerProxy implements AppLifecycle {
   // install, uninstall, and setEnabled carry the caller's hook chain, so the
   // app-started hooks they cause count against the chain's recursion budget.
   async install(params: { source: unknown; enabled?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.install", withHookChain(params), {
+    return await callMain("apps.install", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async uninstall(params: { appId: string; purge?: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.uninstall", withHookChain(params), {
+    return await callMain("apps.uninstall", withHookChain(params), {
       timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
     });
   }
 
   async setEnabled(params: { appId: string; enabled: boolean }): Promise<unknown> {
-    return await getWorkerRpc().call("apps.setEnabled", withHookChain(params), {
+    return await callMain("apps.setEnabled", withHookChain(params), {
       timeoutMs: SHORT_RPC_TIMEOUT_MS,
     });
   }
@@ -189,7 +184,7 @@ export class AppStoreProxy implements AppStoreReader {
   async listListings(
     params: AppStoreListParams = {},
   ): Promise<AppStoreServiceResult<AppStoreListingsBody>> {
-    return await getWorkerRpc().call<AppStoreServiceResult<AppStoreListingsBody>>(
+    return await callMain<AppStoreServiceResult<AppStoreListingsBody>>(
       "appStore.listListings",
       params,
       { timeoutMs: SHORT_RPC_TIMEOUT_MS },
@@ -199,7 +194,7 @@ export class AppStoreProxy implements AppStoreReader {
   async getListing(
     params: AppStoreGetParams,
   ): Promise<AppStoreServiceResult<AppStoreListingDetailBody>> {
-    return await getWorkerRpc().call<AppStoreServiceResult<AppStoreListingDetailBody>>(
+    return await callMain<AppStoreServiceResult<AppStoreListingDetailBody>>(
       "appStore.getListing",
       params,
       { timeoutMs: SHORT_RPC_TIMEOUT_MS },
@@ -224,7 +219,7 @@ export class ChannelsServiceProxy implements ChannelsService {
   }
 
   async list(): Promise<ChannelSummary[]> {
-    const summaries = await getWorkerRpc().call<ChannelSummary[]>("channels.list", {});
+    const summaries = await callMain<ChannelSummary[]>("channels.list", {});
     return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
   }
 
@@ -233,7 +228,7 @@ export class ChannelsServiceProxy implements ChannelsService {
     conversationId: ConversationId,
     message: OutgoingMessage,
   ): Promise<MessageReceipt> {
-    return getWorkerRpc().call<MessageReceipt>("channels.send", {
+    return callMain<MessageReceipt>("channels.send", {
       channel,
       conversationId,
       message,
@@ -242,7 +237,7 @@ export class ChannelsServiceProxy implements ChannelsService {
 
   async query(channel: string, query: ChannelMessageQuery = {}): Promise<ChannelMessage[]> {
     return fromWire(
-      await getWorkerRpc().call<WireChannelMessage[]>("channels.query", {
+      await callMain<WireChannelMessage[]>("channels.query", {
         channel,
         ...query,
         ...(query.since ? { since: query.since.toISOString() } : {}),
@@ -253,19 +248,19 @@ export class ChannelsServiceProxy implements ChannelsService {
 
 export class ConversationSettingsControlProxy implements ConversationSettingsControl {
   list(input: ListConversationSettingsInput): Promise<ConversationSettingsPage> {
-    return getWorkerRpc().call("conversationSettings.list", input);
+    return callMain("conversationSettings.list", input);
   }
 
   get(ref: ConversationRef): Promise<ConversationSettingsSnapshot> {
-    return getWorkerRpc().call("conversationSettings.get", { ref });
+    return callMain("conversationSettings.get", { ref });
   }
 
   update(input: UpdateConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return getWorkerRpc().call("conversationSettings.update", input);
+    return callMain("conversationSettings.update", input);
   }
 
   reset(input: ResetConversationSettingsInput): Promise<ConversationSettingsSnapshot> {
-    return getWorkerRpc().call("conversationSettings.reset", input);
+    return callMain("conversationSettings.reset", input);
   }
 }
 
@@ -277,7 +272,7 @@ export class ConversationSettingsControlProxy implements ConversationSettingsCon
  */
 export class SystemUpgradeServiceProxy implements SystemUpgradeChecker {
   async checkAndOffer(): Promise<SystemUpgradeOfferResult> {
-    return await getWorkerRpc().call<SystemUpgradeOfferResult>("system.upgrade.checkAndOffer", {});
+    return await callMain<SystemUpgradeOfferResult>("system.upgrade.checkAndOffer", {});
   }
 }
 
@@ -288,7 +283,7 @@ export class SystemUpgradeServiceProxy implements SystemUpgradeChecker {
  * the single `runAndDeliver` forwards there over one RPC. */
 export class BackendTurnRunnerProxy implements BackendTurnRunner {
   async runAndDeliver(params: BackendTurnParams): Promise<void> {
-    await getWorkerRpc().call("session.continue", params, {
+    await callMain("session.continue", params, {
       timeoutMs: BACKEND_TURN_RPC_TIMEOUT_MS,
     });
   }
@@ -299,23 +294,17 @@ export class BackendTurnRunnerProxy implements BackendTurnRunner {
  * must never leave the main process — so the whole send (token read + the
  * `/api/notify` call) happens in main and only the `SendOutcome` returns here.
  * A worker→main transport failure leaves delivery genuinely uncertain (the
- * request may have reached main and Rome Cloud), so the three named transport
- * errors map to `outcome_unknown`; anything else — a no-IPC topology error or a
+ * request may have reached main and Rome Cloud), so a timeout or disconnect
+ * maps to `outcome_unknown`; anything else — a no-IPC topology error or a
  * genuine main-handler bug — keeps throwing. */
 export class NotifyServiceProxy implements NotifyService {
   async send(content?: NotifyContent): Promise<SendOutcome> {
     try {
-      return await getWorkerRpc().call<SendOutcome>("notify.send", content ?? {}, {
+      return await callMain<SendOutcome>("notify.send", content ?? {}, {
         timeoutMs: NOTIFY_RPC_TIMEOUT_MS,
       });
     } catch (err) {
-      if (
-        err instanceof WorkerRpcTimeoutError ||
-        err instanceof WorkerRpcDisconnectError ||
-        err instanceof WorkerRpcSendError
-      ) {
-        return { kind: "outcome_unknown" };
-      }
+      if (isTransportUncertain(err)) return { kind: "outcome_unknown" };
       throw err;
     }
   }
@@ -327,7 +316,7 @@ export class NotifyServiceProxy implements NotifyService {
  * + HMAC to main where the adapter verifies and dispatches it. */
 export class EmailInboundControlProxy implements EmailInboundControl {
   async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-    return getWorkerRpc().call<EmailInboundResult>("channels.email.ingestInbound", {
+    return callMain<EmailInboundResult>("channels.email.ingestInbound", {
       rawBody,
       signature,
     });
@@ -337,7 +326,7 @@ export class EmailInboundControlProxy implements EmailInboundControl {
 /** The system-only agent-name lookup, answered in main. */
 export class AgentNamesProxy implements AgentNamesService {
   resolve(name: string): Promise<AgentNameResolution> {
-    return getWorkerRpc().call<AgentNameResolution>("agentNames.resolve", { name });
+    return callMain<AgentNameResolution>("agentNames.resolve", { name });
   }
 }
 
@@ -345,17 +334,9 @@ export class AgentNamesProxy implements AgentNamesService {
 export class FeedbackServiceProxy implements FeedbackService {
   async send(input: AgentFeedback): Promise<FeedbackOutcome> {
     try {
-      return await getWorkerRpc().call<FeedbackOutcome>("feedback.send", input, {
-        timeoutMs: 30_000,
-      });
+      return await callMain<FeedbackOutcome>("feedback.send", input);
     } catch (err) {
-      if (
-        err instanceof WorkerRpcTimeoutError ||
-        err instanceof WorkerRpcDisconnectError ||
-        err instanceof WorkerRpcSendError
-      ) {
-        return { kind: "unreachable" };
-      }
+      if (isTransportUncertain(err)) return { kind: "unreachable" };
       throw err;
     }
   }

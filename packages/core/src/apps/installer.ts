@@ -23,7 +23,6 @@ import {
   appMigrationsTableName,
   ArtifactEntrySchema,
   formatZodIssues,
-  hashWorkspace,
   parseAppManifest,
   resolvePathWithinBase,
   safeIsFile,
@@ -335,11 +334,6 @@ export class AppInstaller {
       return { ok: false, reason: `bundle missing app.yaml at ${root}` };
     }
     return { ok: true, root };
-  }
-
-  /** Convenience for testing and migration scripts. */
-  computeWorkspaceHash(workspaceRoot: string): Promise<string> {
-    return hashWorkspace(workspaceRoot);
   }
 
   /**

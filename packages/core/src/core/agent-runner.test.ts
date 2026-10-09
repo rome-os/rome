@@ -111,6 +111,7 @@ describe("AgentRunner", () => {
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
   let sessionManager: SessionManager;
+  let sessionsRepo: SessionsRepository;
   let promptBuilder: PromptBuilder;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
@@ -121,13 +122,13 @@ describe("AgentRunner", () => {
     // short-circuit never fires unless a test opts in.
 
     testDb = createTestDb();
-    const repo = new SessionsRepository(testDb.db);
+    sessionsRepo = new SessionsRepository(testDb.db);
 
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionManager = new SessionManager(repo, artifactIdentity);
+    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     promptBuilder = new PromptBuilder();
     actionRegistry = new ActionRegistryImpl([]);
     actionEngine = new ActionEngine(actionRegistry);
@@ -1585,6 +1586,7 @@ describe("AgentRunner", () => {
       agentLoader,
       appCatalog,
       sessionManager,
+      sessionsRepo,
       promptBuilder,
       actionRegistry,
       modelResolver,
@@ -2266,7 +2268,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toMatchObject({
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toMatchObject({
         sessionId: start.sessionId,
         turnId: start.turnId,
         provider: "mock",
@@ -2319,7 +2321,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
     });
 
@@ -2373,7 +2375,7 @@ describe("AgentRunner", () => {
       if (!start || start.type !== "turn_start") return;
 
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
       expect(lifecycle.finished[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },

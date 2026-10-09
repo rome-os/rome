@@ -70,6 +70,7 @@ describe("AgentSessionManager working dirs", () => {
       {
         agentLoader: loader,
         sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+        sessionsRepo,
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),

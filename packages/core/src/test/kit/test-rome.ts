@@ -275,6 +275,7 @@ async function buildHarness(
     {
       agentLoader,
       sessionManager,
+      sessionsRepo: repos.sessions,
       promptBuilder,
       actionRegistry,
       modelResolver,

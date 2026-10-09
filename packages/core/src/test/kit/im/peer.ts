@@ -40,6 +40,10 @@ export interface PeerExchange {
   /** The client never got the answer: a fault cut it off, or the client was
    *  gone. With `accepted`, the platform changed but the client cannot know. */
   dropped?: boolean;
+  /** `performance.now()` when the request arrived, and when it was answered or
+   *  dropped. */
+  receivedAt: number;
+  answeredAt?: number;
 }
 
 /**
@@ -221,6 +225,7 @@ export class PeerServer {
     const exchange: PeerExchange = {
       request: { method, path: url.pathname, body },
       accepted: false,
+      receivedAt: performance.now(),
     };
     this.exchanges.push(exchange);
     this.changed();
@@ -258,11 +263,13 @@ export class PeerServer {
     // The answer never reaches a client that is gone, or one a fault cuts off.
     if (fault?.dropAfterAccept || res.destroyed) {
       exchange.dropped = true;
+      exchange.answeredAt = performance.now();
       this.changed();
       res.destroy();
       return;
     }
     exchange.response = { status, body: answer };
+    exchange.answeredAt = performance.now();
     this.changed();
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(answer));
@@ -298,13 +305,22 @@ export interface VisibleMessage {
   edits: number;
 }
 
+/** A message as the platform showed it right after it was created or edited. */
+export interface MessageChange {
+  /** `performance.now()` when the platform applied the change. */
+  at: number;
+  message: VisibleMessage;
+}
+
 /** What a platform holds, independent of how its API spells it. */
 export class MessageStore {
   private readonly messages = new Map<string, VisibleMessage>();
+  private readonly log: MessageChange[] = [];
 
   add(message: Omit<VisibleMessage, "edits">): VisibleMessage {
     const stored = { ...message, edits: 0 };
     this.messages.set(message.id, stored);
+    this.record(stored);
     return stored;
   }
 
@@ -317,7 +333,12 @@ export class MessageStore {
     if (!message) throw new Error(`No message ${id}`);
     message.text = text;
     message.edits += 1;
+    this.record(message);
     return message;
+  }
+
+  private record(message: VisibleMessage) {
+    this.log.push({ at: performance.now(), message: { ...message } });
   }
 
   /** The conversation's messages in the order they were created. */
@@ -326,11 +347,19 @@ export class MessageStore {
       .filter((message) => message.conversation === conversation)
       .map((message) => ({ ...message }));
   }
+
+  /** Every create and edit in the conversation, in the order the platform applied them. */
+  changes(conversation: string): MessageChange[] {
+    return this.log
+      .filter((change) => change.message.conversation === conversation)
+      .map((change) => ({ at: change.at, message: { ...change.message } }));
+  }
 }
 
 /** A platform stand-in: an API server plus what the platform shows. */
 export interface Peer {
   readonly server: PeerServer;
   visible(conversation: string): VisibleMessage[];
+  changes(conversation: string): MessageChange[];
   close(): Promise<void>;
 }

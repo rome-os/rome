@@ -107,6 +107,7 @@ describe("AgentSession turn usage", () => {
     };
     const actionRegistry = new ActionRegistryImpl([]);
     const promptBuilder = new PromptBuilder();
+    const sessionsRepo = new SessionsRepository(testDb.db);
     rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
     const turnMiddleware: TurnMiddlewareChain = {
       loadFromCatalog: async () => [],
@@ -119,7 +120,8 @@ describe("AgentSession turn usage", () => {
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(new SessionsRepository(testDb.db), artifactIdentity),
+        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+        sessionsRepo,
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),

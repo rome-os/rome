@@ -33,7 +33,7 @@ import {
   DEFAULT_REASONING_EFFORT,
   LARGE_MODEL_OPTIONS,
 } from "@/lib/chat-constants";
-import { formatProjectLabel, isReasoningEffort } from "@/lib/chat-helpers";
+import { getProjectDisplayName, isReasoningEffort } from "@/lib/chat-helpers";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import type {
   AgentMention,
@@ -942,8 +942,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const draftProject = projectCatalog?.projects.find((p) => p.name === draftProjectName);
   const draftProjectLabel = draftProject
-    ? (draftProject.displayName ?? formatProjectLabel(draftProject.name))
-    : formatProjectLabel(draftProjectName);
+    ? (draftProject.displayName ?? getProjectDisplayName(draftProject.name))
+    : getProjectDisplayName(draftProjectName);
 
   // Live handoff (not the approve moment, which keeps its own banner). When set,
   // it's the active chip in the row and supersedes the @agent chip — both would

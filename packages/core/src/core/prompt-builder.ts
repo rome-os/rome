@@ -14,7 +14,7 @@ import {
   getRepoAppsDir,
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
-import { getWebchatProjectPath, getWebchatProjectsRoot } from "../webchat/projects.js";
+import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
 
 // Workspace context injection.
 //
@@ -551,7 +551,7 @@ export class PromptBuilder {
    */
   private resolveProjectLocation(projectName: string): string | null {
     const candidates = [
-      getWebchatProjectPath(projectName),
+      resolveWebchatProjectPath(projectName),
       join(this.customAppAuthoringRoot, projectName),
     ];
     for (const candidate of candidates) {

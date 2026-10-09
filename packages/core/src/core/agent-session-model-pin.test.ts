@@ -81,6 +81,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let testDb: TestDb;
   let loader: AgentLoader;
   let sessionManager: SessionManager;
+  let sessionsRepo: SessionsRepository;
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
@@ -105,6 +106,7 @@ describe("agent model pins through AgentSessionManager", () => {
       {
         agentLoader: loader,
         sessionManager,
+        sessionsRepo,
         promptBuilder,
         actionRegistry,
         actionEngine: new ActionEngine(actionRegistry),
@@ -131,7 +133,8 @@ describe("agent model pins through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionManager = new SessionManager(new SessionsRepository(testDb.db), artifactIdentity);
+    sessionsRepo = new SessionsRepository(testDb.db);
+    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
     state = healthyState();

@@ -3,6 +3,7 @@ import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/wechat-text.capture.json" with { type: "json" };
 import {
   MessageStore,
+  type MessageChange,
   PeerServer,
   deferred,
   type Peer,
@@ -61,6 +62,10 @@ export class WechatPeer implements Peer {
 
   visible(userId = WECHAT_USER): VisibleMessage[] {
     return this.store.visible(userId);
+  }
+
+  changes(userId = WECHAT_USER): MessageChange[] {
+    return this.store.changes(userId);
   }
 
   /** Stands in for the global fetch: the iLink origin goes to this peer. */

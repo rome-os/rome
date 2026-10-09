@@ -5,6 +5,7 @@ import { exemplar, loadCapture } from "./capture.js";
 import textCapture from "./captures/discord-text.capture.json" with { type: "json" };
 import {
   MessageStore,
+  type MessageChange,
   PeerServer,
   type Peer,
   type PeerRequest,
@@ -80,6 +81,10 @@ export class DiscordPeer implements Peer {
 
   visible(channelId: string = DISCORD_DM): VisibleMessage[] {
     return this.store.visible(channelId);
+  }
+
+  changes(channelId: string = DISCORD_DM): MessageChange[] {
+    return this.store.changes(channelId);
   }
 
   /** REST options that send discord.js to this peer. */

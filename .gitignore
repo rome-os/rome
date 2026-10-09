@@ -52,3 +52,6 @@ docker-compose.override.yaml
 AGENT_LOG.md
 
 .impeccable
+
+# Channel scenario traces (pnpm test:channels)
+.channel-traces/
