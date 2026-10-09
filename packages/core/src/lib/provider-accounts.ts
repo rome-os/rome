@@ -1,5 +1,4 @@
 import { eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { providerAccounts } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "./oauth-providers.js";
@@ -10,7 +9,6 @@ import type { OAuthProvider } from "./oauth-providers.js";
 // cache (`~/.claude`) is unencrypted too, so a symmetric envelope would only add
 // a required env var with no real benefit. The column name stays to avoid a
 // migration.
-const PROVIDER_TOKEN_VERSION = 1;
 
 /** The legacy `provider_accounts` row's identity columns (transitional bridge —
  *  this whole table dies with the ledger cutover). Raw input to the per-service
@@ -31,17 +29,6 @@ export interface OAuthTokenBundle {
   scope?: string[] | null;
   expiresAt?: string | null;
   raw?: Record<string, unknown> | null;
-}
-
-export interface OAuthProviderAccountRecord {
-  provider: OAuthProvider;
-  profile?: LegacyOAuthAccountProfile;
-  tokens: OAuthTokenBundle;
-  metadata?: Record<string, unknown> | null;
-}
-
-function serializeBundle(value: unknown): string {
-  return JSON.stringify(value);
 }
 
 function deserializeBundle<T>(value: string): T | null {
@@ -68,29 +55,6 @@ export function normalizeScopes(value: string[] | string | null | undefined): st
   }
 
   return [];
-}
-
-function mergeOptionalField<T>(incoming: T | undefined, existing: T | undefined): T | undefined {
-  return incoming === undefined ? existing : incoming;
-}
-
-function mergeTokenBundles(
-  existing: OAuthTokenBundle,
-  incoming: OAuthTokenBundle,
-): OAuthTokenBundle {
-  return {
-    accessToken: mergeOptionalField(incoming.accessToken, existing.accessToken),
-    refreshToken: mergeOptionalField(incoming.refreshToken, existing.refreshToken),
-    idToken: mergeOptionalField(incoming.idToken, existing.idToken),
-    tokenType: mergeOptionalField(incoming.tokenType, existing.tokenType),
-    scope: incoming.scope === undefined ? existing.scope : normalizeScopes(incoming.scope),
-    expiresAt: mergeOptionalField(incoming.expiresAt, existing.expiresAt),
-    raw: mergeOptionalField(incoming.raw, existing.raw),
-  };
-}
-
-function getAccountLabel(profile?: LegacyOAuthAccountProfile): string | null {
-  return profile?.displayName?.trim() || profile?.login?.trim() || profile?.email?.trim() || null;
 }
 
 async function getProviderAccountRow(db: DrizzleDb, provider: OAuthProvider) {
@@ -129,49 +93,6 @@ export async function getProviderAccountProfile(
     login: row.login ?? undefined,
     avatarUrl: row.avatarUrl ?? undefined,
   };
-}
-
-export async function upsertProviderAccount(
-  db: DrizzleDb,
-  record: OAuthProviderAccountRecord,
-): Promise<void> {
-  const now = new Date();
-  const existingRow = await getProviderAccountRow(db, record.provider);
-  const existingTokens =
-    (existingRow ? deserializeBundle<OAuthTokenBundle>(existingRow.tokenCiphertext) : null) ?? {};
-  const tokens = mergeTokenBundles(existingTokens, record.tokens);
-  const profile = record.profile ?? {};
-  const scopes = normalizeScopes(tokens.scope);
-  const expiresAt = tokens.expiresAt ? new Date(tokens.expiresAt) : null;
-  const values = {
-    providerAccountId: profile.subject ?? null,
-    displayName: getAccountLabel(profile),
-    email: profile.email ?? null,
-    login: profile.login ?? null,
-    avatarUrl: profile.avatarUrl ?? null,
-    scopes,
-    tokenCiphertext: serializeBundle(tokens),
-    tokenVersion: PROVIDER_TOKEN_VERSION,
-    tokenExpiresAt: expiresAt,
-    metadata: record.metadata ?? null,
-    updatedAt: now,
-    lastSyncedAt: now,
-  };
-
-  if (existingRow) {
-    await db
-      .update(providerAccounts)
-      .set(values)
-      .where(eq(providerAccounts.provider, record.provider));
-    return;
-  }
-
-  await db.insert(providerAccounts).values({
-    id: uuidv4(),
-    provider: record.provider,
-    ...values,
-    createdAt: now,
-  });
 }
 
 export async function removeProviderAccount(db: DrizzleDb, provider: OAuthProvider): Promise<void> {

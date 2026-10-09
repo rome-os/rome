@@ -1,4 +1,4 @@
-import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { mkdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { getProjectsRoot } from "../paths.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "./constants.js";
@@ -31,15 +31,6 @@ export interface StoredWebchatProjectLike {
 
 export function getWebchatProjectsRoot(): string {
   return getProjectsRoot();
-}
-
-async function ensureDefaultWebchatProject(
-  rootPath: string = getWebchatProjectsRoot(),
-): Promise<string> {
-  await mkdir(rootPath, { recursive: true });
-  const defaultPath = resolveWebchatProjectPath(DEFAULT_WEBCHAT_PROJECT_NAME, rootPath);
-  await mkdir(defaultPath, { recursive: true });
-  return defaultPath;
 }
 
 function formatTimestamp(value?: Date): string | undefined {
@@ -174,81 +165,6 @@ export function getWebchatProjectPath(
 export function normalizeSelectedWebchatProjectPath(projectPath?: string | null): string {
   const trimmed = typeof projectPath === "string" ? projectPath.trim() : "";
   return trimmed ? normalizeWebchatProjectPath(trimmed) : DEFAULT_WEBCHAT_PROJECT_NAME;
-}
-
-export async function listWebchatProjects(
-  rootPath: string = getWebchatProjectsRoot(),
-): Promise<WebchatProjectCatalog> {
-  const defaultPath = await ensureDefaultWebchatProject(rootPath);
-
-  const entries = await readdir(rootPath, { withFileTypes: true });
-  const projects = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => ({
-      name: entry.name,
-      path: join(rootPath, entry.name),
-    }))
-    .sort((a, b) => {
-      if (a.name === DEFAULT_WEBCHAT_PROJECT_NAME) {
-        return -1;
-      }
-      if (b.name === DEFAULT_WEBCHAT_PROJECT_NAME) {
-        return 1;
-      }
-      return a.name.localeCompare(b.name);
-    });
-
-  return {
-    rootPath,
-    defaultPath,
-    projects,
-  };
-}
-
-export async function createWebchatProject(
-  projectName: string,
-  rootPath: string = getWebchatProjectsRoot(),
-): Promise<WebchatProjectOption> {
-  await ensureDefaultWebchatProject(rootPath);
-
-  const normalizedName = normalizeWebchatProjectPath(projectName);
-  const path = resolveWebchatProjectPath(normalizedName, rootPath);
-
-  try {
-    await mkdir(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new Error(`Project "${normalizedName}" already exists`);
-    }
-    throw error;
-  }
-
-  return {
-    name: normalizedName,
-    path,
-  };
-}
-
-export async function ensureWebchatProjectExists(
-  projectName: string,
-  rootPath: string = getWebchatProjectsRoot(),
-): Promise<string> {
-  const path = resolveWebchatProjectPath(projectName, rootPath);
-  const info = await stat(path).catch(() => null);
-
-  if (!info?.isDirectory()) {
-    throw new Error(`Selected project "${projectName}" is unavailable`);
-  }
-
-  return path;
-}
-
-export async function resolveWebchatWorkingDir(
-  projectName: string,
-  rootPath: string = getWebchatProjectsRoot(),
-): Promise<string> {
-  await ensureDefaultWebchatProject(rootPath);
-  return ensureWebchatProjectExists(projectName, rootPath);
 }
 
 /** Just the project fields a continuation needs off a stored webchat session. */

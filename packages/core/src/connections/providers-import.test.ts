@@ -22,6 +22,7 @@
 //     descriptor not registered → no-op
 //     idempotent: a second reconcile is a no-op
 
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 // The real OAuth descriptor's custody hook (added/5c) writes the tmpfs
@@ -42,8 +43,9 @@ rs.mock("../lib/provider-token-files.js", () => ({
 import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
+import { providerAccounts } from "../db/schema.js";
 import {
-  upsertProviderAccount,
+  normalizeScopes,
   type LegacyOAuthAccountProfile,
   type OAuthTokenBundle,
 } from "../lib/provider-accounts.js";
@@ -88,7 +90,24 @@ async function seedAccount(
   tokens: OAuthTokenBundle,
   profile: LegacyOAuthAccountProfile = { login: "someone", displayName: "someone" },
 ): Promise<void> {
-  await upsertProviderAccount(db, { provider, profile, tokens });
+  // Nothing in production writes this legacy table any more, so the row is
+  // written the way older builds left it.
+  const now = new Date();
+  await db.insert(providerAccounts).values({
+    id: randomUUID(),
+    provider,
+    providerAccountId: profile.subject ?? null,
+    displayName: profile.displayName ?? profile.login ?? profile.email ?? null,
+    email: profile.email ?? null,
+    login: profile.login ?? null,
+    avatarUrl: profile.avatarUrl ?? null,
+    scopes: normalizeScopes(tokens.scope),
+    tokenCiphertext: JSON.stringify(tokens),
+    tokenExpiresAt: tokens.expiresAt ? new Date(tokens.expiresAt) : null,
+    createdAt: now,
+    updatedAt: now,
+    lastSyncedAt: now,
+  });
 }
 
 /** Run the pre-load reconciler over a test db, gating on the given descriptor

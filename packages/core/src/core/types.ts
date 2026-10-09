@@ -96,13 +96,6 @@ export interface ForkRunParams {
   persistThreadKey?: (forkSessionId: string) => string;
 }
 
-/** Maps tier names to full model IDs (Anthropic provider defaults). */
-export const MODEL_MAP: Record<NonNullable<AgentConfig["tier"]>, string> = {
-  large: "claude-opus-5-5[1m]",
-  medium: "claude-sonnet-5-5",
-  small: "claude-haiku-5-5",
-};
-
 export interface AgentRunnerInterface {
   run(params: RunParams): AsyncIterable<AgentEvent>;
   runForked?(params: ForkRunParams): AsyncIterable<AgentEvent>;

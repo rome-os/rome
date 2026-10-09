@@ -414,16 +414,3 @@ export function parseThreadParticipants(result: OpencliResult): LinkedInThreadPa
   }
   return participants;
 }
-
-/** Read one thread's full participant list through opencli. */
-export async function readLinkedInThreadParticipants(
-  input: { threadUrl: string },
-  run: RunOpencli = runOpencli,
-  opts: RunOpencliOptions = {},
-): Promise<LinkedInThreadParticipant[]> {
-  const result = await run(
-    ["linkedin", "thread-participants", "--thread-url", input.threadUrl],
-    opts,
-  );
-  return parseThreadParticipants(result);
-}

@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { MODEL_MAP, type ForkRunParams } from "./types.js";
+import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
@@ -750,11 +750,11 @@ describe("AgentRunner", () => {
       );
 
       expect(openParams).toHaveLength(1);
-      expect(openParams[0].model).toBe(MODEL_MAP.small);
+      expect(openParams[0].model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
       const row = await new SessionsRepository(testDb.db).findByChannelThreadKey("webchat:fork-1");
-      expect(row).toMatchObject({ model: MODEL_MAP.large });
+      expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
     it("leaves a resumable thread behind for a fork that ran on its own provider thread", async () => {
@@ -794,7 +794,7 @@ describe("AgentRunner", () => {
       });
       // A fork never rewrites its parent: the source keeps its own pin.
       await expect(repo.findByChannelThreadKey("webchat:fork-1")).resolves.toMatchObject({
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
     });
 
@@ -2392,7 +2392,7 @@ describe("AgentRunner", () => {
       expect(row).toMatchObject({
         provider: "mock",
         // The concrete model that actually ran, not the tier name.
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
     });
 
@@ -2422,7 +2422,7 @@ describe("AgentRunner", () => {
       await collectMessages(session.sendTurn({ prompt: "Three", reasoningEffort: "low" }).events);
       expect(
         await sessionManager.findReusableSession("webchat:effort-record", "test-main"),
-      ).toMatchObject({ model: MODEL_MAP.large, reasoningEffort: "low" });
+      ).toMatchObject({ model: "claude-opus-5-5[1m]", reasoningEffort: "low" });
       await manager.shutdown();
     });
 
@@ -3696,7 +3696,7 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Map model" }));
 
       expect(provider.calls).toHaveLength(1);
-      expect(provider.calls[0].model).toBe(MODEL_MAP.large);
+      expect(provider.calls[0].model).toBe("claude-opus-5-5[1m]");
 
       // test-sentinel maps to "small" tier
       const provider2 = new MockModelProvider([[{ type: "result", content: "Done" }]]);
@@ -3704,7 +3704,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner2.run({ agentName: "test-sentinel", prompt: "Map model" }));
 
-      expect(provider2.calls[0].model).toBe(MODEL_MAP.small);
+      expect(provider2.calls[0].model).toBe("claude-haiku-5-5");
     });
 
     it("pins the session to the agent's configured provider and fails closed", async () => {
@@ -4144,7 +4144,7 @@ describe("AgentRunner", () => {
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
       expect(await repo.findById(session.sessionId)).toMatchObject({
         provider: "anthropic",
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
 
       await manager.shutdown();

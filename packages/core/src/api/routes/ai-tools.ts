@@ -23,14 +23,6 @@ import { getErrorMessage } from "../../lib/provider-usage.js";
 import { fetchRomeCredits } from "../../lib/rome-credits.js";
 import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
-// Re-exported for existing consumers (and the ai-tools route tests) that import
-// the usage parser from this module.
-export {
-  normalizeUsageStatus,
-  parseUsageText,
-  readLiveOrCachedUsage,
-} from "../../lib/provider-usage.js";
-
 const log = createLogger("api:ai-tools");
 
 // Log out of Claude by running `claude auth logout` (non-interactive, so no PTY
