@@ -41,8 +41,6 @@ export interface ExternalAgent extends ExternalAgentRef {
   kind: "dot" | "rome";
   /** The owner's handle. */
   account: string;
-  /** False while a dot waits for the person to approve it in Settings. */
-  ready: boolean;
   /** False for an agent of a linked account. */
   sameAccount: boolean;
 }

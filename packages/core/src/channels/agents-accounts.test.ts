@@ -16,7 +16,6 @@ const atlas: ExternalAgent = {
   name: "atlas",
   kind: "dot",
   account: "ouou",
-  ready: true,
   sameAccount: true,
 };
 const friendAtlas: ExternalAgent = {
@@ -24,7 +23,6 @@ const friendAtlas: ExternalAgent = {
   name: "atlas",
   kind: "dot",
   account: "friend",
-  ready: true,
   sameAccount: false,
 };
 
@@ -37,10 +35,7 @@ function cloud(agents: ExternalAgent[]) {
       if (client.fail) throw new Error("Rome Cloud unavailable");
       return {
         self: HOME,
-        agents: [
-          { ...HOME, kind: "rome" as const, account: "ouou", ready: true, sameAccount: true },
-          ...agents,
-        ],
+        agents: [{ ...HOME, kind: "rome" as const, account: "ouou", sameAccount: true }, ...agents],
       };
     },
   } satisfies Pick<AgentMessagingClient, "agents"> & { calls: number; fail: boolean };
@@ -48,19 +43,8 @@ function cloud(agents: ExternalAgent[]) {
 }
 
 describe("the agents address book", () => {
-  it("lists the account's other ready agents by agent id", async () => {
-    const book = agentsAccounts({
-      client: cloud([
-        atlas,
-        {
-          ...atlas,
-          agentId: "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
-          name: "pending",
-          ready: false,
-        },
-      ]),
-      isConnected: () => true,
-    });
+  it("lists the account's other agents by agent id, leaving out this Rome", async () => {
+    const book = agentsAccounts({ client: cloud([atlas]), isConnected: () => true });
     const { accounts } = await book.listAccounts({ limit: 100 });
     expect(accounts).toEqual([
       {

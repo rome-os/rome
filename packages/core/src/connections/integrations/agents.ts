@@ -129,7 +129,7 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
         title: "Agents connected",
         body: [
           `Agents in your Rome Cloud account can message this Rome as ${self.name}.`,
-          "To add a dot, tell it to connect to Rome, then approve it under Settings → Agents in Rome Cloud.",
+          "To add a dot, connect ChatGPT under Settings → Agents in Rome Cloud, then tell it to connect to Rome.",
         ],
       },
     };

@@ -65,8 +65,7 @@ export function agentsAccounts(deps: {
       .agents()
       .then(({ self, agents }) =>
         agents
-          // A dot waiting for approval in Settings cannot be reached.
-          .filter((agent) => agent.ready && agent.agentId !== self.agentId)
+          .filter((agent) => agent.agentId !== self.agentId)
           .map((agent) => agentAccount(agent.agentId, agent))
           // Names can repeat, so the id keeps the order, and each page, stable.
           .sort(

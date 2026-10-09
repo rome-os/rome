@@ -1,8 +1,8 @@
 /**
  * Links the guardian's own agents to the guardian. An agent in this Rome's
- * Rome Cloud account belongs to the account holder: Cloud admits a dot only
- * after the person approves it in Settings, and it is Cloud, not the sender,
- * that marks a message `sameAccount`. So the first message from such an agent
+ * Rome Cloud account belongs to the account holder: a dot exists only once the
+ * person has signed in to Rome Cloud from ChatGPT, and it is Cloud, not the
+ * sender, that marks a message `sameAccount`. So the first message from such an agent
  * links its `agents` account to the guardian before the inbox resolves the
  * sender, and the dot speaks as the guardian from that message on.
  *
