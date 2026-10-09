@@ -510,6 +510,21 @@ describe("send_message to an agent by name", () => {
     expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
   });
 
+  it("reads a padded guardian alias as the alias, as the approval card does", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "agents", to: " guardian", text: "hi" },
+        { agentNames },
+      ),
+    ).rejects.toThrow();
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
   it("refuses a name from any agent but main, without looking", async () => {
     setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "assistant:assistant" }));
     const adapter = makeAdapter("agents");
