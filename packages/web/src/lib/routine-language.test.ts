@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { describeOutcome, describeSchedule, type ScheduleTrigger } from "./routine-language";
+import {
+  describeEvent,
+  describeOutcome,
+  describeSchedule,
+  type ScheduleTrigger,
+} from "./routine-language";
 
 /** Pin the "browser" timezone that `tzDiffersFromBrowser` reads, without
  * disturbing the formatting `Intl.DateTimeFormat(locale, opts)` calls (which
@@ -55,5 +60,16 @@ describe("describeOutcome artifact ids", () => {
 
   it("applies known action wording to canonical ids", () => {
     expect(describeOutcome("system:summon", {})).toBe("spin up an agent to help");
+  });
+});
+
+describe("describeEvent", () => {
+  it("names the event from its raw type, whatever its first letter", () => {
+    expect(describeEvent({ type: "event-bus", eventName: "user.created" })).toBe(
+      "the user created event happens",
+    );
+    expect(
+      describeEvent({ type: "event-bus", eventName: "provider:event:github.pull_request" }),
+    ).toBe("the github pull request event happens");
   });
 });

@@ -28,7 +28,7 @@ export interface EventFilterCondition {
 
 export interface EventBusTrigger {
   type: "event-bus";
-  eventName: string; // e.g., "action:completed", "message:received"
+  eventName: string; // e.g., "order.created", "provider:event:github.pull_request"
   sourcePattern?: string; // e.g., "deploy_*" to match action names
   /** Payload conditions, AND-ed together. Absent or empty means fire on every
    * event of this name — a legitimate "watch all" routine, so optional. */

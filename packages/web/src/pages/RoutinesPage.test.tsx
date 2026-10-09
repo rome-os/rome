@@ -288,7 +288,7 @@ describe("RoutinesPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Whenever an order created event happens")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
   });
 
   it("keeps run state off the event card and navigates to its detail view on click", async () => {
@@ -299,7 +299,7 @@ describe("RoutinesPage", () => {
     renderPage();
 
     // The card itself carries no waiting/last-ran/run-count line.
-    expect(await screen.findByText("Whenever an order created event happens")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
     expect(screen.queryByText(/Waiting/)).toBeNull();
     expect(screen.queryByText(/hasn't run yet/)).toBeNull();
 

@@ -197,8 +197,8 @@ export function describeSchedule(trigger: ScheduleTrigger): string {
 
 // Event name → trigger phrase
 
-// Turn "connector:GMAIL_NEW_MESSAGE" into "a gmail new message event happens",
-// "order.created" into "an order created event happens". We do not pretend to
+// Turn "connector:GMAIL_NEW_MESSAGE" into "the gmail new message event happens",
+// "order.created" into "the order created event happens". We do not pretend to
 // know the semantics; we surface the raw name readably.
 function humanizeEventName(eventName: string): string {
   const tail = eventName.includes(":")
@@ -209,8 +209,7 @@ function humanizeEventName(eventName: string): string {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .trim()
     .toLowerCase();
-  if (!words) return `the ${eventName} event happens`;
-  return `${/^[aeiou]/.test(words) ? "an" : "a"} ${words} event happens`;
+  return `the ${words || eventName} event happens`;
 }
 
 export function describeEvent(trigger: EventBusTrigger): string {
@@ -220,7 +219,7 @@ export function describeEvent(trigger: EventBusTrigger): string {
 }
 
 // Full trigger phrase for the card's primary line, capitalized as a sentence
-// opener: "Every weekday at 9:00 AM" / "Whenever a new order comes in".
+// opener: "Every weekday at 9:00 AM" / "Whenever the order created event happens".
 export function describeTrigger(trigger: Trigger): string {
   if (isScheduleTrigger(trigger)) return describeSchedule(trigger);
   if (isEventTrigger(trigger)) return `Whenever ${describeEvent(trigger)}`;
