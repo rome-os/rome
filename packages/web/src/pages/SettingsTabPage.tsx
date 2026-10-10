@@ -1022,6 +1022,7 @@ function AdvancedSection({
         </Section>
         <ComputerUseSection />
         <PresentationModeSection />
+        <ExperimentalFeaturesSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1115,7 +1116,6 @@ function DeveloperSettingsSection({
           <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
-          <ReplyStreamingAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
         {open && <RelayHealthSection />}
@@ -1543,10 +1543,11 @@ function ImpersonationAdvancedSection({
   );
 }
 
-/** Off until a developer turns it on: with it off, Rome sends each reply whole,
- *  as it did before streaming existed. The setting is `enableReplyStreaming`,
- *  read by the host on every reply. */
-function ReplyStreamingAdvancedSection({
+/** Features still being tried out, each off until a guardian switches it on.
+ *  Reply streaming is the first: with it off, Rome sends each reply whole, as it
+ *  did before streaming existed. The setting is `enableReplyStreaming`, read by
+ *  the host on every reply. */
+function ExperimentalFeaturesSection({
   settings,
   onSave,
   saving,
@@ -1556,22 +1557,32 @@ function ReplyStreamingAdvancedSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.enableReplyStreaming ?? false);
+  const [replyStreaming, setReplyStreaming] = useState(settings.enableReplyStreaming ?? false);
 
-  function toggle(next: boolean) {
-    setEnabled(next);
+  function toggleReplyStreaming(next: boolean) {
+    setReplyStreaming(next);
     void onSave({ enableReplyStreaming: next });
   }
 
   return (
-    <SettingsToggleRow
-      title={t("advanced.replyStreaming.title")}
-      description={t("advanced.replyStreaming.description")}
-      label={t("advanced.replyStreaming.toggleLabel")}
-      checked={enabled}
-      onChange={toggle}
-      disabled={saving}
-    />
+    <Section>
+      <SectionHeader>
+        <SectionHeading>
+          <SectionTitle>{t("advanced.experimental.title")}</SectionTitle>
+          <SectionDescription>{t("advanced.experimental.description")}</SectionDescription>
+        </SectionHeading>
+      </SectionHeader>
+      <FormRows>
+        <SettingsToggleRow
+          title={t("advanced.experimental.replyStreaming.title")}
+          description={t("advanced.experimental.replyStreaming.description")}
+          label={t("advanced.experimental.replyStreaming.toggleLabel")}
+          checked={replyStreaming}
+          onChange={toggleReplyStreaming}
+          disabled={saving}
+        />
+      </FormRows>
+    </Section>
   );
 }
 

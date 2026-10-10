@@ -693,6 +693,15 @@
       "description": "Hides pinned-agent names, avatars, and the composer chip. Applies to this browser only.",
       "toggleLabel": "Mask agent identity in chat"
     },
+    "experimental": {
+      "title": "Experimental features",
+      "description": "Features still being tried out. Each is off until switched on, and may change or be removed.",
+      "replyStreaming": {
+        "title": "Reply streaming",
+        "description": "Applies to the guardian's direct chats on Telegram. Replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
+        "toggleLabel": "Stream replies in Telegram"
+      }
+    },
     "developerSettings": {
       "title": "Developer Settings"
     },
@@ -724,11 +733,6 @@
     "impersonation": {
       "title": "Impersonation",
       "toggleLabel": "Enable impersonation in chat"
-    },
-    "replyStreaming": {
-      "title": "Reply streaming",
-      "description": "Applies to the guardian's direct chats on Telegram. Replies appear as plain text. A reply that fails partway is not sent again, so it can end unfinished.",
-      "toggleLabel": "Stream replies in Telegram"
     },
     "aiToolUsage": {
       "title": "AI tool usage",

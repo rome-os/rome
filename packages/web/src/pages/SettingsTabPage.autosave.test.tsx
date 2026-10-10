@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -148,6 +148,19 @@ describe("SettingsPage Advanced autosave", () => {
         body: { enableReplyStreaming: true },
       }),
     );
+  });
+
+  it("keeps reply streaming under Experimental features, outside Developer Settings", async () => {
+    mockSettingsBackend();
+    renderAdvancedSettings();
+
+    const toggle = await screen.findByRole("switch", { name: "Stream replies in Telegram" });
+    const section = toggle.closest("section");
+    expect(section).not.toBeNull();
+    expect(
+      within(section as HTMLElement).getByRole("heading", { name: "Experimental features" }),
+    ).toBeTruthy();
+    expect(toggle.closest("details")).toBeNull();
   });
 
   it("shows reply streaming on when the instance has it on", async () => {

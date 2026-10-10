@@ -390,9 +390,10 @@ async function main() {
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
   // Reply streaming (issue #427) is off until the guardian turns it on under
-  // Developer Settings. Off, sends go out unpaced and replies go out whole. On,
-  // a channel that can stream paces every write of its Connection, and the
-  // session bridge streams a guardian's direct replies through its replies port.
+  // Experimental features in Advanced settings. Off, sends go out unpaced and
+  // replies go out whole. On, a channel that can stream paces every write of its
+  // Connection, and the session bridge streams a guardian's direct replies
+  // through its replies port.
   const replyStreamingOn = replyStreamingSwitch(settingsRepo);
   const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
   const replyStreams = new ReplyStreams({
