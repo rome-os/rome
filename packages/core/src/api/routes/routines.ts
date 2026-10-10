@@ -6,6 +6,7 @@ import { toRoutine } from "../../db/repositories/routines.js";
 import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
 import type { ApiDeps } from "../deps.js";
 import { validateActionArgs } from "../../actions/validate-action-args.js";
+import { CHAT_ROUTINE_KEY_PREFIX } from "../../core/mcp-facade.js";
 import type { Trigger } from "../../routines/types.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
@@ -118,10 +119,10 @@ interface CreateRoutineBody {
 }
 
 const MAX_ROUTINE_KEY_LENGTH = 200;
-// Keys this route may assign. Apps key their own managed routines (briefing
-// uses `briefing-*`) through create_routine; keeping this route to its own
-// prefix stops a chat card from claiming, or being answered with, one of those.
-const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
+// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps key their
+// own managed routines (briefing uses `briefing-*`) through create_routine;
+// keeping this route to its own prefix stops a chat card from claiming, or
+// being answered with, one of those.
 
 interface UpdateRoutineBody {
   name?: string;

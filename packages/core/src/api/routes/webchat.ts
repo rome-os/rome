@@ -67,7 +67,11 @@ import {
   buildWorkspaceContextSection,
   type WorkspaceContextSnapshot,
 } from "../../core/prompt-builder.js";
-import { mintChatRoutineKey, normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import {
+  chatRoutineKeyForToolUse,
+  mintChatRoutineKey,
+  normalizeRoutineDraftForCard,
+} from "../../core/mcp-facade.js";
 import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -197,8 +201,8 @@ type WebchatEventName =
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
 // carries the full create payload; turning it on POSTs /api/routines directly.
-// `created` is set when the routine already exists (`activate: true`), so the
-// card renders it saved instead of offering to create it.
+// `routineKey` is set for an `activate: true` call: the key its routine was
+// created with, so the card's lookup finds it and opens saved.
 async function persistRoutineDraftCard(
   webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
   actionRegistry: import("../../actions/types.js").ActionRegistry,
@@ -206,7 +210,7 @@ async function persistRoutineDraftCard(
   turnId: string,
   toolUseId: string,
   toolInput: unknown,
-  created?: { routineId: string; routineKey: string },
+  routineKey?: string,
 ): Promise<void> {
   const normalized = normalizeRoutineDraftForCard(toolInput ?? {});
   if (!normalized.ok) return;
@@ -221,10 +225,8 @@ async function persistRoutineDraftCard(
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
     // Minted here, not taken from the agent's input, so it names this card only.
-    // An activated routine was already created with its own minted key (in the
-    // propose_routine handler); the card carries that one.
-    routineKey: created?.routineKey ?? mintChatRoutineKey(),
-    ...(created ? { routineId: created.routineId } : {}),
+    // An activated routine's key is derived from its tool call instead.
+    routineKey: routineKey ?? mintChatRoutineKey(),
   };
   try {
     await webchatRepo.addMessage(
@@ -296,37 +298,21 @@ type Suspension =
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
 
-// The facade's own tool, by exact name: bare on Codex, MCP-prefixed on Claude.
-// A suffix match would let any external MCP tool named `…__propose_routine`
-// decide which routine an activated card shows.
-const PROPOSE_ROUTINE_TOOL_NAMES = new Set(["propose_routine", "mcp__ask_user__propose_routine"]);
+// Tool names don't prove provenance: the Claude provider strips MCP prefixes,
+// so another server's `propose_routine` arrives with the same name. Nothing
+// here trusts the tool's output for identity — an activated card's routine key
+// is derived from the tool-use id — so a look-alike can at most show a draft.
 const isProposeRoutineTool = (tool: unknown): boolean =>
-  typeof tool === "string" && PROPOSE_ROUTINE_TOOL_NAMES.has(tool);
+  typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
-/** The card state an `activate: true` propose_routine call settled on (see
- * `RoutineCardOutcome` in mcp-facade): saved with its id, or a draft fallback.
- * Null for an error result, which shows no card. */
-function readRoutineCardOutcome(
-  output: unknown,
-): { created?: { routineId: string; routineKey: string } } | null {
-  const o = readToolResultObject(output);
-  if (
-    o?.routineCard === "active" &&
-    typeof o.routineId === "string" &&
-    typeof o.routineKey === "string"
-  ) {
-    return { created: { routineId: o.routineId, routineKey: o.routineKey } };
-  }
-  if (o?.routineCard === "draft") return {};
-  return null;
-}
-
-/** The JSON object a tool returned, whether it arrived structured or
- * JSON-serialized through the facade. An MCP facade tool_result surfaces as
- * `[{ type: "text", text: "<json>" }]` (or `{ content: [...] }`); unwrap to the
- * JSON text the tool returned. Null for anything that isn't a JSON object. */
-function readToolResultObject(output: unknown): Record<string, unknown> | null {
+/** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
+ * out of an action's tool_result output, whether it arrived structured or
+ * JSON-serialized through the facade. Returns null for any non-suspended
+ * result so the drain loop ignores ordinary tool calls. */
+function readSuspensionFromOutput(output: unknown): Suspension | null {
   let value: unknown = output;
+  // An MCP facade tool_result surfaces as `[{ type: "text", text: "<json>" }]`
+  // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) value = content;
@@ -348,17 +334,8 @@ function readToolResultObject(output: unknown): Record<string, unknown> | null {
       return null;
     }
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-/** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
- * out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the facade. Returns null for any non-suspended
- * result so the drain loop ignores ordinary tool calls. */
-function readSuspensionFromOutput(output: unknown): Suspension | null {
-  const o = readToolResultObject(output);
-  if (!o) return null;
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
   if (typeof o.appId !== "string") return null;
   const asRecord = (v: unknown): Record<string, unknown> | undefined =>
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
@@ -452,8 +429,30 @@ function readPlaceWidgetFromOutput(output: unknown): {
   route?: string;
   params?: Record<string, string | number | boolean>;
 } | null {
-  const o = readToolResultObject(output);
-  if (!o) return null;
+  let value: unknown = output;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const content = (value as { content?: unknown }).content;
+    if (Array.isArray(content)) value = content;
+  }
+  if (Array.isArray(value)) {
+    const textBlock = value.find(
+      (b): b is { type: "text"; text: string } =>
+        !!b &&
+        typeof b === "object" &&
+        (b as { type?: unknown }).type === "text" &&
+        typeof (b as { text?: unknown }).text === "string",
+    );
+    value = textBlock?.text;
+  }
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const o = value as Record<string, unknown>;
   if (o.placeWidget !== true) return null;
   if (typeof o.appId !== "string") return null;
   // `route` addresses a screen inside the app; `params` are flat scalar query
@@ -3343,6 +3342,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // parent under the agent's trace instead of landing on a stale one.
       void otelContext.with(handle.turnContext, () =>
         runOnStream(stream, "webchat send", async () => {
+          // propose_routine `activate: true` calls, by tool-use id, until their
+          // tool_result says whether to show a card. The card's key is derived
+          // from the tool-use id (the key the handler created the routine
+          // with), never read from the tool's output.
+          const pendingRoutineActivations = new Map<string, unknown>();
+          const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
+            persistRoutineDraftCard(
+              deps.webchatRepo,
+              deps.actionRegistry,
+              sessionId,
+              turnId,
+              toolUseId,
+              toolInput,
+              chatRoutineKeyForToolUse(toolUseId),
+            );
           try {
             let resultContent = "";
             let lastCompletedText:
@@ -3358,9 +3372,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
-            // propose_routine `activate: true` inputs, by tool-use id, until
-            // their tool_result says which card to show.
-            const pendingRoutineActivations = new Map<string, unknown>();
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
               // Deltas other than text have no webchat consumer yet.
@@ -3545,22 +3556,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   });
                 }
               }
-              // An activated propose_routine's card, once its result says which.
+              // An activated propose_routine's card. An error result created no
+              // routine and asks the agent to retry, so it gets no card; any
+              // other result (created, or the draft fallback) does, and the
+              // card's lookup by key settles On vs. draft.
               if (msg.type === "tool_result" && pendingRoutineActivations.has(msg.toolUseId)) {
                 const toolInput = pendingRoutineActivations.get(msg.toolUseId);
                 pendingRoutineActivations.delete(msg.toolUseId);
-                const outcome = readRoutineCardOutcome(msg.output);
-                if (outcome) {
-                  await persistRoutineDraftCard(
-                    deps.webchatRepo,
-                    deps.actionRegistry,
-                    sessionId,
-                    turnId,
-                    msg.toolUseId,
-                    toolInput,
-                    outcome.created,
-                  );
-                }
+                if (msg.isError !== true) await persistActivatedCard(msg.toolUseId, toolInput);
               }
               // Parked suspension: any action that returned a pending_interaction
               // or handoff result surfaces it on its tool_result. Snapshot a card
@@ -3774,6 +3777,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               reason: resultError?.reason,
             };
           } finally {
+            // A turn stopped or failed between the handler and its result may
+            // already have created the routine; show its card so it stays
+            // visible and reversible (the lookup shows a draft if it doesn't).
+            for (const [toolUseId, toolInput] of pendingRoutineActivations) {
+              await persistActivatedCard(toolUseId, toolInput);
+            }
             unsubscribeStatus();
           }
         }),

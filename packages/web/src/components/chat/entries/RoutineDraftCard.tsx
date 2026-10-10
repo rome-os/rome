@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, BellRing, CalendarClock, Check, Pause, Play } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -14,10 +14,15 @@ import {
 import type { PreviewPayload, RoutineDraftSpec } from "@/lib/chat-types";
 
 type CardState =
+  // Until the first lookup settles, the card can't tell a draft from a routine
+  // that already exists, so it offers no controls at all.
+  | { kind: "checking" }
   | { kind: "draft" }
   | { kind: "creating" }
   // `routineId` is unknown only if a create succeeded without returning a row.
-  | { kind: "on"; routineId?: string; enabled: boolean }
+  // `owned`: this card provably made the routine (same key, or created here),
+  // so it may pause or delete it; a legacy name match only links to it.
+  | { kind: "on"; routineId?: string; enabled: boolean; owned: boolean }
   | { kind: "error"; message: string };
 
 type Busy = "toggle" | "delete" | null;
@@ -41,42 +46,36 @@ function findCreatedRoutine(
  * A draft waits for the guardian: "Turn it on" creates the routine through
  * POST /api/routines (which also activates it), so confirmation needs no
  * second agent turn. When the agent already created it on the guardian's
- * explicit instruction (`activate: true`), `routineId` is set and the card
- * opens saved. A saved routine links to its run history and can be paused or
- * deleted from here, so an auto-enabled routine stays visible and reversible.
+ * explicit instruction (`activate: true`), it used this card's key, so the
+ * lookup finds it and the card opens saved. A saved routine links to its run
+ * history and can be paused or deleted here, so an auto-enabled routine stays
+ * visible and reversible.
  *
  * On mount we look up the routine this card created, so a reload shows its
  * live state instead of re-offering to create a duplicate — or offers to turn
- * it on again if it was deleted.
+ * it on again if it was deleted. If the lookup fails, the card offers "Turn it
+ * on": a keyed create of an existing routine answers with that routine.
  */
 export function RoutineDraftCard({
   draft,
   routineKey,
-  routineId,
 }: {
   draft: RoutineDraftSpec;
   routineKey?: string;
-  routineId?: string;
 }) {
-  const [state, setState] = useState<CardState>(
-    routineId ? { kind: "on", routineId, enabled: true } : { kind: "draft" },
-  );
+  const [state, setState] = useState<CardState>({ kind: "checking" });
   const [busy, setBusy] = useState<Busy>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Set once the guardian creates, pauses or deletes from this card. The mount
-  // lookup's snapshot may predate that change, so it must not overwrite it.
-  const actedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void listRoutineRefs().then((refs) => {
-      // A failed load says nothing about the routine; keep what we know.
-      if (cancelled || !refs || actedRef.current) return;
-      const created = findCreatedRoutine(refs, draft.name, routineKey);
+      if (cancelled) return;
+      const created = refs ? findCreatedRoutine(refs, draft.name, routineKey) : undefined;
       setState(
         created
-          ? { kind: "on", routineId: created.id, enabled: created.enabled }
+          ? { kind: "on", routineId: created.id, enabled: created.enabled, owned: !!routineKey }
           : { kind: "draft" },
       );
     });
@@ -86,7 +85,6 @@ export function RoutineDraftCard({
   }, [draft.name, routineKey]);
 
   const turnOn = async () => {
-    actedRef.current = true;
     setState({ kind: "creating" });
     const result = await createRoutine({
       name: draft.name,
@@ -96,7 +94,7 @@ export function RoutineDraftCard({
       ...(routineKey ? { key: routineKey } : {}),
     });
     if (result.ok) {
-      setState({ kind: "on", routineId: result.routineId, enabled: true });
+      setState({ kind: "on", routineId: result.routineId, enabled: true, owned: true });
     } else {
       setState({
         kind: "error",
@@ -106,17 +104,15 @@ export function RoutineDraftCard({
   };
 
   const toggle = async (id: string, enabled: boolean) => {
-    actedRef.current = true;
     setBusy("toggle");
     const result = await setRoutineEnabled(id, enabled);
     setBusy(null);
     setActionError(result.ok ? null : (result.error ?? null));
-    if (result.ok) setState({ kind: "on", routineId: id, enabled });
+    if (result.ok) setState({ kind: "on", routineId: id, enabled, owned: true });
   };
 
   // Deleting returns the card to its draft, so "Turn it on" undoes it.
   const remove = async (id: string) => {
-    actedRef.current = true;
     setBusy("delete");
     const result = await deleteRoutine(id);
     setBusy(null);
@@ -192,6 +188,7 @@ export function RoutineDraftCard({
             <SavedControls
               routineId={state.routineId}
               enabled={state.enabled}
+              owned={state.owned}
               isManual={isManual}
               busy={busy}
               confirmingDelete={confirmingDelete}
@@ -202,7 +199,7 @@ export function RoutineDraftCard({
             />
           )}
         </div>
-      ) : (
+      ) : state.kind === "checking" ? null : (
         <div className="flex items-center justify-end border-t border-border bg-surface-muted/60 px-4 py-2">
           <Button
             size="sm"
@@ -224,6 +221,7 @@ export function RoutineDraftCard({
 function SavedControls({
   routineId,
   enabled,
+  owned,
   isManual,
   busy,
   confirmingDelete,
@@ -234,6 +232,7 @@ function SavedControls({
 }: {
   routineId: string;
   enabled: boolean;
+  owned: boolean;
   isManual: boolean;
   busy: Busy;
   confirmingDelete: boolean;
@@ -261,6 +260,17 @@ function SavedControls({
       </div>
     );
   }
+  const history = (
+    <Button asChild size="sm" variant="outline">
+      <Link to={`/routines/${encodeURIComponent(routineId)}`}>
+        View run history
+        <ArrowRight data-icon="inline-end" />
+      </Link>
+    </Button>
+  );
+  // A name-only match on an old card may be an unrelated routine: link to it,
+  // but never pause or delete it from here.
+  if (!owned) return history;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {/* A manual routine never fires on its own, so there is nothing to pause. */}
@@ -278,12 +288,7 @@ function SavedControls({
       <Button size="sm" variant="ghost" onClick={onAskDelete} disabled={busy !== null}>
         Delete
       </Button>
-      <Button asChild size="sm" variant="outline">
-        <Link to={`/routines/${encodeURIComponent(routineId)}`}>
-          View run history
-          <ArrowRight data-icon="inline-end" />
-        </Link>
-      </Button>
+      {history}
     </div>
   );
 }

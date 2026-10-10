@@ -151,11 +151,20 @@ export interface RoutineActivationGate {
   validateArgs(actionName: string, args: Record<string, unknown>): string | null;
 }
 
-/** The unique key a chat routine card's routine is created with. The card finds
- * its routine by this key after a reload; `POST /api/routines` accepts only
- * this prefix. */
+/** Prefix of the unique key a chat routine card's routine is created with. The
+ * card finds its routine by this key after a reload; `POST /api/routines`
+ * accepts only keys with this prefix. */
+export const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
+
+/** A fresh key for a draft card, minted by the webchat drain. */
 export function mintChatRoutineKey(): string {
-  return `chat-routine:${randomUUID()}`;
+  return `${CHAT_ROUTINE_KEY_PREFIX}${randomUUID()}`;
+}
+
+/** The key of a routine `propose_routine` auto-enables, derived from the tool
+ * call so the drain can compute the card's key itself. */
+export function chatRoutineKeyForToolUse(toolUseId: string): string {
+  return `${CHAT_ROUTINE_KEY_PREFIX}${toolUseId}`;
 }
 
 interface ActionArgumentSummary {
@@ -740,14 +749,6 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
 
-/** Machine-readable `propose_routine` result for an `activate: true` call. The
- * webchat drain reads `routineCard` off the tool_result to persist the card in
- * the matching state (saved with `routineId`, or a draft fallback); `message`
- * is the model-facing directive. */
-type RoutineCardOutcome =
-  | { routineCard: "active"; routineId: string; routineKey: string; message: string }
-  | { routineCard: "draft"; message: string };
-
 type ActivationDeps = Pick<RoutineActivationGate, "canCallAction" | "validateArgs"> & {
   executeAction: (name: string, input: unknown) => Promise<unknown>;
 };
@@ -758,32 +759,34 @@ const CREATE_ROUTINE_ACTION = "create_routine";
  * The routine goes through the agent's own `create_routine` call (same
  * allow-list, validation and attribution as a direct call); the target must be
  * an action the agent may call too. Without that permission, it falls back to
- * the draft card, so the guardian's click stays the gate. */
+ * the draft card, so the guardian's click stays the gate.
+ *
+ * The routine's key comes from the tool call ({@link chatRoutineKeyForToolUse}),
+ * so the webchat drain derives the card's key on its own and never takes a
+ * routine identity from the tool's output. A non-error result means "show a
+ * card"; whether that card is On or a draft is settled by the card's lookup. */
 async function activateRoutineDraft(
   draft: import("@rome-os/app-runtime").RoutineDraftSpec,
+  toolUseId: string | undefined,
   deps: ActivationDeps | undefined,
 ): Promise<FacadeToolResult> {
-  const json = (outcome: RoutineCardOutcome): FacadeToolResult => ({
-    content: [{ type: "text", text: JSON.stringify(outcome) }],
+  const text = (t: string, isError?: true): FacadeToolResult => ({
+    content: [{ type: "text", text: t }],
+    ...(isError ? { isError } : {}),
   });
   const fallback = (reason: string) =>
-    json({
-      routineCard: "draft",
-      message: `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
-    });
+    text(
+      `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
+    );
 
   if (!deps) return fallback("auto-enable is not available in this session");
+  if (!toolUseId) return fallback("this tool call has no id to key the routine by");
   const target = deps.canCallAction(draft.actionName);
   if (target === "unknown") {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
-        },
-      ],
-      isError: true,
-    };
+    return text(
+      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
+      true,
+    );
   }
   if (target === "denied") {
     return fallback(`"${draft.actionName}" is not an action you are permitted to call`);
@@ -797,24 +800,16 @@ async function activateRoutineDraft(
   // with args that fail on every fire.
   const argsError = deps.validateArgs(draft.actionName, draft.args);
   if (argsError) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `The routine was NOT created and no card was shown: ${argsError}. Fix the args and call propose_routine again.`,
-        },
-      ],
-      isError: true,
-    };
+    return text(
+      `The routine was NOT created and no card was shown: ${argsError}. Fix the args and call propose_routine again.`,
+      true,
+    );
   }
 
-  // Same key shape the webchat drain mints for a draft card, so the card finds
-  // this routine by key after a reload.
-  const routineKey = mintChatRoutineKey();
   let result: unknown;
   try {
     result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
-      key: routineKey,
+      key: chatRoutineKeyForToolUse(toolUseId),
       name: draft.name,
       trigger: draft.trigger,
       actionName: draft.actionName,
@@ -826,22 +821,14 @@ async function activateRoutineDraft(
   const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
   if (r.status === "error" || typeof r.routineId !== "string") {
     const error = typeof r.error === "string" ? r.error : "create_routine returned no routineId";
-    return {
-      content: [
-        {
-          type: "text",
-          text: `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
-        },
-      ],
-      isError: true,
-    };
+    return text(
+      `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
+      true,
+    );
   }
-  return json({
-    routineCard: "active",
-    routineId: r.routineId,
-    routineKey,
-    message: `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from its card or the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
-  });
+  return text(
+    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from its card or the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+  );
 }
 
 const CONFIRM_OUTPUT_DIRECTIVE =
@@ -1415,7 +1402,7 @@ function buildInteractiveTools(
         },
       },
     },
-    handler: async (input) => {
+    handler: async (input, context) => {
       const result = normalizeRoutineDraftForCard(input);
       if (!result.ok) {
         return { content: [{ type: "text", text: result.error }], isError: true };
@@ -1433,7 +1420,9 @@ function buildInteractiveTools(
           isError: true,
         };
       }
-      if (input.activate === true) return activateRoutineDraft(result.draft, activation);
+      if (input.activate === true) {
+        return activateRoutineDraft(result.draft, context?.toolUseId, activation);
+      }
       return { content: [{ type: "text", text: PROPOSE_ROUTINE_DIRECTIVE }] };
     },
   });

@@ -603,7 +603,6 @@ const transcripts: Record<string, ChatMessage[]> = {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-active-1",
           routineKey: "chat-routine:mock-chat-3-active-1",
-          routineId: "routine-brief",
           draft: {
             sentence: "Every day at 7:00 AM, Rome will send you a morning brief.",
             name: "Morning brief",

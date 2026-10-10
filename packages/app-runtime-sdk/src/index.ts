@@ -1501,14 +1501,11 @@ export type MessagePart =
        * Unique key minted by the server with the card. Turning the card on
        * creates the routine with this `key`, so the card finds the exact
        * routine it created (and links to its run history) after a reload.
+       * For `propose_routine` with `activate: true`, it is the key the agent
+       * already created the routine with, so the card opens saved.
        * Absent on cards written before keys existed.
        */
       routineKey?: string;
-      /** Set when the routine was created together with the card: the agent
-       * created it on the guardian's explicit instruction (`propose_routine`
-       * with `activate: true`), using `routineKey` as its key. The card opens
-       * saved, with its controls, instead of offering to turn it on. */
-      routineId?: string;
     }
   | {
       /**

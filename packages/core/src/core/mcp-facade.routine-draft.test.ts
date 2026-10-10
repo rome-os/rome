@@ -308,26 +308,26 @@ describe("normalizeRoutineDraftForCard", () => {
             }),
       });
       const tool = bundle.interactiveTools.find((t) => t.name === "propose_routine")!;
-      const run = async (input: Record<string, unknown>) =>
-        (await tool.handler(input)) as { content: { text: string }[]; isError?: boolean };
+      const run = async (input: Record<string, unknown>, toolUseId: string | null = "toolu_1") =>
+        (await tool.handler(input, toolUseId === null ? undefined : { toolUseId })) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
       return { calls, run, bundle };
     };
-    const parse = (res: { content: { text: string }[] }) =>
-      JSON.parse(res.content[0].text) as Record<string, unknown>;
+    const DRAFTED = "A draft card was shown instead";
 
     it("creates the routine via create_routine and reports it active", async () => {
       const { calls, run } = setup({});
       const res = await run({ ...validSchedule, activate: true });
       expect(res.isError).toBeUndefined();
-      const routineKey = (calls[0]?.input as { key?: string } | undefined)?.key;
-      // A fresh key in the shape the drain mints for draft cards, so the card
-      // finds this routine by key after a reload.
-      expect(routineKey).toMatch(/^chat-routine:[0-9a-f-]{36}$/);
       expect(calls).toEqual([
         {
           name: "create_routine",
           input: {
-            key: routineKey,
+            // Derived from the tool call, so the drain computes the card's key
+            // itself instead of reading it from this result.
+            key: "chat-routine:toolu_1",
             name: "Weekly update reminder",
             trigger: {
               type: "schedule",
@@ -341,33 +341,40 @@ describe("normalizeRoutineDraftForCard", () => {
           },
         },
       ]);
-      const outcome = parse(res);
-      expect(outcome.routineCard).toBe("active");
-      expect(outcome.routineId).toBe("r-42");
-      expect(outcome.routineKey).toBe(routineKey);
-      expect(outcome.message).toContain("Do NOT call any create action");
+      expect(res.content[0].text).toContain('Routine "Weekly update reminder" is on (id r-42)');
+      expect(res.content[0].text).toContain("Do NOT call any create action");
     });
 
     it("falls back to a draft card when the agent may not call the target", async () => {
       const { calls, run } = setup({ permissions: { summon: "denied" } });
-      const outcome = parse(await run({ ...validInput, activate: true }));
+      const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
-      expect(outcome.routineCard).toBe("draft");
-      expect(outcome.message).toContain('"summon" is not an action you are permitted to call');
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
+      expect(res.content[0].text).toContain('"summon" is not an action you are permitted to call');
     });
 
     it("falls back to a draft card when the agent may not call create_routine", async () => {
       const { calls, run } = setup({ permissions: { create_routine: "denied" } });
-      const outcome = parse(await run({ ...validInput, activate: true }));
+      const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
-      expect(outcome.routineCard).toBe("draft");
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
     });
 
     it("falls back to a draft card when the session wires no permission check", async () => {
       const { calls, run } = setup({ withGate: false });
-      const outcome = parse(await run({ ...validInput, activate: true }));
+      const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
-      expect(outcome.routineCard).toBe("draft");
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
+    });
+
+    it("falls back to a draft card when the call has no tool-use id to key by", async () => {
+      const { calls, run } = setup({});
+      const res = await run({ ...validInput, activate: true }, null);
+      expect(calls).toEqual([]);
+      expect(res.content[0].text).toContain(DRAFTED);
     });
 
     it("errors without a card for an unregistered target action", async () => {

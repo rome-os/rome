@@ -80,10 +80,8 @@ describe("RoutineDraftCard", () => {
     expect(screen.getByText("Only when")).toBeTruthy();
     expect(screen.getByText("sender is dana@example.com")).toBeTruthy();
     expect(screen.getByText("Then")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
-
-    // Let the mount lookup settle so it doesn't flag a state update after assert.
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    // The button appears once the lookup confirms nothing exists yet.
+    expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
   });
 
   it("renders a schedule draft as a Scheduled routine with a Runs row and no filter", async () => {
@@ -154,7 +152,7 @@ describe("RoutineDraftCard", () => {
     const user = userEvent.setup();
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
-    await user.click(screen.getByRole("button", { name: /turn it on/i }));
+    await user.click(await screen.findByRole("button", { name: /turn it on/i }));
 
     expect(mockCreate).toHaveBeenCalledWith({
       name: "Landlord emails",
@@ -174,7 +172,7 @@ describe("RoutineDraftCard", () => {
     mockCreate.mockResolvedValue({ ok: false, status: 400, error: "Routine name already taken" });
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
-    await user.click(screen.getByRole("button", { name: /turn it on/i }));
+    await user.click(await screen.findByRole("button", { name: /turn it on/i }));
 
     await waitFor(() => expect(screen.getByText("Routine name already taken")).toBeTruthy());
     expect(screen.queryByText("On")).toBeNull();
@@ -201,9 +199,8 @@ describe("RoutineDraftCard", () => {
     ]);
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
     expect(screen.queryByText("On")).toBeNull();
-    expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
   });
 
   it("matches a card without a key (written before keys) by name among unkeyed routines", async () => {
@@ -216,6 +213,9 @@ describe("RoutineDraftCard", () => {
     const link = await screen.findByRole("link", { name: /view run history/i });
     expect(link.getAttribute("href")).toBe("/routines/r-legacy");
     expect(mockCreate).not.toHaveBeenCalled();
+    // A name match may be an unrelated routine: link only, no Pause or Delete.
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
   it("shows the real bound action name", async () => {
@@ -226,12 +226,12 @@ describe("RoutineDraftCard", () => {
   });
 
   // `propose_routine` with `activate: true`: the agent created the routine with
-  // the card's key, and the part carries its id.
-  describe("an activated routine (routineId set)", () => {
+  // the card's key, so the lookup finds it.
+  describe("an activated routine", () => {
     const key = "chat-routine:card-5";
     const ref = { id: "r-5", name: "Landlord emails", key, enabled: true };
     const renderActivated = (draft: RoutineDraftSpec = eventDraft) =>
-      render(<RoutineDraftCard draft={draft} routineKey={key} routineId="r-5" />);
+      render(<RoutineDraftCard draft={draft} routineKey={key} />);
 
     beforeEach(() => {
       mockList.mockResolvedValue([ref]);
@@ -240,13 +240,12 @@ describe("RoutineDraftCard", () => {
     it("opens saved with Pause, Delete and the run-history link — never Turn it on", async () => {
       renderActivated();
 
-      expect(screen.getByText("On")).toBeTruthy();
+      expect(await screen.findByText("On")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
       const link = screen.getByRole("link", { name: /view run history/i });
       expect(link.getAttribute("href")).toBe("/routines/r-5");
       expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
@@ -260,9 +259,8 @@ describe("RoutineDraftCard", () => {
     it("pauses and resumes the routine", async () => {
       const user = userEvent.setup();
       renderActivated();
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
 
-      await user.click(screen.getByRole("button", { name: "Pause" }));
+      await user.click(await screen.findByRole("button", { name: "Pause" }));
       expect(mockSetEnabled).toHaveBeenCalledWith("r-5", false);
       expect(await screen.findByText("Paused")).toBeTruthy();
 
@@ -275,9 +273,8 @@ describe("RoutineDraftCard", () => {
       const user = userEvent.setup();
       mockSetEnabled.mockResolvedValue({ ok: false, error: "Routine not found" });
       renderActivated();
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
 
-      await user.click(screen.getByRole("button", { name: "Pause" }));
+      await user.click(await screen.findByRole("button", { name: "Pause" }));
       expect(await screen.findByText("Routine not found")).toBeTruthy();
       expect(screen.getByText("On")).toBeTruthy();
     });
@@ -285,9 +282,8 @@ describe("RoutineDraftCard", () => {
     it("deletes only after confirmation, then offers Turn it on as the undo", async () => {
       const user = userEvent.setup();
       renderActivated();
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
 
-      await user.click(screen.getByRole("button", { name: "Delete" }));
+      await user.click(await screen.findByRole("button", { name: "Delete" }));
       expect(mockDelete).not.toHaveBeenCalled();
       expect(screen.getByText("Delete this routine?")).toBeTruthy();
 
@@ -303,12 +299,13 @@ describe("RoutineDraftCard", () => {
       expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
     });
 
-    it("keeps the saved state when the routine list can't load", async () => {
+    // A keyed create of an existing routine answers 409 with its id, so the
+    // fallback can't duplicate it.
+    it("offers Turn it on when the routine list can't load", async () => {
       mockList.mockResolvedValue(null);
       renderActivated();
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
-      expect(screen.getByText("On")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
     });
 
     it("offers no Pause for a manual routine", async () => {
@@ -318,46 +315,20 @@ describe("RoutineDraftCard", () => {
         filterSummary: undefined,
         trigger: { type: "manual" },
       });
-      await waitFor(() => expect(mockList).toHaveBeenCalled());
+      expect(await screen.findByRole("button", { name: "Delete" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
-      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     });
   });
 
-  // The mount lookup can resolve after the guardian already acted; its older
-  // snapshot must not undo what they did.
-  describe("a slow mount lookup", () => {
-    const deferredList = () => {
-      let resolve!: (refs: Awaited<ReturnType<typeof listRoutineRefs>>) => void;
-      mockList.mockReturnValue(new Promise((r) => (resolve = r)));
-      return (refs: Awaited<ReturnType<typeof listRoutineRefs>>) => resolve(refs);
-    };
-    const ref = { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true };
+  // Until the lookup settles the card can't tell a draft from a routine that
+  // already exists, so it offers nothing to click — no stale state to act on.
+  it("shows no controls until the lookup settles", async () => {
+    let resolve!: (refs: Awaited<ReturnType<typeof listRoutineRefs>>) => void;
+    mockList.mockReturnValue(new Promise((r) => (resolve = r)));
+    render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-5" />);
 
-    it("doesn't revert a pause made before it returned", async () => {
-      const user = userEvent.setup();
-      const resolveList = deferredList();
-      render(<RoutineDraftCard draft={eventDraft} routineKey={ref.key} routineId="r-5" />);
-
-      await user.click(screen.getByRole("button", { name: "Pause" }));
-      expect(await screen.findByText("Paused")).toBeTruthy();
-      resolveList([ref]);
-      await new Promise((r) => setTimeout(r, 0));
-      expect(screen.getByText("Paused")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
-    });
-
-    it("doesn't revert a create made before it returned", async () => {
-      const user = userEvent.setup();
-      const resolveList = deferredList();
-      render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
-
-      await user.click(screen.getByRole("button", { name: /turn it on/i }));
-      expect(await screen.findByText("On")).toBeTruthy();
-      resolveList([]);
-      await new Promise((r) => setTimeout(r, 0));
-      expect(screen.getByText("On")).toBeTruthy();
-      expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
-    });
+    expect(screen.queryByRole("button")).toBeNull();
+    resolve([{ id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: false }]);
+    expect(await screen.findByRole("button", { name: "Resume" })).toBeTruthy();
   });
 });
