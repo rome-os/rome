@@ -124,17 +124,27 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
-      // A glyph at the edge of a centred label sits one `--control-gap` from
-      // that edge, the distance it sits from the label. The glyph names its
-      // side with `data-icon`, because a bare-text label leaves a lone glyph
-      // both first and last element child. Square members hold no padding,
-      // `xs` keeps symmetric padding, and a start-aligned glyph sits on the alignment
-      // edge, so none of those take it.
+      // A glyph at the edge of a centred label carries less visual weight
+      // than the word at the other edge, so equal padding reads as the glyph
+      // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
+      // label's, which reads as centred. The glyph names its side with
+      // `data-icon`, because a bare-text label leaves a lone glyph both first
+      // and last element child. These variants outrank a caller's `px-*`, so
+      // a button that sets its own padding leaves its glyph unmarked. Square
+      // members hold no padding, `xs` keeps symmetric padding, and a
+      // start-aligned glyph sits on the alignment edge, so none of those take
+      // it.
       {
         align: "center",
-        size: ["sm", "md", "default"],
+        size: "sm",
         className:
-          "has-data-[icon=inline-start]:pl-[var(--control-gap)] has-data-[icon=inline-end]:pr-[var(--control-gap)]",
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
+      },
+      {
+        align: "center",
+        size: ["md", "default"],
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },

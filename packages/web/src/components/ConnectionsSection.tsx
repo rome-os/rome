@@ -103,7 +103,7 @@ export function ConnectionsSection({
                   className="mt-3"
                   onClick={() => void onRetry?.()}
                 >
-                  <RefreshCw aria-hidden />
+                  <RefreshCw data-icon="inline-start" aria-hidden />
                   {t("page.retry")}
                 </Button>
               </AlertDescription>

@@ -329,14 +329,14 @@ export default function AppDetailPage() {
         {app.fullHref ? (
           <Button asChild variant="outline">
             <Link to={app.fullHref}>
-              <ExternalLink aria-hidden />
+              <ExternalLink data-icon="inline-start" aria-hidden />
               {t("installed.openFullTitle")}
             </Link>
           </Button>
         ) : null}
         {remixable ? (
           <Button type="button" variant="outline" onClick={() => setRemixOpen(true)}>
-            <GitFork aria-hidden />
+            <GitFork data-icon="inline-start" aria-hidden />
             {t("installed.remix")}
           </Button>
         ) : null}

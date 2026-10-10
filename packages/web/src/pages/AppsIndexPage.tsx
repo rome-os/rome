@@ -516,7 +516,7 @@ export default function AppsIndexPage() {
               onClick={lifecycle.upgradeAll}
               disabled={updatesCount === 0 || menusDisabled}
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
+              <Download data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
               {lifecycle.bulkUpgradePending
                 ? t("installed.updateAllUpdating")
                 : t("installed.updateAll")}

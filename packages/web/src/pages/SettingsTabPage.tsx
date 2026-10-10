@@ -402,7 +402,7 @@ export default function SettingsPage() {
             <CardContent className="flex flex-col items-start gap-3">
               <p className="text-ui text-destructive">{loadError}</p>
               <Button type="button" size="sm" onClick={() => void loadAll()}>
-                <RefreshCw />
+                <RefreshCw data-icon="inline-start" />
                 {t("page.retry")}
               </Button>
             </CardContent>
@@ -675,9 +675,13 @@ function FavorRequestRow({
                 aria-label={payBusy ? t("favors.payingApprovalRequest") : undefined}
               >
                 {payBusy ? (
-                  <Spinner size="sm" label={t("favors.payingApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.payingApprovalRequest")}
+                  />
                 ) : (
-                  <Check />
+                  <Check data-icon="inline-start" />
                 )}
                 Pay
               </Button>
@@ -690,9 +694,13 @@ function FavorRequestRow({
                 aria-label={declineBusy ? t("favors.decliningApprovalRequest") : undefined}
               >
                 {declineBusy ? (
-                  <Spinner size="sm" label={t("favors.decliningApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.decliningApprovalRequest")}
+                  />
                 ) : (
-                  <X />
+                  <X data-icon="inline-start" />
                 )}
                 Decline
               </Button>
@@ -790,7 +798,7 @@ function FavorsSection() {
             className="mt-3"
             onClick={() => void query.refetch()}
           >
-            <RefreshCw />
+            <RefreshCw data-icon="inline-start" />
             Retry
           </Button>
         </CardContent>
@@ -866,7 +874,7 @@ function FavorsSection() {
                 key={pack.id}
                 type="button"
                 variant="outline"
-                className="justify-between"
+                align="between"
                 onClick={() => void startRecharge(pack)}
                 disabled={busyPack !== null}
                 aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}

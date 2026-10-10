@@ -285,7 +285,7 @@ export function AppInstallConfirm({
         >
           {installing ? (
             <>
-              <Spinner label={t("install.installing")} />
+              <Spinner data-icon="inline-start" label={t("install.installing")} />
               <span aria-hidden>{t("install.installing")}</span>
             </>
           ) : (

@@ -258,7 +258,7 @@ Write both as product copy, not technical documentation:
 - **Do not** include schemas, file paths, build commands, action/API names, or implementation details. That all belongs in source comments or commit messages, not in the listing.
 - Keep it short — a few headings is enough.
 
-The packed artifact picks the top-level `README.md` up automatically (it does **not** go under `dist/` or `src/`). The publish flow uploads `.rome_store` separately and excludes it from installed app bundles, so store screenshots and videos should live under `.rome_store/assets/`, not `src/assets/`.
+The packed artifact picks the top-level `README.md` up automatically (it does **not** go under `dist/` or `src/`). The publish flow uploads `.rome_store` separately and excludes it from installed app bundles, so store screenshots and videos should live under `.rome_store/assets/`, not `src/assets/`. The publish procedure itself is in `system:app-lifecycle`.
 
 ## Recurring runs
 

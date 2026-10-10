@@ -153,8 +153,9 @@ export default function ComponentGalleryPage() {
               <Popover open={navOpen} onOpenChange={setNavOpen}>
                 <PopoverTrigger asChild>
                   <Button
+                    align="between"
                     aria-expanded={navOpen}
-                    className="w-48 justify-between"
+                    className="w-48"
                     role="combobox"
                     size="sm"
                     variant="outline"

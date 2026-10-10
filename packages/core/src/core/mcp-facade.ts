@@ -661,7 +661,8 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
     },
     {
       name: "read_skill",
-      description: "Read the full markdown for one available skill.",
+      description:
+        "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its `directory` and `files`; open one with your file tools only when the skill body points you to it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -673,9 +674,13 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
       handler: (input) =>
         runFacadeTool("read_skill", input, async (args) => {
           const skillName = resolveSkillLookupName(args);
+          const skill = requireSkill(getSkillCatalog(), skillName);
           return {
             name: skillName,
-            content: requireSkill(getSkillCatalog(), skillName).content,
+            content: skill.content,
+            ...(skill.directory && skill.files?.length
+              ? { directory: skill.directory, files: skill.files }
+              : {}),
           };
         }),
     },

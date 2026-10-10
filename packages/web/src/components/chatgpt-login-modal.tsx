@@ -281,7 +281,7 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
             ) : (
               <>
                 {t("chatgptLogin.steps.login.cta")}
-                <ArrowRight className="h-4 w-4" aria-hidden />
+                <ArrowRight data-icon="inline-end" className="h-4 w-4" aria-hidden />
               </>
             )}
           </Button>
@@ -294,7 +294,7 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
               onClick={handleBack}
               disabled={retrying}
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
+              <ArrowLeft data-icon="inline-start" className="h-4 w-4" aria-hidden />
               {t("chatgptLogin.steps.authorize.back")}
             </Button>
             <Button
@@ -308,7 +308,7 @@ export function ChatGPTLoginModal({ open, onClose, onConnected }: ChatGPTLoginMo
                 <Spinner label={t("chatgptLogin.retrying")} />
               ) : (
                 <>
-                  <RotateCcw className="h-4 w-4" aria-hidden />
+                  <RotateCcw data-icon="inline-start" className="h-4 w-4" aria-hidden />
                   {t("chatgptLogin.steps.authorize.retry")}
                 </>
               )}

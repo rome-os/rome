@@ -191,7 +191,7 @@ function BackLink({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation("people");
   return (
     <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onClick}>
-      <ArrowLeft aria-hidden="true" />
+      <ArrowLeft data-icon="inline-start" aria-hidden="true" />
       {t("detail.back")}
     </Button>
   );

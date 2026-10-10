@@ -280,7 +280,7 @@ export function SourceConnect(props: SourceConnectProps) {
                 }}
                 disabled={!source.connectUrl}
               >
-                <SourceIcon source={source.id} className="size-4" />
+                <SourceIcon data-icon="inline-start" source={source.id} className="size-4" />
                 Connect {source.label}
               </Button>
               <Button variant="outline" onClick={() => void loadSources()}>

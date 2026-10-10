@@ -303,6 +303,10 @@
   --control-px-start-md: 12px;
   --control-px-center-sm: 10px;
   --control-px-center-md: 14px;
+  /* A glyph at a centred edge reads lighter than a word there, so its side
+     takes 2px less than the label's to look centred. */
+  --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
+  --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
   /* Compatibility aliases resolve at the current scope. */
   --field-px-sm: var(--control-px-start-sm);
   --field-px-md: var(--control-px-start-md);
@@ -371,6 +375,8 @@
   --control-px-start-md: 16px;
   --control-px-center-sm: 16px;
   --control-px-center-md: 18px;
+  --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
+  --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
   --control-h-xs: var(--rome-size-44);
   --control-px-center-xs: var(--rome-space-4);
   --control-min-h: var(--rome-size-44);
@@ -728,8 +734,11 @@
    around one line of text buys air rather than emphasis.
 
      --control-h-{sm,md,lg}    28 / 32 / 44px   explicit control height
-     --control-gap                        6px   glyph gap, every size: to its
-                                                label, and to a centred edge
+     --control-gap                        6px   glyph gap to its label, every
+                                                size
+     --control-px-icon-{sm,md}         8 / 12px   a glyph's side of centred
+                                                content: the centred inset
+                                                less 2px
      --control-r-{sm,md,lg}     8 / 10 / 12px   corner radius
      --control-px-start-{sm,md,lg}
                                10 / 12 / 16px   horizontal padding for content
