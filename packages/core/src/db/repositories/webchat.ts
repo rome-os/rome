@@ -663,16 +663,7 @@ export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
-  private liveTurnProbe: (sessionId: string, turnId: string) => boolean = () => false;
-
   constructor(private db: DrizzleDb) {}
-
-  /** Tell the repository which turns the browser renders live off their own
-   *  stream. A message a channel sends for one of those turns is written
-   *  silently, because the stream already shows it. */
-  setLiveTurnProbe(probe: (sessionId: string, turnId: string) => boolean): void {
-    this.liveTurnProbe = probe;
-  }
 
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
@@ -1812,9 +1803,8 @@ export class WebChatRepository {
   }
 
   /**
-   * Persist an assistant message a channel sends into a chat. It notifies
-   * subscribers like {@link insertBackendMessage}, unless the browser renders
-   * the message's turn live off that turn's own stream.
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
    */
   async addSentMessage(
     id: string,
@@ -1822,10 +1812,6 @@ export class WebChatRepository {
     parts: MessagePart[],
     turnId: string | null,
   ): Promise<void> {
-    if (turnId && this.liveTurnProbe(sessionId, turnId)) {
-      await this.addMessage(id, sessionId, "assistant", JSON.stringify(parts), turnId);
-      return;
-    }
     await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 

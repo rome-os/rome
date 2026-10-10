@@ -682,11 +682,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
-  // A turn with a stream shows its reply live, so the webchat channel writes
-  // that reply silently. A reply to any other turn is pushed to open chats.
-  deps.webchatRepo.setLiveTurnProbe(
-    (sessionId, turnId) => streamsByTurnId.get(turnId)?.sessionId === sessionId,
-  );
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();

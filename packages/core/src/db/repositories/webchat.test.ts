@@ -51,9 +51,8 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
-  it("pushes a sent message unless the browser renders its turn live", async () => {
+  it("pushes every sent message to open chats", async () => {
     await repo.createSession("sent-session", "Sent");
-    repo.setLiveTurnProbe((_sessionId, turnId) => turnId === "live-turn");
     const pushed: string[] = [];
     const stop = repo.onMessageInserted((message) => pushed.push(message.id));
     try {
@@ -74,7 +73,7 @@ describe("WebChatRepository", () => {
       stop();
     }
 
-    expect(pushed).toEqual(["later", "bare"]);
+    expect(pushed).toEqual(["live", "later", "bare"]);
     const messages = await repo.getMessages("sent-session");
     expect(messages.map((message) => [message.id, message.turnId]).sort()).toEqual([
       ["bare", null],
