@@ -499,7 +499,7 @@ export class AgentRunner {
       romeSessionId: params.romeSessionId,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      platformMessageId: params.platformMessageId,
+      applyProviderSessionReset: Boolean(params.platformMessageId),
     };
     const session = explicitSessionId
       ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)

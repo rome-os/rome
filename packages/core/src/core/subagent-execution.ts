@@ -116,7 +116,6 @@ export function createSubagentExecutionService(deps: {
             workingDir: context.workingDir,
             threadContext: context.threadContext,
             sharedContext: context.sharedContext,
-            forceNewSession: true,
           },
         );
       }

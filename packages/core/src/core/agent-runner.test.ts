@@ -2167,13 +2167,6 @@ describe("AgentRunner", () => {
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
-      const repo = new SessionsRepository(testDb.db);
-      await repo.create({
-        id: "sess-old",
-        agentName: "test-main",
-        channelThreadKey: "telegram:t-1",
-        status: "active",
-      });
       const provider = new MockModelProvider();
       const modelResolver = createTestModelResolver({
         providers: [provider],
@@ -2182,7 +2175,14 @@ describe("AgentRunner", () => {
         keepAliveAcrossTurns: true,
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
-      const cached = await manager.acquire(key, { forceNewSession: true });
+      const cached = await manager.acquire(key);
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-old",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-1",
+        status: "active",
+      });
 
       expect(cached.sessionId).not.toBe("sess-old");
       expect(provider.sessions).toHaveLength(1);

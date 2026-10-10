@@ -200,7 +200,6 @@ export interface AgentSessionInit {
   /** Stable Rome conversation bound to this provider/runtime session. */
   romeSessionId?: string;
   sharedContext?: Record<string, unknown>;
-  forceNewSession?: boolean;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
    * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
@@ -225,8 +224,11 @@ export interface AgentSessionInit {
    * same degradation an exact fork's own turn already gets.
    */
   interactiveSurfaceDetached?: boolean;
-  /** Existing inbound platform message id, when this acquire starts its turn. */
-  platformMessageId?: string;
+  /**
+   * This acquire starts a turn for an inbound channel message, so the
+   * connection's provider-session reset policy applies before the session opens.
+   */
+  applyProviderSessionReset?: boolean;
   /**
    * Session-scoped handback contract for a handoff child conversation
    * (handoff + interactive summon). Exposes the `submit_output` tool validated
@@ -238,8 +240,6 @@ export interface AgentSessionInit {
    * It cannot be combined with an agent-declared `outputSchema`.
    */
   handback?: { schema: Record<string, unknown>; validate?: string };
-  /** Runtime-internal id for a generation already created transactionally. */
-  preparedSessionId?: string;
 }
 
 export interface AgentTurnInput {
@@ -454,10 +454,12 @@ export function createAgentSessionManager(
     key: AgentSessionKey,
     span: Span,
     init?: AgentSessionInit,
+    /** Set when the reset policy already ran for this acquire. */
+    resetChecked?: { preparedSessionId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
-      init?.platformMessageId &&
+      init?.applyProviderSessionReset &&
       init.threadContext?.connectionId &&
       deps.resolveProviderSessionReset
         ? {
@@ -465,7 +467,7 @@ export function createAgentSessionManager(
             conversationId: init.threadContext.threadId as ConversationId,
           }
         : undefined;
-    if (init && resetRef && !init.resumeSessionId && !init.preparedSessionId) {
+    if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const reset = await deps.resolveProviderSessionReset!(resetRef);
       const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
@@ -512,14 +514,9 @@ export function createAgentSessionManager(
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, {
-          ...init,
-          platformMessageId: undefined,
-          ...(preparedSessionId ? { preparedSessionId } : {}),
-        });
+        return await acquireInner(key, span, init, { preparedSessionId });
       });
     }
-    let forceNewSession = init?.forceNewSession === true;
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -593,8 +590,9 @@ export function createAgentSessionManager(
       const sess = await openSession(
         deps,
         key,
-        { ...(init ?? {}), forceNewSession },
+        init ?? {},
         {
+          preparedSessionId: resetChecked?.preparedSessionId,
           keepAlive,
           onClosed: onSessionClosed,
           isSubagent,
@@ -674,6 +672,8 @@ export function createAgentSessionManager(
 }
 
 interface OpenOptions {
+  /** Id of a generation the reset path already created transactionally. */
+  preparedSessionId?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -812,11 +812,11 @@ async function openSession(
         workingDir?: string | null;
       }
     | undefined;
-  if (init.preparedSessionId) {
+  if (opts.preparedSessionId) {
     // The lifecycle transaction already inserted this fresh generation. Keep
     // resumeResult empty so provider open and prompt framing use new-session
     // semantics while retaining the transactionally allocated runtime id.
-  } else if (init.resumeSessionId && !init.forceNewSession) {
+  } else if (init.resumeSessionId) {
     resumeResult = await deps.sessionManager.findResumableSessionById(
       init.resumeSessionId,
       key.agentName,
@@ -827,7 +827,7 @@ async function openSession(
     if (resumeResult.channelThreadKey !== key.channelThreadKey) {
       throw new Error(`Agent session "${init.resumeSessionId}" does not match this session key`);
     }
-  } else if (key.channelThreadKey && !init.forceNewSession) {
+  } else if (key.channelThreadKey) {
     resumeResult = await deps.sessionManager.findReusableSession(
       key.channelThreadKey,
       key.agentName,
@@ -836,7 +836,7 @@ async function openSession(
 
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
   // was written unless the caller names a dir. Legacy rows record none.
-  let preparedSessionId = init.preparedSessionId;
+  let preparedSessionId = opts.preparedSessionId;
   let recordedWorkingDir: string | undefined;
   if (init.workingDir === undefined && resumeResult?.workingDir) {
     recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);

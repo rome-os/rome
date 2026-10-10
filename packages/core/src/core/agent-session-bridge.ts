@@ -121,7 +121,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           ...req.init,
           workingDir,
           isSubagent: true,
-          platformMessageId: req.platformMessageId,
+          applyProviderSessionReset: Boolean(req.platformMessageId),
         };
         const acquireStartedAt = Date.now();
         log.info("agent.session.manager.acquire started", baseLogFields);
