@@ -573,7 +573,12 @@ describe("AgentRunner", () => {
       appCatalog: opts.appCatalog,
     });
     const first = await collectMessages(
-      runner.run({ agentName, prompt: "Hi", channelThreadKey: "webchat:fork-1" }),
+      runner.run({
+        agentName,
+        prompt: "Hi",
+        channelThreadKey: "webchat:fork-1",
+        threadContext: { channel: "webchat", threadId: "fork-1" },
+      }),
     );
     const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
     return collectMessages(
@@ -1627,6 +1632,8 @@ describe("AgentRunner", () => {
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
+      channelSurface: (channel: string) =>
+        channel === "webchat" ? { interactiveCards: true, promptContext: false } : null,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
         webchatRepo: new WebChatRepository(testDb.db),
@@ -3285,6 +3292,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "webchat:prompt-surface",
+          threadContext: { channel: "webchat", threadId: "prompt-surface" },
         }),
       );
 
@@ -3295,6 +3303,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "telegram:prompt-surface",
+          threadContext: { channel: "telegram", threadId: "prompt-surface" },
         }),
       );
 

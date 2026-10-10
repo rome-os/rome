@@ -755,6 +755,14 @@ async function main() {
       resolveProviderSessionReset: async (ref) =>
         (await conversationSettings.get(ref)).effective.session.reset,
       usageRecorder,
+      channelSurface: (channel) => {
+        const talker = connectionRegistry.getDescriptor(channel)?.capabilities.talker;
+        if (!talker) return null;
+        return {
+          interactiveCards: talker.interactiveCards === true,
+          promptContext: talker.promptContext !== false,
+        };
+      },
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );

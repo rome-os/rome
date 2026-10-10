@@ -380,6 +380,29 @@ interface ManagerDeps {
   resolveProviderSessionReset?: (ref: ConversationRef) => Promise<ProviderSessionResetPolicy>;
   /** Receives every turn this manager's sessions finish, forked turns included. */
   usageRecorder?: TurnUsageSink;
+  /** What the named channel's surface supports, or null for a name no channel
+   *  has. Absent treats every channel as a messaging channel. */
+  channelSurface?: (channel: string) => ChannelSurface | null;
+}
+
+/** The parts of a channel's surface that change how its sessions prompt. */
+export interface ChannelSurface {
+  /** The next human turn arrives on a surface that renders interactive cards. */
+  interactiveCards: boolean;
+  /** Prompts carry the stored messages the agent has not seen. */
+  promptContext: boolean;
+}
+
+const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
+  interactiveCards: false,
+  promptContext: true,
+};
+
+function channelSurfaceOf(
+  deps: Pick<ManagerDeps, "channelSurface">,
+  channel: string,
+): ChannelSurface {
+  return deps.channelSurface?.(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
 interface ManagerOptions {
@@ -931,15 +954,17 @@ async function openSession(
   }
 
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
-  // agent for a human reply. That only works when (a) the surface can render it
-  // (the webchat surface — dashboard + desktop — does; messaging channels don't),
-  // and (b) this session will actually receive the next user turn. Subagents fail
-  // (b): the parent turn blocks on the child, and the next user turn always routes
-  // to the main agent — so a suspended subagent call would hang forever. Where
-  // this is false, an action that returns `renderComponent` falls back to relaying
-  // its `promptText` as prose; see the executeAction shim below.
+  // agent for a human reply. That only works when (a) the channel's surface can
+  // render it, and (b) this session will actually receive the next user turn.
+  // Subagents fail (b): the parent turn blocks on the child, and the next user
+  // turn always routes to the main agent — so a suspended subagent call would
+  // hang forever. Where this is false, an action that returns `renderComponent`
+  // falls back to relaying its `promptText` as prose; see the executeAction shim
+  // below. The answer feeds the cached system prompt, so the opening caller's
+  // channel decides it for the session's life.
+  const openingChannel = init.threadContext?.channel;
   const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+    !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -3308,7 +3333,16 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let pendingConversationMessageIds: string[] = [];
-      if (this.deps.webchatRepo && sink.romeSessionType === "channel" && sink.romeSessionId) {
+      // A channel conversation stores lines the agent never saw as turns. The
+      // surface says whether this channel does; webchat, for one, does not.
+      const channel = sink.threadContext?.channel;
+      if (
+        this.deps.webchatRepo &&
+        sink.romeSessionType === "channel" &&
+        sink.romeSessionId &&
+        channel &&
+        channelSurfaceOf(this.deps, channel).promptContext
+      ) {
         const storedContext = await this.deps.webchatRepo.loadConversationContext(
           sink.romeSessionId,
           sink.replyTo?.messageId,
