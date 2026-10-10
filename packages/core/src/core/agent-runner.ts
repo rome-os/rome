@@ -546,7 +546,7 @@ export class AgentRunner {
     }
 
     const recorder =
-      this.webchatRepo && shouldPersistAgentTrace(threadContext)
+      this.webchatRepo && (params.persistTrace ?? shouldPersistAgentTrace(threadContext))
         ? new AgentTraceRecorder({
             webchatRepo: this.webchatRepo,
             agentName,
@@ -556,7 +556,7 @@ export class AgentRunner {
             channelThreadKey,
             turnId: handle.turnId,
             threadContext,
-            persistTranscript: true,
+            persistTranscript: params.persistTranscript ?? true,
             persistUserTranscript: !boundRomeSessionId,
           })
         : null;
