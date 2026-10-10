@@ -336,6 +336,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     clampTextareaHeight(el, textareaMaxHeight);
   }, [inputText, textareaMaxHeight]);
 
+  // Whether the textarea held focus when the current Send press began.
+  const textareaFocusedAtPressRef = useRef(false);
+
   //      draft seed via location.state), update the chip — but only while we
   //      still have the default-or-stale value so we don't trample on a
   //      project the user explicitly picked from the menu.
@@ -1223,7 +1226,29 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                     : "default"
                 }
                 size="icon-sm"
-                onClick={() => void runSend()}
+                // A press on Send must not take focus from the textarea: on a
+                // phone that blur closes the soft keyboard after every turn.
+                // Cancelling mousedown keeps focus in place. Some mobile
+                // browsers still blur on the tap, so the click restores focus
+                // while it is still a user gesture, which iOS requires for the
+                // keyboard to stay up.
+                onPointerDown={() => {
+                  textareaFocusedAtPressRef.current =
+                    document.activeElement === textareaRef.current;
+                }}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  const textarea = textareaRef.current;
+                  if (
+                    textareaFocusedAtPressRef.current &&
+                    textarea &&
+                    document.activeElement !== textarea
+                  ) {
+                    textarea.focus({ preventScroll: true });
+                  }
+                  textareaFocusedAtPressRef.current = false;
+                  void runSend();
+                }}
                 disabled={
                   uploadInFlight ||
                   (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
