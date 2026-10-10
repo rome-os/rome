@@ -112,14 +112,16 @@ const buttonVariants = cva(
       },
       /**
        * Press feedback. `scale` shrinks the control to 0.96 while held, which
-       * reads as a press. Two boxes never scale, whatever the caller passes: a
-       * popup trigger, whose popup is its feedback, and a ButtonGroup segment,
-       * which would pull away from the neighbours it shares an edge with.
+       * reads as a press, and skips it under `prefers-reduced-motion`. Two
+       * boxes never scale, whatever the caller passes: a popup trigger, whose
+       * popup is its feedback, and a ButtonGroup segment, which would pull
+       * away from the neighbours it shares an edge with.
        * `none` is for any other box a shrink would break, such as a calendar
        * day inside a range band.
        */
       press: {
-        scale: "active:not-aria-[haspopup]:not-in-data-[slot=button-group]:scale-[0.96]",
+        scale:
+          "motion-safe:active:not-aria-[haspopup]:not-in-data-[slot=button-group]:scale-[0.96]",
         none: "",
       },
     },
