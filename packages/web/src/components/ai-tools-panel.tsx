@@ -531,11 +531,14 @@ export function AiToolsPanel({
     try {
       const res = await fetch("/api/ai-tools/status");
       const data = (await res.json()) as {
-        claude: AIToolStatus;
-        codex: AIToolStatus;
+        claude?: AIToolStatus;
+        codex?: AIToolStatus;
         anthropicCompatible?: AnthropicCompatibleConfiguredSummary | null;
       };
-      setToolStatus({ claude: data.claude, codex: data.codex });
+      setToolStatus({
+        ...(data.claude ? { claude: data.claude } : {}),
+        ...(data.codex ? { codex: data.codex } : {}),
+      });
       setStatusLoaded(true);
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
