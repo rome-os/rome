@@ -4,7 +4,10 @@ import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
-import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
+import {
+  nextDateForLocalTime,
+  parseDateAndLocalTime,
+} from "../../routines/schedule-trigger-provider.js";
 import type { ApiDeps } from "../deps.js";
 import type { Trigger } from "../../routines/types.js";
 
@@ -130,6 +133,14 @@ function datedOneOffError(trigger: {
     return "schedule.date is in the past";
   }
   return null;
+}
+
+/** A schedule with neither `date` nor `rrule` means "once, at the next
+ * `localTime`". Pin that to a date so the scheduler only sees dated one-offs. */
+function resolveOneOffDate(trigger: Trigger): void {
+  if (trigger.type === "schedule" && !trigger.date && !trigger.rrule) {
+    trigger.date = nextDateForLocalTime(trigger.localTime, trigger.tzid);
+  }
 }
 
 interface CreateRoutineBody {
@@ -294,6 +305,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (triggerError) {
       return c.json({ error: triggerError }, 400);
     }
+    resolveOneOffDate(body.trigger);
     if (body.trigger.type === "schedule" && body.trigger.date) {
       body.trigger.tzMode = "fixed";
       const datedError = datedOneOffError(body.trigger);
@@ -345,6 +357,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (triggerError) {
         return c.json({ error: triggerError }, 400);
       }
+      resolveOneOffDate(body.trigger);
       // A dated one-off pins to a fixed absolute zone, same as POST,
       // and must not be re-pointed to an already-past instant.
       if (body.trigger.type === "schedule" && body.trigger.date) {

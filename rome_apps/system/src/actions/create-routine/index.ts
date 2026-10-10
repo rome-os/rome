@@ -34,7 +34,7 @@ const scheduleTriggerSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Calendar date (YYYY-MM-DD) for a one-off; omit both date and rrule to fire once at the next localTime",
+      "Calendar date (YYYY-MM-DD) for a one-off; omit both date and rrule to fire once at the next localTime, stored as that date",
     ),
 });
 
@@ -206,6 +206,22 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
   };
 }
 
+/** A schedule with neither `date` nor `rrule` fires once at the next
+ * `localTime`. Store that as the dated one-off it is: the date in `tzid` of the
+ * next time its clock reads `localTime`, pinned `fixed` like any dated one-off.
+ * Runs after validation, since it needs a valid `localTime` and `tzid`. */
+function withOneOffDate(trigger: Trigger): Trigger {
+  if (trigger.type !== "schedule" || trigger.date || trigger.rrule) return trigger;
+  // en-CA formats a date as YYYY-MM-DD.
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: trigger.tzid }).format(new Date());
+  let date = today;
+  if (wallClockToUtc(today, trigger.localTime, trigger.tzid).getTime() <= Date.now()) {
+    const [year, month, day] = today.split("-").map(Number);
+    date = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+  }
+  return { ...trigger, date, tzMode: "fixed" };
+}
+
 /** Validate trigger fields per type. Returns an error string (for the agent to
  * relay) or null. Fails closed so a malformed trigger never becomes an enabled
  * routine that silently never fires. */
@@ -251,9 +267,9 @@ function validateTrigger(trigger: Trigger): string | null {
       }
     }
     // A blank rrule ("") is neither a real recurrence nor an omitted one: with
-    // no date the scheduler reads it as the legacy "fire once at next localTime"
-    // shape, silently changing recurring intent into a one-off. Reject it; omit
-    // rrule entirely for a one-off.
+    // no date it reads as "fire once at the next localTime", silently changing
+    // recurring intent into a one-off. Reject it; omit rrule entirely for a
+    // one-off.
     if (trigger.rrule !== undefined && !trigger.rrule.trim()) {
       return "trigger.rrule must be a non-empty RRULE when provided (omit it for a one-off)";
     }
@@ -424,11 +440,12 @@ export async function createRoutine(
     }
   }
 
-  const trigger = canonicalizeTrigger(input.trigger);
-  const triggerError = validateTrigger(trigger);
+  const canonical = canonicalizeTrigger(input.trigger);
+  const triggerError = validateTrigger(canonical);
   if (triggerError) {
     return { status: "error", error: triggerError };
   }
+  const trigger = withOneOffDate(canonical);
 
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is

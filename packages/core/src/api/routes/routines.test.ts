@@ -517,6 +517,32 @@ describe("Routines API", () => {
     expect(res.status).toBe(201);
   });
 
+  it("dates a schedule with neither date nor rrule to the next localTime in its tzid", async () => {
+    // At 16:00Z it is already 2026-06-24 01:00 in Tokyo, so 09:00 is still
+    // ahead today and 00:30 has passed until tomorrow.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
+      const create = async (localTime: string) => {
+        const res = await app.request("/routines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `next-${localTime}`,
+            trigger: { type: "schedule", tzid: "Asia/Tokyo", tzMode: "floating", localTime },
+            actionName: "anything",
+          }),
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { trigger: Trigger }).trigger;
+      };
+      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", tzMode: "fixed" });
+      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", tzMode: "fixed" });
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("judges a dated one-off against its tzid, not UTC", async () => {
     // At 16:00Z it is already 2026-06-24 01:00 in Tokyo. A one-off at 00:30
     // Tokyo (= 2026-06-23T15:30Z) is in the past; a UTC-naive check with a 24h
@@ -999,6 +1025,7 @@ describe("Routines fire path", () => {
       tzid: "Asia/Shanghai",
       tzMode: "fixed",
       localTime: "23:00",
+      rrule: "FREQ=DAILY",
     };
     await harness.app.request(`/routines/${id}`, {
       method: "PATCH",

@@ -2555,9 +2555,9 @@ export interface ScheduleTrigger {
    * `fixed` is the "absolute zone" choice: it pins the schedule to the literal
    * `tzid`. */
   tzMode: "fixed" | "floating";
-  /** Specific calendar date for a true one-off ("YYYY-MM-DD"). Mutually
-   * exclusive with `rrule`. When neither is set, fires once at the next
-   * matching `localTime`. */
+  /** Calendar date for a one-off ("YYYY-MM-DD"). Mutually exclusive with
+   * `rrule`. A stored schedule has one or the other: `system:create_routine`
+   * resolves a trigger with neither to the date of the next `localTime`. */
   date?: string;
   rrule?: string;
 }

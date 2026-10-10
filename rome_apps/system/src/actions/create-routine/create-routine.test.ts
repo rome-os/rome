@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
+import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { RoutinesRepository } from "../../../../../packages/core/src/db/repositories/routines.js";
@@ -179,6 +179,33 @@ describe("create_routine — engine activation", () => {
     const row = await repo.findById((result.data as { routineId: string }).routineId);
     // The one-off is an absolute instant — its zone is pinned at creation.
     expect(row!.trigger).toMatchObject({ type: "schedule", tzMode: "fixed", date: "2099-01-01" });
+  });
+
+  it("dates a schedule with neither date nor rrule to the next localTime in its tzid", async () => {
+    // At 16:00Z it is already 2026-06-24 01:00 in Tokyo, so 09:00 is still
+    // ahead today and 00:30 has passed until tomorrow.
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
+      const engine = makeFakeEngine();
+      const create = async (localTime: string) => {
+        const result = await createRoutine(
+          {
+            name: `next-${localTime}`,
+            trigger: { type: "schedule", tzid: "Asia/Tokyo", tzMode: "floating", localTime },
+            actionName: "summon",
+            args: {},
+          },
+          { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine },
+        );
+        if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+        return (await repo.findById((result.data as { routineId: string }).routineId))!.trigger;
+      };
+      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", tzMode: "fixed" });
+      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", tzMode: "fixed" });
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("preserves an explicit fixed tzMode", async () => {

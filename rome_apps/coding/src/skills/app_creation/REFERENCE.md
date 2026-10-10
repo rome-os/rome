@@ -668,7 +668,7 @@ authoritative reference):
 | `trigger.tzMode` | `"fixed" \| "floating"` | schedule | Picks the timezone for `localTime`. With `floating`, the routine fires in the guardian's current timezone and reschedules when that timezone changes. Use `floating` for most routines. With `fixed`, it fires in `tzid`, for a time tied to one place, such as a market open. `system:create_routine` stores a routine that has a `date` as `fixed`. |
 | `trigger.localTime` | `"HH:mm"` | schedule | Local wall-clock time in the timezone `tzMode` picks. |
 | `trigger.rrule` | string | recurring | iCal RRULE, e.g. `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,WE,FR`. Mutually exclusive with `date`. `FREQ=MONTHLY` must pin `BYMONTHDAY=N`. |
-| `trigger.date` | `"YYYY-MM-DD"` | one-off | Mutually exclusive with `rrule`; omit both to fire once at the next `localTime`. |
+| `trigger.date` | `"YYYY-MM-DD"` | one-off | Mutually exclusive with `rrule`. Omit both to fire once at the next `localTime`; the routine stores that date. |
 | `trigger.eventName` | string | event-bus | Watchable event type — find it with `system:search_event_catalog`, which also returns each type's `payloadSchema` (JSON Schema for the fields a `trigger.filter` dot-path can match). |
 | `actionName` | string | yes | Canonical `<app-id>:<local-name>` action id to invoke at trigger time. |
 | `args` | `Record<string, unknown>` | no | A single arg object (not an array); defaults to `{}`. To fan out, create one routine per arg set. |
