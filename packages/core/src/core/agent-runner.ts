@@ -3,7 +3,7 @@ import type { AgentEvent, McpServerConfig, ReasoningEffort } from "../types.js";
 import type { ActionConfig } from "../actions/types.js";
 import type { DeferInput } from "./defer.js";
 import type { UsageFunding } from "../usage/events.js";
-import { type ForkRunParams, type RunParams } from "./types.js";
+import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
 import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
@@ -493,9 +493,10 @@ export class AgentRunner {
       promptPreview: params.prompt.slice(0, 200),
     });
 
+    const threadContext = await this.withConversationId(params.threadContext);
     const init = {
       workingDir: params.workingDir,
-      threadContext: params.threadContext,
+      threadContext,
       romeSessionId: params.romeSessionId,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
@@ -519,16 +520,16 @@ export class AgentRunner {
       agentSessionId: session.sessionId,
       romeSessionId: boundRomeSessionId,
       channelThreadKey,
-      threadContext: params.threadContext,
+      threadContext,
     });
-    const romeSessionType = resolveRomeSessionType({ threadContext: params.threadContext });
+    const romeSessionType = resolveRomeSessionType({ threadContext });
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
     const handle = session.sendTurn(
       { prompt: params.prompt, images: params.images },
       {
-        threadContext: params.threadContext,
+        threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
         romeSessionType,
@@ -545,7 +546,7 @@ export class AgentRunner {
     }
 
     const recorder =
-      this.webchatRepo && shouldPersistAgentTrace(params.threadContext)
+      this.webchatRepo && shouldPersistAgentTrace(threadContext)
         ? new AgentTraceRecorder({
             webchatRepo: this.webchatRepo,
             agentName,
@@ -554,7 +555,7 @@ export class AgentRunner {
             existingSessionId: boundRomeSessionId ? romeSessionId : undefined,
             channelThreadKey,
             turnId: handle.turnId,
-            threadContext: params.threadContext,
+            threadContext,
             persistTranscript: true,
             persistUserTranscript: !boundRomeSessionId,
           })
@@ -574,6 +575,23 @@ export class AgentRunner {
       agent: agentName,
       sessionId: session.sessionId,
     });
+  }
+
+  /**
+   * The thread context with its conversation id filled in from the address
+   * when the caller left it out. Re-entries such as backend turns and approval
+   * resumes carry only the channel address, and an approval saved before
+   * callers set the id carries no id at all.
+   */
+  private async withConversationId(
+    threadContext: ThreadContext | undefined,
+  ): Promise<ThreadContext | undefined> {
+    if (!threadContext || threadContext.romeSessionId || !this.webchatRepo) return threadContext;
+    const romeSessionId = await this.webchatRepo.findConversationIdByAddress(
+      threadContext.channel,
+      threadContext.threadId,
+    );
+    return romeSessionId ? { ...threadContext, romeSessionId } : threadContext;
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {

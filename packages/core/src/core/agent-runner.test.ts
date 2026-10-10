@@ -277,6 +277,36 @@ describe("AgentRunner", () => {
     await session.close("shutdown");
   });
 
+  it("fills a re-entry's conversation id from its channel address", async () => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-1", "Webchat chat");
+    const stop = new Error("stop after acquire");
+    const acquireBySessionId = rs.fn(async () => {
+      throw stop;
+    });
+    const manager = { acquireBySessionId } as unknown as AgentSessionManager;
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await expect(
+      collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: "agent-session-1",
+          prompt: "continue",
+          threadContext: { channel: "webchat", threadId: "chat-1" },
+        }),
+      ),
+    ).rejects.toBe(stop);
+
+    expect(acquireBySessionId).toHaveBeenCalledWith(
+      "agent-session-1",
+      "test-main",
+      expect.objectContaining({
+        threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
+      }),
+    );
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {

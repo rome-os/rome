@@ -96,34 +96,4 @@ describe("backend turn delivery", () => {
       }),
     ).rejects.toThrow('Channel "wechat_user" cannot send');
   });
-
-  it("resumes the turn on the conversation its address names", async () => {
-    const agentRunner = createMockAgentRunner([[]]);
-    const enqueueSessionTask = rs.fn(async (_sessionId: string, task) => {
-      await task({ emit: () => {} });
-    });
-    const resolveConversationId = rs.fn(async () => "chat-1");
-    const runner = createBackendTurnRunner({
-      agentRunner,
-      channel: () => null,
-      resolveConversationId,
-    });
-    runner.setWebchatRuntime({ enqueueSessionTask });
-
-    await runner.runAndDeliver({
-      agentName: "main",
-      sessionId: "agent-session-1",
-      channel: "webchat",
-      threadId: "chat-1",
-      prompt: "continue",
-    });
-
-    expect(resolveConversationId).toHaveBeenCalledWith("webchat", "chat-1");
-    expect(agentRunner.calls[0]?.threadContext).toEqual({
-      channel: "webchat",
-      threadId: "chat-1",
-      channelUserId: undefined,
-      romeSessionId: "chat-1",
-    });
-  });
 });

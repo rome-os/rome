@@ -1326,6 +1326,7 @@ export class WebChatRepository {
           eq(romeSessions.sourceThreadId, threadId),
         ),
       )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
       .limit(1);
     return rows[0]?.id ?? null;
   }
