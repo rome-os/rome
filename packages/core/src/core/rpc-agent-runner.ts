@@ -18,6 +18,7 @@ import {
 import { createLogger } from "../logger.js";
 import { getCurrentHookInvocationContext } from "./hook-recursion.js";
 import { agentTurnStreamRouterFor } from "./agent-turn-stream-router.js";
+import { adhocSessionKey } from "./agent-session-key.js";
 
 const log = createLogger("rpc-agent-runner");
 
@@ -60,8 +61,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
     const ipc = this.getIpc();
     const router = agentTurnStreamRouterFor(ipc);
-    const channelThreadKey =
-      params.channelThreadKey ?? `${params.agentName}:${Date.now()}-${Math.random()}`;
+    const channelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
 
     const req: RunTurnRequest = {
       key: { agentName: params.agentName, channelThreadKey },

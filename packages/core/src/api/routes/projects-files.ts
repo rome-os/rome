@@ -26,6 +26,7 @@ import {
   resolveNearestGitTarget,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import type { ApiDeps } from "../deps.js";
@@ -161,10 +162,6 @@ function listTopLevelShadowProjectPaths(rootDir: string): string[] {
     .map((entry) => entry.name);
 }
 
-function buildWebchatChannelThreadKey(sessionId: string): string {
-  return `webchat:${sessionId}`;
-}
-
 async function closeLiveProjectSessions(
   agentSessionManager: ProjectsRouteDeps["agentSessionManager"],
   sessions: Awaited<
@@ -177,7 +174,7 @@ async function closeLiveProjectSessions(
     sessions.map(async (session) => {
       const liveSession = agentSessionManager.peek({
         agentName: session.agentName ?? "main",
-        channelThreadKey: buildWebchatChannelThreadKey(session.id),
+        channelThreadKey: webchatSessionKey(session.id),
       });
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);

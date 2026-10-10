@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
+import { subagentSessionKey } from "./agent-session-key.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
@@ -110,7 +110,7 @@ export function createSubagentExecutionService(deps: {
         child = await context.childManager.acquire(
           {
             agentName: name,
-            channelThreadKey: `${context.parentChannelThreadKey}:subagent:${uuidv4()}`,
+            channelThreadKey: subagentSessionKey(context.parentChannelThreadKey),
           },
           {
             workingDir: context.workingDir,
