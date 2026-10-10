@@ -181,7 +181,7 @@ describe("RoutineEngine fire context", () => {
 
   afterEach(() => testDb.close());
 
-  it("runs as a root, not nested under the action whose event fired it", async () => {
+  it("runs as a root, not nested under the action whose event fired it, retries included", async () => {
     const routines = new RoutinesRepository(testDb.db);
     const runs = new RoutineRunsRepository(testDb.db);
     const seen: Array<{ execution: unknown; replay: unknown }> = [];
@@ -191,10 +191,12 @@ describe("RoutineEngine fire context", () => {
           execution: actionExecutionContext.getStore(),
           replay: replayContext.getStore(),
         });
+        // Fail the first attempt so the engine schedules a retry.
+        if (seen.length === 1) throw new Error("worker crashed");
         return { status: "success", result: null };
       },
     } as unknown as ActionEngine;
-    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const engine = new RoutineEngine(routines, runs, actionEngine, 1, systemClock);
     let fire: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
     const provider: Pick<TriggerProvider, "activate" | "deactivate"> = {
       activate: async (_routine, onFire) => {
@@ -215,7 +217,11 @@ describe("RoutineEngine fire context", () => {
     await replayContext.run({} as ReplayStore, () =>
       actionExecutionContext.run({ agentName: "main" } as ActionExecutionStore, () => fire?.({})),
     );
+    for (let i = 0; i < 100 && seen.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
-    expect(seen).toEqual([{ execution: undefined, replay: undefined }]);
+    const clean = { execution: undefined, replay: undefined };
+    expect(seen).toEqual([clean, clean]);
   });
 });

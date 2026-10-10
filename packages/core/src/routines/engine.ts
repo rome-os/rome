@@ -164,10 +164,24 @@ export class RoutineEngine {
     return { stopped: true, killedLiveProcess };
   }
 
-  private async dispatch(
+  /** A routine fire is its own root. Event-bus subscribers run in the
+   * publisher's async context; without exiting it, the run (and any retry timer
+   * it schedules) would nest under the publishing action and inherit its
+   * agentName. */
+  private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
     opts: { manual?: boolean } = {},
+  ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
+    return replayContext.exit(() =>
+      actionExecutionContext.exit(() => this.dispatchAsRoot(routine, payload, opts)),
+    );
+  }
+
+  private async dispatchAsRoot(
+    routine: Routine,
+    payload: Record<string, unknown>,
+    opts: { manual?: boolean },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const startTime = this.clock.now().getTime();
 
@@ -213,15 +227,8 @@ export class RoutineEngine {
         };
 
         try {
-          // A routine fire is its own root. Event-bus subscribers run in the
-          // publisher's async context, so without exiting it the run would be
-          // nested under the publishing action and inherit its agentName.
           const result = await runWithoutHookInvocationContext(() =>
-            replayContext.exit(() =>
-              actionExecutionContext.exit(() =>
-                this.actionEngine.run(routine.actionName, mergedArgs, context),
-              ),
-            ),
+            this.actionEngine.run(routine.actionName, mergedArgs, context),
           );
           const durationMs = this.clock.now().getTime() - startTime;
 

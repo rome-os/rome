@@ -490,7 +490,7 @@ export class AgentRunner {
    * and execution gate. Unknown agent or action → false.
    */
   hasAction(agentName: string, actionName: string): boolean {
-    if (!this.agentLoader || !this.actionRegistry) return false;
+    if (!this.actionRegistry) return false;
     let actions: string[];
     try {
       actions = this.agentLoader.getRecord(agentName).config.actions ?? [];

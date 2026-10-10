@@ -58,6 +58,10 @@ describe("host root action grants", () => {
     }
 
     const agents = await agentManifests();
+    // Guard against a vacuous pass if manifest directories move.
+    expect(agents.map((agent) => agent.id)).toEqual(
+      expect.arrayContaining(["main", "inbox:sentinel", "assistant:explore"]),
+    );
     const holders = agents
       .filter((agent) => registry.getForAgent(agent.actions).length > 0)
       .map((agent) => agent.id);
