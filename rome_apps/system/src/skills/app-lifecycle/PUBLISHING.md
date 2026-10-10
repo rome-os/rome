@@ -25,7 +25,7 @@ Write both as product copy for users: what the app does, its main features, and 
 ## Publish
 
 1. Bump `version` in `app.yaml` and commit.
-2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). The publish ships the exact packed artifact that is installed. If the source changed after the last install, the publish is refused until you reinstall. Edits under `.rome_store/` alone do not need a reinstall.
+2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). Always do this before you publish. The publish ships the artifact that was packed at the last install. It does not include source edits made after that install, including the version bump, and it gives no warning about them. Edits under `.rome_store/` alone do not need a reinstall, because the listing is read from the source at publish time.
 3. Publish:
    - The guardian can open **Apps**, select the app, and select **Publish**.
    - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
@@ -38,11 +38,14 @@ Write both as product copy for users: what the app does, its main features, and 
 
      | Status | Meaning | Action |
      |---|---|---|
-     | `409` | The installed artifact is stale or missing. | Reinstall from source, then publish again. |
+     | `404` | The app is not installed. | Install it from source first. |
+     | `409` | The packed artifact is missing or was changed after the install. | Reinstall from source, then publish again. |
      | `409` | The app was not developed here, or it is not in the `installed` state. | Stop. Tell the guardian. A reinstall does not fix this. |
      | `412` | This Rome is not connected to a Rome account. | Tell the guardian to connect it. |
      | `403` naming credentials | The store refuses this instance's credential. | Tell the guardian to reconnect the instance to its Rome account. |
      | `400`, `403` | The store refused the version or the listing id. | Raise the version, or tell the guardian the id belongs to another account. |
+     | `501` | This Rome has no App Store origin configured. | Tell the guardian. |
+     | `502` | The store was unreachable or failed. | Retry once after a short wait. If it fails again, tell the guardian. |
 4. Verify with `system:app_store_search` that the listing shows the new version. Report the listing id and version to the guardian.
 
 ## Update or remove

@@ -30,23 +30,24 @@ The host checks the access mode before a request reaches the app. After that, ev
 
 The guardian can do it: open **Apps**, select the app, select **Access**, choose the mode, and copy the link.
 
-When the guardian asks you to do it for a specific app and mode, use the loopback API. Its port is `INTERNAL_API_PORT`, 4141 by default. The policy for all apps is one document, so read it, change only this app, and write the whole document back:
+When the guardian asks you to do it for a specific app and mode, use the loopback API. Its port is `INTERNAL_API_PORT`, 4141 by default. The policy for all apps is one document. Read it, change only this app, and write the whole document back. A `PUT` with an empty or invalid body resets every app to `private`, so run each step only when the one before it succeeded:
 
 ```bash
-curl -s "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/public-access"
-# {"enableAccessControl":false,"allowedApps":[...],"cloudEmailAccess":{...}}
+API="http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/public-access"
+APP='<appId>'                 # the plain id, not URL-encoded
+MODE=public                   # public | cloud-email | private
+EMAILS='["a@example.com"]'    # used only by cloud-email
+
+policy=$(curl -sf "$API") &&
+updated=$(printf '%s' "$policy" | jq -ec --arg app "$APP" --arg mode "$MODE" --argjson emails "$EMAILS" '
+  .allowedApps -= [$app] | del(.cloudEmailAccess[$app])
+  | if $mode == "public" then .allowedApps += [$app]
+    elif $mode == "cloud-email" then .cloudEmailAccess[$app] = $emails
+    else . end') &&
+printf '%s' "$updated" | curl -sf -X PUT "$API" -H 'content-type: application/json' --data-binary @-
 ```
 
-- `public`: add the app id to `allowedApps` and remove its `cloudEmailAccess` entry.
-- `cloud-email`: set `cloudEmailAccess["<appId>"]` to the email list and remove the id from `allowedApps`.
-- `private`: remove the app from both.
-
-Keep `enableAccessControl` and every other app's entry unchanged. Then send the document:
-
-```bash
-curl -s -X PUT "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/public-access" \
-  -H 'content-type: application/json' -d @policy.json
-```
+The filter leaves `enableAccessControl` and every other app's entry unchanged. Afterwards, read the policy again. Confirm that this app's entry changed as intended and that the other entries match `$policy`. The server drops invalid app ids and emails without an error, so a missing entry means the input was invalid.
 
 Use only this endpoint. A write to `publicAccess` through `/api/settings` is rejected, and it would not reload the proxy. A `500` from this endpoint means the policy is saved but the proxy did not reload. Retry the same request.
 
