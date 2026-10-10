@@ -36,9 +36,9 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import { parseTimeZone } from "../lib/timezone.js";
 import {
   buildAnthropicCompatibleProviderEnv,
-  CUSTOM_ANTHROPIC_PROVIDER_ID,
   getStoredAnthropicCompatibleCredentials,
 } from "../lib/anthropic-compatible-providers.js";
+import { CUSTOM_ANTHROPIC_PROVIDER_ID } from "@rome/api-types/anthropic-compatible-providers";
 import {
   clearAnthropicAuthRevoked,
   markAnthropicAuthRevoked,

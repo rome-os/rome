@@ -551,12 +551,7 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
   return { displayName, ref };
 }
 
-/** {@link compareAccountCursors} over the accounts themselves. */
-export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
-  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareAccounts} order —
+/** Whether an account falls after a cursor in {@link compareAccountCursors} order —
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
@@ -647,13 +642,7 @@ export function streamCursorOf(account: StreamAccount): StreamCursor {
   return activityPosition(account, accountRef(account));
 }
 
-/** The stream's order: newest activity first, ties broken by name and then ref
- *  so the sequence is total. */
-export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
-  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+/** Whether an account falls after a cursor in {@link compareStreamCursors}
  *  order — i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
   return compareStreamCursors(cursor, streamCursorOf(account)) < 0;

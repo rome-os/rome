@@ -9,15 +9,17 @@ import {
 } from "../../lib/anthropic-login.js";
 import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
-  CUSTOM_ANTHROPIC_PROVIDER_ID,
   getStoredAnthropicCompatibleCredentials,
-  isAnthropicCompatibleProviderId,
-  listAnthropicCompatibleProviderSummaries,
   summarizeAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentialsForEditing,
-  validateCustomAnthropicEnv,
-  type StoredAnthropicCompatibleCredentials,
 } from "../../lib/anthropic-compatible-providers.js";
+import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
+import {
+  CUSTOM_ANTHROPIC_PROVIDER_ID,
+  isAnthropicCompatibleProviderId,
+  listAnthropicCompatibleProviderSummaries,
+  type StoredAnthropicCompatibleCredentials,
+} from "@rome/api-types/anthropic-compatible-providers";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
 import { fetchRomeCredits } from "../../lib/rome-credits.js";

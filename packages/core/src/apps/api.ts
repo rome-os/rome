@@ -3,7 +3,12 @@ import { importModuleWithCacheBuster } from "../actions/module-loader.js";
 import type { ActionEngine } from "../actions/engine.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { AppRuntimeRepositories } from "@rome-os/app-runtime";
+import type {
+  AppRuntimeRepositories,
+  RomeAppApiHandler,
+  RomeAppApiRequest,
+  RomeAppCaller,
+} from "@rome-os/app-runtime";
 import type { AppCatalog } from "./catalog.js";
 import { type AppView, isResolvedApp, type ResolvedApp } from "./state.js";
 import {
@@ -14,36 +19,7 @@ import {
 import type { RomeAppViewer } from "../lib/visitor-session.js";
 import type { FavorService } from "../favors/types.js";
 
-/**
- * Who is making this app-api request, resolved server-side by the host before
- * the request reaches an app handler — the app never has to (and must not)
- * derive identity from headers itself.
- *
- * - `guardian` — a valid guardian dashboard session (`via: "cookie"`), or a
- *   trusted in-container loopback caller such as the agent or the agent
- *   browser (`via: "loopback"`; see `lib/trusted-loopback.ts` for why this is
- *   not forgeable from outside).
- * - `visitor` — a verified Rome Cloud visitor session (cloud-email access).
- * - `anonymous` — neither; on a public app this is any internet caller.
- *
- * A guardian who also holds a visitor session resolves as `guardian`; the
- * visitor session itself (including its favor token) stays host-side in the
- * dispatch context, where `ctx.favors` reads it.
- */
-export type RomeAppCaller =
-  | { kind: "guardian"; userId: string; via: "cookie" | "loopback" }
-  | { kind: "visitor"; accountId: string; email: string }
-  | { kind: "anonymous" };
-
-export interface RomeAppApiRequest {
-  method: string;
-  path: string[];
-  headers: Record<string, string>;
-  query: URLSearchParams;
-  body?: Uint8Array;
-  /** Resolved caller identity — the single trustworthy "who is calling" answer. */
-  caller: RomeAppCaller;
-}
+export type { RomeAppApiHandler, RomeAppApiRequest, RomeAppCaller } from "@rome-os/app-runtime";
 
 /**
  * Host-side per-request context the dispatcher carries alongside the request —
@@ -53,10 +29,6 @@ export interface RomeAppApiRequest {
  */
 export interface RomeAppApiDispatchContext {
   viewer?: RomeAppViewer;
-}
-
-export interface RomeAppApiHandler {
-  handle(request: RomeAppApiRequest): Promise<Response>;
 }
 
 interface RomeAppApiModule {
