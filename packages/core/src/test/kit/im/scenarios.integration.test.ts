@@ -320,7 +320,13 @@ async function streamReply(
       await sleep(30);
     }
     emit({ type: "text", content: lead + COMMENTARY, blockId: "c", turnPhase: "commentary" });
-    for (const chunk of chunks(STORY, 400)) {
+    const [first, ...rest] = chunks(STORY, 400);
+    emit({ type: "text_delta", content: first!, blockId: "a" });
+    // The answer's preview must be on the platform before the rest arrives. With
+    // slow round trips the whole answer could otherwise complete first and settle
+    // as creates, and nothing would be edited.
+    await channel.peer.server.waitFor(() => romeMessages(channel).length >= 2, 10_000);
+    for (const chunk of rest) {
       emit({ type: "text_delta", content: chunk, blockId: "a" });
       await sleep(2);
     }
