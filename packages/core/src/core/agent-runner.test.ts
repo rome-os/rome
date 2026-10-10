@@ -646,6 +646,48 @@ describe("AgentRunner", () => {
       }
     });
 
+    it("leaves a saved side chat to the webchat route on a backend turn", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "side-chat",
+          type: "fork",
+          name: "Side chat",
+          agentName: "main",
+        });
+        const { manager, turns } = resumedSession("side-chat", {
+          id: "side-chat",
+          name: "Side chat",
+          type: "fork",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: {
+              channel: "webchat",
+              threadId: "side-chat",
+              threadName: "Side chat",
+              threadType: "private",
+            },
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
+        const roles = (await repo.getMessages("side-chat")).map((m) => m.role);
+        expect(roles).not.toContain("user");
+        expect(roles).not.toContain("assistant");
+      } finally {
+        testDb.close();
+      }
+    });
+
     it("leaves a recorded webchat conversation to the webchat route", async () => {
       const testDb = createTestDb();
       try {
