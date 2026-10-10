@@ -171,10 +171,8 @@ export function ProjectsWidget({
           onSelectionChange={handleSelectionChange}
           rootLabel={tFiles("projects.rootLabel")}
           rootPanelTrigger
-          selectInitialFolderOnMobile={false}
           searchPlaceholder={tFiles("projects.searchPlaceholder")}
           sidebarHeading={tFiles("projects.title")}
-          title={tFiles("projects.title")}
         />
       </div>
       {dragging && <div className="absolute inset-0 z-10" />}

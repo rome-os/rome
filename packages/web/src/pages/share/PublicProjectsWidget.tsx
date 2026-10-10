@@ -30,10 +30,8 @@ export function PublicProjectsWidget({ token, initialSelectedPath }: PublicProje
           logicalRootPath="projects"
           rootLabel={tFiles("projects.rootLabel")}
           rootPanelTrigger
-          selectInitialFolderOnMobile={false}
           searchPlaceholder={tFiles("projects.searchPlaceholder")}
           sidebarHeading={tFiles("projects.title")}
-          title={tFiles("projects.title")}
         />
       </div>
     </div>
