@@ -73,8 +73,8 @@ export class SessionsRepository {
 
   /** Complete every active row for an exact key and create its replacement in
    * one transaction. The caller serializes this key before entering. The
-   * replacement serves the same conversation as the row it retires unless the
-   * caller names one. */
+   * replacement serves the caller's conversation, or the retired row's when
+   * the caller names none. */
   async rotateProviderGeneration(input: {
     agentName: string;
     channelThreadKey: string;

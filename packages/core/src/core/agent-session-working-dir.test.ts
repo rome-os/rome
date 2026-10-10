@@ -210,6 +210,17 @@ describe("AgentSessionManager working dirs", () => {
     expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("legacy");
   });
 
+  it("keeps a reused row's conversation when the caller names another", async () => {
+    const key = { agentName: AGENT, channelThreadKey: "webchat:kept" };
+    const original = await manager.acquire(key, { romeSessionId: "kept" });
+    await original.close("idle");
+
+    const reused = await manager.acquire(key, { romeSessionId: "other" });
+
+    expect(reused.sessionId).toBe(original.sessionId);
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("kept");
+  });
+
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
     const firstDir = join(directory, "first");
     const secondDir = join(directory, "second");
