@@ -54,6 +54,7 @@ export class SessionManager {
     agentName: string;
     channelThreadKey: string;
     newSessionId: string;
+    conversationId?: string;
   }) {
     return await this.sessionsRepository.rotateProviderGeneration(input);
   }
@@ -95,6 +96,7 @@ export class SessionManager {
       id: session.id,
       agentName: session.agentName,
       channelThreadKey: session.channelThreadKey,
+      conversationId: session.conversationId,
       status: session.status,
       workingDir: session.workingDir,
     });

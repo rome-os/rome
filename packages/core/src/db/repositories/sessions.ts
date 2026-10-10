@@ -52,6 +52,7 @@ export class SessionsRepository {
     id?: string;
     agentName: string;
     channelThreadKey?: string;
+    conversationId?: string;
     status?: "active" | "completed" | "error";
     workingDir?: string;
   }) {
@@ -61,6 +62,7 @@ export class SessionsRepository {
       id,
       agentName: data.agentName,
       channelThreadKey: data.channelThreadKey ?? null,
+      conversationId: data.conversationId ?? null,
       workingDir: data.workingDir ?? null,
       createdAt: now,
       lastActiveAt: now,
@@ -70,11 +72,14 @@ export class SessionsRepository {
   }
 
   /** Complete every active row for an exact key and create its replacement in
-   * one transaction. The caller serializes this key before entering. */
+   * one transaction. The caller serializes this key before entering. The
+   * replacement serves the same conversation as the row it retires unless the
+   * caller names one. */
   async rotateProviderGeneration(input: {
     agentName: string;
     channelThreadKey: string;
     newSessionId: string;
+    conversationId?: string;
   }): Promise<typeof sessions.$inferSelect> {
     return this.db.transaction((tx) => {
       const exactKey = and(
@@ -83,12 +88,19 @@ export class SessionsRepository {
         eq(sessions.status, "active"),
       );
       const now = new Date();
+      const retired = tx
+        .select({ conversationId: sessions.conversationId })
+        .from(sessions)
+        .where(exactKey)
+        .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt))
+        .get();
       tx.update(sessions).set({ status: "completed", lastActiveAt: now }).where(exactKey).run();
       tx.insert(sessions)
         .values({
           id: input.newSessionId,
           agentName: input.agentName,
           channelThreadKey: input.channelThreadKey,
+          conversationId: input.conversationId ?? retired?.conversationId ?? null,
           provider: null,
           providerThreadId: null,
           model: null,

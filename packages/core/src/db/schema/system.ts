@@ -38,34 +38,43 @@ export const events = sqliteTable("events", {
   nextRunAt: integer("next_run_at", { mode: "timestamp" }),
 });
 
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  agentName: text("agent_name").notNull(),
-  channelThreadKey: text("channel_thread_key"),
-  /** Which provider produced this conversation's thread, so a resumed session
-   *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
-   *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
-  provider: text("provider"),
-  providerThreadId: text("provider_thread_id"),
-  /** The concrete model that produced the session's last successful turn,
-   *  written by the same after-turn provider-info write. Null for legacy
-   *  rows and sessions that never completed a turn. Nothing reads it yet. */
-  model: text("model"),
-  /** The reasoning effort the session's last successful model turn ran with,
-   *  as the provider reported it in its own terms (Claude `max`, Codex
-   *  `xhigh`). Display only: it never seeds the next turn's effort. Null for
-   *  legacy rows and sessions that never completed a model turn. */
-  reasoningEffort: text("reasoning_effort"),
-  /** The cwd the session's provider ran in, so an explicit resume reopens the
-   *  provider where its transcript lives. Null for legacy rows, which resume
-   *  in the default project. */
-  workingDir: text("working_dir"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
-  status: text("status", {
-    enum: ["active", "completed", "error"],
-  }).notNull(),
-});
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    agentName: text("agent_name").notNull(),
+    channelThreadKey: text("channel_thread_key"),
+    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
+     *  rows written before the column existed and for sessions whose caller
+     *  named no conversation. No foreign key: channel, action and subagent
+     *  conversations are recorded after their first session is created. */
+    conversationId: text("conversation_id"),
+    /** Which provider produced this conversation's thread, so a resumed session
+     *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
+     *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
+    provider: text("provider"),
+    providerThreadId: text("provider_thread_id"),
+    /** The concrete model that produced the session's last successful turn,
+     *  written by the same after-turn provider-info write. Null for legacy
+     *  rows and sessions that never completed a turn. Nothing reads it yet. */
+    model: text("model"),
+    /** The reasoning effort the session's last successful model turn ran with,
+     *  as the provider reported it in its own terms (Claude `max`, Codex
+     *  `xhigh`). Display only: it never seeds the next turn's effort. Null for
+     *  legacy rows and sessions that never completed a model turn. */
+    reasoningEffort: text("reasoning_effort"),
+    /** The cwd the session's provider ran in, so an explicit resume reopens the
+     *  provider where its transcript lives. Null for legacy rows, which resume
+     *  in the default project. */
+    workingDir: text("working_dir"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
+    status: text("status", {
+      enum: ["active", "completed", "error"],
+    }).notNull(),
+  },
+  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+);
 
 // Provider-native history anchor for one successfully completed Rome turn.
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
