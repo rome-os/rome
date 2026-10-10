@@ -17,12 +17,6 @@ describe("SettingsTabPage tabs (Connection migration)", () => {
     expect(VISIBLE_TABS).toContain("Channels");
   });
 
-  it("redirects the removed Integrations tab into Connections", () => {
-    expect(normalizeTab("integrations")).toBe("Connections");
-    expect(TABS).not.toContain("Integrations");
-    expect(VISIBLE_TABS).not.toContain("Integrations");
-  });
-
   it("keeps Connections in the visible tab bar", () => {
     expect(VISIBLE_TABS).toContain("Connections");
   });

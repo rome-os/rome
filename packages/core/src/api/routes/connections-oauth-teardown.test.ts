@@ -1,10 +1,8 @@
 // OAuth-provider teardown through the registry-native
 // DELETE routes (superseding `POST /integrations/:provider/disconnect`).
 //
-// Tearing down a Rome Cloud-OAuth provider removes the legacy providerAccounts
-// row AND revokes the grant-ledger credential (so the registry's connection
-// state relocks). Dropping the legacy row matters: it holds the provider's
-// token in plaintext. The route does not clear the tmpfs
+// Tearing down a Rome Cloud-OAuth provider revokes the grant-ledger credential
+// (so the registry's connection state relocks). The route does not clear the tmpfs
 // file / gh shell auth itself: the revoke transition drives the registry's
 // custody hook, which clears them. The custody libs are faked so nothing hits
 // the disk or spawns `gh`; a real ConnectionRegistry holding an authorized
@@ -13,31 +11,19 @@
 
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import * as providerAccountsModule from "../../lib/provider-accounts.js" with {
-  rstest: "importActual",
-};
 
 const {
-  removeProviderAccount,
   syncProviderTokenFile,
   clearProviderTokenFile,
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider,
 } = rs.hoisted(() => ({
-  removeProviderAccount: rs.fn(async (..._a: unknown[]) => {}),
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
   clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
-// Spread the real module so any export the route path transitively depends on
-// (e.g. `normalizeScopes` via the connections bundle mapper) resolves against
-// the actual implementation; only the stateful calls below are stubbed.
-rs.mock("../../lib/provider-accounts.js", () => ({
-  ...providerAccountsModule,
-  removeProviderAccount,
-}));
 // Both the sync and clear halves are stubbed: `makeAuthorizedRegistry` imports a
 // bundle (→ custody sync fires) before the test tears down (→ custody clear).
 rs.mock("../../lib/provider-token-files.js", () => ({
@@ -107,7 +93,7 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     ["github", "user"],
     ["slack", "workspace"],
     ["google", "user"],
-  ] as const)("grant revoke removes the legacy row, relocks the %s grant, and custody clears off the transition", async (provider, grant) => {
+  ] as const)("grant revoke relocks the %s grant, and custody clears off the transition", async (provider, grant) => {
     const registry = await makeAuthorizedRegistry(provider);
     const conn = registry.find(provider)[0];
     expect(conn.auth.grants()[grant]).toBe("authorized");
@@ -120,8 +106,6 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     );
 
     expect(res.status).toBe(200);
-    // Legacy row removed.
-    expect(removeProviderAccount).toHaveBeenCalledTimes(1);
     // Ledger grant relocked.
     expect(registry.find(provider)[0].auth.grants()[grant]).toBe("unauthorized");
     // Custody cleared off the revoke transition (not the route directly).
@@ -129,7 +113,7 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     expect(clearGithubShellIntegrationForProvider).toHaveBeenCalledWith(provider);
   });
 
-  it("connection removal also drops the legacy row", async () => {
+  it("connection removal drops the connection", async () => {
     const registry = await makeAuthorizedRegistry("github");
     const conn = registry.find("github")[0];
 
@@ -139,7 +123,6 @@ describe("OAuth teardown via /connections DELETE routes", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(removeProviderAccount).toHaveBeenCalledTimes(1);
     expect(registry.find("github")).toHaveLength(0);
   });
 

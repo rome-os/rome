@@ -5,7 +5,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { getInstanceToken } from "./instance-identity.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { isOAuthProvider, type OAuthProvider } from "./oauth-providers.js";
-import type { OAuthTokenBundle } from "./provider-accounts.js";
+import type { OAuthTokenBundle } from "./oauth-token-bundle.js";
 
 // RFC 8693 token-exchange grant. The brokering STS at Rome Cloud's
 // /connections/token speaks this grant; the subject token is the

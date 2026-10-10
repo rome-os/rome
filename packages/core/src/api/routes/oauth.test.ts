@@ -4,8 +4,7 @@
 // import the redeemed bundle into the provider's grant (credential + the
 // service-parsed profile in one update). The grant transition drives the registry's
 // custody hook, which materializes the tmpfs token file + gh/git shell auth —
-// the route never touches those artifacts, and there is NO legacy
-// `provider_accounts` write anymore. The import is fail-closed: a missing
+// the route never touches those artifacts. The import is fail-closed: a missing
 // registry, or a bundle that yields no usable credential, or a ledger write that
 // throws all fail the redeem so nothing reports connected.
 //

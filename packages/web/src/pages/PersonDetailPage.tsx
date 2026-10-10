@@ -1,4 +1,4 @@
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
 import { normalizeBondLevel } from "@rome/api-types/people";
@@ -172,19 +172,6 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
       </PageBody>
     </PageShell>
   );
-}
-
-/**
- * The address a person was reached by before the dossier took its own segment.
- *
- * A person id never named a view, so forwarding is unambiguous: `/people/wei-chen`
- * meant that dossier and still reaches it. The two view segments are matched by
- * their own routes ahead of this one and never arrive here.
- */
-export function PersonLegacyRedirect() {
-  const params = useParams<{ personId: string }>();
-  const location = useLocation();
-  return <Navigate to={personPath(params.personId ?? "")} state={location.state} replace />;
 }
 
 function BackLink({ onClick }: { onClick: () => void }) {

@@ -7,7 +7,7 @@ import { describe, expect, it } from "@rstest/core";
 const MIGRATION = readFileSync(
   resolve(
     dirname(fileURLToPath(import.meta.url)),
-    "../../drizzle/system/0072_date_undated_one_off_routines.sql",
+    "../../drizzle/system/0073_date_undated_one_off_routines.sql",
   ),
   "utf8",
 );

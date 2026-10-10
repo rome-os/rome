@@ -31,7 +31,7 @@ rs.mock("../lib/provider-token-files.js", () => ({
 import { createTestDb } from "../test/helpers.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
-import type { OAuthTokenBundle } from "../lib/provider-accounts.js";
+import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
