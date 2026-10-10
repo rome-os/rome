@@ -81,6 +81,9 @@ export function agentMessages(db: DrizzleDb): AccountMessages {
         FROM rome_agent_messages m
         JOIN rome_sessions s ON s.id = m.session_id
         WHERE s.type = 'channel'
+          -- A guardian chat is the guardian talking to Rome, not a conversation
+          -- with a person on an account.
+          AND coalesce(s.source_channel, '') <> 'webchat'
           AND ${held}
           -- 'notification' is a line that passed outside a turn — something
           -- the person said without waking the agent, or something Rome sent

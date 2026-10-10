@@ -383,6 +383,8 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     createdAt: string;
     traceCount: number;
   }> {
+    // A guardian chat is stored either as a webchat row or as a webchat
+    // channel row addressed by its own id.
     const rows = this.ctx.db.connection.all(sql`
       SELECT
         ws.id,
@@ -394,7 +396,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
         cast(count(wm.id) as integer) AS trace_count
       FROM rome_sessions ws
       JOIN rome_agent_messages wm ON wm.session_id = ws.id AND wm.role = 'trace'
-      WHERE ws.type IN ('webchat', 'webchat_handoff')
+      WHERE (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
       GROUP BY ws.id, ws.name, ws.project_name, ws.project_path, ws.agent_name, ws.created_at
       ORDER BY max(wm.created_at) DESC
       LIMIT 100
@@ -601,7 +603,7 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
       JOIN rome_sessions ws ON ws.id = wm.session_id
       WHERE wm.session_id = ${sessionId}
         AND wm.role = 'trace'
-        AND ws.type IN ('webchat', 'webchat_handoff')
+        AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
       ORDER BY wm.created_at ASC
     `) as SourceTraceRow[];
 
