@@ -856,6 +856,7 @@ async function openSession(
         providerThreadId: string | null;
         model: string | null;
         workingDir?: string | null;
+        conversationId?: string | null;
       }
     | undefined;
   if (init.preparedSessionId) {
@@ -948,8 +949,18 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionManager.setWorkingDir(sessionId, workingDir);
-  } else if (romeSessionId) {
+  } else if (romeSessionId && !resumeResult?.conversationId) {
     await deps.sessionManager.fillConversationId(sessionId, romeSessionId);
+  } else if (romeSessionId && resumeResult?.conversationId !== romeSessionId) {
+    // A channel-thread key maps to one conversation, so a reused row that
+    // names another one means the stored value cannot be trusted yet.
+    log.warn("agent session serves a different conversation than requested", {
+      sessionId,
+      agentName: key.agentName,
+      channelThreadKey: key.channelThreadKey,
+      storedConversationId: resumeResult?.conversationId,
+      requestedConversationId: romeSessionId,
+    });
   }
 
   if (config.outputSchema && init.handback) {
