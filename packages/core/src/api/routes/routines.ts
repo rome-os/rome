@@ -8,6 +8,7 @@ import {
   nextDateForLocalTime,
   parseDateAndLocalTime,
 } from "../../routines/schedule-trigger-provider.js";
+import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
 import type { ApiDeps } from "../deps.js";
 import type { Trigger } from "../../routines/types.js";
 
@@ -136,12 +137,19 @@ function datedOneOffError(trigger: {
 }
 
 /** A schedule with neither `date` nor `rrule` means "once, at the next
- * `localTime`". Pin that to a date so the scheduler only sees dated one-offs. */
-function resolveOneOffDate(trigger: Trigger): void {
-  if (trigger.type === "schedule" && !trigger.date && !trigger.rrule) {
-    trigger.date = nextDateForLocalTime(trigger.localTime, trigger.tzid);
-    delete trigger.rrule;
-  }
+ * `localTime`". Pin that to a date so the scheduler only sees dated one-offs.
+ * A `floating` one-off follows the guardian, so its date is taken in the
+ * guardian's zone, which it is then pinned to. A blank `rrule` is dropped so a
+ * stored schedule never carries both fields. */
+async function resolveOneOffDate(
+  trigger: Trigger,
+  guardianTimezone: () => Promise<string>,
+): Promise<void> {
+  if (trigger.type !== "schedule") return;
+  if (trigger.rrule !== undefined && !trigger.rrule) delete trigger.rrule;
+  if (trigger.date || trigger.rrule) return;
+  if (trigger.tzMode === "floating") trigger.tzid = await guardianTimezone();
+  trigger.date = nextDateForLocalTime(trigger.localTime, trigger.tzid);
 }
 
 interface CreateRoutineBody {
@@ -306,7 +314,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (triggerError) {
       return c.json({ error: triggerError }, 400);
     }
-    resolveOneOffDate(body.trigger);
+    await resolveOneOffDate(body.trigger, () => resolveGuardianTimezone(deps.settingsRepo));
     if (body.trigger.type === "schedule" && body.trigger.date) {
       body.trigger.tzMode = "fixed";
       const datedError = datedOneOffError(body.trigger);
@@ -358,7 +366,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (triggerError) {
         return c.json({ error: triggerError }, 400);
       }
-      resolveOneOffDate(body.trigger);
+      await resolveOneOffDate(body.trigger, () => resolveGuardianTimezone(deps.settingsRepo));
       // A dated one-off pins to a fixed absolute zone, same as POST,
       // and must not be re-pointed to an already-past instant.
       if (body.trigger.type === "schedule" && body.trigger.date) {

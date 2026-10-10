@@ -24,12 +24,17 @@ function expectedDate(at: Date, localTime: string, extraDays = 0): string {
   return utcDate(at, today + extraDays);
 }
 
+function createTables(sqlite: Database.Database): void {
+  sqlite.exec(
+    "CREATE TABLE routines (id text PRIMARY KEY NOT NULL, `trigger` text NOT NULL, last_fired_at integer, enabled integer DEFAULT 1)",
+  );
+  sqlite.exec("CREATE TABLE settings (`key` text PRIMARY KEY NOT NULL, `value` text NOT NULL)");
+}
+
 describe("undated one-off routine migration", () => {
   it("dates every schedule that has neither date nor rrule, and nothing else", () => {
     const sqlite = new Database(":memory:");
-    sqlite.exec(
-      "CREATE TABLE routines (id text PRIMARY KEY NOT NULL, `trigger` text NOT NULL, last_fired_at integer, enabled integer DEFAULT 1)",
-    );
+    createTables(sqlite);
     const insert = sqlite.prepare(
       "INSERT INTO routines (id, `trigger`, last_fired_at) VALUES (?, ?, ?)",
     );
@@ -81,5 +86,30 @@ describe("undated one-off routine migration", () => {
     expect(triggers.recurring).toBe(recurring);
     expect(triggers.dated).toBe(dated);
     expect(triggers.manual).toBe(manual);
+  });
+
+  it("moves a floating row to the guardian's zone before dating it", () => {
+    const sqlite = new Database(":memory:");
+    createTables(sqlite);
+    sqlite.exec(`INSERT INTO settings VALUES ('guardianTimezone', '"Asia/Tokyo"')`);
+    const insert = sqlite.prepare("INSERT INTO routines (id, `trigger`) VALUES (?, ?)");
+    const pending = { type: "schedule", tzid: "UTC", localTime: "23:59" };
+    insert.run("floating", JSON.stringify({ ...pending, tzMode: "floating" }));
+    insert.run("fixed", JSON.stringify({ ...pending, tzMode: "fixed" }));
+
+    sqlite.exec(MIGRATION);
+
+    const trigger = (id: string) =>
+      JSON.parse(
+        (
+          sqlite.prepare("SELECT `trigger` FROM routines WHERE id = ?").get(id) as {
+            trigger: string;
+          }
+        ).trigger,
+      ) as Record<string, unknown>;
+    expect(trigger("floating")).toMatchObject({ tzid: "Asia/Tokyo", tzMode: "fixed" });
+    expect(trigger("fixed").tzid).toBe("UTC");
+    // Now outside UTC, the floating row takes the later, never-past date.
+    expect(trigger("floating").date).not.toBe(trigger("fixed").date);
   });
 });

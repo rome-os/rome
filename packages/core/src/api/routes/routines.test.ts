@@ -83,10 +83,12 @@ describe("Routines API", () => {
   let testDb: TestDb;
   let app: Hono;
   let routineEngine: RoutineEngine;
+  let settingsRepo: Awaited<ReturnType<typeof buildTestDeps>>["settingsRepo"];
 
   beforeEach(async () => {
     testDb = createTestDb();
     const baseDeps = await buildTestDeps(testDb.db);
+    settingsRepo = baseDeps.settingsRepo;
     // Wire a minimal RoutineEngine so route-level trigger validation
     // (hasProvider) succeeds for "schedule". CRUD tests don't fire routines.
     routineEngine = new RoutineEngine(
@@ -517,9 +519,11 @@ describe("Routines API", () => {
     expect(res.status).toBe(201);
   });
 
-  it("dates a schedule with neither date nor rrule to the next localTime in its tzid", async () => {
+  it("dates a floating schedule with neither date nor rrule to the next localTime in the guardian's zone", async () => {
     // At 16:00Z it is already 2026-06-24 01:00 in Tokyo, so 09:00 is still
-    // ahead today and 00:30 has passed until tomorrow.
+    // ahead today and 00:30 has passed until tomorrow. The UTC tzid is only a
+    // seed: a floating one-off follows the guardian.
+    await settingsRepo.set("guardianTimezone", "Asia/Tokyo");
     rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
       rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
@@ -542,8 +546,9 @@ describe("Routines API", () => {
         expect(res.status).toBe(201);
         return ((await res.json()) as { trigger: Trigger }).trigger;
       };
-      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", tzMode: "fixed" });
-      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", tzMode: "fixed" });
+      const pinned = { tzid: "Asia/Tokyo", tzMode: "fixed" };
+      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", ...pinned });
+      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", ...pinned });
       expect(await create("09:00", { rrule: "" })).not.toHaveProperty("rrule");
     } finally {
       rs.useRealTimers();

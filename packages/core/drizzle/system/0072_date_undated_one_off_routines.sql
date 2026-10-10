@@ -11,12 +11,26 @@
 --     day after: it never lands in the past, but it can fire a day or two
 --     later than before. These rows live at most a day before firing, so we
 --     accept that over a boot-time fixup.
---   * every row → `fixed`, like any dated one-off. A `floating` row now fires
---     in its stored `tzid` rather than the guardian's current zone.
+--   * every row → `fixed`, like any dated one-off. A `floating` row followed
+--     the guardian, so it first takes the guardian's zone as its `tzid` when
+--     one is set, and is then pinned there.
 --
 -- A blank `rrule` goes, so the row holds only its date.
 -- substr('0' || ..., -5) pads a one-digit hour ("9:00") so the times compare
 -- as strings.
+UPDATE `routines`
+SET `trigger` = json_set(
+  `trigger`,
+  '$.tzid',
+  (SELECT json_extract(`value`, '$') FROM `settings` WHERE `key` = 'guardianTimezone')
+)
+WHERE json_valid(`trigger`)
+  AND json_extract(`trigger`, '$.type') = 'schedule'
+  AND json_extract(`trigger`, '$.tzMode') = 'floating'
+  AND coalesce(json_extract(`trigger`, '$.date'), '') = ''
+  AND coalesce(json_extract(`trigger`, '$.rrule'), '') = ''
+  AND coalesce((SELECT json_extract(`value`, '$') FROM `settings` WHERE `key` = 'guardianTimezone'), '') != '';
+--> statement-breakpoint
 UPDATE `routines`
 SET `trigger` = json_remove(json_set(
   `trigger`,
