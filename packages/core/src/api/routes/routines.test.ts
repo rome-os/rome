@@ -174,8 +174,50 @@ describe("Routines API", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("rejects a key that is not a non-empty string", async () => {
-    for (const key of ["", 42, "k".repeat(201)]) {
+  it("answers a keyed retry with the existing id even if the body no longer validates", async () => {
+    // A dated one-off created before its date, retried after it: the past date
+    // would be a 400, but the routine already exists, so the caller gets its id.
+    const [row] = await testDb.db
+      .insert(routines)
+      .values({
+        id: "r-dated",
+        key: "chat-routine:card-dated",
+        name: "one-off",
+        enabled: true,
+        trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2020-01-01" },
+        actionName: "send_message",
+        args: {},
+        createdAt: new Date(),
+      })
+      .returning();
+    const res = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: "chat-routine:card-dated",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "fixed",
+          localTime: "09:00",
+          date: "2020-01-01",
+        },
+        actionName: "send_message",
+      }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { id: string }).id).toBe(row!.id);
+  });
+
+  it("rejects a key that is not a non-empty chat-routine key", async () => {
+    // Keys outside the chat-card prefix belong to apps' managed routines.
+    for (const key of [
+      "",
+      42,
+      "chat-routine:",
+      `chat-routine:${"k".repeat(200)}`,
+      "briefing-morning",
+    ]) {
       const res = await app.request("/routines", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

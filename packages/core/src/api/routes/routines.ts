@@ -145,6 +145,10 @@ interface CreateRoutineBody {
 }
 
 const MAX_ROUTINE_KEY_LENGTH = 200;
+// Keys this route may assign. Apps key their own managed routines (briefing
+// uses `briefing-*`) through create_routine; keeping this route to its own
+// prefix stops a chat card from claiming, or being answered with, one of those.
+const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
 
 interface UpdateRoutineBody {
   name?: string;
@@ -261,22 +265,37 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   app.post("/routines", async (c) => {
     const body = await c.req.json<CreateRoutineBody>().catch(() => ({}) as CreateRoutineBody);
 
+    if (
+      body.key !== undefined &&
+      (typeof body.key !== "string" ||
+        !body.key.startsWith(CHAT_ROUTINE_KEY_PREFIX) ||
+        body.key.length <= CHAT_ROUTINE_KEY_PREFIX.length ||
+        body.key.length > MAX_ROUTINE_KEY_LENGTH)
+    ) {
+      return c.json(
+        {
+          error: `key must start with "${CHAT_ROUTINE_KEY_PREFIX}" and be at most ${MAX_ROUTINE_KEY_LENGTH} characters`,
+        },
+        400,
+      );
+    }
+    // A key that already names a routine means this create already happened
+    // (a retried click, a second tab). Answer 409 with the existing id so the
+    // caller can link to it rather than creating a duplicate. Checked before
+    // the create-time validation below, which can change after creation (a
+    // dated one-off's date passes, an action is uninstalled).
+    const existingIdForKey = async (key: string | undefined): Promise<string | undefined> =>
+      key === undefined ? undefined : (await deps.routinesRepo.findByKey(key))?.id;
+    const keyTaken = (id: string) =>
+      c.json({ error: "A routine with this key already exists", id }, 409);
+    const takenId = await existingIdForKey(body.key);
+    if (takenId) return keyTaken(takenId);
+
     if (!body.trigger || !body.trigger.type) {
       return c.json({ error: "trigger is required" }, 400);
     }
     if (!body.actionName) {
       return c.json({ error: "actionName is required" }, 400);
-    }
-    if (
-      body.key !== undefined &&
-      (typeof body.key !== "string" ||
-        body.key.length === 0 ||
-        body.key.length > MAX_ROUTINE_KEY_LENGTH)
-    ) {
-      return c.json(
-        { error: `key must be a non-empty string of at most ${MAX_ROUTINE_KEY_LENGTH} characters` },
-        400,
-      );
     }
     // The propose_routine card toggles through here, so this also guards the
     // chat-driven path.
@@ -315,23 +334,6 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    // A key that already names a routine means this create already happened
-    // (a retried click, a second tab). Answer 409 with the existing id so the
-    // caller can link to it rather than creating a duplicate.
-    const findIdByKey = async (key: string): Promise<string | undefined> => {
-      const [row] = await deps.db
-        .select({ id: routines.id })
-        .from(routines)
-        .where(eq(routines.key, key));
-      return row?.id;
-    };
-    const keyTaken = (id: string) =>
-      c.json({ error: "A routine with this key already exists", id }, 409);
-    if (body.key !== undefined) {
-      const existingId = await findIdByKey(body.key);
-      if (existingId) return keyTaken(existingId);
-    }
-
     const now = new Date();
     const record = {
       id: uuid(),
@@ -351,7 +353,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     } catch (err) {
       // Lost a race with a concurrent create of the same key: the UNIQUE
       // constraint is the backstop for the check above.
-      const existingId = body.key !== undefined ? await findIdByKey(body.key) : undefined;
+      const existingId = await existingIdForKey(body.key);
       if (existingId) return keyTaken(existingId);
       throw err;
     }
