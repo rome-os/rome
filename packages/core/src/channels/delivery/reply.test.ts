@@ -37,6 +37,8 @@ class MemoryPlatform implements DeliveryTransport {
     if (capabilities.edit)
       this.edit = async (receipt, text) => {
         await this.editGate;
+        if (this.rejectBlank && !text.trim())
+          throw new DeliveryFailure("rejected", "message text is empty");
         this.fail("edit");
         this.messages.find((m) => m.id === receipt.messageId)!.history.push(text);
         if (this.lostEditAnswers > 0) {
@@ -616,6 +618,112 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  describe("an edit whose result is unknown, met by later text", () => {
+    /** Holds an edit to "Hello world" in flight, and returns a way to let it through. */
+    const holdAnEditInFlight = async (delivery: ReplyDelivery) => {
+      delivery.accept(delta("Hello", "a"));
+      await advance(0);
+      let release!: () => void;
+      platform.editGate = new Promise<void>((resolve) => (release = resolve));
+      platform.lostEditAnswers = 1;
+      delivery.accept(delta(" world", "a"));
+      await advance(0);
+      return () => {
+        platform.editGate = undefined;
+        release();
+      };
+    };
+
+    it("reports the reply as unknown when the block completes blank, since the edit may show", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      const release = await holdAnEditInFlight(delivery);
+      delivery.accept(text("", "a"));
+      release();
+      const outcome = await delivery.finish();
+
+      // The platform shows "Hello world", and a blank edit cannot put anything back.
+      expect(platform.shown).toEqual(["Hello world"]);
+      expect(outcome.status).toBe("unknown");
+    });
+
+    it("never cuts a later part before text the lost edit may have put on the platform", async () => {
+      const narrow = new MemoryPlatform({ maxPartLength: 12, edit: true, budget: OPEN_BUDGET });
+      const delivery = reply({ editIntervalMs: 0 }, narrow);
+      delivery.accept(delta("Hello", "a"));
+      await advance(0);
+      let release!: () => void;
+      narrow.editGate = new Promise<void>((resolve) => (release = resolve));
+      narrow.lostEditAnswers = 1;
+      delivery.accept(delta(" world", "a"));
+      await advance(0);
+      // While the edit is in flight, the block grows past the limit with its only break early on.
+      delivery.accept(delta("!and more", "a"));
+      narrow.editGate = undefined;
+      release();
+      delivery.accept(text("Hello world!and more", "a"));
+      await delivery.finish();
+
+      const lengths = narrow.messages[0]!.history.map((shown) => shown.length);
+      expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
+    });
+  });
+
+  it("keeps a preview, reported as differing, and goes on to the visible text when a split chooses a blank prefix", async () => {
+    // The block completes as 20 spaces and "world", where a preview "Hello" is shown.
+    platform.rejectBlank = true;
+    const delivery = reply({ editIntervalMs: 0 });
+    delivery.accept(delta("Hello", "a"));
+    await advance(0);
+    delivery.accept(text(`${" ".repeat(20)}world`, "a"));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(platform.shown.map((shown) => shown.trim())).toEqual(["Hello", "world"]);
+    expect(outcome.parts[0]).toMatchObject({ text: "Hello", diverged: true });
+  });
+
+  describe("a platform that keeps rate-limiting", () => {
+    const limited = (retryAfterMs: number, times: number) => {
+      for (let i = 0; i < times; i++)
+        platform.failures.push({
+          write: "create",
+          failure: new DeliveryFailure("rate-limited", "slow down", retryAfterMs),
+        });
+    };
+
+    it("fails the reply when a single wait is longer than it will hold a reply for", async () => {
+      limited(3_600_000, 1);
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const outcome = await delivery.finish();
+
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+      expect(platform.messages).toHaveLength(0);
+    });
+
+    it("fails the reply when its waits add up past what it will hold a reply for", async () => {
+      limited(30_000, 5);
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(200_000);
+      const outcome = await finished;
+
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+    });
+
+    it("still waits out a limit that is short enough, and delivers", async () => {
+      limited(5_000, 1);
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(10_000);
+
+      expect((await finished).status).toBe("delivered");
+      expect(platform.shown).toEqual(["Hello"]);
+    });
+  });
+
   it("settles a preview as shown, and reports it differing, when its block completes with nothing visible", async () => {
     const delivery = reply({ editIntervalMs: 0 });
     delivery.accept(delta("Hello", "a"));
@@ -643,6 +751,56 @@ describe("ReplyDelivery", () => {
     expect(outcome.failure).toBeUndefined();
     expect(outcome.status).toBe("delivered");
     expect(outcome.parts.slice(1).every((part) => part.diverged === true)).toBe(true);
+  });
+
+  describe("text a split passed over because it was blank", () => {
+    // Thirty spaces in front of letters: the first split ends inside the spaces, so nothing is sent for them.
+    const spaces = " ".repeat(30);
+    const visible = (value: string) => value.replace(/\s/g, "");
+
+    it("sends it when the block's final text makes it visible while the first message waits its turn", async () => {
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      let release = () => {};
+      const ahead = pacer.run("c1", () => new Promise<void>((resolve) => (release = resolve)));
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      // The spaces are passed over and the first message is planned at the b's, but it waits behind another write.
+      delivery.accept(delta(`${spaces}${"b".repeat(25)}`, "a"));
+      await settle();
+      // The complete block drops the spaces, so the b's move up into the passed-over place.
+      delivery.accept(text("b".repeat(25), "a"));
+      release();
+      await ahead;
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      expect(visible(platform.shown.join(""))).toBe("b".repeat(25));
+    });
+
+    it("reports the message after it as differing when the final text makes it visible between messages", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      // The first message takes the letters and five spaces. The next 25 spaces are passed over,
+      // and the second message starts at the b's.
+      const tail = "c".repeat(15);
+      delivery.accept(delta(`${"a".repeat(15)}${spaces}${"b".repeat(25)}${tail}`, "a"));
+      await advance(1000);
+      expect(platform.messages.length).toBeGreaterThanOrEqual(3);
+      // The complete block is ten characters shorter in front and ten longer behind, so the b's move
+      // into the passed-over place and every message still has text at its place.
+      const final = `${"a".repeat(5)}${spaces}${"b".repeat(25)}${tail}${"d".repeat(10)}`;
+      delivery.accept(text(final, "a"));
+      const outcome = await delivery.finish();
+
+      // A message cannot be put in front of the one that exists, so either everything
+      // shows or the reply says it differs. It never claims a faithful delivery with text missing.
+      const complete = visible(platform.shown.join("")) === visible(final);
+      expect(complete || outcome.parts.some((part) => part.diverged === true)).toBe(true);
+    });
   });
 
   it("keeps a reply's pacer lane when the platform reports another conversation id after the first create", async () => {

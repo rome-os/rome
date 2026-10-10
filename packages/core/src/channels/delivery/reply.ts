@@ -87,6 +87,9 @@ interface Part {
    * platform shows, so only an edit that succeeds settles it.
    */
   uncertain?: true;
+  /** The source of the edit whose result is unknown. The platform may show
+   *  it, so it counts as shown, though `sentSource` is what was acknowledged. */
+  attempted?: string;
   diverged?: true;
   lastWriteAt: number;
 }
@@ -105,6 +108,11 @@ type Plan =
   | { write: "edit"; block: number; part: Part; end: number; source: string; settle: boolean }
   | { waitUntil: number }
   | null;
+
+/** The most a reply waits out platform rate limits, in all. A guardian is not
+ *  served by a reply that arrives after a flood wait of minutes. Past it, the
+ *  reply fails `rate-limited`, which a caller can send whole instead. */
+const MAX_RATE_LIMIT_WAIT_MS = 60_000;
 
 /** Consecutive edits with an unknown result before the reply gives up. */
 const MAX_UNKNOWN_EDITS = 3;
@@ -128,7 +136,11 @@ const MAX_UNKNOWN_EDITS = 3;
  * - A message never receives text older than what it shows.
  * - An edit whose result is unknown leaves its part uncertain. The part is
  *   edited again to the text it should show, even when that matches the text
- *   last acknowledged, and only a successful edit settles it.
+ *   last acknowledged, and only a successful edit settles it. The text that
+ *   edit carried counts as shown, so no later part ends before it. If the
+ *   block then ends with nothing to put back, the reply is `unknown`.
+ * - A platform's rate limit pauses the account. A reply waits out at most a
+ *   minute of them in all, and then fails `rate-limited`.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
  * - After `stop()`, nothing new is written. A write already running finishes
@@ -153,6 +165,7 @@ export class ReplyDelivery {
   private writing = false;
   private failure?: ReplyOutcome["failure"];
   private unknownEdits = 0;
+  private rateLimitedMs = 0;
   private timer?: ClockTimer;
   private readonly idle: Array<() => void> = [];
 
@@ -171,6 +184,19 @@ export class ReplyDelivery {
     if (this.mode !== "final" && waiting > this.options.policy.maxPendingChars)
       this.fail({ kind: "overflow", message: `${waiting} characters wait unsent` });
     this.pump();
+  }
+
+  /**
+   * The reply cannot say what a message shows: its last edit's result is
+   * unknown, and the text that would put it right is blank, which a platform
+   * refuses. The reply ends `unknown`, and a caller does not send it again.
+   */
+  private failUncertain(): null {
+    this.fail({
+      kind: "unknown",
+      message: "an edit's result is unknown and the block ended with nothing to put back",
+    });
+    return null;
   }
 
   /**
@@ -295,6 +321,7 @@ export class ReplyDelivery {
     for (const [index, block] of this.assembler.blocks.entries()) {
       const state = (this.blocks[index] ??= { parts: [] });
       const complete = block.complete || this.closed;
+      this.reviewPassedOver(block.text, state);
 
       for (const part of state.parts) {
         if (!part.settled || part.diverged || part.unknown) continue;
@@ -303,7 +330,13 @@ export class ReplyDelivery {
         const rendered = codec.render(source, true);
         // A platform refuses a blank edit, so a message whose place in the block
         // is now empty stays as it is, and the part is reported as differing.
-        if (!rendered.trim() || this.mode !== "edit" || codec.measure(rendered) > limit) {
+        // If its last edit's result is unknown, nothing can put its text back.
+        if (!rendered.trim()) {
+          if (part.uncertain) return this.failUncertain();
+          part.diverged = true;
+          continue;
+        }
+        if (this.mode !== "edit" || codec.measure(rendered) > limit) {
           part.diverged = true;
           continue;
         }
@@ -331,6 +364,7 @@ export class ReplyDelivery {
           // shows cannot be taken back, so it stays as shown, and the part
           // is reported as differing from the final text.
           if (active) {
+            if (active.uncertain) return this.failUncertain();
             active.diverged = true;
             this.settlePart(active, active.start + active.sentSource.length);
           }
@@ -339,7 +373,9 @@ export class ReplyDelivery {
         }
         let end = start + splitPoint(remaining, limit, codec);
         // A message never gives back text it already shows to the next one.
-        const shown = active ? active.start + active.sentSource.length : start;
+        const shown = active
+          ? active.start + Math.max(active.sentSource.length, active.attempted?.length ?? 0)
+          : start;
         if (
           end < shown &&
           codec.measure(codec.render(block.text.slice(start, shown), true)) <= limit
@@ -350,7 +386,14 @@ export class ReplyDelivery {
         // The split can choose a prefix with nothing visible in it, such as a
         // long run of spaces. It is passed over without a message, and the
         // visible rest starts the next part.
-        if (!active && !codec.render(source, settle).trim()) {
+        if (!codec.render(source, settle).trim()) {
+          // A preview already shown at the start of this text stays as it is,
+          // since a blank edit is refused, and is reported as differing.
+          if (active) {
+            if (active.uncertain) return this.failUncertain();
+            active.diverged = true;
+            this.settlePart(active, active.start + active.sentSource.length);
+          }
           state.skipped = end;
           continue;
         }
@@ -390,6 +433,25 @@ export class ReplyDelivery {
       }
     }
     return null;
+  }
+
+  /**
+   * A split passes over text with nothing visible in it and sends nothing for
+   * it. A block's final text can differ from what streamed, and that text can
+   * turn visible. Text behind the last message is simply sent. Text between
+   * two messages cannot be, since a message cannot be put in front of one that
+   * exists, so the message after it is reported as differing.
+   */
+  private reviewPassedOver(text: string, state: BlockState): void {
+    const { codec } = this.options.transport;
+    const visible = (from: number, to: number) =>
+      to > from && codec.render(text.slice(from, to), true).trim() !== "";
+    let covered = 0;
+    for (const part of state.parts) {
+      if (!part.diverged && visible(covered, part.start)) part.diverged = true;
+      covered = Math.max(covered, part.end);
+    }
+    if (state.skipped !== undefined && visible(covered, state.skipped)) state.skipped = undefined;
   }
 
   private async write(plan: Exclude<Plan, null | { waitUntil: number }>): Promise<void> {
@@ -463,6 +525,7 @@ export class ReplyDelivery {
       await transport.edit(part.receipt!, rendered);
       Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
       delete part.uncertain;
+      delete part.attempted;
       if (!part.settled) part.end = plan.end;
       if (plan.settle && !part.settled) this.settlePart(part, plan.end);
       this.unknownEdits = 0;
@@ -471,7 +534,10 @@ export class ReplyDelivery {
       const failure = asDeliveryFailure(error);
       report(failure.kind, partIndex);
       part.lastWriteAt = this.now();
-      if (failure.kind === "unknown") part.uncertain = true;
+      if (failure.kind === "unknown") {
+        part.uncertain = true;
+        part.attempted = plan.source;
+      }
       if (failure.kind === "unsupported") {
         // The platform will not edit: keep what it shows and carry on in blocks.
         this.mode = "blocks";
@@ -485,9 +551,15 @@ export class ReplyDelivery {
 
   private handle(failure: DeliveryFailure): void {
     if (failure.kind === "rate-limited") {
+      const wait = failure.retryAfterMs ?? 1000;
+      if (this.rateLimitedMs + wait > MAX_RATE_LIMIT_WAIT_MS) {
+        this.fail({ kind: "rate-limited", message: failure.message });
+        return;
+      }
+      this.rateLimitedMs += wait;
       // A platform's answer does not say whose limit it hit, so the whole
       // account waits.
-      this.options.pacer.pause(failure.retryAfterMs ?? 1000);
+      this.options.pacer.pause(wait);
       return;
     }
     this.fail({ kind: failure.kind, message: failure.message });

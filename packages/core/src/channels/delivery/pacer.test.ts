@@ -199,6 +199,28 @@ describe("Pacer", () => {
     await expect(later).resolves.toBe("later");
   });
 
+  it("keeps a conversation's later writes behind its hung write, while other conversations go on", async () => {
+    const paced = pacer();
+    let finishSlow!: () => void;
+    const slow = paced.run(
+      "a",
+      () => new Promise<string>((resolve) => (finishSlow = () => resolve("slow"))),
+    );
+    const sameConversation = paced.run("a", write("a again"));
+    const other = paced.run("b", write("b"));
+    await advance("31s");
+
+    // The account's queue moved on to "b". "a" is still inside its first write, so its second waits.
+    expect(log).toEqual(["b@30000"]);
+    await other;
+
+    finishSlow();
+    await slow;
+    await advance(0);
+    await expect(sameConversation).resolves.toBe("a again");
+    expect(log).toEqual(["b@30000", "a again@31000"]);
+  });
+
   it("does not let a passed-over write release the write that replaced it", async () => {
     const paced = pacer();
     let finishSlow!: () => void;

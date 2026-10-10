@@ -35,6 +35,9 @@ interface Job {
 interface Lane {
   conversation: string;
   queue: Job[];
+  /** A write of this conversation is running, or hung and passed over by the
+   *  watchdog. Its later writes wait for it to settle. */
+  busy?: boolean;
   /** When this conversation may next be written to. */
   readyAt: number;
   /** When it was last served, as a count of writes started; 0 for never. */
@@ -54,9 +57,10 @@ interface Lane {
  * - A caller awaits the write itself, not its place in the queue.
  * - A write whose signal aborts before it starts is dropped and never runs.
  *   One already running finishes, and its result reaches the caller.
- * - A write that runs longer than `slowWriteMs` stops holding the queue, so a
- *   request that hangs cannot stall the account. It is not cut off, and its
- *   result still reaches its caller.
+ * - A write that runs longer than `slowWriteMs` stops holding the account's
+ *   queue, so a request that hangs cannot stall the account. It is not cut
+ *   off, and its result still reaches its caller. Its own conversation waits
+ *   for it, so that conversation's writes stay in order.
  *
  * At most one timer is pending for the earliest moment something becomes
  * ready, plus one for the write that is running. A conversation's state is
@@ -137,6 +141,7 @@ export class Pacer {
     let next = Number.POSITIVE_INFINITY;
     let chosen: Lane | undefined;
     for (const [conversation, lane] of this.lanes) {
+      if (lane.busy) continue;
       if (!lane.queue.length) {
         if (lane.readyAt <= now) this.lanes.delete(conversation);
         else next = Math.min(next, lane.readyAt);
@@ -166,6 +171,7 @@ export class Pacer {
     const job = lane.queue.shift()!;
     job.dispose?.();
     const readyBefore = lane.readyAt;
+    lane.busy = true;
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
@@ -200,7 +206,12 @@ export class Pacer {
       }, job.reject)
       .finally(() => {
         this.clock.clearTimeout(watchdog);
+        lane.busy = false;
+        // A write the watchdog passed over has already handed the queue on.
+        // This conversation's later writes were waiting on it alone.
+        const handedOn = released;
         release();
+        if (handedOn) this.pump();
       });
   }
 
