@@ -850,6 +850,30 @@ describe("ReplyDelivery", () => {
       expect(other).toBe(true);
     });
 
+    it("does not wait for its queued write once the reply has failed", async () => {
+      // Another reply of the account got an hour's wait, so this reply's create waits in the queue.
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      pacer.pause(3_600_000);
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 40 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(delta("hello", "a"));
+      await settle();
+      // The text outgrows the bound, which fails the reply.
+      delivery.accept(delta("x".repeat(60), "a"));
+      const finished = delivery.finish();
+      await settle();
+
+      // The queued write is dropped at once, so finish() does not wait out its minute.
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
+    });
+
     it("fails the reply when the account's queue holds its write for longer than a minute", async () => {
       // Another reply of the account got an hour's wait, which pauses every write.
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
@@ -992,6 +1016,19 @@ describe("ReplyDelivery", () => {
       const outcome = await finished;
 
       expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+    });
+
+    it("counts a limit that names no wait as a second, so an answer of zero cannot loop without bound", async () => {
+      // A platform that keeps answering "retry after 0" would otherwise be tried again at once, for ever.
+      limited(0, 1000);
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(70_000);
+
+      expect(await finished).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+      // About a minute of seconds, and not a thousand tries.
+      expect(platform.failures.length).toBeGreaterThan(900);
     });
 
     it("still waits out a limit that is short enough, and delivers", async () => {

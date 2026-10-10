@@ -126,6 +126,10 @@ type Plan =
  *  reply fails `rate-limited`, which a caller can send whole instead. */
 const MAX_RATE_LIMIT_WAIT_MS = 60_000;
 
+/** The least a rate limit counts for. A platform that names no wait, or none
+ *  at all, would otherwise be tried again at once, for ever. */
+const MIN_RATE_LIMIT_WAIT_MS = 1000;
+
 /** Consecutive edits with an unknown result before the reply gives up. */
 const MAX_UNKNOWN_EDITS = 3;
 
@@ -217,6 +221,8 @@ export class ReplyDelivery {
   private ownPausedUntil = 0;
   /** The transport call of the write that just timed out, still running. */
   private outlasting?: Promise<unknown>;
+  /** Drops the write that waits in the pacer's queue, if one does. */
+  private dropQueued?: () => void;
   private timer?: ClockTimer;
   private readonly idle: Array<() => void> = [];
 
@@ -326,6 +332,9 @@ export class ReplyDelivery {
   private fail(failure: NonNullable<ReplyOutcome["failure"]>) {
     this.failure ??= failure;
     this.closed = true;
+    // A write still waiting for its turn cannot run once the reply has failed,
+    // so it leaves the queue now and `finish()` and `stop()` do not wait for it.
+    this.dropQueued?.();
   }
 
   private now(): number {
@@ -349,6 +358,7 @@ export class ReplyDelivery {
     // A write waits in the account's queue behind whatever pauses it. A pause
     // that came from elsewhere is not this reply's to wait out for an hour.
     const queued = new AbortController();
+    this.dropQueued = () => queued.abort(new Error("the reply failed"));
     const queuedAt = this.now();
     const ownPause = Math.max(0, this.ownPausedUntil - queuedAt);
     const queueTimer = this.options.clock.setTimeout(
@@ -382,6 +392,9 @@ export class ReplyDelivery {
       .catch((error: unknown) => {
         // A write the stop dropped before it ran: nothing happened.
         if (this.abort.signal.aborted) return;
+        // The reply failed already, and this is the write it dropped or one
+        // that failed after it. The reply's failure stays what it was.
+        if (this.failure) return;
         if (error instanceof QueueWaitExceeded) {
           // A pause that was in effect while the write waited, even one that is
           // over by now, is a limit the caller can wait out. With none, the
@@ -400,6 +413,7 @@ export class ReplyDelivery {
       })
       .finally(() => {
         this.options.clock.clearTimeout(queueTimer);
+        this.dropQueued = undefined;
         this.writing = false;
         this.pump();
       });
@@ -707,10 +721,17 @@ export class ReplyDelivery {
 
   private handle(failure: DeliveryFailure): void {
     if (failure.kind === "rate-limited") {
-      const wait = failure.retryAfterMs ?? 1000;
+      const asked = failure.retryAfterMs;
+      const wait =
+        typeof asked === "number" && asked > MIN_RATE_LIMIT_WAIT_MS
+          ? asked
+          : MIN_RATE_LIMIT_WAIT_MS;
       // A platform's answer does not say whose limit it hit, so the whole
-      // account waits. It does so when the reply gives up too, since a send the
-      // caller makes next would run into the same window.
+      // account waits. Pausing only this conversation would let the others run
+      // into the same limit, which can lengthen it. The cost is bounded: a write
+      // that waits behind the pause gives up after a minute. It pauses when the
+      // reply gives up too, since a send the caller makes next would run into
+      // the same window.
       this.options.pacer.pause(wait);
       this.ownPausedUntil = Math.max(this.ownPausedUntil, this.now() + wait);
       if (this.rateLimitedMs + wait > MAX_RATE_LIMIT_WAIT_MS) {
