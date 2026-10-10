@@ -10,6 +10,7 @@ import {
   formatBytes,
   formatDuration,
   GEMINI_VIDEO_DEFAULT_OUTPUT,
+  geminiVideoPhaseBudgets,
   geminiVideoRatioLabel,
   geminiVideoStatusText,
   geminiVideoSubmissionError,
@@ -108,6 +109,33 @@ test("classifyGeminiVideoState reads page-level failures before a model turn ren
       .status,
     "pending",
   );
+  // Generic wording counts only inside Gemini's reply, not in the page chrome.
+  assert.equal(
+    classifyGeminiVideoState({
+      videos: [],
+      responseText: "",
+      bodyTail: "Some tools are not available in your region",
+    }).status,
+    "pending",
+  );
+  assert.equal(
+    classifyGeminiVideoState({
+      videos: [],
+      responseText: "Video generation is not available for this prompt.",
+    }).status,
+    "error",
+  );
+});
+
+test("geminiVideoPhaseBudgets splits the remaining --timeout budget", () => {
+  assert.deepEqual(geminiVideoPhaseBudgets(560), { generationSeconds: 470, downloadSeconds: 110 });
+  assert.deepEqual(geminiVideoPhaseBudgets(560, { skipDownload: true }).generationSeconds, 560);
+  // A short budget still leaves the download a share and finishes inside the
+  // 30 s padding OpenCLI adds on top of --timeout.
+  const tight = geminiVideoPhaseBudgets(100);
+  assert.equal(tight.generationSeconds, 50);
+  assert.equal(tight.downloadSeconds, 70);
+  assert.equal(geminiVideoPhaseBudgets(-5).generationSeconds, 1);
 });
 
 test("geminiVideoSubmissionError requires a cleared editor and a conversation URL", () => {

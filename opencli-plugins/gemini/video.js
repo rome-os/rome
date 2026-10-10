@@ -13,6 +13,7 @@ import {
   buildGeminiVideoFileName,
   GEMINI_VIDEO_DEFAULT_OUTPUT,
   GEMINI_VIDEO_RATIOS,
+  geminiVideoPhaseBudgets,
   geminiVideoRatioLabel,
   integerInRange,
   parseGeminiVideoImages,
@@ -71,7 +72,7 @@ cli({
       name: "timeout",
       type: "int",
       default: 600,
-      help: "Max seconds to wait for the generation (default: 600)",
+      help: "Max seconds for the whole run: upload, generation, and download (default: 600)",
     },
     {
       name: "sd",
@@ -83,6 +84,7 @@ cli({
   columns: ["status", "file", "size", "duration", "images", "link"],
   func: async (page, kwargs) => {
     if (!page) throw new CommandExecutionError("Browser session required for gemini video");
+    const startedAt = Date.now();
     let images;
     let ratioLabel;
     let timeout;
@@ -92,7 +94,7 @@ cli({
       if (!prompt) throw new Error("prompt must not be empty");
       images = parseGeminiVideoImages(kwargs.image);
       ratioLabel = geminiVideoRatioLabel(kwargs.ratio ?? "16:9");
-      timeout = integerInRange(kwargs.timeout ?? 600, "timeout", 30, 3600);
+      timeout = integerInRange(kwargs.timeout ?? 600, "timeout", 120, 3600);
       outputDir = resolveGeminiVideoOutputDir(kwargs.output);
     } catch (error) {
       throw new CommandExecutionError(error instanceof Error ? error.message : String(error));
@@ -103,14 +105,17 @@ cli({
     await attachGeminiVideoImages(page, images);
     await submitGeminiVideoPrompt(page, prompt);
 
-    const video = await waitForGeminiVideo(page, timeout);
+    const skipDownload = kwargs.sd === true;
+    const elapsed = (Date.now() - startedAt) / 1000;
+    const budgets = geminiVideoPhaseBudgets(timeout - elapsed, { skipDownload });
+    const video = await waitForGeminiVideo(page, budgets.generationSeconds);
     if (!video) {
       const link = await page.evaluate("window.location.href").catch(() => "");
       throw new CommandExecutionError(
         `No video appeared within ${timeout}s; Gemini may still be generating at ${link || "https://gemini.google.com/app"}`,
       );
     }
-    if (kwargs.sd === true) {
+    if (skipDownload) {
       return [
         summarizeGeminiVideoResult({
           status: "generated",
@@ -121,7 +126,9 @@ cli({
       ];
     }
     const file = path.join(outputDir, buildGeminiVideoFileName(kwargs.name));
-    const bytes = await downloadGeminiVideo(page, video.src, file);
+    const bytes = await downloadGeminiVideo(page, video.src, file, {
+      timeoutMs: budgets.downloadSeconds * 1000,
+    });
     return [
       summarizeGeminiVideoResult({
         status: "saved",

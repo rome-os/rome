@@ -86,8 +86,20 @@ export function readGeminiVideoComposer() {
 export function readGeminiVideoTurn() {
   var responses = document.querySelectorAll("model-response");
   var last = responses.length ? responses[responses.length - 1] : null;
+  // The clip belongs to the newest turn. Gemini has rendered its player
+  // inside that turn; the page-wide scan only covers a player mounted outside
+  // any turn, and never one from an earlier reply.
+  var players = last ? last.querySelectorAll("video") : [];
+  if (!players.length) {
+    var all = document.querySelectorAll("video");
+    var loose = [];
+    for (var k = 0; k < all.length; k++) {
+      var owner = all[k].closest("model-response");
+      if (!owner || owner === last) loose.push(all[k]);
+    }
+    players = loose;
+  }
   var videos = [];
-  var players = document.querySelectorAll("video");
   for (var i = 0; i < players.length; i++) {
     videos.push({
       src: String(players[i].currentSrc || players[i].getAttribute("src") || ""),
@@ -228,6 +240,9 @@ export async function attachGeminiVideoImages(page, files) {
   await page.cdp("Page.setInterceptFileChooserDialog", { enabled: true });
   try {
     const chooser = bridge.waitForEvent("Page.fileChooserOpened", 15000);
+    // The wait can reject while the click is pending or after it throws;
+    // observe it now so neither path leaves an unhandled rejection behind.
+    chooser.catch(() => undefined);
     await page.nativeClick(before.uploadPoint.x, before.uploadPoint.y);
     let opened;
     try {
@@ -235,6 +250,11 @@ export async function attachGeminiVideoImages(page, files) {
     } catch {
       throw new CommandExecutionError(
         "Gemini did not open a file chooser for the File upload button",
+      );
+    }
+    if (files.length > 1 && opened.mode !== "selectMultiple") {
+      throw new CommandExecutionError(
+        `Gemini's file chooser accepts one image at a time here; rerun with a single --image (got ${files.length})`,
       );
     }
     await page.cdp("DOM.setFileInputFiles", {

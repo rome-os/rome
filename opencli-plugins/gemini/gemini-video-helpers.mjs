@@ -67,6 +67,23 @@ export function parseGeminiVideoImages(value, { exists = fs.existsSync } = {}) {
   return files;
 }
 
+/** Seconds the download keeps back from the overall `--timeout` budget. */
+export const GEMINI_VIDEO_DOWNLOAD_RESERVE = 90;
+
+/**
+ * Split what is left of the overall `--timeout` budget. OpenCLI treats an arg
+ * named `timeout` as the whole command's budget (it aborts at timeout + 30s),
+ * so the generation wait gets the remainder minus the download's share.
+ */
+export function geminiVideoPhaseBudgets(remainingSeconds, { skipDownload = false } = {}) {
+  const remaining = Math.max(0, Number(remainingSeconds) || 0);
+  const reserve = skipDownload ? 0 : Math.min(GEMINI_VIDEO_DOWNLOAD_RESERVE, remaining / 2);
+  return {
+    generationSeconds: Math.max(1, Math.floor(remaining - reserve)),
+    downloadSeconds: Math.max(15, Math.ceil(reserve) + 20),
+  };
+}
+
 const SAFE_NAME = /[^a-z0-9._-]+/gi;
 
 /** File name for the saved clip: explicit `--name` wins, else a timestamp. */
@@ -78,20 +95,33 @@ export function buildGeminiVideoFileName(name, stamp = Date.now()) {
   return cleaned.toLowerCase().endsWith(".mp4") ? cleaned : `${cleaned}.mp4`;
 }
 
-const ERROR_PATTERNS = [
+// Failures Gemini words specifically enough to read anywhere on the page.
+const PAGE_ERROR_PATTERNS = [
   /couldn['’]t (?:generate|create)/i,
   /can['’]t (?:generate|create)/i,
   /unable to (?:generate|create)/i,
   /daily limit/i,
   /reached your limit/i,
   /limit for (?:today|video)/i,
-  /not available/i,
   /something went wrong/i,
+];
+
+// Generic wording that only means failure inside Gemini's own reply; the page
+// chrome around the composer may carry it for unrelated reasons.
+const RESPONSE_ERROR_PATTERNS = [
+  ...PAGE_ERROR_PATTERNS,
+  /not available/i,
   /wasn['’]t able to/i,
   /violat/i,
 ];
 
 const GENERATING_PATTERNS = [/generating your video/i, /could take a few minutes/i];
+
+function normalizeText(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * The text that describes the current turn: the newest model response, or the
@@ -100,9 +130,7 @@ const GENERATING_PATTERNS = [/generating your video/i, /could take a few minutes
  * own turns out of that fallback, so words in the prompt cannot read as errors.
  */
 export function geminiVideoStatusText(snapshot) {
-  const response = String(snapshot?.responseText ?? "").trim();
-  const text = response || String(snapshot?.bodyTail ?? "");
-  return text.replace(/\s+/g, " ").trim();
+  return normalizeText(snapshot?.responseText) || normalizeText(snapshot?.bodyTail);
 }
 
 const CONVERSATION_PATH = /\/app\/[a-z0-9]+/i;
@@ -151,8 +179,10 @@ export function pickGeminiVideoSource(videos) {
 export function classifyGeminiVideoState(snapshot) {
   const source = pickGeminiVideoSource(snapshot?.videos);
   if (source) return { status: "ready", source };
+  const fromResponse = normalizeText(snapshot?.responseText).length > 0;
   const text = geminiVideoStatusText(snapshot);
-  for (const pattern of ERROR_PATTERNS) {
+  const patterns = fromResponse ? RESPONSE_ERROR_PATTERNS : PAGE_ERROR_PATTERNS;
+  for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
       const start = Math.max(0, match.index - 80);

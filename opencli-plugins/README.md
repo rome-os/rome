@@ -512,8 +512,14 @@ requests, so the download forwards the browser's Google session cookies for that
   on demand and only a trusted pointer click opens it, so the command intercepts the file chooser
   over CDP and hands Chrome the paths. That needs the direct CDP backend
   (`opencli --cdp-endpoint http://127.0.0.1:9222 …`); the Browser Bridge extension does not
-  relay CDP events. The command waits for every attachment tile to finish uploading before it
-  sends, because a message sent mid-upload is dropped without an error.
+  relay CDP events. Chrome reads the paths from its own filesystem, so it must see the same files
+  as the CLI. That holds in the production container; the dev Chrome sidecar
+  (`compose.dev.yml`) does not mount `/workspace` or `/rome-home`. The command waits for every
+  attachment tile to finish uploading before it sends, because a message sent mid-upload is
+  dropped without an error.
+- `--timeout` (default 600 seconds) bounds the whole run, as OpenCLI enforces it for the entire
+  command: the generation wait gets what is left after upload and submission, minus a share
+  kept for the download.
 - One prompt yields one clip of roughly 8 to 10 seconds at 1280×720 with generated ambient
   audio. Longer films are several runs stitched together.
 - Gemini enforces a daily video allowance per account (Google AI Pro: 3 videos a day). Once it is
