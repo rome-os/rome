@@ -109,7 +109,9 @@ export interface TurnConversationInput extends RomeSessionIdInput {
 
 // Conversations whose turns only the recorder writes. A webchat conversation
 // belongs to the webchat route, and a channel one to the inbox, which also
-// injects its pending context on a channel turn.
+// injects its pending context on a channel turn. A continuable fork is the
+// exception: once saved it is served by the webchat route too, and is safe
+// here only while nothing resumes a side chat by session id.
 const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set([
   "subagent",
   "fork",

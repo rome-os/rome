@@ -715,8 +715,10 @@ export function createAgentSessionManager(
     async recordConversation(sessionId, conversationId) {
       const filled = await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
       if (!filled) return;
-      // A cached session reads the same value a cold reopen would.
-      for (const session of sessions.values()) {
+      // A cached session reads the same value a cold reopen would. A session
+      // still opening is not cached yet and misses this, so callers record
+      // only after their acquire has returned.
+      for (const session of [...sessions.values()]) {
         if (session.sessionId !== sessionId || session.conversationId) continue;
         session.recordedConversation = await findRecordedConversation(
           deps.webchatRepo,
