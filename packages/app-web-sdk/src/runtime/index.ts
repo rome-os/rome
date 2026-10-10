@@ -11,6 +11,8 @@ export type RomeSessionType =
   | "fork"
   | "subagent";
 
+/** Opaque reference to a durable Rome session. Pass this object through
+ * unchanged; do not inspect or construct its fields in app code. */
 export interface RomeSessionRef {
   readonly _romeSessionId: string;
   readonly _type: RomeSessionType;
@@ -148,7 +150,7 @@ function installPortalEscapeGuard(): void {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (!(node instanceof HTMLElement)) continue;
-        const isFloating = node.matches?.(FLOATING_ROLES) || !!node.querySelector?.(FLOATING_ROLES);
+        const isFloating = node.matches(FLOATING_ROLES) || !!node.querySelector(FLOATING_ROLES);
         if (!isFloating) continue;
         warned = true;
         console.warn(
@@ -615,8 +617,6 @@ export type NavigateRomePayload =
   | { readonly path: "routines" }
   | { readonly path: "desktop" };
 
-/** Opaque reference to a durable Rome session. Pass this object through
- * unchanged; do not inspect or construct its fields in app code. */
 /**
  * Send the host to a Rome-owned route. Implemented as a CustomEvent on the
  * shared `window` (the app mounts in a Shadow DOM, not an iframe, so
@@ -633,33 +633,25 @@ export function navigateRome(payload: NavigateRomePayload): void {
   const detail: { path: string; state?: unknown } = {
     path: resolveHostNavigatePath(payload),
   };
-  if (
-    payload.path === "chat/new" &&
-    (payload.draft ||
-      payload.skill ||
-      payload.agentName ||
-      payload.projectPath ||
-      hasWidgets(payload.widgets))
-  ) {
-    detail.state = {
+  if (payload.path === "chat/new") {
+    const state = {
       ...(payload.draft ? { draft: payload.draft } : {}),
       ...(payload.skill ? { skill: payload.skill } : {}),
       ...(payload.agentName ? { agentName: payload.agentName } : {}),
       ...(payload.projectPath ? { projectPath: payload.projectPath } : {}),
       ...(hasWidgets(payload.widgets) ? { widgets: payload.widgets } : {}),
     };
+    if (Object.keys(state).length > 0) detail.state = state;
   }
   if (payload.path === "chat" && hasWidgets(payload.widgets)) {
     detail.state = { widgets: payload.widgets };
   }
   window.dispatchEvent(new CustomEvent(HOST_NAVIGATE_EVENT, { detail }));
-  const parentWindow = window.parent;
   if (
     (payload.path === "chat" || payload.path === "chat/new" || payload.path === "session") &&
-    parentWindow &&
-    parentWindow !== window
+    window.parent !== window
   ) {
-    parentWindow.postMessage({ type: HOST_NAVIGATE_EVENT, detail }, window.location.origin);
+    window.parent.postMessage({ type: HOST_NAVIGATE_EVENT, detail }, window.location.origin);
   }
 }
 
@@ -738,24 +730,6 @@ function isRomeSessionType(value: unknown): value is RomeSessionType {
   );
 }
 
-/**
- * High-level helper that starts a fresh webchat session, posts `message`
- * as the first user turn (which kicks off the agent), optionally anchors the
- * session to `projectPath`, and — unless `navigate: false` — sends the host to
- * `/chat/<sessionId>`.
- *
- * Composes two existing routes (`POST /api/chat/sessions` and
- * `POST /api/chat/sessions/:id/turns`); there is no dedicated server
- * endpoint and we don't need one.
- *
- * The first-turn POST is awaited before navigating. The POST returns as soon
- * as the user message is persisted and the turnId allocated (the agent run
- * drains in the background), so this only costs the server's
- * turn-setup latency — not the turn itself. Navigating earlier loses the
- * guardian's own message: the chat page's initial history fetch races the
- * insert, and the session events stream deliberately never re-pushes
- * user-turn rows (the sender is expected to have rendered them).
- */
 export interface StartChatOptions {
   readonly message: string;
   readonly agentName?: string;
@@ -822,6 +796,24 @@ function buildWidgetLayout(widgets: readonly ChatWidget[]): HostWidgetPlacement[
   });
 }
 
+/**
+ * High-level helper that starts a fresh webchat session, posts `message`
+ * as the first user turn (which kicks off the agent), optionally anchors the
+ * session to `projectPath`, and — unless `navigate: false` — sends the host to
+ * `/chat/<sessionId>`.
+ *
+ * Composes two existing routes (`POST /api/chat/sessions` and
+ * `POST /api/chat/sessions/:id/turns`); there is no dedicated server
+ * endpoint and we don't need one.
+ *
+ * The first-turn POST is awaited before navigating. The POST returns as soon
+ * as the user message is persisted and the turnId allocated (the agent run
+ * drains in the background), so this only costs the server's
+ * turn-setup latency — not the turn itself. Navigating earlier loses the
+ * guardian's own message: the chat page's initial history fetch races the
+ * insert, and the session events stream deliberately never re-pushes
+ * user-turn rows (the sender is expected to have rendered them).
+ */
 export async function startChat(opts: StartChatOptions): Promise<{ sessionId: string }> {
   const createSessionBody: {
     agentName: string | null;
@@ -848,9 +840,7 @@ export async function startChat(opts: StartChatOptions): Promise<{ sessionId: st
 
   // Let the host shell (RecentChats) know a new session exists, so the
   // sidebar refetches instead of waiting for a later unrelated mutation.
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("rome:chat-sessions-changed"));
-  }
+  window.dispatchEvent(new CustomEvent("rome:chat-sessions-changed"));
 
   if (hasWidgets(opts.widgets)) {
     const layout = buildWidgetLayout(opts.widgets);

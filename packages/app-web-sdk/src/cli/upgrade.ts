@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { parseDocument } from "yaml";
+import { findAppDir } from "./loadAppYaml.js";
 import { CliError } from "./store/config.js";
 
 const HELP = `Usage: rome upgrade <major|minor|patch> [directory]
@@ -105,21 +106,11 @@ function parseReleaseType(input: string): VersionReleaseType {
 }
 
 async function findManifestPath(startDir: string): Promise<string> {
-  let current = await resolveDirectory(startDir);
-
-  while (true) {
-    const manifestPath = path.join(current, "app.yaml");
-    const stat = await fs.stat(manifestPath).catch(() => null);
-    if (stat?.isFile()) return manifestPath;
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      throw new CliError(
-        `rome upgrade: could not locate app.yaml searching upward from ${startDir}`,
-      );
-    }
-    current = parent;
+  const appDir = findAppDir(await resolveDirectory(startDir));
+  if (!appDir) {
+    throw new CliError(`rome upgrade: could not locate app.yaml searching upward from ${startDir}`);
   }
+  return path.join(appDir, "app.yaml");
 }
 
 async function resolveDirectory(inputPath: string): Promise<string> {
@@ -143,18 +134,5 @@ function parseSemver(version: string): { major: number; minor: number; patch: nu
     );
   }
 
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  if (
-    !Number.isSafeInteger(major) ||
-    !Number.isSafeInteger(minor) ||
-    !Number.isSafeInteger(patch)
-  ) {
-    throw new CliError(
-      `app.yaml version is too large to increment safely: ${JSON.stringify(version)}`,
-    );
-  }
-
-  return { major, minor, patch };
+  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }

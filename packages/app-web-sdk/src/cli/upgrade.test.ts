@@ -6,16 +6,12 @@ import YAML from "yaml";
 import { bumpVersion, upgradeAppVersion } from "./upgrade.js";
 
 describe("bumpVersion", () => {
-  it("increments patch versions", () => {
-    expect(bumpVersion("1.2.3", "patch")).toBe("1.2.4");
-  });
-
-  it("increments minor versions and resets patch", () => {
-    expect(bumpVersion("1.2.3", "minor")).toBe("1.3.0");
-  });
-
-  it("increments major versions and resets minor and patch", () => {
-    expect(bumpVersion("1.2.3", "major")).toBe("2.0.0");
+  it.each([
+    ["patch", "1.2.4"],
+    ["minor", "1.3.0"],
+    ["major", "2.0.0"],
+  ] as const)("bumps 1.2.3 by %s to %s", (release, expected) => {
+    expect(bumpVersion("1.2.3", release)).toBe(expected);
   });
 
   it("drops prerelease and build metadata on bump", () => {

@@ -99,11 +99,7 @@ function hashAssets(compilation: Rspack.Compilation): string {
   const names = Object.keys(compilation.assets).sort();
   for (const name of names) {
     hash.update(name);
-    const asset = compilation.assets[name];
-    const source = asset?.source();
-    if (source !== undefined) {
-      hash.update(source);
-    }
+    hash.update(compilation.assets[name].source());
   }
   return hash.digest("hex").slice(0, 12);
 }
