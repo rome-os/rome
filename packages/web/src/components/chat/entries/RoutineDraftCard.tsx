@@ -27,6 +27,11 @@ type CardState =
 
 type Busy = "toggle" | "delete" | null;
 
+// Keys the server mints for chat cards (core's CHAT_ROUTINE_KEY_PREFIX). Only a
+// card keyed in this namespace may pause or delete what it finds: an app's
+// managed routine keys (e.g. `briefing-*`) never belong to a chat card.
+const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
+
 /** The routine this card created, if it still exists. Cards carry a unique
  * `routineKey` the routine was created with; cards written before keys existed
  * fall back to the old name match, limited to routines without a key. */
@@ -75,7 +80,12 @@ export function RoutineDraftCard({
       const created = refs ? findCreatedRoutine(refs, draft.name, routineKey) : undefined;
       setState(
         created
-          ? { kind: "on", routineId: created.id, enabled: created.enabled, owned: !!routineKey }
+          ? {
+              kind: "on",
+              routineId: created.id,
+              enabled: created.enabled,
+              owned: !!routineKey?.startsWith(CHAT_ROUTINE_KEY_PREFIX),
+            }
           : { kind: "draft" },
       );
     });
@@ -94,7 +104,14 @@ export function RoutineDraftCard({
       ...(routineKey ? { key: routineKey } : {}),
     });
     if (result.ok) {
-      setState({ kind: "on", routineId: result.routineId, enabled: true, owned: true });
+      // 409: the keyed routine already existed and was left as it is — it may
+      // be paused — so read its real state rather than assume On.
+      let enabled = true;
+      if (result.status === 409 && result.routineId) {
+        const refs = await listRoutineRefs();
+        enabled = refs?.find((r) => r.id === result.routineId)?.enabled ?? true;
+      }
+      setState({ kind: "on", routineId: result.routineId, enabled, owned: true });
     } else {
       setState({
         kind: "error",

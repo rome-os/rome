@@ -282,6 +282,7 @@ describe("normalizeRoutineDraftForCard", () => {
       permissions?: Record<string, "permitted" | "denied" | "unknown">;
       argsError?: string;
       createResult?: unknown;
+      createThrows?: boolean;
       withGate?: boolean;
       detached?: boolean;
     }) => {
@@ -293,6 +294,7 @@ describe("normalizeRoutineDraftForCard", () => {
         subagentTools: [],
         executeAction: async (name, input) => {
           calls.push({ name, input });
+          if (opts.createThrows) throw new Error("worker RPC timed out");
           return opts.createResult ?? { routineId: "r-42" };
         },
         executeSubagent: async () => ({}),
@@ -395,6 +397,17 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(calls).toEqual([]);
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toContain("do not satisfy the input schema");
+    });
+
+    // A throw doesn't say whether the row was saved: show the card (its lookup
+    // settles it) and stop the agent from retrying under a new key.
+    it("reports an uncertain outcome, not an error, when create_routine throws", async () => {
+      const { calls, run } = setup({ createThrows: true });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toHaveLength(1);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain("may or may not exist");
+      expect(res.content[0].text).toContain("do NOT call propose_routine");
     });
 
     it("relays a create_routine rejection as an error without a card", async () => {

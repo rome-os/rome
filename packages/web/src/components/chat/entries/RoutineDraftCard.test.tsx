@@ -218,6 +218,19 @@ describe("RoutineDraftCard", () => {
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   });
 
+  // A key outside the chat namespace (e.g. an app's managed routine) never
+  // makes the card the routine's owner.
+  it("links but offers no controls for a key outside the chat-routine namespace", async () => {
+    mockList.mockResolvedValue([
+      { id: "r-app", name: "Daily briefing", key: "briefing-daily", enabled: true },
+    ]);
+    render(<RoutineDraftCard draft={eventDraft} routineKey="briefing-daily" />);
+
+    expect(await screen.findByRole("link", { name: /view run history/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+  });
+
   it("shows the real bound action name", async () => {
     render(<RoutineDraftCard draft={eventDraft} />);
     expect(screen.getByText("Action")).toBeTruthy();
@@ -306,6 +319,18 @@ describe("RoutineDraftCard", () => {
       renderActivated();
       expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+    });
+
+    it("shows the real state when Turn it on finds the routine already exists", async () => {
+      const user = userEvent.setup();
+      // The first lookup failed; the routine exists but is paused.
+      mockList.mockResolvedValueOnce(null).mockResolvedValue([{ ...ref, enabled: false }]);
+      mockCreate.mockResolvedValue({ ok: true, status: 409, routineId: "r-5" });
+      renderActivated();
+
+      await user.click(await screen.findByRole("button", { name: /turn it on/i }));
+      expect(await screen.findByText("Paused")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
     });
 
     it("offers no Pause for a manual routine", async () => {

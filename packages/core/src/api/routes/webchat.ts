@@ -67,11 +67,8 @@ import {
   buildWorkspaceContextSection,
   type WorkspaceContextSnapshot,
 } from "../../core/prompt-builder.js";
-import {
-  chatRoutineKeyForToolUse,
-  mintChatRoutineKey,
-  normalizeRoutineDraftForCard,
-} from "../../core/mcp-facade.js";
+import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
 import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -3780,10 +3777,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // A turn stopped or failed between the handler and its result may
             // already have created the routine; show its card so it stays
             // visible and reversible (the lookup shows a draft if it doesn't).
-            for (const [toolUseId, toolInput] of pendingRoutineActivations) {
-              await persistActivatedCard(toolUseId, toolInput);
+            try {
+              for (const [toolUseId, toolInput] of pendingRoutineActivations) {
+                await persistActivatedCard(toolUseId, toolInput);
+              }
+            } catch (err) {
+              log.warn("failed to persist pending routine cards", {
+                sessionId,
+                turnId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            } finally {
+              unsubscribeStatus();
             }
-            unsubscribeStatus();
           }
         }),
       );

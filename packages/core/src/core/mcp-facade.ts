@@ -18,8 +18,8 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
-import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -149,22 +149,6 @@ export interface RoutineActivationGate {
    * one `POST /api/routines` runs for the card's "Turn it on". Null when the
    * args fit. */
   validateArgs(actionName: string, args: Record<string, unknown>): string | null;
-}
-
-/** Prefix of the unique key a chat routine card's routine is created with. The
- * card finds its routine by this key after a reload; `POST /api/routines`
- * accepts only keys with this prefix. */
-export const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
-
-/** A fresh key for a draft card, minted by the webchat drain. */
-export function mintChatRoutineKey(): string {
-  return `${CHAT_ROUTINE_KEY_PREFIX}${randomUUID()}`;
-}
-
-/** The key of a routine `propose_routine` auto-enables, derived from the tool
- * call so the drain can compute the card's key itself. */
-export function chatRoutineKeyForToolUse(toolUseId: string): string {
-  return `${CHAT_ROUTINE_KEY_PREFIX}${toolUseId}`;
 }
 
 interface ActionArgumentSummary {
@@ -816,7 +800,13 @@ async function activateRoutineDraft(
       args: draft.args,
     });
   } catch (err) {
-    result = { status: "error", error: err instanceof Error ? err.message : String(err) };
+    // A throw (an RPC failure, an aborted turn) doesn't say whether the row
+    // was saved. Don't report "not created": the agent would retry under a new
+    // key and could leave a second live routine. Show the card instead; its
+    // lookup by key shows whether the routine exists.
+    return text(
+      `create_routine failed unexpectedly (${err instanceof Error ? err.message : String(err)}), so the routine may or may not exist. Its card was shown and reflects what was saved — do NOT call propose_routine or any create action again. Tell the guardian to check the card, then end your turn.`,
+    );
   }
   const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
   if (r.status === "error" || typeof r.routineId !== "string") {

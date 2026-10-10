@@ -6,7 +6,7 @@ import { toRoutine } from "../../db/repositories/routines.js";
 import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
 import type { ApiDeps } from "../deps.js";
 import { validateActionArgs } from "../../actions/validate-action-args.js";
-import { CHAT_ROUTINE_KEY_PREFIX } from "../../core/mcp-facade.js";
+import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
