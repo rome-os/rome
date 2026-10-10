@@ -1173,9 +1173,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
   const generateShareToken = (): string => randomBytes(32).toString("base64url");
 
-  // The chat's model selection lives on its row and reaches the session at
-  // acquire, so the key names only the chat.
-
   const resolveSessionHandback = (
     session: StoredWebchatSession,
   ): { schema: Record<string, unknown>; validate?: string } | undefined => {
@@ -1334,9 +1331,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         sourceCheckpoint,
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
-        ...(input.continuable
-          ? { persistThreadKey: webchatSessionKey }
-          : {}),
+        ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
       })
       [Symbol.asyncIterator]();
 
