@@ -642,6 +642,7 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
   });
@@ -877,6 +878,7 @@ import {
   setTelemetryBridge as setTelemetryBridgeOnSdk,
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "./channel-surface.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;

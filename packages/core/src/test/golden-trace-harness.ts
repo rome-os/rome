@@ -32,6 +32,7 @@ import {
   createActionEngineRepos,
 } from "./helpers.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { testChannelSurface } from "./channel-surface.js";
 
 export const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "agents");
 
@@ -117,6 +118,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     capabilityDiscovery: new CapabilityDiscovery(),
     skillCatalog: new SkillCatalog(artifactIdentity),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
   });
   const runner = new AgentRunner(manager, agentLoader);
 

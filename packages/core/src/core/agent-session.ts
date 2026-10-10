@@ -382,7 +382,7 @@ interface ManagerDeps {
   usageRecorder?: TurnUsageSink;
   /** What the named channel's surface supports, or null for a name no channel
    *  has. Absent treats every channel as a messaging channel. */
-  channelSurface?: (channel: string) => ChannelSurface | null;
+  channelSurface: (channel: string) => ChannelSurface | null;
 }
 
 /** The parts of a channel's surface that change how its sessions prompt. */
@@ -414,7 +414,7 @@ function channelSurfaceOf(
   deps: Pick<ManagerDeps, "channelSurface">,
   channel: string,
 ): ChannelSurface {
-  return deps.channelSurface?.(channel) ?? MESSAGING_CHANNEL_SURFACE;
+  return deps.channelSurface(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
 interface ManagerOptions {

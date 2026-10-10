@@ -26,6 +26,7 @@ import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -121,6 +122,7 @@ describe("agent model pins through AgentSessionManager", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true, isSubagent },
     );

@@ -21,6 +21,7 @@ import { SkillCatalog } from "./skill-catalog.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { AIToolStateValue } from "./ai-tool-state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const AGENT = "usage_agent";
 const key = { agentName: AGENT, channelThreadKey: "webchat:usage-test" };
@@ -133,6 +134,7 @@ describe("AgentSession turn usage", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        channelSurface: testChannelSurface,
         turnMiddleware,
         usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
       },

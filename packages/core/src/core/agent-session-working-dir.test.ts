@@ -16,6 +16,7 @@ import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const AGENT = "worker";
 
@@ -81,6 +82,7 @@ describe("AgentSessionManager working dirs", () => {
         capabilityDiscovery: new CapabilityDiscovery(),
         skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
     );

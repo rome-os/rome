@@ -71,6 +71,7 @@ import type {
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -1632,8 +1633,7 @@ describe("AgentRunner", () => {
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
-      channelSurface: (channel: string) =>
-        channel === "webchat" ? { interactiveCards: true, promptContext: false } : null,
+      channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
         webchatRepo: new WebChatRepository(testDb.db),
