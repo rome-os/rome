@@ -1042,6 +1042,7 @@ describe("Routines fire path", () => {
         body: JSON.stringify({ enabled: true }),
       });
       expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/which has passed/);
       expect(harness.manualProvider.isActive(id)).toBe(false);
     } finally {
       rs.useRealTimers();
