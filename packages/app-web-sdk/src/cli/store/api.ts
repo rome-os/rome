@@ -54,17 +54,10 @@ export async function postJson<T>(
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
   });
-  const setCookies = response.headers.getSetCookie();
-  const json = (await response.json().catch(() => ({}))) as unknown;
   if (!response.ok) {
-    const errField =
-      json && typeof json === "object" && "error" in json
-        ? (json as { error?: unknown }).error
-        : null;
-    const msg = typeof errField === "string" ? errField : `HTTP ${response.status}`;
-    throw new CliError(msg);
+    throw new CliError(`${response.status} ${await readError(response)}`);
   }
-  return { body: json as T, setCookies };
+  return { body: (await response.json()) as T, setCookies: response.headers.getSetCookie() };
 }
 
 export async function postMultipart<T>(
