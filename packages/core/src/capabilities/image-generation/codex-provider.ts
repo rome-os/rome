@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   AgentRunnerInterface,
   ImageGenerationContext,
@@ -7,6 +6,7 @@ import type {
   ImageProviderAvailability,
   ImageProviderGenerateResult,
 } from "@rome-os/app-runtime";
+import { adhocSessionKey } from "../../core/agent-session-key.js";
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("codex-image-provider");
@@ -168,7 +168,7 @@ export function createCodexImageGenerationProvider(
           // A fresh session per call. Concurrent calls (generate_image batches)
           // rely on it: the generated-images backstop is scoped to the Codex
           // thread, so a shared thread could hand one call another's image.
-          channelThreadKey: `${IMAGE_GEN_AGENT}:${randomUUID()}`,
+          channelThreadKey: adhocSessionKey(IMAGE_GEN_AGENT),
           prompt: `${instruction} Use this prompt verbatim:\n\n${request.prompt}`,
           ...(inputImages.length > 0 ? { images: inputImages } : {}),
           sharedContext: ctx?.sharedContext,
