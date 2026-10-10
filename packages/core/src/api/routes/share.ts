@@ -8,12 +8,12 @@ import {
   createTreeHandler,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
-import { PROJECTS_IGNORED_NAMES } from "./projects-files.js";
 
 const log = createLogger("api:share");
 
@@ -113,15 +113,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
     readHandler((scope) =>
       createSearchHandler({
         ...scope,
-        searchGlobs: [
-          "!**/.git/**",
-          "!**/.next/**",
-          "!**/.turbo/**",
-          "!**/build/**",
-          "!**/coverage/**",
-          "!**/dist/**",
-          "!**/node_modules/**",
-        ],
+        searchGlobs: PROJECTS_SEARCH_GLOBS,
       }),
     ),
   );

@@ -26,15 +26,11 @@ import {
   resolveNearestGitTarget,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import type { ApiDeps } from "../deps.js";
 
-// Dependency trees are skipped at every level of the Projects browser: as
-// project roots, in the tree, in live updates, uploads, and folder downloads.
-// Build outputs (`build`, `coverage`, `dist`) are real project content and
-// stay visible. Dot entries are always skipped by the file browser itself.
-export const PROJECTS_IGNORED_NAMES = ["node_modules"];
 const PROJECT_DASHBOARD_DAYS = 14;
 const PROJECT_DASHBOARD_CHAT_LIMIT = 20;
 const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
@@ -762,15 +758,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     "/projects/search",
     createSearchHandler({
       ...baseScope,
-      searchGlobs: [
-        "!**/.git/**",
-        "!**/.next/**",
-        "!**/.turbo/**",
-        "!**/build/**",
-        "!**/coverage/**",
-        "!**/dist/**",
-        "!**/node_modules/**",
-      ],
+      searchGlobs: PROJECTS_SEARCH_GLOBS,
     }),
   );
 
