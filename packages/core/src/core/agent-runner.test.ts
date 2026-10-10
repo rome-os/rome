@@ -609,6 +609,43 @@ describe("AgentRunner", () => {
       }
     });
 
+    it("leaves a turn under a messaging thread to that thread", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Telegram thread",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Telegram thread",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // A backend turn delivers its reply to the thread and records it in the
+        // thread's conversation under this turn, so the trace stays there too.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
+          }),
+        );
+
+        expect(turns).toEqual([
+          { romeSessionId: "channel:telegram:t1", romeSessionType: "channel" },
+        ]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
     it("writes a recorded subagent transcript when the caller keeps its own", async () => {
       const testDb = createTestDb();
       try {
@@ -673,6 +710,7 @@ describe("AgentRunner", () => {
               threadId: "side-chat",
               threadName: "Side chat",
               threadType: "private",
+              romeSessionId: "side-chat",
             },
             persistTrace: true,
             persistTranscript: false,
