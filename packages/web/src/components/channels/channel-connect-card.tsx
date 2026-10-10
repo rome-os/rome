@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentType, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
@@ -8,7 +8,6 @@ import { ConnectionSlotCard } from "@/components/connection-slot-card";
 import {
   SetupRenderer,
   StandardSetupRenderer,
-  type SetupComponentRegistry,
   type SetupRenderProps,
 } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
@@ -21,9 +20,8 @@ import { revokeConnectionGrant } from "@/lib/connections-api";
 // to be seven near-identical per-service cards (telegram bot / telegram user /
 // whatsapp / discord / wechat / feishu / email) is a single component driven by
 // the {@link ChannelConnectConfig} table below — the only things a channel
-// varies are its grant name, a couple of copy keys, and (for two services) a
-// genuinely custom piece: Discord's post-connect routing table and Feishu's
-// QR-image setup renderer. Those are the "registered custom components"; the
+// varies are its grant name, a couple of copy keys, and (for Feishu) a
+// genuinely custom QR-image setup renderer. That is the custom component; the
 // generic card is the "standard renderer".
 
 /**
@@ -52,10 +50,6 @@ function FeishuPresenting(props: SetupRenderProps) {
   );
 }
 
-const FEISHU_SETUP_REGISTRY: SetupComponentRegistry = {
-  "feishu:presenting": FeishuPresenting,
-};
-
 // ── Config ──────────────────────────────────────────────────────────────────
 
 export interface ChannelConnectConfig {
@@ -72,10 +66,8 @@ export interface ChannelConnectConfig {
   /** i18n key for the success note shown under the connected header (the
    *  "linked as guardian" line). Omitted for services with no such note. */
   guardianLinkedKey?: string;
-  /** Extra content rendered under the connected view — Discord's routing table. */
-  connectedExtra?: ReactNode;
-  /** Custom setup renderers for this service — Feishu's QR image. */
-  registry?: SetupComponentRegistry;
+  /** Custom renderer for the `presenting` setup state — Feishu's QR image. */
+  renderPresenting?: ComponentType<SetupRenderProps>;
   /** Header icon override; defaults to the service brand badge. */
   icon?: ReactNode;
   /** Copy key for the connected title when the slot has no folded identity. */
@@ -143,12 +135,16 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   feishu: {
     service: "feishu",
     defaultGrant: "app",
-    registry: FEISHU_SETUP_REGISTRY,
+    renderPresenting: FeishuPresenting,
     conversationSettings: true,
   },
   email: {
     service: "email",
     defaultGrant: "inbox",
+  },
+  agents: {
+    service: "agents",
+    defaultGrant: "cloud",
   },
 };
 
@@ -163,9 +159,8 @@ export interface ChannelConnectCardProps {
 
 /**
  * The single channel connect card. When connected it shows the folded identity +
- * Disconnect (and, per config, a "linked as guardian" note and/or a custom
- * connected-state panel like Discord's routing table); when not, it runs the
- * setup through the standard renderers (plus any per-service custom
+ * Disconnect (and, per config, a "linked as guardian" note); when not, it runs
+ * the setup through the standard renderers (plus any per-service custom
  * renderer). A channel that reads connected was guardian-linked during the
  * terminal conferral, so there is no separate verify-status polling.
  */
@@ -246,24 +241,20 @@ export function ChannelConnectCard({ config, slot, role, onRefresh }: ChannelCon
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
 
       {connected ? (
-        config.guardianLinkedKey || config.connectedExtra ? (
+        config.guardianLinkedKey ? (
           <div>
-            {config.guardianLinkedKey && (
-              <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
-            )}
-            {config.connectedExtra}
+            <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
           </div>
         ) : null
       ) : setup.state ? (
         <SetupRenderer
-          service={config.service}
           state={setup.state}
           busy={setup.busy}
           error={setup.error}
           onSubmit={setup.submit}
           onCancel={setup.cancel}
           onRetry={() => setup.start(true)}
-          registry={config.registry}
+          renderPresenting={config.renderPresenting}
         />
       ) : (
         <div className="space-y-3">

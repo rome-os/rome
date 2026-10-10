@@ -41,6 +41,8 @@ import {
   searchChatMessages,
 } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import { isChatSearchShortcut, chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import type {
   AgentCatalogGroup,
   AgentMention,
@@ -66,26 +68,6 @@ interface AppSearchEntry {
   href: string;
 }
 
-function currentPlatform(): string {
-  return typeof navigator === "undefined" ? "" : navigator.platform;
-}
-
-function isApplePlatform(platform: string): boolean {
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
-}
-
-export function chatSearchShortcutForPlatform(platform = currentPlatform()): string {
-  return isApplePlatform(platform) ? "⌘K" : "Ctrl K";
-}
-
-export function isChatSearchShortcut(
-  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-  platform = currentPlatform(),
-): boolean {
-  const modifier = isApplePlatform(platform) ? event.metaKey : event.ctrlKey;
-  return modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k";
-}
-
 /**
  * The agent filter while the query is a lone `@` token at its start, else
  * null. Only a leading token counts, so a search that merely contains `@` (an
@@ -94,23 +76,6 @@ export function isChatSearchShortcut(
 export function agentMentionQuery(query: string): string | null {
   const match = /^@(\S*)$/.exec(query.trimStart());
   return match ? match[1] : null;
-}
-
-function activeSessionFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/?#]+)/);
-  if (!match) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
-}
-
-function activityTime(session: ChatSession): number {
-  const activity = new Date(session.activityAt || session.createdAt).getTime();
-  if (Number.isFinite(activity)) return activity;
-  const created = new Date(session.createdAt).getTime();
-  return Number.isFinite(created) ? created : 0;
 }
 
 function normalizeSearchText(value: string): string {
@@ -212,7 +177,7 @@ function rankSession(session: ChatSession, normalizedQuery: string): number | nu
   if (!normalizedQuery) return 0;
 
   const name = normalizeSearchText(session.name);
-  const projectName = normalizeSearchText(session.projectName ?? "");
+  const projectName = normalizeSearchText(session.projectName);
   const projectPath = normalizeSearchText(session.projectPath ?? "");
   const haystack = `${name}\n${projectName}\n${projectPath}`;
   const terms = normalizedQuery.split(/\s+/);
@@ -400,7 +365,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       .sort(
         (a, b) =>
           b.rank - a.rank ||
-          activityTime(b.session) - activityTime(a.session) ||
+          sessionActivityTime(b.session) - sessionActivityTime(a.session) ||
           a.originalIndex - b.originalIndex,
       )
       .map((entry) => entry.session);
@@ -421,14 +386,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       session,
       match: matchBySession.get(session.id),
     }));
-    // One row per session. The endpoint documents one match per session, but
-    // nothing here enforces it, and a second match for the same session would
-    // otherwise append a duplicate row — same React key, and two cmdk options
-    // sharing a value.
-    const seen = new Set(matchingSessions.map((session) => session.id));
+    // The endpoint returns one match per session, so only a session that
+    // already matched by title needs skipping here.
+    const titleMatched = new Set(matchingSessions.map((session) => session.id));
     for (const match of currentContentMatches) {
-      if (seen.has(match.session.id)) continue;
-      seen.add(match.session.id);
+      if (titleMatched.has(match.session.id)) continue;
       entries.push({ session: match.session, match: match.message });
     }
     return entries;
@@ -714,7 +676,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     const archived = Boolean(session.archivedAt);
     const current = session.id === currentSessionId;
     const project = session.projectPath || session.projectName;
-    const timestamp = formatMessageTimestamp(session.activityAt || session.createdAt);
+    const timestamp = formatMessageTimestamp(session.activityAt);
     return (
       <CommandItem
         key={`chat:${session.id}`}

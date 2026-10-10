@@ -1,20 +1,25 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { RoutineDraftCard } from "./RoutineDraftCard";
-import { createRoutine, listRoutineNames } from "@/lib/chat-api";
+import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
 
 // The card reaches the backend through exactly these two calls; stub them so
 // the component renders from fixture data alone — no agent, no server.
 rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
-  listRoutineNames: rs.fn(),
+  listRoutineRefs: rs.fn(),
 }));
 
 const mockCreate = rs.mocked(createRoutine);
-const mockList = rs.mocked(listRoutineNames);
+const mockList = rs.mocked(listRoutineRefs);
+
+// The saved state links into the router, so render inside one.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const eventDraft: RoutineDraftSpec = {
   sentence: "When you get an email from Dana, Rome will summarize it and text you.",
@@ -39,6 +44,7 @@ const scheduleDraft: RoutineDraftSpec = {
   trigger: {
     type: "schedule",
     tzid: "America/Los_Angeles",
+    tzMode: "floating",
     localTime: "09:00",
     rrule: "FREQ=WEEKLY;BYDAY=FR",
   },
@@ -138,9 +144,9 @@ describe("RoutineDraftCard", () => {
     await waitFor(() => expect(mockList).toHaveBeenCalled());
   });
 
-  it("turning it on posts the create payload and shows the On state", async () => {
+  it("turning it on posts the keyed create payload and links to the run history", async () => {
     const user = userEvent.setup();
-    render(<RoutineDraftCard draft={eventDraft} />);
+    render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
     await user.click(screen.getByRole("button", { name: /turn it on/i }));
 
@@ -149,30 +155,58 @@ describe("RoutineDraftCard", () => {
       trigger: eventDraft.trigger,
       actionName: "summon",
       args: eventDraft.args,
+      key: "chat-routine:card-1",
     });
     await waitFor(() => expect(screen.getByText("On")).toBeTruthy());
-    expect(screen.getByText(/Manage it in Routines/i)).toBeTruthy();
+    const link = screen.getByRole("link", { name: /view run history/i });
+    expect(link.getAttribute("href")).toBe("/routines/r-1");
     expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
   });
 
   it("surfaces the server error and keeps the action when creation fails", async () => {
     const user = userEvent.setup();
     mockCreate.mockResolvedValue({ ok: false, status: 400, error: "Routine name already taken" });
-    render(<RoutineDraftCard draft={eventDraft} />);
+    render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
     await user.click(screen.getByRole("button", { name: /turn it on/i }));
 
     await waitFor(() => expect(screen.getByText("Routine name already taken")).toBeTruthy());
     expect(screen.queryByText("On")).toBeNull();
+    expect(screen.queryByRole("link", { name: /view run history/i })).toBeNull();
     expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
   });
 
-  it("shows the On state on mount when the routine already exists", async () => {
-    mockList.mockResolvedValue(["Landlord emails"]);
+  it("on reload, finds its routine by key — not by a same-named routine", async () => {
+    mockList.mockResolvedValue([
+      { id: "r-other", name: "Landlord emails", key: null },
+      { id: "r-mine", name: "Renamed in Routines", key: "chat-routine:card-1" },
+    ]);
+    render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
+
+    const link = await screen.findByRole("link", { name: /view run history/i });
+    expect(link.getAttribute("href")).toBe("/routines/r-mine");
+    expect(screen.getByText("On")).toBeTruthy();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("offers to turn it on again when its keyed routine no longer exists", async () => {
+    mockList.mockResolvedValue([{ id: "r-other", name: "Landlord emails", key: null }]);
+    render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
+
+    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    expect(screen.queryByText("On")).toBeNull();
+    expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
+  });
+
+  it("matches a card without a key (written before keys) by name among unkeyed routines", async () => {
+    mockList.mockResolvedValue([
+      { id: "r-keyed", name: "Landlord emails", key: "chat-routine:other-card" },
+      { id: "r-legacy", name: "Landlord emails", key: null },
+    ]);
     render(<RoutineDraftCard draft={eventDraft} />);
 
-    expect(await screen.findByText("On")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+    const link = await screen.findByRole("link", { name: /view run history/i });
+    expect(link.getAttribute("href")).toBe("/routines/r-legacy");
     expect(mockCreate).not.toHaveBeenCalled();
   });
 });

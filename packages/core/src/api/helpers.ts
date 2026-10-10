@@ -1,5 +1,5 @@
 import type { TraceEventDto } from "@rome/api-types/trace-segments";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import type { ActionResult } from "../actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
@@ -155,7 +155,7 @@ function timestampToIso(value: Date | number): string {
  * so callers must filter deltas out before reaching here — the compiler
  * enforces it instead of a runtime throw.
  */
-export type TraceableEvent = Exclude<AgentMessage, { type: TransientDeltaType | "input_status" }>;
+export type TraceableEvent = Exclude<AgentEvent, { type: TransientDeltaType | "input_status" }>;
 
 export function toTraceEvent(msg: TraceableEvent & { agent?: string }): TraceEventDto {
   switch (msg.type) {

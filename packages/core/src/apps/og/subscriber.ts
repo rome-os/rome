@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { createLogger } from "../../logger.js";
 import { appIdToPathSegment } from "../packaging/app-id.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../state.js";
+import {
+  type CatalogEvent,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+} from "../state.js";
 import { svgToPng } from "./rasterize.js";
 import type { OgImageStore } from "./store.js";
 import { type OgIcon, renderOgSvg } from "./template.js";
@@ -59,13 +64,7 @@ export interface AppOgImageSubscriberOptions {
 }
 
 function isResolvedWebApp(view: CatalogEvent["current"]): view is ResolvedApp {
-  return (
-    view !== null &&
-    (view as ResolvedApp).manifest !== undefined &&
-    view.state === "installed" &&
-    view.enabled &&
-    (view as ResolvedApp).web != null
-  );
+  return isResolvedApp(view) && view.state === "installed" && view.enabled && view.web != null;
 }
 
 /**

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { WhatsAppAdapter } from "./whatsapp.js";
-import type { NormalizedMessage } from "./types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type {
   WhatsAppSyncSink,
   WaContactInput,
@@ -116,33 +116,38 @@ describe("WhatsAppAdapter", () => {
     await rm(profileMemoryDir.value, { recursive: true, force: true });
   });
 
-  describe("message normalization", () => {
-    it("normalizes a private message", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+  describe("inbound messages", () => {
+    it("emits a private message as the channel's record, with the WAMessage as raw", async () => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
+      const waMsg = makeWAMessage();
 
       // Trigger the messages.upsert event
       await eventHandlers["messages.upsert"]({
-        messages: [makeWAMessage()],
+        messages: [waMsg],
       });
 
-      expect(captured).toBeDefined();
-      expect(captured!.id).toBe("wa-msg-001");
-      expect(captured!.channel).toBe("whatsapp");
-      expect(captured!.channelUserId).toBe("1234567890@s.whatsapp.net");
-      expect(captured!.displayName).toBe("Bob");
-      expect(captured!.threadId).toBe("1234567890@s.whatsapp.net");
-      expect(captured!.threadType).toBe("private");
-      expect(captured!.text).toBe("hello from whatsapp");
-      expect(captured!.attachments).toEqual([]);
+      expect(captured).toStrictEqual({
+        channel: "whatsapp",
+        direction: "inbound",
+        messageId: "wa-msg-001",
+        conversationId: "1234567890@s.whatsapp.net",
+        senderId: "1234567890@s.whatsapp.net",
+        senderDisplayName: "Bob",
+        text: "hello from whatsapp",
+        attachments: [],
+        timestamp: new Date(1700000000 * 1000),
+        thread: { kind: "dm" },
+        raw: waMsg,
+      });
     });
 
-    it("normalizes a group message", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+    it("emits a group message with the participant as sender", async () => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
@@ -160,14 +165,14 @@ describe("WhatsAppAdapter", () => {
         ],
       });
 
-      expect(captured!.threadType).toBe("group");
-      expect(captured!.threadId).toBe("group123@g.us");
-      expect(captured!.channelUserId).toBe("sender@s.whatsapp.net");
+      expect(captured!.thread).toEqual({ kind: "group" });
+      expect(captured!.conversationId).toBe("group123@g.us");
+      expect(captured!.senderId).toBe("sender@s.whatsapp.net");
     });
 
     it("extracts image attachments", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
@@ -194,8 +199,8 @@ describe("WhatsAppAdapter", () => {
     });
 
     it("extracts document attachments", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
@@ -223,9 +228,9 @@ describe("WhatsAppAdapter", () => {
       });
     });
 
-    it("uses remoteJid as channelUserId for private chats", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+    it("uses remoteJid as senderId for private chats", async () => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
@@ -242,8 +247,8 @@ describe("WhatsAppAdapter", () => {
         ],
       });
 
-      // Private: channelUserId === remoteJid
-      expect(captured!.channelUserId).toBe("5551234@s.whatsapp.net");
+      // Private: senderId === remoteJid
+      expect(captured!.senderId).toBe("5551234@s.whatsapp.net");
     });
   });
 
@@ -300,7 +305,7 @@ describe("WhatsAppAdapter", () => {
       const { sink, calls } = makeSink();
       let handled = false;
       adapter.onSync(sink);
-      adapter.onMessage(async () => {
+      adapter.onInbound(async () => {
         handled = true;
       });
       await adapter.start();
@@ -320,7 +325,7 @@ describe("WhatsAppAdapter", () => {
       const { sink, calls } = makeSink();
       let handled = false;
       adapter.onSync(sink);
-      adapter.onMessage(async () => {
+      adapter.onInbound(async () => {
         handled = true;
       });
       await adapter.start();
@@ -353,8 +358,8 @@ describe("WhatsAppAdapter", () => {
       const { sink, calls } = makeSink();
       const handledIds: string[] = [];
       adapter.onSync(sink);
-      adapter.onMessage(async (m) => {
-        handledIds.push(m.id);
+      adapter.onInbound(async (m) => {
+        handledIds.push(m.messageId);
       });
       await adapter.start();
 
@@ -384,9 +389,9 @@ describe("WhatsAppAdapter", () => {
 
     it("keeps visible WhatsApp payloads that do not have first-class renderers yet", async () => {
       const { sink, calls } = makeSink();
-      const handled: NormalizedMessage[] = [];
+      const handled: ChannelMessage[] = [];
       adapter.onSync(sink);
-      adapter.onMessage(async (m) => {
+      adapter.onInbound(async (m) => {
         handled.push(m);
       });
       await adapter.start();
@@ -424,7 +429,7 @@ describe("WhatsAppAdapter", () => {
         ],
       });
 
-      expect(handled.map((m) => [m.id, m.text])).toEqual([
+      expect(handled.map((m) => [m.messageId, m.text])).toEqual([
         ["loc1", "Location: Cafe Roma"],
         ["contact1", "Contact: Alice Example"],
         ["poll1", "Poll: Lunch?"],
@@ -440,9 +445,9 @@ describe("WhatsAppAdapter", () => {
 
     it("unwraps view-once and ephemeral containers before summarizing content", async () => {
       const { sink, calls } = makeSink();
-      let handled: NormalizedMessage | undefined;
+      let handled: ChannelMessage | undefined;
       adapter.onSync(sink);
-      adapter.onMessage(async (m) => {
+      adapter.onInbound(async (m) => {
         handled = m;
       });
       await adapter.start();
@@ -538,13 +543,14 @@ describe("WhatsAppAdapter", () => {
 
     it("reconnects on non-logout disconnect", async () => {
       rs.useFakeTimers();
-      await adapter.start();
+      const socketFactory = rs.fn(() => mockSock);
+      const reconnecting = new WhatsAppAdapter(
+        { authStatePath: "/tmp/auth" },
+        socketFactory as never,
+      );
+      await reconnecting.start();
 
-      const connectionHandler = eventHandlers["connection.update"];
-      expect(connectionHandler).toBeDefined();
-
-      // Simulate a close with a non-logout status code
-      connectionHandler({
+      eventHandlers["connection.update"]({
         connection: "close",
         lastDisconnect: {
           error: {
@@ -554,19 +560,18 @@ describe("WhatsAppAdapter", () => {
         },
       });
 
-      // The adapter should schedule a reconnect via setTimeout
-      // Advance timers to trigger it
-      rs.advanceTimersByTime(1_000);
-      // The reconnect calls start() again, which calls makeWASocket
-      // We just verify it doesn't throw
-      rs.useRealTimers();
+      await rs.advanceTimersByTimeAsync(999);
+      expect(socketFactory).toHaveBeenCalledTimes(1);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(mockEnd).toHaveBeenCalledTimes(1);
+      expect(socketFactory).toHaveBeenCalledTimes(2);
     });
   });
 
   describe("own message filtering", () => {
     it("skips messages with fromMe=true", async () => {
-      let captured: NormalizedMessage | undefined;
-      adapter.onMessage(async (msg) => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
         captured = msg;
       });
       await adapter.start();
@@ -623,22 +628,33 @@ describe("WhatsAppAdapter", () => {
     });
   });
 
-  describe("sendMessage()", () => {
-    it("sends a text message via the socket", async () => {
+  describe("send()", () => {
+    const CHAT = "jid@s.whatsapp.net" as ConversationId;
+
+    it("sends a text message via the socket and returns its receipt", async () => {
+      mockSendMessage.mockResolvedValueOnce({ key: { id: "sent-1" } });
       await adapter.start();
-      await adapter.sendMessage("user-1", "jid@s.whatsapp.net", {
+      const receipt = await adapter.send(CHAT, {
         text: "hi from bot",
       });
 
       expect(mockSendMessage).toHaveBeenCalledWith("jid@s.whatsapp.net", {
         text: "hi from bot",
       });
+      expect(receipt).toStrictEqual({ conversationId: CHAT, messageId: "sent-1" });
+    });
+
+    it("leaves messageId out of the receipt when the socket returns none", async () => {
+      await adapter.start();
+      const receipt = await adapter.send(CHAT, { text: "hi" });
+
+      expect(receipt).toStrictEqual({ conversationId: CHAT });
     });
 
     it("throws if socket is not connected", async () => {
       // Don't call start(), so sock is null
       await expect(
-        adapter.sendMessage("user-1", "jid@s.whatsapp.net", {
+        adapter.send(CHAT, {
           text: "fail",
         }),
       ).rejects.toThrow("WhatsApp not connected");
@@ -687,7 +703,7 @@ describe("WhatsAppAdapter", () => {
 
     it("strips the device suffix from a non-self send target", async () => {
       await adapter.start();
-      await adapter.sendMessage("x", "5551234:9@s.whatsapp.net", { text: "hi" });
+      await adapter.send("5551234:9@s.whatsapp.net" as ConversationId, { text: "hi" });
       expect(mockSendMessage).toHaveBeenCalledWith("5551234@s.whatsapp.net", { text: "hi" });
     });
 
@@ -699,7 +715,7 @@ describe("WhatsAppAdapter", () => {
         "267645534388423@lid", // LID
       ]) {
         mockSendMessage.mockClear();
-        await adapter.sendMessage("x", form, { text: "note" });
+        await adapter.send(form as ConversationId, { text: "note" });
         expect(mockSendMessage).toHaveBeenCalledWith(SELF_PN, { text: "note" });
       }
     });
@@ -745,7 +761,7 @@ describe("WhatsAppAdapter", () => {
       }
       mockDownloadMediaMessage.mockResolvedValue(mediaStream());
 
-      const rawEvent = makeWAMessage({
+      const raw = makeWAMessage({
         message: {
           imageMessage: {
             mimetype: "image/jpeg",
@@ -753,22 +769,48 @@ describe("WhatsAppAdapter", () => {
           },
         },
       });
-      const attachments = await adapter.saveIncomingAttachments({
-        id: "wa-msg-001",
+      const attachments = await adapter.saveIncomingAttachments(imageMessage({ raw }));
+
+      expect(mockDownloadMediaMessage).toHaveBeenCalledWith(raw, "stream", {});
+      expect(attachments[0].localPath).toBeTruthy();
+      // Saved under the same channel/conversation/message path as before.
+      expect(attachments[0].localPath).toContain(
+        join("channel-attachments", "whatsapp", "1234567890@s.whatsapp.net", "wa-msg-001"),
+      );
+      await expect(readFile(attachments[0].localPath!)).resolves.toEqual(Buffer.from("image-data"));
+    });
+
+    it("keeps the attachments unsaved when the message carries no raw", async () => {
+      const message = imageMessage({});
+      const attachments = await adapter.saveIncomingAttachments(message);
+
+      expect(mockDownloadMediaMessage).not.toHaveBeenCalled();
+      expect(attachments).toBe(message.attachments);
+    });
+
+    it("keeps the attachments unsaved when raw is not a WAMessage", async () => {
+      const message = imageMessage({ raw: { channel: "whatsapp", rawEvent: null } });
+      const attachments = await adapter.saveIncomingAttachments(message);
+
+      expect(mockDownloadMediaMessage).not.toHaveBeenCalled();
+      expect(attachments).toBe(message.attachments);
+    });
+
+    /** An inbound image message as this transport emits it. */
+    function imageMessage(extra: { raw?: unknown }): ChannelMessage {
+      return {
         channel: "whatsapp",
-        channelUserId: "1234567890@s.whatsapp.net",
-        displayName: "Bob",
-        threadId: "1234567890@s.whatsapp.net",
-        threadType: "private",
+        direction: "inbound",
+        messageId: "wa-msg-001",
+        conversationId: "1234567890@s.whatsapp.net" as ConversationId,
+        senderId: "1234567890@s.whatsapp.net",
+        senderDisplayName: "Bob",
         timestamp: new Date("2026-05-10T00:00:00Z"),
         text: "",
         attachments: [{ type: "image", mimeType: "image/jpeg", caption: "photo" }],
-        rawEvent,
-      });
-
-      expect(mockDownloadMediaMessage).toHaveBeenCalledWith(rawEvent, "stream", {});
-      expect(attachments[0].localPath).toBeTruthy();
-      await expect(readFile(attachments[0].localPath!)).resolves.toEqual(Buffer.from("image-data"));
-    });
+        thread: { kind: "dm" },
+        ...extra,
+      };
+    }
   });
 });

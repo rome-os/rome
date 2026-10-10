@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId, StreamAgentMessage } from "@rome-os/app-runtime";
+import type { ConversationId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import type {
   AgentSession,
@@ -13,6 +13,7 @@ import type {
   AgentTurnHandle,
 } from "./agent-session.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
+import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -35,7 +36,7 @@ describe("AgentSessionBridge turn routing", () => {
       finishTurn = resolve;
     });
     const interrupt = rs.fn(async () => undefined);
-    const events = (async function* (): AsyncIterable<StreamAgentMessage> {
+    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
       await start;
       yield {
         type: "turn_start",
@@ -59,6 +60,7 @@ describe("AgentSessionBridge turn routing", () => {
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, undefined, undefined, turns).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
 
@@ -121,7 +123,7 @@ describe("AgentSessionBridge working dir", () => {
       sendTurn: () =>
         ({
           turnId: "turn-1",
-          events: (async function* (): AsyncIterable<StreamAgentMessage> {})(),
+          events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
           interrupt: async () => undefined,
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
@@ -139,6 +141,7 @@ describe("AgentSessionBridge working dir", () => {
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
     new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
 

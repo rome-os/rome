@@ -9,6 +9,7 @@
 //  5. Grant rows exist from connection creation in "unauthorized"; conferral
 //     FILLS them.
 
+import type { DrizzleTx, SqliteExec } from "../db/index.js";
 import type { ConnectionId, GrantName, GrantState, ProfileRecord, SecretRecord } from "./types.js";
 
 export interface ConnectionRecord {
@@ -37,45 +38,38 @@ export interface GrantRecord {
    *  SAME update as `credential` — never through a separate setter. Absent until
    *  a conferral supplies one; degrade preserves it (no wipe), revoke clears it. */
   profile?: ProfileRecord;
-  /** When the last conferral filled this grant. Retained through `revoke()` —
-   *  see {@link isExplicitlyRevoked}. */
+  /** When the last conferral filled this grant. Retained through `revoke()`. */
   conferredAt?: Date;
   lastRenewedAt?: Date;
   degraded?: { at: Date; reason: string };
 }
 
-/**
- * True iff this grant was explicitly revoked by the guardian. `revoke()` is the
- * only conferred→unauthorized transition, and it clears the credential/profile
- * but deliberately RETAINS `conferredAt` — so an unauthorized grant with a
- * conferral on record is a guardian-initiated disconnect, distinguishable from a
- * never-conferred grant (a fresh `ensureGrant` row has no `conferredAt`). The
- * boot settings bridge reads this to refuse resurrecting a disconnected
- * credential from a retained legacy settings row; a NEW conferral
- * (`importCredential`) stamps a fresh `conferredAt` and clears the marker's
- * meaning by flipping the state back to authorized.
- */
-export function isExplicitlyRevoked(rec: GrantRecord | null | undefined): boolean {
-  return rec?.state === "unauthorized" && rec.conferredAt !== undefined;
-}
+/** The fields a grant update may change. */
+export type GrantPatch = Partial<
+  Pick<
+    GrantRecord,
+    "state" | "credential" | "profile" | "conferredAt" | "lastRenewedAt" | "degraded"
+  >
+>;
 
+/** Each `write*` helper takes an executor (the db for autocommit, or a `tx`), so
+ *  the registry can enlist several writes in one caller-owned transaction. */
 export interface GrantLedger {
   createConnection(rec: ConnectionRecord): Promise<void>;
   listConnections(): Promise<ConnectionRecord[]>;
-  /** Cascades the connection's grant rows. */
-  deleteConnection(id: ConnectionId): Promise<void>;
+  /** Cascades the connection's grant rows. `inTx` runs a caller participant in
+   *  the same transaction as the deletes, so a teardown side-write commits
+   *  atomically with the connection removal. */
+  deleteConnection(id: ConnectionId, inTx?: (tx: DrizzleTx) => void): Promise<void>;
   /** Idempotent; creates the row in "unauthorized" if absent. */
   ensureGrant(custody: string, name: GrantName): Promise<void>;
   getGrant(custody: string, name: GrantName): Promise<GrantRecord | null>;
   listGrants(custody: string): Promise<GrantRecord[]>;
-  updateGrant(
-    custody: string,
-    name: GrantName,
-    patch: Partial<
-      Pick<
-        GrantRecord,
-        "state" | "credential" | "profile" | "conferredAt" | "lastRenewedAt" | "degraded"
-      >
-    >,
-  ): Promise<void>;
+  updateGrant(custody: string, name: GrantName, patch: GrantPatch): Promise<void>;
+  /** Run `fn` inside one synchronous transaction (better-sqlite3). Any throw
+   *  rolls the whole scope back. */
+  runInTransaction<T>(fn: (tx: DrizzleTx) => T): T;
+  writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
+  writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void;
+  writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void;
 }

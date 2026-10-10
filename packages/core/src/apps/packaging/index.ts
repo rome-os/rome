@@ -83,6 +83,7 @@ export {
   buildSourceWorkspace,
   packArtifact,
   readPackageManifest,
+  PNPM_TIMEOUT_MESSAGE_PREFIX,
   runPnpm,
   type BuildSourceWorkspaceOptions,
   type PackOptions,

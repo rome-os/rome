@@ -108,7 +108,6 @@
     "emptyList": "(空列表)",
     "emptyObject": "(空对象)",
     "agentRunFailed": "智能体执行失败",
-    "unknownTool": "未知",
     "showMore": "展开",
     "showLess": "收起",
     "input": "输入",
@@ -146,6 +145,11 @@
     "noProvider": {
       "title": "没有可用的 AI Provider",
       "description": "请连接 AI Tool，或检查当前登录和额度状态。"
+    },
+    "creditsUsedUp": {
+      "title": "Rome 额度已用完",
+      "description": "连接 ChatGPT 或 Claude，或选择已连接服务的模型。",
+      "action": "连接 AI"
     },
     "openAiTools": "打开 AI Tools"
   },
@@ -223,6 +227,13 @@
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置",
+    "zoomLevel": "缩放",
+    "previewImage": "预览",
+    "playVideo": "播放",
+    "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -252,7 +263,16 @@
     "connectedSummary": "已连接 AI",
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",
-    "checking": "正在检查你的 AI 连接…"
+    "checking": "正在检查你的 AI 连接…",
+    "credits": {
+      "title": "使用免费 Rome 额度开始",
+      "hint": "你的账户有 {{amount}} 的 Rome 额度，我现在就可以开始。你也可以随时登录 Claude 或 ChatGPT，改用自己的订阅。",
+      "continue": "使用额度继续",
+      "summary": "使用 Rome 额度继续",
+      "usingTitle": "正在使用 Rome 额度",
+      "using": "Rome 额度使用中",
+      "ready": "Rome 额度可用"
+    }
   },
   "modelSelector": {
     "label": "模型",
@@ -358,7 +378,6 @@
       "sendStatus": "发送消息失败({{status}})。",
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
-      "attachStreamStatus": "附加流失败,轮次 {{turnId}}({{status}})。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。"
     }

@@ -96,9 +96,7 @@ export default function MemoryPage() {
       logicalRootPath="memory"
       rootLabel={t("memory.rootLabel")}
       searchPlaceholder={t("memory.searchPlaceholder")}
-      selectInitialFolderOnMobile={false}
       sidebarHeading={t("memory.sidebarHeading")}
-      title={t("memory.title")}
     />
   );
 }

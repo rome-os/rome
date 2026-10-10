@@ -1,16 +1,25 @@
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { AppDbContext } from "@rome-os/app-runtime";
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { EventsRepo } from "./events-repo.js";
+import type { Logger } from "@rome-os/app-runtime";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import {
+  EMITTED_EVENTS_RING_CAP,
+  EventsRepo,
+  MAX_PUBLISH_ATTEMPTS,
+  PUBLISH_CLAIM_LEASE_MS,
+  publishRetryDelayMs,
+} from "./events-repo.js";
 import {
   processGithubWebhook,
   processVerifiedWebhook,
-  publishEmittedEvent,
-  type ProcessResult,
+  MAX_EVENT_AGE_MS,
+  publishPendingEvents,
   type ResolveToolkitSlug,
   type RunAction,
 } from "./process-webhook.js";
@@ -225,8 +234,14 @@ function recordingRunAction(): {
   return { calls, run };
 }
 
-describe("publishEmittedEvent", () => {
+function silentLog(): Logger & { error: ReturnType<typeof rs.fn>; warn: ReturnType<typeof rs.fn> } {
+  return { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() };
+}
+
+describe("publishPendingEvents", () => {
   let harness: ReturnType<typeof makeCtx>;
+  const receivedAt = new Date();
+  const at = (offsetMs: number) => new Date(receivedAt.getTime() + offsetMs);
 
   beforeEach(() => {
     harness = makeCtx();
@@ -236,17 +251,22 @@ describe("publishEmittedEvent", () => {
     harness.close();
   });
 
-  it("forwards a freshly emitted event to publish_event with the topic as the bus event name", async () => {
-    const result = await processVerifiedWebhook(
+  async function store(eventId: string, at = receivedAt, data: Record<string, unknown> = {}) {
+    return processVerifiedWebhook(
       harness.repo,
       fixtureResolver,
-      v3TriggerMessage({ eventId: "evt-pub", data: { number: 42 } }),
-      "msg_pub",
-      new Date("2026-05-28T00:00:00Z"),
+      v3TriggerMessage({ eventId, data }),
+      `msg_${eventId}`,
+      at,
     );
+  }
+
+  it("publishes a stored event under its topic once", async () => {
+    await store("evt-pub", receivedAt, { number: 42 });
     const { calls, run } = recordingRunAction();
 
-    await publishEmittedEvent(run, result);
+    await publishPendingEvents(harness.repo, run, silentLog());
+    await publishPendingEvents(harness.repo, run, silentLog());
 
     expect(calls).toEqual([
       {
@@ -260,31 +280,177 @@ describe("publishEmittedEvent", () => {
     ]);
   });
 
-  it("does not republish a deduped event (Composio retry must not re-fire the routine)", async () => {
-    const raw = v3TriggerMessage({ eventId: "evt-dup-pub", data: {} });
-    await processVerifiedWebhook(harness.repo, fixtureResolver, raw, "msg_1", new Date());
-    const second = await processVerifiedWebhook(
-      harness.repo,
-      fixtureResolver,
-      raw,
-      "msg_2",
-      new Date(),
-    );
-    expect(second.kind).toBe("deduped");
-
+  it("does not republish a deduped retry (it must not re-fire the routine)", async () => {
+    await store("evt-dup");
     const { calls, run } = recordingRunAction();
-    await publishEmittedEvent(run, second);
+    await publishPendingEvents(harness.repo, run, silentLog());
 
-    expect(calls).toHaveLength(0);
+    expect((await store("evt-dup")).kind).toBe("deduped");
+    await publishPendingEvents(harness.repo, run, silentLog());
+
+    expect(calls).toHaveLength(1);
   });
 
-  it("does not publish ignored results", async () => {
-    const ignored: ProcessResult = { kind: "ignored", reason: "not_a_trigger_message" };
+  it("publishes the oldest event first", async () => {
+    await store("evt-late", at(2 * 60_000), { order: 2 });
+    await store("evt-early", at(1 * 60_000), { order: 1 });
     const { calls, run } = recordingRunAction();
 
-    await publishEmittedEvent(run, ignored);
+    await publishPendingEvents(harness.repo, run, silentLog());
+
+    expect(calls.map((call) => call.args.payload)).toEqual([{ order: 1 }, { order: 2 }]);
+  });
+
+  const capacityError = async () => {
+    throw new Error("Action worker capacity reached (max 8 live workers)");
+  };
+
+  it("retries a failed event only after its backoff, so a burst spends one attempt", async () => {
+    await store("evt-retry");
+    const log = silentLog();
+    const failedAt = at(5 * 60_000);
+
+    await publishPendingEvents(harness.repo, capacityError, log, () => failedAt);
+    expect(log.warn).toHaveBeenCalledWith(
+      "event publish failed, will retry",
+      expect.objectContaining({ eventId: "evt-retry", attempts: 1 }),
+    );
+
+    // A burst of deliveries before the backoff ends leaves the event alone.
+    const { calls, run } = recordingRunAction();
+    for (let i = 0; i < MAX_PUBLISH_ATTEMPTS; i++) {
+      await publishPendingEvents(harness.repo, run, log, () => failedAt);
+    }
+    expect(calls).toHaveLength(0);
+
+    const due = new Date(failedAt.getTime() + publishRetryDelayMs(1));
+    await publishPendingEvents(harness.repo, run, log, () => due);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("publishes each event once when two drains overlap", async () => {
+    await store("evt-a", at(1 * 60_000));
+    await store("evt-b", at(2 * 60_000));
+    const { calls, run } = recordingRunAction();
+
+    await Promise.all([
+      publishPendingEvents(harness.repo, run, silentLog()),
+      publishPendingEvents(harness.repo, run, silentLog()),
+    ]);
+
+    expect(calls).toHaveLength(2);
+  });
+
+  it("reclaims an event whose publisher died, without spending an attempt", async () => {
+    await store("evt-orphan");
+    let clock = at(5 * 60_000);
+    // Fail up to the last attempt, then let the final publisher die mid-publish.
+    for (let failures = 1; failures < MAX_PUBLISH_ATTEMPTS; failures++) {
+      await publishPendingEvents(harness.repo, capacityError, silentLog(), () => clock);
+      clock = new Date(clock.getTime() + publishRetryDelayMs(failures));
+    }
+    expect(await harness.repo.claimNextUnpublished(clock)).not.toBeNull();
+    const { calls, run } = recordingRunAction();
+
+    await publishPendingEvents(harness.repo, run, silentLog(), () => clock);
+    expect(calls).toHaveLength(0);
+
+    const lapsed = new Date(clock.getTime() + PUBLISH_CLAIM_LEASE_MS);
+    await publishPendingEvents(harness.repo, run, silentLog(), () => lapsed);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("gives up on an event after the last attempt so it stops blocking the line", async () => {
+    await store("evt-poison", at(1 * 60_000));
+    const log = silentLog();
+    let clock = at(5 * 60_000);
+    for (let failures = 1; failures <= MAX_PUBLISH_ATTEMPTS; failures++) {
+      await publishPendingEvents(harness.repo, capacityError, log, () => clock);
+      clock = new Date(clock.getTime() + publishRetryDelayMs(failures));
+    }
+    expect(log.error).toHaveBeenCalledWith(
+      "gave up publishing event to bus",
+      expect.objectContaining({ eventId: "evt-poison", attempts: MAX_PUBLISH_ATTEMPTS }),
+    );
+
+    await store("evt-next", at(2 * 60_000));
+    const { calls, run } = recordingRunAction();
+    await publishPendingEvents(harness.repo, run, log, () => clock);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("abandons an owed event once it is too old to fire", async () => {
+    await store("evt-stale");
+    const log = silentLog();
+    const { calls, run } = recordingRunAction();
+
+    const later = new Date(receivedAt.getTime() + MAX_EVENT_AGE_MS + 60_000);
+    await publishPendingEvents(harness.repo, run, log, () => later);
 
     expect(calls).toHaveLength(0);
+    expect(log.error).toHaveBeenCalledWith(
+      "gave up publishing event to bus",
+      expect.objectContaining({ eventId: "evt-stale", reason: "expired" }),
+    );
+  });
+
+  it("never prunes an event still owed a publish", async () => {
+    await store("evt-owed", at(-60 * 60_000));
+    for (let i = 0; i < EMITTED_EVENTS_RING_CAP; i++) {
+      await store(`evt-${i}`, new Date(receivedAt.getTime() + i * 1000));
+    }
+
+    const ids = (await harness.repo.listEvents({ limit: EMITTED_EVENTS_RING_CAP + 1 })).map(
+      (row) => row.eventId,
+    );
+    expect(ids).toContain("evt-owed");
+
+    const { run } = recordingRunAction();
+    await publishPendingEvents(harness.repo, run, silentLog(), () => receivedAt);
+    await store("evt-newest", new Date(receivedAt.getTime() + 600_000));
+    const after = (await harness.repo.listEvents({ limit: EMITTED_EVENTS_RING_CAP + 1 })).map(
+      (row) => row.eventId,
+    );
+    expect(after).not.toContain("evt-owed");
+    expect(after).toHaveLength(EMITTED_EVENTS_RING_CAP);
+  });
+});
+
+describe("outbox migration", () => {
+  it("marks events stored before the outbox as published, so the first drain re-fires none", async () => {
+    // Apply the migrations that predate the outbox, store an event, then
+    // apply the rest.
+    const preOutbox = mkdtempSync(join(tmpdir(), "connector-migrations-"));
+    try {
+      cpSync(MIGRATIONS_DIR, preOutbox, { recursive: true });
+      const journalPath = join(preOutbox, "meta", "_journal.json");
+      const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: unknown[] };
+      journal.entries = journal.entries.slice(0, 2);
+      writeFileSync(journalPath, JSON.stringify(journal));
+
+      const sqlite = new Database(":memory:");
+      const conn = drizzle(sqlite) as unknown as BetterSQLite3Database<Record<string, never>>;
+      const migrationsTable = "__drizzle_migrations_app_connector";
+      migrate(conn, { migrationsFolder: preOutbox, migrationsTable });
+      sqlite
+        .prepare(
+          "INSERT INTO connector__emitted_events (event_id, topic, provider, event_type, received_at, payload_json) VALUES ('evt-old', 't', 'github', 'push', 1779926976, '{}')",
+        )
+        .run();
+      migrate(conn, { migrationsFolder: MIGRATIONS_DIR, migrationsTable });
+
+      const repo = new EventsRepo({
+        connection: conn,
+        tablePrefix: "connector",
+        tableName: (name: string) => `connector__${name}`,
+      });
+      const { calls, run } = recordingRunAction();
+      await publishPendingEvents(repo, run, silentLog());
+      expect(calls).toHaveLength(0);
+      sqlite.close();
+    } finally {
+      rmSync(preOutbox, { recursive: true, force: true });
+    }
   });
 });
 
@@ -338,8 +504,8 @@ describe("processGithubWebhook", () => {
     expect(await harness.repo.listEvents({ limit: 10 })).toHaveLength(1);
   });
 
-  it("forwards an emitted github event to publish_event under its topic", async () => {
-    const result = await processGithubWebhook(
+  it("publishes an emitted github event to publish_event under its topic", async () => {
+    await processGithubWebhook(
       harness.repo,
       { action: "labeled" },
       "issues",
@@ -347,7 +513,7 @@ describe("processGithubWebhook", () => {
       new Date(),
     );
     const { calls, run } = recordingRunAction();
-    await publishEmittedEvent(run, result);
+    await publishPendingEvents(harness.repo, run, silentLog());
     expect(calls).toEqual([
       {
         name: "publish_event",

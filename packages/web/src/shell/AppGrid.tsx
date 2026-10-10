@@ -64,7 +64,7 @@ import {
   SortableItemHandle,
   SortableOverlay,
 } from "@/components/ui/sortable";
-import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
   ACTIVE_CLASS,
@@ -640,7 +640,7 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
         <button
           type="button"
           aria-label={t("sidebar.edit")}
-          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+          className="rounded-4 p-1 text-subtle-foreground transition hover:bg-surface-hover hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30 flex min-h-[var(--control-min-h)] min-w-[var(--control-min-h)] items-center justify-center"
         >
           <Ellipsis className="h-4 w-4" aria-hidden />
         </button>

@@ -2,27 +2,30 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   ChannelMessage,
   ConversationId,
-  TalkActivity,
-  TalkDirectMessaging,
+  InboundEvent,
+  ChannelActivity,
+  ChannelDirectMessaging,
 } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkHistory } from "../connections/types.js";
+import type { TalkDirectory, TalkHistory } from "../connections/types.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
-import { createTalkRouter } from "../connections/talk-router.js";
-import type { ConnectionDescriptor, Talker } from "../connections/types.js";
+import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
-import { ChannelNotConnected, type InboundEvent } from "./channel.js";
+import { ChannelNotConnected } from "./channel.js";
 import { channelList } from "./channel-list.js";
+import type { ConnectionPortsDeps } from "./connection-ports.js";
 
 const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
   resolve: async () => null,
 };
 
-function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
+function message(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
+    channel: "telegram",
+    direction: "inbound",
     messageId: "m-1",
     conversationId: "c-1" as ConversationId,
     senderId: "guardian",
@@ -37,11 +40,12 @@ function message(overrides: Partial<InboundMessage> = {}): InboundMessage {
 function talkService(
   service: string,
   ports: { sends?: boolean; receives?: boolean; history?: boolean } = {},
-  direct: TalkDirectMessaging | null = null,
-  activity: TalkActivity | null = null,
+  direct: ChannelDirectMessaging | null = null,
+  activity: ChannelActivity | null = null,
   history: TalkHistory | null = null,
-): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: InboundMessage) => void }> } {
-  const epochs: Array<{ deliver?: (m: InboundMessage) => void }> = [];
+  directory: TalkDirectory | null = null,
+): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
+  const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
     epochs,
     descriptor: {
@@ -62,14 +66,10 @@ function talkService(
               async send(conversationId) {
                 return { conversationId, messageId: `sent-${epochs.length}` };
               },
-              feature: ((name: string) =>
-                name === "directMessaging"
-                  ? direct
-                  : name === "activity"
-                    ? activity
-                    : name === "history"
-                      ? history
-                      : null) as Talker["feature"],
+              ...(direct && { directMessaging: direct }),
+              ...(activity && { activity }),
+              ...(history && { history }),
+              ...(directory && { directory }),
             };
           },
         },
@@ -84,31 +84,47 @@ describe("channelList", () => {
 
   function setup(
     descriptors: ConnectionDescriptor[],
-    admit = async (_id: string, _service: string, inbound: InboundMessage) =>
+    admit = async (_id: string, _service: string, inbound: ChannelMessage) =>
       inbound.senderId === "guardian",
-    routerOptions?: { admissionTimeoutMs?: number },
+    admission?: { admissionTimeoutMs?: number },
+    connectionAccounts?: Record<string, Accounts>,
   ) {
     testDb = createTestDb();
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(testDb.db) });
     for (const descriptor of descriptors) registry.register(descriptor);
-    const talkRouter = createTalkRouter(registry, admit, routerOptions);
-    // The Connection ids the channel ports hold a router subscription on.
+    // The Connection ids the channel ports hear a talker on.
     const subscribed: string[] = [];
-    const router: typeof talkRouter = Object.assign(Object.create(talkRouter), {
-      subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>) {
-        subscribed.push(connectionId);
-        const detach = talkRouter.subscribe(connectionId, handler);
-        return () => {
-          subscribed.splice(subscribed.indexOf(connectionId), 1);
-          detach();
-        };
-      },
-    });
+    const tracked = (connection: Connection): Connection =>
+      new Proxy(connection, {
+        get(target, property, receiver) {
+          if (property !== "hearTalker") {
+            const value = Reflect.get(target, property, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return (handler: (message: ChannelMessage) => Promise<void>) => {
+            const detach = target.hearTalker(handler);
+            if (!detach) return detach;
+            subscribed.push(target.id);
+            return () => {
+              subscribed.splice(subscribed.indexOf(target.id), 1);
+              detach();
+            };
+          };
+        },
+      });
+    const watched: ConnectionPortsDeps["registry"] = {
+      find: (service) => registry.find(service).map(tracked),
+      getDescriptor: (service) => registry.getDescriptor(service),
+      onUnlocked: (capability, handler) =>
+        registry.onUnlocked(capability, (connection) => handler(tracked(connection))),
+      registeredServices: () => registry.registeredServices(),
+    };
     const channels = channelList({
       db: testDb.db,
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
-      connections: { registry, router },
+      connections: { registry: watched, admit, ...(admission ? { admission } : {}) },
+      ...(connectionAccounts ? { connectionAccounts } : {}),
     });
     return { registry, channels, subscribed };
   }
@@ -137,6 +153,19 @@ describe("channelList", () => {
     expect(linkedin?.send).not.toBeNull();
     expect(linkedin?.inbound).toBeNull();
     expect(telegram).toMatchObject({ accounts: null, messages: null });
+  });
+
+  it("gives a Connection-backed channel the address book named for its service", () => {
+    const book: Accounts = { ...noAccounts };
+    const { channels } = setup(
+      [talkService("agents").descriptor, talkService("telegram").descriptor],
+      undefined,
+      undefined,
+      { agents: book },
+    );
+    const named = (name: string) => channels.find((channel) => channel.name === name);
+    expect(named("agents")?.accounts).toBe(book);
+    expect(named("telegram")?.accounts).toBeNull();
   });
 
   it("rejects a send nothing backs, and sends through the Connection once one does", async () => {
@@ -231,7 +260,7 @@ describe("channelList", () => {
     const build = service.descriptor.capabilities.talker!.build;
     service.descriptor.capabilities.talker!.build = (creds, kit) => ({
       ...build(creds, kit),
-      feature: () => {
+      get history(): never {
         throw new Error("not started");
       },
     });
@@ -274,6 +303,58 @@ describe("channelList", () => {
     await expect(telegram.send!.direct!.conversationFor("u-1")).resolves.toBe("u-1");
     // A Connection whose talker offers no direct messaging.
     expect(discord.send!.direct).toBeNull();
+  });
+
+  it("lists the conversations its Connections see, leaving out one whose read fails", async () => {
+    const listConversations = rs.fn(async (_input: { limit: number }) => ({
+      conversations: [
+        {
+          ref: { connectionId: "unused", conversationId: "general" as ConversationId },
+          service: "discord",
+          kind: "channel" as const,
+          displayName: "general",
+        },
+      ],
+    }));
+    const { registry, channels } = setup([
+      talkService("discord", {}, null, null, null, { listConversations }).descriptor,
+      talkService("feishu", {}, null, null, null, {
+        listConversations: async () => {
+          throw new Error("provider down");
+        },
+      }).descriptor,
+    ]);
+    const discord = channels.find((channel) => channel.name === "discord")!;
+    const feishu = channels.find((channel) => channel.name === "feishu")!;
+
+    // Nothing backs the channel yet, so it sees no conversations.
+    await expect(discord.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
+
+    const ids: Record<string, string> = {};
+    for (const service of ["discord", "feishu"]) {
+      const connection = await registry.connect(service);
+      await registry.importCredential(connection.id, "bot", {
+        material: { token: "t" },
+        expiresAt: "never",
+      });
+      ids[service] = connection.id;
+    }
+    const listed = await discord.directory!.listConversations({ limit: 10 });
+    expect(listed.map((conversation) => conversation.displayName)).toEqual(["general"]);
+    // The Connection reads the page it was asked for, without the narrowing.
+    expect(listConversations).toHaveBeenLastCalledWith({ limit: 10 });
+
+    // Narrowed to a Connection that does not back the channel, it reads nothing.
+    listConversations.mockClear();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.feishu }),
+    ).resolves.toEqual([]);
+    expect(listConversations).not.toHaveBeenCalled();
+    await expect(
+      discord.directory!.listConversations({ limit: 10, connectionId: ids.discord }),
+    ).resolves.toHaveLength(1);
+
+    await expect(feishu.directory!.listConversations({ limit: 10 })).resolves.toEqual([]);
   });
 
   it("shows typing through the send port once a Connection offers it", async () => {

@@ -353,6 +353,14 @@
   vertical-align: top;
 }
 
+/* CJK text breaks between any two characters, so a cell's min-content width
+   is one glyph and a narrow column shrinks to a vertical strip. A floor on
+   every cell keeps short columns readable. A table whose floors overrun the
+   column overflows into Streamdown's `overflow-x: auto` scroller instead. */
+.rome-markdown :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]) {
+  min-width: 6em;
+}
+
 .rome-markdown
   :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
   padding-inline-start: 0;
@@ -376,6 +384,20 @@
   border-radius: var(--rome-radius-8);
   background-color: var(--surface-elevated);
   box-shadow: var(--rome-shadow-1);
+}
+
+/* A coarse pointer has no hover, so the button row never hides and would sit
+   over the header cells. There it drops the floating card and takes its own
+   line above the table, as plain icons on the inline end. */
+@media (hover: none) {
+  .rome-markdown [data-streamdown="table-wrapper"] > :first-child:not(:has(> table)) {
+    position: static;
+    align-self: flex-end;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
 }
 
 /* ── Fenced block chrome ──────────────────────────────────────────────────
@@ -563,6 +585,51 @@
       transition: none;
     }
   }
+}
+
+/* Streamdown chrome consumes the selected platform scale, including when
+   fullscreen diagrams render outside the prose root. */
+/* The row's own buttons only: each is a child of the row, or of the wrapper
+   around a button that opens a format menu. The menu's items sit a level
+   deeper, in its `absolute` panel, and keep their left-aligned layout. */
+:is(
+    [data-streamdown="code-block-actions"],
+    [data-streamdown="mermaid-block-actions"],
+    [data-streamdown="mermaid"] :has(> button[title="Zoom in"]),
+    [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
+  )
+  > button,
+:is(
+    [data-streamdown="code-block-actions"],
+    [data-streamdown="mermaid-block-actions"],
+    [data-streamdown="table-wrapper"] > :first-child:not(:has(> table))
+  )
+  > div
+  > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-min-h, 0px);
+  min-height: var(--control-min-h, 0px);
+}
+
+:is([data-streamdown="code-block-actions"], [data-streamdown="mermaid-block-actions"]) {
+  padding-block: var(--markdown-action-py, 0.25rem);
+}
+
+[data-streamdown="mermaid"] :has(> button[title="Zoom in"]) {
+  flex-direction: var(--markdown-zoom-direction, column);
+}
+
+.rome-markdown
+  :is(
+    [data-streamdown="code-block-header"],
+    [data-streamdown="mermaid-block"] > :first-child,
+    [data-streamdown="code-block"] > :has(> [data-streamdown="code-block-actions"]),
+    [data-streamdown="mermaid-block"] > :has(> [data-streamdown="mermaid-block-actions"])
+  ) {
+  height: var(--markdown-band-height, 2rem);
+  min-height: var(--rome-space-8);
 }
 
 /* Mermaid SVGs are wrapped in a shrink-to-fit pan/zoom layer. Streamdown portals

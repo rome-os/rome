@@ -10,7 +10,11 @@
 // forget to call and no state the two reads can disagree about: an outbox row
 // is exactly a send whose entry is not there yet.
 
-import { matchesSendRequest, type OutboxMessage } from "@rome/api-types/people";
+import {
+  matchesSendRequest,
+  STRANDED_SEND_ERROR,
+  type OutboxMessage,
+} from "@rome/api-types/people";
 import { createLogger } from "../logger.js";
 import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
@@ -36,9 +40,6 @@ const LANDING_WINDOW = 100;
  *  enough that a slow channel is never called dead, short enough that a crash
  *  does not leave a row spinning until someone looks. */
 const STRANDED_AFTER_MS = 5 * 60_000;
-
-const STRANDED_ERROR =
-  "Rome stopped before the channel answered; this may or may not have been sent";
 
 /** What Rome writes into its own transcript when it sends. `senderId` is the
  *  mark every outbound path stamps, and `messages-agent.ts` reads it back to
@@ -268,9 +269,9 @@ export async function readOutbox(
   const stale = Date.now() - STRANDED_AFTER_MS;
   const stranded = rows.filter((row) => row.state === "sending" && row.updatedAt.getTime() < stale);
   for (const row of stranded) {
-    await deps.outboxRepo.stranded(row.id, STRANDED_ERROR);
+    await deps.outboxRepo.stranded(row.id, STRANDED_SEND_ERROR);
     row.state = "failed";
-    row.error = STRANDED_ERROR;
+    row.error = STRANDED_SEND_ERROR;
   }
 
   const awaiting = rows.filter((row) => row.state === "unconfirmed");
@@ -282,7 +283,7 @@ export async function readOutbox(
   // A row the channel accepted but never named cannot be recognized when it
   // arrives, so waiting on it is waiting forever. Clearing it is the lesser
   // wrong, and the requirement that makes it unreachable is stated on
-  // `TalkDirectMessaging`.
+  // `ChannelDirectMessaging`.
   const landed = awaiting.filter(
     (row) =>
       row.providerMessageId === null ||

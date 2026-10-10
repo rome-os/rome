@@ -27,6 +27,7 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unlocked" },
       },
       connect: null,
+      setups: {},
     },
     ...[
       { service: "email", label: "Email", grant: "inbox", email: "guardian@example.com" },
@@ -47,6 +48,7 @@ export const connections: { connections: ApiConnection[] } = {
           watch: { state: "unsupported" },
         },
         connect: null,
+        setups: {},
       }),
     ),
     {
@@ -63,6 +65,7 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     },
     {
       id: "telegram-1",
@@ -78,6 +81,7 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -97,6 +101,7 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     },
     {
       id: "linkedin-1",
@@ -112,6 +117,7 @@ export const connections: { connections: ApiConnection[] } = {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     },
   ],
 };

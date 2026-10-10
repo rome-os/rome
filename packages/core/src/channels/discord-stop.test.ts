@@ -4,6 +4,7 @@ import type { ChatInputCommandInteraction } from "discord.js";
 import {
   buildDiscordSlashCommands,
   DiscordAdapter,
+  discordInboundText,
   normalizeDiscordMessageText,
 } from "./discord.js";
 
@@ -20,6 +21,20 @@ describe("Discord stop command", () => {
   it("removes the bot mention before command recognition", () => {
     expect(normalizeDiscordMessageText("  <@123> /stop  ", "123")).toBe("/stop");
     expect(normalizeDiscordMessageText("<@!123> /STOP", "123")).toBe("/STOP");
+  });
+
+  it("preserves a mention-only message as the visible bot name", () => {
+    const bot = { id: "123", displayName: "Rome" };
+    expect(discordInboundText("<@123>", bot)).toBe("@Rome");
+    expect(discordInboundText(" <@!123> ", bot)).toBe("@Rome");
+    expect(discordInboundText("<@123> please review", bot)).toBe("please review");
+  });
+
+  it("does not invent a mention for empty content without a typed bot mention", () => {
+    // A reply that pings the bot carries no <@id> token in its content.
+    expect(discordInboundText("", { id: "123", displayName: "Rome" })).toBe("");
+    expect(discordInboundText("<@456>", { id: "123", displayName: "Rome" })).toBe("<@456>");
+    expect(discordInboundText("", undefined)).toBe("");
   });
 
   it("routes native /stop through chat control before the guardian-only config gate", async () => {

@@ -9,7 +9,7 @@ export function isEntryActive(pathname: string, href: string): boolean {
 }
 
 export const LINK_CLASS =
-  "rome-sidebar-link group flex h-8 w-full items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
+  "rome-sidebar-link group flex h-8 w-full min-h-[var(--control-min-h)] items-center gap-2 rounded-8 border border-transparent px-2 text-left text-ui text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 // Row state, shared by the wide rows and the rail tiles.
 export const ACTIVE_CLASS = "bg-surface shadow-1 dark:bg-surface-hover";

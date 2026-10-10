@@ -1,14 +1,8 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
-import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../lib/diagnostics.js";
-import { getInstanceToken } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import {
-  FEEDBACK_BODY_MAX,
-  FEEDBACK_SCHEMA_VERSION,
-  type FeedbackReport,
-} from "../../lib/feedback.js";
+import type { ApiDeps } from "../deps.js";
+import { FEEDBACK_BODY_MAX } from "../../lib/feedback.js";
 
 // Guardian-facing "share feedback" relay. The dashboard POSTs free text plus the
 // context it owns (`client`); the instance attaches the diagnostics it measures
@@ -21,8 +15,6 @@ import {
 // never read from the request body, so a malicious or buggy client can't spoof
 // the trusted namespace (the worst it can do is stuff keys under `client`).
 
-const RELAY_TIMEOUT_MS = 15_000;
-
 const bodySchema = z
   .object({
     body: z.string().trim().min(1).max(FEEDBACK_BODY_MAX),
@@ -34,14 +26,7 @@ const bodySchema = z
   // — e.g. a `diagnostics` spoof attempt — is rejected outright.
   .strict();
 
-function romeCloudAccess(): { origin: string; token: string } | null {
-  const token = getInstanceToken();
-  const origin = getRomeCloudOrigin();
-  if (!token || !origin) return null;
-  return { origin, token };
-}
-
-export function feedbackRoutes(deps: DiagnosticsDeps): Hono {
+export function feedbackRoutes(deps: Pick<ApiDeps, "feedback">): Hono {
   const app = new Hono();
 
   app.post("/feedback", async (c) => {
@@ -51,38 +36,19 @@ export function feedbackRoutes(deps: DiagnosticsDeps): Hono {
       return c.json({ error: "invalid_request", details: parsed.error.flatten() }, 400);
     }
 
-    const diagnostics = await assembleDiagnosticBundle(deps);
-    const report: FeedbackReport = {
-      schemaVersion: FEEDBACK_SCHEMA_VERSION,
-      body: parsed.data.body,
-      payload: { client: parsed.data.client, diagnostics },
-    };
-
-    const romeCloud = romeCloudAccess();
-    if (!romeCloud) return c.json({ error: "pantheon_unconfigured" }, 503);
-
-    let response: Response;
-    try {
-      response = await fetch(new URL("/api/instance/feedback", romeCloud.origin), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${romeCloud.token}`,
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-        },
-        cache: "no-store",
-        body: JSON.stringify(report),
-        signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
-      });
-    } catch {
-      return c.json({ error: "pantheon_unreachable" }, 502);
-    }
-
-    if (!response.ok) {
-      // Mirror the upstream status so the dashboard can tell a rejected report
-      // (e.g. 413 too large) from an unreachable Rome Cloud.
-      const body = await response.json().catch(() => ({ error: "relay_failed" }));
-      return c.json(body, response.status as ContentfulStatusCode);
+    const outcome = await deps.feedback.sendGuardian(parsed.data);
+    switch (outcome.kind) {
+      case "no_token":
+      case "unconfigured":
+        return c.json({ error: "pantheon_unconfigured" }, 503);
+      case "unreachable":
+        return c.json({ error: "pantheon_unreachable" }, 502);
+      case "rejected":
+        return c.json(outcome.body, outcome.status as ContentfulStatusCode);
+      case "ok":
+        break;
+      default:
+        throw new Error(`Unexpected guardian feedback outcome: ${outcome.kind}`);
     }
 
     return c.json({ ok: true }, 201);

@@ -32,19 +32,6 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.messageCount).toBe(0);
   });
 
-  it("bounds the address-book read by default and reads it whole on limit: null", async () => {
-    await repo.upsertContacts([
-      { jid: "15550000001@s.whatsapp.net", phoneNumber: "15550000001", name: "Ada" },
-      { jid: "15550000002@s.whatsapp.net", phoneNumber: "15550000002", name: "Bea" },
-      { jid: "15550000003@s.whatsapp.net", phoneNumber: "15550000003", name: "Cy" },
-    ]);
-
-    expect(await repo.listContacts({ limit: 2 })).toHaveLength(2);
-    expect(await repo.listContacts({ limit: null })).toHaveLength(3);
-    // The no-argument call is what `/api/whatsapp/contacts` makes.
-    expect(await repo.listContacts()).toHaveLength(3);
-  });
-
   it("hides nameless LID-only contacts but keeps LIDs with a phone number", async () => {
     await repo.upsertContacts([
       { jid: "raw-lid@lid" },
@@ -252,7 +239,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     expect(msgs.map((m) => m.text)).toEqual(["first", "second"]);
     expect(msgs[0].fromMe).toBe(false);
     expect(msgs[0].senderName).toBe("Bob");
@@ -396,7 +383,7 @@ describe("WhatsAppStoreRepository", () => {
       },
     ]);
 
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     const text = msgs.find((m) => m.id === "m1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
@@ -434,7 +421,7 @@ describe("WhatsAppStoreRepository", () => {
     expect(alice?.lastMessageAt).toBe(Math.floor(1_700_000_000_000 / 1000));
 
     // ...but the chat view still gets it, carrying its emoji + target id.
-    const msgs = await repo.getMessages("111@s.whatsapp.net");
+    const msgs = await repo.fetchHistory("111@s.whatsapp.net", new Date(0));
     const reaction = msgs.find((m) => m.id === "r1");
     expect(reaction).toMatchObject({ type: "reaction", text: "❤️", reactsToId: "m1" });
   });

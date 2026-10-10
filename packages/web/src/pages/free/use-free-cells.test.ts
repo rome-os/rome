@@ -273,6 +273,51 @@ describe("placeWidgetsIfSessionActive", () => {
       expect.objectContaining({ method: "PUT" }),
     );
   });
+
+  it("keeps the panel collapsed with the handed-off tab unread when chat comes first", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("chat-a");
+    const { result } = renderHook(() => store.useFreeCells());
+    act(() => result.current.addWidget("projects"));
+    expect(result.current.toolView.collapsed).toBe(false);
+
+    act(() => {
+      store.placeWidgetsIfSessionActive("chat-a", [{ type: "app", appId: "nav-chat-probe" }], {
+        chatFirst: true,
+      });
+    });
+
+    const app = result.current.placements.find((p) => p.targetId === "nav-chat-probe");
+    expect(result.current.toolView).toEqual({
+      activeId: app?.id,
+      collapsed: true,
+      unreadIds: [app?.id],
+    });
+
+    act(() => result.current.setToolsCollapsed(false));
+    expect(result.current.toolView).toEqual({
+      activeId: app?.id,
+      collapsed: false,
+      unreadIds: [],
+    });
+  });
+
+  it("expands the panel on the handed-off tab by default", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("chat-a");
+    const { result } = renderHook(() => store.useFreeCells());
+
+    act(() => {
+      store.placeWidgetsIfSessionActive("chat-a", [{ type: "app", appId: "nav-chat-probe" }]);
+    });
+
+    const app = result.current.placements.find((p) => p.targetId === "nav-chat-probe");
+    expect(result.current.toolView).toEqual({
+      activeId: app?.id,
+      collapsed: false,
+      unreadIds: [],
+    });
+  });
 });
 
 describe("placeChatWidget", () => {

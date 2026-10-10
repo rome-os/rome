@@ -63,7 +63,7 @@ An account is a party on an external messaging platform — a Telegram user, a W
 
 - **[Person](#person)** — Rome owns persons, and platforms own accounts. A person aggregates the accounts linked to them.
 - **[Address](#address)** — an account is the party. An address is one of the forms it is reachable at.
-- **[Channel](messaging.md#channels)** — a channel is the platform integration messages arrive through. An account is one party on that platform.
+- **[Channel](messaging.md#channels)** — a channel is one of Rome's presences on a platform, which messages arrive through. An account is one party Rome sees on that channel.
 - **Connection** — a connection joins the Rome instance to a service. An account belongs to a party on that service.
 
 ## Address
@@ -91,6 +91,8 @@ A link is the recorded fact that an [account](#account) belongs to a [person](#p
 - A link joins exactly one account to exactly one person. There is no ownerless or dangling link.
 - An account carries at most one link, so two persons can never hold the same account.
 - Sender attribution changes only by creating, destroying, or transferring a link, or by dismissing or restoring the account. A transfer between two persons is always an explicit operation, never a side effect of another one.
+- Rome never creates a link from what a sender says about itself, such as a display name. A sender sets its own name, so an unlinked account whose name matches a person stays unlinked until the guardian links it or approves its pairing.
+- Rome creates a link on its own only from a statement a platform makes about the guardian's own accounts. On the Agents channel, Rome Cloud marks a sender that is in this Rome's Cloud account, and Rome links that agent to the guardian when its first message arrives. Rome makes this link at most once per agent, and never over an existing link or a dismissal, so a guardian who unlinks or dismisses the agent keeps it that way.
 - A link applies retroactively: creating one attributes the account's entire message history to the person, and destroying one detaches that history.
 
 **Not to be confused with:**

@@ -12,27 +12,19 @@ const shard = async (root, label) => {
   await writeFile(path.join(directory, "index.html"), label);
 };
 
-test("keeps historical root links and publishes recent runs at stable paths", async (context) => {
+test("publishes recent runs at stable paths", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-site-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const previous = path.join(root, "previous");
-  const legacy = path.join(root, "legacy");
   const reports = path.join(root, "reports");
   const site = path.join(root, "site");
   await shard(previous, "recent-old");
-  await shard(legacy, "affected-old");
   await shard(reports, "new");
   await mkdir(path.join(previous, "midscene-shard-1/midscene_run/report/screenshots"));
-  await mkdir(path.join(legacy, "midscene-shard-1/midscene_run/report/screenshots"));
   await writeFile(
     path.join(previous, "midscene-shard-1/midscene_run/report/screenshots/recent.jpeg"),
     "recent",
   );
-  await writeFile(
-    path.join(legacy, "midscene-shard-1/midscene_run/report/screenshots/affected.jpeg"),
-    "affected",
-  );
-  await writeFile(path.join(legacy, "index.html"), "affected summary");
   await mkdir(path.join(reports, "native-report", "screenshots"), { recursive: true });
   await writeFile(path.join(reports, "native-report", "index.html"), "native report");
   await writeFile(path.join(reports, "native-report", "screenshots", "new.jpeg"), "new");
@@ -44,34 +36,9 @@ test("keeps historical root links and publishes recent runs at stable paths", as
     reports,
     runId: "101",
     previous,
-    previousRunId: "100",
-    legacy,
-    legacyRunId: "99",
   });
   assert.deepEqual(first.runIds, ["100", "101"]);
-  assert.match(await readFile(path.join(site, "index.html"), "utf8"), /index-99\.html/);
-  assert.equal(await readFile(path.join(site, "index-99.html"), "utf8"), "affected summary");
-  assert.equal(
-    await readFile(
-      path.join(site, "midscene-shard-1/midscene_run/report/affected-old/index.html"),
-      "utf8",
-    ),
-    "affected-old",
-  );
-  assert.equal(
-    await readFile(
-      path.join(site, "midscene-shard-1/midscene_run/report/recent-old/index.html"),
-      "utf8",
-    ),
-    "recent-old",
-  );
-  assert.equal(
-    await readFile(
-      path.join(site, "midscene-shard-1/midscene_run/report/screenshots/affected.jpeg"),
-      "utf8",
-    ),
-    "affected",
-  );
+  assert.match(await readFile(path.join(site, "index.html"), "utf8"), /runs\/101\/index\.html/);
   assert.equal(await readFile(path.join(site, "runs/101/index.html"), "utf8"), "native report");
   assert.equal(await readFile(path.join(site, "runs/101/screenshots/new.jpeg"), "utf8"), "new");
 
@@ -81,44 +48,71 @@ test("keeps historical root links and publishes recent runs at stable paths", as
   const result = await preparePagesSite({ site: final, reports, runId: "103", previous: next });
   assert.deepEqual(result.runIds, ["101", "102", "103"]);
   await assert.rejects(stat(path.join(final, "runs", "100")), { code: "ENOENT" });
-  assert.equal(
-    await readFile(
-      path.join(final, "midscene-shard-1/midscene_run/report/affected-old/index.html"),
-      "utf8",
-    ),
-    "affected-old",
-  );
+  assert.equal(await readFile(path.join(final, "runs/101/index.html"), "utf8"), "native report");
 });
 
 test("rejects nonnumeric run IDs", async () => {
   await assert.rejects(preparePagesSite({ site: "unused", runId: "../escape" }), /numeric/);
 });
 
-test("rejects conflicting historical screenshot IDs", async (context) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-conflict-"));
+test("publishes shard reports when the native merge is incomplete", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-partial-"));
   context.after(() => rm(root, { recursive: true, force: true }));
-  const previous = path.join(root, "previous");
-  const legacy = path.join(root, "legacy");
   const reports = path.join(root, "reports");
-  await shard(previous, "old");
-  await shard(legacy, "older");
-  await mkdir(path.join(previous, "midscene-shard-1/midscene_run/report/screenshots"));
-  await mkdir(path.join(legacy, "midscene-shard-1/midscene_run/report/screenshots"));
-  await writeFile(
-    path.join(previous, "midscene-shard-1/midscene_run/report/screenshots/same.jpeg"),
-    "first",
+  await shard(reports, "partial");
+  const site = path.join(root, "site");
+  await preparePagesSite({ site, reports, runId: "101" });
+  assert.equal(
+    await readFile(
+      path.join(site, "runs/101/midscene-shard-1/midscene_run/report/partial/index.html"),
+      "utf8",
+    ),
+    "partial",
   );
-  await writeFile(
-    path.join(legacy, "midscene-shard-1/midscene_run/report/screenshots/same.jpeg"),
-    "second",
+  await assert.rejects(stat(path.join(site, "runs/101/index.html")), { code: "ENOENT" });
+  assert.doesNotMatch(
+    await readFile(path.join(site, "index.html"), "utf8"),
+    /runs\/101\/index\.html/,
   );
-  await mkdir(reports);
-  await mkdir(path.join(reports, "native-report"));
-  await writeFile(path.join(reports, "native-report", "index.html"), "native report");
-  await assert.rejects(
-    preparePagesSite({ site: path.join(root, "site"), reports, runId: "101", previous, legacy }),
-    /Conflicting report asset/,
+});
+
+test("an incomplete rerun replaces the complete attempt without retaining stale assets", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-rerun-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const completeReports = path.join(root, "complete-reports");
+  await shard(completeReports, "first-attempt");
+  await mkdir(path.join(completeReports, "native-report", "screenshots"), { recursive: true });
+  await writeFile(path.join(completeReports, "native-report", "index.html"), "complete report");
+  await writeFile(path.join(completeReports, "native-report", "screenshots", "old.jpeg"), "old");
+  const previous = path.join(root, "previous-site");
+  await preparePagesSite({ site: previous, reports: completeReports, runId: "101" });
+  await mkdir(path.join(previous, "runs", "100"), { recursive: true });
+  await writeFile(path.join(previous, "runs", "100", "index.html"), "other run");
+
+  const partialReports = path.join(root, "partial-reports");
+  await shard(partialReports, "second-attempt");
+  const site = path.join(root, "rerun-site");
+  await preparePagesSite({ site, reports: partialReports, runId: "101", previous });
+
+  const current = path.join(site, "runs", "101");
+  for (const stale of [
+    "index.html",
+    "screenshots/old.jpeg",
+    "midscene-shard-1/midscene_run/report/first-attempt",
+  ]) {
+    await assert.rejects(stat(path.join(current, stale)), { code: "ENOENT" });
+  }
+  assert.equal(
+    await readFile(
+      path.join(current, "midscene-shard-1/midscene_run/report/second-attempt/index.html"),
+      "utf8",
+    ),
+    "second-attempt",
   );
+  assert.equal(await readFile(path.join(site, "runs/100/index.html"), "utf8"), "other run");
+  const index = await readFile(path.join(site, "index.html"), "utf8");
+  assert.match(index, /Run 101: partial shard reports/);
+  assert.doesNotMatch(index, /runs\/101\/index\.html/);
 });
 
 test("prunes older run directories before exceeding the Pages budget", async (context) => {

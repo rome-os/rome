@@ -4,7 +4,7 @@ import type { Routine, RoutineRunStatus } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import { createLogger } from "../logger.js";
 import { withRomeSpan } from "../telemetry.js";
 import { runWithoutHookInvocationContext } from "../core/hook-recursion.js";
@@ -179,6 +179,7 @@ export class RoutineEngine {
       executionId: rootExecutionId,
       status: "running",
       payload,
+      firedBy: opts.manual ? "run_now" : routine.trigger.type,
     });
 
     // Captured inside the span callback and returned to the caller so a manual
@@ -202,9 +203,11 @@ export class RoutineEngine {
         });
 
         const mergedArgs = { ...routine.args, __triggerPayload: payload };
-        const context = {
+        // A routine fire holds no action worker, so it can wait out a busy pool.
+        const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
           rootExecutionId,
+          whenWorkersBusy: "queue",
         };
 
         try {
@@ -301,6 +304,7 @@ export class RoutineEngine {
                       await runWithoutHookInvocationContext(() =>
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
+                          whenWorkersBusy: "queue",
                         }),
                       );
                       log.info("routine retry succeeded", {

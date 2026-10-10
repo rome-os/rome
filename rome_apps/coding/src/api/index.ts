@@ -51,13 +51,7 @@ class CodingApiHandler implements RomeAppApiHandler {
         appId: this.ctx.app.id,
         version: this.ctx.app.version,
         status: "ok",
-        capabilities: [
-          "planning",
-          "coding",
-          "app_creation",
-          "app_verification",
-          "frontend-gallery",
-        ],
+        capabilities: ["coding", "app_creation", "app_verification", "frontend-gallery"],
         routeExamples: {
           appHome: `/apps/${this.ctx.app.id}`,
           appApi: `/api/apps/${this.ctx.app.id}/status`,

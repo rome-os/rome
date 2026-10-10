@@ -1,13 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ConversationId, TalkDirectMessaging } from "@rome-os/app-runtime";
+import type { ConversationId, ChannelDirectMessaging } from "@rome-os/app-runtime";
 import { type Channel, ChannelNotConnected, type ChannelSend } from "../channels/channel.js";
 import { readSendStates } from "./send.js";
 
 function channel(name: string, send: ChannelSend | null): Channel {
-  return { name, send, inbound: null, accounts: null, messages: null };
+  return { name, send, inbound: null, accounts: null, messages: null, directory: null };
 }
 
-function sending(direct: TalkDirectMessaging | null): ChannelSend {
+function sending(direct: ChannelDirectMessaging | null): ChannelSend {
   return { send: async (conversationId) => ({ conversationId }), direct, activity: null };
 }
 

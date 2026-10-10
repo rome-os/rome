@@ -1,4 +1,4 @@
-// Translate a per-turn buffer of AgentMessage blocks into OpenTelemetry
+// Translate a per-turn buffer of AgentEvent blocks into OpenTelemetry
 // children of `model.turn`:
 //   - one `tool` span per tool_use ↔ tool_result pair, matched by use_id
 //   - `thinking` / `text` blocks recorded as point events on `model.turn`
@@ -21,11 +21,11 @@
 // state is created and ended within one synchronous call.
 
 import { trace, type Attributes, type Context, type Span } from "@opentelemetry/api";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { getTracer } from "../telemetry.js";
 
 export interface CapturedEvent {
-  block: AgentMessage;
+  block: AgentEvent;
   /** Wall-clock ms when AgentSession yielded this block from modelSession.events. */
   tsMs: number;
 }

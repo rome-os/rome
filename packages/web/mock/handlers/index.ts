@@ -21,12 +21,13 @@ import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
+  TranscriptPart,
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
   ProjectCatalog,
   ProjectOption,
-  ChatEntry,
+  SkillSummary,
   TurnInfo,
 } from "@/lib/chat-types";
 import type {
@@ -43,7 +44,6 @@ import { appKeysHandlers } from "./app-keys";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
-import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
@@ -70,7 +70,21 @@ const identity: DashboardIdentity = {
   avatarUrl: null,
 };
 
-const text = (content: string, turnPhase?: "commentary" | "final"): ChatEntry =>
+const skills: SkillSummary[] = [
+  {
+    name: "@ray/scoped-app:identity_probe",
+    localName: "identity_probe",
+    description: "Scoped identity probe",
+    tools: [],
+    ownerType: "app",
+    ownerId: "@ray/scoped-app",
+    ownerLabel: "Scoped App",
+    ownerDescription: "Scoped app test fixture",
+    iconUrl: null,
+  },
+];
+
+const text = (content: string, turnPhase?: "commentary" | "final"): TranscriptPart =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -217,8 +231,8 @@ const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | ChatEntry[],
-  reply: ChatEntry[],
+  prompt: string | TranscriptPart[],
+  reply: TranscriptPart[],
   traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
@@ -459,6 +473,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         // without audio: an audioUrl would need a real asset behind it.
         {
           type: "turn_recap",
+          turnId: "mock-chat-2-t2",
           content: "Rewrote the closing paragraph and handed over a themed banner component.",
         },
       ],
@@ -564,6 +579,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-draft-1",
+          routineKey: "chat-routine:mock-chat-3-draft-1",
           draft: {
             sentence: "Every Monday at 9:00 AM, list anything that has stalled and nudge me.",
             name: "Weekly stall check",
@@ -572,6 +588,7 @@ const transcripts: Record<string, ChatMessage[]> = {
             trigger: {
               type: "schedule",
               tzid: "America/Los_Angeles",
+              tzMode: "floating",
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=MO",
             },
@@ -691,16 +708,16 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
-  session("mock-chat-1", "Morning brief tweaks", "default"),
-  session("mock-chat-2", "Draft launch email", "website-redesign"),
-  session("mock-chat-3", "Weekly planning"),
-  session("mock-chat-4", "Plumber for the leak"),
+  // One chat per sidebar mark: running, failed, done with new replies, waiting.
+  { ...session("mock-chat-1", "Morning brief tweaks", "default"), running: true },
+  { ...session("mock-chat-2", "Draft launch email", "website-redesign"), unread: true },
+  { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true },
+  { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as ChatEntry[])
-    .filter((b) => b.type === "text" && typeof b.content === "string")
-    .map((b) => b.content)
+  (JSON.parse(message.content) as TranscriptPart[])
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
     .join(" ");
 
 /** Elided window around the hit, mirroring the snippet the real route returns. */
@@ -916,9 +933,9 @@ const projectFileHandlers = fileBrowserHandlers({
 /**
  * The two remaining reads the Settings page makes. The page holds its
  * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. Left unhandled
- * the generic 503 fallback would hold those panels in an error state, so
- * these fixtures keep the page usable without a backend.
+ * waits on the Composio status alongside `/api/connections`. In strict E2E
+ * mode, unhandled reads hit the 503 fallback and leave those panels in an
+ * error state. These fixtures keep the page usable without a backend.
  */
 const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
 
@@ -1021,11 +1038,17 @@ export const handlers = [
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // Held open without events: the fixture's running flags never change.
+  http.get("/api/chat/status/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   http.get("/api/chat/sessions/search", ({ request }) => {
     const query = new URL(request.url).searchParams.get("q") ?? "";
     return HttpResponse.json(searchMatches(query));
   }),
   http.get("/api/chat/agents", () => HttpResponse.json(chatAgents)),
+  http.get("/api/skills", () => HttpResponse.json({ skills })),
   // The trace drawer's two loaders. Both answer `{ trace }` and both return a
   // null trace rather than a 404 for a turn that produced no run, which is the
   // drawer's "nothing recorded" state rather than its error state.
@@ -1235,10 +1258,6 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...activityHandlers,
-  // The WhatsApp mirror, and the /people contract over the same fixture store.
-  // Disjoint path families (/api/whatsapp against /api/people and
-  // /api/accounts), so the order between them is free.
-  ...channelMirrorHandlers,
   ...peopleHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded

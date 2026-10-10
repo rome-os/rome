@@ -270,8 +270,8 @@ export function useAppLifecycle(
       const config = await fetchJson<PublicAccessConfigPayload>("/api/public-access", {
         fallback: t("installed.errors.publicAccessLoadFailed", { name: app.displayName }),
       });
-      const allowedApps = new Set(Array.isArray(config.allowedApps) ? config.allowedApps : []);
-      const cloudEmailAccess = { ...(config.cloudEmailAccess ?? {}) };
+      const allowedApps = new Set(config.allowedApps);
+      const cloudEmailAccess = { ...config.cloudEmailAccess };
       allowedApps.delete(app.id);
       delete cloudEmailAccess[app.id];
 
@@ -284,7 +284,7 @@ export function useAppLifecycle(
       await fetchJson<unknown>("/api/public-access", {
         method: "PUT",
         json: {
-          enableAccessControl: config.enableAccessControl === true,
+          enableAccessControl: config.enableAccessControl,
           allowedApps: Array.from(allowedApps).sort(),
           cloudEmailAccess,
         } satisfies PublicAccessConfigPayload,
@@ -436,7 +436,7 @@ export function useAppLifecycle(
     if (!app.canManagePublicAccess || accessBusy || lifecycleBusy) return;
     setAccessTarget(app);
     setAccessModeDraft(app.accessMode ?? (app.isPublic ? "public" : "private"));
-    setAccessEmailsDraft(app.cloudAllowedEmails ?? []);
+    setAccessEmailsDraft(app.cloudAllowedEmails);
     setAccessEmailInput("");
     setAccessDialogError("");
     setAccessLinkCopied(false);

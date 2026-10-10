@@ -64,6 +64,7 @@ const BULLET_KEYS: Record<string, string[]> = {
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
+  "agents.bot": ["reply", "start"],
   "webchat.bot": ["chat"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
@@ -135,8 +136,3 @@ const PRIVACY_SLOTS = new Set([
   "google.user",
   "slack.user",
 ]);
-
-/** The card heading for a slot given its connected/primary/secondary role. */
-export function slotHeadingKey(role: "connected" | "primary" | "secondary"): string {
-  return `connections.headings.${role}`;
-}

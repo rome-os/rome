@@ -4,7 +4,7 @@ import * as claudeAgentSdkModule from "@anthropic-ai/claude-agent-sdk" with {
 };
 import * as anthropicLoginModule from "../lib/anthropic-login.js" with { rstest: "importActual" };
 import { AnthropicProvider } from "./anthropic-provider.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
@@ -89,14 +89,14 @@ function mockThrowingQuery(error: unknown) {
   return iter;
 }
 
-async function collectEvents(session: ModelSession): Promise<AgentMessage[]> {
-  const messages: AgentMessage[] = [];
+async function collectEvents(session: ModelSession): Promise<AgentEvent[]> {
+  const messages: AgentEvent[] = [];
   for await (const msg of session.events) {
     // Strip non-deterministic timestamps so deep-equal stays stable.
     const stripped = { ...(msg as unknown as Record<string, unknown>) };
     delete stripped.startedAt;
     delete stripped.endedAt;
-    messages.push(stripped as unknown as AgentMessage);
+    messages.push(stripped as unknown as AgentEvent);
   }
   return messages;
 }
@@ -249,8 +249,8 @@ describe("AnthropicProvider", () => {
       });
     }
 
-    async function nextTurn(events: AsyncIterator<AgentMessage>): Promise<AgentMessage[]> {
-      const turn: AgentMessage[] = [];
+    async function nextTurn(events: AsyncIterator<AgentEvent>): Promise<AgentEvent[]> {
+      const turn: AgentEvent[] = [];
       for (;;) {
         const next = await events.next();
         if (next.done) return turn;
@@ -517,7 +517,7 @@ describe("AnthropicProvider", () => {
       await new Promise((resolve) => setImmediate(resolve));
       expect(delivered).toBe(false);
       await session.sendUserInput({ text: "then say BANANA", inputId: b });
-      const steerTurn = [(await next).value as AgentMessage, ...(await nextTurn(events))];
+      const steerTurn = [(await next).value as AgentEvent, ...(await nextTurn(events))];
       await session.close();
 
       expect(steerTurn.filter((m) => m.type === "text")).toEqual([
@@ -529,7 +529,7 @@ describe("AnthropicProvider", () => {
 
     // A live SDK stream stays open after its last message; a turn that never
     // ends then shows as a read that times out.
-    const terminalsOf = async (events: AsyncIterator<AgentMessage>) =>
+    const terminalsOf = async (events: AsyncIterator<AgentEvent>) =>
       Promise.race([
         nextTurn(events).then((turn) =>
           turn
@@ -932,7 +932,7 @@ describe("AnthropicProvider", () => {
 
     await session.sendUserInput({ text: "second" });
     const remaining = (async () => {
-      const messages: AgentMessage[] = [];
+      const messages: AgentEvent[] = [];
       for (;;) {
         const next = await events.next();
         if (next.done) return messages;
@@ -1425,10 +1425,20 @@ describe("AnthropicProvider", () => {
       );
     });
 
+    it("keeps TodoWrite on for plan updates", async () => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+
+      const session = await provider.openSession(buildParams());
+      await collectEvents(session);
+      await session.close();
+
+      expect(queryMock.mock.calls[0]![0].options.env.CLAUDE_CODE_ENABLE_TASKS).toBe("false");
+    });
+
     it.each([
       ["low", "low"],
       ["high", "high"],
-      ["xhigh", "max"],
+      ["xhigh", "xhigh"],
     ] as const)("maps %s reasoning effort to Claude effort %s", async (configured, expected) => {
       const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
 

@@ -14,10 +14,6 @@ rs.mock("@/lib/shareable-origin", () => ({ shareableOrigin: () => origin.value }
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(cleanup);
@@ -372,8 +368,13 @@ describe("contact autocomplete in the email list", () => {
       "Ada Lovelaceada@example.com",
       "Adam Smithadam@example.com",
     ]);
-    // The server is asked with the term typed, once the debounce settles.
-    await waitFor(() => expect(requested.some((url) => url.includes("q=ada"))).toBe(true));
+    // The server is asked with the term typed, for email accounts alone, once
+    // the debounce settles.
+    await waitFor(() =>
+      expect(requested.some((url) => url.includes("q=ada") && url.includes("channel=email"))).toBe(
+        true,
+      ),
+    );
 
     await userEvent.click(options[1] as HTMLElement);
 
@@ -411,25 +412,6 @@ describe("contact autocomplete in the email list", () => {
     expect(options.map((o) => o.textContent)).toEqual(["Lady Byroncountess@example.org"]);
   });
 
-  it("asks the server for email accounts alone", async () => {
-    const input = await openCloudEmail();
-    await userEvent.type(input, "ada");
-    await screen.findAllByRole("option");
-    await waitFor(() =>
-      expect(requested.some((url) => url.includes("q=ada") && url.includes("channel=email"))).toBe(
-        true,
-      ),
-    );
-  });
-
-  it("searches a whole name, space and all", async () => {
-    const input = await openCloudEmail();
-    await userEvent.type(input, "adam smith");
-
-    const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Adam Smithadam@example.com"]);
-  });
-
   it("offers nothing for a term that only names the channel", async () => {
     const input = await openCloudEmail();
     await userEvent.type(input, "mail");
@@ -452,7 +434,9 @@ describe("contact autocomplete in the email list", () => {
   it("adds the first suggestion when Enter lands on a typed name", async () => {
     const input = await openCloudEmail();
     await userEvent.type(input, "adam smith");
-    await screen.findAllByRole("option");
+    // The whole name is the term, space and all.
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Adam Smithadam@example.com"]);
 
     await userEvent.keyboard("{Enter}");
 
@@ -470,6 +454,8 @@ describe("contact autocomplete in the email list", () => {
 
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
+    // Escape closes only the suggestions, not the dialog around the field.
+    expect(screen.getByLabelText(emailLabel())).toBe(input);
     await userEvent.keyboard("{Enter}");
 
     // With no list showing, Enter commits the typed text, which is no address.
@@ -510,16 +496,5 @@ describe("contact autocomplete in the email list", () => {
 
     const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(["Adam Smithadam@example.com"]);
-  });
-
-  it("closes the suggestions on Escape without closing the dialog", async () => {
-    const input = await openCloudEmail();
-    await userEvent.type(input, "ada");
-    await screen.findAllByRole("option");
-
-    await userEvent.keyboard("{Escape}");
-
-    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
-    expect(screen.getByLabelText(emailLabel())).toBe(input);
   });
 });

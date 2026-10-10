@@ -20,6 +20,7 @@ import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { readArchivePaths } from "../../test/file-browser.js";
 
 // Projects-files routes over the real stack (edge-only fakes, #763): the
 // projects root is a real temp directory reached via ROME_PROJECTS_ROOT,
@@ -55,6 +56,7 @@ function textMessage(content: string): string {
 function traceMessage(
   accounting: {
     costUsd: number;
+    provider?: string;
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
@@ -62,10 +64,10 @@ function traceMessage(
   },
   hiddenText?: string,
 ): string {
-  const { costUsd, ...usage } = accounting;
+  const { costUsd, provider, ...usage } = accounting;
   const blocks: unknown[] = [];
   if (hiddenText) blocks.push({ type: "text", content: hiddenText });
-  blocks.push({ type: "result", accounting: { costUsd, usage } });
+  blocks.push({ type: "result", accounting: { costUsd, provider, usage } });
   return JSON.stringify(blocks);
 }
 
@@ -239,6 +241,35 @@ describe("Projects files API", () => {
         ),
       ).toEqual(["assets", "bundle.js"]);
     });
+
+    it("keeps build and coverage outputs browsable", async () => {
+      mkdirSync(join(projectsRoot, "demo", "build"), { recursive: true });
+      mkdirSync(join(projectsRoot, "demo", "coverage"), { recursive: true });
+
+      const res = await buildApp().request("/projects/tree?path=projects/demo&depth=1");
+
+      expect((await res.json()).map((node: { name: string }) => node.name)).toEqual([
+        "build",
+        "coverage",
+      ]);
+    });
+
+    it.each([
+      "build",
+      "coverage",
+      "dist",
+    ])("lists a top-level folder named %s as a project", async (name) => {
+      mkdirSync(join(projectsRoot, name));
+      mkdirSync(join(projectsRoot, "node_modules"));
+      const app = buildApp();
+
+      const tree = await (await app.request("/projects/tree?depth=1")).json();
+      expect(tree.map((node: { name: string }) => node.name)).toContain(name);
+      expect(tree.map((node: { name: string }) => node.name)).not.toContain("node_modules");
+      const dashboard = await app.request(`/projects/dashboard?path=projects/${name}`);
+      expect(dashboard.status).toBe(200);
+      expect(await dashboard.json()).toMatchObject({ relativePath: name });
+    });
   });
 
   describe("GET /projects/search", () => {
@@ -296,6 +327,7 @@ describe("Projects files API", () => {
         traceMessage(
           {
             costUsd: 0.25,
+            provider: "anthropic",
             inputTokens: 100,
             outputTokens: 20,
             cacheReadTokens: 10,
@@ -337,13 +369,24 @@ describe("Projects files API", () => {
         ],
       });
       expect(body.chats[0].searchText).not.toContain("intermediate hidden trace content");
+      const anthropicUsage = {
+        cacheReadTokens: 10,
+        cacheWriteTokens: 5,
+        costUsd: 0.25,
+        inputTokens: 100,
+        outputTokens: 20,
+        provider: "anthropic",
+      };
       expect(body.usage.find((day) => day.date === todayKey)).toMatchObject({
         cacheReadTokens: 10,
         cacheWriteTokens: 5,
         inputTokens: 100,
         outputTokens: 20,
         costUsd: 0.25,
+        providers: [anthropicUsage],
       });
+      expect(body.usage.find((day) => day.date !== todayKey)?.providers).toEqual([]);
+      expect(body.providerUsage).toEqual({ month: [anthropicUsage], total: [anthropicUsage] });
     });
 
     it("returns aggregate usage stats and recent chats for the projects root", async () => {
@@ -1033,6 +1076,27 @@ describe("Projects files API", () => {
   });
 
   describe("GET /projects/download", () => {
+    it("includes build outputs in project archives but skips dependencies and dot entries", async () => {
+      for (const directory of ["build", "coverage", "dist", "nested/node_modules", ".next"]) {
+        mkdirSync(join(projectsRoot, "demo", directory), { recursive: true });
+        writeFileSync(join(projectsRoot, "demo", directory, "output.txt"), directory);
+      }
+
+      const res = await buildApp().request("/projects/download?path=projects/demo");
+
+      expect(res.status).toBe(200);
+      expect(await readArchivePaths(res)).toEqual([
+        "demo/",
+        "demo/build/",
+        "demo/build/output.txt",
+        "demo/coverage/",
+        "demo/coverage/output.txt",
+        "demo/dist/",
+        "demo/dist/output.txt",
+        "demo/nested/",
+      ]);
+    });
+
     it("downloads a project file as an attachment", async () => {
       mkdirSync(join(projectsRoot, "demo"), { recursive: true });
       writeFileSync(join(projectsRoot, "demo", "README.md"), "# Demo\n");
@@ -1256,6 +1320,20 @@ describe("Projects files API", () => {
       await expect(res.json()).resolves.toMatchObject({ error: "Invalid file name" });
       expect(existsSync(join(projectsRoot, "demo", "safe.txt"))).toBe(false);
       expect(existsSync(join(projectsRoot, "x.txt"))).toBe(false);
+    });
+
+    it.each(["build", "coverage", "dist"])("accepts folder uploads into %s", async (name) => {
+      const formData = new FormData();
+      formData.append("path", "projects");
+      formData.append("files", new File(["uploaded"], "output.txt"));
+      formData.append("paths", `demo/${name}/output.txt`);
+
+      const res = await buildApp().request("/projects/file", { method: "POST", body: formData });
+
+      expect(res.status).toBe(200);
+      expect(readFileSync(join(projectsRoot, "demo", name, "output.txt"), "utf-8")).toBe(
+        "uploaded",
+      );
     });
 
     it("rejects folder upload paths inside ignored project directories", async () => {

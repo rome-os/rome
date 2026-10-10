@@ -6,7 +6,7 @@
   "AUTH-01 Inspect the authenticated account identity": "shard-5",
   "AUTH-02 Login validation and failed submission preserve the form": "shard-5",
   "CHAT-01 Draft and clear a message from the home composer": "shard-1",
-  "CHAT-02 Exercise composer pickers and the failed-send state": "shard-1",
+  "CHAT-02 Open the skill picker after a failed send": "shard-1",
   "CHAT-03 Open the agent mention picker": "shard-1",
   "CHAT-04 Inspect a successful execution trace": "shard-1",
   "CHAT-05 Draft an answer in an unanswered question card": "shard-1",

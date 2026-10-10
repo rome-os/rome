@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   AgentRunnerInterface,
   ImageGenerationContext,
@@ -72,6 +73,7 @@ const PROVIDER_UNAVAILABLE_CODES = new Set([
   "no_model_provider_available",
   "auth_revoked",
   "usage_limit",
+  "credits_used_up",
 ]);
 
 function isProviderUnavailableFailure(message: string, code?: string): boolean {
@@ -116,8 +118,9 @@ export function createCodexImageGenerationProvider(
     async availability(): Promise<ImageProviderAvailability> {
       const state = deps.getCodexState?.();
       if (!state) return { available: true };
-      // Mirrors the resolver's providerUsable(): an undefined loggedIn means
-      // "not probed yet" and is treated optimistically.
+      // Reads the ChatGPT login, not the resolver's Rome credits view: the
+      // credits gateway rejects hosted image generation. An undefined
+      // loggedIn means "not probed yet" and is treated optimistically.
       if (state.loggedIn === false) {
         return {
           available: false,
@@ -162,6 +165,10 @@ export function createCodexImageGenerationProvider(
       try {
         for await (const msg of deps.agentRunner.run({
           agentName: IMAGE_GEN_AGENT,
+          // A fresh session per call. Concurrent calls (generate_image batches)
+          // rely on it: the generated-images backstop is scoped to the Codex
+          // thread, so a shared thread could hand one call another's image.
+          channelThreadKey: `${IMAGE_GEN_AGENT}:${randomUUID()}`,
           prompt: `${instruction} Use this prompt verbatim:\n\n${request.prompt}`,
           ...(inputImages.length > 0 ? { images: inputImages } : {}),
           sharedContext: ctx?.sharedContext,

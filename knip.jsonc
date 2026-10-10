@@ -30,7 +30,17 @@
   // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
   // invokes it at root scope, where that dependency is out of view. Removing it
   // here on the strength of the mobile dependency reintroduces the finding.
-  "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo", "gofmt", "flock"],
+  "ignoreBinaries": [
+    "tailscale",
+    "composio",
+    "rg",
+    "lipo",
+    "vale",
+    "expo",
+    "gofmt",
+    "flock",
+    "mkfifo"
+  ],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
@@ -61,7 +71,7 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,ts,js}", "infra/**/*.test.mjs"],
+      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "infra/**/*.test.mjs"],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]

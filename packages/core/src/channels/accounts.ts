@@ -34,6 +34,10 @@ export interface Account {
    * something falls back on its own terms — to a name the account's sender put
    * on a message, or to an identifier written for a human — and it cannot
    * choose if a name and a rendered identifier arrive as one value.
+   *
+   * Where a platform lets names repeat and shows each with what tells it
+   * apart, as Rome Cloud shows an agent with its kind and its owner's handle,
+   * the name carries that too, so two accounts never read the same.
    */
   name: string | null;
   /**

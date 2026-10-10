@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
 import { AgentLoader } from "./agent-loader.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
@@ -15,6 +15,8 @@ import { createModelResolver } from "./model-resolver.js";
 import { PromptBuilder } from "./prompt-builder.js";
 import { SessionManager } from "./session-manager.js";
 import { SkillCatalog } from "./skill-catalog.js";
+import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const AGENT = "worker";
 
@@ -40,7 +42,8 @@ describe("AgentSessionManager working dirs", () => {
         permissionMode: "default",
       }),
     );
-    const loader = new AgentLoader();
+    const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
     sessionsRepo = new SessionsRepository(testDb.db);
@@ -61,23 +64,25 @@ describe("AgentSessionManager working dirs", () => {
       codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
       claude: { loggedIn: true, quotaExhausted: false },
     };
-    const actionRegistry = new ActionRegistryImpl([]);
+    const actionRegistry = new ActionRegistryImpl();
     const promptBuilder = new PromptBuilder();
     rs.spyOn(promptBuilder, "build").mockReturnValue("Working dir test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo),
+        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
+        sessionsRepo,
         promptBuilder,
         actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry),
+        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
         modelResolver: createModelResolver({
           providers: [provider],
           aiToolState: { get: () => state, refresh: async () => state },
         }),
         capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(),
+        skillCatalog: new SkillCatalog(artifactIdentity),
         lifecycleDispatcher: createAgentLifecycleDispatcher(),
+        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
     );
@@ -178,6 +183,36 @@ describe("AgentSessionManager working dirs", () => {
     await expect(manager.acquireBySessionId!(original.sessionId, AGENT)).rejects.toThrow(
       "which no longer exists",
     );
+  });
+
+  it("records the conversation a session serves and keeps it in a fresh generation", async () => {
+    const projectDir = join(directory, "moved-away");
+    await mkdir(projectDir);
+    const key = { agentName: AGENT, channelThreadKey: "webchat:conv-1" };
+    const original = await manager.acquire(key, {
+      workingDir: projectDir,
+      romeSessionId: "conv-1",
+    });
+    await original.close("idle");
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("conv-1");
+
+    await rm(projectDir, { recursive: true });
+    const replacement = await manager.acquire(key);
+
+    expect(replacement.sessionId).not.toBe(original.sessionId);
+    expect((await sessionsRepo.findById(replacement.sessionId))?.conversationId).toBe("conv-1");
+  });
+
+  it("records the conversation on a reused row that had none", async () => {
+    const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
+    const original = await manager.acquire(key);
+    await original.close("idle");
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBeNull();
+
+    const reused = await manager.acquire(key, { romeSessionId: "legacy" });
+
+    expect(reused.sessionId).toBe(original.sessionId);
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("legacy");
   });
 
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {

@@ -9,6 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { sendThrough } from "../../channels/connection-ports.js";
 import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
 import type { Update, UserFromGetMe } from "grammy/types";
@@ -16,7 +17,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talk, Talker } from "../types.js";
+import type { Connection, StreamFault, Talker } from "../types.js";
 import { isTelegramAuthError, makeTelegramDescriptor } from "./telegram.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -211,9 +212,8 @@ describe("telegram descriptor shape", () => {
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "telegram", rawEvent: null, attachments: [] },
     } satisfies ChannelMessage;
-    void talker.feature("inboundMedia")?.materialize(message);
+    void talker.inboundMedia?.materialize(message);
     return stopped as Promise<void>;
   });
 
@@ -222,7 +222,7 @@ describe("telegram descriptor shape", () => {
     const registry = setup(factory);
     const conn = await registry.connect("telegram");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk once the bot grant is imported and delivers inbound", async () => {
@@ -232,11 +232,9 @@ describe("telegram descriptor shape", () => {
     await registry.importCredential(conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk;
-    expect(talk).not.toBeNull();
-
     const received: string[] = [];
-    talk!.subscribe(async (msg) => {
+    expect(conn.isUnlocked("talk")).toBe(true);
+    conn.hearTalker(async (msg) => {
       received.push(`${msg.conversationId}:${msg.text}`);
       return;
     });
@@ -252,10 +250,82 @@ describe("telegram descriptor shape", () => {
     });
     expect(received).toEqual(["999:hi"]);
 
-    await talk!.send("999" as ConversationId, { text: "yo" });
+    await sendThrough(conn, "999" as ConversationId, { text: "yo" });
     expect(factory.sent).toEqual([
       { method: "sendMessage", payload: { chat_id: "999", text: "yo", parse_mode: "HTML" } },
     ]);
+  });
+});
+
+describe("telegram inbound delivery", () => {
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const factory = new FaultBotFactory(/* skipInit */ true);
+    const desc = makeTelegramDescriptor({ createBot: factory.createBot });
+    const talker = desc.capabilities.talker!.build(
+      { bot: validCred() },
+      {
+        connectionId: "telegram-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    await factory.untilPolling();
+
+    // A group message that mentions the bot, replies to an earlier message and
+    // carries a document, so every optional field Telegram sets is present.
+    const message = {
+      message_id: 7,
+      date: 1700000000,
+      text: "@fault_bot see this",
+      entities: [{ type: "mention", offset: 0, length: 10 }],
+      from: { id: 111, is_bot: false, first_name: "Alice", last_name: "Smith", username: "alice" },
+      chat: { id: -555, type: "supergroup", title: "Team" },
+      reply_to_message: {
+        message_id: 5,
+        date: 1699999999,
+        chat: { id: -555, type: "supergroup", title: "Team" },
+      },
+      document: {
+        file_id: "doc-1",
+        file_unique_id: "u1",
+        file_name: "a.pdf",
+        mime_type: "application/pdf",
+      },
+    };
+    await factory.emitUpdate({ message });
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "telegram",
+        direction: "inbound",
+        messageId: "7",
+        conversationId: "-555",
+        senderId: "111",
+        senderDisplayName: "Alice Smith",
+        senderUsername: "alice",
+        text: "@fault_bot see this",
+        attachments: [
+          {
+            type: "document",
+            url: "doc-1",
+            mimeType: "application/pdf",
+            fileName: "a.pdf",
+            caption: undefined,
+          },
+        ],
+        timestamp: new Date(1700000000 * 1000),
+        replyTo: { messageId: "5" },
+        thread: { kind: "group", name: "Team" },
+        addressing: "mention",
+        raw: message,
+      },
+    ]);
+    await talker.stop();
   });
 });
 
@@ -351,17 +421,15 @@ describe("telegram send-401 drives renew-once-then-degrade", () => {
     await registry.importCredential(conn.id, "bot", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk as Talk;
-
     // The send() 401 surfaces to the caller as CredentialRejected AND triggers
     // the async grant flow: tokenPaste.renew() → "re-confer" → degrade "bot".
-    await expect(talk.send("999" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+    await expect(sendThrough(conn, "999" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
       CredentialRejected,
     );
     await flush();
 
     // Talk relocked; bot grant degraded (tokenPaste cannot renew headlessly).
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["bot"] });
     expect(conn.auth.grants().bot).toBe("degraded");
 

@@ -26,6 +26,7 @@ import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";
+import { createActionEngineRepos } from "../test/helpers.js";
 
 type RuntimeContextCapture = {
   surface: "action" | "api";
@@ -41,7 +42,7 @@ type RuntimeContextGlobal = typeof globalThis & {
 describe("app runtime context", () => {
   const tempDirs: string[] = [];
 
-  it("injects host execution only into system actions in both main and worker loaders", async () => {
+  it("injects host execution and feedback only into system actions in both main and worker loaders", async () => {
     for (const register of [registerAppActions, registerLazyAppActions]) {
       for (const appId of ["system", "ordinary-app"]) {
         const app = resolvedApp(appId);
@@ -52,7 +53,7 @@ describe("app runtime context", () => {
 export function createAction(config, deps) {
   return {
     config,
-    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution) } }),
+    execute: async () => ({ status: "ok", data: { hasHostExecution: Boolean(deps.hostExecution), hasFeedback: Boolean(deps.feedback) } }),
   };
 }
 `,
@@ -77,7 +78,7 @@ export function createAction(config, deps) {
               ],
             ]),
         } as unknown as ActionLoader;
-        const registry = new ActionRegistryImpl([]);
+        const registry = new ActionRegistryImpl();
         const loaded = await register(
           loader,
           registry,
@@ -88,12 +89,13 @@ export function createAction(config, deps) {
             actionEngine: {} as ActionEngine,
             repositories: createRepositories(),
             hostExecution: new HostExecutionService({ enabled: false }),
+            feedback: { send: async () => ({ kind: "ok" }) },
           },
         );
-        expect(loaded.failed).toEqual([]);
+        expect(loaded.loaded).toEqual(["host_probe"]);
         expect(await registry.get("host_probe")?.execute({})).toEqual({
           status: "ok",
-          data: { hasHostExecution: appId === "system" },
+          data: { hasHostExecution: appId === "system", hasFeedback: appId === "system" },
         });
       }
     }
@@ -142,7 +144,7 @@ export function createAction(config, deps) {
             ],
           ]),
       } as unknown as ActionLoader;
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       await register(
         loader,
         registry,
@@ -258,7 +260,7 @@ export function createAction(config, deps) {
       },
     } as unknown as ActionLoader;
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     const actionLoad = await registerAppActions(
       actionLoader,
       registry,
@@ -400,7 +402,7 @@ export function createAction(config, deps) {
       },
     } as unknown as ActionLoader;
 
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     const actionLoad = registerLazyAppActions(
       actionLoader,
       registry,
@@ -409,7 +411,7 @@ export function createAction(config, deps) {
       services,
     );
 
-    expect(actionLoad).toEqual({ loaded: ["lazy_action"], failed: [] });
+    expect(actionLoad).toEqual({ loaded: ["lazy_action"] });
     expect((globalThis as RuntimeContextGlobal).__lazyActionEvents).toBeUndefined();
 
     const action = registry.get("lazy_action");
@@ -514,6 +516,51 @@ export function createApiHandler(ctx) {
     });
   });
 
+  it.each([
+    { label: "an external webhook", caller: { kind: "anonymous" }, expected: "queue" },
+    // A loopback caller can be an agent whose turn a worker drives.
+    {
+      label: "a loopback caller",
+      caller: { kind: "guardian", userId: "g", via: "loopback" },
+      expected: "fail",
+    },
+  ] as const)("an app API request from $label gets whenWorkersBusy $expected", async ({
+    caller,
+    expected,
+  }) => {
+    const apiEntryPath = join(await tempDir(), "index.js");
+    await writeFile(
+      apiEntryPath,
+      `
+export function createApiHandler(ctx) {
+  return { handle: async () => { await ctx.runAction("probe", {}); return new Response("ok"); } };
+}
+`,
+      "utf-8",
+    );
+    const run = rs.fn(async () => ({ status: "ok", data: null }));
+    const app = resolvedApp("busy-probe-app", { apiEntryPath });
+    await new AppApiDispatcher(catalogFor(app), {
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: { run } as unknown as ActionEngine,
+      repositories: createRepositories(),
+    }).dispatch(app.appId, {
+      method: "POST",
+      path: ["webhook"],
+      headers: {},
+      query: new URLSearchParams(),
+      caller,
+    });
+
+    expect(run).toHaveBeenCalledWith(
+      "probe",
+      {},
+      expect.objectContaining({ whenWorkersBusy: expected }),
+      undefined,
+      undefined,
+    );
+  });
+
   async function tempDir(): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "rome-app-runtime-context-"));
     tempDirs.push(dir);
@@ -526,11 +573,11 @@ export function createApiHandler(ctx) {
 // with fork-IPC JSON semantics even when the callee runs in-process.
 describe("runAction invocation port", () => {
   function contextWithActions(actions: Action[]) {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     for (const action of actions) {
       registry.register(action);
     }
-    const engine = new ActionEngine(registry);
+    const engine = new ActionEngine(registry, createActionEngineRepos());
     return createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),
       db: {} as RomeAppRuntimeServices["db"],
@@ -551,14 +598,11 @@ describe("runAction invocation port", () => {
   });
 
   it("rejects a detached dispatch before acknowledgement when main does not know the action", async () => {
-    const engine = new ActionEngine(
-      new ActionRegistryImpl([]),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { processRole: "main", workerWarmPoolSize: 0, actionWorkerFork: rs.fn() },
-    );
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      actionWorkerFork: rs.fn(),
+    });
     const context = createRomeAppContext(resolvedApp("invoker-app"), {
       catalog: catalogFor(resolvedApp("invoker-app")),
       db: {} as RomeAppRuntimeServices["db"],
@@ -572,6 +616,33 @@ describe("runAction invocation port", () => {
 
     expect(err).toBeInstanceOf(ActionInvocationError);
     expect(err).toMatchObject({ actionName: "nope", code: "not_found" });
+  });
+
+  it.each([
+    // A shared app context also serves code a waiting worker depends on, such
+    // as turn middleware during a summon-driven turn, so it fails fast.
+    { label: "fails fast by default", option: undefined, expected: "fail" },
+    { label: "queues when built for an independent caller", option: "queue", expected: "queue" },
+  ] as const)("$label when every worker is busy", async ({ option, expected }) => {
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos());
+    const run = rs.spyOn(engine, "run").mockResolvedValue({ status: "ok", data: null });
+    const context = createRomeAppContext(resolvedApp("invoker-app"), {
+      catalog: catalogFor(resolvedApp("invoker-app")),
+      db: {} as RomeAppRuntimeServices["db"],
+      actionEngine: engine,
+      repositories: createRepositories(),
+      whenWorkersBusy: option,
+    });
+
+    await context.runAction("publish_event", { name: "x.y" });
+
+    expect(run).toHaveBeenCalledWith(
+      "publish_event",
+      { name: "x.y" },
+      expect.objectContaining({ initiator: "app:invoker-app", whenWorkersBusy: expected }),
+      undefined,
+      undefined,
+    );
   });
 
   it("rejects with code handler_error carrying the handler's message", async () => {

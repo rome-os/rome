@@ -1,8 +1,8 @@
 /**
  * End-to-end coverage for the approval flow.
  *
- * Wires real DB-backed repos + ActionEngine + ApprovalHandler with mock
- * channel adapter + mock agent runner. Behaviors numbered 1-N below match the
+ * Wires real DB-backed repos + ActionEngine + ApprovalHandler with a fake
+ * channel transport + mock agent runner. Behaviors numbered 1-N below match the
  * historical BRS at d6807982:docs/specs/approval-flow-brs.md; unimplemented
  * cases (4, 5) are kept as it.skip so the gap stays visible without falsely
  * passing.
@@ -21,12 +21,13 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import {
   createTestDb,
   buildTestDeps,
-  MockProviderAdapter,
+  FakeTransport,
   createMockAgentRunner,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
+import type { ConversationId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
 
@@ -70,39 +71,39 @@ function buildHarness() {
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 
-  const registry = new ActionRegistryImpl([]);
-  const channel = new MockProviderAdapter("webchat");
+  const registry = new ActionRegistryImpl();
+  const channel = new FakeTransport("webchat");
   const cardEmissions: ApprovalCreatedEvent[] = [];
 
-  const engine = new ActionEngine(registry, undefined, executionsRepo, approvalsRepo, journalRepo, {
-    // "worker" keeps everything in-process so the test's in-memory action
-    // registry is visible to root invocations (no child fork).
-    processRole: "worker",
-    onApprovalCreated: async (event) => {
-      cardEmissions.push(event);
-      if (!event.channelContext) return;
-      const msg: OutgoingMessage = {
-        parts: [
-          {
-            type: "approval_card",
-            approvalId: event.approvalId,
-            actionName: event.actionName,
-            preview: event.preview ?? {
-              kind: "generic",
-              title: event.actionName,
-              summary: "Awaiting guardian approval",
+  const engine = new ActionEngine(
+    registry,
+    { executions: executionsRepo, approvals: approvalsRepo, journal: journalRepo },
+    {
+      // "worker" keeps everything in-process so the test's in-memory action
+      // registry is visible to root invocations (no child fork).
+      processRole: "worker",
+      onApprovalCreated: async (event) => {
+        cardEmissions.push(event);
+        if (!event.channelContext) return;
+        const msg: OutgoingMessage = {
+          parts: [
+            {
+              type: "approval_card",
+              approvalId: event.approvalId,
+              actionName: event.actionName,
+              preview: event.preview ?? {
+                kind: "generic",
+                title: event.actionName,
+                summary: "Awaiting guardian approval",
+              },
+              status: "pending",
             },
-            status: "pending",
-          },
-        ],
-      };
-      await channel.sendMessage(
-        event.channelContext.channelUserId ?? event.channelContext.threadId,
-        event.channelContext.threadId,
-        msg,
-      );
+          ],
+        };
+        await channel.send(event.channelContext.threadId as ConversationId, msg);
+      },
     },
-  });
+  );
 
   const agentRunner = createMockAgentRunner();
   // No webchat runtime is wired here (BRS 7 exercises the degrade path), so the
@@ -265,7 +266,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.threadId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });
@@ -335,13 +336,14 @@ describe("Approval flow E2E — resolving an approval", () => {
       // registry over the shared DB, a mocked agent), then hand it to buildApp.
       // We deliberately do NOT call setStreamHost here — buildApp does, and
       // that is the wiring under test.
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       const engine = new ActionEngine(
         registry,
-        undefined,
-        deps.actionExecutionsRepo,
-        deps.approvalsRepo,
-        deps.executionJournalRepo,
+        {
+          executions: deps.actionExecutionsRepo,
+          approvals: deps.approvalsRepo,
+          journal: deps.executionJournalRepo,
+        },
         { processRole: "worker" },
       );
       const agentRunner = createMockAgentRunner([
@@ -522,19 +524,5 @@ describe("Approval flow E2E — persistence and time", () => {
     expect(pendingNow?.status).toBe("pending");
     expect(pendingNow?.resolvedAt ?? null).toBeNull();
     h.testDb.close();
-  });
-});
-
-// Unimplemented v1 behaviors — kept visible as skipped tests
-
-describe("Approval flow E2E — deferred (not implemented in v1)", () => {
-  it.skip("BRS 4: independent steps in the same session continue while one step is suspended", () => {
-    // No agent-side scheduler models per-step independence yet — the agent
-    // is told to keep working in the tool-result text but parallel branch
-    // semantics are not enforced by the runtime.
-  });
-
-  it.skip("BRS 5: a step depending on a suspended step waits for completion", () => {
-    // Same gap as BRS 4 — completion-dependency is not modeled in v1.
   });
 });

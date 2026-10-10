@@ -17,11 +17,6 @@ export interface TriggerProvider {
   /** Stop watching for a specific routine. */
   deactivate(routineId: string): void;
 
-  /** True when the provider is currently watching this routine — i.e.
-   * a fire on its trigger would invoke the registered callback. Used by the
-   * engine + admin surfaces to distinguish "scheduled" from "orphaned" rows. */
-  isActive(routineId: string): boolean;
-
   /** Cleanup all watchers. */
   stop(): void;
 }

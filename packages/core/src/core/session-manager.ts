@@ -1,14 +1,11 @@
-import type {
-  SessionsRepository,
-  StoredSessionTurnCheckpoint,
-} from "../db/repositories/sessions.js";
+import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { AgentSession } from "../types.js";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
 
 export class SessionManager {
   constructor(
     private sessionsRepository: SessionsRepository,
-    private readonly identity?: ArtifactIdentityContext,
+    private readonly identity: ArtifactIdentityContext,
   ) {}
 
   /**
@@ -31,12 +28,11 @@ export class SessionManager {
       }
     | undefined
   > {
-    const row =
-      this.identity && agentName
-        ? (await this.sessionsRepository.findActiveByChannelThreadKey(channelThreadKey)).find(
-            (candidate) => this.sameAgent(candidate.agentName, agentName),
-          )
-        : await this.sessionsRepository.findByChannelThreadKey(channelThreadKey, agentName);
+    const row = agentName
+      ? (await this.sessionsRepository.findActiveByChannelThreadKey(channelThreadKey)).find(
+          (candidate) => this.sameAgent(candidate.agentName, agentName),
+        )
+      : await this.sessionsRepository.findByChannelThreadKey(channelThreadKey);
     if (!row) return undefined;
     return {
       id: row.id,
@@ -48,14 +44,6 @@ export class SessionManager {
       createdAt: row.createdAt,
       lastActiveAt: row.lastActiveAt,
     };
-  }
-
-  async rotateProviderGeneration(input: {
-    agentName: string;
-    channelThreadKey: string;
-    newSessionId: string;
-  }) {
-    return await this.sessionsRepository.rotateProviderGeneration(input);
   }
 
   /**
@@ -95,61 +83,14 @@ export class SessionManager {
       id: session.id,
       agentName: session.agentName,
       channelThreadKey: session.channelThreadKey,
+      conversationId: session.conversationId,
       status: session.status,
       workingDir: session.workingDir,
     });
   }
 
-  async setWorkingDir(sessionId: string, workingDir: string): Promise<void> {
-    await this.sessionsRepository.setWorkingDir(sessionId, workingDir);
-  }
-
-  /** Update lastActiveAt timestamp. */
-  async touchSession(sessionId: string): Promise<void> {
-    await this.sessionsRepository.touch(sessionId);
-  }
-
-  async completeSession(sessionId: string): Promise<void> {
-    await this.sessionsRepository.complete(sessionId);
-  }
-
-  /** Persist the provider-specific thread id (e.g. codex thread id) for future resume. */
-  async setProviderThreadId(sessionId: string, providerThreadId: string): Promise<void> {
-    await this.sessionsRepository.setProviderThreadId(sessionId, providerThreadId);
-  }
-
-  /** Persist which provider owns this conversation (+ its thread id and the
-   *  concrete model that ran — the session model pin) so a resumed
-   *  session routes back to the same model (Codex→Claude fallback continuity). */
-  async setProviderInfo(
-    sessionId: string,
-    provider: string,
-    providerThreadId?: string,
-    model?: string,
-  ): Promise<void> {
-    await this.sessionsRepository.setProviderInfo(sessionId, provider, providerThreadId, model);
-  }
-
-  /** Persist the provider-reported effort the session's last successful model turn ran with. */
-  async setReasoningEffort(sessionId: string, reasoningEffort: string): Promise<void> {
-    await this.sessionsRepository.setReasoningEffort(sessionId, reasoningEffort);
-  }
-
-  /** Persist the provider-native history anchor for a completed Rome turn. */
-  async setTurnCheckpoint(input: StoredSessionTurnCheckpoint): Promise<void> {
-    await this.sessionsRepository.setTurnCheckpoint(input);
-  }
-
-  /** Resolve the exact provider history anchor for a Rome turn. */
-  async getTurnCheckpoint(
-    sessionId: string,
-    turnId: string,
-  ): Promise<StoredSessionTurnCheckpoint | null> {
-    return await this.sessionsRepository.getTurnCheckpoint(sessionId, turnId);
-  }
-
   private sameAgent(storedName: string, requestedName: string): boolean {
-    if (!this.identity) return storedName === requestedName;
+    if (storedName === requestedName) return true;
     try {
       return (
         resolveArtifactId({

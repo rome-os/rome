@@ -45,6 +45,9 @@ cases:
           6. The duplicate-name rejection is the expected successful result of this test. Stop when
           the UI shows "Already exists." and report the action as complete; do not return a task
           failure because the rename was rejected.
+      - app.expectRenameConflict:
+          sourcePath: projects/demo-app/notes.txt
+          targetName: README.md
       - aiAssert: >-
           Both "notes.txt" and the existing "README.md" remain listed in the demo-app tree after
           the rejected rename.

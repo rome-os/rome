@@ -33,7 +33,6 @@ afterEach(() => {
 
 function fakePersonMappingRepo(): PersonMappingRepository {
   return {
-    deleteGuardianChannelMappings: rs.fn(),
     writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as PersonMappingRepository;
 }
@@ -350,7 +349,7 @@ describe("DELETE /connections/:id/grants/:name", () => {
     expect(connection.capabilities.talk).toEqual({ state: "unlocked" });
     // The talk epoch survived the sibling revoke; only act was torn down.
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(0);
-    expect(personMappingRepo.deleteGuardianChannelMappings).not.toHaveBeenCalled();
+    expect(personMappingRepo.writeDeleteGuardianChannelMappings).not.toHaveBeenCalled();
   });
 
   it("clears the channel guardian mapping when its Talk grant is revoked", async () => {
@@ -444,7 +443,6 @@ describe("DELETE /connections/:id", () => {
       expect.anything(),
       "fake-telegram",
     );
-    expect(personMappingRepo.deleteGuardianChannelMappings).not.toHaveBeenCalled();
   });
 
   it("rolls the connection deletion back when guardian-mapping cleanup fails", async () => {

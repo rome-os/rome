@@ -1,4 +1,5 @@
 import type { AgentAccounting, AgentContextUsage, AgentStop, AgentTokenUsage } from "../types.js";
+import { matchesModelAlias } from "./model-alias.js";
 
 interface TokenRates {
   inputUsdPerMillion: number;
@@ -30,6 +31,7 @@ const ANTHROPIC_5_MINUTE_CACHE_WRITE_MULTIPLIER = 1.25;
 const ANTHROPIC_1_HOUR_CACHE_WRITE_MULTIPLIER = 2;
 const ANTHROPIC_CACHE_READ_MULTIPLIER = 0.1;
 const OPENAI_CACHE_READ_MULTIPLIER = 0.1;
+const GPT_6_1_SOL_CACHE_READ_MULTIPLIER = 0.05;
 const OPENAI_CACHE_WRITE_MULTIPLIER = 1.25;
 const OPENAI_LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
 const OPENAI_LONG_CONTEXT_INPUT_MULTIPLIER = 2;
@@ -37,23 +39,6 @@ const OPENAI_LONG_CONTEXT_OUTPUT_MULTIPLIER = 1.5;
 
 function hasPrefix(model: string, prefix: string): boolean {
   return model.toLowerCase().startsWith(prefix.toLowerCase());
-}
-
-function matchesModelAlias(model: string, baseModel: string): boolean {
-  const normalizedModel = model.toLowerCase();
-  const normalizedBaseModel = baseModel.toLowerCase();
-  if (
-    normalizedModel === normalizedBaseModel ||
-    normalizedModel.startsWith(`${normalizedBaseModel}:`)
-  ) {
-    return true;
-  }
-
-  const snapshotSuffix = normalizedModel.slice(`${normalizedBaseModel}-`.length);
-  return (
-    normalizedModel.startsWith(`${normalizedBaseModel}-`) &&
-    /^\d{4}-\d{2}-\d{2}(?::.+)?$/.test(snapshotSuffix)
-  );
 }
 
 function anthropicRates(baseInputUsdPerMillion: number, outputUsdPerMillion: number): TokenRates {
@@ -76,11 +61,13 @@ function getAnthropicCacheWriteMultiplier(rawUsage?: Record<string, unknown>): n
 // OpenAI's Codex-era rate card: cache reads at 0.1x and cache writes at
 // 1.25x the input rate, with the whole request billed at long-context
 // multipliers once the prompt passes 272K input tokens. GPT-5.6 and GPT-6
-// publish the same rules, so one helper serves both generations.
+// publish the same rules, so one helper serves both generations. GPT-6.1 Sol
+// halves the cache-read rate to 0.05x, so the multiplier is a parameter.
 function openAiLongContextRates(
   inputUsdPerMillion: number,
   outputUsdPerMillion: number,
   rawUsage?: Record<string, unknown>,
+  cacheReadMultiplier = OPENAI_CACHE_READ_MULTIPLIER,
 ): TokenRates {
   const rawInputTokens = rawUsage?.input_tokens;
   const isLongContext =
@@ -91,7 +78,7 @@ function openAiLongContextRates(
   return {
     inputUsdPerMillion: inputUsdPerMillion * inputMultiplier,
     outputUsdPerMillion: outputUsdPerMillion * outputMultiplier,
-    cacheReadUsdPerMillion: inputUsdPerMillion * OPENAI_CACHE_READ_MULTIPLIER * inputMultiplier,
+    cacheReadUsdPerMillion: inputUsdPerMillion * cacheReadMultiplier * inputMultiplier,
     cacheWriteUsdPerMillion: inputUsdPerMillion * OPENAI_CACHE_WRITE_MULTIPLIER * inputMultiplier,
   };
 }
@@ -134,11 +121,12 @@ const PRICING_RULES: PricingRule[] = [
   },
   {
     provider: "anthropic",
+    // Sonnet 5.5 halved cache reads on 2026-10-07 to 0.05x the input rate.
     matchesModel: (model) => hasPrefix(model, "claude-sonnet-5-5"),
     resolveRates: (rawUsage) => ({
       inputUsdPerMillion: 2,
       outputUsdPerMillion: 10,
-      cacheReadUsdPerMillion: 0.2,
+      cacheReadUsdPerMillion: 0.1,
       cacheWriteUsdPerMillion: 2 * getAnthropicCacheWriteMultiplier(rawUsage),
     }),
   },
@@ -154,6 +142,19 @@ const PRICING_RULES: PricingRule[] = [
       outputUsdPerMillion: 15,
       cacheReadUsdPerMillion: 0.3,
       cacheWriteUsdPerMillion: 3 * getAnthropicCacheWriteMultiplier(rawUsage),
+    }),
+  },
+  {
+    provider: "anthropic",
+    // Haiku 5.5 bills 5x these rates when a single request's prompt exceeds
+    // 100K tokens. Run usage sums every request, so the per-request prompt
+    // size is unknown here and this rule prices the run at the base tier.
+    matchesModel: (model) => hasPrefix(model, "claude-haiku-5-5"),
+    resolveRates: (rawUsage) => ({
+      inputUsdPerMillion: 0.1,
+      outputUsdPerMillion: 0.5,
+      cacheReadUsdPerMillion: 0.01,
+      cacheWriteUsdPerMillion: 0.1 * getAnthropicCacheWriteMultiplier(rawUsage),
     }),
   },
   {
@@ -183,6 +184,12 @@ const PRICING_RULES: PricingRule[] = [
     provider: "openai",
     matchesModel: (model) => matchesModelAlias(model, "gpt-6-astra"),
     resolveRates: (rawUsage) => openAiLongContextRates(10, 50, rawUsage),
+  },
+  {
+    provider: "openai",
+    matchesModel: (model) => matchesModelAlias(model, "gpt-6.1-sol"),
+    resolveRates: (rawUsage) =>
+      openAiLongContextRates(2, 10, rawUsage, GPT_6_1_SOL_CACHE_READ_MULTIPLIER),
   },
   {
     provider: "openai",

@@ -395,6 +395,8 @@ export type ActionResult<T = unknown> =
   | { status: "handoff"; handoff: Handoff }
   | { status: "place_widget"; placement: PlaceWidget };
 
+const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
+
 /**
  * Build an {@link Action} from a Zod input schema. The schema is the single
  * source of truth: it generates the model-facing JSON Schema (`inputSchema`),
@@ -426,13 +428,27 @@ export function defineAction<S extends z.ZodType>(spec: {
   const invalidInputMessage = (error: z.ZodError): string =>
     `Invalid input for ${spec.config.name}: ${z.prettifyError(error)}`;
 
+  // A routine adds `__triggerPayload` to every action's args. A schema that
+  // forbids unknown keys and does not declare it would reject every routine
+  // run, so drop the key for that schema alone. A loose schema still sees it.
+  const dropsTriggerPayload =
+    inputSchema.additionalProperties === false &&
+    !Object.hasOwn((inputSchema.properties as object | undefined) ?? {}, TRIGGER_PAYLOAD_KEY);
+  const parse = (args: Record<string, unknown>) => {
+    if (dropsTriggerPayload && Object.hasOwn(args, TRIGGER_PAYLOAD_KEY)) {
+      const { [TRIGGER_PAYLOAD_KEY]: _payload, ...rest } = args;
+      return spec.schema.safeParse(rest);
+    }
+    return spec.schema.safeParse(args);
+  };
+
   const previewFn = spec.preview;
 
   return {
     config: spec.config,
     inputSchema,
     execute: async (args, context) => {
-      const parsed = spec.schema.safeParse(args);
+      const parsed = parse(args);
       if (!parsed.success) {
         return { status: "error", error: invalidInputMessage(parsed.error) };
       }
@@ -440,7 +456,7 @@ export function defineAction<S extends z.ZodType>(spec: {
     },
     ...(previewFn && {
       preview: (args: Record<string, unknown>): PreviewPayload => {
-        const parsed = spec.schema.safeParse(args);
+        const parsed = parse(args);
         if (!parsed.success) {
           return {
             kind: "generic",
@@ -587,7 +603,7 @@ export interface AgentTurnOutput {
   terminalKind?: "result" | "error";
   /**
    * The turn's outcome, consistent with the turn's `status`: `interrupted`
-   * when the turn was interrupted, `error` when it ended with an error block,
+   * when the turn was interrupted, `error` when it ended with an error event,
    * and never `error` when it ended with a result. It can therefore differ
    * from `accounting.stop`, which reports how the provider's model run ended.
    * For example, a run that completed but whose structured output Rome
@@ -639,6 +655,43 @@ export interface AgentLifecycleHookDeps {
   agentRunner?: AgentRunnerInterface;
 }
 
+// App-started hook. Contract: docs/concepts/apps.md#hooks.
+
+export type AppStartedEventVersion = 1;
+
+/** One app start: an installed bundle of an enabled app becoming active in
+ *  the running daemon. */
+export interface AppStartedEvent {
+  type: "app-started";
+  version: AppStartedEventVersion;
+  appId: string;
+  /** The manifest `version` of the bundle that started. */
+  appVersion: string;
+}
+
+/**
+ * Declared as `hooks/app-started`. Rome calls `onAppStarted` once per app
+ * start: at boot for every enabled app, and after an install, upgrade, or
+ * re-enable. A re-install of identical content is not a new start. The call
+ * comes after boot finishes, so actions, routines, and agents are available.
+ * Neither boot nor the install waits for it. Rome logs a throw and does not
+ * retry until the next app start.
+ *
+ * Every boot is a new start, so Rome calls the hook again for state it
+ * already set up. Make it idempotent: check that the state exists before
+ * creating it.
+ */
+export interface AppStartedHook {
+  onAppStarted(event: AppStartedEvent): Promise<void> | void;
+}
+
+export interface AppStartedHookDeps {
+  appId: string;
+  logger: AppLogger;
+  appContext: RomeAppContext;
+  agentRunner?: AgentRunnerInterface;
+}
+
 // Awaited onion middleware around an agent turn. Agent model: docs/concepts/agents.md.
 
 /** Identifies the wrapped turn; middleware matching uses only `agentName`. */
@@ -666,7 +719,7 @@ export interface TurnMiddlewareContext {
   input: TurnMiddlewareInput;
   session: TurnMiddlewareSession;
   /** Emits model-shaped content. A terminal `result` produces the persisted assistant row. */
-  emit(event: AgentMessage): void;
+  emit(event: AgentEvent): void;
   /** Reserved for the self-loop guard when a future middleware re-injects a
    *  turn (e.g. replay). `welcome-to-rome` does not inject. */
   meta: { synthetic?: boolean };
@@ -681,7 +734,7 @@ export interface TurnMiddlewareHook {
   order: number;
   /** How the chain treats a throw from this middleware. `fail-open` (default)
    *  skips it and continues to `next()` so ordinary chat is never broken;
-   *  `fail-closed` aborts the turn with an error block. */
+   *  `fail-closed` aborts the turn with an error event. */
   onError?: "fail-open" | "fail-closed";
   handle(ctx: TurnMiddlewareContext, next: TurnMiddlewareNext): Promise<void>;
 }
@@ -694,9 +747,25 @@ export interface TurnMiddlewareHookDeps {
 }
 
 // Agent event stream contracts. Session model: docs/concepts/sessions.md.
+//
+// A turn's stream is a sequence of `AgentEvent`s in four groups:
+// - block events carry a completed block: text, thinking, a tool use, or a
+//   tool result;
+// - delta events carry an increment of a block still being produced, and are
+//   transient;
+// - lifecycle events mark the turn's edges and progress: session init, turn
+//   start and end, input status, and the terminal result or error;
+// - other events report subagent activity, structured output, and plan
+//   updates.
+//
+// A text or thinking block is identified by its `blockId`. A tool use is
+// identified by its tool-use id (`id` on `tool_use`), which its `tool_result`
+// and its deltas carry as `toolUseId`. A delta carries the identity of its
+// block whenever the block has one, so a consumer matches the two without
+// relying on event order.
 
 /** First event of a turn stream. Each stream contains exactly one. */
-export interface TurnStartMessage {
+export interface TurnStartEvent {
   type: "turn_start";
   turnId: string;
   /** Session the turn runs on — stable across turns of a conversation. */
@@ -705,76 +774,76 @@ export interface TurnStartMessage {
 }
 
 /** Turn bracketing: the last event of a turn's stream, emitted after the
- *  terminal `result`/`error` block. */
-export interface TurnEndMessage {
+ *  terminal `result` or `error` event when the turn has one. */
+export interface TurnEndEvent {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
-   *  it takes precedence over `error` (an abort surfaced as an error block is
+   *  it takes precedence over `error` (an abort surfaced as an error event is
    *  still an interruption, not a failure). */
   status: "completed" | "interrupted" | "error";
   /** Turn wall-clock measured by the AgentSession. Distinct from
-   *  `accounting.durationMs` on the terminal block, which is the
+   *  `accounting.durationMs` on the terminal event, which is the
    *  provider's self-reported per-call duration. */
   durationMs: number;
 }
 
-export interface TextMessage {
+export interface TextBlockEvent {
   type: "text";
   content: string;
   /** Provider-agnostic role of this text within its turn. `commentary` =
    *  in-turn narration emitted between/before tool calls; `final` = the turn's
-   *  closing answer (also carried by the terminal `result` block). Sourced from
+   *  closing answer (also carried by the terminal `result` event). Sourced from
    *  the provider's native terminal signal (Anthropic `stop_reason`; Codex
    *  app-server `phase`). Optional: absence degrades to "unknown" (the text is
    *  not promoted into the answer flow). Borrows Codex's vocabulary by design;
    *  it is not Codex-specific. */
   turnPhase?: "commentary" | "final";
   /**
-   * Identity of this content block within its turn: the same value on the
-   * block's deltas and on the completed block, so a consumer can match them
-   * without relying on event order. Opaque, and unique only within its turn.
-   * Absent when the provider gives no block identity.
+   * Block id: this block's identity within its turn. Its deltas carry the same
+   * value, so a consumer matches them without relying on event order. Opaque,
+   * and unique only within its turn. Absent when the provider gives the block
+   * no identity; Rome never borrows another block's id for it.
    */
   blockId?: string;
 }
 
 /**
- * Incremental preview of an in-flight `text` block (provider streaming).
- * Transient: the complete `text` block still follows, so consumers that
- * only care about whole blocks (trace, persistence, accounting) must
- * ignore this variant. Emitted only by providers that support partial
- * output; absence degrades to whole-block delivery.
+ * Delta of an in-flight `text` block (provider streaming). Transient: the
+ * complete `text` block still follows, so consumers that only care about whole
+ * blocks (trace, persistence, accounting) must ignore this event. Emitted only
+ * by providers that support partial output; absence degrades to whole-block
+ * delivery.
  */
-export interface TextDeltaMessage {
+export interface TextDeltaEvent {
   type: "text_delta";
   content: string;
   /** The `blockId` of the `text` block this delta belongs to, when known. */
   blockId?: string;
 }
 
-export interface ThinkingMessage {
+export interface ThinkingBlockEvent {
   type: "thinking";
   content: string;
   /**
-   * Identity of this content block within its turn: the same value on the
-   * block's deltas and on the completed block, so a consumer can match them
-   * without relying on event order. Opaque, and unique only within its turn.
-   * Absent when the provider gives no block identity.
+   * Block id: this block's identity within its turn. Its deltas carry the same
+   * value, so a consumer matches them without relying on event order. Opaque,
+   * and unique only within its turn. Absent when the provider gives the block
+   * no identity; Rome never borrows another block's id for it.
    */
   blockId?: string;
 }
 
 /**
- * Incremental preview of an in-flight `thinking` block. Transient, like
- * `text_delta`: consumers that only care about whole blocks must ignore this
- * variant. The complete `thinking` block normally follows; a turn interrupted
- * or failed mid-block may end without it, so a consumer that renders previews
- * discards any without a matching block when the turn ends. Emitted only when
+ * Delta of an in-flight `thinking` block. Transient, like `text_delta`:
+ * consumers that only care about whole blocks must ignore this event. The
+ * complete `thinking` block normally follows; a turn interrupted or failed
+ * mid-block may end without it, so a consumer that renders deltas discards any
+ * without a matching block when the turn ends. Emitted only when
  * the provider streams reasoning text; a provider that keeps reasoning hidden
  * sends none.
  */
-export interface ThinkingDeltaMessage {
+export interface ThinkingDeltaEvent {
   type: "thinking_delta";
   /** The `blockId` of the `thinking` block this delta belongs to. */
   blockId: string;
@@ -782,14 +851,14 @@ export interface ThinkingDeltaMessage {
 }
 
 /**
- * Incremental preview of a tool call's input while the model is still writing
- * it, as a fragment of the input's JSON text. Transient: consumers that only
- * care about whole blocks must ignore this variant. The `tool_use` with the
- * complete `input` normally follows; a turn interrupted or failed while the
- * model is writing the input may end without it, so a consumer that renders
- * previews discards any without a matching `tool_use` when the turn ends.
+ * Delta of a tool call's input while the model is still writing it: a piece of
+ * the input's JSON text. Transient: consumers that only care about whole
+ * blocks must ignore this event. The `tool_use` with the complete `input`
+ * normally follows; a turn interrupted or failed while the model is writing
+ * the input may end without it, so a consumer that renders deltas discards any
+ * without a matching `tool_use` when the turn ends.
  */
-export interface ToolInputDeltaMessage {
+export interface ToolInputDeltaEvent {
   type: "tool_input_delta";
   /** The `id` of the `tool_use` this input belongs to. */
   toolUseId: string;
@@ -799,29 +868,31 @@ export interface ToolInputDeltaMessage {
 }
 
 /**
- * Incremental output of a running tool call, for example a shell command's
- * output as it is produced. Transient: consumers that only care about whole
- * blocks must ignore this variant. The `tool_result` with the complete output
- * normally follows; a turn interrupted or failed while the tool runs may end
- * without it, so a consumer that renders previews discards any without a
- * matching `tool_result` when the turn ends.
+ * Delta of a running tool call's output, for example a shell command's output
+ * as it is produced. Transient: consumers that only care about whole blocks
+ * must ignore this event. The `tool_result` with the complete output normally
+ * follows; a turn interrupted or failed while the tool runs may end without
+ * it, so a consumer that renders deltas discards any without a matching
+ * `tool_result` when the turn ends.
  */
-export interface ToolOutputDeltaMessage {
+export interface ToolOutputDeltaEvent {
   type: "tool_output_delta";
   /** The `id` of the `tool_use` producing this output. */
   toolUseId: string;
   content: string;
 }
 
-export interface ToolUseMessage {
+export interface ToolUseBlockEvent {
   type: "tool_use";
+  /** Tool-use id: this block's identity within its turn. The `tool_result`
+   *  that answers it, and the tool call's deltas, carry it as `toolUseId`. */
   id: string;
   tool: string;
   input: unknown;
   startedAt?: string;
 }
 
-export interface ToolResultMessage {
+export interface ToolResultBlockEvent {
   type: "tool_result";
   toolUseId: string;
   tool: string;
@@ -838,7 +909,7 @@ export interface ToolResultMessage {
   isError?: boolean;
 }
 
-export interface SubagentStartMessage {
+export interface SubagentStartEvent {
   type: "subagent_start";
   toolUseId: string;
   agentName: string;
@@ -848,7 +919,7 @@ export interface SubagentStartMessage {
   startedAt?: string;
 }
 
-export type SubagentResultMessage =
+export type SubagentResultEvent =
   | {
       type: "subagent_result";
       toolUseId: string;
@@ -870,22 +941,23 @@ export type SubagentResultMessage =
       endedAt?: string;
     };
 
-/** Terminal content block: the agent's final answer for its turn.
+/** Terminal event: the agent's final answer for its turn.
  *  The turn boundary itself is the `turn_end` event that follows. */
-export interface ResultMessage {
+export interface TurnResultEvent {
   type: "result";
   content: string;
   /** Provider-native structured result when the agent declares outputSchema.
    * `content` is the canonical JSON serialization of this value. */
   structuredOutput?: unknown;
-  /** Provider-reported usage for the agent that produced this block.
+  /** Provider-reported usage for the agent that produced this event.
    *  Sub-agent terminals carry their own accounting. */
   accounting?: AgentAccounting;
 }
 
-/** Terminal content block: the turn failed. `turn_end` still follows. */
+/** Machine-readable classification of a failed turn, carried as `TurnErrorEvent.code`. */
 export type AgentErrorCode =
   | "usage_limit"
+  | "credits_used_up"
   | "auth_revoked"
   | "model_provider_unavailable"
   | "model_unavailable"
@@ -902,7 +974,8 @@ export type AgentErrorReason =
   | "model_access_denied"
   | "no_available_provider";
 
-export interface ErrorMessage {
+/** Terminal event: the turn failed. `turn_end` still follows. */
+export interface TurnErrorEvent {
   type: "error";
   error: string;
   accounting?: AgentAccounting;
@@ -912,6 +985,8 @@ export interface ErrorMessage {
    * human-readable `error`.
    *
    * - `usage_limit`: the provider's quota or rate limit is exhausted.
+   * - `credits_used_up`: the instance's Rome credits are used up. Retrying
+   *   fails until credits are added or ChatGPT is connected.
    * - `auth_revoked`: the stored credentials are no longer valid server-side
    *   (for example, Codex's refresh token was revoked) and need a re-login.
    * - `context_window_exceeded`: the conversation no longer fits the model's
@@ -928,7 +1003,7 @@ export interface ErrorMessage {
   reason?: AgentErrorReason;
 }
 
-export interface SessionInitMessage {
+export interface SessionInitEvent {
   type: "session_init";
   sessionId: string;
   /** Durable Rome trace for the current invocation. Treat as opaque. */
@@ -944,7 +1019,7 @@ export interface SessionInitMessage {
  * Schema-validated structured output. Unlike the corresponding raw tool use,
  * this payload has been accepted and is authoritative.
  */
-export interface StructuredOutputMessage {
+export interface StructuredOutputEvent {
   type: "structured_output";
   payload: unknown;
 }
@@ -969,7 +1044,7 @@ export interface AgentPlan {
 }
 
 /** Complete replacement snapshot of the current provider-authored Plan. */
-export interface PlanUpdateMessage {
+export interface PlanUpdateEvent {
   type: "plan_update";
   plan: AgentPlan;
 }
@@ -983,34 +1058,92 @@ export type AgentInputState =
   | "cancelled"
   | "failed";
 
-export interface InputStatusMessage {
+export interface InputStatusEvent {
   type: "input_status";
   inputId: string;
   state: AgentInputState;
   turnId?: string;
 }
 
-export type AgentMessage =
-  | InputStatusMessage
-  | TurnStartMessage
-  | TurnEndMessage
-  | TextMessage
-  | TextDeltaMessage
-  | ThinkingMessage
-  | ThinkingDeltaMessage
-  | ToolInputDeltaMessage
-  | ToolOutputDeltaMessage
-  | ToolUseMessage
-  | ToolResultMessage
-  | SubagentStartMessage
-  | SubagentResultMessage
-  | ResultMessage
-  | ErrorMessage
-  | SessionInitMessage
-  | StructuredOutputMessage
-  | PlanUpdateMessage;
+/** Block events: each carries one completed block of the turn. */
+export type AgentBlockEvent =
+  | TextBlockEvent
+  | ThinkingBlockEvent
+  | ToolUseBlockEvent
+  | ToolResultBlockEvent;
 
-export type StreamAgentMessage = AgentMessage & { agent?: string };
+/** Delta events: transient increments of a block still being produced. The
+ *  durable trace, persistence, and accounting never keep them. */
+export type AgentDeltaEvent =
+  | TextDeltaEvent
+  | ThinkingDeltaEvent
+  | ToolInputDeltaEvent
+  | ToolOutputDeltaEvent;
+
+/** Lifecycle events: the turn's edges and progress, including its terminal
+ *  `result` or `error`. */
+export type AgentLifecycleEvent =
+  | SessionInitEvent
+  | TurnStartEvent
+  | TurnEndEvent
+  | InputStatusEvent
+  | TurnResultEvent
+  | TurnErrorEvent;
+
+/** Events that are neither blocks, deltas, nor lifecycle: subagent activity,
+ *  structured output, and plan updates. */
+export type AgentOtherEvent =
+  | SubagentStartEvent
+  | SubagentResultEvent
+  | StructuredOutputEvent
+  | PlanUpdateEvent;
+
+/** One item of a turn's stream. */
+export type AgentEvent = AgentBlockEvent | AgentDeltaEvent | AgentLifecycleEvent | AgentOtherEvent;
+
+/** An event as a stream delivers it, stamped with the agent that produced it. */
+export type StreamAgentEvent = AgentEvent & { agent?: string };
+
+/** @deprecated Use {@link AgentEvent}. */
+export type AgentMessage = AgentEvent;
+/** @deprecated Use {@link StreamAgentEvent}. */
+export type StreamAgentMessage = StreamAgentEvent;
+/** @deprecated Use {@link TurnStartEvent}. */
+export type TurnStartMessage = TurnStartEvent;
+/** @deprecated Use {@link TurnEndEvent}. */
+export type TurnEndMessage = TurnEndEvent;
+/** @deprecated Use {@link TextBlockEvent}. */
+export type TextMessage = TextBlockEvent;
+/** @deprecated Use {@link TextDeltaEvent}. */
+export type TextDeltaMessage = TextDeltaEvent;
+/** @deprecated Use {@link ThinkingBlockEvent}. */
+export type ThinkingMessage = ThinkingBlockEvent;
+/** @deprecated Use {@link ThinkingDeltaEvent}. */
+export type ThinkingDeltaMessage = ThinkingDeltaEvent;
+/** @deprecated Use {@link ToolInputDeltaEvent}. */
+export type ToolInputDeltaMessage = ToolInputDeltaEvent;
+/** @deprecated Use {@link ToolOutputDeltaEvent}. */
+export type ToolOutputDeltaMessage = ToolOutputDeltaEvent;
+/** @deprecated Use {@link ToolUseBlockEvent}. */
+export type ToolUseMessage = ToolUseBlockEvent;
+/** @deprecated Use {@link ToolResultBlockEvent}. */
+export type ToolResultMessage = ToolResultBlockEvent;
+/** @deprecated Use {@link SubagentStartEvent}. */
+export type SubagentStartMessage = SubagentStartEvent;
+/** @deprecated Use {@link SubagentResultEvent}. */
+export type SubagentResultMessage = SubagentResultEvent;
+/** @deprecated Use {@link TurnResultEvent}. */
+export type ResultMessage = TurnResultEvent;
+/** @deprecated Use {@link TurnErrorEvent}. */
+export type ErrorMessage = TurnErrorEvent;
+/** @deprecated Use {@link SessionInitEvent}. */
+export type SessionInitMessage = SessionInitEvent;
+/** @deprecated Use {@link StructuredOutputEvent}. */
+export type StructuredOutputMessage = StructuredOutputEvent;
+/** @deprecated Use {@link PlanUpdateEvent}. */
+export type PlanUpdateMessage = PlanUpdateEvent;
+/** @deprecated Use {@link InputStatusEvent}. */
+export type InputStatusMessage = InputStatusEvent;
 
 export interface ThreadContext {
   channel: string;
@@ -1110,8 +1243,8 @@ export interface ForkRunParams {
 }
 
 export interface AgentRunnerInterface {
-  run(params: RunParams): AsyncIterable<AgentMessage>;
-  runForked?(params: ForkRunParams): AsyncIterable<AgentMessage>;
+  run(params: RunParams): AsyncIterable<AgentEvent>;
+  runForked?(params: ForkRunParams): AsyncIterable<AgentEvent>;
   /**
    * Returns true when the agent with the given name is loaded in the catalog
    * and can be invoked via `run`. Used by callers (e.g. the inbox message
@@ -1323,10 +1456,18 @@ export type MessagePart =
        *  (Anthropic `stop_reason`; Codex app-server `phase`). Absent on legacy
        *  rows (and channels that don't split turns) → treated as `final`. */
       turnPhase?: "commentary" | "final";
-      /** Zero-based identity of this WebChat assistant text block within its turn.
-       *  Assigned by the WebChat projection and persisted so the live SSE
-       *  block and transcript block share the same `(turnId, blockIx)` key.
-       *  Absent on legacy rows and channels that do not stream text blocks. */
+      /** Block id of the block whose position this text part takes in the
+       *  producing turn's stream (`TextBlockEvent.blockId`). For the final
+       *  answer, it can differ from this part's content when the result carries
+       *  structured output. Unique only within that turn, so `(turnId, blockId)`
+       *  identifies the block. Prefer it when present. Absent when the provider
+       *  gave the block no id, and on rows written without it. */
+      blockId?: string;
+      /** Zero-based position of this WebChat assistant text block within its
+       *  turn, assigned by the WebChat projection and written on every text
+       *  part it persists. `(turnId, blockIx)` is the key WebChat's live
+       *  stream and transcript share, and the fallback when `blockId` is
+       *  absent. */
       blockIx?: number;
     }
   | {
@@ -1356,6 +1497,13 @@ export type MessagePart =
       type: "routine_draft_card";
       toolUseId: string;
       draft: RoutineDraftSpec;
+      /**
+       * Unique key minted by the server with the card. Turning the card on
+       * creates the routine with this `key`, so the card finds the exact
+       * routine it created (and links to its run history) after a reload.
+       * Absent on cards written before keys existed.
+       */
+      routineKey?: string;
     }
   | {
       /**
@@ -1481,35 +1629,6 @@ export interface MessageReplyReference {
   senderName?: string;
 }
 
-export interface NormalizedMessage {
-  id: string;
-  channel:
-    | "telegram"
-    | "telegram_user"
-    | "whatsapp"
-    | "wechat"
-    | "webchat"
-    | "discord"
-    | "email"
-    | "feishu"
-    | "linkedin";
-  channelUserId: string;
-  displayName: string;
-  username?: string;
-  threadId: string;
-  /** Parent chat id when threadId is a platform-native thread id. */
-  parentThreadId?: string;
-  threadName?: string;
-  threadType: "private" | "group";
-  timestamp: Date;
-  text: string;
-  attachments: Attachment[];
-  replyTo?: MessageReplyReference;
-  routing?: MessageRouting;
-  addressing?: MessageAddressing;
-  rawEvent: unknown;
-}
-
 /** Opaque provider-owned conversation address. Callers may persist and
  * round-trip this value, but must never parse or construct one. */
 export type ConversationId = string & { readonly __brand: "ConversationId" };
@@ -1579,60 +1698,10 @@ export interface ChannelMessageQuery {
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
   name: string;
-  /** The Connections backing the channel now. `send` and `history` pick among
-   *  them, and need one named when there are several. */
-  connectionIds: string[];
-}
-
-/** Why no Connection could be chosen for a channel: none backs it, several do
- *  and none was named, or the one named does not back it. */
-export type ConnectionRefusal = "none" | "several" | "not-backing";
-
-/**
- * The Connection a send or a history read on a channel goes through, given
- * the Connections backing the channel ({@link ChannelSummary.connectionIds}):
- * the one named, which must back the channel, or else the channel's only one.
- * With several and none named it refuses rather than guessing. The rule
- * `ChannelsService.send` and `history` apply, for a caller that checks first.
- */
-export function chooseConnection(
-  connectionIds: readonly string[],
-  requested?: string,
-): { connectionId: string } | { refused: ConnectionRefusal } {
-  if (requested) {
-    return connectionIds.includes(requested)
-      ? { connectionId: requested }
-      : { refused: "not-backing" };
-  }
-  if (connectionIds.length === 0) return { refused: "none" };
-  if (connectionIds.length > 1) return { refused: "several" };
-  return { connectionId: connectionIds[0]! };
-}
-
-/** What `ChannelsService.send` and `history` say when {@link chooseConnection}
- *  refuses. */
-export function connectionRefusalMessage(
-  channel: string,
-  refused: ConnectionRefusal,
-  requested?: string,
-): string {
-  switch (refused) {
-    case "not-backing":
-      return `Connection "${requested}" does not provide channel "${channel}"`;
-    case "none":
-      return `No Talk connection registered for "${channel}"`;
-    case "several":
-      return `Channel "${channel}" has multiple connections; connectionId is required`;
-  }
-}
-
-/** What {@link ChannelsService.history} reads. */
-export interface ChannelHistoryRead {
-  conversationId?: ConversationId;
-  since?: Date;
-  limit?: number;
-  /** The Connection to read, needed when several back the channel. */
-  connectionId?: string;
+  /** Whether a Connection backs the channel, so `send` has something to send
+   *  through. A send can still fail while that Connection is locked or
+   *  offline. */
+  sendable: boolean;
 }
 
 /**
@@ -1645,18 +1714,14 @@ export interface ChannelHistoryRead {
  * it subscribes through.
  */
 export interface ChannelsService {
-  /** Every channel this Rome has, with the Connections backing each now. */
+  /** Every channel this Rome has, and whether a Connection backs each. */
   list(): Promise<ChannelSummary[]>;
-  /**
-   * Send on a channel, through the one Connection backing it, or through
-   * `options.connectionId` when several do. Rejects when no Connection backs
-   * the channel, or when several do and none is named.
-   */
+  /** Send on a channel, through the Connection backing it. Rejects when no
+   *  Connection backs the channel. */
   send(
     channel: string,
     conversationId: ConversationId,
     message: OutgoingMessage,
-    options?: { connectionId?: string },
   ): Promise<MessageReceipt>;
   /**
    * The channel's `messages.query`: its newest messages, newest first.
@@ -1666,13 +1731,6 @@ export interface ChannelsService {
    * `send` may not appear until that read expires.
    */
   query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
-  /**
-   * What `fetch_channel_history` has always read: each channel's history
-   * window cut as its Connection's retired history read cut it, oldest first.
-   * Kept apart from `query` because those windows differ from `query`'s. Read
-   * `query` for anything new.
-   */
-  history(channel: string, input: ChannelHistoryRead): Promise<ChannelMessage[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */
@@ -1713,20 +1771,20 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-export interface TalkInboundMedia {
+export interface ChannelInboundMedia {
   materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
-export interface TalkActivitySession {
+export interface ChannelActivitySession {
   update(state: "thinking" | "working"): Promise<void>;
   finish(result: "done" | "error"): Promise<void>;
 }
 
-export interface TalkActivity {
+export interface ChannelActivity {
   begin(input: {
     conversationId: ConversationId;
     messageId?: string;
-  }): Promise<TalkActivitySession | null>;
+  }): Promise<ChannelActivitySession | null>;
 }
 
 /**
@@ -1736,7 +1794,7 @@ export interface TalkActivity {
  * A channel that offers this can be written to from a surface that knows only
  * who it wants to talk to — the People page, which holds addresses and no
  * thread ids. A channel that does not offer it can still be replied to, and
- * still delivers inbound: `feature("directMessaging")` answering null is the
+ * still delivers inbound: offering no direct messaging is the
  * whole declaration, which is why LinkedIn's read-only inbox needs no flag of
  * its own and no exception anywhere else.
  *
@@ -1751,7 +1809,7 @@ export interface TalkActivity {
  * both spellings of that entry share. A send accepted anonymously cannot be
  * followed, and is reported as delivered the moment the channel takes it.
  */
-export interface TalkDirectMessaging {
+export interface ChannelDirectMessaging {
   /**
    * The conversation that reaches `channelUserId` directly, or null when the
    * channel cannot produce one.
@@ -1770,7 +1828,7 @@ export interface ChannelSend {
   /** Showing the account that a reply is on its way (a typing indicator), or
    *  null or absent where the channel cannot. Cosmetic: a caller never waits
    *  on it to answer. */
-  readonly activity?: TalkActivity | null;
+  readonly activity?: ChannelActivity | null;
 }
 
 /**
@@ -1821,7 +1879,7 @@ export interface ChannelInbound {
   subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
   /** Materializes a message's attachments, or null when the channel cannot
    *  now. A consumer without it uses the attachments as delivered. */
-  readonly media: TalkInboundMedia | null;
+  readonly media: ChannelInboundMedia | null;
 }
 
 /**
@@ -2661,9 +2719,6 @@ export interface BackendTurnParams {
   agentName: string;
   /** Exact runtime session resume handle. */
   sessionId: string;
-  /** Connection that owns the provider conversation, passed to the resumed
-   * turn's thread context. Delivery finds the channel by `channel`, not by this. */
-  connectionId?: string;
   channel: string;
   threadId: string;
   /** Recipient id on the channel, used as the reply target where the channel

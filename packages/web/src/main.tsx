@@ -1,3 +1,4 @@
+import { DashboardScaleProvider } from "./hooks/use-preview-scale";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
@@ -8,6 +9,7 @@ import { ThemeProvider } from "./hooks/use-theme";
 import { initAnalytics } from "./lib/analytics";
 import { injectThemeCss } from "./lib/theme";
 import { queryClient } from "./lib/query-client";
+import { trackVisualViewport } from "./lib/visual-viewport";
 import "./globals.css";
 import "./i18n";
 
@@ -20,6 +22,9 @@ injectThemeCss();
 // ID — and never inside widget iframes (see lib/analytics.ts).
 initAnalytics();
 
+// Sizes the shell to the screen area above an open keyboard (lib/visual-viewport.ts).
+trackVisualViewport();
+
 /**
  * Mounts the dashboard into #root. Exported so the regular entry
  * (src/entry.tsx) and the mock entry (mock/main.tsx) can control when the
@@ -31,13 +36,15 @@ export function renderApp() {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <GuardianTimestampProvider>
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </GuardianTimestampProvider>
-        </ThemeProvider>
+        <BrowserRouter>
+          <DashboardScaleProvider>
+            <ThemeProvider>
+              <GuardianTimestampProvider>
+                <App />
+              </GuardianTimestampProvider>
+            </ThemeProvider>
+          </DashboardScaleProvider>
+        </BrowserRouter>
       </QueryClientProvider>
     </StrictMode>,
   );

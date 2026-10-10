@@ -47,10 +47,6 @@ export function getFileBrowserUrlPath(logicalRootPath: string, path: string | nu
   return `/${logicalRootPath}/${encodedPath}`;
 }
 
-export function shouldSyncRootPanelTriggerUrl(isDesktopViewport: boolean): boolean {
-  return isDesktopViewport;
-}
-
 export function getFileBrowserDirectoryAncestors(path: string, logicalRootPath: string): string[] {
   if (path === logicalRootPath || !path.startsWith(`${logicalRootPath}/`)) {
     return [];

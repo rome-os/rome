@@ -1,6 +1,6 @@
 import { context } from "@opentelemetry/api";
 import { describe, expect, it, rs } from "@rstest/core";
-import type { InputStatusMessage } from "@rome-os/app-runtime";
+import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
 import type { ModelSession } from "./agent-runner.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
@@ -9,7 +9,7 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
   const started: AgentTurnInput[] = [];
-  const statuses: InputStatusMessage[] = [];
+  const statuses: InputStatusEvent[] = [];
   const handles: AgentTurnHandle[] = [];
   const errors = rs.fn();
   const queue = new AgentInputQueue(

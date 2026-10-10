@@ -13,6 +13,7 @@ import {
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
@@ -94,85 +95,49 @@ type StatusStyle = {
   live?: boolean;
 };
 
-// Visual styling per status code; labels come from i18n at render time
-// via t("status.<code>").
-const STATUS_STYLE: Record<string, StatusStyle> = {
-  accepted: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  approved: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  rejected: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  auto_approved: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  pending: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  executed: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  execution_failed: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  awaiting_execution: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  running: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-    live: true,
-  },
+const TONE_STYLE = {
+  info: { bar: "border-info", dot: "bg-info", pill: "bg-info-bg text-info-fg ring-info-border" },
   success: {
     bar: "border-success",
     dot: "bg-success",
     pill: "bg-success-bg text-success-fg ring-success-border",
   },
-  error: {
+  destructive: {
     bar: "border-destructive",
     dot: "bg-destructive",
     pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
   },
-  pending_approval: {
+  warning: {
     bar: "border-warning",
     dot: "bg-warning",
     pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
   },
-  cancelled: {
+  neutral: {
     bar: "border-border-strong",
     dot: "bg-border-strong",
     pill: "bg-surface-muted text-foreground ring-border",
   },
+} satisfies Record<string, StatusStyle>;
+
+// Visual styling per status code; labels come from i18n at render time
+// via t("status.<code>").
+const STATUS_STYLE: Record<string, StatusStyle> = {
+  accepted: TONE_STYLE.info,
+  approved: TONE_STYLE.success,
+  rejected: TONE_STYLE.destructive,
+  auto_approved: TONE_STYLE.info,
+  pending: { ...TONE_STYLE.warning, live: true },
+  executed: TONE_STYLE.success,
+  execution_failed: TONE_STYLE.destructive,
+  awaiting_execution: { ...TONE_STYLE.warning, live: true },
+  running: { ...TONE_STYLE.info, live: true },
+  success: TONE_STYLE.success,
+  error: TONE_STYLE.destructive,
+  pending_approval: { ...TONE_STYLE.warning, live: true },
+  cancelled: TONE_STYLE.neutral,
 };
 
-const FALLBACK_STYLE: StatusStyle = {
-  bar: "border-border-strong",
-  dot: "bg-border-strong",
-  pill: "bg-surface-muted text-foreground ring-border",
-};
+const FALLBACK_STYLE: StatusStyle = TONE_STYLE.neutral;
 
 const TYPE_TINTS: Record<string, string> = {
   person_mapping: "text-brand",
@@ -259,7 +224,7 @@ function Collapsible({ label, children }: { label: string; children: React.React
     <div className="mt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground min-h-[var(--control-min-h)]"
       >
         <span
           className={`inline-block transition-transform duration-200 ${open ? "rotate-90" : ""}`}
@@ -867,7 +832,7 @@ export default function ActivityPage() {
         {stats.pendingApprovals > 0 && statusFilter === "all" && (
           <button
             onClick={() => setStatusFilter("pending")}
-            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left transition-colors hover:bg-warning-bg/70"
+            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left min-h-[var(--control-min-h)] transition-colors hover:bg-warning-bg/70"
           >
             <div className="flex items-center gap-2">
               <span
@@ -893,25 +858,12 @@ export default function ActivityPage() {
           </button>
         )}
 
-        {/* Filter pills */}
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
-          {FILTER_VALUES.map((value) => {
-            const active = statusFilter === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
-                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
-                }`}
-              >
-                {t(`page.filters.${value}`)}
-              </button>
-            );
-          })}
-        </div>
+        <FilterChipGroup
+          aria-label={t("page.filterStatus")}
+          options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+        />
 
         <ApprovalHistoryButton />
 

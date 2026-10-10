@@ -44,9 +44,16 @@ cases:
       - app.open:
           path: /settings/advanced
       - aiAct: >-
-          Scroll through Advanced settings until the "Developer Settings" disclosure is visible.
-          Open it once, then scroll farther down within the expanded section until the "Show Claude
-          and ChatGPT usage" switch is visible. Leave the section expanded.
+          Scroll through Advanced settings until the "Developer Settings" disclosure is visible
+          and open it once. Then scroll down until its heading is near the top of the screen, and
+          stop.
       - aiAssert: >-
-          The Developer Settings section is expanded and shows the "Show Claude and ChatGPT usage"
-          switch.
+          The Developer Settings section is expanded and shows the "Fable" setting directly below
+          its heading.
+      # The section is taller than one screen, so the heading and the switch are
+      # checked in separate screenshots.
+      - aiAct: >-
+          Scroll farther down within the expanded Developer Settings section until the "Show
+          Claude and ChatGPT usage" switch is visible. Leave the section expanded.
+      - aiAssert: >-
+          The "Show Claude and ChatGPT usage" switch is visible.

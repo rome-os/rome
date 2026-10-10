@@ -21,6 +21,7 @@ interface ProjectContext {
   browserContext?: BrowserContext;
   page?: Page;
   agent?: PlaywrightAgent;
+  renameResponses?: Array<{ sourcePath: string; targetName: string; status: number }>;
 }
 
 const AI_ACT_CONTEXT = `
@@ -146,6 +147,20 @@ const appOpen = defineNode<typeof openInput, void, ProjectContext>({
     const page = await browserContext.newPage();
     context.browserContext = browserContext;
     context.page = page;
+    context.renameResponses = [];
+    page.on("response", (response) => {
+      if (
+        response.request().method() !== "PATCH" ||
+        new URL(response.url()).pathname !== "/api/projects/file"
+      )
+        return;
+      const body = response.request().postDataJSON() as { path?: string; name?: string };
+      context.renameResponses?.push({
+        sourcePath: body.path ?? "",
+        targetName: body.name ?? "",
+        status: response.status(),
+      });
+    });
 
     const url = input.path.startsWith("http")
       ? input.path
@@ -171,24 +186,26 @@ const appOpen = defineNode<typeof openInput, void, ProjectContext>({
   },
 });
 
-const expectUrlInput = z.strictObject({
-  // Substring matched against the full URL; prefix with "re:" for a regex.
-  path: z.string().min(1),
+const renameConflictInput = z.strictObject({
+  sourcePath: z.string(),
+  targetName: z.string(),
 });
 
-const appExpectUrl = defineNode<typeof expectUrlInput, void, ProjectContext>({
-  name: "app.expectUrl",
-  description: "Assert the current URL matches the given substring or re: regex.",
-  inputSchema: expectUrlInput,
-  async execute({ context, input }) {
-    const { page } = context;
-    if (!page) throw new Error("No page is open; call app.open first");
-    const current = page.url();
-    const matched = input.path.startsWith("re:")
-      ? new RegExp(input.path.slice(3)).test(current)
-      : current.includes(input.path);
+const expectRenameConflict = defineNode<typeof renameConflictInput, void, ProjectContext>({
+  name: "app.expectRenameConflict",
+  description: "Verify that a project-file rename request received HTTP 409.",
+  inputSchema: renameConflictInput,
+  execute({ context, input }) {
+    const matched = context.renameResponses?.some(
+      (response) =>
+        response.sourcePath === input.sourcePath &&
+        response.targetName === input.targetName &&
+        response.status === 409,
+    );
     if (!matched) {
-      throw new Error(`Expected URL to match "${input.path}" but got "${current}"`);
+      throw new Error(
+        `Expected PATCH /api/projects/file to reject ${input.sourcePath} -> ${input.targetName} with 409`,
+      );
     }
   },
 });
@@ -216,6 +233,6 @@ export default defineTestProject<ProjectContext>({
   nodes: [
     ...createMidsceneNodes<ProjectContext>({ agentClass: PlaywrightAgent, getAgent }),
     appOpen,
-    appExpectUrl,
+    expectRenameConflict,
   ],
 });

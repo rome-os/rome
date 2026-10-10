@@ -3,10 +3,11 @@
 // Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
-// gate + body-pull + normalize, attachment download, history paging — is the
-// existing `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here
+// gate + body-pull + the inbound `ChannelMessage`, attachment download, history
+// paging — is `EmailAdapter` (packages/core/src/channels/email.ts), wrapped here
 // so the runtime's grant-epoch lifecycle and fault→grant-state mapping
-// (registry.ts) drive it.
+// (registry.ts) drive it. The transport already speaks the channel's record, so
+// inbound, send and history pass through without a projection.
 //
 // Unlike the polling/gateway channels, email is PUSH-driven: there is no live
 // transport loop to report a terminal failure from. Two distinct signals reach
@@ -29,7 +30,7 @@
 // terminal conferral is the single ledger write. No credential ever touches the
 // settings table, so `confer()` here throws (see cross-stage notes).
 
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import {
   EMAIL_SETTINGS_KEY,
   EmailAdapter,
@@ -37,7 +38,6 @@ import {
 } from "../../channels/email.js";
 import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { z } from "zod";
 import type { SetupFn } from "../setup/types.js";
@@ -50,12 +50,7 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import {
-  historyLinesFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 // The `inbox` grant's profile — the non-secret provisioned identity (the
 // `<slug>@romeos.cc` address Rome Cloud minted). Declared next to the material
@@ -94,24 +89,6 @@ export function emailGrantProfile(address: string): EmailGrantProfile {
   return emailGrantProfileSchema.parse({ address });
 }
 
-/** The identity field a LEGACY (pre-4c) email settings row carries — the
- *  provisioned address a pre-direct-conferral connect wrote next to the secret.
- *  Only the boot bridge reads this shape; fresh rows are pure config and carry
- *  no address. */
-export interface EmailProfileSource {
-  address?: string;
-}
-
-/** Build the parsed grant profile from a legacy settings row, or null when the
- *  row carries no provisioned address (fresh config-only rows). */
-export function emailProfileFromSettings(settings: EmailProfileSource): EmailGrantProfile | null {
-  // null / undefined / "" are the absent cases; any other present value flows
-  // through untouched so the strict parse rejects a wrong-typed address loudly
-  // instead of silently dropping it.
-  if (settings.address == null || settings.address === "") return null;
-  return emailGrantProfileSchema.parse({ address: settings.address });
-}
-
 /** The `inbox` grant material (grant table): exactly the
  *  Rome Cloud-provisioned coordinates the connect route confers. `guardianEmail`
  *  is NOT here — it is durable settings config that survives revoke, sourced
@@ -133,8 +110,6 @@ export interface EmailDescriptorDeps {
   /** Defaults to the whoami lookup (see EmailAdapter). Injectable for
    *  tests and for the descriptor-factory call site to share one resolver. */
   ownerEmailResolver?: () => Promise<string | undefined>;
-  /** Defaults to an in-memory LRU (see EmailAdapter). */
-  inboundDedup?: InboundDedup;
   /**
    * Called synchronously right after each fresh `EmailAdapter` is built (every
    * epoch — birth, relock/re-authorize, and Disconnected backoff rebuild).
@@ -255,17 +230,30 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
             personMappingRepo: deps.personMappingRepo,
             config,
             ownerEmailResolver: deps.ownerEmailResolver,
-            inboundDedup: deps.inboundDedup,
           });
           deps.onAdapterBuilt?.(adapter);
 
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           let unregisterIngress: (() => void) | null = null;
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            history: {
+              async query(input) {
+                const messages = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return messages.slice(0, historyQueryLimit(input.limit));
+              },
+            },
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               unregisterIngress = kit.registerIngress(async (input) => {
                 const deposit = input as { rawBody?: unknown; signature?: unknown };
                 if (typeof deposit.rawBody !== "string" || typeof deposit.signature !== "string") {
@@ -291,19 +279,10 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
               unregisterIngress = null;
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                history: historyLinesFeature(adapter, "email"),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

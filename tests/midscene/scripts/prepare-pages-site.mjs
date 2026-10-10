@@ -72,9 +72,6 @@ export async function preparePagesSite({
   reports,
   runId,
   previous,
-  previousRunId,
-  legacy,
-  legacyRunId,
   maxSiteBytes = MAX_SITE_BYTES,
 }) {
   if (!/^\d+$/.test(runId)) throw new Error("run-id must be numeric");
@@ -83,32 +80,13 @@ export async function preparePagesSite({
   if (previous && (await exists(path.join(previous, "runs")))) {
     await cp(path.join(previous, "runs"), path.join(site, "runs"), { recursive: true });
   }
-  if (previous && (await exists(path.join(previous, "midscene-shard-1")))) {
-    await copyShardReports(previous, site);
-    const previousEntries = await readdir(previous);
-    for (const entry of previousEntries) {
-      if (/^index-\d+\.html$/.test(entry))
-        await cp(path.join(previous, entry), path.join(site, entry));
-    }
-    if (
-      previousRunId &&
-      !previousEntries.some((entry) => /^index-\d+\.html$/.test(entry)) &&
-      (await exists(path.join(previous, "index.html")))
-    ) {
-      await cp(path.join(previous, "index.html"), path.join(site, `index-${previousRunId}.html`));
-    }
-  }
-  if (legacy && (await exists(path.join(legacy, "midscene-shard-1")))) {
-    await copyShardReports(legacy, site);
-    if (legacyRunId && (await exists(path.join(legacy, "index.html")))) {
-      await cp(path.join(legacy, "index.html"), path.join(site, `index-${legacyRunId}.html`));
-    }
-  }
-
   const current = path.join(site, "runs", runId);
+  await rm(current, { recursive: true, force: true });
   await mkdir(current, { recursive: true });
   const nativeReport = path.join(reports, "native-report");
-  await cp(path.join(nativeReport, "index.html"), path.join(current, "index.html"));
+  if (await exists(path.join(nativeReport, "index.html"))) {
+    await cp(path.join(nativeReport, "index.html"), path.join(current, "index.html"));
+  }
   if (await exists(path.join(nativeReport, "screenshots"))) {
     await cp(path.join(nativeReport, "screenshots"), path.join(current, "screenshots"), {
       recursive: true,
@@ -129,15 +107,16 @@ export async function preparePagesSite({
     const oldRun = retainedRunIds.shift();
     await rm(path.join(runsDirectory, oldRun), { recursive: true });
   }
-  const historicalIndexes = (await readdir(site))
-    .filter((entry) => /^index-\d+\.html$/.test(entry))
-    .sort();
-  const archiveLinks = historicalIndexes
-    .map((entry) => `<li><a href="${entry}">Run ${entry.slice(6, -5)}</a></li>`)
-    .join("");
+  const recentLinks = await Promise.all(
+    retainedRunIds.map(async (id) =>
+      (await exists(path.join(runsDirectory, id, "index.html")))
+        ? `<li><a href="runs/${id}/index.html">Run ${id}</a></li>`
+        : `<li>Run ${id}: partial shard reports are linked from its workflow Summary</li>`,
+    ),
+  );
   await writeFile(
     path.join(site, "index.html"),
-    `<!doctype html><html lang="en"><meta charset="utf-8"><title>Midscene reports</title><h1>Midscene reports</h1><p>Recent run reports:</p><ul>${retainedRunIds.map((id) => `<li><a href="runs/${id}/index.html">Run ${id}</a></li>`).join("")}</ul><p>Historical run reports:</p><ul>${archiveLinks}</ul></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><title>Midscene reports</title><h1>Midscene reports</h1><p>Recent run reports:</p><ul>${recentLinks.join("")}</ul></html>`,
   );
   const bytes = await bytesIn(site);
   if (bytes > maxSiteBytes) {
@@ -153,9 +132,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     reports: options.reports,
     runId: options["run-id"],
     previous: options.previous,
-    previousRunId: options["previous-run-id"],
-    legacy: options.legacy,
-    legacyRunId: options["legacy-run-id"],
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

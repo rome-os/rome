@@ -1,15 +1,16 @@
+import type { SVGProps } from "react";
 import { Cloud } from "lucide-react";
 import { GithubIcon } from "@/components/brand-icons/github-icon";
 import { GoogleIcon } from "@/components/brand-icons/google-icon";
 
 /** Maps a source id / icon hint to its brand logo. Source-agnostic: a new
  * source registers its glyph here and everything else stays the same. */
-export function SourceIcon({ source, className }: { source?: string; className?: string }) {
+export function SourceIcon({ source, ...props }: { source?: string } & SVGProps<SVGSVGElement>) {
   if (source === "git" || source === "github") {
-    return <GithubIcon className={className} />;
+    return <GithubIcon {...props} />;
   }
   if (source === "googledrive" || source === "google") {
-    return <GoogleIcon className={className} />;
+    return <GoogleIcon {...props} />;
   }
-  return <Cloud className={className} aria-hidden />;
+  return <Cloud {...props} aria-hidden />;
 }

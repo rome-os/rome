@@ -3,6 +3,7 @@ import { settings } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "./public-access-config.js";
@@ -57,7 +58,10 @@ export class PublicAccessState {
 
   /** Loads and normalizes the stored policy, updates this snapshot, and returns that config. */
   async load(db: DrizzleDb): Promise<PublicAccessConfig> {
-    const rows = await db.select().from(settings).where(eq(settings.key, "publicAccess"));
+    const rows = await db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
     const config =
       rows.length > 0 && rows[0].value
         ? normalizePublicAccessConfig(rows[0].value)

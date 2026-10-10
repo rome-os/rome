@@ -68,7 +68,18 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
-import { describeTrigger, describeOutcome, relativeTime } from "@/lib/routine-language";
+import {
+  describeOutcome,
+  describeTrigger,
+  hasOwnName,
+  relativeTime,
+  routineDisplayName,
+  type EventBusTrigger,
+  type ManualTrigger,
+  type Routine,
+  type ScheduleTrigger,
+  type Trigger,
+} from "@/lib/routine-language";
 import { useActionCatalog, type ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { buildArgsTemplate, describeArgType, evaluateArgsText } from "@/lib/action-args";
 import {
@@ -78,48 +89,7 @@ import {
   useStopRoutine,
 } from "@/hooks/use-routines";
 
-interface ScheduleTrigger {
-  type: "schedule";
-  tzid: string;
-  // Floating follows the guardian's timezone; fixed pins `tzid`.
-  tzMode: "fixed" | "floating";
-  localTime: string;
-  date?: string;
-  rrule?: string;
-}
-
-interface EventBusTrigger {
-  type: "event-bus";
-  eventName: string;
-  sourcePattern?: string;
-}
-
-// A routine that never fires on its own — it only runs via "Run now". Carries
-// no config of its own.
-interface ManualTrigger {
-  type: "manual";
-}
-
-type Trigger = ScheduleTrigger | EventBusTrigger | ManualTrigger;
 type TriggerType = Trigger["type"];
-
-type RunStatus = "success" | "error" | "running" | "pending_approval" | "cancelled";
-
-interface Routine {
-  id: string;
-  name: string;
-  // The app that owns this routine, if any. A managed routine can't be deleted
-  // from the dashboard (the server refuses too) — only the owning app removes it.
-  managedBy?: string | null;
-  enabled: boolean;
-  trigger: Trigger;
-  actionName: string;
-  args: Record<string, unknown>;
-  createdAt: string;
-  lastFiredAt: string | null;
-  nextRunAt: string | null;
-  lastRun?: { status: RunStatus; firedAt: string } | null;
-}
 
 type ViewMode = "timeline" | "calendar" | "table";
 type TableFilter = "all" | "active" | "disabled" | "schedule" | "event-bus" | "manual" | "failing";
@@ -174,23 +144,6 @@ function isCompletedOneOff(r: Routine): boolean {
 function scheduleSubtypeLabel(t: TFunction, trigger: ScheduleTrigger): string {
   return trigger.rrule ? t("schedule.subtypeRecurring") : t("schedule.subtypeOneOff");
 }
-// The human-facing name for a routine, used wherever a routine is named (rows,
-// stats, next-up). The guardian-written name headlines the routine; agent-created
-// routines often carry a machine name equal to the action (no real name to show),
-// so the humanized action phrase stands in. Never surfaces the snake_case id.
-function routineDisplayName(routine: Routine): string {
-  const trimmedName = routine.name.trim();
-  if (
-    trimmedName !== "" &&
-    trimmedName !== routine.actionName &&
-    trimmedName !== artifactLocalName(routine.actionName)
-  ) {
-    return trimmedName;
-  }
-  const outcomePhrase = describeOutcome(routine.actionName, routine.args);
-  return outcomePhrase.charAt(0).toUpperCase() + outcomePhrase.slice(1);
-}
-
 // Adapts shadcn's Popover + Calendar recipe to our string-shaped form state.
 // The form stores `YYYY-MM-DD` (Zod string + RRULE expect it); Calendar speaks
 // Date. Parse/format here so the rest of the form stays unchanged. We avoid
@@ -230,7 +183,8 @@ function DatePickerInput({
           id={id}
           onBlur={onBlur}
           aria-invalid={invalid || undefined}
-          className="w-full justify-between"
+          align="between"
+          className="w-full"
         >
           <span className={date ? "" : "text-muted-foreground"}>
             {date ? format(date, "PPP") : placeholder}
@@ -238,7 +192,7 @@ function DatePickerInput({
           <ChevronDown className="h-4 w-4 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto overflow-hidden p-0" align="start">
+      <PopoverContent className="w-auto overflow-hidden p-0" align="start" collisionPadding={4}>
         <Calendar
           mode="single"
           selected={date}
@@ -928,52 +882,43 @@ function DoneSection({
 }
 
 // "Run now": fires the routine's action immediately — real execution, the same
-// path as a scheduled fire. The button disables while the request is in flight,
-// and when the routine is already running or paused. A run-level failure surfaces
-// on the card via the status badge once the list refetches; a request that never
-// reached the server has nothing to refetch, so it reports through `onError`.
+// path as a scheduled fire. The card owns the in-flight state, since the "⋯"
+// menu's Run now shares it.
 function RunNowButton({
-  routineId,
   label,
   disabled,
-  onError,
+  inFlight,
+  onRun,
 }: {
-  routineId: string;
   label: string;
   disabled: boolean;
-  onError: (message: string) => void;
+  inFlight: boolean;
+  onRun: () => void;
 }) {
   const { t } = useTranslation("routines");
-  const runNow = useRunRoutineNow();
-  const [inFlight, setInFlight] = useState(false);
 
-  const handleRun = async () => {
-    if (inFlight || disabled) return;
-    setInFlight(true);
-    try {
-      await runNow(routineId);
-    } catch {
-      onError(t("errors.runFailed"));
-    } finally {
-      setInFlight(false);
-    }
-  };
-
+  // Hidden on phones while idle so the routine name keeps the row's width; the
+  // "⋯" menu offers Run now there. It shows during a run so the spinner confirms
+  // a run started from the menu.
   return (
     <Button
       variant="outline"
       size="sm"
-      onClick={handleRun}
+      onClick={onRun}
       disabled={disabled || inFlight}
       aria-label={
         inFlight ? t("run.loadingLabel", { name: label }) : t("run.ariaLabel", { name: label })
       }
-      className="gap-2 text-muted-foreground"
+      className={`gap-2 text-muted-foreground ${inFlight ? "" : "max-sm:hidden"}`}
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("run.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("run.loadingLabel", { name: label })}
+        />
       ) : (
-        <Play className="h-3.5 w-3.5" aria-hidden />
+        <Play data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("run.now")}
     </Button>
@@ -1021,9 +966,13 @@ function StopButton({
       className="gap-2 border-destructive/30 text-destructive-fg hover:bg-destructive/10 hover:text-destructive-fg"
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("stop.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("stop.loadingLabel", { name: label })}
+        />
       ) : (
-        <Square className="h-3.5 w-3.5" aria-hidden />
+        <Square data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("stop.now")}
     </Button>
@@ -1050,16 +999,8 @@ function RoutineCard({
 
   const triggerPhrase = describeTrigger(routine.trigger);
   const outcomePhrase = describeOutcome(routine.actionName, routine.args);
-  // The guardian-written name is the routine's intent and headlines the row.
-  // Agent-created routines often carry a machine name equal to the action — no
-  // real name to show — so the humanized action phrase becomes the title.
-  const trimmedName = routine.name.trim();
-  const hasMeaningfulName =
-    trimmedName !== "" &&
-    trimmedName !== routine.actionName &&
-    trimmedName !== artifactLocalName(routine.actionName);
   const title = routineDisplayName(routine);
-  const accessibleName = hasMeaningfulName ? trimmedName : `${triggerPhrase}, ${outcomePhrase}`;
+  const accessibleName = hasOwnName(routine) ? title : `${triggerPhrase}, ${outcomePhrase}`;
 
   // Only a truly-running run is stoppable. A pending_approval run has no live
   // process to kill, so it keeps the normal Run-now control.
@@ -1084,12 +1025,21 @@ function RoutineCard({
       : { lead: "next run ", value: nextRel }
     : null;
 
-  const handleMenuRun = async () => {
-    if (!routine.enabled || isStoppable) return;
+  // One in-flight state for the inline button and the menu item, so neither can
+  // start a second run while the first request is pending. The request resolves
+  // only when the run finishes. A run-level failure surfaces on the card via the
+  // status badge once the list refetches; a request that never reached the
+  // server has nothing to refetch, so it reports through `onError`.
+  const [runInFlight, setRunInFlight] = useState(false);
+  const handleRun = async () => {
+    if (runInFlight || !routine.enabled || isStoppable) return;
+    setRunInFlight(true);
     try {
       await runNow(routine.id);
     } catch {
       onError(t("errors.runFailed"));
+    } finally {
+      setRunInFlight(false);
     }
   };
 
@@ -1103,7 +1053,7 @@ function RoutineCard({
       <Link
         to={`/routines/${routine.id}`}
         aria-label={accessibleName}
-        className="group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group flex min-w-0 flex-1 items-center gap-3 rounded-8 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[var(--control-min-h)]"
       >
         <span
           className={`h-2 w-2 flex-none rounded-full ${
@@ -1143,10 +1093,10 @@ function RoutineCard({
           <StopButton routineId={routine.id} label={accessibleName} onError={onError} />
         ) : (
           <RunNowButton
-            routineId={routine.id}
             label={accessibleName}
             disabled={!routine.enabled}
-            onError={onError}
+            inFlight={runInFlight}
+            onRun={handleRun}
           />
         )}
         <Switch
@@ -1164,7 +1114,10 @@ function RoutineCard({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled={!routine.enabled || isStoppable} onSelect={handleMenuRun}>
+            <DropdownMenuItem
+              disabled={!routine.enabled || isStoppable || runInFlight}
+              onSelect={handleRun}
+            >
               {t("run.now")}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -1296,8 +1249,9 @@ function ActionPicker({
           role="combobox"
           aria-expanded={open}
           aria-invalid={invalid || undefined}
+          align="between"
           className={cn(
-            "w-full justify-between",
+            "w-full",
             invalid && "border-destructive focus-visible:ring-destructive/20",
           )}
         >
@@ -1915,7 +1869,6 @@ function CreateRoutineModal({
                             </FieldLabel>
                             <Input
                               id="routine-eventname"
-                              list="routine-event-names"
                               value={field.state.value}
                               onChange={(e) => field.handleChange(e.target.value)}
                               onBlur={field.handleBlur}
@@ -1923,13 +1876,6 @@ function CreateRoutineModal({
                               className="font-mono"
                               aria-invalid={invalid || undefined}
                             />
-                            <datalist id="routine-event-names">
-                              <option value="action:completed" />
-                              <option value="action:failed" />
-                              <option value="message:received" />
-                              <option value="approval:resolved" />
-                              <option value="routine:fired" />
-                            </datalist>
                             <p className="text-aux text-muted-foreground">
                               {t("modal.hints.eventName")}
                             </p>
@@ -1979,7 +1925,8 @@ function CreateRoutineModal({
                             variant="outline"
                             disabled
                             aria-label={t("modal.actionPicker.loading")}
-                            className="w-full justify-between"
+                            align="between"
+                            className="w-full"
                           >
                             <span aria-hidden className="text-muted-foreground">
                               {t("modal.actionPicker.loading")}
@@ -2126,10 +2073,7 @@ export default function RoutinesPage() {
   // owns the cache, and mutations invalidate it to re-read server truth rather
   // than hand-merging fields into local state.
   const { routines: routineData, isLoading: loading, error: loadError, refetch } = useRoutines();
-  // The hook types triggers with a wider union (it admits unknown trigger types
-  // for the card view's honest fallback); this page's Timeline/Calendar code uses
-  // the narrower schedule|event discriminated union. Same JSON at runtime.
-  const routines = (routineData ?? []) as Routine[];
+  const routines = routineData ?? [];
   const invalidate = useInvalidateRoutines();
   const [view, setView] = useState<ViewMode>("table");
   const [showCreate, setShowCreate] = useState(false);
@@ -2280,7 +2224,7 @@ export default function RoutinesPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" className="justify-between gap-2">
+                      <Button variant="outline" align="between" className="gap-2">
                         <span className="flex items-center gap-2 text-muted-foreground">
                           <Filter className="size-4" aria-hidden />
                           <span className="text-foreground">

@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { Bot } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { WeChatIcon } from "@/components/brand-icons/connection-badges";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,12 @@ function EmailGlyph({ className }: { className?: string }) {
   );
 }
 
+/** Agents has no brand of its own, so it draws the bot mark the Connections
+ *  card already gives it. */
+function AgentsGlyph({ className }: { className?: string }) {
+  return <Bot className={className} aria-hidden="true" />;
+}
+
 /** The glyph a channel with no entry of its own draws with: a speech bubble,
  *  which reads as "a channel" without claiming to be any particular one. */
 function GenericChannelGlyph({ className }: { className?: string }) {
@@ -126,6 +133,7 @@ export const CHANNEL_META: Record<string, ChannelMeta> = {
   wechat_user: { labelKey: "channels.wechat", Glyph: WeChatIcon },
   email: { labelKey: "channels.email", Glyph: EmailGlyph },
   feishu: { labelKey: "channels.feishu" },
+  agents: { labelKey: "channels.agents", Glyph: AgentsGlyph },
 };
 
 /**

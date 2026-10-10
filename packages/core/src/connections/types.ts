@@ -4,44 +4,24 @@
 // the `expiresAt` envelope).
 
 import type {
-  Attachment,
   ChannelMessage,
   ConversationDescriptor,
   ConversationId,
-  MessageAddressing,
   MessageReceipt,
-  MessageReplyReference,
   OutgoingMessage,
-  TalkActivity,
-  TalkDirectMessaging,
-  TalkInboundMedia,
+  ChannelActivity,
+  ChannelDirectMessaging,
+  ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
-// A Connection's conversational surface, as its builder implements it and the
-// router dispatches it. Core-internal: apps reach channels through the
-// channels service (actions) or a hook's `channels`, never through a Talk.
-
-/** A message as a Talk delivers it, before a channel names itself and the
- *  direction on it ({@link ChannelMessage}). Provider-native data is an opaque
- *  pass-through token reserved for a feature on the same provider. */
-export interface InboundMessage {
-  messageId: string;
-  conversationId: ConversationId;
-  /** Parent conversation when this message belongs to a native thread. */
-  parentConversationId?: ConversationId;
-  senderId: string;
-  senderDisplayName?: string;
-  senderUsername?: string;
-  text: string;
-  attachments: Attachment[];
-  timestamp: Date;
-  replyTo?: MessageReplyReference;
-  thread?: { kind: "dm" | "group" | "topic"; name?: string };
-  addressing?: MessageAddressing;
-  raw?: unknown;
-}
+// A Connection's conversational surface, as its builder implements it
+// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
+// through `Connection.withTalker`: apps reach channels through the channels
+// service (actions) or a hook's `channels`. A talker delivers each message as
+// the channel's own record: a `ChannelMessage` naming the channel it backs,
+// with direction `inbound`.
 
 /**
  * The platform's own history of a Connection's conversations: at most `limit`
@@ -69,32 +49,22 @@ export interface TalkDirectory {
 
 export interface TalkFeatureMap {
   history: TalkHistory;
-  inboundMedia: TalkInboundMedia;
-  activity: TalkActivity;
+  inboundMedia: ChannelInboundMedia;
+  activity: ChannelActivity;
   directory: TalkDirectory;
-  directMessaging: TalkDirectMessaging;
+  directMessaging: ChannelDirectMessaging;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;
 
-export interface Talk {
-  subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
-}
-
-/** Routing keyed by Connection id: pairing and ordered admission run here,
- *  before a channel's inbound hears anything. */
-export interface TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>>;
-  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
-}
+/**
+ * What a talker offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the talker
+ * does not offer it. The registry reads a field each time it is used, so a
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
+ */
+export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
@@ -242,8 +212,22 @@ export interface Connection {
   readonly auth: AuthState;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
+  /** Whether `cap` is built and live now. `status()` reads the grants; this
+   *  reads whether the capability's instance exists. */
+  isUnlocked(cap: Capability): boolean;
+  /**
+   * Calls `call` with the talker of the live epoch and answers what it
+   * returns, or undefined while talk is locked. Starting and stopping the
+   * talker are the registry's. A `CredentialRejected` that
+   * `call` throws, or that the promise it returns rejects with, runs the
+   * grant's fault flow before it reaches the caller. Read the talker inside
+   * `call` only: a talker held past it outlives a relock unguarded.
+   */
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
+  /** Hears each message the live talker delivers until talk relocks, or null
+   *  while talk is locked. */
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
-  get talk(): Talk | null;
   get act(): Act | null;
   get watch(): Watch | null;
 }
@@ -263,14 +247,13 @@ export interface RuntimeKit {
 }
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker {
-  start(deliver: (msg: InboundMessage) => void, fault: (err: StreamFault) => void): void;
+export interface Talker extends TalkFeatures {
+  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
   send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
 }
 
 /** Builder-side Act implementation. */
@@ -341,6 +324,15 @@ export interface ConnectionDescriptor {
        *  backs answers `messages.query` through it. Absent means it does not:
        *  the channel's messages come from a store, or from nowhere. */
       history?: boolean;
+      /** True when the surface that delivers this channel's next human turn
+       *  renders interactive cards, so an agent may pause on one for a reply.
+       *  Absent means it does not, and a card falls back to prose. */
+      interactiveCards?: boolean;
+      /** False when every message in a conversation already reaches the agent
+       *  as a turn, so a prompt needs no preamble of stored messages the agent
+       *  has not seen. Absent means the channel stores messages the agent
+       *  never saw, such as other people's lines in a group. */
+      promptContext?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

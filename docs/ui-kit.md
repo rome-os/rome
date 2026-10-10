@@ -4,7 +4,7 @@
 
 ## Consumers
 
-The consumers are the dashboard (`packages/web`), first-party apps (`rome_apps/*`), and scaffolded apps. Rome Cloud, desktop-base-web, and mobile are explicit non-goals. Do not shape an API around them.
+The consumers are the dashboard (`packages/web`), first-party apps (`rome_apps/*`), and scaffolded apps. `packages/channel-test-ui`, the browser UI for the channel scenario tests, is a development tool that imports the kit as published. It shapes no API, and it reads the dashboard's theme helpers (`packages/web/src/lib/theme.ts`) for the theme values the kit leaves to the host. Rome Cloud, desktop-base-web, and mobile are explicit non-goals. Do not shape an API around them.
 
 The app scaffold (`packages/app-template/template/package.json`) depends on this package through a concrete `^` range. A release here therefore reaches external apps that no monorepo typecheck covers. Treat the published surface accordingly, and bump the scaffold's range when a new app should start on a newer minor.
 
@@ -28,4 +28,4 @@ An app bundle in a Shadow DOM needs that import in its own stylesheet. The host 
 
 ## The kit ships style vocabulary, not values
 
-Tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).
+The platform sizing scales, tokens, variants, and base-layer defaults belong in `src/styles.css`. Concrete theme values stay host-owned in `packages/web` and the app-web SDK. The layer rules that keep this sound are in [design-system.md](design-system.md#rules-that-keep-the-two-layers-sound).

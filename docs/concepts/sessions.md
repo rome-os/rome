@@ -92,7 +92,7 @@ A block is one completed piece of model content inside a turn: text, thinking, a
 
 - A tool use block is identified by its tool-use id, and the tool result that answers it carries the same tool-use id. For a subagent call, the subagent start and result events that stand in for those two blocks carry the same tool-use id.
 - A text or thinking block is identified by its block id when the provider adapter can derive one from the provider's own identifiers. The id is opaque, and a block for which the adapter cannot derive one has none. Rome never borrows another block's id for it.
-- A block has at most one identity, unique within its turn: a block id or a tool-use id, never both.
+- A block has at most one identity: a block id or a tool-use id, never both. A block id is unique within its turn. A tool-use id is shared only by a tool use and the tool result that answers it.
 - Provider-native units are translated into blocks and events at the provider adapter. Nothing outside the adapter depends on a provider's own unit.
 
 **Not to be confused with:**

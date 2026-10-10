@@ -3,12 +3,11 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Chat, type SessionMessage } from "@/components/chat/Chat";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
-import {
-  fetchRomeNewsDefinitions,
-  getQuickEntries,
-  type QuickEntry,
-  type QuickEntryDefinition,
-} from "@/config/quick-entries";
+import { fetchRomeNewsDefinitions, getQuickEntries } from "@/config/quick-entries";
+import type {
+  ResolvedRomeNewsItem,
+  RomeNewsDefinition,
+} from "@rome-os/rome-web-components/news-item/schema";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -124,7 +123,7 @@ export function ChatComponent({
     [sessionId, onSessionNotFound, navigate, hideSidebar],
   );
   const [cloudQuickEntryDefinitions, setCloudQuickEntryDefinitions] = useState<
-    QuickEntryDefinition[]
+    RomeNewsDefinition[]
   >([]);
   const quickEntries = useMemo(
     () => getQuickEntries(cloudQuickEntryDefinitions, i18n.language),
@@ -201,7 +200,7 @@ export function ChatComponent({
   const [appStoreSrc, setAppStoreSrc] = useState<string | null>(null);
 
   const handleActivateQuickEntry = useCallback(
-    (entry: QuickEntry) => {
+    (entry: ResolvedRomeNewsItem) => {
       switch (entry.type) {
         case "chat": {
           draftComposerRef.current?.setSkillSelection(
@@ -370,7 +369,7 @@ export function ChatComponent({
 
   return (
     <div
-      className="relative flex h-full flex-col bg-chat-canvas [--background:var(--chat-canvas)]"
+      className="relative flex h-full min-h-0 flex-col bg-chat-canvas [--background:var(--chat-canvas)]"
       onDragEnter={handleDraftDragEnter}
       onDragOver={handleDraftDragOver}
       onDragLeave={handleDraftDragLeave}

@@ -8,7 +8,7 @@ import type {
   ConversationId,
   ConversationSettingsControl,
   InboundEvent,
-  TalkActivitySession,
+  ChannelActivitySession,
 } from "@rome-os/app-runtime";
 
 const log = createAppLogger("channel-message-hook");
@@ -158,7 +158,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     connectionId: string,
     attachments: InboundEvent["message"]["attachments"],
     routedAgentName: string | undefined,
-    activity: Promise<TalkActivitySession | null>,
+    activity: Promise<ChannelActivitySession | null>,
   ): Promise<void> {
     const slowTurnMs = this.options.slowTurnMs ?? SLOW_TURN_MS;
     const slow = setTimeout(() => {

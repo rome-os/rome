@@ -10,17 +10,18 @@ import {
   installTestSpanHarness,
   type SpanHarness,
   type TestDb,
+  createActionEngineRepos,
 } from "../test/helpers.js";
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { MODEL_MAP, type ForkRunParams } from "./types.js";
+import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
-import type { AgentMessage } from "../types.js";
+import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
 import { actionExecutionContext } from "../actions/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -28,6 +29,7 @@ import {
   claimLegacyArtifactName,
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
+  type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import * as pathsModule from "../paths.js" with { rstest: "importActual" };
 
@@ -57,6 +59,7 @@ import {
   type AgentSession,
   type AgentSessionManager,
   type AgentTurnHandle,
+  subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
 import { createTurnMiddlewareChain } from "./turn-middleware.js";
@@ -68,6 +71,7 @@ import type {
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -87,16 +91,17 @@ function createTestModelResolver({ providers }: { providers: ModelProvider[] }) 
 
 function makeOpenSessionFromRun(
   providerId: ProviderId,
-  run: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentMessage>,
+  run: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentEvent>,
 ): (params: ModelSessionParams) => Promise<import("./agent-runner.js").ModelSession> {
   return async (params) => createSessionFromRun(providerId, run, params);
 }
 
 const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
+const EXPLORE_TOOL = subagentToolName("core:test-explore");
 
 /** Collect all messages from an async iterable into an array. */
-async function collectMessages(iterable: AsyncIterable<AgentMessage>): Promise<AgentMessage[]> {
-  const messages: AgentMessage[] = [];
+async function collectMessages(iterable: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
+  const messages: AgentEvent[] = [];
   for await (const msg of iterable) {
     messages.push(msg);
   }
@@ -106,7 +111,9 @@ async function collectMessages(iterable: AsyncIterable<AgentMessage>): Promise<A
 describe("AgentRunner", () => {
   let testDb: TestDb;
   let agentLoader: AgentLoader;
+  let artifactIdentity: ArtifactIdentityContext;
   let sessionManager: SessionManager;
+  let sessionsRepo: SessionsRepository;
   let promptBuilder: PromptBuilder;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
@@ -117,15 +124,16 @@ describe("AgentRunner", () => {
     // short-circuit never fires unless a test opts in.
 
     testDb = createTestDb();
-    const repo = new SessionsRepository(testDb.db);
+    sessionsRepo = new SessionsRepository(testDb.db);
 
-    agentLoader = new AgentLoader();
+    artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+    agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionManager = new SessionManager(repo);
+    sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
     promptBuilder = new PromptBuilder();
-    actionRegistry = new ActionRegistryImpl([]);
-    actionEngine = new ActionEngine(actionRegistry);
+    actionRegistry = new ActionRegistryImpl();
+    actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
     mockProvider = new MockModelProvider();
   });
 
@@ -195,7 +203,7 @@ describe("AgentRunner", () => {
       executeAction: async () => ({ ok: true }),
       executeSubagent: async () => "delegated",
     });
-    const drained: AgentMessage[] = [];
+    const drained: AgentEvent[] = [];
     const collector = (async () => {
       for await (const msg of session.events) drained.push(msg);
     })();
@@ -231,7 +239,7 @@ describe("AgentRunner", () => {
     // Webchat retains long-lived conversation semantics across reacquires.
     const key = {
       agentName: "test-code-backed",
-      channelThreadKey: "webchat:session-reuse:large-model:opus",
+      channelThreadKey: "webchat:session-reuse",
     };
     const first = await manager.acquire(key);
     const second = await manager.acquire(key);
@@ -270,6 +278,71 @@ describe("AgentRunner", () => {
     await session.close("shutdown");
   });
 
+  it("fills a re-entry's conversation id from its channel address", async () => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-1", "Webchat chat");
+    const stop = new Error("stop after acquire");
+    const acquireBySessionId = rs.fn(async () => {
+      throw stop;
+    });
+    const manager = { acquireBySessionId } as unknown as AgentSessionManager;
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await expect(
+      collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: "agent-session-1",
+          prompt: "continue",
+          threadContext: { channel: "webchat", threadId: "chat-1" },
+        }),
+      ),
+    ).rejects.toBe(stop);
+
+    expect(acquireBySessionId).toHaveBeenCalledWith(
+      "agent-session-1",
+      "test-main",
+      expect.objectContaining({
+        threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
+      }),
+    );
+  });
+
+  it.each([
+    ["saves", true, ["trace"]],
+    ["leaves", undefined, []],
+  ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-trace", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-trace",
+        prompt: "continue",
+        threadContext: { channel: "webchat", threadId: "chat-trace", romeSessionId: "chat-trace" },
+        persistTrace,
+        persistTranscript: false,
+      }),
+    );
+
+    const messages = await webchatRepo.getMessages("chat-trace");
+    expect(messages.map((message) => message.role)).toEqual(roles);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
@@ -291,7 +364,7 @@ describe("AgentRunner", () => {
       peek: rs.fn(() => source),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
-    const runner = new AgentRunner(manager);
+    const runner = new AgentRunner(manager, agentLoader);
 
     const messages = await collectMessages(
       runner.runForked({
@@ -346,7 +419,7 @@ describe("AgentRunner", () => {
         peek: rs.fn(() => source),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
-      const runner = new AgentRunner(manager, undefined, repo);
+      const runner = new AgentRunner(manager, agentLoader, repo);
 
       const messages = await collectMessages(
         runner.runForked({
@@ -357,6 +430,7 @@ describe("AgentRunner", () => {
           threadContext: {
             channel: "webchat",
             threadId: "parent-chat",
+            romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
           },
@@ -428,7 +502,7 @@ describe("AgentRunner", () => {
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const turnStreams = createAgentTurnStreamRegistry();
-    const runner = new AgentRunner(manager, undefined, undefined, turnStreams);
+    const runner = new AgentRunner(manager, agentLoader, undefined, turnStreams);
     const iterator = runner
       .runForked({
         agentName: "main",
@@ -501,7 +575,7 @@ describe("AgentRunner", () => {
     return {
       providerId: "mock",
       model: "mock-model",
-      events: (async function* (): AsyncIterable<AgentMessage> {})(),
+      events: (async function* (): AsyncIterable<AgentEvent> {})(),
       async sendUserInput() {},
       async fork() {
         throw new Error("nested fork unsupported");
@@ -523,7 +597,7 @@ describe("AgentRunner", () => {
       onFork?: (params: ModelSessionForkParams) => void;
       appCatalog?: Pick<AppCatalog, "get">;
     } = {},
-  ): Promise<AgentMessage[]> {
+  ): Promise<AgentEvent[]> {
     const agentName = opts.agentName ?? "test-main";
     const provider = withForkSupport(
       opts.provider ?? new MockModelProvider([[{ type: "result", content: "Done" }]]),
@@ -535,7 +609,12 @@ describe("AgentRunner", () => {
       appCatalog: opts.appCatalog,
     });
     const first = await collectMessages(
-      runner.run({ agentName, prompt: "Hi", channelThreadKey: "webchat:fork-1" }),
+      runner.run({
+        agentName,
+        prompt: "Hi",
+        channelThreadKey: "webchat:fork-1",
+        threadContext: { channel: "webchat", threadId: "fork-1" },
+      }),
     );
     const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
     return collectMessages(
@@ -555,11 +634,11 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_input_delta",
                 toolUseId: "tu-explore-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 content: "{",
               };
               yield {
@@ -594,7 +673,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork complete" };
             })(),
           }),
@@ -649,7 +728,7 @@ describe("AgentRunner", () => {
         new MockModelProvider([[{ type: "result", content: "Source ready" }]]),
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork complete" };
             })(),
           }),
@@ -658,11 +737,11 @@ describe("AgentRunner", () => {
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true, idleTtlMs: 100 },
       );
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       const key = { agentName: "test-main", channelThreadKey: "webchat:fork-idle-lease" };
-      let firstFork: AsyncIterator<AgentMessage> | undefined;
-      let secondFork: AsyncIterator<AgentMessage> | undefined;
-      let resumedFork: AsyncIterator<AgentMessage> | undefined;
+      let firstFork: AsyncIterator<AgentEvent> | undefined;
+      let secondFork: AsyncIterator<AgentEvent> | undefined;
+      let resumedFork: AsyncIterator<AgentEvent> | undefined;
 
       try {
         const sourceMessages = await collectMessages(
@@ -741,7 +820,7 @@ describe("AgentRunner", () => {
         (params) => {
           openParams.push(params);
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork summary" };
             })(),
           });
@@ -750,11 +829,11 @@ describe("AgentRunner", () => {
       );
 
       expect(openParams).toHaveLength(1);
-      expect(openParams[0].model).toBe(MODEL_MAP.small);
+      expect(openParams[0].model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
       const row = await new SessionsRepository(testDb.db).findByChannelThreadKey("webchat:fork-1");
-      expect(row).toMatchObject({ model: MODEL_MAP.large });
+      expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
     it("leaves a resumable thread behind for a fork that ran on its own provider thread", async () => {
@@ -764,7 +843,7 @@ describe("AgentRunner", () => {
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
             appliedReasoningEffort: "max",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -794,7 +873,7 @@ describe("AgentRunner", () => {
       });
       // A fork never rewrites its parent: the source keeps its own pin.
       await expect(repo.findByChannelThreadKey("webchat:fork-1")).resolves.toMatchObject({
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
     });
 
@@ -810,7 +889,7 @@ describe("AgentRunner", () => {
             openParams.push(params);
             return forkSessionStub({
               providerThreadId: "fork-provider-thread",
-              events: (async function* (): AsyncIterable<AgentMessage> {
+              events: (async function* (): AsyncIterable<AgentEvent> {
                 yield { type: "result", content: "Fork answer" };
               })(),
             });
@@ -834,7 +913,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "shared-source-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -858,7 +937,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -871,7 +950,7 @@ describe("AgentRunner", () => {
       const noThread = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork answer" };
             })(),
           }),
@@ -881,7 +960,7 @@ describe("AgentRunner", () => {
         () =>
           forkSessionStub({
             providerThreadId: "fork-provider-thread",
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "error", error: "the branch blew up" };
             })(),
           }),
@@ -903,7 +982,7 @@ describe("AgentRunner", () => {
     it("synthesizes error + turn_end when the fork stream ends without a terminal", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "text", content: "partial fork output" };
           })(),
         }),
@@ -952,7 +1031,7 @@ describe("AgentRunner", () => {
     it("a close-time fork error does not escape after turn_end", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "result", content: "Fork summary" };
           })(),
           async close() {
@@ -968,7 +1047,7 @@ describe("AgentRunner", () => {
     it("brackets a user-stopped forked turn with status=interrupted", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield {
               type: "result",
               content: "",
@@ -995,7 +1074,7 @@ describe("AgentRunner", () => {
     it("brackets a successful forked turn with status=completed", async () => {
       const messages = await runForkAgainstLiveSession(() =>
         forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "text", content: "fork output" };
             yield { type: "result", content: "Fork summary" };
           })(),
@@ -1034,7 +1113,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession((openParams) => {
         forkOpen = openParams;
         return forkSessionStub({
-          events: (async function* (): AsyncIterable<AgentMessage> {
+          events: (async function* (): AsyncIterable<AgentEvent> {
             yield { type: "result", content: "Fork summary" };
           })(),
         });
@@ -1054,7 +1133,7 @@ describe("AgentRunner", () => {
       );
       await expect(
         forkOpen!.executeSubagent(
-          "test-explore",
+          EXPLORE_TOOL,
           { prompt: "x" },
           { toolUseId: "isolated-subagent" },
         ),
@@ -1065,7 +1144,7 @@ describe("AgentRunner", () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
-        if (name !== "test-main") return record;
+        if (record.config.name !== "test-main") return record;
         return {
           ...record,
           metadata: {
@@ -1082,7 +1161,7 @@ describe("AgentRunner", () => {
           (openParams) => {
             forkOpen = openParams;
             return forkSessionStub({
-              events: (async function* (): AsyncIterable<AgentMessage> {
+              events: (async function* (): AsyncIterable<AgentEvent> {
                 yield { type: "result", content: "Fork summary" };
               })(),
             });
@@ -1119,7 +1198,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "Fork summary" };
             })(),
           });
@@ -1136,7 +1215,7 @@ describe("AgentRunner", () => {
       expect(forkOpen!.getSkillCatalog).toBe(sourceOpen.getSkillCatalog);
       expect(forkOpen!.getActionCatalog().map((a) => a.name)).toEqual(["demo_action"]);
       expect(forkOpen!.subagentTools).toBe(sourceOpen.subagentTools);
-      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain("test-explore");
+      expect(forkOpen!.subagentTools.map((t) => t.name)).toContain(EXPLORE_TOOL);
       // test-main declares Read + Edit; Bash stays provider-only in both.
       expect(forkOpen!.builtinTools).toBe(sourceOpen.builtinTools);
       expect(forkOpen!.builtinTools).toEqual(["Read", "Edit"]);
@@ -1170,7 +1249,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               await openParams.executeAction("demo_action", {});
               yield { type: "result", content: "acted" };
             })(),
@@ -1207,22 +1286,22 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 input: { prompt: "dig" },
               };
               const completion = (await openParams.executeSubagent(
-                "test-explore",
+                EXPLORE_TOOL,
                 { prompt: "dig" },
                 { toolUseId: "fork-subagent-1" },
               )) as { output: string };
               yield {
                 type: "tool_result",
                 toolUseId: "fork-subagent-1",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 output: completion,
               };
               yield { type: "result", content: completion.output };
@@ -1234,7 +1313,7 @@ describe("AgentRunner", () => {
       const start = messages.find((m) => m.type === "subagent_start");
       expect(start).toMatchObject({
         toolUseId: "fork-subagent-1",
-        agentName: "test-explore",
+        agentName: "core:test-explore",
       });
       const childResult = messages.find((m) => m.type === "subagent_result");
       expect(childResult).toMatchObject({
@@ -1245,7 +1324,8 @@ describe("AgentRunner", () => {
       expect(
         messages.some(
           (m) =>
-            m.type === "text" && (m as AgentMessage & { agent?: string }).agent === "test-explore",
+            m.type === "text" &&
+            (m as AgentEvent & { agent?: string }).agent === "core:test-explore",
         ),
       ).toBe(false);
       const terminal = messages.find((m) => m.type === "result");
@@ -1262,7 +1342,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "result",
                 content: JSON.stringify(payload),
@@ -1288,7 +1368,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield { type: "result", content: "forgot to submit" };
             })(),
           }),
@@ -1308,7 +1388,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         () =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_result",
                 toolUseId: "tu-fork-park",
@@ -1354,7 +1434,7 @@ describe("AgentRunner", () => {
       const messages = await runForkAgainstLiveSession(
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               actionResult = await openParams.executeAction("demo_action", {});
               yield { type: "result", content: "done" };
             })(),
@@ -1388,7 +1468,7 @@ describe("AgentRunner", () => {
       let actionResult: unknown;
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         actionResult = await params.executeAction("demo_action", {});
         yield { type: "result", content: "done" };
       };
@@ -1423,7 +1503,7 @@ describe("AgentRunner", () => {
         (openParams) => {
           forkOpen = openParams;
           return forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               submitResponse = await openParams.executeSubmitOutput!({ answer: "candidate" });
               yield { type: "result", content: "tried to submit" };
             })(),
@@ -1434,7 +1514,7 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       // A conversational-handback source (interactive-summon child session):
       // No config outputSchema; the session-scoped contract wires handback tools.
       const source = await manager.acquire(
@@ -1487,22 +1567,22 @@ describe("AgentRunner", () => {
         ]),
         (openParams) =>
           forkSessionStub({
-            events: (async function* (): AsyncIterable<AgentMessage> {
+            events: (async function* (): AsyncIterable<AgentEvent> {
               yield {
                 type: "tool_use",
                 id: "fork-subagent-2",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 input: { prompt: "fork dig" },
               };
               const completion = (await openParams.executeSubagent(
-                "test-explore",
+                EXPLORE_TOOL,
                 { prompt: "fork dig" },
                 { toolUseId: "fork-subagent-2" },
               )) as { output: string };
               yield {
                 type: "tool_result",
                 toolUseId: "fork-subagent-2",
-                tool: "test-explore",
+                tool: EXPLORE_TOOL,
                 output: completion,
               };
               yield { type: "result", content: completion.output };
@@ -1513,7 +1593,7 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
       });
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       const first = await collectMessages(
         runner.run({ agentName: "test-main", prompt: "Hi", channelThreadKey: "webchat:fork-iso" }),
       );
@@ -1530,7 +1610,7 @@ describe("AgentRunner", () => {
       );
 
       // The fork's subagent is always a fresh session owned by the fork.
-      const childOpens = provider.sessions.filter((s) => s.agentName === "test-explore");
+      const childOpens = provider.sessions.filter((s) => s.agentName === "core:test-explore");
       expect(childOpens).toHaveLength(1);
       expect(childOpens[0].sessionId).not.toBe(start.sessionId);
       expect(childOpens[0].isNewSession).toBe(true);
@@ -1579,14 +1659,16 @@ describe("AgentRunner", () => {
       agentLoader,
       appCatalog,
       sessionManager,
+      sessionsRepo,
       promptBuilder,
       actionRegistry,
       modelResolver,
       actionEngine,
       webchatRepo: new WebChatRepository(testDb.db),
       capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(),
+      skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
         webchatRepo: new WebChatRepository(testDb.db),
@@ -1618,13 +1700,13 @@ describe("AgentRunner", () => {
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
-    return new AgentRunner(manager);
+    return new AgentRunner(manager, agentLoader);
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
     let closed = false;
-    const resolvers: Array<(item: IteratorResult<AgentMessage>) => void> = [];
-    const finish = (): IteratorResult<AgentMessage> => ({ value: undefined as never, done: true });
+    const resolvers: Array<(item: IteratorResult<AgentEvent>) => void> = [];
+    const finish = (): IteratorResult<AgentEvent> => ({ value: undefined as never, done: true });
 
     return {
       providerId: "mock",
@@ -1632,7 +1714,7 @@ describe("AgentRunner", () => {
       events: {
         [Symbol.asyncIterator]() {
           return {
-            async next(): Promise<IteratorResult<AgentMessage>> {
+            async next(): Promise<IteratorResult<AgentEvent>> {
               if (closed) return finish();
               return await new Promise((resolve) => {
                 resolvers.push(resolve);
@@ -1891,7 +1973,7 @@ describe("AgentRunner", () => {
                   forkSessionStub({
                     providerId: "anthropic",
                     model: "claude-fork",
-                    events: (async function* (): AsyncIterable<AgentMessage> {
+                    events: (async function* (): AsyncIterable<AgentEvent> {
                       yield { type: "result", content: "Fork complete" };
                     })(),
                   }),
@@ -1908,7 +1990,7 @@ describe("AgentRunner", () => {
         managerDeps(createTestModelResolver({ providers: [provider] })),
         { keepAliveAcrossTurns: true },
       );
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       const session = await manager.acquire({
         agentName: "test-main",
         channelThreadKey: "webchat:abort-fork",
@@ -1967,6 +2049,8 @@ describe("AgentRunner", () => {
         sessionId: "sess-1",
         status: "idle",
         sendTurn,
+        submitInput: rs.fn(),
+        runForkedTurn: rs.fn(),
         subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         interrupt: rs.fn(async () => undefined),
@@ -1978,9 +2062,10 @@ describe("AgentRunner", () => {
         }),
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
+        findWorkingDirBySessionId: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       };
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
 
       await collectMessages(
         runner.run({
@@ -2019,18 +2104,15 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const sessionInit = messages.find((m) => m.type === "session_init");
-      expect(sessionInit).toBeDefined();
-      expect(
-        (
-          sessionInit as {
-            type: "session_init";
-            sessionId: string;
-            systemPrompt?: string;
-            userPrompt?: string;
-          }
-        ).sessionId,
-      ).toBeDefined();
+      const sessionInit = messages.find((m) => m.type === "session_init") as {
+        type: "session_init";
+        sessionId: string;
+      };
+      const stored = await new SessionsRepository(testDb.db).findByChannelThreadKey(
+        "telegram:thread-new",
+      );
+      expect(stored?.id).toBe(sessionInit.sessionId);
+      expect(stored?.agentName).toBe("core:test-main");
     });
 
     it("reuses an active session for the same key", async () => {
@@ -2068,7 +2150,7 @@ describe("AgentRunner", () => {
       const repo = new SessionsRepository(testDb.db);
       const existingId = await repo.create({
         id: "expired-generation",
-        agentName: "test-main",
+        agentName: "core:test-main",
         channelThreadKey: "telegram:thread-reset",
       });
       await testDb.db
@@ -2105,12 +2187,12 @@ describe("AgentRunner", () => {
         existingId,
       );
       expect((await repo.findById(existingId))?.status).toBe("completed");
-      expect(await repo.findByChannelThreadKey("telegram:thread-reset", "test-main")).toMatchObject(
-        {
-          id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
-          status: "active",
-        },
-      );
+      expect(
+        await repo.findByChannelThreadKey("telegram:thread-reset", "core:test-main"),
+      ).toMatchObject({
+        id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
+        status: "active",
+      });
     });
 
     it("resumes a keyless run by explicit sessionId", async () => {
@@ -2158,13 +2240,6 @@ describe("AgentRunner", () => {
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
-      const repo = new SessionsRepository(testDb.db);
-      await repo.create({
-        id: "sess-old",
-        agentName: "test-main",
-        channelThreadKey: "telegram:t-1",
-        status: "active",
-      });
       const provider = new MockModelProvider();
       const modelResolver = createTestModelResolver({
         providers: [provider],
@@ -2173,7 +2248,14 @@ describe("AgentRunner", () => {
         keepAliveAcrossTurns: true,
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
-      const cached = await manager.acquire(key, { forceNewSession: true });
+      const cached = await manager.acquire(key);
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-old",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-1",
+        status: "active",
+      });
 
       expect(cached.sessionId).not.toBe("sess-old");
       expect(provider.sessions).toHaveLength(1);
@@ -2263,7 +2345,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toMatchObject({
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toMatchObject({
         sessionId: start.sessionId,
         turnId: start.turnId,
         provider: "mock",
@@ -2316,7 +2398,7 @@ describe("AgentRunner", () => {
       expect(start).toBeDefined();
       if (!start || start.type !== "turn_start") return;
 
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
     });
 
@@ -2370,7 +2452,7 @@ describe("AgentRunner", () => {
       if (!start || start.type !== "turn_start") return;
 
       expect(messages.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
-      expect(await sessionManager.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
+      expect(await sessionsRepo.getTurnCheckpoint(start.sessionId, start.turnId)).toBeNull();
       expect(lifecycle.finished[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
@@ -2392,7 +2474,7 @@ describe("AgentRunner", () => {
       expect(row).toMatchObject({
         provider: "mock",
         // The concrete model that actually ran, not the tier name.
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
     });
 
@@ -2422,7 +2504,7 @@ describe("AgentRunner", () => {
       await collectMessages(session.sendTurn({ prompt: "Three", reasoningEffort: "low" }).events);
       expect(
         await sessionManager.findReusableSession("webchat:effort-record", "test-main"),
-      ).toMatchObject({ model: MODEL_MAP.large, reasoningEffort: "low" });
+      ).toMatchObject({ model: "claude-opus-5-5[1m]", reasoningEffort: "low" });
       await manager.shutdown();
     });
 
@@ -2498,7 +2580,7 @@ describe("AgentRunner", () => {
       });
     });
 
-    it("ends an errored turn with turn_end status=error", async () => {
+    it("yields the model failure as one error, then ends the turn with status=error", async () => {
       const failingProvider: MockModelProvider = new MockModelProvider();
       failingProvider.run = async function* () {
         throw new Error("Model API failure");
@@ -2509,6 +2591,11 @@ describe("AgentRunner", () => {
         runner.run({ agentName: "test-main", prompt: "Fail" }),
       );
 
+      const errorMessages = messages.filter((m) => m.type === "error");
+      expect(errorMessages).toHaveLength(1);
+      expect((errorMessages[0] as { type: "error"; error: string }).error).toContain(
+        "Model API failure",
+      );
       expect(messages[messages.length - 1]).toMatchObject({
         type: "turn_end",
         status: "error",
@@ -2539,7 +2626,7 @@ describe("AgentRunner", () => {
         await collectMessages(runner.run({ agentName: "test-main", prompt: "Fail" }));
 
         const spans = await harness.finishedSpans();
-        const agentSpan = spans.find((s) => s.name === "agent:test-main");
+        const agentSpan = spans.find((s) => s.name === "agent:core:test-main");
         const modelSpan = spans.find((s) => s.name === "model.turn");
         expect(agentSpan?.status.code).toBe(SpanStatusCode.ERROR);
         expect(modelSpan?.status.code).toBe(SpanStatusCode.ERROR);
@@ -2552,7 +2639,7 @@ describe("AgentRunner", () => {
         await collectMessages(runner.run({ agentName: "test-main", prompt: "Hello" }));
 
         const spans = await harness.finishedSpans();
-        const agentSpan = spans.find((s) => s.name === "agent:test-main");
+        const agentSpan = spans.find((s) => s.name === "agent:core:test-main");
         const modelSpan = spans.find((s) => s.name === "model.turn");
         expect(agentSpan?.status.code).toBe(SpanStatusCode.OK);
         expect(modelSpan?.status.code).toBe(SpanStatusCode.OK);
@@ -2635,25 +2722,6 @@ describe("AgentRunner", () => {
         "Final answer",
       );
     });
-
-    it("yields error message on model failure", async () => {
-      const failingProvider: MockModelProvider = new MockModelProvider();
-      // Override run to throw
-      failingProvider.run = async function* () {
-        throw new Error("Model API failure");
-      };
-      const runner = createRunner(failingProvider);
-
-      const messages = await collectMessages(
-        runner.run({ agentName: "test-main", prompt: "Fail" }),
-      );
-
-      const errorMessages = messages.filter((m) => m.type === "error");
-      expect(errorMessages).toHaveLength(1);
-      expect((errorMessages[0] as { type: "error"; error: string }).error).toContain(
-        "Model API failure",
-      );
-    });
   });
 
   describe("agent lifecycle", () => {
@@ -2703,7 +2771,7 @@ describe("AgentRunner", () => {
         turn: {
           sessionId: expect.any(String),
           turnId: expect.any(String),
-          agentName: "test-main",
+          agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
           threadContext: {
             channel: "webchat",
@@ -2725,7 +2793,7 @@ describe("AgentRunner", () => {
         turn: {
           sessionId: lifecycle.started[0].turn.sessionId,
           turnId: lifecycle.started[0].turn.turnId,
-          agentName: "test-main",
+          agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
         },
         status: "completed",
@@ -2774,7 +2842,7 @@ describe("AgentRunner", () => {
 
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield {
           type: "tool_use",
           id: `tu-${params.prompt}`,
@@ -2885,7 +2953,7 @@ describe("AgentRunner", () => {
       const nestedCalls: import("./agent-runner.js").ModelRunParams[] = [];
       const runImplNested = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         nestedCalls.push(params);
 
         if (nestedCalls.length === 1 || nestedCalls.length === 3) {
@@ -2893,15 +2961,15 @@ describe("AgentRunner", () => {
           yield {
             type: "tool_use",
             id,
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: `Inspect ${nestedCalls.length}` },
           };
           const output = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: `Inspect ${nestedCalls.length}` },
             { toolUseId: id },
           );
-          yield { type: "tool_result", toolUseId: id, tool: "test-explore", output };
+          yield { type: "tool_result", toolUseId: id, tool: EXPLORE_TOOL, output };
           yield { type: "result", content: `Delegated ${nestedCalls.length}` };
           return;
         }
@@ -2947,8 +3015,10 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "test-main");
-      const childFinished = lifecycle.finished.filter((e) => e.turn.agentName === "test-explore");
+      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "core:test-main");
+      const childFinished = lifecycle.finished.filter(
+        (e) => e.turn.agentName === "core:test-explore",
+      );
 
       expect(nestedCalls[0].systemPrompt).toContain("```mermaid");
       expect(nestedCalls[1].systemPrompt).not.toContain("```mermaid");
@@ -2958,12 +3028,12 @@ describe("AgentRunner", () => {
       expect(childFinished[0].turn.parent).toEqual({
         sessionId: rootFinished[0].turn.sessionId,
         turnId: rootFinished[0].turn.turnId,
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(childFinished[1].turn.parent).toEqual({
         sessionId: rootFinished[1].turn.sessionId,
         turnId: rootFinished[1].turn.turnId,
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(childFinished[0].turn.parent?.turnId).not.toBe(childFinished[1].turn.parent?.turnId);
       expect(childFinished.map((e) => e.turn.threadContext?.channelUserId)).toEqual([
@@ -3107,7 +3177,7 @@ describe("AgentRunner", () => {
 
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield {
           type: "tool_use",
           id: "tu-shared-1",
@@ -3167,7 +3237,7 @@ describe("AgentRunner", () => {
       expect(call.systemPrompt).toContain("You are a test main agent.");
       expect(call.systemPrompt).toContain("Extra context");
       expect(provider.sessions[0]).toMatchObject({
-        agentName: "test-main",
+        agentName: "core:test-main",
       });
       expect(provider.sessions[0].appStoreListingId).toBeUndefined();
     });
@@ -3176,7 +3246,7 @@ describe("AgentRunner", () => {
       const getRecord = agentLoader.getRecord.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
         const record = getRecord(name);
-        if (name !== "test-main") return record;
+        if (record.config.name !== "test-main") return record;
         return {
           ...record,
           metadata: {
@@ -3218,7 +3288,7 @@ describe("AgentRunner", () => {
             "App-supplied session context.",
         );
         expect(provider.sessions[0]).toMatchObject({
-          agentName: "test-main",
+          agentName: "core:test-main",
           appStoreListingId: "@publisher/test-app",
         });
 
@@ -3257,6 +3327,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "webchat:prompt-surface",
+          threadContext: { channel: "webchat", threadId: "prompt-surface" },
         }),
       );
 
@@ -3267,6 +3338,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "telegram:prompt-surface",
+          threadContext: { channel: "telegram", threadId: "prompt-surface" },
         }),
       );
 
@@ -3314,7 +3386,7 @@ describe("AgentRunner", () => {
       };
     }
 
-    function initUserPrompt(messages: AgentMessage[]): string {
+    function initUserPrompt(messages: AgentEvent[]): string {
       const init = messages.find((m) => m.type === "session_init") as {
         type: "session_init";
         userPrompt?: string;
@@ -3411,6 +3483,54 @@ describe("AgentRunner", () => {
       );
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
+      await manager.shutdown();
+    });
+
+    it("skips stored-message context for a channel whose surface needs none", async () => {
+      const webchatRepo = new WebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelConversation({
+        channel: "discord",
+        threadId: "quiet-context",
+        agentName: "main",
+      });
+      await webchatRepo.addConversationMessage({
+        sessionId: conversation.id,
+        role: "notification",
+        content: JSON.stringify([{ type: "text", content: "ambient update" }]),
+        platformMessageId: "ambient-message",
+        senderName: "Bob",
+        createdAt: new Date("2026-08-03T08:01:00.000Z"),
+      });
+
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-no-conversation-context",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      // The same channel conversation as above, but its surface says every
+      // message already reaches the agent, as webchat's does.
+      const manager = createAgentSessionManager({
+        ...managerDeps(createTestModelResolver({ providers: [provider] })),
+        channelSurface: () => ({ interactiveCards: false, promptContext: false }),
+      });
+      await collectMessages(
+        new AgentRunner(manager, agentLoader).run({
+          agentName: "test-main",
+          prompt: "current message",
+          channelThreadKey: "discord:quiet-context",
+          romeSessionId: conversation.id,
+          threadContext: { channel: "discord", threadId: "quiet-context" },
+        }),
+      );
+
+      expect(providerPrompts).toHaveLength(1);
+      expect(providerPrompts[0]).not.toContain("<conversation_context>");
+      expect(providerPrompts[0]).not.toContain("ambient update");
       await manager.shutdown();
     });
 
@@ -3710,7 +3830,7 @@ describe("AgentRunner", () => {
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Map model" }));
 
       expect(provider.calls).toHaveLength(1);
-      expect(provider.calls[0].model).toBe(MODEL_MAP.large);
+      expect(provider.calls[0].model).toBe("claude-opus-5-5[1m]");
 
       // test-sentinel maps to "small" tier
       const provider2 = new MockModelProvider([[{ type: "result", content: "Done" }]]);
@@ -3718,7 +3838,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner2.run({ agentName: "test-sentinel", prompt: "Map model" }));
 
-      expect(provider2.calls[0].model).toBe(MODEL_MAP.small);
+      expect(provider2.calls[0].model).toBe("claude-haiku-5-5");
     });
 
     it("pins the session to the agent's configured provider and fails closed", async () => {
@@ -3838,7 +3958,7 @@ describe("AgentRunner", () => {
       const session = await manager.acquire(
         {
           agentName: "test-main",
-          channelThreadKey: "webchat:session-1:large-model:gpt-5-6-terra",
+          channelThreadKey: "webchat:session-1",
         },
         { selectionId: "gpt-5-6-terra" },
       );
@@ -3850,7 +3970,7 @@ describe("AgentRunner", () => {
       expect(openAiSessions[0].model).toBe("gpt-5.6-terra");
     });
 
-    it("restores the selected model from the persisted session key on explicit cold resume", async () => {
+    it("restores the selected model from the session pin on explicit cold resume", async () => {
       const openAiSessions: ModelSessionParams[] = [];
       const openai: ModelProvider = {
         id: "openai",
@@ -3873,14 +3993,14 @@ describe("AgentRunner", () => {
       const firstManager = createAgentSessionManager(managerDeps(modelResolver));
       const key = {
         agentName: "test-main",
-        channelThreadKey: "webchat:session-cold:large-model:gpt-5-6-terra",
+        channelThreadKey: "webchat:session-cold",
       };
       const firstSession = await firstManager.acquire(key, { selectionId: "gpt-5-6-terra" });
       await collectMessages(firstSession.sendTurn({ prompt: "Start" }).events);
       await firstManager.shutdown();
 
       const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
-      const resumedRunner = new AgentRunner(resumedManager);
+      const resumedRunner = new AgentRunner(resumedManager, agentLoader);
       const resumedMessages = await collectMessages(
         resumedRunner.run({
           agentName: "test-main",
@@ -4158,7 +4278,7 @@ describe("AgentRunner", () => {
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
       expect(await repo.findById(session.sessionId)).toMatchObject({
         provider: "anthropic",
-        model: MODEL_MAP.large,
+        model: "claude-opus-5-5[1m]",
       });
 
       await manager.shutdown();
@@ -4372,7 +4492,7 @@ describe("AgentRunner", () => {
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
       const manager = createAgentSessionManager(managerDeps(modelResolver));
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       await collectMessages(
         runner.run({ agentName: "test-main", sessionId: legacyId, prompt: "Continue" }),
       );
@@ -4451,7 +4571,7 @@ describe("AgentRunner", () => {
       // would now pick Sol; the pin keeps the resume on Terra.
       state.codex.solAccess = true;
       const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
-      const runner = new AgentRunner(resumedManager);
+      const runner = new AgentRunner(resumedManager, agentLoader);
       await collectMessages(
         runner.run({ agentName: "test-main", sessionId: first.sessionId, prompt: "Continue" }),
       );
@@ -4578,21 +4698,37 @@ describe("AgentRunner", () => {
       });
 
       const repo = new SessionsRepository(testDb.db);
-      // A pre-cutover row (model NULL) whose webchat key pins a Claude selection,
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-mismatch",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
       const legacyId = await repo.create({
         agentName: "test-main",
-        channelThreadKey: "webchat:legacy-mismatch:large-model:claude-opus",
+        channelThreadKey: "webchat:legacy-mismatch",
         status: "active",
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
 
       const manager = createAgentSessionManager(managerDeps(modelResolver));
-      const runner = new AgentRunner(manager);
+      const runner = new AgentRunner(manager, agentLoader);
       const messages = await collectMessages(
-        runner.run({ agentName: "test-main", sessionId: legacyId, prompt: "Continue" }),
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+          threadContext: {
+            channel: "webchat",
+            threadId: "legacy-mismatch",
+            romeSessionId: "legacy-mismatch",
+          },
+        }),
       );
 
       // The resume opens Claude Opus on a fresh provider thread (provider changed
@@ -4607,6 +4743,114 @@ describe("AgentRunner", () => {
       });
       expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
+      await manager.shutdown();
+    });
+
+    it("a legacy resume without a thread context reads the selection through its key", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const codexOpens: ModelSessionParams[] = [];
+      const claudeOpens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+
+      const repo = new SessionsRepository(testDb.db);
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
+      // while the stored provider thread is Codex. With the resume guard removed,
+      // the single precedence rule honors the persisted selection instead of
+      // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-no-context",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
+      const legacyId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-no-context",
+        status: "active",
+      });
+      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+
+      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader);
+      const messages = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+        }),
+      );
+
+      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // from Codex), never the stored-provider tier resolution.
+      expect(messages.find((message) => message.type === "result")).toMatchObject({
+        content: "claude-opus-4-8[1m]",
+      });
+      expect(claudeOpens).toHaveLength(1);
+      expect(claudeOpens[0]).toMatchObject({
+        model: "claude-opus-4-8[1m]",
+        isNewSession: true,
+      });
+      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(codexOpens).toHaveLength(0);
+      await manager.shutdown();
+    });
+
+    it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const codexOpens: ModelSessionParams[] = [];
+      const claudeOpens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+
+      const repo = new SessionsRepository(testDb.db);
+      // The parent chat stores a Claude selection. Its subagent's legacy row
+      // (model NULL) ran on Codex, and the subagent opens with the parent's
+      // thread context, so the chat's selection must not reach it.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-parent",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
+      const legacyId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-parent:subagent:child-1",
+        status: "active",
+      });
+      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+
+      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+        isSubagent: true,
+      });
+      const runner = new AgentRunner(manager, agentLoader);
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+          threadContext: {
+            channel: "webchat",
+            threadId: "legacy-parent",
+            romeSessionId: "legacy-parent",
+          },
+        }),
+      );
+
+      expect(claudeOpens).toHaveLength(0);
+      expect(codexOpens).toHaveLength(1);
       await manager.shutdown();
     });
   });
@@ -4633,7 +4877,7 @@ describe("AgentRunner", () => {
 
       const runImplAction = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         yield { type: "tool_use", id: "tu-send-1", tool: "send_message", input: { text: "hello" } };
         await params.executeAction("send_message", { text: "hello" });
         yield { type: "result", content: "Done" };
@@ -4936,8 +5180,8 @@ describe("AgentRunner", () => {
       const legacyBindings = createEmptyLegacyArtifactBindings();
       const actionId = formatArtifactId("review-app", "demo_action");
       claimLegacyArtifactName(legacyBindings, "action", "demo_action", actionId);
-      actionRegistry = new ActionRegistryImpl([], { legacyBindings });
-      actionEngine = new ActionEngine(actionRegistry);
+      actionRegistry = new ActionRegistryImpl({ legacyBindings });
+      actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
 
       const executed: unknown[] = [];
       actionRegistry.register(
@@ -5039,9 +5283,9 @@ describe("AgentRunner", () => {
       expect(provider.calls).toHaveLength(1);
       const toolNames = provider.calls[0].subagentTools.map((t) => t.name);
       // test-main has allowedSubagents: ["test-explore"]
-      expect(toolNames).toContain("test-explore");
+      expect(toolNames).toContain(EXPLORE_TOOL);
 
-      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === "test-explore");
+      const subagentTool = provider.calls[0].subagentTools.find((t) => t.name === EXPLORE_TOOL);
       expect(subagentTool).toBeDefined();
       expect(subagentTool!.description).toContain("test-explore");
       expect(subagentTool!.inputSchema).toHaveProperty("properties");
@@ -5051,7 +5295,7 @@ describe("AgentRunner", () => {
       let calls = 0;
       const runImpl = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         calls += 1;
         if (calls > 1) {
           yield { type: "result", content: "Explore complete" };
@@ -5068,21 +5312,21 @@ describe("AgentRunner", () => {
         yield {
           type: "tool_input_delta",
           toolUseId: "tu-explore-1",
-          tool: "test-explore",
+          tool: EXPLORE_TOOL,
           content: '{"prompt":',
         };
         yield {
           type: "tool_use",
           id: "tu-explore-1",
-          tool: "test-explore",
+          tool: EXPLORE_TOOL,
           input: { prompt: "Inspect" },
         };
         const output = await params.executeSubagent(
-          "test-explore",
+          EXPLORE_TOOL,
           { prompt: "Inspect" },
           { toolUseId: "tu-explore-1" },
         );
-        yield { type: "tool_result", toolUseId: "tu-explore-1", tool: "test-explore", output };
+        yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
         yield { type: "result", content: "Delegated" };
       };
       const provider: ModelProvider = {
@@ -5112,38 +5356,38 @@ describe("AgentRunner", () => {
       const nestedCalls: import("./agent-runner.js").ModelRunParams[] = [];
       const runImplNested = async function* (
         params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentMessage> {
+      ): AsyncIterable<AgentEvent> {
         nestedCalls.push(params);
 
         if (nestedCalls.length === 1) {
           yield {
             type: "tool_use",
             id: "tu-explore-1",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: "Inspect" },
           };
           const output = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: "Inspect" },
             { toolUseId: "tu-explore-1" },
           );
           delegatedOutput = output;
-          yield { type: "tool_result", toolUseId: "tu-explore-1", tool: "test-explore", output };
+          yield { type: "tool_result", toolUseId: "tu-explore-1", tool: EXPLORE_TOOL, output };
           const earlyOutput = await params.executeSubagent(
-            "test-explore",
+            EXPLORE_TOOL,
             { prompt: "Inspect before provider event" },
             { toolUseId: "tu-explore-2" },
           );
           yield {
             type: "tool_use",
             id: "tu-explore-2",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             input: { prompt: "Inspect before provider event" },
           };
           yield {
             type: "tool_result",
             toolUseId: "tu-explore-2",
-            tool: "test-explore",
+            tool: EXPLORE_TOOL,
             output: earlyOutput,
           };
           yield { type: "result", content: "Delegated" };
@@ -5187,47 +5431,47 @@ describe("AgentRunner", () => {
           expect.objectContaining({
             type: "subagent_start",
             toolUseId: "tu-explore-1",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             input: { prompt: "Inspect" },
             sessionId: expect.any(String),
             turnId: expect.any(String),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_result",
             toolUseId: "tu-explore-1",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             status: "completed",
             sessionId: expect.any(String),
             turnId: expect.any(String),
             output: "Explore complete",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_start",
             toolUseId: "tu-explore-2",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             sessionId: expect.any(String),
             turnId: expect.any(String),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "subagent_result",
             toolUseId: "tu-explore-2",
-            agentName: "test-explore",
+            agentName: "core:test-explore",
             status: "completed",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "result",
             content: "Delegated",
-            agent: "test-main",
+            agent: "core:test-main",
           }),
           expect.objectContaining({
             type: "turn_end",
             status: "completed",
             durationMs: expect.any(Number),
-            agent: "test-main",
+            agent: "core:test-main",
           }),
         ]),
       );
@@ -5240,17 +5484,17 @@ describe("AgentRunner", () => {
         }),
       );
       const firstChild = messages.find(
-        (message): message is Extract<AgentMessage, { type: "subagent_start" }> =>
+        (message): message is Extract<AgentEvent, { type: "subagent_start" }> =>
           message.type === "subagent_start" && message.toolUseId === "tu-explore-1",
       );
       expect(firstChild).toBeDefined();
       const storedChild = await new WebChatRepository(testDb.db).getSession(firstChild!.sessionId);
       expect(storedChild).toMatchObject({
         type: "subagent",
-        parentSessionId: "action:exec-1:test-main",
+        parentSessionId: "action:exec-1:core:test-main",
       });
       expect(
-        messages.some((message) => "agent" in message && message.agent === "test-explore"),
+        messages.some((message) => "agent" in message && message.agent === "core:test-explore"),
       ).toBe(false);
       expect(observerEvents).toEqual([]);
     });
@@ -5258,7 +5502,7 @@ describe("AgentRunner", () => {
 
   describe("outputSchema", () => {
     function structuredProvider(
-      runImpl: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentMessage>,
+      runImpl: (params: import("./agent-runner.js").ModelRunParams) => AsyncIterable<AgentEvent>,
     ): ModelProvider & { sessions: import("./agent-runner.js").ModelSessionParams[] } {
       const provider: ModelProvider & {
         sessions: import("./agent-runner.js").ModelSessionParams[];
@@ -5290,7 +5534,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-native",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(provider.sessions[0].outputSchema).toEqual(
@@ -5326,7 +5570,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-invalid",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();
@@ -5348,7 +5592,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-missing",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "error")).toMatchObject({
@@ -5376,7 +5620,7 @@ describe("AgentRunner", () => {
         channelThreadKey: "test:structured-suspended",
       });
 
-      const events: AgentMessage[] = [];
+      const events: AgentEvent[] = [];
       for await (const msg of session.sendTurn({ prompt: "Triage." }).events) events.push(msg);
 
       expect(events.find((event) => event.type === "result")).toBeUndefined();

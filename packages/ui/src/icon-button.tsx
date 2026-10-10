@@ -15,10 +15,9 @@ export interface IconButtonProps
    * size are the same box. `xs` = 24×24px sits below the scale — the WCAG
    * 2.5.8 minimum, for an action inside a row rather than beside it.
    *
-   * Every step under 44px pairs with the `touch-target` class from
-   * `@rome-os/ui/styles.css` on a touch-reachable surface, which raises the
-   * control to the 44px floor where the device has no pointer. Only `lg`
-   * clears the floor on its own.
+   * Narrow viewports and coarse-pointer devices paint every step at 44px.
+   * Geometry follows `@rome-os/ui/styles.css`, including the selected platform scale
+   * on `xs`. Layout breakpoints remain width-based.
    */
   size?: IconButtonSize;
 }
@@ -38,7 +37,7 @@ export interface IconButtonProps
 // the base below holds the 16px the other two take, exactly as `Button` is
 // arranged.
 const sizeClasses: Record<IconButtonSize, string> = {
-  xs: "size-6 rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3",
+  xs: "size-[var(--control-h-xs)] rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3",
   sm: "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] [&_svg:not([class*='size-'])]:size-3.5",
   md: "size-[var(--control-h-md)] rounded-[var(--control-r-md)]",
   lg: "size-[var(--control-h-lg)] rounded-[var(--control-r-lg)]",

@@ -64,7 +64,7 @@ export const WEBCHAT_LARGE_MODEL_SELECTIONS: Record<ModelSelectionId, WebchatLar
     "claude-haiku": {
       id: "claude-haiku",
       providerId: "anthropic",
-      model: "claude-haiku-4-5",
+      model: "claude-haiku-5-5",
     },
     "claude-fable": {
       id: "claude-fable",

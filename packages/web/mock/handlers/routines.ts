@@ -301,7 +301,15 @@ export const routineHandlers = [
     const body = (await request.json()) as Omit<
       Routine,
       "id" | "createdAt" | "lastFiredAt" | "nextRunAt" | "lastRun"
-    >;
+    > & { key?: string };
+    // Mirrors the server: a repeat keyed create answers 409 with the existing id.
+    const existing = body.key ? routines.find((routine) => routine.key === body.key) : undefined;
+    if (existing) {
+      return HttpResponse.json(
+        { error: "A routine with this key already exists", id: existing.id },
+        { status: 409 },
+      );
+    }
     const created: Routine = {
       ...body,
       id: `routine-new-${nextRoutineId++}`,

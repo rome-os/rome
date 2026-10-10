@@ -20,6 +20,7 @@
       "errors": "错误",
       "events": "事件"
     },
+    "filterStatus": "活动状态",
     "filters": {
       "all": "全部",
       "pending": "待处理",

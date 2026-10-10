@@ -144,6 +144,7 @@ function apiConnection(
       watch: { state: "unsupported" },
     },
     connect: options.connect ?? null,
+    setups: {},
   };
 }
 

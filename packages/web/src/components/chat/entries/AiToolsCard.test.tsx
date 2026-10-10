@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 import { AiToolsCard } from "./AiToolsCard";
 
 beforeAll(async () => {
@@ -18,10 +19,14 @@ function ok(json: unknown): Response {
   return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
 }
 
-function mockStatus(status: { claude: { loggedIn: boolean }; codex: { loggedIn: boolean } }) {
+function mockStatus(
+  status: { claude: { loggedIn: boolean }; codex: { loggedIn: boolean } },
+  credits: RomeCreditsView | null = null,
+) {
   return rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
     const url = String(input);
     if (url === "/api/ai-tools/status") return ok(status);
+    if (url === "/api/ai-tools/rome-credits") return ok({ credits });
     if (url === "/api/ai-tools/anthropic-compatible-providers") {
       return ok({ providers: [], configured: null });
     }
@@ -29,7 +34,157 @@ function mockStatus(status: { claude: { loggedIn: boolean }; codex: { loggedIn: 
   }) as typeof fetch);
 }
 
+const SIGNUP_CREDITS: RomeCreditsView = {
+  grantedMicros: "10000000",
+  balanceMicros: "10000000",
+  availableMicros: "10000000",
+  enabled: true,
+};
+
 describe("AiToolsCard", () => {
+  it("offers Rome credits in place of a skip while the account has some left", async () => {
+    mockStatus({ claude: { loggedIn: false }, codex: { loggedIn: false } }, SIGNUP_CREDITS);
+    const onSubmit = rs.fn();
+
+    render(<AiToolsCard toolUseId="t-credits" onSubmit={onSubmit} />);
+
+    const proceed = await screen.findByRole("button", { name: "Continue with credits" });
+    expect(screen.getByText("Start with free Rome credits")).toBeTruthy();
+    expect(await screen.findByText("Rome credits")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+
+    await userEvent.setup().click(proceed);
+
+    // Credits run Rome the way a sign-in would, so the welcome treats the step
+    // as connected.
+    expect(onSubmit).toHaveBeenCalledWith(
+      "t-credits",
+      { connected: true, credits: true },
+      "Continued with Rome credits",
+    );
+    expect(screen.getByText("Using Rome credits")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("advances a connected guardian without waiting on the credits read", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: true }, codex: { loggedIn: false } });
+      }
+      // Rome Cloud never answers.
+      if (url === "/api/ai-tools/rome-credits") return await new Promise<Response>(() => {});
+      return ok({});
+    }) as typeof fetch);
+    const onSubmit = rs.fn();
+
+    render(<AiToolsCard toolUseId="t-slow-credits" onSubmit={onSubmit} />);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit).toHaveBeenCalledWith("t-slow-credits", { connected: true }, "Connected an AI");
+  });
+
+  it("offers credits once a ChatGPT login that was unknown at boot settles", async () => {
+    let reads = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        reads += 1;
+        return ok({ claude: { loggedIn: false }, codex: reads === 1 ? {} : { loggedIn: false } });
+      }
+      if (url === "/api/ai-tools/rome-credits") return ok({ credits: SIGNUP_CREDITS });
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+
+    render(<AiToolsCard toolUseId="t-settling-codex" onSubmit={rs.fn()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Continue with credits" }, { timeout: 3_000 }),
+    ).toBeTruthy();
+    // The card asked twice; the embedded panel then reads status itself.
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not offer credits while the ChatGPT login is still unknown", async () => {
+    mockStatus({ claude: { loggedIn: false }, codex: {} as { loggedIn: boolean } }, SIGNUP_CREDITS);
+
+    render(<AiToolsCard toolUseId="t-unknown-codex" onSubmit={rs.fn()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Skip for now" }, { timeout: 3_000 }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("opens with the plain card on a slow Rome Cloud and keeps it", async () => {
+    let release!: (response: Response) => void;
+    const slowCredits = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      }
+      if (url === "/api/ai-tools/rome-credits") return await slowCredits;
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+
+    render(<AiToolsCard toolUseId="t-slow-absent" onSubmit={rs.fn()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Skip for now" }, { timeout: 3_000 }),
+    ).toBeTruthy();
+
+    release(ok({ credits: SIGNUP_CREDITS }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // A late read never swaps the button the guardian may be reaching for.
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("does not read credits for a guardian who is already connected", async () => {
+    const fetchSpy = mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } });
+    const onSubmit = rs.fn();
+
+    render(<AiToolsCard toolUseId="t-no-credits-read" onSubmit={onSubmit} />);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("rome-credits"))).toBe(
+      false,
+    );
+  });
+
+  it("falls back to the plain skip once the credits are used up", async () => {
+    mockStatus(
+      { claude: { loggedIn: false }, codex: { loggedIn: false } },
+      { ...SIGNUP_CREDITS, balanceMicros: "-12000", availableMicros: "-12000" },
+    );
+
+    render(<AiToolsCard toolUseId="t-used-up" onSubmit={rs.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "Skip for now" })).toBeTruthy();
+    expect(screen.getByText("Connect Claude or ChatGPT")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+  });
+
+  it("renders a card resolved with credits read-only", () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch");
+
+    render(
+      <AiToolsCard
+        toolUseId="t-resolved-credits"
+        result={{ connected: true, credits: true }}
+        onSubmit={rs.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Using Rome credits")).toBeTruthy();
+    expect(screen.queryByText("AI connected")).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("never shows the sign-in options when a provider is already connected", async () => {
     mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } });
     const onSubmit = rs.fn();

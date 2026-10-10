@@ -12,7 +12,12 @@ import type {
   ChannelMessageHookDeps,
 } from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
+import {
+  type CatalogEvent,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+} from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import { createRomeAppContext, type RomeAppContext } from "../apps/context.js";
 import {
@@ -22,6 +27,9 @@ import {
 } from "./module-loader.js";
 import type { FavorService } from "../favors/types.js";
 import type { HostExecutionService } from "../host-execution/service.js";
+import type { FeedbackService } from "../lib/feedback-client.js";
+import type { AgentNamesService } from "../channels/agent-names.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -48,25 +56,6 @@ export function assertNoAppActionLoadFailures(
   );
 }
 
-export function assertRequiredActionRegistered(
-  registry: { has(name: string): boolean },
-  actionName: string,
-): void {
-  if (registry.has(actionName)) {
-    return;
-  }
-
-  throw new Error(`Required action "${actionName}" is not registered`);
-}
-
-export function assertRequiredHookPresent<T>(hook: T | null, hookName: string): T {
-  if (hook) {
-    return hook;
-  }
-
-  throw new Error(`Required hook "${hookName}" is not registered`);
-}
-
 export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
@@ -91,6 +80,11 @@ interface AppActionServices {
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
   hostExecution?: HostExecutionService;
+  /** System-only: reporter provenance must come from system:send_feedback. */
+  feedback?: FeedbackService;
+  /** System-only: lists the guardian's agents and linked accounts', so only
+   *  system:send_message resolves a name in it. */
+  agentNames?: AgentNamesService;
 }
 
 interface AppLookup {
@@ -100,45 +94,25 @@ interface AppLookup {
 function makeAppLookup(catalog: AppCatalog): AppLookup {
   return (appId: string) => {
     const view = catalog.get(appId);
-    if (!view) return null;
-    if ((view as ResolvedApp).manifest === undefined) return null;
-    return view as ResolvedApp;
+    return isResolvedApp(view) ? view : null;
   };
 }
 
 /**
- * Deps that @rome-os/app-runtime 0.7 removed, answered for that release with
- * the change an app built against 0.6 has to make, rather than with a
- * `Cannot read properties of undefined` from deep inside the app. Each is a
- * non-enumerable getter, so copying or listing the deps never trips it. It is
- * still an own property, so `"talkRouter" in deps` answers true while the
- * getter is here: an app feature-testing with `in` must read the value.
+ * Deps that @rome-os/app-runtime 0.7 removed, answered with the migration
+ * ({@link withRemovedMembers}).
  *
- * TODO(0.8): remove, with REMOVED_HOOK_DEPS and withRemovedDeps.
+ * TODO(0.8): remove, with REMOVED_HOOK_DEPS.
  */
 const REMOVED_ACTION_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
 };
-// TODO(0.8): remove, with REMOVED_ACTION_DEPS and withRemovedDeps.
+// TODO(0.8): remove, with REMOVED_ACTION_DEPS.
 const REMOVED_HOOK_DEPS: Record<string, string> = {
   talkRouter:
     "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",
 };
-
-function withRemovedDeps<T extends object>(deps: T, removed: Record<string, string>): T {
-  for (const [name, migration] of Object.entries(removed)) {
-    if (name in deps) continue;
-    Object.defineProperty(deps, name, {
-      configurable: true,
-      enumerable: false,
-      get() {
-        throw new Error(migration);
-      },
-    });
-  }
-  return deps;
-}
 
 function createAppActionRuntimeDeps(
   record: AppActionRecord,
@@ -151,11 +125,17 @@ function createAppActionRuntimeDeps(
     throw new Error(`App "${record.metadata.ownerId}" is not resolved in the catalog`);
   }
 
-  return withRemovedDeps(
+  return withRemovedMembers(
     {
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
         ? { hostExecution: services.hostExecution }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.feedback
+        ? { feedback: services.feedback }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.agentNames
+        ? { agentNames: services.agentNames }
         : {}),
       appContext: createRomeAppContext(app, {
         catalog,
@@ -250,16 +230,11 @@ export function registerLazyAppActions(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
-  options: { onlyAppId?: string } = {},
-): { loaded: string[]; failed: AppActionLoadFailure[] } {
+): { loaded: string[] } {
   const loaded: string[] = [];
-  const failed: AppActionLoadFailure[] = [];
 
   for (const [name, record] of actionLoader.getAllRecords()) {
     if (record.metadata.ownerType !== "app") {
-      continue;
-    }
-    if (options.onlyAppId !== undefined && record.metadata.ownerId !== options.onlyAppId) {
       continue;
     }
 
@@ -267,7 +242,7 @@ export function registerLazyAppActions(
     loaded.push(name);
   }
 
-  return { loaded, failed };
+  return { loaded };
 }
 
 /**
@@ -284,9 +259,7 @@ export function createAppActionsSubscriber(
   return async function appActionsSubscriber(event: CatalogEvent) {
     actionRegistry.unregisterOwnedBy("app", event.appId);
     if (event.change === "removed") return;
-    const current = event.current;
-    if (current == null) return;
-    if ((current as ResolvedApp).manifest === undefined) return;
+    if (!isResolvedApp(event.current)) return;
     await registerAppActions(actionLoader, actionRegistry, catalog, deps, services, {
       onlyAppId: event.appId,
     });
@@ -311,7 +284,7 @@ export async function createChannelMessageHookFromCatalog(
 
   if (typeof module.createHook === "function") {
     const hook = module.createHook(
-      withRemovedDeps({ ...deps }, REMOVED_HOOK_DEPS),
+      withRemovedMembers({ ...deps }, REMOVED_HOOK_DEPS),
     ) as ChannelMessageHook;
     // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
     // removed registerConnection, which the host no longer calls: it would hear

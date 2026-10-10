@@ -8,11 +8,6 @@ import { SystemUpgradeSection } from "./system-upgrade-section";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix dialog pokes pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {

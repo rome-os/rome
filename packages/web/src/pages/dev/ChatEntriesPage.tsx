@@ -213,12 +213,13 @@ export function ChatEntryPreview({
   onSubmitAppComponent,
   onDismissAppComponent,
 }: ChatEntryPreviewProps) {
+  const toolUseId = "toolUseId" in block ? block.toolUseId : undefined;
   const results =
-    result && block.toolUseId
-      ? new Map([[interactionResultKey(sessionId, block.toolUseId), result]])
+    result && toolUseId
+      ? new Map([[interactionResultKey(sessionId, toolUseId), result]])
       : undefined;
 
-  return renderSingleEntry(block, block.toolUseId ?? "chat-block-preview", {
+  return renderSingleEntry(block, toolUseId ?? "chat-block-preview", {
     sessionId,
     interactionResults: results,
     onSubmitAppComponent,

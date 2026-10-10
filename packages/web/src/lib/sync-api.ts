@@ -152,16 +152,6 @@ export async function linkProject(input: {
   return jsonOrThrow<SyncStatus>(res);
 }
 
-export async function unlinkProject(projectPath: string): Promise<void> {
-  const res = await fetch("/api/sync/unlink", {
-    method: "POST",
-    credentials: "include",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ projectPath }),
-  });
-  await jsonOrThrow<{ ok: boolean }>(res);
-}
-
 export async function getSyncStatus(projectPath: string): Promise<SyncStatus> {
   const params = new URLSearchParams({ projectPath });
   const res = await fetch(`/api/sync/status?${params.toString()}`, { credentials: "include" });

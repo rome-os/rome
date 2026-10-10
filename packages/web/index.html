@@ -3,12 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <!-- maximum-scale=1 + user-scalable=no locks zoom so mobile browsers stop
-         auto-zooming when a sub-16px input gains focus (and disables pinch-zoom
-         on this guardian-only app). -->
+    <!-- interactive-widget=resizes-content makes Chrome on Android shrink the
+         page above the keyboard rather than slide the keyboard over it. iOS
+         ignores the key, and lib/visual-viewport.ts covers iOS. Do not restrict
+         user zoom here: the control scale keeps focusable fields at 16px or
+         larger on touch devices, which prevents iOS focus zoom. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <!-- Add-to-Home-Screen / installable PWA. iOS ignores the SVG favicon and
          the manifest for the Home Screen icon — it uses apple-touch-icon.png —
@@ -87,13 +89,13 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Rome" />
     <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />
-    <meta property="og:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta property="og:description" content="Enjoy your life, work, business, and creativity with Rome OS, a compounding agent OS for recursive agents." />
     <meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Rome OS - Enjoy your life with Rome" />
-    <meta name="twitter:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta name="twitter:description" content="Enjoy your life, work, business, and creativity with Rome OS, a compounding agent OS for recursive agents." />
     <meta name="twitter:image" content="https://romeos.cc/public-og-20260825.jpg" />
     <!-- rome:social:end -->
     <!-- Per-deployment browser config. Referenced unconditionally:
@@ -139,7 +141,7 @@
       })();
     </script>
   </head>
-  <body class="bg-background text-foreground antialiased">
+  <body class="bg-background text-foreground">
     <div id="root"></div>
   </body>
 </html>

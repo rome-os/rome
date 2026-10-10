@@ -16,6 +16,12 @@ export interface RomeCreditsView {
   availableMicros: string;
   /** False when an operator has disabled inference for the account. */
   enabled: boolean;
+  /**
+   * The Codex model names the gateway serves this account, matched exactly
+   * against the model a request sends. Empty when inference is disabled.
+   * Absent when the gateway does not report them, which means unknown.
+   */
+  models?: string[];
 }
 
 export interface RomeCreditsResponse {

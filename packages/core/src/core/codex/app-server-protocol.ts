@@ -161,10 +161,8 @@ export interface TurnCompletedNotification {
 }
 export interface ThreadTokenUsageUpdatedNotification {
   threadId: string;
-  turnId?: string;
+  turnId: string;
   tokenUsage?: ThreadTokenUsage;
-  /** Compatibility for early local stubs that used Rome's pre-generated shape. */
-  usage?: ThreadTokenUsage;
 }
 // v2 `ErrorNotification` wraps the same `TurnError` under `error`.
 export interface ErrorNotification {

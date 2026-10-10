@@ -4,7 +4,6 @@ import {
   CONVERSATION_TITLE_INPUT_MAX_LENGTH,
   conversationTitleLength,
   createConversationTitleGenerator,
-  fallbackConversationTitle,
   normalizeConversationTitle,
 } from "./conversation-title.js";
 import type { ModelResolver } from "./model-resolver.js";
@@ -78,7 +77,7 @@ describe("conversation title generation", () => {
   });
 
   it("provides a readable first-message fallback when title generation fails", () => {
-    expect(fallbackConversationTitle("  Plan   a launch\nfor Q4  ")).toBe("Plan a launch for Q4");
+    expect(normalizeConversationTitle("  Plan   a launch\nfor Q4  ")).toBe("Plan a launch for Q4");
   });
 
   it("bounds the first-message text sent to the title model", async () => {

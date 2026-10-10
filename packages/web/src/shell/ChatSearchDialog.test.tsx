@@ -10,17 +10,11 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import type { AgentCatalogGroup, ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
-import {
-  agentMentionQuery,
-  ChatSearchDialog,
-  chatSearchShortcutForPlatform,
-  isChatSearchShortcut,
-  matchRanges,
-} from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
+import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -306,15 +300,13 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("shows a focused no-results state", async () => {
+  it("shows a focused no-results state with the listbox its combobox points at still mounted", async () => {
     mockSessionSearch([chatSession("one", "Planning", "rome")]);
     const user = userEvent.setup();
     renderSearch("/chat", true);
 
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
-      "missing",
-    );
+    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
+    await user.type(input, "missing");
 
     // The no-results state waits for the debounced message search to settle.
     expect(await screen.findByText("No apps or chats found")).toBeTruthy();
@@ -322,23 +314,12 @@ describe("ChatSearchDialog", () => {
       screen.getByText("Try another app name, app id, chat title, project, or message text."),
     ).toBeTruthy();
     expect(screen.queryByRole("option")).toBeNull();
-  });
 
-  it("keeps the listbox its combobox points at mounted with no results", async () => {
     // cmdk's input emits aria-controls unconditionally, so rendering the empty
     // state instead of the list would leave the combobox pointing at nothing.
-    mockSessionSearch([chatSession("one", "Planning", "rome")]);
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    const input = await screen.findByRole("combobox", { name: "Search apps and chats" });
-    await user.type(input, "missing");
-    expect(await screen.findByText("No apps or chats found")).toBeTruthy();
-
     const controls = input.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     expect(document.getElementById(controls as string)).not.toBeNull();
-    expect(screen.queryByRole("option")).toBeNull();
   });
 
   it("surfaces message-content matches with role-labelled snippets", async () => {
@@ -377,36 +358,6 @@ describe("ChatSearchDialog", () => {
       (mark) => mark.textContent,
     );
     expect(snippetMarks).toContain("roadmap");
-  });
-
-  it("renders one row per session when the search returns repeat matches", async () => {
-    // The endpoint documents one match per session; if it ever returns two,
-    // the row must not be duplicated — that would collide on both the React
-    // key and the cmdk option value.
-    const contentOnly = chatSession("content-only", "Random notes", "work/rome");
-    const message = (id: string, snippet: string) => ({
-      id,
-      role: "assistant" as const,
-      snippet,
-      createdAt: "2026-07-14T10:00:00.000Z",
-    });
-    mockSessionSearch(
-      [contentOnly],
-      [
-        { session: contentOnly, message: message("m1", "…first roadmap mention…") },
-        { session: contentOnly, message: message("m2", "…second roadmap mention…") },
-      ],
-    );
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
-      "roadmap",
-    );
-
-    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
-    expect(screen.getByText("1 result")).toBeTruthy();
   });
 
   it("keeps apps out of the blank state, then groups them before matching chats", async () => {

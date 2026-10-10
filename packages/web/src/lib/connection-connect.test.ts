@@ -11,10 +11,19 @@ describe("runComposioLogin — endpoint contracts", () => {
   beforeEach(() => {
     rs.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
+    rs.useFakeTimers();
   });
   afterEach(() => {
+    rs.useRealTimers();
     rs.unstubAllGlobals();
   });
+
+  // Runs the status poll's 2s waits to completion.
+  async function login(options?: Parameters<typeof runComposioLogin>[0]) {
+    const pending = runComposioLogin(options);
+    await rs.runAllTimersAsync();
+    return pending;
+  }
 
   it("returns the loginUrl and resolves ok after the status poll confirms login", async () => {
     fetchMock
@@ -29,11 +38,7 @@ describe("runComposioLogin — endpoint contracts", () => {
       );
 
     const capturedUrls: string[] = [];
-    const result = await runComposioLogin({
-      onLoginUrl: (url) => capturedUrls.push(url),
-      sleep: () => Promise.resolve(),
-      maxTries: 3,
-    });
+    const result = await login({ onLoginUrl: (url) => capturedUrls.push(url) });
 
     expect(result).toEqual({ ok: true });
     expect(capturedUrls).toEqual(["https://composio/login"]);
@@ -48,7 +53,7 @@ describe("runComposioLogin — endpoint contracts", () => {
       new Response(JSON.stringify({ error: "CLI not found" }), { status: 500 }),
     );
 
-    const result = await runComposioLogin({ sleep: () => Promise.resolve(), maxTries: 1 });
+    const result = await login();
     expect(result).toEqual({ ok: false, error: "CLI not found" });
   });
 
@@ -71,12 +76,12 @@ describe("runComposioLogin — endpoint contracts", () => {
         ),
       );
 
-    const result = await runComposioLogin({ sleep: () => Promise.resolve(), maxTries: 5 });
+    const result = await login();
     expect(result).toEqual({
       ok: false,
       error: "Composio login --poll exited (code 1) without saving credentials.",
     });
-    // Should stop at the first errored status, not poll out all 5 tries.
+    // Should stop at the first errored status, not poll out every try.
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -92,7 +97,7 @@ describe("runComposioLogin — endpoint contracts", () => {
         ),
       );
 
-    const result = await runComposioLogin({ sleep: () => Promise.resolve(), maxTries: 2 });
+    const result = await login();
     expect(result).toEqual({ ok: true });
   });
 });

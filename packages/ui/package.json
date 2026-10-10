@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",
@@ -184,7 +184,11 @@
       "default": "./dist/tooltip.js"
     },
     "./styles.css": "./src/styles.css",
-    "./markdown.css": "./src/markdown.css"
+    "./markdown.css": "./src/markdown.css",
+    "./ui-scale": {
+      "types": "./dist/ui-scale.d.ts",
+      "default": "./dist/ui-scale.js"
+    }
   },
   "files": [
     "dist",

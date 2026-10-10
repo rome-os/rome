@@ -18,6 +18,7 @@ import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
 import { routeTitle } from "@/lib/page-title";
+import { isApplePlatform } from "@/lib/platform";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -35,7 +36,7 @@ function readSidebarCollapsed(): boolean {
 
 function sidebarShortcutForPlatform(): string {
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? "⌘B" : "Ctrl B";
+  return isApplePlatform(platform) ? "⌘B" : "Ctrl B";
 }
 
 export function RomeShellLayout() {
@@ -172,7 +173,7 @@ export function RomeShellLayout() {
   }, [pushed, clipped]);
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
       <UpgradeCountdownBanner />
       <div
         ref={frameRef}
@@ -189,7 +190,7 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
@@ -226,7 +227,10 @@ export function RomeShellLayout() {
                 data-app-titlebar="header"
                 className="flex shrink-0 items-center justify-between px-5 pb-4 pt-5"
               >
-                <Link to="/" className="text-title text-foreground">
+                <Link
+                  to="/"
+                  className="text-title text-foreground flex min-h-[var(--control-min-h)] items-center"
+                >
                   {t("appName")}
                 </Link>
                 <div className="flex items-center gap-1">
@@ -303,7 +307,7 @@ export function RomeShellLayout() {
                 name="mobileHeader"
                 className="flex min-w-0 flex-1 items-center gap-2"
                 fallback={
-                  <Link to="/" className="flex items-center gap-2">
+                  <Link to="/" className="flex items-center gap-2 min-h-[var(--control-min-h)]">
                     <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
                     <span className="text-ui text-foreground">{t("appName")}</span>
                   </Link>

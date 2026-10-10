@@ -1,7 +1,7 @@
-import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
+import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { prettyAgentName } from "@/lib/agent-name";
-import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: many flat per-session message lists → one renderable view.
 // This is the single place the multi-session handoff tree is merged. No React,
@@ -47,19 +47,12 @@ export interface ChatView {
   interactionResults: Map<string, Record<string, unknown>>;
 }
 
-// Exported for the timeline rail, which labels its dots with the same plain
-// text the transcript renders in the bubble.
+// Shared by the user bubble and the timeline rail, so the rail labels its dots
+// with the same plain text the bubble renders.
 export function userMessageText(content: string): string {
-  try {
-    const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed)) return content;
-    return parsed
-      .filter((b) => b?.type === "text" && typeof b.content === "string")
-      .map((b) => b.content as string)
-      .join("\n");
-  } catch {
-    return content;
-  }
+  return parseEntries(content)
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
+    .join("\n");
 }
 
 // Index every handoff reachable from `sessionId`, recursing into child sessions.
@@ -75,22 +68,17 @@ function indexHandoffs(
   for (const msg of msgs) {
     for (const b of parseMessageEntries(msg)) {
       if (msg.role === "user") {
-        if (b.type === "interaction_result" && b.toolUseId) {
+        if (b.type === "interaction_result") {
           const node = openByToolUseId.get(b.toolUseId);
           if (node) {
-            node.status =
-              b.output &&
-              typeof b.output === "object" &&
-              (b.output as Record<string, unknown>).dismissed === true
-                ? "cancelled"
-                : "done";
+            node.status = b.output.dismissed === true ? "cancelled" : "done";
             openByToolUseId.delete(b.toolUseId);
           }
         }
         continue;
       }
       if (msg.role !== "assistant" || b.type !== "handoff") continue;
-      if (!b.toolUseId || !b.appId || !b.childSessionId) continue;
+      if (!b.childSessionId) continue;
       const node: HandoffNode = {
         toolUseId: b.toolUseId,
         appId: b.appId,
@@ -180,11 +168,11 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 // guardian is.
 const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
 
-function isAutoDismissedCard(b: ChatEntry): boolean {
+function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
     b.type === "pending_interaction" &&
-    b.render?.builtin === true &&
-    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
+    b.render.builtin === true &&
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId)
   );
 }
 
@@ -202,30 +190,17 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   for (const msg of messages) {
     let userTextReply = false;
     for (const b of parseMessageEntries(msg)) {
-      if (
-        msg.role === "assistant" &&
-        (b.type === "pending_interaction" || b.type === "handoff") &&
-        b.toolUseId
-      ) {
+      if (msg.role === "assistant" && (b.type === "pending_interaction" || b.type === "handoff")) {
         map.delete(interactionResultKey(msg.sessionId, b.toolUseId));
         if (isAutoDismissedCard(b)) {
           const open = openCards.get(msg.sessionId) ?? new Set<string>();
           open.add(b.toolUseId);
           openCards.set(msg.sessionId, open);
         }
-      } else if (
-        msg.role === "user" &&
-        b.type === "interaction_result" &&
-        b.toolUseId &&
-        b.output &&
-        typeof b.output === "object"
-      ) {
-        map.set(
-          interactionResultKey(msg.sessionId, b.toolUseId),
-          b.output as Record<string, unknown>,
-        );
+      } else if (msg.role === "user" && b.type === "interaction_result") {
+        map.set(interactionResultKey(msg.sessionId, b.toolUseId), b.output);
         openCards.get(msg.sessionId)?.delete(b.toolUseId);
-      } else if (msg.role === "user" && b.type === "text" && (b.content ?? "").trim()) {
+      } else if (msg.role === "user" && b.type === "text" && b.content.trim()) {
         // A genuine typed reply (not a card resolution, which is parts-only).
         userTextReply = true;
       }
@@ -282,6 +257,53 @@ export function buildChatView(
     seedByChild,
     interactionResults,
   };
+}
+
+// Whether the floor session is parked on a card the guardian has not answered
+// yet (an ask_question card, a connect-AI card, an app component). Only the
+// floor session's latest turn counts, meaning every assistant message that
+// shares the turn id of its last message: the card is saved mid-turn and the
+// turn's closing text and recap land after it under the same id. A card from
+// an earlier turn is no longer what the agent waits on, and a backend-initiated
+// turn (an approval continuation) starts a new id without a user message.
+// Pass the floor's running turn while one streams: a backend turn persists its
+// messages only when it ends, so until then the transcript still closes on the
+// previous turn, whose cards it has moved past.
+export function isAwaitingGuardian(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId" | "interactionResults">,
+  runningTurnId: string | null = null,
+): boolean {
+  const { displayMessages, floorSessionId, interactionResults } = view;
+  const floor = displayMessages.filter((m) => m.sessionId === floorSessionId);
+  const latestTurnId = floor.at(-1)?.turnId;
+  if (runningTurnId !== null && latestTurnId !== runningTurnId) return false;
+  for (let i = floor.length - 1; i >= 0; i--) {
+    const msg = floor[i];
+    if (msg.turnId !== latestTurnId || msg.role === "user") return false;
+    if (msg.role !== "assistant") continue;
+    const waiting = parseMessageEntries(msg).some(
+      (b) =>
+        b.type === "pending_interaction" &&
+        !interactionResults.has(interactionResultKey(floorSessionId, b.toolUseId)),
+    );
+    if (waiting) return true;
+  }
+  return false;
+}
+
+// Whether the floor session's latest finished turn ended with an error: the
+// same turn_end status the sidebar's failed mark reads.
+export function isLastTurnFailed(
+  view: Pick<ChatView, "displayMessages" | "floorSessionId">,
+): boolean {
+  const { displayMessages, floorSessionId } = view;
+  for (let i = displayMessages.length - 1; i >= 0; i--) {
+    const msg = displayMessages[i];
+    if (msg.sessionId === floorSessionId && msg.role === "trace" && msg.traceSummary) {
+      return msg.traceSummary.turnStatus === "error";
+    }
+  }
+  return false;
 }
 
 // Render rows: group the flat transcript into speaker blocks. Pure data — the

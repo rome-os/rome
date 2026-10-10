@@ -306,6 +306,20 @@ describe("rowHandle", () => {
     const [row] = peopleRows([], [contact({ channel: "discord", channelUserId: "6128843201" })]);
     expect(rowHandle(row)).toBe("6128843201");
   });
+
+  it("adds nothing under an agent the row already names by its label", () => {
+    const [row] = peopleRows(
+      [],
+      [
+        contact({
+          channel: "agents",
+          channelUserId: "0b6c5a1e-7d2f-4c3a-9e1b-5f8a2d4c6e01",
+          displayName: "atlas (dot)",
+        }),
+      ],
+    );
+    expect(rowHandle(row)).toBeNull();
+  });
 });
 
 describe("peoplePath", () => {

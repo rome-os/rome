@@ -233,7 +233,8 @@ export function SessionsTrendChart({
               tickLine={false}
               tickMargin={10}
               tickCount={3}
-              width={54}
+              // Sized from the formatted ticks: they range from "0" to "$1,045.44".
+              width="auto"
               allowDecimals={metric === "cost"}
               domain={[0, (maximum: number) => (maximum > 0 ? maximum * 1.08 : 1)]}
               tick={AUXILIARY_TICK_TEXT}

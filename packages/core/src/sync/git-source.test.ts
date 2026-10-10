@@ -1,10 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
 import {
   OAUTH_PROVIDER_GRANTS,
   type GithubGrantProfile,
@@ -23,7 +31,12 @@ import {
 } from "./git-source.js";
 
 const tempDirs: string[] = [];
+let templateRepo: string | undefined;
 const savedTokenFileEnv = process.env.ROME_GITHUB_TOKEN_FILE;
+
+afterAll(() => {
+  if (templateRepo) rmSync(templateRepo, { recursive: true, force: true });
+});
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -56,16 +69,23 @@ async function seedGithubGrant(
   });
 }
 
+/** A private repo on `main` with one committed `tracked.txt`. Copies one
+ *  template, since building it runs six git processes. */
 function createRepo(): string {
+  if (!templateRepo) {
+    templateRepo = mkdtempSync(join(tmpdir(), "rome-sync-template-"));
+    const cwd = templateRepo;
+    execFileSync("git", ["init", "-q"], { cwd });
+    execFileSync("git", ["config", "user.name", "Rome Test"], { cwd });
+    execFileSync("git", ["config", "user.email", "rome@example.com"], { cwd });
+    writeFileSync(join(cwd, "tracked.txt"), "baseline\n");
+    execFileSync("git", ["add", "."], { cwd });
+    execFileSync("git", ["commit", "-qm", "baseline"], { cwd });
+    execFileSync("git", ["branch", "-M", "main"], { cwd });
+  }
   const dir = mkdtempSync(join(tmpdir(), "rome-sync-restore-"));
   tempDirs.push(dir);
-  execFileSync("git", ["init", "-q"], { cwd: dir });
-  execFileSync("git", ["config", "user.name", "Rome Test"], { cwd: dir });
-  execFileSync("git", ["config", "user.email", "rome@example.com"], { cwd: dir });
-  writeFileSync(join(dir, "tracked.txt"), "baseline\n");
-  execFileSync("git", ["add", "."], { cwd: dir });
-  execFileSync("git", ["commit", "-qm", "baseline"], { cwd: dir });
-  execFileSync("git", ["branch", "-M", "main"], { cwd: dir });
+  cpSync(templateRepo, dir, { recursive: true });
   return dir;
 }
 

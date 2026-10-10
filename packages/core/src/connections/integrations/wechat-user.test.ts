@@ -4,15 +4,14 @@
 //
 // Seams under test:
 //   1. The setup coroutine — an already-ready account confers with no guardian
-//      interaction; a fresh one installs, waits for the scan, recovers the key
-//      via the injected root-script step, and confers once the store unlocks.
+//      interaction; a fresh one installs, captures the keys while the guardian
+//      scans, and confers once the store unlocks.
 //   2. Read-only by construction: `send` throws, `directMessaging` answers null,
 //      nothing is delivered into the agent pipeline.
 //   3. The read surfaces map reader rows onto Talk's provider-neutral shapes.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage } from "../types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { WechatUserRuntime, WechatUserStatus } from "../../channels/wechat-user.js";
 import { WechatUserStorePending } from "../../channels/wechat-user.js";
 import { CredentialRejected } from "../errors.js";
@@ -49,8 +48,10 @@ const READY: StatusInput = {
  */
 function fakeRuntime(opts: {
   statuses: StatusInput[];
-  readerJson?: unknown;
-  onDerive?: (passphrase: string) => void;
+  /** What `wechat-cli sessions` answers. */
+  sessions?: unknown;
+  /** What the key capture does; it resolves at once by default. */
+  onCapture?: (display: string) => Promise<void> | void;
   qr?: string | null;
 }): WechatUserRuntime {
   const statuses = [...opts.statuses];
@@ -59,7 +60,6 @@ function fakeRuntime(opts: {
       display === ":100" ? "/desktop/wechat" : "/desktop",
     ),
     install: rs.fn(async () => {}),
-    installReader: rs.fn(async () => {}),
     prepareSession: rs.fn(async () => {}),
     ensureDesktop: rs.fn(async () => ":100"),
     ensureAccessibility: rs.fn(async () => {}),
@@ -82,37 +82,26 @@ function fakeRuntime(opts: {
         ...(statuses.length > 1 ? statuses.shift()! : statuses[0]!),
       }),
     ),
-    readerCommand: rs.fn(async (args: string[]) => {
-      if (args[0] === "derive") {
-        opts.onDerive?.(args[2] ?? "");
-        return { derived: 1 };
-      }
-      return opts.readerJson ?? { conversations: [] };
+    captureKeys: rs.fn(async (display: string, _signal?: AbortSignal) => {
+      await opts.onCapture?.(display);
+    }),
+    bridgeCommand: rs.fn(async (args: string[]) => {
+      if (args[0] === "sessions") return opts.sessions ?? [];
+      return { messages: [], cursor: null };
     }),
   };
   return runtime as unknown as WechatUserRuntime;
 }
 
-function setupWith(
-  runtime: WechatUserRuntime,
-  recoverPassphrase = rs.fn(async (_signal: AbortSignal) => "a".repeat(64)),
-) {
-  const stageDriver = rs.fn(async () => {});
+function setupWith(runtime: WechatUserRuntime) {
   return {
-    fn: makeWechatUserSetup({
-      runtime,
-      recoverPassphrase,
-      stageDriver,
-      pollIntervalMs: 1,
-      qrPollIntervalMs: 1,
-    }),
-    recoverPassphrase,
-    stageDriver,
+    fn: makeWechatUserSetup({ runtime, pollIntervalMs: 1, qrPollIntervalMs: 1 }),
   };
 }
 
 describe("makeWechatUserSetup", () => {
   it("holds off ordinary launches from the install through the key capture", async () => {
+    let heldDuringCapture = 0;
     const runtime = fakeRuntime({
       statuses: [
         { state: "absent", installed: false, running: false, loggedIn: false, keysReady: false },
@@ -125,20 +114,16 @@ describe("makeWechatUserSetup", () => {
         },
         READY,
       ],
+      onCapture: () => {
+        heldDuringCapture = held.captures;
+      },
     });
     const held = runtime as unknown as { captures: number };
-    let heldDuringReaderInstall = 0;
-    runtime.installReader = rs.fn(async () => {
-      heldDuringReaderInstall = held.captures;
+    let heldDuringPreparation = 0;
+    runtime.prepareSession = rs.fn(async () => {
+      heldDuringPreparation = held.captures;
     });
-    let heldDuringRecovery = 0;
-    const { fn } = setupWith(
-      runtime,
-      rs.fn(async (_signal: AbortSignal) => {
-        heldDuringRecovery = held.captures;
-        return "a".repeat(64);
-      }),
-    );
+    const { fn } = setupWith(runtime);
     const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
 
     await session.started();
@@ -146,8 +131,8 @@ describe("makeWechatUserSetup", () => {
 
     // The page could otherwise start an ordinary client in the minutes between
     // the install and the capture, which the capture would then kill.
-    expect(heldDuringReaderInstall).toBe(1);
-    expect(heldDuringRecovery).toBe(1);
+    expect(heldDuringPreparation).toBe(1);
+    expect(heldDuringCapture).toBe(1);
     expect(held.captures).toBe(0);
   });
 
@@ -173,17 +158,16 @@ describe("makeWechatUserSetup", () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, state: "stopped", running: false }, READY],
     });
-    const { fn, recoverPassphrase, stageDriver } = setupWith(runtime);
+    const { fn } = setupWith(runtime);
     const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
     await session.started();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(runtime.start).toHaveBeenCalledTimes(1);
-    expect(recoverPassphrase).not.toHaveBeenCalled();
-    expect(stageDriver).not.toHaveBeenCalled();
+    expect(runtime.captureKeys).not.toHaveBeenCalled();
     expect(runtime.install).not.toHaveBeenCalled();
   });
 
-  it("installs, launches under gdb to capture the passphrase, then derives it once", async () => {
+  it("installs, then captures the keys on WeChat's own desktop", async () => {
     const runtime = fakeRuntime({
       statuses: [
         { state: "absent", installed: false, running: false, loggedIn: false, keysReady: false },
@@ -210,43 +194,42 @@ describe("makeWechatUserSetup", () => {
         READY,
       ],
     });
-    const { fn, recoverPassphrase, stageDriver } = setupWith(runtime);
+    // WeChat's own desktop exists only once ensureDesktop brings it up, and
+    // only that screen shows the login window.
+    let desktopUp = false;
+    rs.mocked(runtime.ensureDesktop).mockImplementation(async () => {
+      desktopUp = true;
+      return ":100";
+    });
+    rs.mocked(runtime.captureLoginQr).mockImplementation(async (display) =>
+      display === ":100" ? "data:image/png;base64,qr" : null,
+    );
+    let finishLogin!: () => void;
+    rs.mocked(runtime.captureKeys).mockImplementation(async (display) => {
+      if (!desktopUp || display !== ":100") throw new Error(`no WeChat desktop on ${display}`);
+      await new Promise<void>((resolve) => (finishLogin = resolve));
+    });
+    const { fn } = setupWith(runtime);
     const commit = rs.fn(async (_c: SetupConferral, _s: AbortSignal) => {});
     const session = new SetupSession({ fn, commit });
-
     await session.started();
+
+    // The guardian scans the QR from the display the capture launched on, not
+    // the legacy client's that status() reported.
+    await rs.waitFor(() => {
+      const state = session.state;
+      expect(state.status === "presenting" && state.view.qr).toBe("data:image/png;base64,qr");
+    });
+    finishLogin();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(runtime.install).toHaveBeenCalledTimes(1);
-    expect(runtime.installReader).toHaveBeenCalledTimes(1);
-    expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
-    // Recovery launches the client on WeChat's own desktop, so it must be up
-    // first, and after the last status read: a legacy client still running on
-    // the shared display would have pulled `display` back there.
-    type Mocked = { mock: { invocationCallOrder: number[] } };
-    const order = (fn: unknown) => (fn as Mocked).mock.invocationCallOrder;
-    const recovery = order(recoverPassphrase)[0]!;
-    const lastStatus = Math.max(...order(runtime.status).filter((at) => at < recovery));
-    expect(runtime.ensureDesktop).toHaveBeenCalledTimes(1);
-    expect(order(runtime.ensureDesktop)[0]).toBeGreaterThan(lastStatus);
-    expect(order(runtime.ensureDesktop)[0]).toBeLessThan(recovery);
-    // The client is launched by recovery under gdb, not started the ordinary way.
+    // The capture launches the client under gdb, not the ordinary start.
     expect(runtime.start).not.toHaveBeenCalled();
-    expect(stageDriver).toHaveBeenCalledTimes(1);
-    // The scan step polls the login window so the QR can be shown inline.
-    // It captures, and links to, the display recovery launches on, not the
-    // legacy client's that status() reported.
-    expect(runtime.captureLoginQr).toHaveBeenCalled();
-    for (const call of rs.mocked(runtime.captureLoginQr).mock.calls) expect(call[0]).toBe(":100");
-    expect(recoverPassphrase).toHaveBeenCalledTimes(1);
-    // Recovery launches on the display ensureDesktop prepared, not whatever
-    // `display` reads by the time recovery gets to it.
-    expect(recoverPassphrase).toHaveBeenCalledWith(expect.anything(), ":100");
-    expect(runtime.readerCommand).toHaveBeenCalledWith(
-      ["derive", "--passphrase", "a".repeat(64)],
-      expect.anything(),
-    );
-    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0]?.[0].credential.material).toEqual({
+      custody: "rome-container",
+      wxid: "wxid_guardian",
+    });
   });
 
   it("skips installation when the client is present but signed out", async () => {
@@ -279,7 +262,6 @@ describe("makeWechatUserSetup", () => {
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
 
     expect(runtime.install).not.toHaveBeenCalled();
-    expect(runtime.installReader).toHaveBeenCalledTimes(1);
     expect(runtime.start).not.toHaveBeenCalled();
     expect(runtime.prepareSession).toHaveBeenCalledTimes(1);
   });
@@ -288,8 +270,8 @@ describe("makeWechatUserSetup", () => {
     const locked = { ...READY, state: "awaiting-keys" as const, keysReady: false };
     const runtime = fakeRuntime({
       statuses: [locked],
-      onDerive: () => {
-        throw new Error("message/message_0.db has no valid key");
+      onCapture: () => {
+        throw new Error("the captured passphrase does not open this account");
       },
     });
     const { fn } = setupWith(runtime);
@@ -300,23 +282,19 @@ describe("makeWechatUserSetup", () => {
     expect(commit).not.toHaveBeenCalled();
   });
 
-  it("keeps the captured passphrase while the client creates message shards", async () => {
-    let attempts = 0;
+  it("fails rather than waits when the login had not created every shard", async () => {
     const runtime = fakeRuntime({
-      statuses: [{ ...READY, state: "awaiting-keys", keysReady: false }, READY],
-      onDerive: () => {
-        if (++attempts === 1)
-          throw new WechatUserStorePending("Message database is not available yet");
+      statuses: [{ ...READY, state: "awaiting-keys", keysReady: false }],
+      onCapture: () => {
+        throw new WechatUserStorePending("WeChat had not finished creating message/message_0.db");
       },
     });
-    const { fn, recoverPassphrase } = setupWith(runtime);
+    const { fn } = setupWith(runtime);
     const commit = rs.fn(async () => {});
     const session = new SetupSession({ fn, commit });
     await session.started();
-    await rs.waitFor(() => expect(session.state.status).toBe("done"));
-    expect(attempts).toBe(2);
-    expect(recoverPassphrase).toHaveBeenCalledTimes(1);
-    expect(commit).toHaveBeenCalledTimes(1);
+    await rs.waitFor(() => expect(session.state.status).toBe("failed"));
+    expect(commit).not.toHaveBeenCalled();
   });
 
   it("links a resuming client to the desktop that shows it", async () => {
@@ -346,15 +324,15 @@ describe("makeWechatUserSetup", () => {
       statuses: [signedOut, signedOut, READY],
       qr: "data:image/png;base64,button",
     });
-    let finishLogin!: (passphrase: string) => void;
-    const recoverPassphrase = rs.fn(
-      (_signal: AbortSignal) => new Promise<string>((resolve) => (finishLogin = resolve)),
+    let finishLogin!: () => void;
+    rs.mocked(runtime.captureKeys).mockImplementation(
+      () => new Promise<void>((resolve) => (finishLogin = resolve)),
     );
-    const { fn } = setupWith(runtime, recoverPassphrase);
+    const { fn } = setupWith(runtime);
     const session = new SetupSession({ fn, commit: rs.fn(async () => {}) });
     await session.started();
 
-    await rs.waitFor(() => expect(recoverPassphrase).toHaveBeenCalled());
+    await rs.waitFor(() => expect(runtime.captureKeys).toHaveBeenCalled());
     const state = session.state;
     expect(state.status === "presenting" && state.view.title).toBe("Sign in to WeChat");
     expect(state.status === "presenting" && state.view.qr).toBeUndefined();
@@ -362,7 +340,7 @@ describe("makeWechatUserSetup", () => {
     expect(state.status === "presenting" && state.view.links?.[0]?.url).toBe("/desktop/wechat");
     expect(runtime.captureLoginQr).not.toHaveBeenCalled();
 
-    finishLogin("a".repeat(64));
+    finishLogin();
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
   });
 });
@@ -420,7 +398,7 @@ describe("the WeChat personal Talker", () => {
     };
     const talker = descriptor.capabilities.talker!.build({ session: credential }, kit);
     const deliver = rs.fn();
-    talker.start(deliver as unknown as (msg: InboundMessage) => void, fault);
+    talker.start(deliver as unknown as (msg: ChannelMessage) => void, fault);
     return {
       talker,
       deliver,
@@ -437,7 +415,6 @@ describe("the WeChat personal Talker", () => {
     try {
       await rs.waitFor(() => expect(runtime.start).toHaveBeenCalledTimes(1));
       expect(fault).not.toHaveBeenCalled();
-      expect(runtime.installReader).not.toHaveBeenCalled();
     } finally {
       await talker.stop();
     }
@@ -503,7 +480,6 @@ describe("the WeChat personal Talker", () => {
   it("retries a failed client launch without rejecting the grant", async () => {
     const runtime = fakeRuntime({
       statuses: [{ ...READY, state: "stopped", running: false }],
-      readerJson: { messages: [] },
     });
     rs.mocked(runtime.start).mockRejectedValue(new Error("desktop unavailable"));
     const fault = rs.fn();
@@ -587,7 +563,7 @@ describe("the WeChat personal Talker", () => {
     await expect(talker.send("wxid_friend" as ConversationId, { text: "hi" })).rejects.toThrow(
       /read-only/,
     );
-    expect(talker.feature("directMessaging")).toBeNull();
+    expect(talker.directMessaging).toBeUndefined();
     expect(deliver).not.toHaveBeenCalled();
 
     await talker.stop();
@@ -596,16 +572,28 @@ describe("the WeChat personal Talker", () => {
   it("lists conversations as provider-neutral descriptors", async () => {
     const runtime = fakeRuntime({
       statuses: [READY],
-      readerJson: {
-        conversations: [
-          { id: "45357963768@chatroom", name: "Karball", isGroup: true, unread: 1 },
-          { id: "wxid_friend", name: "A Friend", isGroup: false, unread: 0 },
-        ],
-      },
+      sessions: [
+        {
+          username: "45357963768@chatroom",
+          displayName: "Karball",
+          type: "group",
+          unread: 1,
+          lastMessage: { content: "hi", createdAt: "2026-10-01T00:00:00.000Z" },
+        },
+        {
+          username: "wxid_friend",
+          displayName: "A Friend",
+          type: "private",
+          unread: 0,
+          lastMessage: { content: "yo", createdAt: "2026-09-30T00:00:00.000Z" },
+        },
+        // A folded entry is a row in the session list, not a chat.
+        { username: "brandsessionholder", displayName: "订阅号消息", type: "folded", unread: 0 },
+      ],
     });
     const { talker } = buildTalker(runtime);
 
-    const page = await talker.feature("directory")!.listConversations({ limit: 10 });
+    const page = await talker.directory!.listConversations({ limit: 10 });
     expect(page.conversations).toEqual([
       {
         ref: { connectionId: "conn-wechat-user", conversationId: "45357963768@chatroom" },
@@ -628,7 +616,7 @@ describe("the WeChat personal Talker", () => {
   // (wechat-user-messages.ts). The Talk offers only the directory.
   it("leaves history to the channel", async () => {
     const { talker } = buildTalker(fakeRuntime({ statuses: [READY] }));
-    expect(talker.feature("history")).toBeNull();
+    expect(talker.history).toBeUndefined();
     expect(
       createWechatUserDescriptor({ runtime: fakeRuntime({ statuses: [READY] }) }).capabilities
         .talker?.history,

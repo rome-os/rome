@@ -1,3 +1,4 @@
+import { notifyPairingResolution } from "../channels/pairing.js";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import Database from "better-sqlite3";
@@ -5,7 +6,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { NormalizedMessage, AgentMessage, AgentConfig, OutgoingMessage } from "../types.js";
+import type { AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -20,7 +21,7 @@ import { PromptBuilder } from "../core/prompt-builder.js";
 import { createAIToolState } from "../core/ai-tool-state.js";
 import type { CodexAccountService } from "../core/codex/account-service.js";
 import { createModelResolver } from "../core/model-resolver.js";
-import { fallbackConversationTitle } from "../core/conversation-title.js";
+import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../core/agent-session.js";
 import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
@@ -41,9 +42,14 @@ import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
 import { SystemUpgradeService } from "../system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
-import type { ProviderAdapter } from "../channels/adapter.js";
-import type { ConversationId, ConversationSettingsControl } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkFeatureMap, TalkRouter } from "../connections/types.js";
+import type {
+  ChannelMessage,
+  ConversationId,
+  ConversationSettingsControl,
+  MessageReceipt,
+} from "@rome-os/app-runtime";
+import type { Talker } from "../connections/types.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
@@ -52,6 +58,7 @@ import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import { LinkedInAccounts } from "../channels/linkedin-accounts.js";
 import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
+import type { Accounts } from "../channels/accounts.js";
 import type { Channel, Channels } from "../channels/channel.js";
 import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
@@ -69,7 +76,7 @@ import { ExecutionJournalRepository } from "../db/repositories/execution-journal
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { ActionEngine } from "../actions/engine.js";
+import { ActionEngine, type ActionEngineRepositories } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionLoader } from "../actions/loader.js";
 import {
@@ -88,8 +95,10 @@ import {
   type RomeCloudListingClient,
 } from "../apps/rome-cloud-listing-client.js";
 import { createAppStoreService } from "../apps/store-service.js";
-import type { CatalogEvent } from "../apps/state.js";
+import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
+import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/types.js";
 import { Hono } from "hono";
@@ -108,21 +117,47 @@ export interface TestDb {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYSTEM_MIGRATIONS_DIR = resolve(__dirname, "../../drizzle/system");
 
+// Running the migrations costs ~11ms against ~0.15ms to deserialize their
+// result, and a core run opens well over a thousand test databases.
+let migratedImage: Buffer | undefined;
+
+function migratedSystemImage(): Buffer {
+  if (!migratedImage) {
+    const sqlite = new Database(":memory:");
+    migrate(drizzle(sqlite, { schema }), {
+      migrationsFolder: SYSTEM_MIGRATIONS_DIR,
+      migrationsTable: "__drizzle_migrations_system",
+    });
+    migratedImage = sqlite.serialize();
+    sqlite.close();
+  }
+  return migratedImage;
+}
+
+/** Opens a private in-memory database at the latest system schema. Each call
+ *  starts from the same freshly migrated state, unaffected by writes to any
+ *  other instance. */
 export function createTestDb(): TestDb {
-  const sqlite = new Database(":memory:");
+  const sqlite = new Database(migratedSystemImage());
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
 
   const db = drizzle(sqlite, { schema }) as unknown as DrizzleDb;
 
-  migrate(db, {
-    migrationsFolder: SYSTEM_MIGRATIONS_DIR,
-    migrationsTable: "__drizzle_migrations_system",
-  });
-
   return {
     db,
     close: () => sqlite.close(),
+  };
+}
+
+/** The repositories an `ActionEngine` records into, backed by `db` or a fresh test DB. */
+export function createActionEngineRepos(
+  db: DrizzleDb = createTestDb().db,
+): ActionEngineRepositories {
+  return {
+    executions: new ActionExecutionsRepository(db),
+    approvals: new ApprovalsRepository(db),
+    journal: new ExecutionJournalRepository(db),
   };
 }
 
@@ -150,13 +185,13 @@ export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number
   return { db: counted as DrizzleDb, passes: () => passes };
 }
 
-// MockModelProvider — returns predetermined AgentMessage sequences
+// MockModelProvider — returns predetermined AgentEvent sequences
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
   readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
-  private responses: AgentMessage[][];
+  private responses: AgentEvent[][];
   private callIndex = 0;
 
   /** Track all calls made to run() for assertions */
@@ -164,11 +199,11 @@ export class MockModelProvider implements ModelProvider {
   /** Track all openSession calls for assertions */
   sessions: ModelSessionParams[] = [];
 
-  constructor(responses: AgentMessage[][] = []) {
+  constructor(responses: AgentEvent[][] = []) {
     this.responses = responses;
   }
 
-  async *run(params: ModelRunParams): AsyncIterable<AgentMessage> {
+  async *run(params: ModelRunParams): AsyncIterable<AgentEvent> {
     this.calls.push(params);
     const messages = this.responses[this.callIndex++] ?? [];
     for (const msg of messages) {
@@ -182,135 +217,150 @@ export class MockModelProvider implements ModelProvider {
   }
 }
 
-// MockProviderAdapter — captures sent messages
+// FakeTransport — the platform end of a test channel
 
-export class MockProviderAdapter implements ProviderAdapter {
-  readonly channelName: string;
-  sentMessages: {
-    channelUserId: string;
-    threadId: string;
-    message: OutgoingMessage;
-  }[] = [];
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+let sentCount = 0;
 
-  constructor(channelName = "test") {
-    this.channelName = channelName;
+/** One message Rome sent on a fake transport. */
+export interface SentMessage {
+  conversationId: ConversationId;
+  message: OutgoingMessage;
+}
+
+/**
+ * The platform behind one test channel: what its Connection's Talk hears from
+ * and sends to. Inbound arrives as the channel's own record, a
+ * `ChannelMessage`, the way every production transport delivers it.
+ *
+ * Replace a method with `rs.spyOn` to fake what the platform does: the Talk
+ * reads each one at call time.
+ */
+export class FakeTransport {
+  /** Every message sent and accepted, oldest first. */
+  readonly sentMessages: SentMessage[] = [];
+  private readonly listeners = new Set<(message: ChannelMessage) => Promise<void>>();
+
+  constructor(readonly channel = "test") {}
+
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    this.sentMessages.push({ conversationId, message });
+    // A message id, the way every real talker answers with one. The outbox
+    // recognizes a delivered message by it, so a Talk that named nothing
+    // would make every send untrackable in tests and only in tests.
+    return { conversationId, messageId: `sent-${++sentCount}` };
   }
 
-  async sendMessage(
-    channelUserId: string,
-    threadId: string,
-    message: OutgoingMessage,
-  ): Promise<void> {
-    this.sentMessages.push({ channelUserId, threadId, message });
+  /** What the Connection's talker delivers through. */
+  listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
-    this.handler = handler;
-  }
-
-  /** Simulate an incoming message for testing */
-  async simulateMessage(msg: NormalizedMessage): Promise<void> {
-    await this.handler?.(msg);
+  /**
+   * Deliver one inbound message on this channel, built by `buildMessage`
+   * with this channel's name. Resolves once every listener has taken it,
+   * which on a channel's inbound port is after admission and before any
+   * subscriber's handler finishes (R4 buffers it). Answers the message.
+   */
+  async receive(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
+    const message = buildMessage({ channel: this.channel, ...overrides });
+    await Promise.all([...this.listeners].map((listener) => listener(message)));
+    return message;
   }
 }
 
-/** The Connections a mock Talk router answers for, as `channelList` reads
- *  them: one `test:<name>` Connection with a Talk per mock adapter. */
-export function mockConnections(
-  talkRouter: TalkRouter,
-  adapters: ReadonlyMap<string, unknown>,
-): ConnectionPortsDeps {
+/** What a test Connection's live talker offers: sending and its features. */
+export type TestTalker = Omit<Talker, "start" | "stop">;
+
+/** The Connections a test channel list reads: one `test:<name>` Connection per
+ *  fake transport, each with a live talker over its transport. */
+export type TestConnections = ConnectionPortsDeps["registry"] &
+  Pick<ConnectionRegistry, "get" | "all">;
+
+/**
+ * Builds the test Connections. `talker` edits one service's talker, for a test
+ * that fakes what a Connection offers; the default talker addresses a direct
+ * chat by the contact, like the two channels that ship with sending. Every
+ * Connection hears its transport's deliveries.
+ */
+export function createTestConnections(
+  transports: ReadonlyMap<string, FakeTransport>,
+  talker: (service: string, talker: TestTalker) => TestTalker = (_service, talker) => talker,
+): TestConnections {
+  const connections = new Map<string, Connection>();
+  for (const [service, transport] of transports) {
+    const id = `test:${service}`;
+    const live = talker(service, talkerOver(transport));
+    connections.set(id, {
+      id,
+      service,
+      withTalker: (call: (talker: TestTalker) => unknown) => call(live),
+      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+        transport.listen(handler),
+      isUnlocked: (capability: string) => capability === "talk",
+      status: () => ({ talk: { state: "unlocked" } }),
+    } as unknown as Connection);
+  }
+  const find = (service: string) => connections.get(`test:${service}`);
   return {
-    registry: {
-      find: (service) =>
-        adapters.has(service) ? [{ id: `test:${service}`, service } as Connection] : [],
-      getDescriptor: (service) =>
-        adapters.has(service)
-          ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
-          : null,
-      onUnlocked: () => {},
-      registeredServices: () => [...adapters.keys()],
+    find: (service) => {
+      const connection = find(service);
+      return connection ? [connection] : [];
     },
-    router: talkRouter,
+    get: (id) => {
+      const connection = connections.get(id);
+      if (!connection) throw new Error(`unknown connection "${id}"`);
+      return connection;
+    },
+    all: () => [...connections.values()],
+    getDescriptor: (service) =>
+      find(service)
+        ? ({ service, auth: {}, capabilities: { talker: {} } } as unknown as ConnectionDescriptor)
+        : null,
+    // Every test Connection is unlocked from the start, so a handler hears
+    // each of them at once, as the registry's replay does.
+    onUnlocked: (_capability, handler) => {
+      for (const connection of connections.values()) handler(connection);
+    },
+    registeredServices: () => [...transports.keys()],
   };
 }
 
-/** The harness's channel list over `talkRouter`, built by the production
- *  `channelList`. A test that swaps the router rebuilds the list with it. */
+/** A talker over a fake transport. */
+function talkerOver(transport: FakeTransport): TestTalker {
+  return {
+    send: (conversationId, message) => transport.send(conversationId, message),
+    directMessaging: {
+      async conversationFor(channelUserId: string) {
+        return channelUserId as ConversationId;
+      },
+    },
+  };
+}
+
+/** An address book with nobody in it, for a rig that reads no People. */
+export const noAccounts: Accounts = {
+  listAccounts: async () => ({ accounts: [] }),
+  resolve: async () => null,
+};
+
+/** The harness's channel list over `connections`, built by the production
+ *  `channelList`. A test that fakes a talker rebuilds the list with it. */
 export function testChannels(
-  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts"> & {
-    channelPortMap: ReadonlyMap<string, unknown>;
-  },
-  talkRouter: TalkRouter,
+  deps: Pick<TestDeps, "db" | "whatsAppAccounts" | "linkedInAccounts">,
+  connections: TestConnections,
 ): Channels {
   return channelList({
     db: deps.db,
     whatsAppAccounts: deps.whatsAppAccounts,
     linkedInAccounts: deps.linkedInAccounts,
-    connections: mockConnections(talkRouter, deps.channelPortMap),
+    connections: { registry: connections },
   });
 }
 
 /** Look a channel up by name, as the backend-turn runner does. */
 export function channelNamed(channels: Channels): (name: string) => Channel | null {
   return (name) => channels.find((channel) => channel.name === name) ?? null;
-}
-
-export function createMockTalkRouter(adapters: Map<string, MockProviderAdapter>): TalkRouter {
-  const byConnection = new Map<string, { service: string; adapter: MockProviderAdapter }>(
-    [...adapters].map(([service, adapter]) => [`test:${service}`, { service, adapter }] as const),
-  );
-  let sent = 0;
-  return {
-    list: async () =>
-      [...byConnection].map(([connectionId, value]) => ({
-        connectionId,
-        service: value.service,
-      })),
-    subscribe(connectionId, handler) {
-      const target = byConnection.get(connectionId);
-      if (!target) throw new Error(`Unknown test connection ${connectionId}`);
-      target.adapter.onMessage(async (message) =>
-        handler({
-          messageId: message.id,
-          conversationId: message.threadId as ConversationId,
-          senderId: message.channelUserId,
-          senderDisplayName: message.displayName,
-          text: message.text,
-          attachments: message.attachments,
-          timestamp: message.timestamp,
-          replyTo: message.replyTo,
-          thread: {
-            kind: message.threadType === "private" ? "dm" : "group",
-            name: message.threadName,
-          },
-          raw: message,
-        }),
-      );
-      return () => {};
-    },
-    async send(connectionId, conversationId, message) {
-      const target = byConnection.get(connectionId);
-      if (!target) throw new Error(`Unknown test connection ${connectionId}`);
-      await target.adapter.sendMessage(conversationId, conversationId, message);
-      // A message id, the way every real talker answers with one. The outbox
-      // recognizes a delivered message by it, so a router that named nothing
-      // would make every send untrackable in tests and only in tests.
-      return { conversationId, messageId: `sent-${++sent}` };
-    },
-    // Every test channel addresses a direct chat by the contact, like the two
-    // channels that ship with sending. A test needing a channel that cannot be
-    // written to overrides `feature` to answer null.
-    feature: (_connectionId, name) =>
-      name === "directMessaging"
-        ? ({
-            async conversationFor(channelUserId: string) {
-              return channelUserId as ConversationId;
-            },
-          } as TalkFeatureMap[typeof name])
-        : null,
-  };
 }
 
 const emptyConversationSettings: ConversationSettingsControl = {
@@ -331,14 +381,14 @@ const emptyConversationSettings: ConversationSettingsControl = {
 // createMockAgentRunner — mock returning predetermined responses
 
 export function createMockAgentRunner(
-  responses: AgentMessage[][] = [],
+  responses: AgentEvent[][] = [],
 ): AgentRunnerInterface & { calls: RunParams[] } {
   let callIndex = 0;
   const calls: RunParams[] = [];
 
   return {
     calls,
-    async *run(params: RunParams): AsyncIterable<AgentMessage> {
+    async *run(params: RunParams): AsyncIterable<AgentEvent> {
       calls.push(params);
       const messages = responses[callIndex++] ?? [];
       for (const msg of messages) {
@@ -348,26 +398,20 @@ export function createMockAgentRunner(
   };
 }
 
-// createMockChannel — convenience wrapper
+// buildMessage — an inbound ChannelMessage with defaults
 
-export function createMockChannel(channelName = "test"): MockProviderAdapter {
-  return new MockProviderAdapter(channelName);
-}
-
-// buildMessage — NormalizedMessage factory with defaults
-
-export function buildMessage(overrides?: Partial<NormalizedMessage>): NormalizedMessage {
+export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMessage {
   return {
-    id: "msg-001",
     channel: "telegram",
-    channelUserId: "user-123",
-    displayName: "Test User",
-    threadId: "thread-001",
-    threadType: "private",
-    timestamp: new Date("2026-01-15T10:00:00Z"),
+    direction: "inbound",
+    messageId: "msg-001",
+    conversationId: "thread-001" as ConversationId,
+    senderId: "user-123",
+    senderDisplayName: "Test User",
     text: "Hello, world!",
     attachments: [],
-    rawEvent: {},
+    timestamp: new Date("2026-01-15T10:00:00Z"),
+    thread: { kind: "dm" },
     ...overrides,
   };
 }
@@ -395,6 +439,9 @@ export interface TestDeps extends ApiDeps {
    *  the person timeline reads through it — so a test that wants LinkedIn
    *  history seeds it here rather than through the API's own dependencies. */
   linkedInStoreRepo: LinkedInStoreRepository;
+  /** The WhatsApp mirror behind `whatsAppAccounts`. No route reads it either,
+   *  so a test seeds WhatsApp contacts and history here. */
+  whatsAppStoreRepo: WhatsAppStoreRepository;
   /** The address books behind `channels`, kept reachable so a test can rebuild
    *  the list against a different database handle. */
   whatsAppAccounts: WhatsAppAccounts;
@@ -402,7 +449,11 @@ export interface TestDeps extends ApiDeps {
   sessionsRepo: SessionsRepository;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
-  channelPortMap: Map<string, MockProviderAdapter>;
+  /** The platform end of each channel `connections` backs, by channel name. */
+  transports: Map<string, FakeTransport>;
+  /** The Connections behind `channels` and `channelsService`. A test that
+   *  fakes a talker builds its own with `createTestConnections`. */
+  connections: TestConnections;
 }
 
 export interface BuildTestDepsOptions {
@@ -459,9 +510,9 @@ export async function buildTestDeps(
   options: BuildTestDepsOptions = {},
 ): Promise<TestDeps> {
   const channelNames = options.channels ?? ["telegram", "webchat"];
-  const channelPortMap = new Map<string, MockProviderAdapter>();
+  const transports = new Map<string, FakeTransport>();
   for (const name of channelNames) {
-    channelPortMap.set(name, new MockProviderAdapter(name));
+    transports.set(name, new FakeTransport(name));
   }
 
   const sessionsRepo = new SessionsRepository(db);
@@ -472,11 +523,8 @@ export async function buildTestDeps(
   const linkedInStoreRepo = new LinkedInStoreRepository(db);
   const linkedInAccounts = new LinkedInAccounts(linkedInStoreRepo);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const talkRouter = createMockTalkRouter(channelPortMap);
-  const channels = testChannels(
-    { db, whatsAppAccounts, linkedInAccounts, channelPortMap },
-    talkRouter,
-  );
+  const connections = createTestConnections(transports);
+  const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
   const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
@@ -497,19 +545,17 @@ export async function buildTestDeps(
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
 
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     { processRole: "main" },
   );
 
-  const actionLoader = new ActionLoader();
-  const agentLoader = new AgentLoader();
-  const skillCatalog = new SkillCatalog();
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const actionLoader = new ActionLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity);
+  const skillCatalog = new SkillCatalog(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -520,13 +566,13 @@ export async function buildTestDeps(
   const appStore = createAppStoreService({ appCatalog });
 
   // The agent loader stays real but unloaded. Core agent YAMLs cannot load
-  // here: `core:main` references the `coding:planning` subagent,
+  // here: `core:main` references the `assistant:explore` subagent,
   // and the loader fail-closes on unresolvable core-owned refs — production
   // only has a valid `main` because required first-party apps are installed
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionManager = new SessionManager(sessionsRepo);
+  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const promptBuilder = new PromptBuilder(appCatalog);
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: CodexAccountService = {
@@ -588,6 +634,7 @@ export async function buildTestDeps(
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry,
     modelResolver,
@@ -595,6 +642,7 @@ export async function buildTestDeps(
     skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
   });
@@ -632,10 +680,15 @@ export async function buildTestDeps(
   await dashboardAccessState.load(db);
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
+  const channelsService = createChannelsService({
+    channels: () => channels,
+    registry: connections,
+  });
 
   return {
-    talkRouter,
-    channelsService: createChannelsService({ channels: () => channels, router: talkRouter }),
+    connections,
+    notifyPairingResolution: (approval) => notifyPairingResolution(connections, approval),
+    channelsService,
     conversationSettings: emptyConversationSettings,
     actionEngine,
     actionLoader,
@@ -682,7 +735,7 @@ export async function buildTestDeps(
     agentSessionManager,
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return fallbackConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New Chat";
       },
     },
     agentRunner,
@@ -710,6 +763,17 @@ export async function buildTestDeps(
       }),
     },
     favorService: unavailableFavorService,
+    feedback: new FeedbackClient({
+      diagnostics: () =>
+        assembleDiagnosticBundle({
+          settingsRepo,
+          channelsService,
+          appCatalog,
+          bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },
+        }),
+      agentReportsEnabled: async () =>
+        (await settingsRepo.get(AGENT_REPORTS_ENABLED_KEY)) !== false,
+    }),
     // The "nothing changed" report a versionless test boot produces; tests
     // exercising the upgrade notice construct their own report.
     bootVersionReport: { upgradedSinceLastBoot: false, previousVersion: null },
@@ -717,7 +781,8 @@ export async function buildTestDeps(
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
     isCloudAuthEnabled: async () => false,
-    channelPortMap,
+    loginUsage: { recordLogin: () => {} },
+    transports,
   };
 }
 
@@ -813,6 +878,7 @@ import {
   setTelemetryBridge as setTelemetryBridgeOnSdk,
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "./channel-surface.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;
@@ -906,8 +972,6 @@ export function clearTestTelemetryBridge(): void {
   setTelemetryBridgeOnSdk(null);
 }
 
-import type { ResolvedApp } from "../apps/state.js";
-
 export interface AppLifecycleHarness {
   profileRoot: string;
   appsRoot: string;
@@ -965,7 +1029,7 @@ export async function createAppLifecycleHarness(
       bundleFetcher: options.bundleFetcher,
       romeCloudListings: options.romeCloudListings,
     });
-    const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+    const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
     const agentLoader = new AgentLoader(artifactIdentity);
     const skillCatalog = new SkillCatalog(artifactIdentity);
@@ -996,8 +1060,8 @@ export async function createAppLifecycleHarness(
     // their DB tables.
     appCatalog.subscribe(async function migrationSubscriber(event: CatalogEvent) {
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined || current.db == null) return;
+      const current = event.current;
+      if (!isResolvedApp(current) || current.db == null) return;
       try {
         await migrateAppByMetadata(db, current.db);
       } catch {
@@ -1005,14 +1069,9 @@ export async function createAppLifecycleHarness(
       }
     });
 
-    const actionEngine = new ActionEngine(
-      actionRegistry,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { processRole: "worker" },
-    );
+    const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(db), {
+      processRole: "worker",
+    });
     const settingsRepo = new SettingsRepository(db);
     const webchatRepo = new WebChatRepository(db);
     const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
@@ -1020,8 +1079,8 @@ export async function createAppLifecycleHarness(
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
       actionRegistry.unregisterOwnedBy("app", event.appId);
       if (event.change === "removed") return;
-      const current = event.current as ResolvedApp | null;
-      if (current == null || current.manifest === undefined) return;
+      const current = event.current;
+      if (!isResolvedApp(current)) return;
       const result = await registerAppActions(
         actionLoader,
         actionRegistry,

@@ -11,6 +11,7 @@ Commands:
   device           List authorized devices (they may be offline).
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
+  cp               Copy a file to or from a device.
   watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
 
@@ -96,7 +97,7 @@ The token is never printed.
   device: `Usage:
   rome-node device
   rome-node device describe <device-id>
-  rome-node device run <device-id> <action> [--args <json>]
+  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->]
 
 With no subcommand, list authorized devices as {"items":[...]}.
 Use an item's id for subsequent commands. Listed devices may be offline.
@@ -120,7 +121,9 @@ Example result:
 Failures return {"type":"response","ok":false,"error":{"code":"...","message":"..."}}.
 The local exit status is 0 on success or 1 on failure.
 `,
-  "device run": `Usage: rome-node device run <device-id> <action> [--args <json>]
+  "device run": `Usage:
+  rome-node device run <device-id> <action> [--args <json>]
+  rome-node device run <device-id> <action> [--args <json>] [--input <file|->] [--output <file|->]
 
 Use an ID from rome-node device. Run device describe first to discover actions.
 --args is a JSON object for the action (default: {}).
@@ -134,7 +137,7 @@ exec arguments:
   args         Optional array of string arguments (default: []).
   cwd          Optional working directory on the target (default: executor cwd).
 
-Programs receive no interactive stdin. No shell is added automatically.
+Programs receive no stdin unless --input is given. No shell is added automatically.
 Invoke a shell explicitly for pipelines, redirection, or shell builtins.
 Examples below use POSIX caller-shell quoting:
   rome-node device run <device-id> system.info
@@ -152,12 +155,66 @@ Check exec's exitCode even when ok is true. The local exit status is 1 for
 action failures, nonzero remote exit codes, or signal termination, otherwise 0.
 Local setup and argument errors print diagnostics to stderr and exit 1.
 Output is collected in memory and returned in full after program exit.
-The CLI does not truncate output or impose message or send-buffer size limits.
-Transport limits still apply. Connection loss returns unknown_outcome.
+In text mode, the CLI does not truncate output or impose message or send-buffer
+size limits. Transport limits still apply. Connection loss returns unknown_outcome.
+
+Raw bytes (--input or --output):
+  The request travels as a binary frame. Bytes are never JSON or base64 encoded.
+  --input <file|->   Send the file, or this command's stdin, as the program's stdin.
+                     The program then reads end of file. Without --input, stdin is empty.
+  --output <file|->  Write the program's stdout bytes to the file, or to stdout (default: -).
+                     The file is written only when ok is true.
+  The JSON response goes to stdout, or to stderr when the output is -.
+  exec result: {exitCode, signal, stderr, truncated}. stdout is the raw output.
+  Secrets in stdout are replaced by the same number of * bytes.
+  Each request and each response is one frame of at most 32 MiB. Larger input
+  fails with message_too_large before anything is sent. Larger output fails with
+  output_too_large after the program ran. Use rome-node cp for large files.
+  A target without binary frame support (no frameVersion in system.info) drops
+  the request, and the caller reports unknown_outcome after 60 seconds.
+  device run does not check frameVersion. rome-node cp checks transferVersion
+  first and fails at once with unsupported_device.
+  Example:
+    rome-node device run <device-id> exec --args '{"command":"gzip","args":["-c"]}' --input data.bin --output data.bin.gz
 
 The caller waits up to 60 seconds for a response. unknown_outcome means execution
 may have started or completed. A local timeout does not cancel the remote program.
 Never automatically retry an unknown outcome. Requests are never replayed.
+`,
+  cp: `Usage: rome-node cp <src> <dst>
+
+Copy one regular file between this computer and a device. Exactly one side is
+<device-id>:<path>, and the other is a local path. A device path that is not
+absolute starts from the working directory of rome-node connect on that device.
+A destination ending in / or \\ receives the source file name.
+
+  rome-node cp ./video.mp4 <device-id>:/tmp/video.mp4
+  rome-node cp <device-id>:/tmp/video.mp4 ./video.mp4
+  rome-node cp ./video.mp4 '<device-id>:C:/Users/me/'
+
+To copy between two devices, copy in two steps through this computer:
+  rome-node cp <device-a>:/data/video.mp4 ./video.mp4
+  rome-node cp ./video.mp4 <device-b>:/data/video.mp4
+
+The caller daemon reads or writes the local file, and rome-node connect reads
+or writes the device file. Programs and shells are not involved. The source
+must be a regular file. FIFOs, devices, and directories fail with not_a_file.
+
+Each copy writes its own .<name>.<uuid>.rome-part next to <dst>, created with
+mode 0600. It replaces <dst> only after the size and SHA-256 checksum match the
+source and the data is flushed to disk. A replaced file keeps its permission
+bits, and a new file gets the directory's default mode.
+
+A failed or interrupted copy (including Ctrl+C) leaves <dst> unchanged and
+deletes its part file. There is no resume or automatic retry. Run the copy
+again. A copy aborts after 60 seconds without progress. The device must run a
+rome-node version that reports transferVersion in system.info.
+
+Output:
+  Progress (bytes, percent, throughput) goes to stderr.
+  Success prints {"bytes":...,"ms":...,"sha256":"..."} to stdout and exits 0.
+  A copy failure prints {"type":"response","ok":false,"error":{...}} to stdout
+  and exits 1. Argument errors print to stderr and exit 1.
 `,
   daemon: `Usage: rome-node daemon [start|status|stop|serve]
 

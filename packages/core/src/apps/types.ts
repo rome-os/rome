@@ -1,6 +1,5 @@
 export type ArtifactOwnerType = "core" | "app";
 export type RomeAppArtifactKind = "agent" | "action" | "skill" | "hook";
-export type RomeAppRoutingMode = "client";
 
 export interface ArtifactOwnership {
   ownerType: ArtifactOwnerType;
@@ -69,7 +68,6 @@ export interface RomeAppBuildManifest {
   assetVersion: string;
   displayName: string;
   navLabel?: string;
-  routing: RomeAppRoutingMode;
 }
 
 export interface ResolvedRomeAppWebMetadata extends RomeAppBuildManifest {

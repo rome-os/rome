@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { DrizzleDb } from "../db/index.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema.js";
-import { countingDb, createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/helpers.js";
 import {
   testAccountMessagesContract,
   WHOLE_HISTORY,
@@ -119,6 +119,9 @@ describe("agentMessages", () => {
       (entry) => entry.ref,
     );
 
+  // Exact, so it also pins what stays out: the trace row, which belongs to no
+  // conversation; the group session, whoever sent into it; and the webchat
+  // session, which is no channel's.
   it("answers the roles that carry conversation, newest first", async () => {
     expect(await refs()).toEqual([
       "agent:m-later",
@@ -129,13 +132,7 @@ describe("agentMessages", () => {
     ]);
   });
 
-  it("leaves out a trace row, which belongs to no conversation", async () => {
-    expect(await refs()).not.toContain("agent:m-trace");
-  });
-
-  it("leaves out a session a group addresses, whoever sent the message", async () => {
-    expect(await refs()).not.toContain("agent:m-group");
-    // And nothing reaches the group's own address either: it is not an account.
+  it("answers nothing to a group's own address, which is no account", async () => {
     const asGroup = await agentMessages(db).read({
       accounts: [{ channel: CHANNEL, addresses: [GROUP] }],
       limit: WHOLE_HISTORY,
@@ -173,20 +170,6 @@ describe("agentMessages", () => {
     expect(byRef.get("agent:m-rome")).toMatchObject({ direction: "outbound" });
     expect(byRef.get("agent:m-rome")?.sender).toBeUndefined();
     expect(byRef.get("agent:m-person")?.sender).toEqual({ id: DIRECT, name: null });
-  });
-
-  it("keeps an account on its own channel", async () => {
-    // `s-elsewhere` spells this account's thread id on another channel, so the
-    // pair is all that keeps the two histories apart.
-    const there = await agentMessages(db).read({
-      accounts: [{ channel: OTHER_CHANNEL, addresses: [DIRECT] }],
-      limit: WHOLE_HISTORY,
-    });
-    expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
-  });
-
-  it("leaves out a session that is not a channel's", async () => {
-    expect(await refs()).not.toContain("agent:m-webchat");
   });
 
   it("names the channel as the source and the direction by the role", async () => {
@@ -315,27 +298,6 @@ describe("agentMessages", () => {
     ]);
     expect(here.map((entry) => entry.ref)).not.toContain("agent:m-elsewhere");
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
-  });
-
-  it("costs one pass per round of calls, not one per account", async () => {
-    const counted = countingDb(db);
-    const messages = agentMessages(counted.db);
-    const before = counted.passes();
-
-    await Promise.all([
-      messages.latest([account]),
-      messages.latest([{ channel: OTHER_CHANNEL, addresses: [DIRECT] }]),
-      messages.count([account]),
-      messages.read({ accounts: [account], limit: 2 }),
-    ]);
-
-    expect(counted.passes() - before).toBe(1);
-  });
-
-  it("holds nothing for an empty scope", async () => {
-    expect(await agentMessages(db).latest([])).toBeNull();
-    expect(await agentMessages(db).count([])).toBe(0);
-    expect(await agentMessages(db).read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
   });
 });
 

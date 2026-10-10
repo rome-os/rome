@@ -59,15 +59,15 @@ export interface ApiConnection {
   connect: ConnectHint | null;
   /** Active-setup discovery: per grant, the id of the live conferral
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
-   *  a fresh one. Absent/empty when no setup is in progress. */
-  setups?: Record<string, string>;
+   *  a fresh one. Empty when no setup is in progress. */
+  setups: Record<string, string>;
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {
-  const payload = await fetchJson<{ connections?: ApiConnection[] }>("/api/connections", {
+  const payload = await fetchJson<{ connections: ApiConnection[] }>("/api/connections", {
     fallback: "Failed to load connections.",
   });
-  return Array.isArray(payload.connections) ? payload.connections : [];
+  return payload.connections;
 }
 
 /** Structured, non-throwing result from a teardown call. */
@@ -87,18 +87,6 @@ export async function revokeConnectionGrant(
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
     return { ok: false, error: payload?.error || "Failed to disconnect." };
-  }
-  return { ok: true };
-}
-
-/** Remove the whole connection (row + grants). */
-export async function removeConnection(connectionId: string): Promise<TeardownResult> {
-  const response = await fetch(`/api/connections/${encodeURIComponent(connectionId)}`, {
-    method: "DELETE",
-  });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    return { ok: false, error: payload?.error || "Failed to remove the connection." };
   }
   return { ok: true };
 }

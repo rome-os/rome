@@ -160,7 +160,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       registryA.register(desc);
       const connA = await registryA.connect("fake-telegram", "my-telegram");
       await registryA.importCredential(connA.id, "bot", validCredential());
-      expect(connA.talk).not.toBeNull();
+      expect(connA.isUnlocked("talk")).toBe(true);
       const connAId = connA.id;
 
       // Registry B: fresh registry over same db, same descriptor
@@ -174,7 +174,7 @@ describe("Scenario 12 — rehydration (drizzle ledger only)", () => {
       expect(connB).toBeDefined();
       expect(connB.service).toBe("fake-telegram");
       expect(connB.label).toBe("my-telegram");
-      expect(connB.talk).not.toBeNull();
+      expect(connB.isUnlocked("talk")).toBe(true);
       expect(connB.status().talk).toEqual({ state: "unlocked" });
       // No new confer: tf2 got a build call because the credential was persisted
       expect(tf2.instances.length).toBeGreaterThanOrEqual(1);

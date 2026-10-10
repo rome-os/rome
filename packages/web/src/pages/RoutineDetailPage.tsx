@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ArrowLeft, Check, ChevronRight, Clock, Radio, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import { artifactLocalName } from "@/lib/artifact-name";
 import { Badge } from "@/components/ui/badge";
 import { List, ListRow } from "@/components/ui/list-row";
 import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
@@ -12,8 +11,10 @@ import { ActionExecutionTree } from "@/components/agent-trace/ActionExecutionTre
 import {
   describeOutcome,
   describeTrigger,
+  hasOwnName,
   isScheduleTrigger,
   relativeTime,
+  routineDisplayName,
   type Routine,
   type RoutineRun,
 } from "@/lib/routine-language";
@@ -28,8 +29,12 @@ export default function RoutineDetailPage() {
   const { id = "" } = useParams();
   // Reuse the cached list rather than a per-routine endpoint — a deep link just
   // triggers the list fetch, which is small and already the source of truth.
-  const { routines, isLoading } = useRoutines();
-  const routine = (routines as Routine[] | null)?.find((r) => r.id === id) ?? null;
+  const { routines, isLoading, isFetching, isFetchedAfterMount } = useRoutines();
+  const routine = routines?.find((r) => r.id === id) ?? null;
+  // A cached list can predate a routine just created elsewhere (e.g. from a
+  // chat card), so only call it missing once the mount refetch has settled.
+  // Later background refetches don't count, so a real "not found" stays put.
+  const isResolving = isLoading || (isFetching && !isFetchedAfterMount);
   useDocumentTitle(routine === null ? null : [routineDisplayName(routine), t("header.title")]);
 
   return (
@@ -43,7 +48,7 @@ export default function RoutineDetailPage() {
           {t("detail.back")}
         </Link>
 
-        {isLoading && !routine ? (
+        {isResolving && !routine ? (
           <p className="text-ui text-subtle-foreground">{t("loading")}</p>
         ) : !routine ? (
           <p className="text-ui text-subtle-foreground">{t("detail.notFound")}</p>
@@ -59,24 +64,6 @@ export default function RoutineDetailPage() {
       </PageBody>
     </PageShell>
   );
-}
-
-// Mirror the card: agent-created routines often name themselves after the
-// action they run, which reads as no name at all.
-function hasOwnName(routine: Routine): boolean {
-  const trimmed = routine.name.trim();
-  return (
-    trimmed !== "" &&
-    trimmed !== routine.actionName &&
-    trimmed !== artifactLocalName(routine.actionName)
-  );
-}
-
-/** What the routine is called: its own name, else the humanized outcome. */
-function routineDisplayName(routine: Routine): string {
-  if (hasOwnName(routine)) return routine.name.trim();
-  const outcome = describeOutcome(routine.actionName, routine.args);
-  return outcome.charAt(0).toUpperCase() + outcome.slice(1);
 }
 
 function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {

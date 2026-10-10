@@ -4,6 +4,8 @@ import type { TalkDirectory } from "../connections/types.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
+import type { Channels } from "../channels/channel.js";
+import { connectionPorts } from "../channels/connection-ports.js";
 import type { ConnectionDescriptor, Talker } from "../connections/types.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { ConversationSettingsRepository } from "./repository.js";
@@ -37,12 +39,24 @@ function directoryDescriptor(
             async send(conversationId) {
               return { conversationId };
             },
-            feature: (name) => (name === "directory" ? directory : null) as never,
+            directory,
           };
         },
       },
     },
   };
+}
+
+/** The channels the registry's Talks back, built by the production ports,
+ *  once per service as `channelList` builds them. */
+function channelsOver(registry: ConnectionRegistry): () => Channels {
+  const built = new Map<string, ReturnType<typeof connectionPorts>>();
+  return () =>
+    registry.registeredServices().flatMap((name) => {
+      if (!built.has(name)) built.set(name, connectionPorts({ registry }, name));
+      const ports = built.get(name);
+      return ports ? [{ name, accounts: null, ...ports }] : [];
+    });
 }
 
 describe("ConversationSettingsService", () => {
@@ -81,6 +95,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => ["pm-assistant"],
       onChanged,
     });
@@ -189,6 +204,26 @@ describe("ConversationSettingsService", () => {
     expect(reset.effective.routing.agentName).toBeNull();
     expect(reset.effective.session.reset).toEqual({ mode: "idle", idleMinutes: 10_080 });
     expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves an observed thread with no session row through its parent", async () => {
+    const { service, discord, parent } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    const thread: ConversationRef = {
+      connectionId: discord.id,
+      conversationId: "new-thread" as ConversationId,
+    };
+    service.observe({ ref: thread, service: "discord", kind: "topic", displayName: "new", parent });
+
+    await expect(service.get(thread)).resolves.toMatchObject({
+      inheritedFrom: parent,
+      effective: { enabled: false },
+    });
   });
 
   it("reconciles a first-seen topic placeholder with its persisted parent", async () => {
@@ -439,7 +474,7 @@ describe("ConversationSettingsService", () => {
     ).toBe("configured");
 
     await registry.stopAll();
-    expect(discord.talk).toBeNull();
+    expect(discord.isUnlocked("talk")).toBe(false);
     await expect(
       service.update({
         ref: parent,
@@ -541,7 +576,9 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository: new ConversationSettingsRepository(testDb.db),
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => [],
+      onChanged: () => {},
     });
 
     const first = await service.list({ limit: 2 });
@@ -592,7 +629,9 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channels: channelsOver(registry),
       listAgents: () => [],
+      onChanged: () => {},
     });
 
     const first = await service.list({ limit: 2 });

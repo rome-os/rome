@@ -9,10 +9,6 @@ import type {
   WhatsAppSyncSink,
 } from "../../channels/whatsapp-sync.js";
 
-// Cap on a single address-book read. A WhatsApp account can carry thousands of
-// contacts; the People-tab viewer paginates client-side, so the API hands back
-// a generous-but-bounded slice rather than the entire table in one payload.
-const CONTACTS_READ_LIMIT = 10000;
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
 
@@ -131,26 +127,10 @@ export interface WhatsAppContactRow {
 /** One address-book JID as the query reads it, before grouping folds aliases. */
 type WhatsAppContactAliasRow = Omit<WhatsAppContactRow, "aliases">;
 
-export interface WhatsAppMessageRow {
-  id: string;
-  senderJid: string | null;
-  senderName: string | null;
-  senderPhoneNumber: string | null;
-  fromMe: boolean;
-  /** Unix seconds. */
-  timestamp: number;
-  type: string | null;
-  text: string | null;
-  hasMedia: boolean;
-  pushName: string | null;
-  /** For a reaction (`type === "reaction"`), the id of the message it reacts to. */
-  reactsToId: string | null;
-}
-
 /**
  * Durable store for the WhatsApp address-book mirror (contacts, chats, recent
  * message history). Writes are fed by the adapter as a {@link WhatsAppSyncSink};
- * reads back the People-tab contact list + per-contact history.
+ * reads back the contact list and recent history.
  */
 export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   constructor(private db: DrizzleDb) {}
@@ -263,15 +243,9 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   /**
    * The synced address book, newest-conversation-first then alphabetical,
    * each row annotated with whether it has been promoted to a `persons` entry.
-   *
-   * `limit` bounds the address-book rows read before grouping folds aliases,
-   * so the returned card count can be smaller. It defaults to a generous cap
-   * that suits a single-payload endpoint. Pass `null` to read the table whole,
-   * which is what a caller that paginates the result itself wants.
+   * Reads the table whole; callers paginate the result themselves.
    */
-  async listContacts(opts: { limit?: number | null } = {}): Promise<WhatsAppContactRow[]> {
-    const limitClause =
-      opts.limit === null ? sql`` : sql`LIMIT ${opts.limit ?? CONTACTS_READ_LIMIT}`;
+  async listContacts(): Promise<WhatsAppContactRow[]> {
     const rows = (await this.db.all(sql`
       WITH wa_threads AS (
         SELECT jid FROM wa_contacts
@@ -313,7 +287,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       )
       ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC,
         lower(coalesce(c.name, c.notify, c.verified_name, ch.name, c.phone_number, t.jid)) ASC
-      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     const mapped = rows.map((r) => ({
@@ -333,44 +306,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
     }));
 
     return consolidateByAccount(mapped);
-  }
-
-  /** Recent messages for one chat, oldest→newest (newest at the bottom). */
-  async getMessages(
-    chatJid: string,
-    opts: { limit?: number; before?: number } = {},
-  ): Promise<WhatsAppMessageRow[]> {
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
-    const beforeClause = opts.before != null ? sql`AND timestamp < ${opts.before}` : sql``;
-    const rows = (await this.db.all(sql`
-      SELECT m.id AS id, m.sender_jid AS senderJid,
-        coalesce(sc.name, sc.notify, sc.verified_name) AS senderName,
-        sc.phone_number AS senderPhoneNumber,
-        m.from_me AS fromMe, m.timestamp AS timestamp,
-        m.type AS type, m.text AS text, m.has_media AS hasMedia, m.push_name AS pushName,
-        reacts_to_id AS reactsToId
-      FROM wa_messages m
-      LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
-      WHERE m.chat_jid = ${chatJid} ${beforeClause}
-      ORDER BY m.timestamp DESC, m.rowid DESC
-      LIMIT ${limit}
-    `)) as Array<Record<string, unknown>>;
-
-    return rows
-      .map((r) => ({
-        id: String(r.id),
-        senderJid: (r.senderJid as string | null) ?? null,
-        senderName: (r.senderName as string | null) ?? null,
-        senderPhoneNumber: (r.senderPhoneNumber as string | null) ?? null,
-        fromMe: Boolean(r.fromMe),
-        timestamp: Number(r.timestamp),
-        type: (r.type as string | null) ?? null,
-        text: (r.text as string | null) ?? null,
-        hasMedia: Boolean(r.hasMedia),
-        pushName: (r.pushName as string | null) ?? null,
-        reactsToId: (r.reactsToId as string | null) ?? null,
-      }))
-      .reverse();
   }
 
   /**

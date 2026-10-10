@@ -31,14 +31,6 @@ export function orderChatMessages(messages: ChatMessage[]): ChatMessage[] {
     .map(({ msg }) => msg);
 }
 
-export function latestTurnId(messages: ChatMessage[]): string | null {
-  const ordered = orderChatMessages(messages);
-  for (let i = ordered.length - 1; i >= 0; i -= 1) {
-    if (ordered[i].turnId) return ordered[i].turnId ?? null;
-  }
-  return null;
-}
-
 export function mergeChatMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
   const next = messages.filter((existing) => existing.id !== message.id);
   next.push(message);

@@ -26,7 +26,7 @@ function Calendar({
     <DayPicker
       showOutsideDays={showOutsideDays}
       className={cn(
-        "group/calendar bg-background p-2 [--cell-size:--spacing(7)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
+        "group/calendar bg-background p-2 [--cell-size:var(--calendar-cell)] px-[var(--control-calendar-px)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
         String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
         className,
@@ -50,7 +50,7 @@ function Calendar({
           // which is the same 28px as `--control-h-sm`, so naming the step it
           // already measures is what gets the glyph and the radius off the
           // scale instead of off a step the button does not occupy.
-          buttonVariants({ variant: buttonVariant, size: "icon-sm" }),
+          buttonVariants({ variant: buttonVariant, size: "icon-sm", press: "none" }),
           "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_previous,
         ),
@@ -59,7 +59,7 @@ function Calendar({
           // which is the same 28px as `--control-h-sm`, so naming the step it
           // already measures is what gets the glyph and the radius off the
           // scale instead of off a step the button does not occupy.
-          buttonVariants({ variant: buttonVariant, size: "icon-sm" }),
+          buttonVariants({ variant: buttonVariant, size: "icon-sm", press: "none" }),
           "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_next,
         ),
@@ -96,7 +96,7 @@ function Calendar({
           defaultClassNames.week_number,
         ),
         day: cn(
-          "group/day relative aspect-square h-full w-full rounded-8 p-0 text-center select-none [&:last-child[data-selected=true]_button]:rounded-r-8",
+          "group/day relative aspect-square h-full w-full rounded-8 p-0 text-center tabular-nums select-none [&:last-child[data-selected=true]_button]:rounded-r-8",
           props.showWeekNumber
             ? "[&:nth-child(2)[data-selected=true]_button]:rounded-l-8"
             : "[&:first-child[data-selected=true]_button]:rounded-l-8",
@@ -180,6 +180,7 @@ function CalendarDayButton({
       ref={ref}
       variant="ghost"
       size="icon"
+      press="none"
       data-day={day.date.toLocaleDateString(locale?.code)}
       data-selected-single={
         modifiers.selected &&

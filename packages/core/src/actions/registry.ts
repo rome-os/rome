@@ -1,7 +1,6 @@
 import type { Action, ActionRegistry } from "./types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import {
-  claimLegacyArtifactNames,
   formatArtifactId,
   resolveArtifactId,
   type ArtifactIdentityContext,
@@ -10,47 +9,14 @@ import {
 export class ActionRegistryImpl implements ActionRegistry {
   private actions = new Map<string, Action>();
   private metadata = new Map<string, ArtifactMetadata>();
-  private readonly globalActionNames: readonly string[];
 
-  /**
-   * @param globalActionNames Action names granted to every agent on top of its
-   * own allow-list (see `global-actions.ts`). Pass `[]` for registries that
-   * don't gate agent tool visibility.
-   */
-  constructor(
-    globalActionNames: readonly string[],
-    private readonly identity?: ArtifactIdentityContext,
-  ) {
-    this.globalActionNames = globalActionNames;
-  }
+  constructor(private readonly identity?: ArtifactIdentityContext) {}
 
   register(action: Action, metadata?: ArtifactMetadata): void {
     const artifactId =
       metadata && this.identity
         ? formatArtifactId(metadata.ownerId, action.config.name)
         : action.config.name;
-    if (
-      metadata &&
-      this.identity &&
-      (metadata.ownerType === "core" || metadata.formatVersion !== 2)
-    ) {
-      const claim = claimLegacyArtifactNames(
-        this.identity.legacyBindings,
-        "action",
-        [action.config.name, metadata.publicName, ...metadata.aliases],
-        artifactId as ReturnType<typeof formatArtifactId>,
-      );
-      if (claim.conflicts.length > 0) {
-        throw new Error(
-          `Legacy action name conflict: ${claim.conflicts
-            .map(
-              ({ legacyName, artifactId: owner }) =>
-                `${JSON.stringify(legacyName)} is bound to ${owner}`,
-            )
-            .join(", ")}`,
-        );
-      }
-    }
     const registeredAction =
       artifactId === action.config.name
         ? action
@@ -120,7 +86,7 @@ export class ActionRegistryImpl implements ActionRegistry {
   /**
    * Return agent-callable actions (those with inputSchema) the agent may use:
    * public actions when the allow-list contains "*", plus actions named in the
-   * allow-list or globally granted. An explicit action never enters through
+   * allow-list. An explicit action never enters through
    * the wildcard. This is the single resolution point for both the model-facing
    * tool catalog and the execution gate, so the two cannot disagree about what
    * an agent is permitted to call.
@@ -138,10 +104,7 @@ export class ActionRegistryImpl implements ActionRegistry {
       }
     }
 
-    for (const name of new Set([
-      ...names.filter((name) => name !== "*"),
-      ...this.globalActionNames,
-    ])) {
+    for (const name of new Set(names.filter((name) => name !== "*"))) {
       const action = this.get(name);
       if (action && action.inputSchema && !included.has(action.config.name)) {
         result.push(action);

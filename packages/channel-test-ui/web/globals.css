@@ -1,0 +1,11 @@
+@import "tailwindcss";
+/* The kit's token vocabulary, variants and base layer. The theme values behind
+   the tokens are injected by theme.ts. */
+@import "@rome-os/ui/styles.css";
+
+/* The typewriter's caret, used as `animate-[caret-blink_1s_steps(2,start)_infinite]`. */
+@keyframes caret-blink {
+  to {
+    visibility: hidden;
+  }
+}

@@ -29,7 +29,7 @@ export function ToolCallView({
   hasResult,
   live = false,
 }: {
-  tool?: string;
+  tool: string;
   input: unknown;
   output: unknown;
   status: ToolCallStatus;
@@ -39,8 +39,7 @@ export function ToolCallView({
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
-  const rawToolLabel = tool ?? t("blocks.unknownTool");
-  const toolLabel = artifactLocalName(rawToolLabel);
+  const toolLabel = artifactLocalName(tool);
   const summary = describeToolSummary(tool, input, output, hasResult, t);
   const duration = formatStepDuration(durationMs);
   const resultUnknown = !hasResult && !live;
@@ -66,10 +65,7 @@ export function ToolCallView({
           aria-hidden="true"
           className={`inline-block h-1.5 w-1.5 flex-none rounded-full ${toolCallDotClass(status, live)}`}
         />
-        <span
-          className="flex-none font-mono text-aux text-foreground"
-          title={toolLabel === rawToolLabel ? undefined : rawToolLabel}
-        >
+        <span className="min-w-0 truncate font-mono text-aux text-foreground" title={tool}>
           {toolLabel}
         </span>
         {summary && (

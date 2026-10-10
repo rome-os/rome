@@ -5,9 +5,7 @@ import { formatDuration } from "@/components/agent-trace/CollapsedTraceSummary";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { artifactLocalName } from "@/lib/artifact-name";
 
-export type DelegatedSubagentNode = TraceSubagentSummary;
-
-function SubagentTraceSummary({ node }: { node: DelegatedSubagentNode }) {
+function SubagentTraceSummary({ node }: { node: TraceSubagentSummary }) {
   const { t } = useTranslation("activity");
   if (node.status === "running") {
     return <span className="shimmer">{t("trace.summary.activity.thinking")}</span>;
@@ -37,22 +35,18 @@ export function DelegatedSubagentGroup({
   agentIconByName,
   onOpenSubagentTrace,
 }: {
-  subagents?: TraceSubagentSummary[];
+  subagents: TraceSubagentSummary[];
   selected?: { sessionId: string; turnId: string | null } | null;
   agentIconByName?: ReadonlyMap<string, string | null>;
-  onOpenSubagentTrace: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace: (node: TraceSubagentSummary) => void;
 }) {
   const { t } = useTranslation("activity");
-  const nodes = subagents ?? [];
-
-  if (nodes.length === 0) return null;
-
   return (
     <ul
       aria-label={t("trace.subagents.ariaLabel")}
       className="flex min-w-0 items-center overflow-hidden"
     >
-      {nodes.map((node) => {
+      {subagents.map((node) => {
         const key = `${node.sessionId}:${node.turnId}`;
         const label = artifactLocalName(node.agentName);
         const isSelected =

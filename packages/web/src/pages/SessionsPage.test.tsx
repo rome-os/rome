@@ -1,6 +1,13 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
@@ -14,8 +21,7 @@ import {
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
-import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
-import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
+import SessionsPage from "./SessionsPage";
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
@@ -138,9 +144,19 @@ function ChatHomeProbe() {
   );
 }
 
+function OpenMissingTileSession() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/full/apps/sessions/missing")}>
+      Open missing session
+    </button>
+  );
+}
+
 function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      {container ? <OpenMissingTileSession /> : null}
       <Routes>
         <Route path="/sessions/*" element={<SessionsPage />} />
         <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
@@ -230,7 +246,10 @@ describe("SessionsPage missing sessions", () => {
     );
   });
 
-  it("keeps a missing workspace tile inside its frame", async () => {
+  it.each([
+    ["/full/apps/sessions/missing", false],
+    ["/full/apps/sessions/feedback-fork-session", true],
+  ])("keeps a missing workspace tile inside its frame from %s", async (entry, navigatesToMissing) => {
     const frame = document.createElement("iframe");
     frame.src = "/full/apps/sessions/missing";
     document.body.appendChild(frame);
@@ -238,12 +257,21 @@ describe("SessionsPage missing sessions", () => {
     const parentWindow = frame.contentWindow!.parent;
     const postMessage = rs.spyOn(parentWindow, "postMessage").mockImplementation(() => {});
     rs.stubGlobal("window", frame.contentWindow!);
-    rs.mocked(getRomeSession).mockResolvedValue(null);
+    rs.mocked(getRomeSession).mockImplementation(async (id) =>
+      id === FORK_SESSION.id ? FORK_SESSION : null,
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     try {
-      const view = renderDetail("/full/apps/sessions/missing", frame.contentDocument!.body);
+      const view = renderDetail(entry, frame.contentDocument!.body);
+      if (navigatesToMissing) {
+        expect(await view.findByText("Feedback")).toBeTruthy();
+        fireEvent.click(view.getByRole("button", { name: "Open missing session" }));
+      }
 
       expect(await view.findByText("Session not found")).toBeTruthy();
+      // An existing-to-missing move must not keep showing the previous session.
+      expect(view.queryByText("Feedback")).toBeNull();
       expect(view.queryByTestId("chat-home")).toBeNull();
       expect(postMessage).not.toHaveBeenCalled();
     } finally {
@@ -259,18 +287,6 @@ describe("SessionsPage missing sessions", () => {
 
     expect(await screen.findByText("Service unavailable")).toBeTruthy();
     expect(screen.queryByTestId("chat-home")).toBeNull();
-  });
-});
-
-describe("sessionsViewportClass", () => {
-  it("keeps the standard mobile shell surface edge-to-edge", () => {
-    expect(sessionsViewportClass(false)).toContain("h-[var(--rome-mobile-content-height)]");
-    expect(sessionsViewportClass(false)).not.toContain("pb-safe");
-  });
-
-  it("protects the top edge in full mode without shrinking its bottom surface", () => {
-    expect(sessionsViewportClass(true)).toContain("pt-safe");
-    expect(sessionsViewportClass(true)).not.toContain("pb-safe");
   });
 });
 
@@ -304,7 +320,6 @@ describe("SessionsPage landmarks", () => {
         const mains = view.container.querySelectorAll("main");
         expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
         expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
-        expect(mains[0].className).toContain("pt-safe");
       });
       cleanup();
     }
@@ -432,41 +447,6 @@ describe("SessionsPage live fork details", () => {
 });
 
 describe("SessionsPage explorer", () => {
-  it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
-    expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    rs.mocked(getSessionMetrics).mockResolvedValue({
-      scope: {
-        from: "2026-07-08T00:00:00.000Z",
-        to: "2026-07-15T00:00:00.000Z",
-        timeZone: "UTC",
-      },
-      totals: {
-        sessionCount: 0,
-        runCount: 0,
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          totalTokens: 0,
-          costUsd: null,
-          costedRunCount: 0,
-        },
-        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
-      },
-      projections: [],
-    });
-
-    renderIndex("/sessions?groupBy=source&range=all");
-
-    await waitFor(() =>
-      expect(getSessionMetrics).toHaveBeenCalledWith(
-        expect.objectContaining({ groupBy: "app", range: "7d" }),
-      ),
-    );
-    expect(screen.getByRole("combobox", { name: "Group by" }).textContent).toContain("Apps");
-  });
-
   it("shows usage overview and switches to the human-readable inventory", async () => {
     rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },

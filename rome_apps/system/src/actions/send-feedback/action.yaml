@@ -1,0 +1,17 @@
+name: send_feedback
+type: system
+description: >-
+  Report a Rome platform problem only the platform can fix: a system or first-party
+  action failing or misbehaving, a wrong or stale skill or doc, a missing capability,
+  or confusing UX. Do not use for bugs in the guardian's custom apps, task outcomes,
+  or things you can fix yourself. Write generically: never include the guardian's
+  personal data, message or file contents, credentials, or secrets. Give a short
+  one-line summary and details of what happened, what was expected, and a minimal
+  repro. Summary, a blank line, and details must fit within 4000 characters.
+  File once per distinct issue and tell the guardian you filed it. Reports
+  include instance diagnostics, as in the Feedback dialog. If the outcome is
+  unknown, the report may have been filed: do not retry.
+complexity: simple
+speed: moderate
+reliability: high
+sideEffects: write

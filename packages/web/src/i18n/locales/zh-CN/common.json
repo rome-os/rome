@@ -39,7 +39,12 @@
     "title": "最近对话",
     "newChat": "新对话",
     "empty": "还没有对话",
-    "unread": "未读",
+    "rowStatus": {
+      "waiting": "等你处理",
+      "running": "正在回复",
+      "failed": "出错停止了",
+      "done": "已完成 · 有新回复"
+    },
     "delete": "删除对话",
     "deleteConfirm": "永久删除该对话？此操作无法撤销。",
     "archive": "归档对话",
@@ -238,6 +243,7 @@
     "tools": "应用",
     "toolOpened": "已打开",
     "toolUpdated": "新内容",
+    "openToolNewTab": "在新标签页中打开{{name}}",
     "closeTool": "关闭{{name}}",
     "allTools": "所有已打开应用",
     "collapseTools": "收起应用",

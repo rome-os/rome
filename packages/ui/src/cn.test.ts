@@ -11,11 +11,17 @@ import { TYPOGRAPHY_ROLES } from "./typography-roles.js";
  * empty, which is what keeps the per-role modifiers (`--text-aux--line-height`)
  * out: the double hyphen ends the match before the `:`.
  */
+// Unique, in first-declared order: the phone block re-declares some roles at
+// phone size, which retunes a role rather than adding one.
 const stylesheetRoles = [
-  ...readFileSync(join(import.meta.dirname, "styles.css"), "utf8").matchAll(
-    /^\s*--text-([a-z0-9]+(?:-[a-z0-9]+)*):/gm,
+  ...new Set(
+    [
+      ...readFileSync(join(import.meta.dirname, "styles.css"), "utf8").matchAll(
+        /^\s*--text-([a-z0-9]+(?:-[a-z0-9]+)*):/gm,
+      ),
+    ].map(([, role]) => role),
   ),
-].map(([, role]) => role);
+];
 
 describe("cn", () => {
   it("joins conditional class names and drops falsy ones", () => {
@@ -30,6 +36,11 @@ describe("cn", () => {
     expect(cn("text-sm font-medium", "text-muted-foreground")).toBe(
       "text-sm font-medium text-muted-foreground",
     );
+  });
+
+  it.each(["4", "8", "12", "16"])("lets rounded-%s override another radius utility", (radius) => {
+    expect(cn("rounded-full", `rounded-${radius}`)).toBe(`rounded-${radius}`);
+    expect(cn(`rounded-${radius}`, "rounded-full")).toBe("rounded-full");
   });
 
   // The kit's hosts are on Tailwind 4, whose utilities tailwind-merge only

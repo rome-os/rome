@@ -141,6 +141,7 @@ export function oauthRoutes(deps: ApiDeps): Hono {
           : "/onboard";
 
       issueGuardianSession(c, guardian.userId);
+      if (!existingSession) deps.loginUsage.recordLogin("oauth");
 
       c.header("Cache-Control", "no-store");
       return c.json({

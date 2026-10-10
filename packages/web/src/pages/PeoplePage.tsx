@@ -269,7 +269,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
                 className="mt-3"
                 onClick={() => void roster.refetch()}
               >
-                <RefreshCw aria-hidden="true" />
+                <RefreshCw data-icon="inline-start" aria-hidden="true" />
                 {t("errors.retry")}
               </Button>
             </AlertDescription>

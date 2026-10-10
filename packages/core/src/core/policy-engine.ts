@@ -1,15 +1,10 @@
 import { trace } from "@opentelemetry/api";
+import type { PolicyContext } from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../types.js";
 import type { PoliciesRepository } from "../db/repositories/policies.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 
-export interface PolicyContext {
-  channel: string;
-  sender: { id: string; bondLevel: string } | null;
-  bondLevel: string;
-  threadName?: string;
-  threadType?: string;
-}
+export type { PolicyContext } from "@rome-os/app-runtime";
 
 type MatchedScope = "sender_specific" | "thread" | "sender_tier" | "channel" | "global" | "default";
 

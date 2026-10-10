@@ -1,7 +1,22 @@
 import { describe, expect, it } from "@rstest/core";
+import { WEBCHAT_LARGE_MODEL_SELECTIONS } from "./model-selector.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "./provider-accounting.js";
 
 describe("provider-accounting", () => {
+  // A model without a pricing rule records no cost at all, and the session
+  // shows "API cost unknown". Adding a selectable model must add its price.
+  it.each(
+    Object.values(WEBCHAT_LARGE_MODEL_SELECTIONS),
+  )("prices selectable model $id ($providerId $model)", ({ providerId, model }) => {
+    const cost = calculateImpliedCostUsd(providerId, model, {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+    expect(cost).toBeGreaterThan(0);
+  });
+
   it("calculates Anthropic Fable 5.1 costs using cache read and 5-minute cache write rates", () => {
     const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-fable-5-1[1m]", {
       inputTokens: 1_000_000,
@@ -53,7 +68,7 @@ describe("provider-accounting", () => {
     expect(impliedCostUsd).toBeCloseTo(22.05);
   });
 
-  it("prices Anthropic Sonnet 5.5 at $2/$10 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {
+  it("prices Anthropic Sonnet 5.5 at $2/$10 with cache reads at $0.10 and 5-minute writes at 1.25x", () => {
     const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-sonnet-5-5", {
       inputTokens: 1_000_000,
       outputTokens: 1_000_000,
@@ -61,7 +76,18 @@ describe("provider-accounting", () => {
       cacheWriteTokens: 1_000_000,
     });
 
-    expect(impliedCostUsd).toBeCloseTo(14.7);
+    expect(impliedCostUsd).toBeCloseTo(14.6);
+  });
+
+  it("prices Anthropic Haiku 5.5 at its base tier of $0.10/$0.50 with cache reads at 0.1x and 5-minute writes at 1.25x", () => {
+    const impliedCostUsd = calculateImpliedCostUsd("anthropic", "claude-haiku-5-5", {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    });
+
+    expect(impliedCostUsd).toBeCloseTo(0.735);
   });
 
   it("matches model aliases with dated suffixes", () => {
@@ -216,6 +242,22 @@ describe("provider-accounting", () => {
 
     expect(calculateImpliedCostUsd("openai", "gpt-6-sol", usage, rawUsage)).toBeCloseTo(24.4);
     expect(calculateImpliedCostUsd("openai", "gpt-6-luna", usage, rawUsage)).toBeCloseTo(1.22);
+  });
+
+  it("prices GPT-6.1 Sol with its halved cache-read rate", () => {
+    const usage = {
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheWriteTokens: 1_000_000,
+    };
+
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol:high", usage)).toBeCloseTo(14.6);
+    expect(calculateImpliedCostUsd("openai", "gpt-6.1-sol-2026-09-29", usage)).toBeCloseTo(14.6);
+    expect(
+      calculateImpliedCostUsd("openai", "gpt-6.1-sol", usage, { input_tokens: 272_001 }),
+    ).toBeCloseTo(24.2);
   });
 
   it("applies GPT-5.6 long-context input and output multipliers", () => {

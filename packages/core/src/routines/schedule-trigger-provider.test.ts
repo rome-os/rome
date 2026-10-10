@@ -266,36 +266,6 @@ describe("ScheduleTriggerProvider", () => {
     }
   });
 
-  it("legacy row with no tzMode defaults to floating, never to the literal tzid", async () => {
-    // tzMode is required now and existing rows were backfilled, but the read
-    // path must still fail safe: a row that somehow lacks tzMode follows the
-    // guardian, never its stored snapshot. Cast past the type to
-    // simulate such a row.
-    const floatingProvider = new ScheduleTriggerProvider(repo, async () => "America/New_York");
-    const id = await repo.create({
-      name: "legacy",
-      trigger: {
-        type: "schedule",
-        tzid: "Asia/Tokyo",
-        localTime: "09:00",
-        rrule: "FREQ=DAILY",
-      } as unknown as Trigger,
-      actionName: "noop",
-      args: {},
-      enabled: true,
-    });
-    const row = await repo.findById(id);
-    const routine = buildRoutine({ id, trigger: row!.trigger as Trigger });
-
-    await floatingProvider.activate(routine, async () => {});
-    try {
-      const job = jobFor(floatingProvider, id) as unknown as { options: { timezone?: string } };
-      expect(job.options.timezone).toBe("America/New_York");
-    } finally {
-      floatingProvider.stop();
-    }
-  });
-
   it("deactivate stops the cron job AND drops it from the active set", async () => {
     const id = await repo.create({
       name: "stop-me",

@@ -35,18 +35,20 @@ A conversation is the thread a [message](#message) was said in, named by the pla
 
 ## Channels
 
-A channel is somewhere Rome and a person can reach each other — WhatsApp, Telegram, email, the chat built into the dashboard. Every [message](#message) arrives on one, and everyone Rome can talk to is reached through one. The platform owns the channel. Rome connects to it.
+A channel is one of Rome's presences on a platform, where Rome and a person can reach each other: Rome's Telegram bot, its signed-in WhatsApp, its mailbox, the chat built into the dashboard. Every [message](#message) arrives on one, and everyone Rome can talk to is reached through one. The platform owns the conversations. Rome's presence on it is the channel.
 
 **Contracts:**
 
 - Every inbound message reaches routing in one shape, whatever platform it came from. A channel absorbs its own platform's wire format, so adding a channel changes nothing downstream.
 - Channel connection setup is uniform: enabling any channel drives the same server-owned setup protocol — there is no bespoke per-service connect flow ([channel invariants](../architecture/channels.md#invariants)).
 - Per-channel credentials are kept separate and are revoked independently.
+- A channel is named after its service, and links and stored messages name the channel. One platform can carry several channels, such as the `telegram` bot and the `telegram_user` signed-in account, and a second presence is always a second channel ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-08-a-channel-is-one-presence-on-a-platform)).
 
 **Not to be confused with:**
 
 - **[Message](#message)** — the message is what was said. The channel is what carried it.
 - **[Person](people.md#person)** — a channel is where a message arrives. The person is who sent it, resolved across channels.
+- **Platform** — the platform, such as Telegram, holds the conversations and the people's accounts. A channel is one of Rome's presences on it, and one platform can carry several.
 - **Connection** — a connection is what joins the Rome instance to a service, holding the authority the guardian granted. Carrying messages is one of the things that authority buys. The same connection to Slack can also let Rome act on the workspace without messaging anyone.
 - **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. The channel is where the message came from.
 
@@ -86,7 +88,7 @@ The sentinel is a lightweight [agent](agents.md) that triages messages from untr
 
 **Contracts:**
 
-- All sentinel decisions are recorded. The main agent periodically reviews the log (cadence configurable) to catch anything that needs follow-up.
+- All sentinel decisions are recorded in the sentinel log, which the guardian reviews from the Inbox triage view.
 - The sentinel only sees messages the [policy engine](#policies) routes to it. It is not in the path of trusted senders' messages.
 
 **Not to be confused with:**

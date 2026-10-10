@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action } from "./types.js";
-import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import {
+  claimLegacyArtifactName,
+  createEmptyLegacyArtifactBindings,
+  formatArtifactId,
+} from "../apps/artifact-id.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 
 function callableAction(
@@ -40,9 +44,15 @@ function eventOnlyAction(name: string): Action {
 }
 
 describe("ActionRegistryImpl", () => {
-  it("stores app actions by canonical ID while preserving a legacy bare binding", () => {
+  it("stores app actions by canonical ID and resolves a bound legacy bare name", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    const registry = new ActionRegistryImpl([], identity);
+    claimLegacyArtifactName(
+      identity.legacyBindings,
+      "action",
+      "foo",
+      formatArtifactId("legacy-app", "foo"),
+    );
+    const registry = new ActionRegistryImpl(identity);
     const metadata: ArtifactMetadata = {
       kind: "action",
       ownerType: "app",
@@ -61,7 +71,7 @@ describe("ActionRegistryImpl", () => {
 
   it("allows v2 apps to reuse a local name without creating a bare binding", () => {
     const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    const registry = new ActionRegistryImpl([], identity);
+    const registry = new ActionRegistryImpl(identity);
     for (const ownerId of ["review-one", "review-two"]) {
       registry.register(callableAction("review"), {
         kind: "action",
@@ -81,7 +91,7 @@ describe("ActionRegistryImpl", () => {
   });
 
   it("returns all agent-callable actions when names includes '*'", () => {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(callableAction("alpha"));
     registry.register(callableAction("beta"));
     registry.register(eventOnlyAction("workflow_only"));
@@ -92,7 +102,7 @@ describe("ActionRegistryImpl", () => {
   });
 
   it("does not grant an explicit action through '*'", () => {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(callableAction("public_tool"));
     registry.register(callableAction("internal_tool", "explicit"));
 
@@ -102,46 +112,12 @@ describe("ActionRegistryImpl", () => {
   });
 
   it("grants an explicit action by exact name alongside '*'", () => {
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register(callableAction("public_tool"));
     registry.register(callableAction("internal_tool", "explicit"));
 
     expect(
       registry.getForAgent(["*", "internal_tool"]).map((action) => action.config.name),
     ).toEqual(["public_tool", "internal_tool"]);
-  });
-
-  it("grants a globally-granted explicit action", () => {
-    const registry = new ActionRegistryImpl(["internal_tool"]);
-    registry.register(callableAction("internal_tool", "explicit"));
-
-    expect(registry.getForAgent([]).map((action) => action.config.name)).toEqual(["internal_tool"]);
-  });
-
-  it("grants a globally-granted action to an agent whose allow-list omits it", () => {
-    const registry = new ActionRegistryImpl(["ask_question"]);
-    registry.register(callableAction("ask_question"));
-    registry.register(callableAction("scoped_tool"));
-    registry.register(callableAction("secret_tool"));
-
-    const names = registry.getForAgent(["scoped_tool"]).map((a) => a.config.name);
-
-    expect(names).toContain("scoped_tool");
-    expect(names).toContain("ask_question");
-    expect(names).not.toContain("secret_tool");
-  });
-
-  it("grants globally-granted actions even when the allow-list is empty", () => {
-    const registry = new ActionRegistryImpl(["ask_question"]);
-    registry.register(callableAction("ask_question"));
-
-    expect(registry.getForAgent([]).map((a) => a.config.name)).toEqual(["ask_question"]);
-  });
-
-  it("does not grant a globally-granted name that is not agent-callable", () => {
-    const registry = new ActionRegistryImpl(["event_global"]);
-    registry.register(eventOnlyAction("event_global"));
-
-    expect(registry.getForAgent([])).toEqual([]);
   });
 });
