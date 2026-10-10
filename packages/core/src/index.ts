@@ -815,6 +815,8 @@ async function main() {
     // no backend turn runs before boot completes.
     channel: (name) => channels.find((channel) => channel.name === name) ?? null,
     resolveWorkingDir: resolveContinuationWorkingDir,
+    resolveConversationId: (channel, threadId) =>
+      webchatRepo.findConversationIdByAddress(channel, threadId),
     conversations: appRuntimeRepositories.conversations!,
   });
 

@@ -364,6 +364,7 @@ describe("AgentRunner", () => {
           threadContext: {
             channel: "webchat",
             threadId: "parent-chat",
+            romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
           },

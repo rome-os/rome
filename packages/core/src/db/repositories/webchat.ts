@@ -1311,6 +1311,25 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
+  /** The id of the conversation a channel address names, or null when none
+   *  exists yet. A webchat conversation's address is its own id. Forks and
+   *  subagent runs copy their parent's address, so only conversation types
+   *  match. */
+  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          inArray(romeSessions.type, ["webchat", "webchat_handoff", "channel"]),
+          eq(romeSessions.sourceChannel, channel),
+          eq(romeSessions.sourceThreadId, threadId),
+        ),
+      )
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
   async deleteSession(id: string) {
     // One transaction so a crash mid-cascade can't leave orphan messages or
     // feedback rows behind. `webchat_turn_feedback` also cascades via its FK,

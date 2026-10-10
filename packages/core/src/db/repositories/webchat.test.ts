@@ -121,6 +121,29 @@ describe("WebChatRepository", () => {
   describe("channel conversation continuity", () => {
     const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
 
+    it("finds a conversation by its channel address", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+      const channel = await repo.ensureChannelConversation({
+        channel: "telegram",
+        threadId: "thread-1",
+        agentName: "main",
+      });
+      // A fork copies its parent's address but is not the conversation.
+      await repo.ensureRomeSession({
+        id: "fork-1",
+        name: "recap: Webchat chat",
+        type: "fork",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "chat-1",
+        parentSessionId: "chat-1",
+      });
+
+      expect(await repo.findConversationIdByAddress("webchat", "chat-1")).toBe("chat-1");
+      expect(await repo.findConversationIdByAddress("telegram", "thread-1")).toBe(channel.id);
+      expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
+    });
+
     it("keeps one thread session while refreshing its routing from the parent", async () => {
       const first = await repo.ensureChannelConversation({
         channel: "discord",

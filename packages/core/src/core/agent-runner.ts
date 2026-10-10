@@ -676,11 +676,8 @@ export class AgentRunner {
       // cover older/non-conversation callers that did not acquire with one.
       const parentSessionId =
         sourceRomeSessionId ??
-        (thread?.channel === "webchat"
-          ? thread.threadId
-          : thread
-            ? `channel:${thread.channel}:${thread.threadId}`
-            : null);
+        thread?.romeSessionId ??
+        (thread ? `channel:${thread.channel}:${thread.threadId}` : null);
       const parent = parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null;
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
       const label = params.label ?? "fork";

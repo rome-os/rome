@@ -76,6 +76,9 @@ export interface BackendTurnRunnerDeps {
    * project to honor (non-webchat channels, unknown threads); the session then
    * falls back to the default working dir. */
   resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>;
+  /** The conversation (channel, thread) names, so the continued turn's trace
+   * lands on it. Null when the address has no conversation yet. */
+  resolveConversationId?: (channel: string, threadId: string) => Promise<string | null>;
   /** Durable conversation projection used to attach provider delivery ids. */
   conversations?: ConversationRepository;
 }
@@ -86,6 +89,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
+    conversationId: string | null | undefined,
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
       agentName: params.agentName,
@@ -101,6 +105,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         channel: params.channel,
         threadId: params.threadId,
         channelUserId: params.channelUserId,
+        ...(conversationId ? { romeSessionId: conversationId } : {}),
       },
       // A continuation is not a guardian-authored turn — mark it system so the
       // turn-level logic treats it as an internal re-entry, not a fresh message.
@@ -139,11 +144,12 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // runs where its SDK transcript lives (defer/timer fire on a fresh stack
       // that never carried it). Undefined ⇒ keep the default-dir fallback.
       const workingDir = await deps.resolveWorkingDir?.(params.channel, params.threadId);
+      const conversationId = await deps.resolveConversationId?.(params.channel, params.threadId);
 
       if (params.channel === "webchat") {
         // Webchat delivery rides the session's SSE push inside the session task.
         await runBackendSessionTask(params.channel, params.threadId, async ({ emit }) => {
-          for await (const msg of runTurn(params, workingDir)) {
+          for await (const msg of runTurn(params, workingDir, conversationId)) {
             emit({ ...msg, agent: params.agentName });
           }
         });
@@ -154,7 +160,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       // on the channel's `send` port.
       let reply = "";
       let turnId: string | undefined;
-      for await (const msg of runTurn(params, workingDir)) {
+      for await (const msg of runTurn(params, workingDir, conversationId)) {
         if (msg.type === "turn_start") turnId = msg.turnId;
         if (msg.type === "result") reply = msg.content;
       }
