@@ -17,7 +17,7 @@ export function PublicProjectsWidget({ token, initialSelectedPath }: PublicProje
   const { t: tFiles } = useTranslation("files");
   const apiBasePath = `/api/share/${encodeURIComponent(token)}/projects`;
   const [restorePath] = useState(() => initialSelectedPath ?? null);
-  const externalSelection = useResolvedSelection(apiBasePath, restorePath);
+  const { selection: externalSelection } = useResolvedSelection(apiBasePath, restorePath);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">

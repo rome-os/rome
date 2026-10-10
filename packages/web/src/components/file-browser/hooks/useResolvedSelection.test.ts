@@ -20,7 +20,10 @@ describe("useResolvedSelection", () => {
       useResolvedSelection("/api/share/tok/projects", "projects/docs"),
     );
     await waitFor(() =>
-      expect(result.current).toEqual({ path: "projects/docs", type: "directory" }),
+      expect(result.current).toEqual({
+        selection: { path: "projects/docs", type: "directory" },
+        settled: true,
+      }),
     );
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/share/tok/projects/resolve?path=projects%2Fdocs",
@@ -30,13 +33,22 @@ describe("useResolvedSelection", () => {
   it("restores a saved file as a file", async () => {
     stubResolve("file");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/a.md"));
-    await waitFor(() => expect(result.current).toEqual({ path: "projects/a.md", type: "file" }));
+    await waitFor(() =>
+      expect(result.current.selection).toEqual({ path: "projects/a.md", type: "file" }),
+    );
   });
 
   it("selects nothing without a path", () => {
     const fetchMock = stubResolve("file");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", null));
-    expect(result.current).toBeNull();
+    expect(result.current).toEqual({ selection: null, settled: true });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("settles with no selection when the saved path is missing", async () => {
+    stubResolve("missing");
+    const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/gone"));
+    expect(result.current).toEqual({ selection: null, settled: false });
+    await waitFor(() => expect(result.current).toEqual({ selection: null, settled: true }));
   });
 });

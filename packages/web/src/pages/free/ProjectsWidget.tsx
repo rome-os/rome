@@ -65,10 +65,17 @@ export function ProjectsWidget({
   // doesn't re-resolve and yank the view around as the user navigates. The
   // agent follow target, when present, takes precedence below.
   const [restorePath] = useState<string | null>(() => initialSelectedPath ?? null);
-  const restoredTarget = useResolvedSelection("/api/projects", restorePath);
+  const restored = useResolvedSelection("/api/projects", restorePath);
   // Until the browser reaches the restored spot (or navigates elsewhere), its
   // empty mount state must not overwrite the saved location.
   const restorePendingRef = useRef(restorePath !== null);
+  // A saved path that no longer resolves will never be reached: release the
+  // guard and drop it, so the placement and its link follow what is shown.
+  useEffect(() => {
+    if (!restored.settled || restored.selection || !restorePendingRef.current) return;
+    restorePendingRef.current = false;
+    if (placementId) updateProjectsSelection(placementId, null);
+  }, [restored.settled, restored.selection, placementId]);
 
   const candidatePath = useMemo(() => {
     if (!targetPath) return null;
@@ -82,12 +89,12 @@ export function ProjectsWidget({
     return null;
   }, [targetPath, activeProjectPath]);
 
-  const followTarget = useResolvedSelection("/api/projects", candidatePath);
+  const { selection: followTarget } = useResolvedSelection("/api/projects", candidatePath);
   // Agent follow wins when present; otherwise fall back to the restored
   // selection. `useExternalSelection` only re-selects when this value's path
   // changes and no-ops if the browser is already there, so a manual selection
   // after restore is never overridden.
-  const externalSelection = followTarget ?? restoredTarget;
+  const externalSelection = followTarget ?? restored.selection;
 
   // Publish a workspace-context snapshot driven by the file
   // browser's own selection (`onSelectionChange`) so it works on the first
