@@ -225,7 +225,7 @@ describe("SessionsRepository", () => {
     expect((await repo.findById(unbound))?.conversationId).toBeNull();
   });
 
-  it("rotation keeps the retired row's conversation unless the caller names one", async () => {
+  it("rotation takes the caller's conversation and keeps the retired row's otherwise", async () => {
     await repo.create({
       id: "old",
       agentName: "main",
