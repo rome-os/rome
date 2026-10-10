@@ -226,6 +226,35 @@ describe("AgentSessionManager working dirs", () => {
     expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("kept");
   });
 
+  it("records a conversation learned after acquire, without overwriting it", async () => {
+    const child = await manager.acquire({
+      agentName: AGENT,
+      channelThreadKey: "main:subagent:1",
+    });
+    expect((await sessionsRepo.findById(child.sessionId))?.conversationId).toBeNull();
+
+    await manager.recordConversation(child.sessionId, child.sessionId);
+    await manager.recordConversation(child.sessionId, "other");
+
+    expect((await sessionsRepo.findById(child.sessionId))?.conversationId).toBe(child.sessionId);
+  });
+
+  it("fills a row with no conversation when a resume names one", async () => {
+    const original = await manager.acquire({
+      agentName: AGENT,
+      channelThreadKey: "main:subagent:2",
+    });
+    await original.close("idle");
+
+    await manager.acquireBySessionId!(original.sessionId, AGENT, {
+      romeSessionId: original.sessionId,
+    });
+
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe(
+      original.sessionId,
+    );
+  });
+
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
     const firstDir = join(directory, "first");
     const secondDir = join(directory, "second");
