@@ -124,6 +124,7 @@ export interface ActionConfig {
   name: string;
   type: "system" | "custom";
   description: string;
+  /** Relative module entry path from the action directory (default: ./index.ts or ./index.js). */
   entry?: string;
   /** Defaults to public. Explicit actions require an exact agent allow-list entry. */
   visibility?: "public" | "explicit";
@@ -204,6 +205,7 @@ export class ActionInvocationEventOverflowError extends Error {
 
 export interface Action {
   config: ActionConfig;
+  /** Present = agent-callable action (tool). Absent = event-only action (workflow). */
   inputSchema?: Record<string, unknown>;
   execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
   /**
@@ -1177,6 +1179,7 @@ export interface RunParams {
    * without it ignore them.
    */
   images?: string[];
+  /** Used for session reuse lookup: `${channel}:${threadId}` */
   channelThreadKey?: string;
   threadContext?: ThreadContext;
   /** Stable Rome conversation to bind to the provider/runtime session. */
@@ -1185,9 +1188,12 @@ export interface RunParams {
   platformMessageId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** Explicit session ID to continue */
   sessionId?: string;
+  /** Variable content appended to the end of the system prompt */
   contextSuffix?: string;
   sharedContext?: Record<string, unknown>;
+  /** Working directory for the agent. Defaults to project root. */
   workingDir?: string;
 }
 
@@ -2093,10 +2099,10 @@ export interface AppFavorCapability {
     | {
         status: "pending_consent";
         requestId: string;
-        authorizationUrl?: string;
-        request?: FavorActionRequestView;
+        authorizationUrl: string;
+        request: FavorActionRequestView;
       }
-    | { status: "declined"; requestId: string; request?: FavorActionRequestView }
+    | { status: "declined"; requestId: string; request: FavorActionRequestView }
     | { status: "error"; error: string }
   >;
 }
@@ -2202,9 +2208,6 @@ export interface WebChatRecapRepository {
   getMessages(sessionId: string): Promise<WebChatRecapMessage[]>;
   addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<WebChatRecapMessage>;
 }
-
-// @ts-expect-error The public recap port must not expose broader WebChat repository methods.
-type _WebChatRecapRepositoryDoesNotExposeDeleteSession = WebChatRecapRepository["deleteSession"];
 
 export interface RomeAppContext {
   app: RomeAppDefinition;
