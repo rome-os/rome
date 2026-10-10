@@ -103,6 +103,7 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
+      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -182,6 +183,7 @@ describe("Webchat API", () => {
       acquireBySessionId: rs.fn(async () => agent),
       peek: () => agent,
       findWorkingDirBySessionId: () => undefined,
+      recordConversation: async () => {},
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
@@ -4500,6 +4502,7 @@ function fakeSessionManager(
     },
     peek: () => undefined,
     findWorkingDirBySessionId: () => undefined,
+    recordConversation: async () => undefined,
     shutdown: async () => undefined,
   };
 }
