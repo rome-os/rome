@@ -168,7 +168,7 @@ export function SettingsPanel({
           </span>
         )}
         <Button onClick={() => void save()} disabled={saving}>
-          <Save className={saving ? "animate-pulse" : undefined} />
+          <Save data-icon="inline-start" className={saving ? "animate-pulse" : undefined} />
           {saving ? "Saving…" : "Save settings"}
         </Button>
       </div>

@@ -4,7 +4,6 @@ import type { VariantProps } from "class-variance-authority";
 import { buttonVariants } from "./button.js";
 import { cn } from "./cn.js";
 import { canonicalControlSize } from "./control-size.js";
-import { glyphTrim } from "./glyph-edge.js";
 
 /** The *unpressed* resting look. Both mirror `Button`'s variant of the same name. */
 type ToggleVariant = "ghost" | "outline";
@@ -67,19 +66,12 @@ export function Toggle({
   className,
   ...rest
 }: ToggleProps) {
-  const trim = glyphTrim(rest.children, size);
   return (
     <button
       type="button"
       data-slot="toggle"
       data-size={canonicalControlSize(size)}
-      className={cn(
-        buttonVariants({ variant, size, glyphs: "read" }),
-        trim.start,
-        trim.end,
-        pressed && pressedClasses,
-        className,
-      )}
+      className={cn(buttonVariants({ variant, size }), pressed && pressedClasses, className)}
       onClick={() => onPressedChange(!pressed)}
       {...rest}
       // After the spread on purpose. The props type already refuses

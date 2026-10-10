@@ -110,7 +110,9 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
             disabled={state.kind === "creating"}
             aria-label={state.kind === "creating" ? "Turning on routine" : undefined}
           >
-            {state.kind === "creating" && <Spinner size="sm" label="Turning on routine" />}
+            {state.kind === "creating" && (
+              <Spinner data-icon="inline-start" size="sm" label="Turning on routine" />
+            )}
             {state.kind === "creating" ? <span aria-hidden>Turning it on…</span> : "Turn it on"}
           </Button>
         </div>

@@ -655,7 +655,7 @@ function SessionsIndexPage({
       }}
       disabled={overviewRefreshing}
     >
-      <RefreshCw className={overviewRefreshing ? "animate-spin" : ""} />
+      <RefreshCw data-icon="inline-start" className={overviewRefreshing ? "animate-spin" : ""} />
       Refresh
     </Button>
   );
@@ -707,7 +707,7 @@ function SessionsIndexPage({
                 <ToolbarButton asChild>
                   <PopoverTrigger asChild>
                     <Button variant="outline">
-                      <ListFilter aria-hidden />
+                      <ListFilter data-icon="inline-start" aria-hidden />
                       Filter
                       {popoverFilterCount > 0 ? (
                         <Badge variant="muted" shape="pill">
@@ -1282,7 +1282,7 @@ function SessionDetailsSheet({
                     relative="path"
                     state={location.state}
                   >
-                    <GitFork />
+                    <GitFork data-icon="inline-start" />
                     Parent · {session.lineage.parent.displayTitle}
                   </Link>
                 </Button>
@@ -1294,7 +1294,7 @@ function SessionDetailsSheet({
                     relative="path"
                     state={location.state}
                   >
-                    <GitFork />
+                    <GitFork data-icon="inline-start" />
                     Child · {child.displayTitle}
                   </Link>
                 </Button>
@@ -1547,7 +1547,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
               relative="path"
               state={location.state}
             >
-              <GitFork />
+              <GitFork data-icon="inline-start" />
               {session.type === "subagent" ? "Parent" : "Forked from"}
             </Link>
           </Button>
@@ -1555,7 +1555,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         {session?.type === "webchat" ? (
           <Button asChild variant="outline">
             <Link to={`/chat/${session.id}`}>
-              <ExternalLink />
+              <ExternalLink data-icon="inline-start" />
               Open chat
             </Link>
           </Button>

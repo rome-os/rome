@@ -70,11 +70,11 @@ describe("control scale", () => {
         </Button>
       </>,
     );
-    const trim = "pl-[var(--control-px-icon-md)]";
+    const trim = "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)]";
 
-    expect(screen.getByRole("button", { name: "Leading" }).classList).toContain(trim);
-    expect(screen.getByRole("button", { name: "Start" }).classList).not.toContain(trim);
-    expect(screen.getByRole("button", { name: "Square" }).classList).not.toContain(trim);
+    expect(screen.getByRole("button", { name: "Leading" }).className).toContain(trim);
+    expect(screen.getByRole("button", { name: "Start" }).className).not.toContain(trim);
+    expect(screen.getByRole("button", { name: "Square" }).className).not.toContain(trim);
   });
 
   it("lets a caller override an Input's padding and radius", () => {

@@ -18,17 +18,6 @@ const components = readdirSync(srcDir)
   .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
   .filter((name) => readFileSync(join(srcDir, name), "utf8").includes("className"));
 
-/**
- * Plain `.ts` helpers that hand class strings to a component, such as
- * `glyph-edge.ts`. They carry no `className`, so they are found by an
- * arbitrary-value utility (`pl-[…]`) inside a string literal instead.
- */
-const classModules = readdirSync(srcDir)
-  .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
-  .filter((name) =>
-    /["'`][^"'`]*\b[a-z]+(?:-[a-z]+)*-\[[^\]]+\]/.test(readFileSync(join(srcDir, name), "utf8")),
-  );
-
 describe("the kit stylesheet's @source registry", () => {
   it.each(components)("opts %s back into a consumer's Tailwind scan", (module) => {
     // Tailwind v4 skips node_modules, so an unregistered module's utilities —
@@ -36,14 +25,6 @@ describe("the kit stylesheet's @source registry", () => {
     // simply absent from a consumer's compiled CSS. The component still
     // renders, and every DOM/class-token test still passes; it just paints
     // undressed in every host but this repo.
-    expect(sourced).toContain(module);
-  });
-
-  it("finds the glyph-edge helper among the class-emitting .ts modules", () => {
-    expect(classModules).toContain("glyph-edge.ts");
-  });
-
-  it.each(classModules)("opts the %s helper into a consumer's Tailwind scan", (module) => {
     expect(sourced).toContain(module);
   });
 

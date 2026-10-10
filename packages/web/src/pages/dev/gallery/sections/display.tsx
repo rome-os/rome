@@ -505,13 +505,13 @@ export function DisplaySection() {
           <Row>
             <Item label="sm — replacing the icon">
               <Button size="sm" disabled>
-                <Spinner size="sm" />
+                <Spinner data-icon="inline-start" size="sm" />
                 Installing
               </Button>
             </Item>
             <Item label="md — destructive tone">
               <Button variant="destructive" disabled>
-                <Spinner />
+                <Spinner data-icon="inline-start" />
                 Deleting
               </Button>
             </Item>

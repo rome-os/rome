@@ -4,7 +4,6 @@ import { Slot } from "@radix-ui/react-slot";
 
 import { cn } from "./cn.js";
 import { canonicalControlSize } from "./control-size.js";
-import { glyphTrim } from "./glyph-edge.js";
 
 // The 36px step, held in a const because two names resolve to it: `md`, the
 // shared control vocabulary's name for the step, and `default`, the shadcn
@@ -111,46 +110,27 @@ const buttonVariants = cva(
         start: "justify-start",
         between: "justify-between",
       },
-      /**
-       * Where the glyph-edge trim learns which side holds a glyph. `marked`
-       * reads `data-icon` in CSS, for `asChild` content and direct
-       * `buttonVariants` consumers. `read` turns that off, because `Button`
-       * reads the side from its children and adds the trim itself.
-       *
-       * @internal Only `Button` and `Toggle` pass `read`, alongside the classes
-       * from `glyph-edge.ts`. Passed alone, it drops the correction.
-       */
-      glyphs: {
-        marked: "",
-        read: "",
-      },
     },
     compoundVariants: [
       // A glyph at the edge of a centred label carries less visual weight
       // than the word at the other edge, so equal padding reads as the glyph
       // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
-      // label's, which reads as centred. `Button` reads the glyph's side from
-      // its children and adds a plain padding class (see `glyph-edge.ts`),
-      // so a caller's `px-*` still wins the merge. A glyph inside `asChild`
-      // content, or a `buttonVariants` consumer, names its side with
-      // `data-icon` instead, because CSS cannot tell a lone glyph beside a
-      // text node from a lone glyph. Square members hold no padding, `xs`
-      // keeps symmetric padding, and a start-aligned glyph sits on the
-      // alignment edge, so none of those take it. These variants outrank a
-      // caller's `px-*` and the merge cannot drop them, so a marked glyph
-      // keeps this inset even when the caller narrows the button. That is
-      // why only the `marked` path takes them.
+      // label's, which reads as centred. The glyph names its side with
+      // `data-icon`, because a bare-text label leaves a lone glyph both first
+      // and last element child. These variants outrank a caller's `px-*`, so
+      // a button that sets its own padding leaves its glyph unmarked. Square
+      // members hold no padding, `xs` keeps symmetric padding, and a
+      // start-aligned glyph sits on the alignment edge, so none of those take
+      // it.
       {
         align: "center",
         size: "sm",
-        glyphs: "marked",
         className:
           "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
       },
       {
         align: "center",
         size: ["md", "default"],
-        glyphs: "marked",
         className:
           "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
@@ -164,18 +144,10 @@ const buttonVariants = cva(
       size: "md",
       shape: "square",
       align: "center",
-      glyphs: "marked",
     },
   },
 );
 
-/**
- * A centred Button trims the side of a leading or trailing glyph (see
- * `glyph-edge.ts`). It reads only direct children and fragment members, and
- * counts any childless component as a glyph. So wrap a label component in a
- * `<span>` to keep it untrimmed. A `data-icon` marker inside a wrapper element
- * does nothing here; it applies only to `asChild` content.
- */
 function Button({
   className,
   variant = "default",
@@ -185,13 +157,10 @@ function Button({
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
-  Omit<VariantProps<typeof buttonVariants>, "glyphs"> & {
+  VariantProps<typeof buttonVariants> & {
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot : "button";
-  // `asChild` content is the child's own subtree, so its glyph names its side
-  // with `data-icon` and the `marked` CSS path, rather than being read here.
-  const trim = asChild ? {} : glyphTrim(props.children, size, align);
 
   return (
     <Comp
@@ -200,12 +169,7 @@ function Button({
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(
-        buttonVariants({ variant, size, shape, align, glyphs: asChild ? "marked" : "read" }),
-        trim.start,
-        trim.end,
-        className,
-      )}
+      className={cn(buttonVariants({ variant, size, shape, align, className }))}
       {...props}
     />
   );

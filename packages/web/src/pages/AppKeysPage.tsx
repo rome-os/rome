@@ -217,7 +217,7 @@ export default function AppKeysPage() {
         {form === null && (
           <PageActions>
             <Button type="button" size="sm" onClick={() => openForm({ mode: "add" })}>
-              <Plus aria-hidden />
+              <Plus data-icon="inline-start" aria-hidden />
               {t("appKeys.add")}
             </Button>
           </PageActions>
@@ -382,7 +382,7 @@ export default function AppKeysPage() {
                   className="mt-3"
                   onClick={() => void keysQuery.refetch()}
                 >
-                  <RefreshCw aria-hidden />
+                  <RefreshCw data-icon="inline-start" aria-hidden />
                   {t("page.retry")}
                 </Button>
               </AlertDescription>

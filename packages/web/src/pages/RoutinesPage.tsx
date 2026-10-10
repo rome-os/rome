@@ -912,9 +912,13 @@ function RunNowButton({
       className={`gap-2 text-muted-foreground ${inFlight ? "" : "max-sm:hidden"}`}
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("run.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("run.loadingLabel", { name: label })}
+        />
       ) : (
-        <Play className="h-3.5 w-3.5" aria-hidden />
+        <Play data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("run.now")}
     </Button>
@@ -962,9 +966,13 @@ function StopButton({
       className="gap-2 border-destructive/30 text-destructive-fg hover:bg-destructive/10 hover:text-destructive-fg"
     >
       {inFlight ? (
-        <Spinner size="sm" label={t("stop.loadingLabel", { name: label })} />
+        <Spinner
+          data-icon="inline-start"
+          size="sm"
+          label={t("stop.loadingLabel", { name: label })}
+        />
       ) : (
-        <Square className="h-3.5 w-3.5" aria-hidden />
+        <Square data-icon="inline-start" className="h-3.5 w-3.5" aria-hidden />
       )}
       {t("stop.now")}
     </Button>
@@ -2159,12 +2167,7 @@ export default function RoutinesPage() {
         <PageHeader
           title={t("header.title")}
           actions={
-            <Button
-              onClick={() => setShowCreate(true)}
-              // Below `sm` the label hides and the icon stands alone, so it
-              // keeps symmetric padding there instead of the glyph-side trim.
-              className="max-sm:px-[var(--control-px-center-md)]"
-            >
+            <Button onClick={() => setShowCreate(true)}>
               <Plus className="size-4" aria-hidden />
               <span className="hidden sm:inline">{t("header.createButton")}</span>
             </Button>

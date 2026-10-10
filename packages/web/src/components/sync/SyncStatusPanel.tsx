@@ -132,7 +132,7 @@ export function SyncStatusPanel({ path, className }: SyncStatusPanelProps) {
               <p className="text-aux text-muted-foreground">Not connected to any source</p>
             </div>
             <Button size="sm" onClick={() => setConnectOpen(true)}>
-              <Link2 className="size-4" aria-hidden /> Connect…
+              <Link2 data-icon="inline-start" className="size-4" aria-hidden /> Connect…
             </Button>
           </div>
           <SourceConnect
