@@ -115,7 +115,7 @@ import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./core/agent-session.js";
+import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -757,11 +757,7 @@ async function main() {
       usageRecorder,
       channelSurface: (channel) => {
         const talker = connectionRegistry.getDescriptor(channel)?.capabilities.talker;
-        if (!talker) return null;
-        return {
-          interactiveCards: talker.interactiveCards === true,
-          promptContext: talker.promptContext !== false,
-        };
+        return talker ? talkerChannelSurface(talker) : null;
       },
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },

@@ -398,6 +398,18 @@ const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
   promptContext: true,
 };
 
+/** The surface a channel's talker declares, with an omitted fact read as a
+ *  messaging channel's. */
+export function talkerChannelSurface(talker: {
+  interactiveCards?: boolean;
+  promptContext?: boolean;
+}): ChannelSurface {
+  return {
+    interactiveCards: talker.interactiveCards ?? MESSAGING_CHANNEL_SURFACE.interactiveCards,
+    promptContext: talker.promptContext ?? MESSAGING_CHANNEL_SURFACE.promptContext,
+  };
+}
+
 function channelSurfaceOf(
   deps: Pick<ManagerDeps, "channelSurface">,
   channel: string,
@@ -961,8 +973,10 @@ async function openSession(
   // hang forever. Where this is false, an action that returns `renderComponent`
   // falls back to relaying its `promptText` as prose; see the executeAction shim
   // below. The answer feeds the cached system prompt, so the opening caller's
-  // channel decides it for the session's life.
-  const openingChannel = init.threadContext?.channel;
+  // channel decides it for the session's life. An opener without a thread
+  // context falls back to the channel the key names.
+  const openingChannel =
+    init.threadContext?.channel ?? (getChannelFromThreadKey(key.channelThreadKey) || undefined);
   const supportsInteractiveSurface =
     !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
 
