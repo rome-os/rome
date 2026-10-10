@@ -402,7 +402,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (trigger?.type === "schedule" && datedOneOffError(trigger)) {
         return c.json(
           {
-            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Edit its date to schedule it again.`,
+            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
           },
           400,
         );
