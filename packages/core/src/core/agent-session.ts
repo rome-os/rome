@@ -960,7 +960,6 @@ async function openSession(
   const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv4();
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
-  const romeSessionId = requestedRomeSessionId;
   // A caller that names no conversation still serves the one the row recorded.
   const recordedConversation = requestedRomeSessionId
     ? undefined
@@ -1771,7 +1770,7 @@ async function openSession(
   impl = new AgentSessionImpl({
     key,
     sessionId,
-    romeSessionId,
+    romeSessionId: requestedRomeSessionId,
     recordedConversation,
     modelSession,
     deps,
