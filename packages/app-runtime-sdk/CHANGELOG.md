@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.1](https://github.com/rome-os/rome/compare/app-runtime-v0.7.0...app-runtime-v0.7.1) (2026-10-10)
+
+
+### Features
+
+* **web:** link saved routine cards to their run history ([#870](https://github.com/rome-os/rome/issues/870)) ([79c7990](https://github.com/rome-os/rome/commit/79c7990b6e6c03122e16c9572a30cd1e8d08eefd))
+
 ## [0.7.0](https://github.com/rome-os/rome/compare/app-runtime-v0.6.7...app-runtime-v0.7.0) (2026-10-10)
 
 
