@@ -381,7 +381,7 @@ interface ManagerDeps {
   /** Receives every turn this manager's sessions finish, forked turns included. */
   usageRecorder?: TurnUsageSink;
   /** What the named channel's surface supports, or null for a name no channel
-   *  has. Absent treats every channel as a messaging channel. */
+   *  has. A null result reads as a messaging channel. */
   channelSurface: (channel: string) => ChannelSurface | null;
 }
 
@@ -975,8 +975,14 @@ async function openSession(
   // below. The answer feeds the cached system prompt, so the opening caller's
   // channel decides it for the session's life. An opener without a thread
   // context falls back to the channel the key names.
-  const openingChannel =
-    init.threadContext?.channel ?? (getChannelFromThreadKey(key.channelThreadKey) || undefined);
+  const keyChannel = getChannelFromThreadKey(key.channelThreadKey) || undefined;
+  const openingChannel = init.threadContext?.channel ?? keyChannel;
+  if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
+    log.warn("session opener's channel differs from the channel its key names", {
+      channelThreadKey: key.channelThreadKey,
+      openingChannel,
+    });
+  }
   const supportsInteractiveSurface =
     !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
 
