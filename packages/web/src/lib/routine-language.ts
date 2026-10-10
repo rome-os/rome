@@ -36,6 +36,8 @@ export interface Routine {
   // The app that owns this routine, if any. A managed routine can't be deleted
   // from the dashboard (the server refuses too); only the owning app removes it.
   managedBy?: string | null;
+  // Optional unique identity a caller assigned (e.g. the chat card that created it).
+  key?: string | null;
   enabled: boolean;
   trigger: Trigger;
   actionName: string;

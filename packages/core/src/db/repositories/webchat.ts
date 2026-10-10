@@ -30,6 +30,7 @@ import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -1089,6 +1090,9 @@ export class WebChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void> {
+    // Sender-supplied content (send_message, the outbox): only the host may
+    // author routine cards, so a forged one never reaches the transcript.
+    input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {
       const delivered = await this.db
         .select({ id: romeAgentMessages.id })

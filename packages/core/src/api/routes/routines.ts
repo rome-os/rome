@@ -1,11 +1,12 @@
 import { Hono } from "hono";
-import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
 import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
 import type { ApiDeps } from "../deps.js";
+import { validateActionArgs } from "../../actions/validate-action-args.js";
+import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
@@ -14,8 +15,6 @@ const RESERVED_ARG_KEY = "__triggerPayload";
 
 const LOCAL_TIME_RE = /^\d{2}:\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const argsSchemaValidator = new Ajv2020({ allErrors: true, strict: false });
-const compiledArgsSchemas = new WeakMap<Record<string, unknown>, ValidateFunction>();
 
 /** Error when a routine names an action that isn't registered. Names the remedy
  * so the agent routes to building a workflow instead of guessing again. Kept in
@@ -37,31 +36,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
     !Array.isArray(v) &&
     Object.getPrototypeOf(v) === Object.prototype
   );
-}
-
-function validateActionArgs(
-  actionName: string,
-  args: Record<string, unknown>,
-  schema: Record<string, unknown> | undefined,
-): string | null {
-  if (!schema) return null;
-
-  let validator = compiledArgsSchemas.get(schema);
-  if (!validator) {
-    try {
-      validator = argsSchemaValidator.compile(schema);
-      compiledArgsSchemas.set(schema, validator);
-    } catch (error) {
-      return `cannot validate args for action "${actionName}": invalid input schema (${
-        error instanceof Error ? error.message : String(error)
-      })`;
-    }
-  }
-  if (validator(args)) return null;
-  return `args do not satisfy the input schema for action "${actionName}": ${argsSchemaValidator.errorsText(
-    validator.errors,
-    { dataVar: "args", separator: "; " },
-  )}`;
 }
 
 /** Validates against the engine's registered providers and per-type required
@@ -138,7 +112,17 @@ interface CreateRoutineBody {
   actionName?: string;
   args?: Record<string, unknown>;
   enabled?: boolean;
+  /** Optional caller-assigned identity (the unique `routines.key`). A chat
+   * routine card sends the key minted with it, so retries and reloads find the
+   * routine it created instead of matching by name. */
+  key?: string;
 }
+
+const MAX_ROUTINE_KEY_LENGTH = 200;
+// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps key their
+// own managed routines (briefing uses `briefing-*`) through create_routine;
+// keeping this route to its own prefix stops a chat card from claiming, or
+// being answered with, one of those.
 
 interface UpdateRoutineBody {
   name?: string;
@@ -255,6 +239,32 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   app.post("/routines", async (c) => {
     const body = await c.req.json<CreateRoutineBody>().catch(() => ({}) as CreateRoutineBody);
 
+    if (
+      body.key !== undefined &&
+      (typeof body.key !== "string" ||
+        !body.key.startsWith(CHAT_ROUTINE_KEY_PREFIX) ||
+        body.key.length <= CHAT_ROUTINE_KEY_PREFIX.length ||
+        body.key.length > MAX_ROUTINE_KEY_LENGTH)
+    ) {
+      return c.json(
+        {
+          error: `key must start with "${CHAT_ROUTINE_KEY_PREFIX}" and be at most ${MAX_ROUTINE_KEY_LENGTH} characters`,
+        },
+        400,
+      );
+    }
+    // A key that already names a routine means this create already happened
+    // (a retried click, a second tab). Answer 409 with the existing id so the
+    // caller can link to it rather than creating a duplicate. Checked before
+    // the create-time validation below, which can change after creation (a
+    // dated one-off's date passes, an action is uninstalled).
+    const existingIdForKey = async (key: string | undefined): Promise<string | undefined> =>
+      key === undefined ? undefined : (await deps.routinesRepo.findByKey(key))?.id;
+    const keyTaken = (id: string) =>
+      c.json({ error: "A routine with this key already exists", id }, 409);
+    const takenId = await existingIdForKey(body.key);
+    if (takenId) return keyTaken(takenId);
+
     if (!body.trigger || !body.trigger.type) {
       return c.json({ error: "trigger is required" }, 400);
     }
@@ -301,6 +311,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const now = new Date();
     const record = {
       id: uuid(),
+      key: body.key ?? null,
       name: body.name ?? "",
       enabled: body.enabled ?? true,
       trigger: body.trigger as unknown,
@@ -311,7 +322,15 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       nextRunAt: null,
     };
 
-    await deps.db.insert(routines).values(record);
+    try {
+      await deps.db.insert(routines).values(record);
+    } catch (err) {
+      // Lost a race with a concurrent create of the same key: the UNIQUE
+      // constraint is the backstop for the check above.
+      const existingId = await existingIdForKey(body.key);
+      if (existingId) return keyTaken(existingId);
+      throw err;
+    }
     const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
 
     if (inserted?.enabled) {

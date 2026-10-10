@@ -30,12 +30,14 @@ interface FileBrowserPageProps {
   renderCreateExtra?: (ctx: { type: "file" | "folder"; parentPath: string | null }) => ReactNode;
   /**
    * Fires whenever the user's selection in the browser changes: the file
-   * currently displayed and any multi-select set in the tree. Used by hosts
-   * (e.g. the workspace `ProjectsWidget`) that need to mirror selection
-   * elsewhere — the browser stays the source of truth.
+   * currently displayed, the folder whose contents the browser is showing,
+   * and any multi-select set in the tree. Used by hosts (e.g. the workspace
+   * `ProjectsWidget`) that need to mirror selection elsewhere — the browser
+   * stays the source of truth.
    */
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
   rootLabel: string;

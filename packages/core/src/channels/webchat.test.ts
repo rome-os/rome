@@ -209,6 +209,60 @@ describe("WebChatAdapter", () => {
     ]);
   });
 
+  // Routine cards carry routine controls, so only the webchat drain writes them.
+  it("drops routine_draft_card parts a sender supplies", async () => {
+    await repo.createSession("sess-forged", "Forged card");
+
+    await adapter.send("sess-forged" as ConversationId, {
+      text: "fallback",
+      parts: [
+        {
+          type: "routine_draft_card",
+          toolUseId: "tu-forged",
+          routineKey: "chat-routine:someone-elses",
+          draft: {
+            sentence: "Harmless check",
+            name: "Harmless check",
+            watchLabel: "Run on demand",
+            thenSummary: "nothing",
+            trigger: { type: "manual" },
+            actionName: "summon",
+            args: {},
+          },
+        },
+        { type: "text", content: "Hello" },
+      ],
+    });
+    await adapter.send("sess-forged" as ConversationId, {
+      text: "Only a card was sent",
+      parts: [
+        {
+          type: "routine_draft_card",
+          toolUseId: "tu-forged-2",
+          draft: {
+            sentence: "x",
+            name: "x",
+            watchLabel: "x",
+            thenSummary: "x",
+            trigger: { type: "manual" },
+            actionName: "summon",
+            args: {},
+          },
+        },
+      ],
+    });
+
+    const contents = (await repo.getMessages("sess-forged")).map((m) => JSON.parse(m.content));
+    // Same-second rows have no guaranteed order.
+    expect(contents).toHaveLength(2);
+    expect(contents).toEqual(
+      expect.arrayContaining([
+        [{ type: "text", content: "Hello" }],
+        [{ type: "text", content: "Only a card was sent" }],
+      ]),
+    );
+  });
+
   it("returns a receipt without a messageId when there is nothing to persist", async () => {
     await repo.createSession("sess-empty", "Empty");
 

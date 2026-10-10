@@ -21,6 +21,9 @@ import {
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
+import { validateActionArgs } from "../actions/validate-action-args.js";
+import type { RoutineActivationGate } from "./mcp-facade.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
@@ -1053,6 +1056,24 @@ async function openSession(
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
   };
+  // `propose_routine` auto-enables only a routine the agent could already
+  // create with `create_routine` itself (the same check, non-throwing), with
+  // args that fit the target action's schema.
+  const routineActivation: RoutineActivationGate = {
+    canCallAction: (name) => {
+      if (!deps.actionRegistry.get(name)) return "unknown";
+      return findPermittedAction(name) ? "permitted" : "denied";
+    },
+    validateArgs: (actionName, args) => {
+      const action = deps.actionRegistry.get(actionName);
+      return validateActionArgs(action?.config.name ?? actionName, args, action?.inputSchema);
+    },
+    // The live turn's id is the one the webchat drain sees on its handle.
+    routineKeyFor: (toolUseId) => {
+      const turnId = impl.currentTurnId;
+      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
+    },
+  };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
     name: a.config.name,
     description: a.config.description,
@@ -1459,6 +1480,7 @@ async function openSession(
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    routineActivation,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });

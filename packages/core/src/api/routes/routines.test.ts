@@ -143,6 +143,100 @@ describe("Routines API", () => {
     expect(body.trigger).toEqual(trigger);
   });
 
+  it("stores a caller key and answers a repeat create with 409 and the existing id", async () => {
+    const create = () =>
+      app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "chat card",
+          key: "chat-routine:card-1",
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+
+    const first = await create();
+    expect(first.status).toBe(201);
+    const created = (await first.json()) as { id: string; key: string };
+    expect(created.key).toBe("chat-routine:card-1");
+
+    const second = await create();
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { id: string }).id).toBe(created.id);
+    const rows = await testDb.db.select().from(routines);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("answers a keyed retry with the existing id even if the body no longer validates", async () => {
+    // A dated one-off created before its date, retried after it: the past date
+    // would be a 400, but the routine already exists, so the caller gets its id.
+    const [row] = await testDb.db
+      .insert(routines)
+      .values({
+        id: "r-dated",
+        key: "chat-routine:card-dated",
+        name: "one-off",
+        enabled: true,
+        trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2020-01-01" },
+        actionName: "send_message",
+        args: {},
+        createdAt: new Date(),
+      })
+      .returning();
+    const res = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: "chat-routine:card-dated",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "fixed",
+          localTime: "09:00",
+          date: "2020-01-01",
+        },
+        actionName: "send_message",
+      }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { id: string }).id).toBe(row!.id);
+  });
+
+  it("rejects a key that is not a non-empty chat-routine key", async () => {
+    // Keys outside the chat-card prefix belong to apps' managed routines.
+    for (const key of [
+      "",
+      42,
+      "chat-routine:",
+      `chat-routine:${"k".repeat(200)}`,
+      "briefing-morning",
+    ]) {
+      const res = await app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("rejects creation without trigger", async () => {
     const res = await app.request("/routines", {
       method: "POST",

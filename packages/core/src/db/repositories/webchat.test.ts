@@ -519,6 +519,32 @@ describe("WebChatRepository", () => {
       });
     });
 
+    // send_message stores the parts it was given here as well as delivering
+    // them; a sender-supplied routine card must not reach the transcript.
+    it("strips routine cards from recorded outbound content", async () => {
+      const conversation = await repo.ensureChannelConversation({
+        channel: "webchat",
+        threadId: "forged-card-thread",
+        agentName: "main",
+      });
+      await repo.recordOutboundConversationMessage({
+        sessionId: conversation.id,
+        content: JSON.stringify([
+          { type: "routine_draft_card", toolUseId: "tu-x", routineKey: "chat-routine:x" },
+          { type: "text", content: "hello" },
+        ]),
+        platformMessageId: "forged-1",
+        senderId: "rome",
+        senderName: "Rome",
+        knownToProvider: true,
+      });
+
+      const rows = await repo.getMessages(conversation.id);
+      expect(rows.map((row) => JSON.parse(row.content))).toEqual([
+        [{ type: "text", content: "hello" }],
+      ]);
+    });
+
     it("keeps the pending Rome notification when its referenced parent message is missing", async () => {
       const child = await repo.ensureChannelConversation({
         channel: "discord",
