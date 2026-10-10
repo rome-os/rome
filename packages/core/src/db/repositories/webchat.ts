@@ -1763,16 +1763,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1799,6 +1800,19 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {

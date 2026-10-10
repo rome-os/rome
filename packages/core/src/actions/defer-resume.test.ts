@@ -68,7 +68,7 @@ describe("defer session continuity", () => {
 
     const backendTurnRunner = createBackendTurnRunner({
       agentRunner: rome.agentRunner,
-      channel: () => null,
+      channel: (name) => rome?.channels.find((channel) => channel.name === name) ?? null,
     });
     const resumeSession = createResumeSessionAction(resumeSessionConfig, {
       backendTurnRunner,
