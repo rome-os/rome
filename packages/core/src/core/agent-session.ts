@@ -60,11 +60,7 @@ import {
   type ModelResolver,
 } from "./model-resolver.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import {
-  resolveWebchatLargeModelSelection,
-  type ModelSelectionId,
-  type WebchatLargeModelSelection,
-} from "./model-selector.js";
+import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
@@ -898,9 +894,11 @@ async function openSession(
   // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
+  // A subagent opens with its parent's thread context, so the conversation's
+  // selection is the parent's and never applies to it.
   const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
   const persistedSelection =
-    init.resumeSessionId && !sessionPin && !init.selectionId && conversationId
+    init.resumeSessionId && !sessionPin && !init.selectionId && !opts.isSubagent && conversationId
       ? resolveWebchatLargeModelSelection(
           (await deps.webchatRepo?.getSession(conversationId))?.largeModelSelection,
         )
