@@ -134,5 +134,18 @@ function parseSemver(version: string): { major: number; minor: number; patch: nu
     );
   }
 
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  if (
+    !Number.isSafeInteger(major) ||
+    !Number.isSafeInteger(minor) ||
+    !Number.isSafeInteger(patch)
+  ) {
+    throw new CliError(
+      `app.yaml version is too large to increment safely: ${JSON.stringify(version)}`,
+    );
+  }
+
+  return { major, minor, patch };
 }

@@ -22,6 +22,10 @@ describe("bumpVersion", () => {
     expect(() => bumpVersion("1.2", "patch")).toThrow(/must be SemVer/);
     expect(() => bumpVersion("01.2.3", "patch")).toThrow(/must be SemVer/);
   });
+
+  it("refuses a component too large to increment exactly", () => {
+    expect(() => bumpVersion("9007199254740993.0.0", "patch")).toThrow(/too large/);
+  });
 });
 
 describe("upgradeAppVersion", () => {
