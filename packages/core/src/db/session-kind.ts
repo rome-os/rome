@@ -10,18 +10,17 @@
 // address under their own id, and older outbound sends left
 // `channel:webchat:<id>` rows that name a chat without being one.
 
-import { and, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { romeSessions } from "./schema.js";
 
-/** Whether a row is a guardian chat, in either stored form. */
-export const isWebchatChat: SQL = or(
-  eq(romeSessions.type, "webchat"),
-  and(
-    eq(romeSessions.type, "channel"),
-    eq(romeSessions.sourceChannel, "webchat"),
-    eq(romeSessions.sourceThreadId, romeSessions.id),
-  ),
-) as SQL;
+/**
+ * Whether a row is a guardian chat, in either stored form. The text matches the
+ * WHERE of the partial chat indexes in `schema/system.ts`, so SQLite can page
+ * the sidebar off them in order. That needs the constants inlined, not bound,
+ * and the unary `+` on `type`, which stops SQLite from splitting the OR across
+ * the `type` indexes and sorting the union instead.
+ */
+export const isWebchatChat: SQL = sql`(+${romeSessions.type} = 'webchat' or (+${romeSessions.type} = 'channel' and ${romeSessions.sourceChannel} = 'webchat' and ${romeSessions.sourceThreadId} = ${romeSessions.id}))`;
 
 /** Whether a row is a conversation on a messaging channel, chats excluded. */
 export const isChannelConversation: SQL = and(

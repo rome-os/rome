@@ -101,10 +101,17 @@ describe("WebChatRepository", () => {
       .update(romeSessions)
       .set({ type: storedType })
       .where(eq(romeSessions.id, "chat-1"));
-    await repo.ensureChannelConversation({
-      channel: "webchat",
-      threadId: "chat-1",
-      agentName: "main",
+    // A stray row an older outbound send left for the chat's address.
+    await testDb.db.insert(romeSessions).values({
+      id: "channel:webchat:chat-1",
+      name: "stray",
+      projectName: "Rome",
+      projectPath: "/work/rome",
+      type: "channel",
+      sourceChannel: "webchat",
+      sourceThreadId: "chat-1",
+      createdAt: new Date(),
+      activityAt: new Date(),
     });
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);

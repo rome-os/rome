@@ -523,6 +523,18 @@ export const romeSessions = sqliteTable(
       table.createdAt,
       table.id,
     ),
+    // Sidebar paging for guardian chats in either stored form. The WHERE text
+    // must match `isWebchatChat` in `db/session-kind.ts` for SQLite to use them.
+    index("idx_rome_sessions_chat_activity")
+      .on(table.activityAt, table.createdAt, table.id)
+      .where(
+        sql`(+${table.type} = 'webchat' or (+${table.type} = 'channel' and ${table.sourceChannel} = 'webchat' and ${table.sourceThreadId} = ${table.id}))`,
+      ),
+    index("idx_rome_sessions_chat_project_activity")
+      .on(table.projectPath, table.activityAt, table.createdAt, table.id)
+      .where(
+        sql`(+${table.type} = 'webchat' or (+${table.type} = 'channel' and ${table.sourceChannel} = 'webchat' and ${table.sourceThreadId} = ${table.id}))`,
+      ),
     index("idx_rome_sessions_source_channel").on(table.sourceChannel),
     index("idx_rome_sessions_source_thread").on(table.sourceChannel, table.sourceThreadId),
     index("idx_rome_sessions_channel_address")

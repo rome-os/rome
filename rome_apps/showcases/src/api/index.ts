@@ -384,7 +384,8 @@ class ShowcasesApiHandler implements RomeAppApiHandler {
     traceCount: number;
   }> {
     // A guardian chat is stored either as a webchat row or as a webchat
-    // channel row addressed by its own id.
+    // channel row addressed by its own id. Same rule as `isWebchatChat` in
+    // packages/core/src/db/session-kind.ts; keep the two in step.
     const rows = this.ctx.db.connection.all(sql`
       SELECT
         ws.id,

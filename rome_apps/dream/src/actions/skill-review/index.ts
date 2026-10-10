@@ -141,7 +141,7 @@ export function createAction(
         // rome_sessions also holds channel and background runs, including this
         // review's own agent session; keep to guardian chats. A chat is stored
         // either as a webchat row or as a webchat channel row addressed by its
-        // own id.
+        // own id, the rule `isWebchatChat` in core's db/session-kind.ts holds.
         const row = appContext.db.connection.get(
           sql`
             SELECT id, name FROM rome_sessions

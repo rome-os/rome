@@ -512,6 +512,13 @@
       "when": 1791637153137,
       "tag": "0073_webchat_thread_key_without_model",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1791648008048,
+      "tag": "0074_webchat_chat_activity_indexes",
+      "breakpoints": true
     }
   ]
 }

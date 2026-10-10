@@ -115,6 +115,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       // A guardian chat is stored either as a webchat row or as a webchat
       // channel row addressed by its own id; both filters below match either.
+      // Same rule as `isWebchatChat` in packages/core/src/db/session-kind.ts.
       let rows: MessageRow[] = [];
       try {
         if (sessionId) {
