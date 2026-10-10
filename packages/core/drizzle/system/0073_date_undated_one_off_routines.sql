@@ -2,10 +2,10 @@
 -- next localTime". Writers now store that as a dated one-off and the scheduler
 -- only fires dated one-offs, so give every such row its date.
 --
---   * disabled fired rows → two days before the UTC date they fired on. They
+--   * disabled fired rows → the day before the UTC date they fired on. They
 --     are spent, and the date only keeps the row well-formed. The UTC date
---     can still be ahead in the row's zone, so it would re-arm on re-enable;
---     two days back is past in every zone.
+--     can be a day after the local one, so it could still be ahead and re-arm
+--     on re-enable; the day before is never after the real fire.
 --   * every other row, a fired one switched back on included → the next UTC
 --     day whose clock reaches localTime. SQLite has no zone data, so that is
 --     exact only for a UTC row (UTC, Etc/UTC, GMT). Any other zone is up to
@@ -42,7 +42,7 @@ SET `trigger` = json_remove(json_set(
   'fixed',
   '$.date',
   CASE
-    WHEN `enabled` = 0 AND `last_fired_at` IS NOT NULL THEN date(`last_fired_at`, 'unixepoch', '-2 days')
+    WHEN `enabled` = 0 AND `last_fired_at` IS NOT NULL THEN date(`last_fired_at`, 'unixepoch', '-1 day')
     ELSE date(
       'now',
       CASE
