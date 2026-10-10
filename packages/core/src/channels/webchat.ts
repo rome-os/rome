@@ -4,6 +4,7 @@ import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repos
 import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
+import { withoutHostOnlyParts } from "./host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
 
@@ -72,11 +73,8 @@ export class WebChatAdapter {
    *  parts or attachments writes nothing, and its receipt has no `messageId`. */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
-    // A routine card creates, pauses and deletes routines, so only the webchat
-    // drain may author one (it writes cards to the repo directly). Drop any a
-    // sender supplies: a forged card could otherwise bind those controls to a
-    // routine it names, or schedule an arbitrary action on one click.
-    const given = (message.parts ?? []).filter((p) => p.type !== "routine_draft_card");
+    // Only the host authors routine cards (see host-only-parts.ts).
+    const given = withoutHostOnlyParts(message.parts ?? []);
     if (message.parts && given.length < message.parts.length) {
       log.warn("dropped routine_draft_card parts from a sent message", { threadId });
     }
