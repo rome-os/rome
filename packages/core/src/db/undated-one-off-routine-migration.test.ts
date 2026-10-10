@@ -28,12 +28,17 @@ describe("undated one-off routine migration", () => {
   it("dates every schedule that has neither date nor rrule, and nothing else", () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(
-      "CREATE TABLE routines (id text PRIMARY KEY NOT NULL, `trigger` text NOT NULL, last_fired_at integer)",
+      "CREATE TABLE routines (id text PRIMARY KEY NOT NULL, `trigger` text NOT NULL, last_fired_at integer, enabled integer DEFAULT 1)",
     );
-    const insert = sqlite.prepare("INSERT INTO routines VALUES (?, ?, ?)");
+    const insert = sqlite.prepare(
+      "INSERT INTO routines (id, `trigger`, last_fired_at) VALUES (?, ?, ?)",
+    );
     const schedule = { type: "schedule", tzid: "UTC", tzMode: "floating" };
     // 2026-06-23T12:00:00Z
     insert.run("fired", JSON.stringify({ ...schedule, localTime: "12:00" }), 1_782_216_000);
+    sqlite.exec("UPDATE routines SET enabled = 0 WHERE id = 'fired'");
+    // Fired, then switched back on: still pending, so it gets the next date.
+    insert.run("refired", JSON.stringify({ ...schedule, localTime: "23:59" }), 1_782_216_000);
     insert.run("pending-late", JSON.stringify({ ...schedule, localTime: "23:59" }), null);
     insert.run("pending-early", JSON.stringify({ ...schedule, localTime: "0:00" }), null);
     const tokyo = { ...schedule, tzid: "Asia/Tokyo", localTime: "23:59" };
@@ -70,6 +75,7 @@ describe("undated one-off routine migration", () => {
     expect(parsed("pending-early").tzMode).toBe("fixed");
     // A non-UTC zone takes the day after, so the date is never already past there.
     expect(pendingDate("23:59", 1)).toContain(parsed("pending-tokyo").date);
+    expect(parsed("refired").date).toBe(parsed("pending-late").date);
     expect(parsed("blank-rrule").date).toBe(parsed("pending-late").date);
     expect(triggers.recurring).toBe(recurring);
     expect(triggers.dated).toBe(dated);
