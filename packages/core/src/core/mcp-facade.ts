@@ -131,14 +131,31 @@ export interface FacadeParams {
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
   /**
-   * Whether this session's agent may call `name` itself — the same allow-list
-   * check `executeAction` enforces. `propose_routine` with `activate: true`
-   * creates the routine only when the agent may call both `create_routine`
-   * and the target action, so auto-enabling never schedules anything the
-   * agent couldn't already schedule by calling `create_routine` directly.
+   * Lets `propose_routine` with `activate: true` create the routine itself.
    * Absent → auto-enable is unavailable and the draft card is shown instead.
    */
-  canCallAction?: (name: string) => "permitted" | "denied" | "unknown";
+  routineActivation?: RoutineActivationGate;
+}
+
+/** What `propose_routine` checks before it creates a routine without the
+ * guardian's click. */
+export interface RoutineActivationGate {
+  /** Whether this session's agent may call `name` itself — the same allow-list
+   * check `executeAction` enforces. Auto-enable needs both `create_routine` and
+   * the target action, so it never schedules anything the agent couldn't
+   * already schedule by calling `create_routine` directly. */
+  canCallAction(name: string): "permitted" | "denied" | "unknown";
+  /** The target action's input-schema check on the routine's args — the same
+   * one `POST /api/routines` runs for the card's "Turn it on". Null when the
+   * args fit. */
+  validateArgs(actionName: string, args: Record<string, unknown>): string | null;
+}
+
+/** The unique key a chat routine card's routine is created with. The card finds
+ * its routine by this key after a reload; `POST /api/routines` accepts only
+ * this prefix. */
+export function mintChatRoutineKey(): string {
+  return `chat-routine:${randomUUID()}`;
 }
 
 interface ActionArgumentSummary {
@@ -708,8 +725,8 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.interactiveSurfaceDetached ?? false,
       !!params.handback,
       params.executeDefer,
-      params.canCallAction
-        ? { canCallAction: params.canCallAction, executeAction: params.executeAction }
+      params.routineActivation
+        ? { ...params.routineActivation, executeAction: params.executeAction }
         : undefined,
     ),
   };
@@ -731,8 +748,7 @@ type RoutineCardOutcome =
   | { routineCard: "active"; routineId: string; routineKey: string; message: string }
   | { routineCard: "draft"; message: string };
 
-type ActivationDeps = {
-  canCallAction: (name: string) => "permitted" | "denied" | "unknown";
+type ActivationDeps = Pick<RoutineActivationGate, "canCallAction" | "validateArgs"> & {
   executeAction: (name: string, input: unknown) => Promise<unknown>;
 };
 
@@ -776,9 +792,25 @@ async function activateRoutineDraft(
     return fallback("you are not permitted to create routines directly");
   }
 
-  // The same key shape the webchat drain mints for a draft card, so the card
-  // finds this routine by key after a reload.
-  const routineKey = `chat-routine:${randomUUID()}`;
+  // create_routine checks only that the target exists; run the same args check
+  // the card's "Turn it on" gets, so an auto-enabled routine can't be saved
+  // with args that fail on every fire.
+  const argsError = deps.validateArgs(draft.actionName, draft.args);
+  if (argsError) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `The routine was NOT created and no card was shown: ${argsError}. Fix the args and call propose_routine again.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  // Same key shape the webchat drain mints for a draft card, so the card finds
+  // this routine by key after a reload.
+  const routineKey = mintChatRoutineKey();
   let result: unknown;
   try {
     result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
@@ -808,7 +840,7 @@ async function activateRoutineDraft(
     routineCard: "active",
     routineId: r.routineId,
     routineKey,
-    message: `Routine "${draft.name}" is on (id ${r.routineId}). The guardian sees it as a saved card with Pause, Delete and a link to its run history. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+    message: `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from its card or the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
   });
 }
 

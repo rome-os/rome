@@ -280,6 +280,7 @@ describe("normalizeRoutineDraftForCard", () => {
     type Call = { name: string; input: unknown };
     const setup = (opts: {
       permissions?: Record<string, "permitted" | "denied" | "unknown">;
+      argsError?: string;
       createResult?: unknown;
       withGate?: boolean;
       detached?: boolean;
@@ -299,7 +300,12 @@ describe("normalizeRoutineDraftForCard", () => {
         interactiveSurfaceDetached: opts.detached ?? false,
         ...(opts.withGate === false
           ? {}
-          : { canCallAction: (name: string) => permissions[name] ?? "permitted" }),
+          : {
+              routineActivation: {
+                canCallAction: (name: string) => permissions[name] ?? "permitted",
+                validateArgs: () => opts.argsError ?? null,
+              },
+            }),
       });
       const tool = bundle.interactiveTools.find((t) => t.name === "propose_routine")!;
       const run = async (input: Record<string, unknown>) =>
@@ -370,6 +376,18 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(calls).toEqual([]);
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toContain("not a registered action");
+    });
+
+    // create_routine checks only that the target exists, so the args check the
+    // card's "Turn it on" gets must run here too.
+    it("creates nothing when the args don't fit the target action's schema", async () => {
+      const { calls, run } = setup({
+        argsError: 'args do not satisfy the input schema for action "summon"',
+      });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("do not satisfy the input schema");
     });
 
     it("relays a create_routine rejection as an error without a card", async () => {

@@ -323,4 +323,41 @@ describe("RoutineDraftCard", () => {
       expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     });
   });
+
+  // The mount lookup can resolve after the guardian already acted; its older
+  // snapshot must not undo what they did.
+  describe("a slow mount lookup", () => {
+    const deferredList = () => {
+      let resolve!: (refs: Awaited<ReturnType<typeof listRoutineRefs>>) => void;
+      mockList.mockReturnValue(new Promise((r) => (resolve = r)));
+      return (refs: Awaited<ReturnType<typeof listRoutineRefs>>) => resolve(refs);
+    };
+    const ref = { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true };
+
+    it("doesn't revert a pause made before it returned", async () => {
+      const user = userEvent.setup();
+      const resolveList = deferredList();
+      render(<RoutineDraftCard draft={eventDraft} routineKey={ref.key} routineId="r-5" />);
+
+      await user.click(screen.getByRole("button", { name: "Pause" }));
+      expect(await screen.findByText("Paused")).toBeTruthy();
+      resolveList([ref]);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.getByText("Paused")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    });
+
+    it("doesn't revert a create made before it returned", async () => {
+      const user = userEvent.setup();
+      const resolveList = deferredList();
+      render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
+
+      await user.click(screen.getByRole("button", { name: /turn it on/i }));
+      expect(await screen.findByText("On")).toBeTruthy();
+      resolveList([]);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.getByText("On")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+    });
+  });
 });

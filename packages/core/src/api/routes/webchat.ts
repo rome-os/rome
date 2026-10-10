@@ -67,7 +67,7 @@ import {
   buildWorkspaceContextSection,
   type WorkspaceContextSnapshot,
 } from "../../core/prompt-builder.js";
-import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import { mintChatRoutineKey, normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
 import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -221,9 +221,9 @@ async function persistRoutineDraftCard(
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
     // Minted here, not taken from the agent's input, so it names this card only.
-    // An activated routine was already created with a key minted the same
-    // way (in the propose_routine handler); the card carries that one.
-    routineKey: created?.routineKey ?? `chat-routine:${randomUUID()}`,
+    // An activated routine was already created with its own minted key (in the
+    // propose_routine handler); the card carries that one.
+    routineKey: created?.routineKey ?? mintChatRoutineKey(),
     ...(created ? { routineId: created.routineId } : {}),
   };
   try {
@@ -296,8 +296,12 @@ type Suspension =
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
 
+// The facade's own tool, by exact name: bare on Codex, MCP-prefixed on Claude.
+// A suffix match would let any external MCP tool named `…__propose_routine`
+// decide which routine an activated card shows.
+const PROPOSE_ROUTINE_TOOL_NAMES = new Set(["propose_routine", "mcp__ask_user__propose_routine"]);
 const isProposeRoutineTool = (tool: unknown): boolean =>
-  typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
+  typeof tool === "string" && PROPOSE_ROUTINE_TOOL_NAMES.has(tool);
 
 /** The card state an `activate: true` propose_routine call settled on (see
  * `RoutineCardOutcome` in mcp-facade): saved with its id, or a draft fallback.
@@ -3541,15 +3545,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   });
                 }
               }
-              // Parked suspension: any action that returned a pending_interaction
-              // or handoff result surfaces it on its tool_result. Snapshot a card
-              // keyed by toolUseId so the host renders it and can match the later
-              // interaction_result back to this call. Fail closed on both kinds —
-              // the owning app must actually be installed, and an inline
-              // component must be declared in its app.yaml `components:` list. A
-              // handoff also mints a dedicated child session for its
-              // design conversation so it never interleaves with this (parent)
-              // thread.
+              // An activated propose_routine's card, once its result says which.
               if (msg.type === "tool_result" && pendingRoutineActivations.has(msg.toolUseId)) {
                 const toolInput = pendingRoutineActivations.get(msg.toolUseId);
                 pendingRoutineActivations.delete(msg.toolUseId);
@@ -3566,6 +3562,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   );
                 }
               }
+              // Parked suspension: any action that returned a pending_interaction
+              // or handoff result surfaces it on its tool_result. Snapshot a card
+              // keyed by toolUseId so the host renders it and can match the later
+              // interaction_result back to this call. Fail closed on both kinds —
+              // the owning app must actually be installed, and an inline
+              // component must be declared in its app.yaml `components:` list. A
+              // handoff also mints a dedicated child session for its
+              // design conversation so it never interleaves with this (parent)
+              // thread.
               if (msg.type === "tool_result") {
                 const suspension = readSuspensionFromOutput(msg.output);
                 if (suspension && suspension.kind === "inline" && suspension.builtin) {

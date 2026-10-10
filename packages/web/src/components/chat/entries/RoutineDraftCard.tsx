@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, BellRing, CalendarClock, Check, Pause, Play } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
@@ -64,12 +64,15 @@ export function RoutineDraftCard({
   const [busy, setBusy] = useState<Busy>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Set once the guardian creates, pauses or deletes from this card. The mount
+  // lookup's snapshot may predate that change, so it must not overwrite it.
+  const actedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     void listRoutineRefs().then((refs) => {
       // A failed load says nothing about the routine; keep what we know.
-      if (cancelled || !refs) return;
+      if (cancelled || !refs || actedRef.current) return;
       const created = findCreatedRoutine(refs, draft.name, routineKey);
       setState(
         created
@@ -83,6 +86,7 @@ export function RoutineDraftCard({
   }, [draft.name, routineKey]);
 
   const turnOn = async () => {
+    actedRef.current = true;
     setState({ kind: "creating" });
     const result = await createRoutine({
       name: draft.name,
@@ -102,6 +106,7 @@ export function RoutineDraftCard({
   };
 
   const toggle = async (id: string, enabled: boolean) => {
+    actedRef.current = true;
     setBusy("toggle");
     const result = await setRoutineEnabled(id, enabled);
     setBusy(null);
@@ -111,6 +116,7 @@ export function RoutineDraftCard({
 
   // Deleting returns the card to its draft, so "Turn it on" undoes it.
   const remove = async (id: string) => {
+    actedRef.current = true;
     setBusy("delete");
     const result = await deleteRoutine(id);
     setBusy(null);

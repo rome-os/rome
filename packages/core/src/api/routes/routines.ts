@@ -1,11 +1,11 @@
 import { Hono } from "hono";
-import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
 import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
 import type { ApiDeps } from "../deps.js";
+import { validateActionArgs } from "../../actions/validate-action-args.js";
 import type { Trigger } from "../../routines/types.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
@@ -14,8 +14,6 @@ const RESERVED_ARG_KEY = "__triggerPayload";
 
 const LOCAL_TIME_RE = /^\d{2}:\d{2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const argsSchemaValidator = new Ajv2020({ allErrors: true, strict: false });
-const compiledArgsSchemas = new WeakMap<Record<string, unknown>, ValidateFunction>();
 
 /** Error when a routine names an action that isn't registered. Names the remedy
  * so the agent routes to building a workflow instead of guessing again. Kept in
@@ -37,31 +35,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
     !Array.isArray(v) &&
     Object.getPrototypeOf(v) === Object.prototype
   );
-}
-
-function validateActionArgs(
-  actionName: string,
-  args: Record<string, unknown>,
-  schema: Record<string, unknown> | undefined,
-): string | null {
-  if (!schema) return null;
-
-  let validator = compiledArgsSchemas.get(schema);
-  if (!validator) {
-    try {
-      validator = argsSchemaValidator.compile(schema);
-      compiledArgsSchemas.set(schema, validator);
-    } catch (error) {
-      return `cannot validate args for action "${actionName}": invalid input schema (${
-        error instanceof Error ? error.message : String(error)
-      })`;
-    }
-  }
-  if (validator(args)) return null;
-  return `args do not satisfy the input schema for action "${actionName}": ${argsSchemaValidator.errorsText(
-    validator.errors,
-    { dataVar: "args", separator: "; " },
-  )}`;
 }
 
 /** Validates against the engine's registered providers and per-type required

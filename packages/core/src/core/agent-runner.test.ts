@@ -5038,9 +5038,10 @@ describe("AgentRunner", () => {
 
       expect(executionWasRejected).toBe(true);
       // propose_routine's auto-enable gate mirrors the same allow-list.
-      expect(sessionParams?.canCallAction?.("demo_action")).toBe("permitted");
-      expect(sessionParams?.canCallAction?.("internal_action")).toBe("denied");
-      expect(sessionParams?.canCallAction?.("no_such_action")).toBe("unknown");
+      const gate = sessionParams?.routineActivation;
+      expect(gate?.canCallAction("demo_action")).toBe("permitted");
+      expect(gate?.canCallAction("internal_action")).toBe("denied");
+      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
