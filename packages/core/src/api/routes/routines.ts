@@ -86,6 +86,9 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
     if (h < 0 || h > 23 || m < 0 || m > 59) {
       return "schedule.localTime hour/minute out of range";
     }
+    if (trigger.rrule !== undefined && typeof trigger.rrule !== "string") {
+      return "schedule.rrule must be a string";
+    }
     if (trigger.date !== undefined) {
       if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
         return 'schedule.date must match "YYYY-MM-DD"';

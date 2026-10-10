@@ -169,6 +169,20 @@ describe("Routines API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a non-string rrule", async () => {
+    const res = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "bad-rrule",
+        actionName: "send_message",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "12:00", rrule: 5 },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("schedule.rrule must be a string");
+  });
+
   it("rejects args that violate the registered action's full JSON Schema", async () => {
     const baseDeps = await buildTestDeps(testDb.db);
     registerStubAction(baseDeps.actionRegistry, "validated_action", {
