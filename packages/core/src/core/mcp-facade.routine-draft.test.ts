@@ -306,6 +306,7 @@ describe("normalizeRoutineDraftForCard", () => {
               routineActivation: {
                 canCallAction: (name: string) => permissions[name] ?? "permitted",
                 validateArgs: () => opts.argsError ?? null,
+                routineKeyFor: (toolUseId: string) => `chat-routine:turn-1:${toolUseId}`,
               },
             }),
       });
@@ -329,7 +330,7 @@ describe("normalizeRoutineDraftForCard", () => {
           input: {
             // Derived from the tool call, so the drain computes the card's key
             // itself instead of reading it from this result.
-            key: "chat-routine:toolu_1",
+            key: "chat-routine:turn-1:toolu_1",
             name: "Weekly update reminder",
             trigger: {
               type: "schedule",
@@ -407,6 +408,19 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(calls).toHaveLength(1);
       expect(res.isError).toBeUndefined();
       expect(res.content[0].text).toContain("may or may not exist");
+      expect(res.content[0].text).toContain("do NOT call propose_routine");
+    });
+
+    // The key is this call's own, so a duplicate means its routine was saved.
+    it("treats an already-taken key as this call's routine, not a retry", async () => {
+      const { run } = setup({
+        createResult: {
+          status: "error",
+          error: 'a routine with key "chat-routine:turn-1:toolu_1" already exists (id r-1)',
+        },
+      });
+      const res = await run({ ...validInput, activate: true });
+      expect(res.isError).toBeUndefined();
       expect(res.content[0].text).toContain("do NOT call propose_routine");
     });
 

@@ -19,7 +19,6 @@
 // regression gate for this module.
 
 import { createLogger } from "../logger.js";
-import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
@@ -149,6 +148,10 @@ export interface RoutineActivationGate {
    * one `POST /api/routines` runs for the card's "Turn it on". Null when the
    * args fit. */
   validateArgs(actionName: string, args: Record<string, unknown>): string | null;
+  /** The key to create this tool call's routine with — derived from the
+   * current Rome turn, the same way the webchat drain derives the card's key.
+   * Undefined when no turn is running. */
+  routineKeyFor(toolUseId: string): string | undefined;
 }
 
 interface ActionArgumentSummary {
@@ -733,7 +736,7 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
 
-type ActivationDeps = Pick<RoutineActivationGate, "canCallAction" | "validateArgs"> & {
+type ActivationDeps = RoutineActivationGate & {
   executeAction: (name: string, input: unknown) => Promise<unknown>;
 };
 
@@ -745,8 +748,8 @@ const CREATE_ROUTINE_ACTION = "create_routine";
  * an action the agent may call too. Without that permission, it falls back to
  * the draft card, so the guardian's click stays the gate.
  *
- * The routine's key comes from the tool call ({@link chatRoutineKeyForToolUse}),
- * so the webchat drain derives the card's key on its own and never takes a
+ * The routine's key comes from the turn and the tool call (`routineKeyFor`), so
+ * the webchat drain derives the card's key on its own and never takes a
  * routine identity from the tool's output. A non-error result means "show a
  * card"; whether that card is On or a draft is settled by the card's lookup. */
 async function activateRoutineDraft(
@@ -758,13 +761,18 @@ async function activateRoutineDraft(
     content: [{ type: "text", text: t }],
     ...(isError ? { isError } : {}),
   });
+  const uncertain = (detail: string) =>
+    text(
+      `create_routine did not confirm the routine (${detail}), so it may or may not exist. Its card was shown and reflects what was saved — do NOT call propose_routine or any create action again. Tell the guardian to check the card, then end your turn.`,
+    );
   const fallback = (reason: string) =>
     text(
       `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
     );
 
   if (!deps) return fallback("auto-enable is not available in this session");
-  if (!toolUseId) return fallback("this tool call has no id to key the routine by");
+  const routineKey = toolUseId ? deps.routineKeyFor(toolUseId) : undefined;
+  if (!routineKey) return fallback("this tool call has no id to key the routine by");
   const target = deps.canCallAction(draft.actionName);
   if (target === "unknown") {
     return text(
@@ -793,7 +801,7 @@ async function activateRoutineDraft(
   let result: unknown;
   try {
     result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
-      key: chatRoutineKeyForToolUse(toolUseId),
+      key: routineKey,
       name: draft.name,
       trigger: draft.trigger,
       actionName: draft.actionName,
@@ -804,11 +812,14 @@ async function activateRoutineDraft(
     // was saved. Don't report "not created": the agent would retry under a new
     // key and could leave a second live routine. Show the card instead; its
     // lookup by key shows whether the routine exists.
-    return text(
-      `create_routine failed unexpectedly (${err instanceof Error ? err.message : String(err)}), so the routine may or may not exist. Its card was shown and reflects what was saved — do NOT call propose_routine or any create action again. Tell the guardian to check the card, then end your turn.`,
-    );
+    return uncertain(err instanceof Error ? err.message : String(err));
   }
   const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
+  // The key is this call's own, so "already exists" means its routine was saved
+  // (e.g. the card's Turn it on won a race after a stopped turn).
+  if (r.status === "error" && typeof r.error === "string" && /already exists/.test(r.error)) {
+    return uncertain(r.error);
+  }
   if (r.status === "error" || typeof r.routineId !== "string") {
     const error = typeof r.error === "string" ? r.error : "create_routine returned no routineId";
     return text(

@@ -333,6 +333,20 @@ describe("RoutineDraftCard", () => {
       expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
     });
 
+    it("offers neither Pause nor Resume when the existing state can't be read", async () => {
+      const user = userEvent.setup();
+      mockList.mockResolvedValue(null);
+      mockCreate.mockResolvedValue({ ok: true, status: 409, routineId: "r-5" });
+      renderActivated();
+
+      await user.click(await screen.findByRole("button", { name: /turn it on/i }));
+      expect(await screen.findByText(/couldn’t be loaded/)).toBeTruthy();
+      expect(screen.queryByText("On")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    });
+
     it("offers no Pause for a manual routine", async () => {
       renderActivated({
         ...eventDraft,

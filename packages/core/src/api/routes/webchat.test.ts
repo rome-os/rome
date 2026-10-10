@@ -3097,7 +3097,7 @@ describe("Webchat API", () => {
         // tool-use id; nothing is read from the result.
         expect(cards[0]).toMatchObject({
           toolUseId: "tu-routine",
-          routineKey: "chat-routine:tu-routine",
+          routineKey: expect.stringMatching(/^chat-routine:[^:]+:tu-routine$/),
           draft: { name: "Feedback triage", actionName: "summon" },
         });
         expect(cards[0].routineId).toBeUndefined();
@@ -3113,8 +3113,29 @@ describe("Webchat API", () => {
         });
         const cards = await runTurn(proposeEvents({ ...routineInput, activate: true }, forged));
         expect(cards).toHaveLength(1);
-        expect(cards[0].routineKey).toBe("chat-routine:tu-routine");
+        expect(cards[0].routineKey).toMatch(/^chat-routine:[^:]+:tu-routine$/);
         expect(JSON.stringify(cards[0])).not.toContain("someone-elses");
+      });
+
+      // Codex reuses tool-use ids like `item_0` every turn; the Rome turn id
+      // keeps each activation's key distinct.
+      it("keys a repeated provider tool-use id differently in each turn", async () => {
+        mockScriptedManager().setEvents(
+          proposeEvents({ ...routineInput, activate: true }, "Routine is on."),
+        );
+        const app = createWebchatRuntime(deps).routes;
+        const sessionId = await newSession(app);
+        for (let i = 0; i < 2; i++) {
+          const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: `check feedback, take ${i}` }),
+          });
+          await drainTurn(app, res);
+        }
+        const keys = (await routineCards(sessionId)).map((c) => c.routineKey);
+        expect(keys).toHaveLength(2);
+        expect(new Set(keys).size).toBe(2);
       });
 
       it("writes no card for an error result", async () => {
@@ -3142,7 +3163,7 @@ describe("Webchat API", () => {
       it("writes the card when the turn ends before the result arrives", async () => {
         const cards = await runTurn(proposeEvents({ ...routineInput, activate: true }, null));
         expect(cards).toHaveLength(1);
-        expect(cards[0].routineKey).toBe("chat-routine:tu-routine");
+        expect(cards[0].routineKey).toMatch(/^chat-routine:[^:]+:tu-routine$/);
       });
     });
   });

@@ -22,7 +22,8 @@ type CardState =
   // `routineId` is unknown only if a create succeeded without returning a row.
   // `owned`: this card provably made the routine (same key, or created here),
   // so it may pause or delete it; a legacy name match only links to it.
-  | { kind: "on"; routineId?: string; enabled: boolean; owned: boolean }
+  // `enabled` is null when the routine exists but its state couldn't be read.
+  | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean }
   | { kind: "error"; message: string };
 
 type Busy = "toggle" | "delete" | null;
@@ -106,10 +107,10 @@ export function RoutineDraftCard({
     if (result.ok) {
       // 409: the keyed routine already existed and was left as it is — it may
       // be paused — so read its real state rather than assume On.
-      let enabled = true;
+      let enabled: boolean | null = true;
       if (result.status === 409 && result.routineId) {
         const refs = await listRoutineRefs();
-        enabled = refs?.find((r) => r.id === result.routineId)?.enabled ?? true;
+        enabled = refs?.find((r) => r.id === result.routineId)?.enabled ?? null;
       }
       setState({ kind: "on", routineId: result.routineId, enabled, owned: true });
     } else {
@@ -157,6 +158,7 @@ export function RoutineDraftCard({
           {badgeLabel}
         </Badge>
         {state.kind === "on" &&
+          state.enabled !== null &&
           (state.enabled ? (
             <Badge variant="success">
               <Check aria-hidden />
@@ -195,11 +197,13 @@ export function RoutineDraftCard({
       {state.kind === "on" ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-muted/50 px-4 py-2">
           <p className="min-w-0 text-aux text-muted-foreground">
-            {!state.enabled
-              ? "Paused. It won’t run until you resume it."
-              : isManual
-                ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
-                : "Saved. Next time it matches, Rome will run it within a minute."}
+            {state.enabled === null
+              ? "Saved earlier. Its current state couldn’t be loaded — check it in its run history."
+              : !state.enabled
+                ? "Paused. It won’t run until you resume it."
+                : isManual
+                  ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
+                  : "Saved. Next time it matches, Rome will run it within a minute."}
           </p>
           {state.routineId && (
             <SavedControls
@@ -248,7 +252,7 @@ function SavedControls({
   onDelete,
 }: {
   routineId: string;
-  enabled: boolean;
+  enabled: boolean | null;
   owned: boolean;
   isManual: boolean;
   busy: Busy;
@@ -290,8 +294,9 @@ function SavedControls({
   if (!owned) return history;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {/* A manual routine never fires on its own, so there is nothing to pause. */}
-      {!isManual && (
+      {/* A manual routine never fires on its own, so there is nothing to pause;
+          with an unknown state there's no honest Pause/Resume to offer. */}
+      {!isManual && enabled !== null && (
         <Button
           size="sm"
           variant="ghost"

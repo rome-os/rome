@@ -10,8 +10,10 @@ export function mintChatRoutineKey(): string {
   return `${CHAT_ROUTINE_KEY_PREFIX}${randomUUID()}`;
 }
 
-/** The key of a routine `propose_routine` auto-enables, derived from the tool
- * call so the drain can compute the card's key itself. */
-export function chatRoutineKeyForToolUse(toolUseId: string): string {
-  return `${CHAT_ROUTINE_KEY_PREFIX}${toolUseId}`;
+/** The key of a routine `propose_routine` auto-enables, derived from the Rome
+ * turn and the tool call so the drain can compute the card's key itself.
+ * Provider tool-use ids are only unique within a turn (Codex reuses `item_0`
+ * every turn), so the Rome turn id scopes them. */
+export function chatRoutineKeyForToolUse(turnId: string, toolUseId: string): string {
+  return `${CHAT_ROUTINE_KEY_PREFIX}${turnId}:${toolUseId}`;
 }

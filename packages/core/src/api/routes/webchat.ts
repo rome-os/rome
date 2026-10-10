@@ -3352,7 +3352,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               turnId,
               toolUseId,
               toolInput,
-              chatRoutineKeyForToolUse(toolUseId),
+              chatRoutineKeyForToolUse(turnId, toolUseId),
             );
           try {
             let resultContent = "";
@@ -3778,15 +3778,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // already have created the routine; show its card so it stays
             // visible and reversible (the lookup shows a draft if it doesn't).
             try {
+              // One failing card (e.g. a throwing preview) must not hide the rest.
               for (const [toolUseId, toolInput] of pendingRoutineActivations) {
-                await persistActivatedCard(toolUseId, toolInput);
+                await persistActivatedCard(toolUseId, toolInput).catch((err: unknown) => {
+                  log.warn("failed to persist a pending routine card", {
+                    sessionId,
+                    turnId,
+                    toolUseId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                });
               }
-            } catch (err) {
-              log.warn("failed to persist pending routine cards", {
-                sessionId,
-                turnId,
-                error: err instanceof Error ? err.message : String(err),
-              });
             } finally {
               unsubscribeStatus();
             }

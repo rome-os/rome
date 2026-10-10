@@ -23,6 +23,7 @@ import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
 import type { RoutineActivationGate } from "./mcp-facade.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
@@ -1024,6 +1025,11 @@ async function openSession(
     validateArgs: (actionName, args) => {
       const action = deps.actionRegistry.get(actionName);
       return validateActionArgs(action?.config.name ?? actionName, args, action?.inputSchema);
+    },
+    // The live turn's id is the one the webchat drain sees on its handle.
+    routineKeyFor: (toolUseId) => {
+      const turnId = impl.currentTurnId;
+      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
     },
   };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
