@@ -41,13 +41,14 @@ import {
   searchChatMessages,
 } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import { isChatSearchShortcut, chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import type {
   AgentCatalogGroup,
   AgentMention,
   ChatSearchMessageMatch,
   ChatSession,
 } from "@/lib/chat-types";
-import { isApplePlatform } from "@/lib/platform";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
@@ -67,22 +68,6 @@ interface AppSearchEntry {
   href: string;
 }
 
-function currentPlatform(): string {
-  return typeof navigator === "undefined" ? "" : navigator.platform;
-}
-
-export function chatSearchShortcutForPlatform(platform = currentPlatform()): string {
-  return isApplePlatform(platform) ? "⌘K" : "Ctrl K";
-}
-
-export function isChatSearchShortcut(
-  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "shiftKey">,
-  platform = currentPlatform(),
-): boolean {
-  const modifier = isApplePlatform(platform) ? event.metaKey : event.ctrlKey;
-  return modifier && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "k";
-}
-
 /**
  * The agent filter while the query is a lone `@` token at its start, else
  * null. Only a leading token counts, so a search that merely contains `@` (an
@@ -91,20 +76,6 @@ export function isChatSearchShortcut(
 export function agentMentionQuery(query: string): string | null {
   const match = /^@(\S*)$/.exec(query.trimStart());
   return match ? match[1] : null;
-}
-
-export function activeSessionFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/?#]+)/);
-  if (!match) return null;
-  try {
-    return decodeURIComponent(match[1]);
-  } catch {
-    return match[1];
-  }
-}
-
-export function sessionActivityTime(session: ChatSession): number {
-  return new Date(session.activityAt).getTime();
 }
 
 function normalizeSearchText(value: string): string {

@@ -31,6 +31,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { deleteSession, listSessions, renameSession } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import {
@@ -39,11 +41,6 @@ import {
   usePinSession,
   useSessionsChanged,
 } from "@/lib/session-events";
-import {
-  activeSessionFromPath,
-  chatSearchShortcutForPlatform,
-  sessionActivityTime,
-} from "./ChatSearchDialog";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open

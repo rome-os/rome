@@ -10,13 +10,8 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import type { AgentCatalogGroup, ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
-import {
-  agentMentionQuery,
-  ChatSearchDialog,
-  chatSearchShortcutForPlatform,
-  isChatSearchShortcut,
-  matchRanges,
-} from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
+import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
