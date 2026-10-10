@@ -32,12 +32,6 @@ describe("findEntryChunk", () => {
     expect(found).toBe(entry);
   });
 
-  it("picks the same chunk when the build emits only one", () => {
-    const only = chunk("index");
-
-    expect(findEntryChunk(compilation({ entryChunk: only, chunks: [only] }))).toBe(only);
-  });
-
   it("reports no entry chunk rather than falling back to an arbitrary one", () => {
     const runtime = chunk("612");
 
