@@ -100,7 +100,10 @@ export function createSubagentExecutionService(deps: {
             `Subagent session "${input.resumeSessionId}" belongs to a different project`,
           );
         }
+        // Naming the conversation lets the resume fill a row whose record
+        // failed when the subagent was minted.
         child = await context.childManager.acquireBySessionId(input.resumeSessionId, name, {
+          romeSessionId: input.resumeSessionId,
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
