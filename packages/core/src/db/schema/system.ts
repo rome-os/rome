@@ -417,24 +417,6 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const providerAccounts = sqliteTable("provider_accounts", {
-  id: text("id").primaryKey(),
-  provider: text("provider").notNull().unique(),
-  providerAccountId: text("provider_account_id"),
-  displayName: text("display_name"),
-  email: text("email"),
-  login: text("login"),
-  avatarUrl: text("avatar_url"),
-  scopes: text("scopes", { mode: "json" }),
-  tokenCiphertext: text("token_ciphertext").notNull(),
-  tokenVersion: integer("token_version").notNull().default(1),
-  tokenExpiresAt: integer("token_expires_at", { mode: "timestamp" }),
-  metadata: text("metadata", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }).notNull(),
-});
-
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -878,9 +860,8 @@ export const connections = sqliteTable(
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
-// stored as plain JSON (repo precedent: encryption deliberately dropped, see
-// `packages/core/src/lib/provider-accounts.ts`); the envelope shape is kept so
-// encryption can return later. A grant row is present in "unauthorized" from
+// stored as plain JSON (encryption was deliberately dropped); the envelope
+// shape is kept so encryption can return later. A grant row is present in "unauthorized" from
 // connection creation; conferral fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",

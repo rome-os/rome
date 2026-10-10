@@ -5,7 +5,7 @@
 // material and profile shapes.
 
 import type { OAuthProvider } from "../lib/oauth-providers.js";
-import { normalizeScopes, type OAuthTokenBundle } from "../lib/provider-accounts.js";
+import { normalizeScopes, type OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
 import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
