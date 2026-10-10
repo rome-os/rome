@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.2](https://github.com/rome-os/rome/compare/app-runtime-v0.7.1...app-runtime-v0.7.2) (2026-10-10)
+
+
+### Features
+
+* **routines:** auto-enable a routine the guardian explicitly asked for ([#872](https://github.com/rome-os/rome/issues/872)) ([f52d3a5](https://github.com/rome-os/rome/commit/f52d3a506da17596dd6103ed88c9d9993d5734ac))
+
 ## [0.7.1](https://github.com/rome-os/rome/compare/app-runtime-v0.7.0...app-runtime-v0.7.1) (2026-10-10)
 
 
