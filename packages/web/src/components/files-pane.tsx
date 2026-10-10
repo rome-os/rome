@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   File,
@@ -23,13 +23,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +38,7 @@ import {
   useFileBrowserStoreApi,
 } from "@/components/file-browser/store/context";
 import { findDirectoryTreeNode } from "@/components/file-browser/store/utils";
+import { PathBreadcrumb } from "@/components/file-browser/PathBreadcrumb";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { cn } from "@/lib/utils";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
@@ -252,39 +246,25 @@ export function FilesPane({ className, searchPlaceholder, contextMenuActions }: 
       ? t("pane.loading")
       : "";
 
-  const crumbs = useMemo(() => getBreadcrumbChain(path, logicalRootPath), [path, logicalRootPath]);
+  const crumbs = useMemo(
+    () =>
+      getBreadcrumbChain(path, logicalRootPath).map((crumbPath) => ({
+        path: crumbPath,
+        label: getCrumbLabel(crumbPath),
+      })),
+    [path, logicalRootPath],
+  );
 
   return (
     <section className={cn("flex min-h-0 min-w-0 flex-col", className)}>
       <Toolbar searchPlaceholder={searchPlaceholder} />
       <header className="mb-3 flex shrink-0 items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <Breadcrumb>
-            <BreadcrumbList className="font-mono text-aux">
-              {crumbs.map((crumbPath, i) => {
-                const isLast = i === crumbs.length - 1;
-                const label = getCrumbLabel(crumbPath);
-                return (
-                  <Fragment key={crumbPath}>
-                    <BreadcrumbItem className="min-w-0">
-                      {isLast ? (
-                        <BreadcrumbPage className="truncate">{label}</BreadcrumbPage>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setPath(crumbPath)}
-                          className="truncate rounded-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {label}
-                        </button>
-                      )}
-                    </BreadcrumbItem>
-                    {!isLast && <BreadcrumbSeparator />}
-                  </Fragment>
-                );
-              })}
-            </BreadcrumbList>
-          </Breadcrumb>
+          <PathBreadcrumb
+            crumbs={crumbs}
+            onNavigate={setPath}
+            listClassName="-ml-1 font-mono text-aux"
+          />
           <div className="text-aux mt-1 text-subtle-foreground">{countLabel}</div>
         </div>
         <SegmentedControl

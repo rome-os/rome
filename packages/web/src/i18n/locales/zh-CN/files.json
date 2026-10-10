@@ -91,6 +91,10 @@
     "resize": "调整侧边栏宽度",
     "emptyTree": "{{rootLabel}} 中没有文件"
   },
+  "pathBreadcrumb": {
+    "showHidden_one": "显示 {{count}} 个隐藏的文件夹",
+    "showHidden_other": "显示 {{count}} 个隐藏的文件夹"
+  },
   "pane": {
     "items_one": "{{count}} 项",
     "items_other": "{{count}} 项",

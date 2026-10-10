@@ -4,6 +4,7 @@ import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
+import { PathBreadcrumb } from "./PathBreadcrumb";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { getBaseName, getParentPath, isPathWithin } from "./store/utils";
 
@@ -83,16 +84,19 @@ export function MoveDialog() {
 
   const folders = useMemo(() => children.filter((node) => node.type === "directory"), [children]);
 
-  const segments = useMemo(() => {
+  const crumbs = useMemo(() => {
     if (!currentPath) return [];
     const relative =
       currentPath === logicalRootPath ? "" : currentPath.slice(logicalRootPath.length + 1);
     const parts = relative ? relative.split("/") : [];
-    return parts.map((name, index) => ({
-      name,
-      path: [logicalRootPath, ...parts.slice(0, index + 1)].join("/"),
-    }));
-  }, [currentPath, logicalRootPath]);
+    return [
+      { path: logicalRootPath, label: rootLabel },
+      ...parts.map((name, index) => ({
+        label: name,
+        path: [logicalRootPath, ...parts.slice(0, index + 1)].join("/"),
+      })),
+    ];
+  }, [currentPath, logicalRootPath, rootLabel]);
 
   if (!moveDialog || !currentPath || !movingPath) return null;
 
@@ -136,32 +140,13 @@ export function MoveDialog() {
         <DialogDescription className="mt-2">{t("moveDialog.description")}</DialogDescription>
       </div>
 
-      <nav
+      <PathBreadcrumb
         aria-label={t("moveDialog.breadcrumbLabel")}
-        className="mt-4 flex flex-wrap items-center gap-1 text-ui"
-      >
-        <button
-          type="button"
-          onClick={() => goTo(logicalRootPath)}
-          disabled={currentPath === logicalRootPath}
-          className="rounded-4 px-2 py-1 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:cursor-default disabled:text-foreground disabled:hover:bg-transparent"
-        >
-          {rootLabel}
-        </button>
-        {segments.map((segment, index) => (
-          <span key={segment.path} className="flex items-center gap-1">
-            <ChevronRight className="h-3 w-3 shrink-0 text-subtle-foreground" />
-            <button
-              type="button"
-              onClick={() => goTo(segment.path)}
-              disabled={index === segments.length - 1}
-              className="max-w-[12rem] truncate rounded-4 px-2 py-1 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:cursor-default disabled:text-foreground disabled:hover:bg-transparent"
-            >
-              {segment.name}
-            </button>
-          </span>
-        ))}
-      </nav>
+        crumbs={crumbs}
+        onNavigate={goTo}
+        className="mt-4"
+        listClassName="-ml-1"
+      />
 
       <div
         ref={listRef}

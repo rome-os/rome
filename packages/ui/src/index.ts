@@ -26,6 +26,7 @@ export {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
+  collapseBreadcrumb,
 } from "./breadcrumb.js";
 export { Button, buttonVariants } from "./button.js";
 export {

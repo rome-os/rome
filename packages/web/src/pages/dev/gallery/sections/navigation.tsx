@@ -5,12 +5,19 @@ import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/s
 import { FilterChipGroup, type FilterChipOption } from "@/components/ui/filter-chip-group";
 import {
   Breadcrumb,
+  BreadcrumbEllipsis,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Stepper } from "@/components/ui/stepper";
 import { Component, Item, Row, Section, Specimen } from "../kit";
 
@@ -270,6 +277,39 @@ export function NavigationSection() {
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 <BreadcrumbPage>Ledger</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+        </Specimen>
+        <Specimen
+          label="Collapsed"
+          note="`collapseBreadcrumb` keeps the first crumb and the deepest ones; the ellipsis lists the rest."
+        >
+          <Breadcrumb>
+            <BreadcrumbList className="font-mono text-aux">
+              <BreadcrumbItem>
+                <BreadcrumbLink href="#navigation">Files</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <BreadcrumbEllipsis label="Show 3 hidden folders" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" sideOffset={4}>
+                    <DropdownMenuItem>projects</DropdownMenuItem>
+                    <DropdownMenuItem>ash-and-oak</DropdownMenuItem>
+                    <DropdownMenuItem>ledger</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbLink href="#navigation">2026</BreadcrumbLink>
+              </BreadcrumbItem>
+              <BreadcrumbSeparator />
+              <BreadcrumbItem>
+                <BreadcrumbPage>q3-invoices</BreadcrumbPage>
               </BreadcrumbItem>
             </BreadcrumbList>
           </Breadcrumb>

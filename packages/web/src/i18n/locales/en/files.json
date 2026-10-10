@@ -91,6 +91,10 @@
     "resize": "Resize sidebar",
     "emptyTree": "No files found in {{rootLabel}}"
   },
+  "pathBreadcrumb": {
+    "showHidden_one": "Show {{count}} hidden folder",
+    "showHidden_other": "Show {{count}} hidden folders"
+  },
   "pane": {
     "items_one": "{{count}} item",
     "items_other": "{{count}} items",
