@@ -9,7 +9,7 @@ import {
   isVideoContentType,
 } from "./gemini-video-helpers.mjs";
 
-const BROWSER_USER_AGENT =
+const FALLBACK_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
 
 /**
@@ -96,7 +96,14 @@ export function readGeminiVideoTurn() {
     var loose = [];
     for (var k = 0; k < all.length; k++) {
       var owner = all[k].closest("model-response");
-      if (!owner || owner === last) loose.push(all[k]);
+      var looseSrc = String(all[k].currentSrc || all[k].getAttribute("src") || "");
+      // Outside the turn, only a player on Gemini's clip host is the result.
+      if (
+        (!owner || owner === last) &&
+        /^https:\/\/[^/]*usercontent\.google\.com\//i.test(looseSrc)
+      ) {
+        loose.push(all[k]);
+      }
     }
     players = loose;
   }
@@ -340,6 +347,9 @@ export async function downloadGeminiVideo(
   { fetchImpl = fetch, timeoutMs = 120000 } = {},
 ) {
   const cookies = await page.getCookies({ url: src });
+  // Present the cookies with the user agent of the browser that owns them.
+  const agent = await page.evaluate("navigator.userAgent").catch(() => "");
+  const userAgent = typeof agent === "string" && agent ? agent : FALLBACK_USER_AGENT;
   const cookie = buildGeminiVideoCookieHeader(cookies, src);
   // Bounds the whole transfer, body included, so a stalled media host fails
   // like every other step instead of hanging the command.
@@ -357,7 +367,7 @@ export async function downloadGeminiVideo(
       signal,
       headers: {
         ...(cookie ? { cookie } : {}),
-        "user-agent": BROWSER_USER_AGENT,
+        "user-agent": userAgent,
         referer: "https://gemini.google.com/",
       },
     });

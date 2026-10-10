@@ -85,6 +85,27 @@ export function geminiVideoPhaseBudgets(remainingSeconds, { skipDownload = false
   };
 }
 
+/** Seconds kept back for typing, sending, and confirming the prompt. */
+export const GEMINI_VIDEO_SUBMIT_ALLOWANCE = 35;
+/** Generation below this budget cannot finish; a clip takes a minute or more. */
+export const GEMINI_VIDEO_MIN_GENERATION = 60;
+/** Smallest `--timeout` that leaves room for setup, generation, and download. */
+export const GEMINI_VIDEO_MIN_TIMEOUT = 240;
+
+/**
+ * Why the run must stop before sending the prompt, or null. Sending spends
+ * the account's daily video allowance, so a budget that setup already used up
+ * fails here instead of submitting a request the command cannot wait for.
+ */
+export function geminiVideoBudgetError(remainingSeconds, { skipDownload = false } = {}) {
+  const { generationSeconds } = geminiVideoPhaseBudgets(
+    Number(remainingSeconds) - GEMINI_VIDEO_SUBMIT_ALLOWANCE,
+    { skipDownload },
+  );
+  if (generationSeconds >= GEMINI_VIDEO_MIN_GENERATION) return null;
+  return `Setup left ${Math.max(0, Math.floor(remainingSeconds))}s of the --timeout budget, too little to generate a clip; the prompt was not sent. Rerun with a higher --timeout`;
+}
+
 const SAFE_NAME = /[^a-z0-9._-]+/gi;
 
 /** File name for the saved clip: explicit `--name` wins, else a timestamp. */

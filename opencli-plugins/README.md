@@ -519,7 +519,8 @@ requests, so the download forwards the browser's Google session cookies for that
   dropped without an error.
 - `--timeout` (default 600 seconds) bounds the whole run, as OpenCLI enforces it for the entire
   command: the generation wait gets what is left after upload and submission, minus a share
-  kept for the download.
+  kept for the download. The minimum is 240. If setup leaves too little for a generation, the
+  command stops before sending, so the daily allowance is not spent.
 - One prompt yields one clip of roughly 8 to 10 seconds at 1280×720 with generated ambient
   audio. Longer films are several runs stitched together.
 - Gemini enforces a daily video allowance per account (Google AI Pro: 3 videos a day). Once it is

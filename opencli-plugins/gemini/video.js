@@ -12,7 +12,9 @@ import {
 import {
   buildGeminiVideoFileName,
   GEMINI_VIDEO_DEFAULT_OUTPUT,
+  GEMINI_VIDEO_MIN_TIMEOUT,
   GEMINI_VIDEO_RATIOS,
+  geminiVideoBudgetError,
   geminiVideoPhaseBudgets,
   geminiVideoRatioLabel,
   integerInRange,
@@ -94,7 +96,7 @@ cli({
       if (!prompt) throw new Error("prompt must not be empty");
       images = parseGeminiVideoImages(kwargs.image);
       ratioLabel = geminiVideoRatioLabel(kwargs.ratio ?? "16:9");
-      timeout = integerInRange(kwargs.timeout ?? 600, "timeout", 120, 3600);
+      timeout = integerInRange(kwargs.timeout ?? 600, "timeout", GEMINI_VIDEO_MIN_TIMEOUT, 3600);
       outputDir = resolveGeminiVideoOutputDir(kwargs.output);
     } catch (error) {
       throw new CommandExecutionError(error instanceof Error ? error.message : String(error));
@@ -103,16 +105,19 @@ cli({
     await openGeminiVideoComposer(page);
     await selectGeminiVideoRatio(page, ratioLabel);
     await attachGeminiVideoImages(page, images);
-    await submitGeminiVideoPrompt(page, prompt);
 
     const skipDownload = kwargs.sd === true;
-    const elapsed = (Date.now() - startedAt) / 1000;
-    const budgets = geminiVideoPhaseBudgets(timeout - elapsed, { skipDownload });
+    const remaining = () => timeout - (Date.now() - startedAt) / 1000;
+    const tooLate = geminiVideoBudgetError(remaining(), { skipDownload });
+    if (tooLate) throw new CommandExecutionError(tooLate);
+    await submitGeminiVideoPrompt(page, prompt);
+
+    const budgets = geminiVideoPhaseBudgets(remaining(), { skipDownload });
     const video = await waitForGeminiVideo(page, budgets.generationSeconds);
     if (!video) {
       const link = await page.evaluate("window.location.href").catch(() => "");
       throw new CommandExecutionError(
-        `No video appeared within ${timeout}s; Gemini may still be generating at ${link || "https://gemini.google.com/app"}`,
+        `No video appeared within ${budgets.generationSeconds}s of generation (--timeout ${timeout}); Gemini may still be generating at ${link || "https://gemini.google.com/app"}`,
       );
     }
     if (skipDownload) {

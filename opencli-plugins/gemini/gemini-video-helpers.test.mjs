@@ -10,6 +10,7 @@ import {
   formatBytes,
   formatDuration,
   GEMINI_VIDEO_DEFAULT_OUTPUT,
+  geminiVideoBudgetError,
   geminiVideoPhaseBudgets,
   geminiVideoRatioLabel,
   geminiVideoStatusText,
@@ -143,6 +144,17 @@ test("classifyGeminiVideoState reads a page-level failure while the reply shows 
     }).status,
     "generating",
   );
+});
+
+test("geminiVideoBudgetError stops before sending when setup used the budget", () => {
+  // Default --timeout 600 after a 30 s setup: plenty left.
+  assert.equal(geminiVideoBudgetError(570), null);
+  // Minimum --timeout 240 after a quick setup still fits a generation.
+  assert.equal(geminiVideoBudgetError(225), null);
+  // A slow upload that ate the budget must not spend the daily allowance.
+  assert.match(geminiVideoBudgetError(110), /prompt was not sent/);
+  assert.match(geminiVideoBudgetError(-4), /left 0s/);
+  assert.equal(geminiVideoBudgetError(100, { skipDownload: true }), null);
 });
 
 test("geminiVideoPhaseBudgets splits the remaining --timeout budget", () => {
