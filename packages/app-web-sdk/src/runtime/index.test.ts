@@ -7,6 +7,7 @@ import {
   getPortalContainer,
   isPreview,
   navigateRome,
+  navigateToApp,
   setMountContainer,
   startChat,
   type RomeAppBootstrap,
@@ -122,6 +123,24 @@ describe("isPreview", () => {
   it("defaults to false before bootstrap is available", () => {
     rs.stubGlobal("window", {} as Window & typeof globalThis);
     expect(isPreview()).toBe(false);
+  });
+});
+
+describe("navigateToApp", () => {
+  it("emits the same path the URL decodes back to", () => {
+    const pushState = rs.fn();
+    const dispatchEvent = rs.fn();
+    rs.stubGlobal("window", {
+      __ROME_APP_BOOTSTRAP__: bootstrap,
+      history: { pushState },
+      dispatchEvent,
+    } as unknown as Window & typeof globalThis);
+
+    navigateToApp("notes/a%2520b");
+
+    expect(pushState).toHaveBeenCalledWith(null, "", "/apps/founder-scout/notes/a%2520b");
+    const navigation = dispatchEvent.mock.calls[0]?.[0] as CustomEvent<string>;
+    expect(navigation.detail).toBe("notes/a%20b");
   });
 });
 
