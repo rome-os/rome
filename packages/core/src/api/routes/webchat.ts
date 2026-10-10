@@ -213,10 +213,21 @@ async function persistRoutineDraftCard(
   if (!normalized.ok) return;
   // Render the bound action through its own preview() so the card shows
   // ground truth, not the agent's prose summary. Pure call; absent when the
-  // action implements no preview, in which case the card uses the prose.
-  const preview = await actionRegistry
-    .get(normalized.draft.actionName)
-    ?.preview?.(normalized.draft.args);
+  // action implements no preview, in which case the card uses the prose. The
+  // preview is optional, so a failing one never costs the card — an activated
+  // routine is already live and the card is how the guardian reverses it.
+  let preview: import("@rome-os/app-runtime").PreviewPayload | undefined;
+  try {
+    preview = await actionRegistry
+      .get(normalized.draft.actionName)
+      ?.preview?.(normalized.draft.args);
+  } catch (err) {
+    log.warn("routine card preview failed; showing the card without it", {
+      sessionId,
+      toolUseId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   const part = {
     type: "routine_draft_card" as const,
     toolUseId,

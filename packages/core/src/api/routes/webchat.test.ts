@@ -3138,6 +3138,36 @@ describe("Webchat API", () => {
         expect(new Set(keys).size).toBe(2);
       });
 
+      // The preview is optional; a throwing one must not cost an activated
+      // routine its card (or abort the turn).
+      it("writes the card without a preview when the action's preview throws", async () => {
+        deps.actionRegistry.register({
+          config: {
+            name: "preview_boom",
+            type: "system",
+            description: "Throws from preview",
+            complexity: "simple",
+            speed: "fast",
+            reliability: "high",
+            sideEffects: "read-only",
+          },
+          inputSchema: { type: "object", properties: {} },
+          execute: async () => ({ status: "ok", data: {} }),
+          preview: () => {
+            throw new Error("preview exploded");
+          },
+        });
+        const cards = await runTurn(
+          proposeEvents(
+            { ...routineInput, actionName: "preview_boom", args: {}, activate: true },
+            "Routine is on.",
+          ),
+        );
+        expect(cards).toHaveLength(1);
+        expect(cards[0].routineKey).toMatch(/^chat-routine:[^:]+:tu-routine$/);
+        expect((cards[0].draft as { preview?: unknown }).preview).toBeUndefined();
+      });
+
       it("writes no card for an error result", async () => {
         const events = async function* () {
           yield {

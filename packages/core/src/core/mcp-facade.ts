@@ -816,7 +816,8 @@ async function activateRoutineDraft(
   }
   const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
   // The key is this call's own, so "already exists" means its routine was saved
-  // (e.g. the card's Turn it on won a race after a stopped turn).
+  // (e.g. the card's Turn it on won a race after a stopped turn). The wording is
+  // pinned by create_routine's duplicate-key test.
   if (r.status === "error" && typeof r.error === "string" && /already exists/.test(r.error)) {
     return uncertain(r.error);
   }
@@ -828,7 +829,7 @@ async function activateRoutineDraft(
     );
   }
   return text(
-    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from its card or the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
   );
 }
 
