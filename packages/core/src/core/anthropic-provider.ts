@@ -509,6 +509,7 @@ export class AnthropicProvider implements ModelProvider {
       executeSubagent,
       executeSubmitOutput,
       executeDefer,
+      routineActivation,
     } = params;
     const outputValidator = params.outputSchema
       ? compileOutputSchema(params.outputSchema)
@@ -528,6 +529,7 @@ export class AnthropicProvider implements ModelProvider {
       supportsInteractiveSurface: params.supportsInteractiveSurface,
       interactiveSurfaceDetached: params.interactiveSurfaceDetached,
       executeDefer,
+      routineActivation,
     });
 
     const queryContext = await this.buildQueryContext();

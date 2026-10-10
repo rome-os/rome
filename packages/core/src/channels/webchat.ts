@@ -4,6 +4,7 @@ import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repos
 import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
+import { withoutHostOnlyParts } from "./host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
 
@@ -72,9 +73,14 @@ export class WebChatAdapter {
    *  parts or attachments writes nothing, and its receipt has no `messageId`. */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     const threadId: string = conversationId;
+    // Only the host authors routine cards (see host-only-parts.ts).
+    const given = withoutHostOnlyParts(message.parts ?? []);
+    if (message.parts && given.length < message.parts.length) {
+      log.warn("dropped routine_draft_card parts from a sent message", { threadId });
+    }
     const parts =
-      message.parts && message.parts.length > 0
-        ? message.parts
+      given.length > 0
+        ? given
         : message.text
           ? [{ type: "text" as const, content: message.text }]
           : [];
