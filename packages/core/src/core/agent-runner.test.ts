@@ -308,6 +308,41 @@ describe("AgentRunner", () => {
     );
   });
 
+  it.each([
+    ["saves", true, ["trace"]],
+    ["leaves", undefined, []],
+  ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-trace", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-trace",
+        prompt: "continue",
+        threadContext: { channel: "webchat", threadId: "chat-trace", romeSessionId: "chat-trace" },
+        persistTrace,
+        persistTranscript: false,
+      }),
+    );
+
+    const messages = await webchatRepo.getMessages("chat-trace");
+    expect(messages.map((message) => message.role)).toEqual(roles);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {

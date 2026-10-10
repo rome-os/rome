@@ -86,15 +86,8 @@ export class WebChatAdapter {
 
     if (parts.length === 0) return { conversationId };
 
-    const content = JSON.stringify(parts);
     const messageId = uuid();
-    await this.webchatRepo.addMessage(
-      messageId,
-      threadId,
-      "assistant",
-      content,
-      message.turnId ?? null,
-    );
+    await this.webchatRepo.addSentMessage(messageId, threadId, parts, message.turnId ?? null);
     log.info("webchat message persisted", { threadId });
     return { conversationId, messageId };
   }
