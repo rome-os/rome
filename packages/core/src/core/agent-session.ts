@@ -157,6 +157,7 @@ import type {
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { evaluateProviderSessionReset } from "../conversation-settings/reset-policy.js";
+import { forkSessionKey, LARGE_MODEL_MARKER, WEBCHAT_KEY_PREFIX } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -821,8 +822,8 @@ type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 function resolveSelectionFromChannelThreadKey(
   channelThreadKey: string,
 ): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
-  const marker = ":large-model:";
+  if (!channelThreadKey.startsWith(WEBCHAT_KEY_PREFIX)) return undefined;
+  const marker = LARGE_MODEL_MARKER;
   const markerIndex = channelThreadKey.lastIndexOf(marker);
   if (markerIndex < 0) return undefined;
   return (
@@ -1035,7 +1036,7 @@ async function openSession(
   // this is false, an action that returns `renderComponent` falls back to relaying
   // its `promptText` as prose; see the executeAction shim below.
   const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+    key.channelThreadKey.startsWith(WEBCHAT_KEY_PREFIX) && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -1613,7 +1614,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: `${key.channelThreadKey}#fork:${fork.forkSessionId}`,
+      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
       captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
