@@ -37,10 +37,7 @@ export function BriefsPanel({
             </Label>
           </div>
           <Button onClick={() => void onRunTest(deliver)} disabled={running}>
-            <PlayCircle
-              data-icon="inline-start"
-              className={running ? "animate-pulse" : undefined}
-            />
+            <PlayCircle className={running ? "animate-pulse" : undefined} />
             {running ? "Preparing…" : "Run test brief"}
           </Button>
         </div>

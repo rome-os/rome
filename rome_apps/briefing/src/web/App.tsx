@@ -187,8 +187,7 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
           <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Briefing</h1>
         </div>
         <Button variant="ghost" size="sm" onClick={() => void refresh()} disabled={refreshing}>
-          <RefreshCw data-icon="inline-start" className={refreshing ? "animate-spin" : undefined} />{" "}
-          Refresh
+          <RefreshCw className={refreshing ? "animate-spin" : undefined} /> Refresh
         </Button>
       </header>
       <p className="mt-1 text-sm text-muted-foreground">

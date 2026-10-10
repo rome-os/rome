@@ -52,7 +52,7 @@ export function ScoutsPanel({
         </div>
         {!adding && (
           <Button size="sm" onClick={() => setAdding(true)}>
-            <Plus data-icon="inline-start" /> Add scout
+            <Plus /> Add scout
           </Button>
         )}
       </div>

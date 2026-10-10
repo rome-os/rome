@@ -510,7 +510,7 @@ function ConnectedCard({
         ) : needs ? (
           <div className="flex gap-2">
             <Button variant="default" className="flex-1" onClick={onReconnect} disabled={busy}>
-              <LogIn data-icon="inline-start" />
+              <LogIn />
               {busy ? "Opening…" : "Sign in again"}
             </Button>
             <Button
@@ -519,7 +519,7 @@ function ConnectedCard({
               onClick={() => setConfirming(true)}
               disabled={busy}
             >
-              <Unplug data-icon="inline-start" />
+              <Unplug />
               Disconnect
             </Button>
           </div>
@@ -530,7 +530,7 @@ function ConnectedCard({
             onClick={() => setConfirming(true)}
             disabled={busy}
           >
-            <Unplug data-icon="inline-start" />
+            <Unplug />
             Disconnect
           </Button>
         )}
@@ -560,12 +560,12 @@ function AvailableCard({
       <div className="mt-auto pt-1">
         {locked ? (
           <Button variant="secondary" className="w-full" disabled>
-            <Lock data-icon="inline-start" />
+            <Lock />
             Sign in to connect
           </Button>
         ) : (
           <Button variant="secondary" className="w-full" onClick={onConnect} disabled={busy}>
-            <Plus data-icon="inline-start" />
+            <Plus />
             {busy ? "Opening…" : "Connect"}
           </Button>
         )}
@@ -608,7 +608,7 @@ function ManagedCard({ entry, connected }: { entry: CatalogEntry; connected: boo
       </div>
       <div className="mt-auto pt-1">
         <Button variant="secondary" className="w-full" onClick={openConnectionSettings}>
-          <ExternalLink data-icon="inline-start" />
+          <ExternalLink />
           Manage in Settings
         </Button>
       </div>
@@ -673,7 +673,7 @@ function SignInGate({
           </div>
         ) : (
           <Button onClick={start} disabled={phase !== "idle"}>
-            <LogIn data-icon="inline-start" />
+            <LogIn />
             {phase === "starting" ? "Starting…" : requiresSignIn ? "Sign in again" : "Sign in"}
           </Button>
         )}
