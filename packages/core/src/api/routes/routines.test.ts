@@ -221,14 +221,6 @@ describe("Routines API", () => {
       }),
     });
     expect(accepted.status).toBe(201);
-    const { id } = (await accepted.json()) as { id: string };
-
-    const invalidPatch = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args: { channel: "bogus", op: "uninstall" } }),
-    });
-    expect(invalidPatch.status).toBe(400);
   });
 
   it("rejects an actionName that is not a registered action and names the remedy", async () => {
@@ -283,64 +275,6 @@ describe("Routines API", () => {
     expect(accepted.status).toBe(201);
   });
 
-  it("rejects re-binding via PATCH to an unregistered action (no guard bypass)", async () => {
-    const registry = new ActionRegistryImpl();
-    registry.register({
-      config: {
-        name: "summon",
-        type: "system",
-        description: "stub",
-        complexity: "simple",
-        speed: "fast",
-        reliability: "high",
-        sideEffects: "read-only",
-      },
-      async execute() {
-        return { status: "ok" };
-      },
-    });
-    const baseDeps = await buildTestDeps(testDb.db);
-    const guardedApp = new Hono().route(
-      "/",
-      routinesRoutes({ ...baseDeps, routineEngine, actionRegistry: registry }),
-    );
-    const trigger: Trigger = {
-      type: "schedule",
-      tzid: "UTC",
-      tzMode: "fixed",
-      localTime: "07:00",
-      rrule: "FREQ=DAILY",
-    };
-
-    // Create bound to a registered action.
-    const created = await guardedApp.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "rebind", trigger, actionName: "summon" }),
-    });
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
-
-    // PATCHing actionName to an unregistered action is rejected, not silently accepted.
-    const toGhost = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionName: "ghost_run" }),
-    });
-    expect(toGhost.status).toBe(400);
-    expect(((await toGhost.json()) as { error: string }).error).toContain(
-      "not a registered action",
-    );
-
-    // PATCHing other fields (no actionName) still works.
-    const renamed = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "rebind-renamed" }),
-    });
-    expect(renamed.status).toBe(200);
-  });
-
   it("rejects creation when args contains reserved key __triggerPayload", async () => {
     const res = await app.request("/routines", {
       method: "POST",
@@ -355,26 +289,6 @@ describe("Routines API", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("__triggerPayload");
-  });
-
-  it("rejects PATCH when args contains reserved key __triggerPayload", async () => {
-    const create = await app.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "patch-collision",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "12:00" },
-        actionName: "anything",
-      }),
-    });
-    const { id } = (await create.json()) as { id: string };
-
-    const res = await app.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args: { __triggerPayload: "nope" } }),
-    });
-    expect(res.status).toBe(400);
   });
 
   it("rejects args that is not a plain object (fan-out semantics not supported)", async () => {
@@ -631,6 +545,27 @@ describe("Routines API", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects patch of fields other than name and enabled", async () => {
+    const create = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
+        actionName: "some_action",
+      }),
+    });
+    const created = (await create.json()) as { id: string };
+
+    const res = await app.request(`/routines/${created.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed", actionName: "other_action" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("actionName");
   });
 
   it("returns 404 when patching unknown id", async () => {
@@ -982,35 +917,6 @@ describe("Routines fire path", () => {
       body: JSON.stringify({ enabled: true }),
     });
     expect(harness.manualProvider.isActive(id)).toBe(true);
-  });
-
-  it("PATCH trigger re-activates the routine with the new trigger spec", async () => {
-    registerStubAction(harness.actionRegistry, "noop_action");
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "reschedule",
-      trigger: scheduleTrigger,
-      actionName: "noop_action",
-    });
-    expect(harness.manualProvider.routineSnapshot(id)?.trigger.type).toBe("schedule");
-    expect(harness.manualProvider.activateCount(id)).toBe(1);
-
-    const newTrigger: Trigger = {
-      type: "schedule",
-      tzid: "Asia/Shanghai",
-      tzMode: "fixed",
-      localTime: "23:00",
-    };
-    await harness.app.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trigger: newTrigger }),
-    });
-    const snapshot = harness.manualProvider.routineSnapshot(id);
-    expect(snapshot?.trigger).toEqual(newTrigger);
-    // The engine must deactivate-then-reactivate, not stack — entries.size
-    // stays 1 even though activate has been called twice.
-    expect(harness.manualProvider.activateCount(id)).toBe(2);
-    expect(harness.manualProvider.activeIds()).toEqual([id]);
   });
 
   it("PATCH name-only still re-activates (engine deactivates+reactivates on any PATCH)", async () => {
