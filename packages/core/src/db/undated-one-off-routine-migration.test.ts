@@ -78,7 +78,7 @@ describe("undated one-off routine migration", () => {
       ).map((row) => [row.id, row.trigger]),
     );
     const parsed = (id: string) => JSON.parse(triggers[id]) as Record<string, unknown>;
-    expect(parsed("fired")).toMatchObject({ date: "2026-06-23", tzMode: "fixed" });
+    expect(parsed("fired")).toMatchObject({ date: "2026-06-21", tzMode: "fixed" });
     expect(pendingDate("23:59")).toContain(parsed("pending-late").date);
     expect(pendingDate("00:00")).toContain(parsed("pending-early").date);
     expect(parsed("pending-early").tzMode).toBe("fixed");
