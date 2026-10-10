@@ -42,7 +42,15 @@ function scrollRailByWheel(rail: HTMLElement, event: WheelEvent): boolean {
   return true;
 }
 
-export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps) {
+/**
+ * Horizontal scrolling for a row whose scrollbar is hidden. Spread `props` onto
+ * the scrolling element. A vertical wheel scrolls the row, and `style` carries
+ * `--scroll-fade-mask`, which fades whichever edge still has content past it.
+ * The fade tracks the element's size and that of its direct children, so a
+ * child that changes width updates it. A child added or removed does not until
+ * `contentKey` changes.
+ */
+export function useHorizontalScrollRail(contentKey?: unknown) {
   const railRef = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
   const maskImage =
@@ -67,6 +75,7 @@ export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps
     );
   }, []);
 
+  // `contentKey` is not read here. It re-runs the effect so added children get observed.
   useEffect(() => {
     const rail = railRef.current;
     if (!rail) return;
@@ -74,13 +83,14 @@ export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps
     const resizeObserver =
       typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateEdges);
     resizeObserver?.observe(rail);
+    for (const child of rail.children) resizeObserver?.observe(child);
     window.addEventListener("resize", updateEdges);
     return () => {
       window.cancelAnimationFrame(frame);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateEdges);
     };
-  }, [children, updateEdges]);
+  }, [contentKey, updateEdges]);
 
   useEffect(() => {
     const rail = railRef.current;
@@ -94,17 +104,28 @@ export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps
     return () => rail.removeEventListener("wheel", onWheel);
   }, []);
 
+  return {
+    edges,
+    props: {
+      ref: railRef,
+      onScroll: updateEdges,
+      "data-scroll-left": edges.left,
+      "data-scroll-right": edges.right,
+      style: { "--scroll-fade-mask": maskImage } as CSSProperties,
+    },
+  };
+}
+
+export function HorizontalScrollRail({ children, id }: HorizontalScrollRailProps) {
+  const rail = useHorizontalScrollRail(children);
+
   return (
     <div className="relative overflow-visible">
       <div
-        ref={railRef}
-        onScroll={updateEdges}
+        {...rail.props}
         className="-mx-2 flex gap-3 overflow-x-auto overscroll-x-contain px-2 py-1 pb-3 [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         data-horizontal-scroll={id}
-        data-scroll-left={edges.left}
-        data-scroll-right={edges.right}
         role="list"
-        style={{ "--scroll-fade-mask": maskImage } as CSSProperties}
       >
         {children}
       </div>

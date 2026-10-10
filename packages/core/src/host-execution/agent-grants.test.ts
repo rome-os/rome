@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { GLOBALLY_GRANTED_ACTIONS, resolveGlobalActionNames } from "../actions/global-actions.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { ActionConfigSchema } from "../apps/packaging/artifact-config.js";
@@ -38,8 +37,7 @@ async function agentManifests(): Promise<Array<{ id: string; actions: string[] }
 
 describe("host root action grants", () => {
   it("grants the root actions to the main agent only", async () => {
-    // Production grants: a global grant would reach every agent.
-    const registry = new ActionRegistryImpl(resolveGlobalActionNames(GLOBALLY_GRANTED_ACTIONS), {
+    const registry = new ActionRegistryImpl({
       legacyBindings: createEmptyLegacyArtifactBindings(),
     });
     for (const dir of HOST_ACTIONS) {

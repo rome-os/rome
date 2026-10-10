@@ -131,6 +131,15 @@ describe("codexStop", () => {
     expect(codexStop("inProgress")).toEqual({ reason: "other", raw: "inProgress" });
     expect(codexStop(undefined)).toEqual({ reason: "other" });
   });
+
+  it("reports a failed turn as an error whatever its status", () => {
+    expect(codexStop("failed", true)).toEqual({ reason: "error", raw: "failed" });
+    expect(codexStop("completed", true)).toEqual({ reason: "error", raw: "completed" });
+    expect(codexStop(undefined, true)).toEqual({ reason: "error" });
+    const interrupted = codexStop("interrupted", true);
+    expect(interrupted).toEqual({ reason: "error", raw: "interrupted" });
+    expect(isInterruptedAccounting(accounting({ stop: interrupted }))).toBe(false);
+  });
 });
 
 describe("stopFromLegacyReason", () => {

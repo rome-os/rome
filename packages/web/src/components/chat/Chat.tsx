@@ -1,12 +1,4 @@
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
@@ -55,7 +47,12 @@ import {
 import { ShareBar } from "@/components/chat/ShareBar";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
-import type { TraceSegment, TraceSnapshot, TraceSummary } from "@rome/api-types/trace-segments";
+import type {
+  TraceSegment,
+  TraceSnapshot,
+  TraceSubagentSummary,
+  TraceSummary,
+} from "@rome/api-types/trace-segments";
 import { useSmoothText } from "@/hooks/use-smooth-text";
 import { useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
@@ -71,7 +68,6 @@ import {
   findLastSubmission,
   hasPendingApprovalConfirmation,
 } from "@/components/chat/MessageList";
-import type { DelegatedSubagentNode } from "@/components/chat/DelegatedSubagentGroup";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -84,9 +80,7 @@ import type {
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
-  ChatEntry,
 } from "@/lib/chat-types";
-import { SCROLL_BOTTOM_THRESHOLD_PX } from "@/lib/chat-constants";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import {
@@ -240,11 +234,6 @@ function isModelResolutionErrorCode(code: DoneEventData["code"]): boolean {
   );
 }
 
-export interface ChatHandle {
-  focus: () => void;
-  insertText: (text: string) => void;
-}
-
 export interface SessionMessage {
   sessionId: string;
   turnId: string | null;
@@ -260,10 +249,13 @@ export interface ChatProps {
   onSessionMessage?: (message: SessionMessage) => void;
 }
 
-export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
-  { sessionId, mainAgentDisplayName, onSessionsChanged, onSessionNotFound, onSessionMessage },
-  ref,
-) {
+export function Chat({
+  sessionId,
+  mainAgentDisplayName,
+  onSessionsChanged,
+  onSessionNotFound,
+  onSessionMessage,
+}: ChatProps) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   // `null` outside the workspace shell; sends simply skip injection.
@@ -372,9 +364,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     scrollRef: stickScrollRef,
     isAtBottom,
     scrollToBottom,
-  } = useStickToBottom({
-    thresholdPx: SCROLL_BOTTOM_THRESHOLD_PX,
-  });
+  } = useStickToBottom();
 
   // The timeline rail measures against these two nodes, so they are held as
   // state rather than refs: its effect has to re-run once they mount. Both
@@ -396,15 +386,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       stickContentRef(node);
     },
     [stickContentRef],
-  );
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      focus: () => composerRef.current?.focus(),
-      insertText: (text: string) => composerRef.current?.insertText(text),
-    }),
-    [],
   );
 
   // One <Chat> owns the main session but displays & talks to the child sessions
@@ -570,6 +551,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [onSessionsChanged]);
   useEffect(() => {
     onSessionNotFoundRef.current = onSessionNotFound;
+    return () => {
+      // A late 404 from a chat we left must not redirect the current page.
+      onSessionNotFoundRef.current = undefined;
+    };
   }, [onSessionNotFound]);
   useEffect(() => {
     onSessionMessageRef.current = onSessionMessage;
@@ -635,7 +620,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat.
   const handleDeleteSession = useCallback(async () => {
-    if (!mainSessionId) return;
     setDeleteConfirmOpen(false);
     try {
       await deleteSession(mainSessionId);
@@ -650,7 +634,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   // not navigate away — the transcript stays open, read-only. The override flips
   // the composer immediately; the sidebar reconciles via the changed event.
   const handleArchive = useCallback(async () => {
-    if (!mainSessionId) return;
     setArchivedOverride(true);
     try {
       // Archive mutation PATCHes and broadcasts the sessions-changed event.
@@ -661,7 +644,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, setArchived]);
 
   const handleUnarchive = useCallback(async () => {
-    if (!mainSessionId) return;
     setArchivedOverride(false);
     try {
       await setArchived(mainSessionId, false);
@@ -671,7 +653,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
   }, [mainSessionId, setArchived]);
 
   const handlePin = useCallback(async () => {
-    if (!mainSessionId) return;
     try {
       await setPinned(mainSessionId, !pinnedAt);
     } catch {
@@ -1151,6 +1132,10 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       sendingSessionId: string,
       postTurn: () => Promise<PostTurnResult>,
       optimisticUserContent: string,
+      // The client-minted input id, when the row may show before the POST
+      // settles. The server keeps it as the message id, so the accepted row
+      // replaces this one in place instead of mounting a second bubble.
+      immediateInputId?: string,
     ): Promise<void> => {
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
@@ -1158,6 +1143,45 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       scrollToBottom("auto");
       const wasLocallyStreaming = locallyStreamingSessionIdsRef.current.has(sendingSessionId);
       locallyStreamingSessionIdsRef.current.add(sendingSessionId);
+      const sentAt = new Date().toISOString();
+
+      const putUserMessage = (message: ChatMessage, replacesId?: string) => {
+        const localIds =
+          localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
+        localIds.add(message.id);
+        localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
+        setMessages((prev) => {
+          const next = new Map(prev);
+          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
+          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          return next;
+        });
+      };
+      const dropImmediateMessage = () => {
+        if (!immediateInputId) return;
+        localOptimisticMessageIdsRef.current.get(sendingSessionId)?.delete(immediateInputId);
+        setMessages((prev) => {
+          const existing = prev.get(sendingSessionId);
+          if (!existing?.some((m) => m.id === immediateInputId)) return prev;
+          const next = new Map(prev);
+          next.set(
+            sendingSessionId,
+            existing.filter((m) => m.id !== immediateInputId),
+          );
+          return next;
+        });
+      };
+      if (immediateInputId) {
+        putUserMessage({
+          id: immediateInputId,
+          sessionId: sendingSessionId,
+          turnId: null,
+          inputState: "submitted",
+          role: "user",
+          content: optimisticUserContent,
+          createdAt: sentAt,
+        });
+      }
 
       // The POST result is the acceptance boundary. Whether the composer clears
       // or restores the user's input hinges on this result alone — never on the
@@ -1168,6 +1192,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       // dropped stream never does.
       const result = await postTurn().catch((err: unknown) => {
         // Transport failure posting the turn — a genuine failed submit.
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         // A cancelled attachment upload is a deliberate act, not a failure:
@@ -1177,6 +1202,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
         throw err;
       });
       if (!result.ok) {
+        dropImmediateMessage();
         if (!wasLocallyStreaming) locallyStreamingSessionIdsRef.current.delete(sendingSessionId);
         setStreamReconnectRevision((revision) => revision + 1);
         const message =
@@ -1198,24 +1224,15 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 
       const userMsg: ChatMessage = {
-        id: createResp.inputId ?? crypto.randomUUID(),
+        id: createResp.inputId ?? immediateInputId ?? crypto.randomUUID(),
         sessionId: sendingSessionId,
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
         content: optimisticUserContent,
-        createdAt: new Date().toISOString(),
+        createdAt: sentAt,
       };
-      const localIds =
-        localOptimisticMessageIdsRef.current.get(sendingSessionId) ?? new Set<string>();
-      localIds.add(userMsg.id);
-      localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
-      setMessages((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(sendingSessionId) ?? [];
-        next.set(sendingSessionId, mergeChatMessage(existing, userMsg));
-        return next;
-      });
+      putUserMessage(userMsg, immediateInputId);
 
       // Appending input does not own a second stream or replace the live tail.
       // Late follow-up turns are discovered by the existing reattach loop.
@@ -1311,6 +1328,9 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           });
         },
         optimisticContent,
+        // A text-only send shows its bubble at once. An upload keeps its text
+        // in the composer until the server accepts it, so its bubble waits too.
+        snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
       );
     },
     [runTurnLifecycle, workspaceContextRegistry, t],
@@ -1623,7 +1643,7 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
     setTraceDrawerTarget(target);
   }, [buildLiveTraceTarget]);
 
-  const openSubagentTraceDrawer = useCallback((node: DelegatedSubagentNode) => {
+  const openSubagentTraceDrawer = useCallback((node: TraceSubagentSummary) => {
     setTraceDrawerTarget({
       kind: "turn",
       sessionId: node.sessionId,
@@ -1805,7 +1825,6 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
                 selection={
                   shareMode
                     ? {
-                        active: true,
                         selectedTurns: selectedShareTurns,
                         selectableSessionId: mainSessionId,
                         onToggleTurn: toggleShareTurn,
@@ -1936,13 +1955,13 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
           onClose={closeTraceDrawer}
           hasApps={isAppsPanelOpen}
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: refreshActiveSession,
               compact: true,
               live,
@@ -1961,4 +1980,4 @@ export const Chat = forwardRef<ChatHandle, ChatProps>(function ChatView(
       </div>
     </TooltipProvider>
   );
-});
+}

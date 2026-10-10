@@ -1,9 +1,5 @@
-import type {
-  TraceErrorEvent,
-  RomeSessionRefDto,
-  TraceAccounting,
-  TraceSummary,
-} from "@rome/api-types/trace-segments";
+import type { TranscriptPart } from "@rome/api-types/chat";
+import type { TraceErrorEvent, TraceEventDto, TraceSummary } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
   RomeSessionExplorerRecord,
@@ -62,8 +58,7 @@ export interface ChatSearchMessageMatch {
   };
 }
 
-export type RomeSessionRecord = RomeSessionExplorerRecord;
-export type { RomeSessionDetail, RomeSessionsPageResult };
+export type { RomeSessionDetail, RomeSessionExplorerRecord, RomeSessionsPageResult };
 
 export interface AgentMention {
   appId: string;
@@ -102,150 +97,16 @@ export interface SkillSummary {
   iconUrl: string | null;
 }
 
-export type ApprovalCardStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "executing"
-  | "executed"
-  | "failed";
+export type {
+  ApprovalCardStatus,
+  PreviewPayload,
+  RoutineDraftSpec,
+  TranscriptPart,
+} from "@rome/api-types/chat";
 
-export type ApprovalPreviewPayload =
-  | {
-      kind: "sensitive_message";
-      channel: string;
-      threadId: string;
-      text: string;
-      reason?: string;
-    }
-  | {
-      kind: "generic";
-      title: string;
-      summary: string;
-      fields?: { label: string; value: string }[];
-    };
-
-export interface ChatEntry {
-  type: string;
-  content?: string;
-  /** On `text` parts/blocks: role of this text within its agent turn.
-   *  `commentary` = in-turn narration (rendered muted), `final`/absent = the
-   *  turn's answer. */
-  turnPhase?: "commentary" | "final";
-  /** Zero-based WebChat assistant text-block identity within the agent turn. */
-  blockIx?: number;
-  error?: string | { message: string; code?: string };
-  code?: ChatErrorCode;
-  provider?: ChatErrorProvider;
-  reason?: ChatErrorReason;
-  tool?: string;
-  id?: string;
-  toolUseId?: string;
-  input?: unknown;
-  output?: unknown;
-  /** On `tool_result` blocks: whether the call failed. Absent on older results
-   *  and from producers that cannot tell. */
-  isError?: boolean;
-  turnId?: string;
-  audioUrl?: string;
-  audioMimeType?: string;
-  audioDurationMs?: number;
-  startedAt?: string;
-  endedAt?: string;
-  agent?: string;
-  sessionId?: string;
-  romeSession?: RomeSessionRefDto;
-  systemPrompt?: string;
-  userPrompt?: string;
-  accounting?: TraceAccounting;
-  approvalId?: string;
-  actionName?: string;
-  preview?: ApprovalPreviewPayload;
-  status?: ApprovalCardStatus | "running" | "completed" | "cancelled";
-  /** Present on routine_draft_card parts. */
-  draft?: RoutineDraftSpec;
-  /** Present on pending_interaction / handoff parts — the app that owns the
-   * component or surface. */
-  appId?: string;
-  /** Present on pending_interaction parts — the inline component to mount. */
-  render?: InlineInteractionRender;
-  /** Present on handoff parts — the agent holding the floor in the child
-   * session. */
-  agentName?: string;
-  /** Present on handoff parts — the spawned webchat session the design
-   * conversation lives in; clicking the marker opens it. */
-  childSessionId?: string;
-  /** On handoff parts: seed context (summary, agentLabel) for the design
-   * conversation. On submission_card parts: the validated payload the
-   * specialist submitted for guardian approval. */
-  payload?: Record<string, unknown>;
-}
-
-/** The inline component a `pending_interaction` part mounts in the
- * transcript — mirrors the server part. */
-export interface InlineInteractionRender {
-  kind: "inline";
-  componentId: string;
-  props?: Record<string, unknown>;
-  /** When true the component is a host built-in (rendered by rome-web), not
-   * an app component to mount in a shadow root. `appId` is the sentinel
-   * "core" in that case. */
-  builtin?: boolean;
-}
-
-export interface RoutineEventFilterCondition {
-  field: string;
-  equals: string;
-}
-
-export interface RoutineEventBusTrigger {
-  type: "event-bus";
-  eventName: string;
-  filter?: RoutineEventFilterCondition[];
-}
-
-export interface RoutineScheduleTrigger {
-  type: "schedule";
-  tzid: string;
-  localTime: string;
-  date?: string;
-  rrule?: string;
-}
-
-/** A routine with no automatic trigger — it runs only from the Routines page's
- * "Run now" button. Carries no config. */
-export interface RoutineManualTrigger {
-  type: "manual";
-}
-
-/** Mirrors `@rome-os/app-runtime`'s PreviewPayload — an action's own
- * ground-truth render of a bound call, used to build approval and routine cards. */
-export type PreviewPayload =
-  | { kind: "sensitive_message"; channel: string; threadId: string; text: string; reason?: string }
-  | {
-      kind: "generic";
-      title: string;
-      summary: string;
-      fields?: { label: string; value: string }[];
-    };
-
-/** Mirrors `@rome-os/app-runtime`'s RoutineDraftSpec — the payload snapshotted
- * from a `propose_routine` tool call and rendered by the draft card. The routine
- * fires on a matching event, on a schedule, or only when run by hand (manual). */
-export interface RoutineDraftSpec {
-  sentence: string;
-  name: string;
-  watchLabel: string;
-  filterSummary?: string;
-  thenSummary: string;
-  trigger: RoutineScheduleTrigger | RoutineEventBusTrigger | RoutineManualTrigger;
-  actionName: string;
-  args: Record<string, unknown>;
-  /** Authoritative render of the bound action, produced by the action's own
-   * preview(). Absent when the action implements none; the card then falls back
-   * to `thenSummary`. */
-  preview?: PreviewPayload;
-}
+/** One block a chat surface renders: a part of a stored message's content, or
+ * a trace event. Switch on `type` to narrow it. */
+export type ChatEntry = TranscriptPart | TraceEventDto;
 
 export interface ApprovalRecord {
   id: string;

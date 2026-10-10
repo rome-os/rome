@@ -7,7 +7,6 @@ import type {
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
-import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredConversationRow = typeof romeSessions.$inferSelect;
@@ -73,8 +72,8 @@ export class ConversationSettingsRepository {
       settings: StoredConversationSettings | null;
       agentName: string | null | undefined;
     },
-  ): StoredConversationRow {
-    return this.db.transaction((tx) => {
+  ): void {
+    this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent
         ? (rowByAddress(tx, descriptor.service, descriptor.parent.conversationId)?.id ?? null)
@@ -122,21 +121,6 @@ export class ConversationSettingsRepository {
         })
         .where(eq(romeSessions.id, current.id))
         .run();
-
-      const saved = rowByAddress(tx, descriptor.service, descriptor.ref.conversationId);
-      if (!saved) throw new Error(`Conversation ${current.id} disappeared during settings update`);
-      return saved;
     });
   }
-}
-
-export function storedSettings(row: StoredConversationRow): StoredConversationSettings | null {
-  if (!row.channelSettings || typeof row.channelSettings !== "object") return null;
-  const value = row.channelSettings as Partial<StoredConversationSettings>;
-  if (value.schemaVersion !== 1 || !value.overrides || typeof value.updatedAt !== "string") {
-    throw new Error(`Invalid channel_settings payload on conversation "${row.id}"`);
-  }
-  const reset = value.overrides.session?.reset;
-  if (reset !== undefined) assertProviderSessionResetPolicy(reset);
-  return value as StoredConversationSettings;
 }

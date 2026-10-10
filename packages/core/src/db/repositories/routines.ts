@@ -11,18 +11,6 @@ import {
 
 type RoutineRow = typeof routines.$inferSelect;
 
-/** Normalize a stored trigger to the current contract. `tzMode` is required on
- * schedule triggers and existing rows were backfilled, but a row that
- * predates/escapes the backfill must never surface as `tzMode: undefined` — the
- * read contract mirrors the scheduler's "missing => floating" backstop, so every
- * read path (GET /routines, app SDK, etc.) sees a contract-compliant trigger. */
-function normalizeTrigger(trigger: Trigger): Trigger {
-  if (trigger.type === "schedule" && trigger.tzMode === undefined) {
-    return { ...trigger, tzMode: "floating" };
-  }
-  return trigger;
-}
-
 export function toRoutine(row: RoutineRow): Routine {
   return {
     id: row.id,
@@ -30,7 +18,7 @@ export function toRoutine(row: RoutineRow): Routine {
     key: row.key ?? undefined,
     managedBy: row.managedBy ?? undefined,
     enabled: row.enabled ?? true,
-    trigger: normalizeTrigger(row.trigger as Trigger),
+    trigger: row.trigger as Trigger,
     actionName: row.actionName,
     args: (row.args ?? {}) as Record<string, unknown>,
     createdAt: row.createdAt,
@@ -189,9 +177,5 @@ export class RoutinesRepository {
 
   async updateNextRun(id: string, nextRunAt: Date | null) {
     await this.db.update(routines).set({ nextRunAt }).where(eq(routines.id, id));
-  }
-
-  async delete(id: string) {
-    await this.db.delete(routines).where(eq(routines.id, id));
   }
 }

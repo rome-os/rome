@@ -1,6 +1,8 @@
 import { forwardRef, useMemo, useRef, type Ref } from "react";
 import type { TFunction } from "i18next";
 import { Check, ChevronDown, FolderPlus, X } from "lucide-react";
+import { getProjectDisplayName } from "@/lib/chat-helpers";
+import type { ProjectCatalog } from "@/lib/chat-types";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,
@@ -17,19 +19,6 @@ import { cn } from "@/lib/utils";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@rome-os/ui/spinner";
-
-interface ProjectOption {
-  displayName?: string;
-  name: string;
-  path: string;
-  projectPath?: string;
-}
-
-interface ProjectCatalog {
-  rootPath: string;
-  defaultPath: string;
-  projects: ProjectOption[];
-}
 
 interface ProjectSelectorProps {
   disabled?: boolean;
@@ -53,11 +42,6 @@ interface ProjectSelectorProps {
   onToggleMenu: () => void;
   onPickProject: (name: string) => void;
   onCreateProject: () => void;
-}
-
-function getProjectDisplayName(name: string): string {
-  const segments = name.split("/").filter(Boolean);
-  return segments.at(-1) ?? name;
 }
 
 export const ProjectSelector = forwardRef(function ProjectSelector(

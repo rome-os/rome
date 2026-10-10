@@ -313,7 +313,8 @@ const totalsFor = (projects) => {
     project.cases.map((testCase) => ({ ...testCase, project: project.name })),
   );
   const passed = cases.filter((testCase) => testCase.status === "success").length;
-  return { cases, passed, failed: cases.length - passed, total: cases.length };
+  const notRun = cases.filter((testCase) => testCase.status === "not-run").length;
+  return { cases, passed, notRun, failed: cases.length - passed - notRun, total: cases.length };
 };
 
 const missingNativeReports = (projects) =>
@@ -371,6 +372,9 @@ export function renderMarkdown({
   producerResult = "success",
   caseInventoryIssues = [],
   publishedReportPath,
+  sourceRunId,
+  reportResult,
+  publicationResult,
 }) {
   const totals = totalsFor(projects);
   const incompleteProjects = projects.filter((project) => project.status !== "success");
@@ -404,13 +408,59 @@ export function renderMarkdown({
     "",
     `**${complete ? "✅ " : ""}${needsAttention} need attention · ${passedCases.length} passed**`,
     "",
+    `**Cases:** ${totals.total} total · ${totals.passed} passed · ${totals.failed} failed · ${totals.notRun} not run`,
+    "",
     `**Models:** ${models.length ? models.map(markdownCell).join(", ") : "not recorded"}`,
     "",
-    reportAvailable
+    reportAvailable && pagesUrl
       ? `**[Open the Midscene Test report](${reportUrl(pagesUrl, reportPath)})** · [Download the artifact](${runUrl}#artifacts)`
-      : `[Download the artifact](${runUrl}#artifacts) · Native Midscene Test report unavailable`,
+      : `[Download the artifact](${runUrl}#artifacts) · ${reportAvailable ? "Native Midscene Test report included" : "Native Midscene Test report unavailable"}`,
     "",
   ];
+
+  if (sourceRunId) {
+    const sourceUrl = new URL(sourceRunId, runUrl.replace(/\/$/, "")).href;
+    sections.push(
+      `Report source: [run ${sourceRunId}](${sourceUrl}). This run makes no new model calls. [Source-run artifacts](${sourceUrl}#artifacts).`,
+      "",
+    );
+  }
+  if (reportResult && reportResult !== "success") {
+    sections.push(
+      `Report aggregation: **${markdownCell(reportResult)}**. Results below use the available shard data. [Inspect the workflow run](${runUrl}).`,
+      "",
+    );
+  }
+  if (publicationResult && !pagesUrl) {
+    sections.push(
+      `Pages publication: **${markdownCell(publicationResult)}**. Web report links are unavailable. Download the available artifacts to inspect reports and screenshots.`,
+      "",
+    );
+  }
+  if (!pagesUrl) {
+    sections.push(
+      complete
+        ? `🎉 All ${passedCases.length} cases passed.`
+        : needsAttention
+          ? "⚠️ Tests or report generation need attention. See the job logs and artifacts for details."
+          : "No cases were reported.",
+      "",
+      "The published Summary shows case tables with clickable screenshots after Pages deployment succeeds. If publication is skipped or fails, use the artifact downloads above.",
+      "",
+    );
+    return sections.join("\n");
+  }
+  sections.push(
+    "### Shard results",
+    "",
+    "| Shard | Result | Total | Passed | Failed | Not run | Duration |",
+    "|:--|:--|--:|--:|--:|--:|--:|",
+    ...projects.map((project) => {
+      const counts = totalsFor([project]);
+      return `| ${markdownCell(project.name)} | ${markdownCell(project.status)} | ${counts.total} | ${counts.passed} | ${counts.failed} | ${counts.notRun} | ${formatDuration(project.durationMs)} |`;
+    }),
+    "",
+  );
 
   if (needsAttention) {
     sections.push(
@@ -479,6 +529,8 @@ export function renderMarkdown({
 }
 
 export async function buildSummary(options) {
+  const sourceRunId = options["source-run-id"];
+  if (sourceRunId && !/^\d+$/.test(sourceRunId)) throw new Error("Source run ID must be numeric");
   const reportsDirectory = path.resolve(options["reports-dir"]);
   const expectedProjects = (options["expected-projects"] ?? "")
     .split(",")
@@ -494,6 +546,9 @@ export async function buildSummary(options) {
     pagesUrl: options["pages-url"],
     runUrl: options["run-url"],
     producerResult: options["producer-result"],
+    sourceRunId,
+    reportResult: options["report-result"],
+    publicationResult: options["publication-result"],
     publishedReportPath: await access(
       path.join(reportsDirectory, "native-report", "index.html"),
     ).then(

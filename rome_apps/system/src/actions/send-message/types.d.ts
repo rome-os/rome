@@ -48,8 +48,6 @@ export type ChatChannel =
   | "agents";
 
 interface SendMessageBase {
-  /** Exact Connection that owns the opaque provider conversation. */
-  connectionId?: string;
   /** The message text to send (supports markdown). Optional when attachments are provided. */
   text?: string;
   /** Optional file attachments to send. */
@@ -81,8 +79,11 @@ export interface SendMessageChatInput extends SendMessageBase {
   channel: ChatChannel;
   /** The thread/chat ID to send the message to. Required unless `to: "guardian"` is used. */
   threadId?: string;
-  /** Recipient alias for chat channels. Currently only `"guardian"` is supported. */
-  to?: "guardian";
+  /**
+   * Recipient alias for chat channels: `"guardian"`, or on `agents`, from the main
+   * agent, an agent's name, which core resolves to the agent's id.
+   */
+  to?: string;
   /** The recipient user ID. Defaults to threadId if not provided. */
   channelUserId?: string;
   /** Optional message ID to reply to. */

@@ -6,6 +6,7 @@ import {
 } from "@rome/api-types/anthropic-compatible-providers";
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
+import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
 import type {
   AIToolStatus,
   AnthropicCompatibleConfiguredSummary,
@@ -74,6 +75,16 @@ const anthropicProviders: AnthropicCompatibleProviderSummary[] =
 // the Claude row, which would hide the subscription state seeded above. The
 // configured branch is one dialog away, and the PUT below makes it stick.
 let configuredAnthropic: AnthropicCompatibleConfiguredSummary | null = null;
+
+// The signup grant is US$10. Part of it is spent so the meter has something to
+// show.
+const romeCredits: RomeCreditsView = {
+  grantedMicros: "10000000",
+  balanceMicros: "7420000",
+  availableMicros: "7420000",
+  enabled: true,
+  models: ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-terra"],
+};
 
 // ── Access control ─────────────────────────────────────
 
@@ -301,6 +312,9 @@ export const settingsHandlers = [
   ),
   http.get("/api/ai-tools/status", () =>
     HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
+  ),
+  http.get("/api/ai-tools/rome-credits", () =>
+    HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),
   ),
   http.get("/api/ai-tools/anthropic-compatible-providers", () =>
     HttpResponse.json({ providers: anthropicProviders, configured: configuredAnthropic }),

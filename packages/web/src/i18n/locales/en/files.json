@@ -155,6 +155,7 @@
     "moveTo": "Move to…",
     "delete": "Delete",
     "copyPath": "Copy path",
+    "copyPaths": "Copy paths",
     "moreActions": "More actions for {{name}}",
     "actionsFor": "Actions for {{name}}",
     "closeActions": "Close actions"

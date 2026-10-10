@@ -551,12 +551,7 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
   return { displayName, ref };
 }
 
-/** {@link compareAccountCursors} over the accounts themselves. */
-export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
-  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareAccounts} order —
+/** Whether an account falls after a cursor in {@link compareAccountCursors} order —
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
@@ -647,13 +642,7 @@ export function streamCursorOf(account: StreamAccount): StreamCursor {
   return activityPosition(account, accountRef(account));
 }
 
-/** The stream's order: newest activity first, ties broken by name and then ref
- *  so the sequence is total. */
-export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
-  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+/** Whether an account falls after a cursor in {@link compareStreamCursors}
  *  order — i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
   return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
@@ -903,11 +892,9 @@ export const PERSON_BOND_LEVELS: readonly PlacedBondLevel[] = [
   "other",
 ];
 
-export type PersonBondLevel = PlacedBondLevel;
-
 /** A level the listing can be filtered and counted by: a bond level, or "all"
  *  — every curated person whatever their level. */
-export type PersonFilterLevel = "all" | PersonBondLevel;
+export type PersonFilterLevel = "all" | PlacedBondLevel;
 
 /**
  * How many people sit at each level.
@@ -1388,3 +1375,22 @@ export interface SendRefusal {
   error: string;
   send: Exclude<AccountSendState, "yes">;
 }
+
+/** The {@link SendRefusal} `error` line for each reason. A fallback, not the
+ *  copy: the dashboard renders `send` through its own locale files. */
+export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): string {
+  switch (send) {
+    case "not-connected":
+      return "That channel is not connected";
+    case "unsupported":
+      return "Rome cannot send on that channel";
+    case "no-conversation":
+      return "Rome has no conversation open with that account";
+  }
+}
+
+/** The `error` the server writes on a send whose process died before the
+ *  channel answered. Not a provider message, and deliberately equivocal: Rome
+ *  does not know whether it went out. */
+export const STRANDED_SEND_ERROR =
+  "Rome stopped before the channel answered; this may or may not have been sent";

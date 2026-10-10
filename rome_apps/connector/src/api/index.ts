@@ -28,7 +28,7 @@ import {
 import {
   processGithubWebhook,
   processVerifiedWebhook,
-  publishEmittedEvent,
+  publishPendingEvents,
 } from "./process-webhook.js";
 import { resolveRelayDepositUrl } from "./relay-webhook.js";
 import { SettingsStore } from "./settings-store.js";
@@ -731,32 +731,13 @@ class ComposioApiHandler implements RomeAppApiHandler {
       webhookId,
       new Date(),
     );
+    this.publishPendingInBackground();
     if (result.kind === "ignored") {
       this.ctx.log.info("webhook ignored", { webhookId, reason: result.reason });
       return Response.json({ ok: true, ignored: result.reason });
     }
     if (result.kind === "deduped") {
       this.ctx.log.info("webhook retry dedup", { eventId: result.event.eventId });
-    }
-    if (result.kind === "emitted") {
-      try {
-        await publishEmittedEvent((name, args) => this.ctx.runAction(name, args), result);
-        this.ctx.log.info("published composio event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-        });
-      } catch (err) {
-        // The event is already persisted in connector__emitted_events (visible
-        // via GET /events), so the trigger fire is recoverable. Ack Composio
-        // anyway: a non-2xx would make it retry, and the retry dedups — it
-        // would never republish, so 500-ing here strands the event instead of
-        // recovering it.
-        this.ctx.log.error("failed to publish composio event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
     }
     return Response.json({ ok: true, deduped: result.kind === "deduped" });
   }
@@ -802,28 +783,29 @@ class ComposioApiHandler implements RomeAppApiHandler {
       deliveryId,
       new Date(),
     );
+    this.publishPendingInBackground();
     if (result.kind === "deduped") {
       this.ctx.log.info("github webhook retry dedup", { eventId: result.event.eventId });
     }
-    if (result.kind === "emitted") {
-      try {
-        await publishEmittedEvent((name, args) => this.ctx.runAction(name, args), result);
-        this.ctx.log.info("published github event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-        });
-      } catch (err) {
-        // Already persisted (visible via GET /events), so the fire is
-        // recoverable. Ack anyway: a non-2xx makes GitHub redeliver, and the
-        // retry dedups — it would never republish, so 500-ing strands the event.
-        this.ctx.log.error("failed to publish github event to bus", {
-          eventId: result.event.eventId,
-          topic: result.topic,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
     return Response.json({ ok: true, deduped: result.kind === "deduped" });
+  }
+
+  /**
+   * Starts an outbox drain without awaiting it. A publish can wait minutes for
+   * an action worker, far past a webhook sender's response timeout, so the
+   * delivery is acked once its event is stored. Every verified delivery drains,
+   * which also retries events an earlier drain left behind.
+   */
+  private publishPendingInBackground(): void {
+    publishPendingEvents(
+      this.events,
+      (name, args) => this.ctx.runAction(name, args),
+      this.ctx.log,
+    ).catch((err: unknown) => {
+      this.ctx.log.error("event outbox drain failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // Transport-only bridge for inbound Rome Mail: hand the raw deposit body and

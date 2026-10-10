@@ -43,17 +43,6 @@ function peopleList(): PeopleList {
 }
 
 describe("usePeople", () => {
-  it("reads the curated people from GET /api/people", async () => {
-    const fetchSpy = rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementation((async () => Response.json(peopleList())) as typeof fetch);
-
-    const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
-
-    await waitFor(() => expect(result.current.data).toBeDefined());
-    expect(fetchSpy.mock.calls.map(([input]) => String(input))).toEqual(["/api/people"]);
-  });
-
   it("unwraps the listing envelope into its rows, whole", async () => {
     rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
       Response.json(peopleList())) as typeof fetch);

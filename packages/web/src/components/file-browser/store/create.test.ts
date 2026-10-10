@@ -39,6 +39,22 @@ describe("file-browser action selection", () => {
     expect(store.getState().ui.filesPaneDrillPath).toBe("/projects/current");
   });
 
+  it("keeps a multi-selection in tree order and drops paths nested in a selected folder", () => {
+    const store = createTestStore();
+    store.setState((state) => ({
+      selection: {
+        ...state.selection,
+        selectedTreePaths: ["/projects/zeta", "/projects/zeta/inner.md", "/projects/alpha.md"],
+      },
+    }));
+
+    const paths = store
+      .getState()
+      .selection.prepareContextMenu({ path: "/projects/alpha.md", type: "file" });
+
+    expect(paths).toEqual(["/projects/zeta", "/projects/alpha.md"]);
+  });
+
   it("waits for the app confirmation dialog before discarding unsaved edits", async () => {
     const store = createTestStore();
     store.setState((state) => ({

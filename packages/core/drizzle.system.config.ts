@@ -9,7 +9,6 @@ export default defineConfig({
   dialect: "sqlite",
   migrations: { table: "__drizzle_migrations_system" },
   tablesFilter: [
-    "events",
     "sessions",
     "session_turn_checkpoints",
     "persons",
@@ -20,7 +19,6 @@ export default defineConfig({
     "app_keys",
     "policies",
     "guardian_auth",
-    "provider_accounts",
     "oauth_pending_attempts",
     "webchat_projects",
     "webchat_sessions",

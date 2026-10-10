@@ -11,7 +11,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { buildSourceWorkspace, packArtifact } from "./pack.js";
+import { buildSourceWorkspace, packArtifact, runPnpm } from "./pack.js";
 import { hashArtifact } from "./hash.js";
 import {
   classifyAppDir,
@@ -710,3 +710,152 @@ describe("buildSourceWorkspace", () => {
     );
   });
 });
+
+describe("runPnpm", () => {
+  let binDir: string;
+  let cwd: string;
+  let originalPath: string | undefined;
+
+  beforeEach(() => {
+    binDir = mkdtempSync(join(tmpdir(), "rome-fake-pnpm-bin-"));
+    cwd = mkdtempSync(join(tmpdir(), "rome-fake-pnpm-cwd-"));
+    originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+  });
+
+  afterEach(() => {
+    process.env.PATH = originalPath;
+    rmSync(binDir, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function fakePnpm(script: string): void {
+    writeFileSync(join(binDir, "pnpm"), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  }
+
+  it("resolves when pnpm exits 0", async () => {
+    fakePnpm("echo ok\nexit 0");
+    await expect(runPnpm(["install"], { cwd })).resolves.toBeUndefined();
+  });
+
+  describe("with ROME_PNPM_COREPACK_HOME", () => {
+    let originalPinned: string | undefined;
+    let originalCorepackHome: string | undefined;
+
+    beforeEach(() => {
+      originalPinned = process.env.ROME_PNPM_COREPACK_HOME;
+      originalCorepackHome = process.env.COREPACK_HOME;
+      process.env.COREPACK_HOME = "/home/rome/.cache/node/corepack";
+    });
+
+    afterEach(() => {
+      restoreEnv("ROME_PNPM_COREPACK_HOME", originalPinned);
+      restoreEnv("COREPACK_HOME", originalCorepackHome);
+    });
+
+    it("runs pnpm against the pinned cache without promoting app-declared versions", async () => {
+      process.env.ROME_PNPM_COREPACK_HOME = "/opt/rome-corepack";
+      fakePnpm(
+        'echo "COREPACK_HOME=$COREPACK_HOME"\necho "DEFAULT_TO_LATEST=$COREPACK_DEFAULT_TO_LATEST"\nexit 1',
+      );
+      const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+        .message;
+      expect(message).toContain("COREPACK_HOME=/opt/rome-corepack");
+      expect(message).toContain("DEFAULT_TO_LATEST=0");
+    });
+
+    it("leaves COREPACK_HOME alone when unset", async () => {
+      delete process.env.ROME_PNPM_COREPACK_HOME;
+      fakePnpm('echo "COREPACK_HOME=$COREPACK_HOME"\nexit 1');
+      const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+        .message;
+      expect(message).toContain("COREPACK_HOME=/home/rome/.cache/node/corepack");
+    });
+  });
+
+  it("carries the tail of pnpm's stdout and stderr on a non-zero exit", async () => {
+    fakePnpm(
+      [
+        "echo 'Progress: resolved 3'",
+        "printf '\\033[31m[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/x: Not Found\\033[39m\\n'",
+        "echo 'a warning on stderr' >&2",
+        "exit 1",
+      ].join("\n"),
+    );
+    const err = await runPnpm(["install", "--prod"], { cwd }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain(`Command failed: pnpm install --prod (cwd: ${cwd}, exit 1)`);
+    expect(message).toContain("pnpm output (tail):");
+    expect(message).toContain("[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/x: Not Found");
+    expect(message).toContain("a warning on stderr");
+    expect(message).not.toContain("\u001b[");
+  });
+
+  it("keeps only the last lines of long output", async () => {
+    fakePnpm('i=0\nwhile [ $i -lt 200 ]; do echo "line $i"; i=$((i+1)); done\nexit 1');
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    const tail = message.split("pnpm output (tail):\n")[1]?.split("\n");
+    expect(tail?.[0]).toBe("line 170");
+    expect(tail?.at(-1)).toBe("line 199");
+  });
+
+  it("times out even when a descendant keeps the output pipes open", async () => {
+    // The background sleep inherits stdout/stderr and outlives pnpm, so its
+    // pipes stay open long after pnpm itself is killed.
+    fakePnpm("echo starting\nsleep 5 &\nwait");
+    const startedAt = Date.now();
+    const err = await runPnpm(["install"], { cwd, timeoutMs: 200 }).catch((e: unknown) => e);
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+    const message = (err as Error).message;
+    expect(message).toContain(`Command timed out after 200ms: pnpm install (cwd: ${cwd})`);
+    expect(message).toContain("starting");
+  });
+
+  it("settles on exit when a descendant keeps the output pipes open", async () => {
+    fakePnpm("echo done\nsleep 5 &\nexit 0");
+    const startedAt = Date.now();
+    await expect(runPnpm(["install"], { cwd })).resolves.toBeUndefined();
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  });
+
+  it("keeps multi-byte characters intact in the tail", async () => {
+    fakePnpm(`printf '\\342\\234'\nsleep 0.1\nprintf '\\225 failed\\n'\nexit 1`);
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toContain("\u2715 failed");
+  });
+
+  it("redacts credentials from the tail", async () => {
+    fakePnpm(
+      [
+        "echo 'GET https://user:s3cret@registry.example.com/x: 401'",
+        "echo '//registry.example.com/:_authToken=npm_abc123'",
+        "echo '//registry.example.com/:_password=cGFzcw=='",
+        "echo 'Authorization: Bearer tok_xyz'",
+        "exit 1",
+      ].join("\n"),
+    );
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toContain("https://***@registry.example.com/x: 401");
+    expect(message).toContain("_authToken=***");
+    expect(message).not.toContain("s3cret");
+    expect(message).not.toContain("npm_abc123");
+    expect(message).not.toContain("cGFzcw==");
+    expect(message).not.toContain("tok_xyz");
+  });
+
+  it("leaves the message unchanged when pnpm printed nothing", async () => {
+    fakePnpm("exit 2");
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toBe(`Command failed: pnpm install (cwd: ${cwd}, exit 2)`);
+  });
+});
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}

@@ -185,13 +185,14 @@ reasons behind them.
   Every case carries exactly one `shard-N` tag. `fail-fast: false`,
   `max-parallel: 1`, a 45-minute per-job timeout, and 2 case-level retries.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
-  `.midscene/` shard artifacts, including failed runs. A repository with
-  `MIDSCENE_PUBLISH_REPO` set to its full name also writes a Markdown job
-  Summary. The aggregation job puts abnormal cases first in the run Summary
-  and passed cases in a collapsed appendix. Each case has a screenshot and
-  exact report-step link when available. Midscene merges the native Test
-  reports across shards, and GitHub Pages publishes that report when available.
-  An incomplete merge still publishes available shard reports.
+  `.midscene/` shard artifacts, including failed runs. A read-only job writes
+  results after aggregation without waiting for Pages approval or deployment.
+  It shows total and per-shard counts, abnormal cases first, and passed cases
+  in a collapsed appendix. After Pages completes, a second Summary adds publication
+  status and the native report, screenshot, and exact report-step links when available.
+  If Pages fails or is skipped, results and artifact links remain available.
+  If aggregation fails, the final job recovers available trusted shard data.
+  Shard and publication jobs do not write separate Summaries.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.

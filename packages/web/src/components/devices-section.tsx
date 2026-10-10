@@ -62,7 +62,7 @@ export function DevicesSection() {
               disabled={query.isFetching || start.isPending}
               onClick={() => void query.refetch()}
             >
-              <RefreshCw aria-hidden="true" />
+              <RefreshCw data-icon="inline-start" aria-hidden="true" />
               {t("devices.refresh")}
             </Button>
           </SectionActions>

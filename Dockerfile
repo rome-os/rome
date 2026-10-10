@@ -290,6 +290,19 @@ RUN corepack enable && corepack prepare pnpm@11.6.0 --activate
 RUN groupadd --system rome && \
     useradd --system --no-log-init --gid rome --create-home --shell /bin/bash rome
 
+# The daemon runs as rome with HOME on the persistent volume. Corepack's
+# default cache lives under HOME, and an empty cache pins whatever pnpm is
+# latest on first use, so each instance would install apps with a different
+# pnpm. App installs run pnpm against this cache instead (runPnpm in
+# packages/core/src/apps/packaging/pack.ts). rome owns it so an app that
+# declares another packageManager version can still download that version.
+# Such downloads live in the image layer, not the volume, so they repeat after
+# each container recreate (first-party apps all declare this version).
+ENV ROME_PNPM_COREPACK_HOME=/opt/rome-corepack
+RUN mkdir -p /opt/rome-corepack && \
+    COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
+    chown -R rome:rome /opt/rome-corepack
+
 # Tailscale binaries + state dirs
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
 COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled

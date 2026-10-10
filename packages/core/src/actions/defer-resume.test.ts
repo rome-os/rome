@@ -23,22 +23,21 @@ describe("defer session continuity", () => {
     rome = undefined;
   });
 
-  it("resumes the AgentSession that scheduled defer when webchat uses a selected-model key", async () => {
+  it("resumes the AgentSession that scheduled defer from a webchat key", async () => {
     rome = await createTestRome({ keepAliveAcrossTurns: true });
 
-    const webchatSessionId = "selected-model-chat";
-    const selectedModelKey = `webchat:${webchatSessionId}:large-model:gpt-5-6-sol`;
+    const webchatSessionId = "deferring-chat";
+    const webchatKey = `webchat:${webchatSessionId}`;
     const channelContext = {
       channel: "webchat",
       threadId: webchatSessionId,
       channelUserId: "guardian",
     };
 
-    // This is the key shape used by the normal WebChat turn path when the chat
-    // has a persisted large-model selection.
+    // This is the key shape the normal WebChat turn path uses.
     const initialMessages = await rome.runAgent({
       prompt: "Start work and check again later",
-      channelThreadKey: selectedModelKey,
+      channelThreadKey: webchatKey,
       threadContext: channelContext,
     });
     const initialSessionId = initialMessages.find(
@@ -56,12 +55,12 @@ describe("defer session continuity", () => {
       channelContext,
     } satisfies DeferContext;
     await runDefer(
-      { name: "selected-model follow-up", afterMinutes: 1 },
+      { name: "deferred follow-up", afterMinutes: 1 },
       {
         context: deferContext,
         createRoutine: async (args) => {
           routineArgs = args;
-          return { routineId: "defer-selected-model" };
+          return { routineId: "defer-follow-up" };
         },
         now: Date.parse("2026-07-15T12:00:00.000Z"),
       },
@@ -69,7 +68,7 @@ describe("defer session continuity", () => {
 
     const backendTurnRunner = createBackendTurnRunner({
       agentRunner: rome.agentRunner,
-      channel: () => null,
+      channel: (name) => rome?.channels.find((channel) => channel.name === name) ?? null,
     });
     const resumeSession = createResumeSessionAction(resumeSessionConfig, {
       backendTurnRunner,
@@ -85,15 +84,14 @@ describe("defer session continuity", () => {
       ? await rome.repos.sessions.findById(deferredSessionId)
       : null;
 
-    // Regression assertion: the old path created a second AgentSession whose
-    // key was only `webchat:selected-model-chat`. The continuation must instead
-    // keep both the original runtime ID and its selected-model session key.
+    // Regression assertion: the continuation keeps the original runtime ID and
+    // its session key instead of opening a second AgentSession.
     expect({
       sessionId: deferredSessionId,
       channelThreadKey: deferredSession?.channelThreadKey,
     }).toEqual({
       sessionId: initialSessionId,
-      channelThreadKey: selectedModelKey,
+      channelThreadKey: webchatKey,
     });
   });
 });

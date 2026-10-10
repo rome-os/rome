@@ -10,8 +10,12 @@
 //   4. end-to-end over the real ConnectionRegistry: a bad-signature deposit
 //      degrades the inbox grant (renew-once via setup-driven "re-confer").
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { createHmac } from "node:crypto";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -26,7 +30,7 @@ import { createTestDb } from "../../test/helpers.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { ConversationId, InboundMessage, StreamFault, Talker } from "../types.js";
+import type { ConversationId, StreamFault, Talker } from "../types.js";
 import { makeEmailDescriptor, type EmailDescriptorDeps, type EmailInboxMaterial } from "./email.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
@@ -301,7 +305,7 @@ describe("email Talker fault mapping", () => {
         },
       },
     );
-    const received: InboundMessage[] = [];
+    const received: ChannelMessage[] = [];
     talker.start(
       (msg) => received.push(msg),
       () => {},
@@ -319,13 +323,14 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider);
     h.start();
 
-    await h.talker.send("t1" as ConversationId, {
+    const receipt = await h.talker.send("t1" as ConversationId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
     });
 
     expect(provider.sent).toHaveLength(1);
+    expect(receipt).toStrictEqual({ conversationId: "t_out", messageId: "m_out" });
   });
 
   it("marks the lines this inbox sent as outbound, however its address is written", async () => {
@@ -347,7 +352,7 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider, { address: `Rome <${ADDRESS.toUpperCase()}>` });
     h.start();
 
-    const history = await h.talker.feature("history")?.query({});
+    const history = await h.talker.history?.query({});
     expect(history?.map((line) => [line.messageId, line.direction])).toEqual([
       ["mine", "outbound"],
     ]);
@@ -364,10 +369,130 @@ describe("email Talker fault mapping", () => {
     const h = buildTalker(provider);
     h.start();
 
-    expect(h.talker.feature("history")).not.toBeNull();
-    expect(h.talker.feature("inboundMedia")).not.toBeNull();
-    const history = await h.talker.feature("history")?.query({ limit: 20 });
+    expect(h.talker.history).toBeDefined();
+    expect(h.talker.inboundMedia).toBeDefined();
+    const history = await h.talker.history?.query({ limit: 20 });
     expect(Array.isArray(history)).toBe(true);
+  });
+});
+
+/** A talker whose ingress and deliveries the test drives directly. */
+function buildDeliveringTalker(provider: MailProvider): {
+  talker: Talker;
+  delivered: ChannelMessage[];
+  ingest: (event: RomeMailEvent) => Promise<unknown>;
+} {
+  const desc = makeEmailDescriptor(makeDeps(provider));
+  let ingress: ((input: unknown) => Promise<unknown>) | undefined;
+  const talker = desc.capabilities.talker!.build(
+    { inbox: validCred() },
+    {
+      connectionId: "email-test",
+      persist: async () => {},
+      registerIngress: (handler) => {
+        ingress = handler;
+        return () => {};
+      },
+    },
+  );
+  const delivered: ChannelMessage[] = [];
+  talker.start(
+    (msg) => delivered.push(msg),
+    () => {},
+  );
+  return {
+    talker,
+    delivered,
+    ingest: async (event) => {
+      const rawBody = JSON.stringify(event);
+      return ingress?.({ rawBody, signature: sign(rawBody) });
+    },
+  };
+}
+
+describe("email inbound delivery", () => {
+  let sandboxHome: string;
+
+  beforeEach(async () => {
+    sandboxHome = await mkdtemp(join(tmpdir(), "rome-email-integration-"));
+    rs.stubEnv("HOME", sandboxHome);
+    rs.stubEnv("ROME_PROFILE", "email-test");
+  });
+
+  afterEach(async () => {
+    rs.unstubAllEnvs();
+    rs.unstubAllGlobals();
+    await rm(sandboxHome, { recursive: true, force: true });
+  });
+
+  // An authenticated email with a subject and one attachment, so every field
+  // email sets is present.
+  const event = buildEvent({
+    hasAttachment: true,
+    attachments: [{ blobId: "att_1", name: "doc.pdf", size: 3, type: "application/pdf" }],
+  });
+
+  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+    const h = buildDeliveringTalker(makeProvider());
+
+    await h.ingest(event);
+
+    expect(h.delivered).toStrictEqual([
+      {
+        channel: "email",
+        direction: "inbound",
+        messageId: "msg_1",
+        conversationId: "t1",
+        senderId: GUARDIAN,
+        senderDisplayName: "Guardian",
+        text: "hello from the full body",
+        attachments: [{ type: "document", mimeType: "application/pdf", fileName: "doc.pdf" }],
+        timestamp: new Date(0),
+        thread: { kind: "dm", name: "Hi" },
+        raw: event,
+      },
+    ]);
+  });
+
+  it("materializes the attachments of a message it delivered", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(Buffer.from("pdf"), { status: 200 })),
+    );
+    const getAttachment = rs.fn(async (_messageId: string, _attachmentId: string) => ({
+      downloadUrl: "https://files.example/presigned",
+      expiresAt: new Date(0).toISOString(),
+      size: 3,
+    }));
+    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    await h.ingest(event);
+
+    const saved = await h.talker.inboundMedia!.materialize(h.delivered[0]);
+
+    expect(getAttachment).toHaveBeenCalledWith("msg_1", "att_1");
+    expect(saved[0].localPath).toContain(join("channel-attachments", "email", "t1", "msg_1"));
+  });
+
+  it("returns the attachments unchanged for a message it never ingested", async () => {
+    const getAttachment = rs.fn(async () => {
+      throw new Error("should not be called");
+    });
+    const h = buildDeliveringTalker(makeProvider({ getAttachment }));
+    const attachments = [{ type: "document" as const, fileName: "doc.pdf" }];
+
+    const saved = await h.talker.inboundMedia!.materialize({
+      channel: "email",
+      direction: "inbound",
+      messageId: "msg_unknown",
+      conversationId: "t1" as ConversationId,
+      senderId: GUARDIAN,
+      text: "",
+      attachments,
+      timestamp: new Date(0),
+    });
+
+    expect(saved).toBe(attachments);
+    expect(getAttachment).not.toHaveBeenCalled();
   });
 });
 
@@ -377,7 +502,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     registry.register(makeEmailDescriptor(makeDeps(makeProvider())));
     const conn = await registry.connect("email");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk once the inbox grant is imported and delivers inbound", async () => {
@@ -388,10 +513,8 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     await registry.importCredential(conn.id, "inbox", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    const talk = conn.talk!;
-
-    const received: InboundMessage[] = [];
-    talk.subscribe(async (msg) => {
+    const received: ChannelMessage[] = [];
+    conn.hearTalker(async (msg) => {
       received.push(msg);
       return;
     });
@@ -420,7 +543,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(result).toEqual({ status: "rejected", reason: "bad_signature" });
     await flush();
 
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["inbox"] });
     expect(conn.auth.grants().inbox).toBe("degraded");
   });

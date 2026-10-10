@@ -32,6 +32,3 @@ export const APP_MANAGER_ERROR_STATUS = {
   ALREADY_IN_FLIGHT: 409,
   ARTIFACT_INVALID: 422,
 } as const satisfies Record<AppManagerErrorCode, number>;
-
-export type AppManagerErrorStatus =
-  (typeof APP_MANAGER_ERROR_STATUS)[keyof typeof APP_MANAGER_ERROR_STATUS];

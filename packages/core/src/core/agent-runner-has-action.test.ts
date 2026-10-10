@@ -24,7 +24,7 @@ function action(name: string, visibility: "public" | "explicit"): Action {
 }
 
 describe("AgentRunner.hasAction", () => {
-  const registry = new ActionRegistryImpl([], {
+  const registry = new ActionRegistryImpl({
     legacyBindings: createEmptyLegacyArtifactBindings(),
   });
   for (const [name, visibility] of [

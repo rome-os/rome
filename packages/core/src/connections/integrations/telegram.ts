@@ -1,11 +1,13 @@
 // Telegram connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Telegram is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — normalization, attachment extraction, send formatting — is
-// the existing `TelegramAdapter` (packages/core/src/channels/telegram.ts),
+// transport core — the inbound `ChannelMessage`, attachment extraction, send
+// formatting — is `TelegramAdapter` (packages/core/src/channels/telegram.ts),
 // wrapped here so the runtime's grant-epoch lifecycle and fault→grant-state
-// mapping (registry.ts) drive it. grammy owns transient reconnect internally
-// (auto-retries dropped long-polls); only TERMINAL failures reach `fault`:
+// mapping (registry.ts) drive it. The transport already speaks the channel's
+// record, so inbound and send pass through without a projection. grammy owns
+// transient reconnect internally (auto-retries dropped long-polls); only
+// TERMINAL failures reach `fault`:
 //   - auth failure (401 Unauthorized from getMe/getUpdates/sendMessage) →
 //     CredentialRejected{ grant: "bot" } → runtime renews once, then degrades.
 //   - any other terminal transport failure → Disconnected → runtime backs off
@@ -13,18 +15,13 @@
 
 import { Bot, GrammyError } from "grammy";
 import { z } from "zod";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkFeatures } from "../types.js";
 import { TelegramAdapter, type CreateTelegramBot } from "../../channels/telegram.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import {
-  addressIsConversationFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { addressIsConversationFeature } from "./talk-features.js";
 
 /**
  * True iff `err` is a Telegram "credential refused" — a grammy `GrammyError`
@@ -233,10 +230,18 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             createBot,
           );
 
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            // A Telegram private chat carries the user's own id as its chat
+            // id, so the address is already the conversation.
+            directMessaging: addressIsConversationFeature(),
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // adapter.start() awaits bot.init() (getMe), so a bad token rejects
               // here; the long-poll loop routes its terminal errors through
               // onPollingError → routeFault.
@@ -250,10 +255,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
             },
             async send(conversationId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(conversationId, msg);
               } catch (err) {
                 // A 401 from sendMessage is a refused credential,
                 // surfaced as CredentialRejected so the runtime renews/degrades.
@@ -263,15 +265,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                // A Telegram private chat carries the user's own id as its chat
-                // id, so the address is already the conversation.
-                directMessaging: addressIsConversationFeature(),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

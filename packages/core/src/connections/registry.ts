@@ -1,10 +1,10 @@
 // Connection lifecycle registry. Messaging model: docs/concepts/messaging.md.
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
-import { isTransactionalLedger, type TransactionalGrantLedger } from "./ledger-db.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -24,16 +24,12 @@ import type {
   Credential,
   GrantName,
   GrantState,
-  InboundMessage,
   OperationCall,
   OperationResult,
   ProfileRecord,
   RuntimeKit,
   SecretRecord,
   StreamFault,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
   Talker,
   Watch,
   WatchEvent,
@@ -66,9 +62,7 @@ function defaultSleep(ms: number): Promise<void> {
 }
 
 /** Persist a live Credential's envelope. External-custody credentials (function
- *  material) persist as `{ kind: "external" }` — the ledger stores no secret.
- *  Exported so the pre-load providerAccounts reconciler, which writes the ledger
- *  directly (before the registry loads), shares this one envelope transform. */
+ *  material) persist as `{ kind: "external" }` — the ledger stores no secret. */
 export function toPersisted(cred: Credential): PersistedCredential {
   if (typeof cred.material === "function") {
     return { material: { kind: "external" }, expiresAt: cred.expiresAt };
@@ -146,7 +140,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: InboundMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 
@@ -213,7 +207,7 @@ export class ConnectionRegistry {
   }
 
   /** True iff a descriptor has been registered for `service`. Lets callers
-   *  (settings-import's zero-grant path) skip services this registry does not
+   *  (the zero-grant boot path) skip services this registry does not
    *  know about — e.g. a test that registers only a subset. */
   isRegistered(service: string): boolean {
     return this.descriptors.has(service);
@@ -253,9 +247,9 @@ export class ConnectionRegistry {
     }
   }
 
-  /** Start every capability hydrated while boot activation was deferred. The
-   * startup cutover uses this barrier so no provider transport can observe
-   * pre-cutover settings state. */
+  /** Start every capability hydrated while boot activation was deferred. Boot
+   * uses this barrier so no provider transport starts before the zero-grant
+   * connections exist. */
   startCapabilities(): void {
     this.capabilityActivationPaused = false;
     for (const connection of this.connections.values()) {
@@ -285,7 +279,7 @@ export class ConnectionRegistry {
       const createdAt = this.clock();
       const record = { id, service, label: label ?? service, createdAt };
       try {
-        await this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
+        this.createConnectionWithGrants(record, Object.keys(registered.descriptor.auth));
       } catch (error) {
         if (error instanceof ServiceConnectionWriteConflict) {
           throw await this.duplicateServiceError(service);
@@ -300,36 +294,13 @@ export class ConnectionRegistry {
   }
 
   /** Persist a connection and all of its initial grant placeholders as one
-   *  durable unit. Production ledgers use the same transaction seam as
-   *  confer(); the compensating fallback keeps lightweight test ledgers from
-   *  stranding a connection row if their grant initialization fails. */
-  private async createConnectionWithGrants(
-    record: ConnectionRecord,
-    grants: GrantName[],
-  ): Promise<void> {
+   *  durable unit, in the same transaction seam as confer(). */
+  private createConnectionWithGrants(record: ConnectionRecord, grants: GrantName[]): void {
     const ledger = this.ledger;
-    if (isTransactionalLedger(ledger)) {
-      ledger.runInTransaction((tx) => {
-        ledger.writeConnection(tx, record);
-        for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
-      });
-      return;
-    }
-
-    await ledger.createConnection(record);
-    try {
-      for (const grant of grants) await ledger.ensureGrant(record.id, grant);
-    } catch (error) {
-      try {
-        await ledger.deleteConnection(record.id);
-      } catch (rollbackError) {
-        throw new AggregateError(
-          [error, rollbackError],
-          `Failed to initialize connection "${record.id}" and remove its partial record`,
-        );
-      }
-      throw error;
-    }
+    ledger.runInTransaction((tx) => {
+      ledger.writeConnection(tx, record);
+      for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
+    });
   }
 
   private async duplicateServiceError(service: string): Promise<DuplicateServiceConnectionsError> {
@@ -379,20 +350,15 @@ export class ConnectionRegistry {
    *  mirrored for teardown) enlisted in the SAME transaction as the connection/
    *  grant deletes — e.g. the guardian channel-mapping cleanup, so it can never
    *  be left stranded by a failure after the connection is already committed as
-   *  deleted. A participant requires a transactional ledger. The in-memory
-   *  teardown (`teardownAll`) and map eviction run only AFTER that transaction
-   *  commits. */
+   *  deleted. The in-memory teardown (`teardownAll`) and map eviction run only
+   *  AFTER that transaction commits. */
   async remove(id: ConnectionId, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
     await this.connectionMutex.runExclusive(conn.service, async () => {
       const current = this.connections.get(id);
       if (!current) throw new Error(`unknown connection "${id}"`);
-      if (opts.inTx) {
-        await this.txLedger.deleteConnection(id, opts.inTx);
-      } else {
-        await this.ledger.deleteConnection(id);
-      }
+      await this.ledger.deleteConnection(id, opts.inTx);
       current.teardownAll();
       this.connections.delete(id);
     });
@@ -470,7 +436,7 @@ export class ConnectionRegistry {
     const id = conn?.id ?? crypto.randomUUID();
     const createdAt = this.clock();
     const patch = conferralPatch(this.now(), credential, profile);
-    const ledger = this.txLedger;
+    const ledger = this.ledger;
 
     // One transaction spanning every durable write of the conferral: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
@@ -508,17 +474,8 @@ export class ConnectionRegistry {
     return conn as Connection;
   }
 
-  /** The ledger viewed as transaction-capable — required by `confer`. Throws for
-   *  the in-memory test fakes, which never reach `confer`. */
-  private get txLedger(): TransactionalGrantLedger {
-    if (!isTransactionalLedger(this.ledger)) {
-      throw new Error("confer() requires a transactional ledger");
-    }
-    return this.ledger;
-  }
-
   /** Headless conferral: skip confer(), inject a caller-supplied credential.
-   *  The settings-import / API-shim path (phase 3). Idempotent: re-importing
+   *  The API-shim path (phase 3). Idempotent: re-importing
    *  identical inline material over an authorized grant is a no-op.
    *
    *  `profile` is the non-secret conferral outcome: when supplied it
@@ -536,21 +493,6 @@ export class ConnectionRegistry {
     const conn = this.connections.get(connectionId);
     if (!conn) throw new Error(`unknown connection "${connectionId}"`);
     await conn.importCredential(grant, credential, profile);
-  }
-
-  /** Fill a MISSING profile on an already-authorized/degraded grant WITHOUT
-   *  touching the credential or rebuilding the grant epoch — the boot bridge's
-   *  profile-only backfill. The credential column is
-   *  never in the patch, so a bridge-era install that connected before profiles
-   *  existed gains its identity with no credential write and no onUnlocked. */
-  async backfillProfile(
-    connectionId: ConnectionId,
-    grant: GrantName,
-    profile: ProfileRecord,
-  ): Promise<void> {
-    const conn = this.connections.get(connectionId);
-    if (!conn) throw new Error(`unknown connection "${connectionId}"`);
-    await conn.backfillProfile(grant, profile);
   }
 
   /** In-memory subscription gate for subscription-gated Watchers (phase 6
@@ -579,8 +521,7 @@ export class ConnectionRegistry {
    *  each other.
    *
    *  Composition is deadlock-free by construction: a registry grant mutation
-   *  invoked from inside the section (`importCredential`, `revoke`,
-   *  `backfillProfile`) acquires only the per-connection grant lock — a
+   *  invoked from inside the section (`importCredential`, `revoke`) acquires only the per-connection grant lock — a
    *  DISTINCT lock this section never holds and which is uncontended while the
    *  section runs — so it runs without re-queueing behind other section work and
    *  cannot deadlock against the section (reentrancy by scope falls out of the
@@ -600,14 +541,14 @@ export class ConnectionRegistry {
    *  importCredential, re-import after degrade, subscription arrival).
    *
    *  Delivery guarantee: only handlers a caller registers SYNCHRONOUSLY inside
-   *  the onUnlocked callback (via `conn.talk.onMessage` / `conn.watch.onEvent`)
+   *  the onUnlocked callback (via `conn.hearTalker` / `conn.watch.onEvent`)
    *  are guaranteed to see the epoch's FIRST deliveries. For a fresh unlock epoch
    *  the registry fires onUnlocked before the capability's stream starts, so a
    *  synchronous registration is wired before start() runs; a handler attached
    *  later (after an await, or on an already-unlocked connection whose stream is
    *  already running) may miss deliveries the stream emitted synchronously from
-   *  start(). Send-before-start is permitted: the wrapper and instance exist when
-   *  the callback runs, so `conn.talk.send(...)` inside it works. */
+   *  start(). Send-before-start is permitted: the instance exists when the
+   *  callback runs, so a send through `conn.withTalker` inside it works. */
   onUnlocked(cap: Capability, handler: (conn: Connection) => void): void {
     this.unlockHandlers[cap].push(handler);
     for (const conn of this.connections.values()) {
@@ -740,7 +681,7 @@ class ConnectionImpl implements Connection {
    */
   private checkHistoryDeclared(talker: Talker): void {
     const declared = this.descriptor.capabilities.talker?.history === true;
-    const offered = talker.feature("history") !== null;
+    const offered = talker.history !== undefined;
     if (declared === offered) return;
     this.log.error("talker history flag disagrees with its history feature", {
       connectionId: this.id,
@@ -870,11 +811,33 @@ class ConnectionImpl implements Connection {
     return { state: "unlocked" };
   }
 
-  get talk(): Talk | null {
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined {
+    const slot = this.slots.get("talk");
+    const epoch = slot?.epoch;
+    if (!slot || !epoch) return undefined;
+    let answer: T;
+    try {
+      answer = call(epoch.instance as Talker);
+    } catch (err) {
+      this.handleThrownFault(slot, err, epoch);
+      throw err;
+    }
+    if (answer instanceof Promise) {
+      answer.catch((err: unknown) => this.handleThrownFault(slot, err, epoch));
+    }
+    return answer;
+  }
+
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
     const slot = this.slots.get("talk");
     if (!slot || !slot.epoch) return null;
-    return this.talkWrapper(slot, slot.epoch);
+    slot.messageHandlers.push(handler);
+    return () => {
+      const index = slot.messageHandlers.indexOf(handler);
+      if (index >= 0) slot.messageHandlers.splice(index, 1);
+    };
   }
+
   get act(): Act | null {
     const slot = this.slots.get("act");
     if (!slot || !slot.epoch) return null;
@@ -884,62 +847,6 @@ class ConnectionImpl implements Connection {
     const slot = this.slots.get("watch");
     if (!slot || !slot.epoch) return null;
     return this.watchWrapper(slot, slot.epoch);
-  }
-
-  private talkWrapper(slot: CapabilitySlot, epoch: Epoch): Talk {
-    return {
-      subscribe: (handler) => {
-        this.assertLive(epoch);
-        slot.messageHandlers.push(handler);
-        return () => {
-          const index = slot.messageHandlers.indexOf(handler);
-          if (index >= 0) slot.messageHandlers.splice(index, 1);
-        };
-      },
-      send: async (conversationId, msg) => {
-        this.assertLive(epoch);
-        try {
-          return await (epoch.instance as Talker).send(conversationId, msg);
-        } catch (err) {
-          this.handleThrownFault(slot, err, epoch);
-          throw err;
-        }
-      },
-      feature: <K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null => {
-        this.assertLive(epoch);
-        const current = (epoch.instance as Talker).feature(name);
-        if (!current) return null;
-        return this.epochFeatureProxy(slot, epoch, name);
-      },
-    };
-  }
-
-  private epochFeatureProxy<K extends TalkFeatureName>(
-    slot: CapabilitySlot,
-    epoch: Epoch,
-    name: K,
-  ): TalkFeatureMap[K] {
-    return new Proxy({} as TalkFeatureMap[K] & object, {
-      get: (_target, property) => {
-        return (...args: unknown[]) => {
-          this.assertLive(epoch);
-          const feature = (epoch.instance as Talker).feature(name) as
-            | (TalkFeatureMap[K] & Record<PropertyKey, unknown>)
-            | null;
-          if (!feature) throw new Error(`talk feature "${name}" is unavailable`);
-          const method = feature[property];
-          if (typeof method !== "function") {
-            throw new Error(`talk feature "${name}" has no operation "${String(property)}"`);
-          }
-          try {
-            return method.apply(feature, args);
-          } catch (err) {
-            this.handleThrownFault(slot, err, epoch);
-            throw err;
-          }
-        };
-      },
-    });
   }
 
   private actWrapper(slot: CapabilitySlot, epoch: Epoch): Act {
@@ -983,9 +890,9 @@ class ConnectionImpl implements Connection {
    *  caller registers SYNCHRONOUSLY inside its onUnlocked callback are wired
    *  into the slot before the stream starts. A Talker/Watcher whose start()
    *  delivers synchronously (e.g. flushing buffered inbound) would otherwise send
-   *  into empty handler arrays and drop its first delivery. The wrapper and
-   *  instance already exist when onUnlocked fires, so an onUnlocked handler may
-   *  call talk.send() before start() has run — send-before-start is permitted. */
+   *  into empty handler arrays and drop its first delivery. The instance already
+   *  exists when onUnlocked fires, so an onUnlocked handler may send through
+   *  `withTalker` before start() has run — send-before-start is permitted. */
   private buildEpoch(slot: CapabilitySlot, fire: boolean): void {
     const creds: Record<GrantName, Credential> = {};
     for (const grant of slot.needs) {
@@ -1028,8 +935,8 @@ class ConnectionImpl implements Connection {
     slot.eventHandlers = [];
     // Fire onUnlocked BEFORE starting the instance so handlers registered
     // synchronously in the callback are wired when the stream starts (see the
-    // method doc). A handler may also call talk.send() here — the wrapper and
-    // instance exist, so send-before-start works.
+    // method doc). A handler may also send through withTalker here — the
+    // instance exists, so send-before-start works.
     if (fire) this.registry.fireUnlock(slot.cap, this);
     this.startInstance(slot, epoch);
   }
@@ -1301,24 +1208,6 @@ class ConnectionImpl implements Connection {
     await this.applyNewCredential(grant, credential, profile);
   }
 
-  /** Fill a MISSING profile on an already-authorized/degraded grant without
-   *  touching the credential, grant state, or the capability epoch.
-   *  Ledger-only write; then re-sync custody so a profile-derived
-   *  artifact reflects the new identity (no-op for a channel — no custody — and
-   *  for a degraded grant whose live credential was cleared at load). */
-  backfillProfile(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    return this.withGrantLock(grant, () => this.backfillProfileLocked(grant, profile));
-  }
-
-  private async backfillProfileLocked(grant: GrantName, profile: ProfileRecord): Promise<void> {
-    if (!this.descriptor.auth[grant]) {
-      throw new Error(`connection "${this.id}" has no grant "${grant}"`);
-    }
-    await this.ledger.updateGrant(this.id, grant, { profile });
-    const cred = this.liveCreds.get(grant);
-    if (cred) await this.syncCustody(grant, cred);
-  }
-
   /** Persist a freshly minted/imported credential, mark the grant authorized,
    *  clear the renewed flag, and rebuild every dependent capability. Ledger
    *  first (the ledger is authoritative): if the durable write throws,
@@ -1373,17 +1262,13 @@ class ConnectionImpl implements Connection {
       credential: undefined,
       // An unauthorized grant records no conferral outcome — clear the profile
       // with the credential so a revoked grant carries no stale identity.
-      // `conferredAt` is deliberately NOT cleared: an unauthorized grant with a
-      // conferral on record is the explicit-revoke marker (isExplicitlyRevoked)
-      // the boot settings bridge reads to refuse resurrecting a disconnected
-      // credential from a retained legacy settings row.
+      // `conferredAt` is deliberately NOT cleared, so the grant keeps a record
+      // of its last conferral.
       profile: undefined,
       degraded: undefined,
     };
     if (opts.inTx) {
       const ledger = this.ledger;
-      if (!isTransactionalLedger(ledger))
-        throw new Error("Grant cleanup requires a transactional ledger");
       ledger.runInTransaction((tx) => {
         ledger.writeGrant(tx, this.id, grant, patch);
         opts.inTx!(tx);
@@ -1426,8 +1311,8 @@ class ConnectionImpl implements Connection {
     this.runFaultFlow(slot, "CredentialRejected", this.handleCredentialRejected(slot, err, source));
   }
 
-  /** Faults thrown synchronously from act.invoke / talk.send. The wrapper
-   *  rethrows the original error to the caller; the grant flow runs async. */
+  /** Faults thrown from act.invoke or inside withTalker. The caller still gets
+   *  the original error; the grant flow runs async. */
   private handleThrownFault(slot: CapabilitySlot, err: unknown, source: Epoch): void {
     if (source.dead || slot.epoch !== source) return; // see handleFault
     if (err instanceof CredentialRejected) {

@@ -1,46 +1,14 @@
 import type { SettingsRepository } from "../db/repositories/settings.js";
-// The custom-env rules live in @rome/api-types so the dashboard's mock backend
-// can apply the identical ones. Re-exported here to keep this module's public
-// surface — and every core import site — unchanged.
-export {
-  isAllowedCustomAnthropicEnvKey,
-  validateCustomAnthropicEnv,
-  type CustomAnthropicEnvValidationResult,
-} from "@rome/api-types/anthropic-compatible-env";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
-
-export const ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING = "aiTools.anthropicCompatibleCredentials";
-
-// The catalog and its wire shapes live in @rome/api-types so the dashboard's
-// mock backend reads the identical providers. Re-exported here to keep this
-// module's public surface — and every core import site — unchanged.
-export {
-  ANTHROPIC_COMPATIBLE_PROVIDERS,
-  CUSTOM_ANTHROPIC_PROVIDER_ID,
-  isAnthropicCompatibleConfigurationId,
-  isAnthropicCompatibleProviderId,
-  listAnthropicCompatibleProviderSummaries,
-  type AnthropicCompatibleConfigurationId,
-  type AnthropicCompatibleCredentialsSummary,
-  type AnthropicCompatibleProviderId,
-  type AnthropicCompatibleProviderSummary,
-  type StoredAnthropicCompatibleCredentials,
-  type StoredCustomAnthropicCompatibleCredentials,
-  type StoredPresetAnthropicCompatibleCredentials,
-} from "@rome/api-types/anthropic-compatible-providers";
 import {
   ANTHROPIC_COMPATIBLE_PROVIDERS,
   CUSTOM_ANTHROPIC_PROVIDER_ID,
-  isAnthropicCompatibleConfigurationId,
   isAnthropicCompatibleProviderId,
-  type AnthropicCompatibleConfigurationId,
   type AnthropicCompatibleCredentialsSummary,
-  type AnthropicCompatibleProviderId,
-  type AnthropicCompatibleProviderSummary,
   type StoredAnthropicCompatibleCredentials,
-  type StoredCustomAnthropicCompatibleCredentials,
-  type StoredPresetAnthropicCompatibleCredentials,
 } from "@rome/api-types/anthropic-compatible-providers";
+
+export const ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING = "aiTools.anthropicCompatibleCredentials";
 
 export interface AnthropicCompatibleCredentialsEditorSummary
   extends AnthropicCompatibleCredentialsSummary {

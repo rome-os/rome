@@ -3,17 +3,16 @@
 // re-exported from here exists in the SDK; types unique to core (sessions,
 // configs, policies, etc.) stay defined locally.
 
-import type { ReasoningEffort } from "@rome-os/app-runtime";
+import type { PolicyRule, ReasoningEffort } from "@rome-os/app-runtime";
 
 export type {
   Attachment,
-  ChannelSendResult,
+  PolicyRule,
   OutgoingAttachment,
   OutgoingMessage,
   ApprovalCardStatus,
   MessagePart,
   MessageReplyReference,
-  NormalizedMessage,
   AgentEvent,
   /** @deprecated Use AgentEvent from @rome-os/app-runtime. */
   AgentMessage,
@@ -76,6 +75,8 @@ export interface AgentSession {
   id: string;
   agentName: string;
   channelThreadKey: string;
+  /** The Rome conversation this session serves, when the caller named one. */
+  conversationId?: string;
   providerThreadId?: string;
   workingDir?: string;
   createdAt: Date;
@@ -118,13 +119,7 @@ export type PolicyScope =
   | { type: "thread"; threadName: string; threadType: string }
   | { type: "global" };
 
-export interface PolicyRule {
-  action: "allow" | "block" | "require_approval" | "sentinel_review";
-  conditions?: Record<string, unknown>;
-}
-
 export interface Settings {
-  sentinelReviewIntervalMinutes: number;
   trustedBondLevels: string[];
   replyToBondLevels: string[];
   database: {

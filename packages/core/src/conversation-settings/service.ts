@@ -16,18 +16,18 @@ import type {
   StoredConversationSettings,
   UpdateConversationSettingsInput,
 } from "@rome-os/app-runtime";
-import type { TalkDirectory } from "../connections/types.js";
 import { CONVERSATION_SETTING_FIELDS } from "@rome-os/app-runtime";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
+import type { Channels } from "../channels/channel.js";
 import type { StoredConversationRow } from "./repository.js";
-import { ConversationSettingsRepository, storedSettings } from "./repository.js";
+import { ConversationSettingsRepository } from "./repository.js";
 import {
-  CONVERSATION_SETTINGS_SUPPORT,
-  CORE_CONVERSATION_SETTINGS_SUPPORT,
-  type ConversationSettingsSupport,
+  CONVERSATION_SETTING_FIELDS_BY_SERVICE,
+  CORE_CONVERSATION_SETTING_FIELDS,
+  defaultConversationSettings,
 } from "./support.js";
 import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
@@ -195,12 +195,8 @@ function assertValue(field: ConversationSettingField, value: unknown): void {
 
 function cursorOffset(cursor?: string): number {
   if (!cursor) return 0;
-  try {
-    const value = Number(Buffer.from(cursor, "base64url").toString("utf8"));
-    return Number.isInteger(value) && value >= 0 && value <= 10_000 ? value : 0;
-  } catch {
-    return 0;
-  }
+  const value = Number(Buffer.from(cursor, "base64url").toString("utf8"));
+  return Number.isInteger(value) && value >= 0 && value <= 10_000 ? value : 0;
 }
 
 function encodeCursor(offset: number): string {
@@ -210,9 +206,11 @@ function encodeCursor(offset: number): string {
 export interface ConversationSettingsServiceDeps {
   repository: ConversationSettingsRepository;
   connections: ConnectionRegistry;
+  /** The channels whose directories list live conversations. Undefined until
+   *  the channel list is built, and until then only persisted rows list. */
+  channels: () => Channels | undefined;
   listAgents: () => Iterable<string>;
-  support?: ReadonlyMap<string, ConversationSettingsSupport>;
-  onChanged?: (event: {
+  onChanged: (event: {
     ref: ConversationRef;
     actor: SettingsActor;
     fields: ConversationSettingField[];
@@ -223,11 +221,8 @@ export interface ConversationSettingsServiceDeps {
 export class ConversationSettingsService implements ConversationSettingsControl {
   private readonly mutex = new KeyedMutex();
   private readonly descriptors = new Map<string, ConversationDescriptor>();
-  private readonly support: ReadonlyMap<string, ConversationSettingsSupport>;
 
-  constructor(private readonly deps: ConversationSettingsServiceDeps) {
-    this.support = deps.support ?? CONVERSATION_SETTINGS_SUPPORT;
-  }
+  constructor(private readonly deps: ConversationSettingsServiceDeps) {}
 
   /** Remember provider-native discovery metadata without changing settings. */
   observe(descriptor: ConversationDescriptor): void {
@@ -351,7 +346,6 @@ export class ConversationSettingsService implements ConversationSettingsControl 
 
   async get(ref: ConversationRef): Promise<ConversationSettingsSnapshot> {
     const { descriptor, row } = this.resolveConversation(ref);
-    const support = this.requireSupport(descriptor.service);
     if (this.isThread(descriptor)) {
       if (!descriptor.parent) {
         throw new Error(`Thread conversation "${ref.conversationId}" has no parent settings owner`);
@@ -374,14 +368,10 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       });
       return snapshot;
     }
-    const stored = row ? storedSettings(row) : null;
+    const stored = row?.channelSettings ?? null;
     const direct = this.directOverrides(row, stored);
-    const defaults = support.defaults(descriptor);
-    defaults.session ??= structuredClone(
-      CORE_CONVERSATION_SETTINGS_SUPPORT.defaults(descriptor).session,
-    );
-    const effective = overlay(defaults, direct);
-    const supportedFields = this.supportedFields(descriptor, row, support);
+    const effective = overlay(defaultConversationSettings(), direct);
+    const supportedFields = this.supportedFields(descriptor, row);
     const snapshot: ConversationSettingsSnapshot = {
       conversation: descriptor,
       supportedFields,
@@ -408,11 +398,10 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
-        const support = this.requireSupport(descriptor.service);
-        const supportedFields = this.supportedFields(descriptor, row, support);
+        const supportedFields = this.supportedFields(descriptor, row);
         const supported = new Set(supportedFields);
-        const current = await this.get(input.ref);
-        const next = normalizeOverrides(current.overrides);
+        // `get` returns a fresh, already-normalized overrides object.
+        const next = (await this.get(input.ref)).overrides;
         const changed = new Set<ConversationSettingField>();
 
         for (const field of input.clear) {
@@ -462,7 +451,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
               : null
             : undefined,
         });
-        await this.deps.onChanged?.({
+        await this.deps.onChanged({
           ref: input.ref,
           actor: input.actor,
           fields: [...changed],
@@ -493,13 +482,12 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       .runExclusive(this.storageKey(input.ref), async () => {
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
-        const support = this.requireSupport(descriptor.service);
-        const fields = [...this.supportedFields(descriptor, row, support)];
+        const fields = [...this.supportedFields(descriptor, row)];
         this.deps.repository.mutate(descriptor, {
           settings: null,
           agentName: fields.includes("routing.agentName") ? null : undefined,
         });
-        await this.deps.onChanged?.({ ref: input.ref, actor: input.actor, fields, reset: true });
+        await this.deps.onChanged({ ref: input.ref, actor: input.actor, fields, reset: true });
         log.info("conversation_settings.reset", {
           connectionId: input.ref.connectionId,
           conversationId: input.ref.conversationId,
@@ -528,25 +516,29 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     input: ListConversationSettingsInput,
     discoveryLimit: number,
   ): Promise<ConversationDescriptor[]> {
+    const selected = input.connectionId
+      ? this.deps.connections.all().find((connection) => connection.id === input.connectionId)
+      : undefined;
+    if (input.connectionId && !selected) return [];
+    const channels = (this.deps.channels() ?? []).filter(
+      (channel) => !selected || channel.name === selected.service,
+    );
     const conversations: ConversationDescriptor[] = [];
-    const connections = input.connectionId
-      ? this.deps.connections.all().filter((connection) => connection.id === input.connectionId)
-      : this.deps.connections.all();
     await Promise.all(
-      connections.map(async (connection) => {
-        const directory = connection.talk?.feature("directory") as TalkDirectory | null | undefined;
-        if (!directory) return;
+      channels.map(async (channel) => {
+        if (!channel.directory) return;
         try {
-          const result = await directory.listConversations({
-            query: input.query,
-            limit: discoveryLimit,
-            includeTopics: false,
-          });
-          conversations.push(...result.conversations);
+          conversations.push(
+            ...(await channel.directory.listConversations({
+              query: input.query,
+              limit: discoveryLimit,
+              includeTopics: false,
+              ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+            })),
+          );
         } catch (err) {
           log.warn("conversation_settings.directory_failed", {
-            connectionId: connection.id,
-            service: connection.service,
+            channel: channel.name,
             error: err instanceof Error ? err.message : String(err),
           });
           // Persisted rows still render; directory availability is not a data gate.
@@ -626,19 +618,17 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     this.descriptors.set(this.key(descriptor.ref), descriptor);
   }
 
-  private requireSupport(service: string): ConversationSettingsSupport {
-    return this.support.get(service) ?? CORE_CONVERSATION_SETTINGS_SUPPORT;
-  }
-
   private supportedFields(
     descriptor: ConversationDescriptor,
     row: StoredConversationRow | null,
-    support: ConversationSettingsSupport,
   ): readonly ConversationSettingField[] {
     if (descriptor.kind === "dm" || row?.sourceThreadType === "private") {
-      return ["session.reset"];
+      return CORE_CONVERSATION_SETTING_FIELDS;
     }
-    return support.fields;
+    return (
+      CONVERSATION_SETTING_FIELDS_BY_SERVICE.get(descriptor.service) ??
+      CORE_CONVERSATION_SETTING_FIELDS
+    );
   }
 
   private availability(connectionId: string): ConversationSettingsListItem["availability"] {
@@ -648,7 +638,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     } catch {
       return "not-connected";
     }
-    return connection.talk ? "online" : "offline";
+    return connection.isUnlocked("talk") ? "online" : "offline";
   }
 
   private isThread(descriptor: ConversationDescriptor): boolean {

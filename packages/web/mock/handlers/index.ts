@@ -21,7 +21,7 @@ import type { SettingsMap } from "@/hooks/use-settings";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
-  ChatEntry,
+  TranscriptPart,
   ChatMessage,
   ChatSearchMessageMatch,
   ChatSession,
@@ -44,7 +44,6 @@ import { appKeysHandlers } from "./app-keys";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
-import { channelMirrorHandlers } from "./people";
 import { peopleHandlers } from "./people-api";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
@@ -85,7 +84,7 @@ const skills: SkillSummary[] = [
   },
 ];
 
-const text = (content: string, turnPhase?: "commentary" | "final"): ChatEntry =>
+const text = (content: string, turnPhase?: "commentary" | "final"): TranscriptPart =>
   turnPhase ? { type: "text", content, turnPhase } : { type: "text", content };
 
 // Tool steps, thinking, subagent runs and the usage footer belong to the
@@ -232,8 +231,8 @@ const turn = (
   sessionId: string,
   index: number,
   startedAt: string,
-  prompt: string | ChatEntry[],
-  reply: ChatEntry[],
+  prompt: string | TranscriptPart[],
+  reply: TranscriptPart[],
   traceEvents?: TraceEventDto[],
 ): ChatMessage[] => {
   const turnId = `${sessionId}-t${index}`;
@@ -474,6 +473,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         // without audio: an audioUrl would need a real asset behind it.
         {
           type: "turn_recap",
+          turnId: "mock-chat-2-t2",
           content: "Rewrote the closing paragraph and handed over a themed banner component.",
         },
       ],
@@ -579,6 +579,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-draft-1",
+          routineKey: "chat-routine:mock-chat-3-draft-1",
           draft: {
             sentence: "Every Monday at 9:00 AM, list anything that has stalled and nudge me.",
             name: "Weekly stall check",
@@ -587,11 +588,35 @@ const transcripts: Record<string, ChatMessage[]> = {
             trigger: {
               type: "schedule",
               tzid: "America/Los_Angeles",
+              tzMode: "floating",
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=MO",
             },
             actionName: "daily_summary",
             args: { filter: "stalled" },
+          },
+        },
+        // An activated card: the agent created the routine on an explicit
+        // request (`propose_routine` with `activate: true`), so it opens saved
+        // with Pause / Delete / run history instead of "Turn it on".
+        {
+          type: "routine_draft_card",
+          toolUseId: "mock-chat-3-active-1",
+          routineKey: "chat-routine:mock-chat-3-active-1",
+          draft: {
+            sentence: "Every day at 7:00 AM, Rome will send you a morning brief.",
+            name: "Morning brief",
+            watchLabel: "Every day at 7:00 AM",
+            thenSummary: "send you your inbox and weather brief",
+            trigger: {
+              type: "schedule",
+              tzid: "America/Los_Angeles",
+              tzMode: "floating",
+              localTime: "07:00",
+              rrule: "FREQ=DAILY",
+            },
+            actionName: "daily_summary",
+            args: { sections: ["inbox", "weather"] },
           },
         },
       ],
@@ -714,9 +739,8 @@ const chatSessions: ChatSession[] = [
 ];
 
 const messageText = (message: ChatMessage): string =>
-  (JSON.parse(message.content) as ChatEntry[])
-    .filter((b) => b.type === "text" && typeof b.content === "string")
-    .map((b) => b.content)
+  (JSON.parse(message.content) as TranscriptPart[])
+    .flatMap((b) => (b.type === "text" ? [b.content] : []))
     .join(" ");
 
 /** Elided window around the hit, mirroring the snippet the real route returns. */
@@ -1257,10 +1281,6 @@ export const handlers = [
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
   ...activityHandlers,
-  // The WhatsApp mirror, and the /people contract over the same fixture store.
-  // Disjoint path families (/api/whatsapp against /api/people and
-  // /api/accounts), so the order between them is free.
-  ...channelMirrorHandlers,
   ...peopleHandlers,
   ...routineHandlers,
   // The session inventory behind /sessions/all, over the same four seeded

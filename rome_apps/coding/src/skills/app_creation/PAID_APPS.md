@@ -5,7 +5,7 @@ Companion to [`REFERENCE.md` → APIs](./REFERENCE.md#apis-createapihandlerctx).
 ## 1. Identity and ownership
 
 - Take identity only from `request.caller`. A visitor's owner key is `caller.accountId`; the guardian maps to one fixed owner. Never accept an owner or account id from the browser.
-- `requireVisitor(request)` gates signed-in routes. Return `visitorAuthRequired()` for every 401 so the frontend handles them the same way. In the UI, use `SignInWithRomeCloud` and `CallerBadge` from `@rome-os/app-web-sdk`.
+- `requireVisitor(request)` gates signed-in routes. Return `visitorAuthRequired()` for every 401 so the frontend handles them the same way. In the UI, use `SignInWithRomeCloud` and `CallerBadge` from `@rome-os/app-web-sdk`. Keep the button's default "Sign in" label. Do not pass `label="Sign in with Rome Cloud"`, because the button's cloud mark already names the provider.
 - Put a non-null `owner` column on every root record. Child records (photos, results, media) inherit access through that root.
 - Scope every list query by owner and every fetch-by-id by owner. A record owned by someone else returns **404**, not 403. Apply the same rule to nested resources, downloads, media routes, and job status. Background workers carry the originating owner and never bypass the check.
 - Decide explicitly who owns legacy rows when you add the column. The usual answer is the guardian.

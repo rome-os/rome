@@ -44,10 +44,10 @@ export function PageBody({ children, className }: { children: ReactNode; classNa
 }
 
 /**
- * The heading every routed page opens with: an optional leading mark, the
- * page's one `h1`, whatever sits on the title line, a caption under it, and
- * the page's actions at the trailing end. Lives beside `PageShell` so the
- * three parts hold one relation on every route.
+ * The heading every routed page opens with: the page's one `h1`, whatever
+ * sits on the title line, a caption under it, and the page's actions at the
+ * trailing end. Lives beside `PageShell` so the three parts hold one relation
+ * on every route.
  *
  * `title` is text, and it is the only text inside the `h1` — the type is what
  * holds that, not this paragraph. A badge or a status beside it goes in
@@ -59,14 +59,12 @@ export function PageHeader({
   title,
   titleAside,
   description,
-  leading,
   actions,
   className,
 }: {
   title: string;
   titleAside?: ReactNode;
   description?: ReactNode;
-  leading?: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {
@@ -76,7 +74,6 @@ export function PageHeader({
       className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-3", className)}
     >
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        {leading}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <PageTitle>{title}</PageTitle>

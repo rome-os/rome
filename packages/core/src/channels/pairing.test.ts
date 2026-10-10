@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ConversationId } from "@rome-os/app-runtime";
-import type { InboundMessage, TalkRouter } from "../connections/types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { ChannelSend } from "@rome-os/app-runtime";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
@@ -15,6 +16,31 @@ import { pairingPayload } from "@rome/api-types/approvals";
 import { createPairingAdmission, notifyPairingResolution } from "./pairing.js";
 import { eq } from "drizzle-orm";
 import { STRANGER_PERSON_ID } from "../constants.js";
+
+type Send = (
+  connectionId: string,
+  ...args: Parameters<ChannelSend["send"]>
+) => ReturnType<ChannelSend["send"]>;
+
+/** A registry whose Connections send through `send` and answer direct
+ *  messaging from `feature`, each told which Connection is asking. */
+function registryOf(
+  send: Send,
+  feature: (connectionId: string, name: string) => unknown = () => null,
+): Pick<ConnectionRegistry, "get"> {
+  return {
+    get: (connectionId) =>
+      ({
+        withTalker: (call: (talker: object) => unknown) =>
+          call({
+            send: (...args: Parameters<ChannelSend["send"]>) => send(connectionId, ...args),
+            get directMessaging() {
+              return feature(connectionId, "directMessaging") ?? undefined;
+            },
+          }),
+      }) as never,
+  };
+}
 
 describe("channel pairing approvals", () => {
   let testDb: TestDb;
@@ -69,47 +95,45 @@ describe("channel pairing approvals", () => {
         : channel === "discord"
           ? "<@123> (`123`)"
           : '<at user_id="ou_123">ou_123</at> (`ou_123`)';
-    const send = rs.fn<TalkRouter["send"]>(async (_connection, conversationId) => ({
+    const send = rs.fn<Send>(async (_connection, conversationId) => ({
       messageId: "sent",
       conversationId,
     }));
     const conversationFor = rs.fn(async () => "private-chat" as ConversationId);
     const feature = rs.fn(() => ({ conversationFor }));
-    const router = { send, feature } as unknown as TalkRouter;
+    const registry = registryOf(send, feature);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      registry,
     });
-    await admit(
-      "connection",
+    await admit("connection", channel, {
       channel,
-      {
-        senderId: id,
-        senderUsername: channel === "telegram" ? "actualuser" : undefined,
-        conversationId: "group" as ConversationId,
-        messageId: "request",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date(),
-        thread: { kind: "group" },
-        addressing: "mention",
-      },
-      router,
-    );
+      direction: "inbound",
+      senderId: id,
+      senderUsername: channel === "telegram" ? "actualuser" : undefined,
+      conversationId: "group" as ConversationId,
+      messageId: "request",
+      text: "hello",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "group" },
+      addressing: "mention",
+    });
     const request = (await repo.findPending())[0];
     expect(pairingPayload(request)?.conversationId).toBeUndefined();
     const result = await repo.resolvePending(request.id, "approve", "owner");
     if (result.outcome !== "resolved") throw new Error("Approval failed");
     send.mockClear();
-    await notifyPairingResolution(router, result.approval);
+    await notifyPairingResolution(registry, result.approval);
     expect(feature).toHaveBeenCalledWith("connection", "directMessaging");
     expect(conversationFor).toHaveBeenCalledWith(id);
     expect(send).toHaveBeenCalledWith("connection", "private-chat", {
       text: `✅ ${account} is paired with Rome. You can start chatting now.`,
     });
     send.mockRejectedValueOnce(new Error("Private messages disabled"));
-    await expect(notifyPairingResolution(router, result.approval)).resolves.toBeUndefined();
+    await expect(notifyPairingResolution(registry, result.approval)).resolves.toBeUndefined();
     expect((await repo.findById(request.id))?.status).toBe("approved");
     expect(testDb.db.select().from(channelMappings).all()).toHaveLength(1);
   });
@@ -118,29 +142,27 @@ describe("channel pairing approvals", () => {
     seedConnection("telegram");
     // A reply that never settles must not hold up the admission decision, which
     // gates every later message in the conversation.
-    const send = rs.fn<TalkRouter["send"]>(() => new Promise(() => {}));
-    const router = { send, feature: () => null } as unknown as TalkRouter;
+    const send = rs.fn<Send>(() => new Promise(() => {}));
+    const registry = registryOf(send);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      registry,
     });
 
-    const admitted = await admit(
-      "connection",
-      "telegram",
-      {
-        senderId: "123",
-        conversationId: "group" as ConversationId,
-        messageId: "request",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date(),
-        thread: { kind: "group" },
-        addressing: "mention",
-      },
-      router,
-    );
+    const admitted = await admit("connection", "telegram", {
+      channel: "telegram",
+      direction: "inbound",
+      senderId: "123",
+      conversationId: "group" as ConversationId,
+      messageId: "request",
+      text: "hello",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "group" },
+      addressing: "mention",
+    });
 
     expect(admitted).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
@@ -157,7 +179,7 @@ describe("channel pairing approvals", () => {
     ],
   ])("%s mentions only the requester even with special characters in their name", async (channel, id, name, expected) => {
     seedConnection(channel);
-    const send = rs.fn<TalkRouter["send"]>(async () => ({
+    const send = rs.fn<Send>(async () => ({
       messageId: "sent",
       conversationId: "dm" as ConversationId,
     }));
@@ -165,21 +187,19 @@ describe("channel pairing approvals", () => {
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
-    })(
-      "connection",
+      registry: registryOf(send),
+    })("connection", channel, {
       channel,
-      {
-        senderId: id,
-        senderDisplayName: name,
-        conversationId: "dm" as ConversationId,
-        messageId: "request",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date(),
-        thread: { kind: "dm" },
-      },
-      { send } as unknown as TalkRouter,
-    );
+      direction: "inbound",
+      senderId: id,
+      senderDisplayName: name,
+      conversationId: "dm" as ConversationId,
+      messageId: "request",
+      text: "hello",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "dm" },
+    });
     expect(send.mock.calls[0][2].text).toContain(`Pair ${expected} with Rome.`);
   });
 
@@ -215,15 +235,14 @@ describe("channel pairing approvals", () => {
     expect(await repo.pairingCode(first.approval.id)).toBe(code);
     const result = await repo.resolvePending(first.approval.id, "approve", "owner");
     if (result.outcome !== "resolved") throw new Error("Approval failed");
-    const send = rs.fn<TalkRouter["send"]>(async () => ({
+    const send = rs.fn<Send>(async () => ({
       messageId: "sent",
       conversationId: "dm" as ConversationId,
     }));
-    const router = {
-      send,
-      feature: () => ({ conversationFor: async () => "dm" as ConversationId }),
-    } as unknown as TalkRouter;
-    await notifyPairingResolution(router, result.approval);
+    const registry = registryOf(send, () => ({
+      conversationFor: async () => "dm" as ConversationId,
+    }));
+    await notifyPairingResolution(registry, result.approval);
     expect(send).toHaveBeenCalledWith(input.connectionId, "dm", {
       text: '✅ <at user_id="ou_123">Alice</at> (`ou_123`) is paired with Rome. You can start chatting now.',
     });
@@ -268,17 +287,20 @@ describe("channel pairing approvals", () => {
       .onConflictDoNothing()
       .run();
     await people.addChannelMapping(STRANGER_PERSON_ID, channel, accountId, "Alice");
+    const send = rs.fn<Send>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const registry = registryOf(send);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: people,
+      registry,
     });
-    const send = rs.fn<TalkRouter["send"]>(async () => ({
-      messageId: "sent",
-      conversationId: "dm" as ConversationId,
-    }));
-    const router = { send } as unknown as TalkRouter;
-    const message: InboundMessage = {
+    const message: ChannelMessage = {
+      channel,
+      direction: "inbound",
       senderId: accountId,
       senderDisplayName: "Alice",
       conversationId: "dm" as ConversationId,
@@ -288,11 +310,11 @@ describe("channel pairing approvals", () => {
       timestamp: new Date(),
       thread: { kind: "dm" },
     };
-    expect(await admit("connection", channel, message, router)).toBe(false);
+    expect(await admit("connection", channel, message)).toBe(false);
     const request = (await repo.findPending())[0];
     expect(request).toBeDefined();
     expect((await people.findByChannelUser(channel, accountId))?.id).toBe(STRANGER_PERSON_ID);
-    expect(await admit("connection", channel, message, router)).toBe(false);
+    expect(await admit("connection", channel, message)).toBe(false);
     expect(await repo.findPending()).toHaveLength(1);
     expect(send).toHaveBeenCalledTimes(1);
     testDb.db.run(
@@ -316,7 +338,7 @@ describe("channel pairing approvals", () => {
       expect((await repo.resolvePending(request.id, "approve", "owner")).outcome).toBe("resolved");
     }
     expect((await people.findByChannelUser(channel, accountId))?.id).toBe("owner");
-    expect(await admit("connection", channel, message, router)).toBe(true);
+    expect(await admit("connection", channel, message)).toBe(true);
   });
 
   it.each([
@@ -340,26 +362,24 @@ describe("channel pairing approvals", () => {
       });
       return null;
     });
-    const send = rs.fn<TalkRouter["send"]>();
+    const send = rs.fn<Send>();
     const admission = createPairingAdmission({
       approvalsRepo: repo,
       personMappingRepo: people,
       talkGrants,
-    })(
-      "connection",
-      "telegram",
-      {
-        senderId: "123",
-        senderDisplayName: "Alice",
-        conversationId: "dm" as ConversationId,
-        messageId: "racing",
-        text: "hello",
-        attachments: [],
-        timestamp: new Date(),
-        thread: { kind: "dm" },
-      },
-      { send } as unknown as TalkRouter,
-    );
+      registry: registryOf(send),
+    })("connection", "telegram", {
+      channel: "telegram",
+      direction: "inbound",
+      senderId: "123",
+      senderDisplayName: "Alice",
+      conversationId: "dm" as ConversationId,
+      messageId: "racing",
+      text: "hello",
+      attachments: [],
+      timestamp: new Date(),
+      thread: { kind: "dm" },
+    });
     await paused;
     testDb.db.transaction((tx) => {
       repo.supersedePairings("connection", tx);
@@ -563,16 +583,17 @@ describe("channel pairing approvals", () => {
     "feishu",
   ])("blocks unknown %s messages and consumes group and replayed verification", async (service) => {
     seedConnection(service);
+    const send = rs.fn<Send>(async () => ({
+      messageId: "sent",
+      conversationId: "dm" as ConversationId,
+    }));
+    const registry = registryOf(send);
     const admit = createPairingAdmission({
       talkGrants,
       approvalsRepo: repo,
       personMappingRepo: new PersonMappingRepository(testDb.db),
+      registry,
     });
-    const send = rs.fn<TalkRouter["send"]>(async () => ({
-      messageId: "sent",
-      conversationId: "dm" as ConversationId,
-    }));
-    const router = { send } as unknown as TalkRouter;
     const id = service === "feishu" ? "ou_123" : "123";
     const account =
       service === "telegram"
@@ -580,7 +601,9 @@ describe("channel pairing approvals", () => {
         : service === "discord"
           ? "<@123> (`123`)"
           : '<at user_id="ou_123">Owner</at> (`ou_123`)';
-    const message: InboundMessage = {
+    const message: ChannelMessage = {
+      channel: service,
+      direction: "inbound",
       senderId: id,
       senderDisplayName: "Owner",
       senderUsername: service === "telegram" ? "realowner" : undefined,
@@ -592,49 +615,39 @@ describe("channel pairing approvals", () => {
       thread: { kind: "dm" },
     };
     const group = { ...message, thread: { kind: "group" as const } };
-    expect(await admit("connection", service, { ...group, addressing: "ambient" }, router)).toBe(
-      false,
-    );
+    expect(await admit("connection", service, { ...group, addressing: "ambient" })).toBe(false);
     expect(send).not.toHaveBeenCalled();
     expect(await repo.findPending()).toHaveLength(0);
     if (service === "telegram") {
       expect(
-        await admit(
-          "connection",
-          service,
-          { ...group, senderId: "-100123", text: "ROME-PAIR-code" },
-          router,
-        ),
+        await admit("connection", service, {
+          ...group,
+          senderId: "-100123",
+          text: "ROME-PAIR-code",
+        }),
       ).toBe(false);
       expect(await repo.findPending()).toHaveLength(0);
     }
-    expect(await admit("connection", service, { ...group, addressing: "mention" }, router)).toBe(
-      false,
-    );
-    expect(await admit("connection", service, message, router)).toBe(false);
+    expect(await admit("connection", service, { ...group, addressing: "mention" })).toBe(false);
+    expect(await admit("connection", service, message)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2].text).toContain(`🔗 Pair ${account} with Rome.`);
     expect(send.mock.calls[0][2].text).toContain(
       `Learn more in the [Pairing Guide](https://romeos.cc/docs/rome/${service === "feishu" ? "lark" : service}).`,
     );
-    expect(await admit("connection", service, message, router)).toBe(false);
+    expect(await admit("connection", service, message)).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
     const request = (await repo.findPending())[0];
     const code = (await repo.pairingCode(request.id))!;
     expect(
-      await admit(
-        "connection",
-        service,
-        { ...message, text: code, thread: { kind: "group" } },
-        router,
-      ),
+      await admit("connection", service, { ...message, text: code, thread: { kind: "group" } }),
     ).toBe(false);
     expect((await repo.findById(request.id))?.status).toBe("pending");
-    expect(
-      await admit("connection", service, { ...message, text: code.toLowerCase() }, router),
-    ).toBe(false);
-    expect(await admit("connection", service, { ...message, text: code }, router)).toBe(false);
-    expect(await admit("connection", service, message, router)).toBe(true);
+    expect(await admit("connection", service, { ...message, text: code.toLowerCase() })).toBe(
+      false,
+    );
+    expect(await admit("connection", service, { ...message, text: code })).toBe(false);
+    expect(await admit("connection", service, message)).toBe(true);
     expect(
       send.mock.calls.some(
         ([, , body]) =>

@@ -23,6 +23,7 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { readRomeCredits, RomeCreditsRow } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
@@ -51,6 +52,7 @@ import {
   type AnthropicCompatibleConfigurationId,
   type AnthropicCompatibleProviderSummary,
 } from "@rome/api-types/anthropic-compatible-providers";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 
 const TerminalModal = lazy(() => import("@/components/terminal-modal"));
 const ChatGPTLoginModal = lazy(() =>
@@ -243,6 +245,11 @@ type LogoutProvider = keyof typeof LOGOUT_PROVIDER_CONFIG;
 interface AiToolsPanelProps {
   hiddenProviders?: readonly AiToolProviderId[];
   showUsage?: boolean;
+  /** Show the account's Rome credits above the sign-ins when it has any. */
+  showRomeCredits?: boolean;
+  /** Credits the caller already read. The panel then shows these and does not
+   *  read or poll them itself. */
+  romeCredits?: RomeCreditsView | null;
   showHeader?: boolean;
   onConnectedChange?: (connected: boolean) => void;
 }
@@ -458,6 +465,8 @@ export function shouldShowAiToolUsage(
 export function AiToolsPanel({
   hiddenProviders = [],
   showUsage = false,
+  showRomeCredits = false,
+  romeCredits: providedRomeCredits,
   showHeader = true,
   onConnectedChange,
 }: AiToolsPanelProps) {
@@ -487,8 +496,21 @@ export function AiToolsPanel({
   const [savingAnthropicProvider, setSavingAnthropicProvider] = useState(false);
   const [anthropicProviderMessage, setAnthropicProviderMessage] = useState("");
   const [loadingStatus, setLoadingStatus] = useState(true);
+  // The credits row waits for the first successful status only, since its
+  // state depends on the ChatGPT login; a later re-read keeps it in place.
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+  const fetchesRomeCredits = showRomeCredits && providedRomeCredits === undefined;
+  const romeCredits = providedRomeCredits === undefined ? fetchedRomeCredits : providedRomeCredits;
+
+  // Rome Cloud owns the balance. A failed read keeps the last known one rather
+  // than hiding the row during a transient outage.
+  const fetchRomeCredits = useCallback(async () => {
+    const credits = await readRomeCredits();
+    if (credits !== undefined) setRomeCredits(credits);
+  }, []);
 
   const fetchAnthropicProviders = useCallback(async () => {
     const res = await fetch("/api/ai-tools/anthropic-compatible-providers");
@@ -517,6 +539,7 @@ export function AiToolsPanel({
         ...(data.claude ? { claude: data.claude } : {}),
         ...(data.codex ? { codex: data.codex } : {}),
       });
+      setStatusLoaded(true);
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -544,14 +567,20 @@ export function AiToolsPanel({
     fetchAnthropicProviders().catch(() => {
       /* ignore */
     });
-  }, [fetchStatus, fetchAnthropicProviders]);
+    if (fetchesRomeCredits) {
+      fetchRomeCredits().catch(() => {
+        /* ignore */
+      });
+    }
+  }, [fetchStatus, fetchAnthropicProviders, fetchRomeCredits, fetchesRomeCredits]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
       void fetchStatus();
+      if (fetchesRomeCredits) void fetchRomeCredits().catch(() => {});
     }, AI_TOOLS_STATUS_REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [fetchStatus]);
+  }, [fetchStatus, fetchRomeCredits, fetchesRomeCredits]);
 
   function handleTerminalClose() {
     setTerminalPreset(null);
@@ -647,18 +676,16 @@ export function AiToolsPanel({
   async function handleRefresh() {
     setRefreshPending(true);
     setRefreshError(null);
+    if (fetchesRomeCredits) void fetchRomeCredits().catch(() => {});
     try {
       const res = await fetch("/api/ai-tools/refresh", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
-        claude?: AIToolStatus;
-        codex?: AIToolStatus;
+        claude: AIToolStatus;
+        codex: AIToolStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
-      setToolStatus({
-        ...(data.claude ? { claude: data.claude } : {}),
-        ...(data.codex ? { codex: data.codex } : {}),
-      });
+      setToolStatus({ claude: data.claude, codex: data.codex });
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {
@@ -807,9 +834,9 @@ export function AiToolsPanel({
                   className={`shrink-0 ${AI_TOOL_ACTION_BUTTON_CLASS}`}
                 >
                   {refreshPending ? (
-                    <Spinner size="sm" aria-hidden />
+                    <Spinner data-icon="inline-start" size="sm" aria-hidden />
                   ) : (
-                    <RefreshCw className="size-4" aria-hidden />
+                    <RefreshCw data-icon="inline-start" className="size-4" aria-hidden />
                   )}
                   {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
                 </Button>
@@ -824,6 +851,15 @@ export function AiToolsPanel({
         )}
 
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
+          {showRomeCredits && romeCredits && statusLoaded && (
+            <RomeCreditsRow
+              credits={romeCredits}
+              // The payer counts an unknown ChatGPT login as connected, so only
+              // an explicit false lets credits pay.
+              chatgptConnected={toolStatus.codex?.loggedIn !== false}
+              claudeConnected={toolStatus.claude?.loggedIn === true}
+            />
+          )}
           {visibleProviders.map((provider) => {
             const status = toolStatus[provider.statusKey];
             const isLoggedIn = status?.loggedIn === true;
@@ -1018,7 +1054,11 @@ export function AiToolsPanel({
                               >
                                 {logoutProvider === provider.statusKey && logoutPending ? (
                                   <>
-                                    <Spinner size="sm" label={t("aiTools.loggingOut")} />
+                                    <Spinner
+                                      data-icon="inline-start"
+                                      size="sm"
+                                      label={t("aiTools.loggingOut")}
+                                    />
                                     <span aria-hidden>{t("aiTools.loggingOut")}</span>
                                   </>
                                 ) : (
@@ -1239,7 +1279,7 @@ export function AiToolsPanel({
                         setAnthropicEnvError(null);
                       }}
                     >
-                      <Plus />
+                      <Plus data-icon="inline-start" />
                       {t("aiTools.otherProviders.custom.addVariable")}
                     </Button>
                   </div>

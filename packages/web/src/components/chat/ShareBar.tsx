@@ -231,7 +231,7 @@ export function ShareBar({
         onClick={() => void handleCreate()}
         disabled={count === 0 || creating}
       >
-        <Link2 className="size-4" />
+        <Link2 data-icon="inline-start" className="size-4" />
         {creating ? t("share.creating", "Creating…") : t("share.create", "Create link")}
       </Button>
 
@@ -247,7 +247,11 @@ export function ShareBar({
             className="flex-1"
           />
           <Button variant="outline" onClick={() => handleCopy(createdUrl)}>
-            {copiedUrl === createdUrl ? <Check className="size-4" /> : <Copy className="size-4" />}
+            {copiedUrl === createdUrl ? (
+              <Check data-icon="inline-start" className="size-4" />
+            ) : (
+              <Copy data-icon="inline-start" className="size-4" />
+            )}
             {copiedUrl === createdUrl ? t("share.copied", "Copied") : t("share.copy", "Copy")}
           </Button>
         </div>

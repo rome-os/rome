@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Chat, type SessionMessage } from "@/components/chat/Chat";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
-import {
-  fetchRomeNewsDefinitions,
-  getQuickEntries,
-  type QuickEntry,
-  type QuickEntryDefinition,
-} from "@/config/quick-entries";
+import { fetchRomeNewsDefinitions, getQuickEntries } from "@/config/quick-entries";
+import type {
+  ResolvedRomeNewsItem,
+  RomeNewsDefinition,
+} from "@rome-os/rome-web-components/news-item/schema";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -110,8 +109,21 @@ export function ChatComponent({
   }, [initialSkillName, sessionId]);
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
+  const handleSessionNotFound = useCallback(
+    (missingSessionId: string) => {
+      if (missingSessionId !== sessionId) return;
+      if (onSessionNotFound) {
+        onSessionNotFound();
+        return;
+      }
+      navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+    },
+    [sessionId, onSessionNotFound, navigate, hideSidebar],
+  );
   const [cloudQuickEntryDefinitions, setCloudQuickEntryDefinitions] = useState<
-    QuickEntryDefinition[]
+    RomeNewsDefinition[]
   >([]);
   const quickEntries = useMemo(
     () => getQuickEntries(cloudQuickEntryDefinitions, i18n.language),
@@ -188,7 +200,7 @@ export function ChatComponent({
   const [appStoreSrc, setAppStoreSrc] = useState<string | null>(null);
 
   const handleActivateQuickEntry = useCallback(
-    (entry: QuickEntry) => {
+    (entry: ResolvedRomeNewsItem) => {
       switch (entry.type) {
         case "chat": {
           draftComposerRef.current?.setSkillSelection(
@@ -349,7 +361,7 @@ export function ChatComponent({
         sessionId={sessionId}
         mainAgentDisplayName={mainAgentDisplayName}
         onSessionsChanged={notifySessionsChanged}
-        onSessionNotFound={onSessionNotFound ? () => onSessionNotFound() : undefined}
+        onSessionNotFound={handleSessionNotFound}
         onSessionMessage={onSessionMessage}
       />
     );

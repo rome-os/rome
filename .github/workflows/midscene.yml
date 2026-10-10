@@ -24,6 +24,11 @@ on:
         description: Rebuild the Summary from an existing run's shard artifacts without model calls
         required: false
         type: string
+      publish_pages:
+        description: Publish reports to Pages when this repository is enabled
+        required: false
+        type: boolean
+        default: true
 
 # Credential trust model:
 # The four MIDSCENE_MODEL_* secrets are billable, and a pull_request job runs
@@ -34,8 +39,8 @@ on:
 # bearing path (the `midscene` matrix) is restricted to the protected main
 # branch in the upstream repository. Fork owners may explicitly dispatch a
 # fork branch with their fork's own secrets. Pull requests run secret-free
-# harness and mock-browser boundary jobs. A configured publisher repository
-# renders and publishes reports.
+# harness and mock-browser boundary jobs. Reports are always aggregated after
+# model runs. Pages publication is enabled upstream and opt-in for forks.
 
 permissions:
   contents: read
@@ -44,9 +49,14 @@ concurrency:
   group: midscene-e2e-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  MIDSCENE_UPSTREAM_REPOSITORY: rome-os/rome
+
 jobs:
   harness-validation:
     name: Midscene harness validation (no secrets)
+    outputs:
+      upstream-repository: ${{ env.MIDSCENE_UPSTREAM_REPOSITORY }}
     # Runs on path-filtered PRs, nightly, and manual dispatch: validates the package
     # without model secrets, a browser download, the Rome workspace install,
     # or the mock server. Loading the config and collecting YAML cases never
@@ -144,6 +154,7 @@ jobs:
           if-no-files-found: ignore
 
   midscene:
+    needs: harness-validation
     name: "Midscene visual: ${{ matrix.label }} (${{ matrix.shard }})"
     # Fail-closed trust gate: contributor-controlled pull request code never
     # runs automatically with billable model credentials. Upstream runs only
@@ -151,8 +162,9 @@ jobs:
     # own secrets.
     if: >-
       inputs.report_source_run_id == '' &&
-      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
-      (github.event_name == 'workflow_dispatch' && github.repository != 'rome-os/rome'))
+      needs.harness-validation.outputs.upstream-repository != '' &&
+      (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && github.repository != needs.harness-validation.outputs.upstream-repository))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -300,21 +312,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Add shard results to the job Summary
-        if: always() && github.repository == vars.MIDSCENE_PUBLISH_REPO
-        working-directory: tests/midscene
-        env:
-          SHARD: ${{ matrix.shard }}
-          PRODUCER_RESULT: ${{ steps.run-shard.outcome == 'success' && steps.upload-shard.outcome == 'success' && 'success' || 'failure' }}
-        run: |
-          node scripts/render-ci-summary.mjs \
-            --reports-dir . \
-            --expected-projects "web-$SHARD" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --pages-url "https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}/runs/$GITHUB_RUN_ID/midscene-$SHARD/" \
-            --producer-result "$PRODUCER_RESULT" \
-            --output "$GITHUB_STEP_SUMMARY"
-
       - name: Upload mock server log on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -325,20 +322,19 @@ jobs:
           retention-days: 14
 
   report-summary:
-    name: Merge Midscene reports and assemble Summary
+    name: Merge Midscene reports
     needs: midscene
     if: >-
       always() && !cancelled() &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '') &&
-      github.repository == vars.MIDSCENE_PUBLISH_REPO
+      github.event_name != 'pull_request' &&
+      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       actions: read
       contents: read
-      pages: write
     outputs:
-      pages-artifact-name: ${{ steps.upload-pages.outcome == 'success' && steps.pages-artifact.outputs.name || '' }}
+      report-artifact-name: ${{ steps.upload-report.outcome == 'success' && 'midscene-e2e-report' || '' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -361,8 +357,8 @@ jobs:
         if: inputs.report_source_run_id != ''
         env:
           REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-        run: |
-          [[ "$REPORT_SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          GH_TOKEN: ${{ github.token }}
+        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
 
       # Separate directories preserve reports whose generated filenames match
       # across serial shards.
@@ -400,39 +396,6 @@ jobs:
           });
           NODE
 
-      - name: Configure GitHub Pages
-        id: pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-        with:
-          enablement: true
-
-      - name: Find the latest published report artifact
-        id: previous-report
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
-            --jq '[.artifacts[] | select(.name | startswith("midscene-e2e-report-pages-")) | select(.expired == false)][0]')
-          if [ "$artifact" != "null" ]; then
-            echo "name=$(jq -r .name <<< "$artifact")" >> "$GITHUB_OUTPUT"
-            echo "run_id=$(jq -r .workflow_run.id <<< "$artifact")" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Download the latest published report
-        if: steps.previous-report.outputs.run_id != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ steps.previous-report.outputs.name }}
-          run-id: ${{ steps.previous-report.outputs.run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/previous-pages-artifact
-
-      - name: Extract the latest published report
-        if: steps.previous-report.outputs.run_id != ''
-        run: |
-          mkdir -p "$RUNNER_TEMP/previous-pages"
-          tar -xf "$RUNNER_TEMP/previous-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/previous-pages"
-
       - name: Render case table
         id: case-table
         continue-on-error: true
@@ -444,53 +407,19 @@ jobs:
             --expected-projects "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6" \
             --case-manifest "tests/midscene/case-manifest.json" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --pages-url "${{ steps.pages.outputs.base_url }}/runs/$GITHUB_RUN_ID/" \
             --producer-result "$PRODUCER_RESULT" \
-            --output "$RUNNER_TEMP/midscene-summary.md"
-
-      - name: Prepare published report
-        run: |
-          node tests/midscene/scripts/prepare-pages-site.mjs \
-            --site "$RUNNER_TEMP/midscene-pages" \
-            --reports "$RUNNER_TEMP/midscene-report-shards" \
-            --run-id "$GITHUB_RUN_ID" \
-            --previous "$RUNNER_TEMP/previous-pages"
-
-      - name: Add case table to the run Summary
-        env:
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          CASE_TABLE_RESULT: ${{ steps.case-table.outcome }}
-        run: |
-          if [ -n "$REPORT_SOURCE_RUN_ID" ]; then
-            echo "Report rebuilt from [run $REPORT_SOURCE_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$REPORT_SOURCE_RUN_ID) without new model calls." >> "$GITHUB_STEP_SUMMARY"
-            echo >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ "$CASE_TABLE_RESULT" = "success" ]; then
-            cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Case table generation failed. [Download available shard reports]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts)." >> "$GITHUB_STEP_SUMMARY"
-          fi
+            --output "$RUNNER_TEMP/midscene-report-shards/summary.md"
 
       - name: Upload combined Midscene report
+        id: upload-report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: midscene-e2e-report
+          include-hidden-files: true
           path: ${{ runner.temp }}/midscene-report-shards/
           if-no-files-found: error
           retention-days: 14
-
-      - name: Name GitHub Pages artifact
-        id: pages-artifact
-        run: echo "name=midscene-e2e-report-pages-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-
-      - name: Upload GitHub Pages report
-        id: upload-pages
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          name: ${{ steps.pages-artifact.outputs.name }}
-          path: ${{ runner.temp }}/midscene-pages
-          retention-days: 90
 
       - name: Require complete native report
         if: >-
@@ -501,12 +430,143 @@ jobs:
           echo "The native Midscene Test report is incomplete; see the run Summary and shard artifacts." >&2
           exit 1
 
+  available-results:
+    name: Midscene results before publication
+    needs: [midscene, report-summary]
+    if: >-
+      always() && !cancelled() && github.event_name != 'pull_request' &&
+      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Download available results
+        id: report
+        if: needs.report-summary.outputs.report-artifact-name != ''
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.report-summary.outputs.report-artifact-name }}
+          path: ${{ runner.temp }}/midscene-results
+
+      - name: Show results without waiting for Pages
+        if: always()
+        env:
+          REPORT_RESULT: ${{ needs.report-summary.result }}
+        run: |
+          if [ -f "$RUNNER_TEMP/midscene-results/summary.md" ]; then
+            cat "$RUNNER_TEMP/midscene-results/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Midscene results"
+              echo
+              echo "Report aggregation: $REPORT_RESULT. Case counts are unavailable."
+              echo
+              echo "[Inspect this run and available shard artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  prepare-pages:
+    name: Prepare optional Midscene Pages publication
+    needs: [harness-validation, report-summary]
+    # Publication never runs on contributor-controlled pull request code.
+    # Upstream is enabled in code; each fork must opt in by its exact full name.
+    if: >-
+      always() && !cancelled() && github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' || inputs.publish_pages) &&
+      needs.harness-validation.outputs.upstream-repository != '' &&
+      (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
+      github.repository != needs.harness-validation.outputs.upstream-repository && github.repository == vars.MIDSCENE_PUBLISH_REPO && github.event_name == 'workflow_dispatch') &&
+      needs.report-summary.outputs.report-artifact-name != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pages: read
+    outputs:
+      pages-artifact-name: ${{ steps.upload-pages.outcome == 'success' && steps.pages-artifact.outputs.name || '' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Configure GitHub Pages
+        id: pages
+        continue-on-error: true
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        with:
+          enablement: false
+
+      - name: Explain unavailable Pages configuration
+        if: steps.pages.outcome != 'success'
+        run: |
+          echo "::warning::GitHub Pages is unavailable. A maintainer must select Settings > Pages > Build and deployment > Source > GitHub Actions."
+
+      - name: Download combined Midscene report
+        if: steps.pages.outcome == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.report-summary.outputs.report-artifact-name }}
+          path: ${{ runner.temp }}/midscene-report-shards
+
+      - name: Find the latest published report artifact
+        id: previous-report
+        if: steps.pages.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tests/midscene/scripts/trusted-report-runs.mjs find-previous
+
+      - name: Download the latest published report
+        if: steps.pages.outcome == 'success' && steps.previous-report.outputs.run_id != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ steps.previous-report.outputs.name }}
+          run-id: ${{ steps.previous-report.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/previous-pages-artifact
+
+      - name: Extract the latest published report
+        if: steps.pages.outcome == 'success' && steps.previous-report.outputs.run_id != ''
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous-pages"
+          tar -xf "$RUNNER_TEMP/previous-pages-artifact/artifact.tar" -C "$RUNNER_TEMP/previous-pages"
+
+      - name: Prepare published report
+        if: steps.pages.outcome == 'success'
+        run: |
+          node tests/midscene/scripts/prepare-pages-site.mjs \
+            --site "$RUNNER_TEMP/midscene-pages" \
+            --reports "$RUNNER_TEMP/midscene-report-shards" \
+            --run-id "$GITHUB_RUN_ID" \
+            --previous "$RUNNER_TEMP/previous-pages"
+
+      - name: Name GitHub Pages artifact
+        id: pages-artifact
+        if: steps.pages.outcome == 'success'
+        run: echo "name=midscene-e2e-report-pages-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload GitHub Pages report
+        id: upload-pages
+        if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          name: ${{ steps.pages-artifact.outputs.name }}
+          path: ${{ runner.temp }}/midscene-pages
+          retention-days: 90
+
   deploy-report:
     name: Publish Midscene HTML report
-    needs: report-summary
+    needs: prepare-pages
     if: >-
-      always() && github.repository == vars.MIDSCENE_PUBLISH_REPO &&
-      needs.report-summary.outputs.pages-artifact-name != ''
+      always() && !cancelled() &&
+      needs.prepare-pages.outputs.pages-artifact-name != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
@@ -515,6 +575,8 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    outputs:
+      page-url: ${{ steps.deployment.outputs.page_url }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -523,4 +585,101 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
-          artifact_name: ${{ needs.report-summary.outputs.pages-artifact-name }}
+          artifact_name: ${{ needs.prepare-pages.outputs.pages-artifact-name }}
+
+  report-results:
+    name: Midscene results
+    needs: [midscene, report-summary, prepare-pages, deploy-report]
+    # Results are already visible in available-results while Pages awaits approval.
+    # This Summary adds publication status and verified report links.
+    if: >-
+      always() && !cancelled() && github.event_name != 'pull_request' &&
+      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+
+      - name: Validate report source run
+        id: source-run
+        if: inputs.report_source_run_id != ''
+        continue-on-error: true
+        env:
+          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
+
+      - name: Download combined Midscene report
+        id: combined-report
+        if: >-
+          needs.report-summary.outputs.report-artifact-name != '' &&
+          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.report-summary.outputs.report-artifact-name }}
+          path: ${{ runner.temp }}/midscene-combined-report
+
+      - name: Recover available shard reports
+        if: >-
+          steps.combined-report.outcome != 'success' &&
+          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: midscene-shard-*
+          run-id: ${{ inputs.report_source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/midscene-report-shards
+          merge-multiple: false
+
+      - name: Write the consolidated run Summary
+        if: always()
+        env:
+          PAGE_URL: ${{ needs.deploy-report.result == 'success' && needs.deploy-report.outputs.page-url || '' }}
+          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
+          REPORTS_DIR: ${{ steps.combined-report.outcome == 'success' && 'midscene-combined-report' || 'midscene-report-shards' }}
+          PRODUCER_RESULT: ${{ needs.report-summary.result == 'success' && (inputs.report_source_run_id != '' || needs.midscene.result == 'success') && 'success' || 'failure' }}
+          REPORT_RESULT: ${{ needs.report-summary.result }}
+          PUBLICATION_RESULT: ${{ needs.prepare-pages.result == 'failure' && 'failure' || needs.deploy-report.result }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          pages_url=""
+          if [ -n "$PAGE_URL" ]; then
+            pages_url="${PAGE_URL%/}/runs/$GITHUB_RUN_ID/"
+          fi
+          if node tests/midscene/scripts/render-ci-summary.mjs \
+            --reports-dir "$RUNNER_TEMP/$REPORTS_DIR" \
+            --expected-projects "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6" \
+            --case-manifest "tests/midscene/case-manifest.json" \
+            --run-url "$run_url" \
+            --pages-url "$pages_url" \
+            --source-run-id "$REPORT_SOURCE_RUN_ID" \
+            --producer-result "$PRODUCER_RESULT" \
+            --report-result "$REPORT_RESULT" \
+            --publication-result "$PUBLICATION_RESULT" \
+            --output "$RUNNER_TEMP/midscene-summary.md"; then
+            cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Rome × Midscene · Summary unavailable"
+              echo
+              echo "Case counts could not be read. Aggregation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT."
+              echo
+              echo "[Inspect this run and available artifacts]($run_url#artifacts)."
+              if [[ "$REPORT_SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
+                echo "[Inspect source-run artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$REPORT_SOURCE_RUN_ID#artifacts)."
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

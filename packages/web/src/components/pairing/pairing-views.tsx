@@ -238,7 +238,11 @@ export function PairingCodeSection({
                 onClick={onCopy}
                 aria-label={t(state.copied ? "pairing.copied" : "pairing.copy")}
               >
-                {state.copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                {state.copied ? (
+                  <Check data-icon="inline-start" aria-hidden="true" />
+                ) : (
+                  <Copy data-icon="inline-start" aria-hidden="true" />
+                )}
                 {t("pairing.copy")}
               </Button>
             </div>

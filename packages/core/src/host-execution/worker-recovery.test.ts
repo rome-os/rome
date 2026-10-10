@@ -16,7 +16,7 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import { RoutineEngine } from "../routines/engine.js";
-import { createTestDb } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
 import { buildAction, FakeClock } from "../test/kit/index.js";
 import { HostExecutionService } from "./service.js";
 import { createHostWorkerRecovery } from "./worker-recovery.js";
@@ -80,7 +80,7 @@ async function setup(nested = false, signal: NodeJS.Signals | null = null, cance
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   });
-  const registry = new ActionRegistryImpl([]);
+  const registry = new ActionRegistryImpl();
   const hostAction = createAction(buildAction(actionName, { cancellable: false }).config, {
     hostExecution: new HostExecutionService({ enabled: true, socketPath }),
   });
@@ -117,7 +117,7 @@ async function setup(nested = false, signal: NodeJS.Signals | null = null, cance
           },
         },
   );
-  const workerEngine = new ActionEngine(registry, undefined, repo);
+  const workerEngine = new ActionEngine(registry, createActionEngineRepos(testDb.db));
   if (nested)
     registry.register(
       buildAction("app:parent", {
@@ -157,7 +157,7 @@ async function setup(nested = false, signal: NodeJS.Signals | null = null, cance
     });
     return child as unknown as ChildProcess;
   });
-  engine = new ActionEngine(registry, undefined, repo, undefined, undefined, {
+  engine = new ActionEngine(registry, createActionEngineRepos(testDb.db), {
     processRole: "main",
     workerWarmPoolSize: 0,
     clock,
@@ -253,7 +253,6 @@ describe("host jobs after action worker loss", () => {
         fire = callback;
       },
       deactivate() {},
-      isActive: () => true,
       stop() {},
     });
     const id = await routines.create({

@@ -47,6 +47,10 @@ function renderAdvanced(tailscale: Record<string, unknown>, relay: Record<string
     if (url === "/api/settings") return response({});
     if (url === "/api/tailscale/devices") return response(tailscale);
     if (url === "/api/integrations/relay") return response({ relay });
+    if (url === "/api/public-access") {
+      return response({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
+    }
+    if (url === "/api/dashboard-access") return response({ cloudEmailAccess: [] });
     return response({});
   }) as typeof fetch);
 

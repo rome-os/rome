@@ -547,6 +547,19 @@
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshFailed": "无法刷新 AI 工具，请重试。",
+    "romeCredits": {
+      "name": "Rome 额度",
+      "status": {
+        "inUse": "使用中",
+        "ready": "就绪",
+        "standby": "待用",
+        "usedUp": "已用完",
+        "usedUpWithClaude": "已用完",
+        "paused": "已暂停"
+      },
+      "ofGranted": "共 {{amount}}",
+      "meterLabel": "Rome 剩余额度"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"
@@ -791,6 +804,14 @@
       "lastSeen": "上次在线",
       "notReported": "未提供",
       "installExtension": "安装 OpenCLI 扩展"
+    },
+    "feedback": {
+      "title": "反馈",
+      "agentReports": {
+        "title": "智能体平台问题报告",
+        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "toggleLabel": "允许智能体发送报告"
+      }
     }
   },
   "system": {
@@ -822,11 +843,6 @@
     "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "Rome 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。"
-  },
-  "sentinel": {
-    "title": "哨兵设置",
-    "intervalLabel": "审阅间隔（分钟）",
-    "intervalHelp": "提醒守护者审阅哨兵日志条目的频率。"
   },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",

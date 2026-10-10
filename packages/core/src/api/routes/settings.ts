@@ -1,3 +1,4 @@
+import { AGENT_REPORTS_ENABLED_KEY } from "../../lib/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -48,6 +49,10 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     const body = await c.req
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);
+
+    if (AGENT_REPORTS_ENABLED_KEY in body && typeof body[AGENT_REPORTS_ENABLED_KEY] !== "boolean") {
+      return c.json({ error: "feedback.agentReportsEnabled must be a boolean" }, 400);
+    }
 
     for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
       if (key in body) {

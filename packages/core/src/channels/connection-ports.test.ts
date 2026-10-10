@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { ChannelMessage, ConversationId, NormalizedMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import type { TalkHistory } from "../connections/types.js";
-import { historyFeature } from "../connections/integrations/talk-features.js";
+import {
+  historyQueryLimit,
+  historyWindowHours,
+} from "../connections/integrations/talk-features.js";
 import {
   connectionPorts,
   LIVE_DEFAULT_WINDOW_MS,
@@ -9,6 +12,11 @@ import {
   type ConnectionPortsDeps,
 } from "./connection-ports.js";
 import { testMessagesQueryContract } from "./messages-contract.js";
+import { ChannelNotConnected } from "./channel.js";
+import { ConnectionRegistry } from "../connections/registry.js";
+import { DrizzleGrantLedger } from "../connections/ledger-db.js";
+import { makePasteTalk } from "../connections/test-fixtures.js";
+import { createTestDb } from "../test/helpers.js";
 
 // A channel with no store answers `query` through its Connection's history.
 // That history reads a window rounded out to whole hours, as the adapters do,
@@ -16,18 +24,33 @@ import { testMessagesQueryContract } from "./messages-contract.js";
 
 const HOUR = 3_600_000;
 
-function said(id: string, threadId: string, hoursAgo: number): NormalizedMessage {
+function said(id: string, conversationId: string, hoursAgo: number): ChannelMessage {
   return {
-    id,
     channel: "telegram_user",
-    channelUserId: "7",
-    displayName: "Chat",
-    threadId,
-    threadType: threadId === "group-1" ? "group" : "private",
-    timestamp: new Date(Date.now() - hoursAgo * HOUR),
+    direction: "inbound",
+    messageId: id,
+    conversationId: conversationId as ConversationId,
+    senderId: "7",
+    senderDisplayName: "Chat",
     text: id,
     attachments: [],
-    rawEvent: null,
+    timestamp: new Date(Date.now() - hoursAgo * HOUR),
+    thread: { kind: conversationId === "group-1" ? "group" : "dm" },
+  };
+}
+
+/** A Connection's history over an adapter's read, as the integrations build it. */
+function historyOver(
+  fetchHistory: (conversationId: string | null, windowHours: number) => Promise<ChannelMessage[]>,
+): TalkHistory {
+  return {
+    async query(input) {
+      const messages = await fetchHistory(
+        input.conversationId ?? null,
+        historyWindowHours(input.since),
+      );
+      return messages.slice(0, historyQueryLimit(input.limit));
+    },
   };
 }
 
@@ -40,26 +63,28 @@ testMessagesQueryContract("connection-backed messages", () => {
     said("g3", "group-1", 1.5),
     said("d1", "dm-1", 1),
   ];
-  const history = historyFeature(
-    {
-      // An adapter's read: everything in the whole-hour window, oldest first.
-      async fetchHistory(threadId, windowHours) {
-        const cutoff = Date.now() - windowHours * HOUR;
-        return held.filter(
-          (m) => (threadId === null || m.threadId === threadId) && m.timestamp.getTime() >= cutoff,
-        );
-      },
-    },
-    { channel: "telegram_user" },
-  );
+  // An adapter's read: everything in the whole-hour window, oldest first.
+  const history = historyOver(async (conversationId, windowHours) => {
+    const cutoff = Date.now() - windowHours * HOUR;
+    return held.filter(
+      (m) =>
+        (conversationId === null || m.conversationId === conversationId) &&
+        m.timestamp.getTime() >= cutoff,
+    );
+  });
   const deps = {
     registry: {
       getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-      find: () => [{ id: "conn-1" }],
+      find: () => [
+        {
+          id: "conn-1",
+          withTalker: (call: (talker: object) => unknown) => call({ history }),
+          hearTalker: () => () => {},
+        },
+      ],
       onUnlocked: () => {},
       registeredServices: () => ["telegram_user"],
     },
-    router: { feature: () => history },
   } as unknown as ConnectionPortsDeps;
   const messages = connectionPorts(deps, "telegram_user")?.messages;
   if (!messages) throw new Error("a talker with history backs the channel's messages");
@@ -77,23 +102,23 @@ describe("connection-backed messages", () => {
   it("reaches back the default window unless a since is named", async () => {
     const old = said("old", "dm-1", 30);
     const recent = said("recent", "dm-1", 1);
-    const history = historyFeature(
-      {
-        async fetchHistory(_threadId, windowHours) {
-          const cutoff = Date.now() - windowHours * HOUR;
-          return [old, recent].filter((m) => m.timestamp.getTime() >= cutoff);
-        },
-      },
-      { channel: "telegram_user" },
-    );
+    const history = historyOver(async (_conversationId, windowHours) => {
+      const cutoff = Date.now() - windowHours * HOUR;
+      return [old, recent].filter((m) => m.timestamp.getTime() >= cutoff);
+    });
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-        find: () => [{ id: "conn-1" }],
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history }),
+            hearTalker: () => () => {},
+          },
+        ],
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
-      router: { feature: () => history },
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
 
@@ -104,6 +129,34 @@ describe("connection-backed messages", () => {
       "recent",
       "old",
     ]);
+  });
+});
+
+// A read over every conversation that joins each conversation's lines one
+// after another, as Discord's does, still answers the newest lines first.
+describe("connection-backed messages, across conversations", () => {
+  it("answers the newest lines first whatever order the history joins them in", async () => {
+    const lines = [said("a-old", "dm-1", 3), said("a-new", "dm-1", 1), said("b-mid", "dm-2", 2)];
+    const history = historyOver(async () => lines);
+    const deps = {
+      registry: {
+        getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history }),
+            hearTalker: () => () => {},
+          },
+        ],
+        onUnlocked: () => {},
+        registeredServices: () => ["telegram_user"],
+      },
+    } as unknown as ConnectionPortsDeps;
+    const messages = connectionPorts(deps, "telegram_user")?.messages;
+
+    const page = await messages?.query({ limit: 2 });
+
+    expect(page?.map((m) => m.messageId)).toEqual(["a-new", "b-mid"]);
   });
 });
 
@@ -135,11 +188,16 @@ describe("connection-backed messages, shared reads", () => {
     const deps = {
       registry: {
         getDescriptor: () => ({ capabilities: { talker: { history: true } } }),
-        find: () => [{ id: "conn-1" }],
+        find: () => [
+          {
+            id: "conn-1",
+            withTalker: (call: (talker: object) => unknown) => call({ history: { query } }),
+            hearTalker: () => () => {},
+          },
+        ],
         onUnlocked: () => {},
         registeredServices: () => ["telegram_user"],
       },
-      router: { feature: () => ({ query }) },
     } as unknown as ConnectionPortsDeps;
     const messages = connectionPorts(deps, "telegram_user")?.messages;
     if (!messages) throw new Error("a talker with history backs the channel's messages");
@@ -243,5 +301,33 @@ describe("connection-backed messages, shared reads", () => {
     fail = false;
     expect(ids(await messages.query({}))).toEqual(["only"]);
     expect(query).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("connection-backed send, across epochs", () => {
+  it("keeps a held direct port on whichever talker is live", async () => {
+    const registry = new ConnectionRegistry({
+      ledger: new DrizzleGrantLedger(createTestDb().db),
+    });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const connection = await registry.connect("fake-telegram");
+    const offerDirect = (answer: string) => {
+      const talker = fx.talkerFactory.instances.at(-1);
+      if (!talker) throw new Error("talker not built");
+      talker.directMessaging = { conversationFor: async () => answer as ConversationId };
+    };
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    offerDirect("first");
+    const direct = connectionPorts({ registry }, "fake-telegram")?.send?.direct;
+    if (!direct) throw new Error("the talker offers direct messaging");
+    await expect(direct.conversationFor("7")).resolves.toBe("first");
+
+    await connection.auth.revoke("bot");
+    await expect(direct.conversationFor("7")).rejects.toBeInstanceOf(ChannelNotConnected);
+
+    await registry.importCredential(connection.id, "bot", fx.validCredential());
+    offerDirect("second");
+    await expect(direct.conversationFor("7")).resolves.toBe("second");
   });
 });

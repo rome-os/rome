@@ -91,8 +91,23 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { identity: { name: string } } }) => (
-    <div data-testid="message-list">{live.identity.name}</div>
+  MessageList: ({
+    live,
+    rows,
+  }: {
+    live: { identity: { name: string } };
+    rows: { kind: string; key: string; message?: { content: string } }[];
+  }) => (
+    <>
+      <div data-testid="message-list">{live.identity.name}</div>
+      {rows
+        .filter((row) => row.kind === "user")
+        .map((row) => (
+          <div key={row.key} data-testid="user-row" data-row-key={row.key}>
+            {row.message?.content}
+          </div>
+        ))}
+    </>
   ),
   findActiveSubmission: mockFindActiveSubmission,
   findLastSubmission: () => null,
@@ -119,6 +134,26 @@ rs.mock("@/components/chat/ChatComposer", () => ({
             void props
               .onSend?.(
                 { text: "hi", uploads: [], reasoningEffort: "medium", projectPath: "" },
+                { onUploadProgress: () => {}, signal: new AbortController().signal },
+              )
+              .catch(() => {})
+          }
+        />
+      ) : null}
+      {props.onSend ? (
+        <button
+          type="button"
+          data-testid="send-text-button"
+          onClick={() =>
+            void props
+              .onSend?.(
+                {
+                  text: "sent at once",
+                  uploads: [],
+                  reasoningEffort: "medium",
+                  projectPath: "",
+                  inputId: "11111111-1111-4111-8111-111111111111",
+                },
                 { onUploadProgress: () => {}, signal: new AbortController().signal },
               )
               .catch(() => {})
@@ -221,6 +256,46 @@ afterEach(() => {
   rs.clearAllMocks();
   rs.unstubAllGlobals();
   MockEventSource.instances = [];
+});
+
+describe("Chat missing-session detection", () => {
+  it("reports a confirmed missing session", async () => {
+    rs.mocked(listSessionMessages).mockResolvedValueOnce(null);
+    const onSessionNotFound = rs.fn();
+    renderChat(<Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />);
+
+    await waitFor(() => expect(onSessionNotFound).toHaveBeenCalledWith("missing"));
+  });
+
+  it("does not report a temporary fetch failure as a missing session", async () => {
+    rs.mocked(listSessionMessages).mockRejectedValueOnce(new Error("Service unavailable"));
+    const onSessionNotFound = rs.fn();
+    await act(async () => {
+      renderChat(<Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />);
+    });
+
+    expect(listSessionMessages).toHaveBeenCalledWith("session-1");
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late missing-session response after leaving the chat", async () => {
+    let resolveMessages!: (value: null) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMessages = resolve;
+        }),
+    );
+    const onSessionNotFound = rs.fn();
+    const { unmount } = renderChat(
+      <Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />,
+    );
+    unmount();
+
+    await act(async () => resolveMessages(null));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
 });
 
 describe("Chat read marking", () => {
@@ -505,6 +580,51 @@ describe("Chat turn stream lifecycle", () => {
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
     }
+  });
+
+  it("shows a text-only send before the server accepts it, under the same id", async () => {
+    let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
+    rs.mocked(postSessionTurn).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePost = resolve)),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    const bubble = await screen.findByTestId("user-row");
+    expect(bubble.dataset.rowKey).toBe("11111111-1111-4111-8111-111111111111");
+    expect(bubble.textContent).toContain("sent at once");
+    expect(postSessionTurn).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolvePost({
+        ok: true,
+        data: {
+          turnId: "turn-1",
+          inputId: "11111111-1111-4111-8111-111111111111",
+          inputState: "submitted",
+        },
+      });
+    });
+
+    expect(screen.getAllByTestId("user-row")).toHaveLength(1);
+    expect(screen.getByTestId("user-row")).toBe(bubble);
+  });
+
+  it("takes the early bubble back down when the send is refused", async () => {
+    let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
+    rs.mocked(postSessionTurn).mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePost = resolve)),
+    );
+    renderChat(<Chat sessionId="session-1" />);
+
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    await screen.findByTestId("user-row");
+
+    await act(async () => {
+      resolvePost({ ok: false, status: 500, message: "boom" });
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("user-row")).toBeNull());
   });
 
   it("keeps backing off when resumed streams keep closing right away", async () => {

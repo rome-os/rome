@@ -8,7 +8,7 @@ import {
   type ApprovalCreatedEvent,
 } from "./engine.js";
 import { actionExecutionContext } from "./context.js";
-import { ReplayDivergenceError, hashArgs, replayContext, type JournalEntry } from "./replay.js";
+import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { Action, ActionResult } from "./types.js";
 import { callAction } from "./call-action.js";
@@ -25,6 +25,7 @@ import {
   FakeClock,
   type TestRome,
 } from "../test/kit/index.js";
+import { createActionEngineRepos } from "../test/helpers.js";
 
 // ActionEngine tests through the real wiring (testkit): the production engine
 // over real repositories on an in-memory DB. Assertions read execution rows,
@@ -172,9 +173,9 @@ describe("ActionEngine", () => {
     }
 
     it("returns successful warm workers to idle and reuses them", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -196,8 +197,8 @@ describe("ActionEngine", () => {
     });
 
     it("recycles idle warm workers on pool restart", async () => {
-      const registry = new ActionRegistryImpl([]);
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const registry = new ActionRegistryImpl();
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -217,8 +218,8 @@ describe("ActionEngine", () => {
     });
 
     it("does not refill pooled workers that exit before becoming idle", async () => {
-      const registry = new ActionRegistryImpl([]);
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const registry = new ActionRegistryImpl();
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -235,9 +236,9 @@ describe("ActionEngine", () => {
     });
 
     it("retires a running warm worker after pool restart", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
       });
@@ -267,12 +268,12 @@ describe("ActionEngine", () => {
     });
 
     it("counts warm and delegated workers against the configured process cap", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
       const { children, actionWorkerFork } = installFakeChildProcessFactory({
         autoRespond: false,
       });
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 1,
         maxWorkerProcesses: 1,
@@ -306,12 +307,12 @@ describe("ActionEngine", () => {
     });
 
     it("rejects a second root instead of cold-forking past the process cap", async () => {
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       registry.register(buildAction("root"));
       const { children, actionWorkerFork } = installFakeChildProcessFactory({
         autoRespond: false,
       });
-      const engine = new ActionEngine(registry, undefined, undefined, undefined, undefined, {
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
         processRole: "main",
         workerWarmPoolSize: 0,
         maxWorkerProcesses: 1,
@@ -328,6 +329,203 @@ describe("ActionEngine", () => {
 
       children[0].completeNext();
       await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+    });
+
+    describe("queued roots", () => {
+      const queue: ActionRunContext = { whenWorkersBusy: "queue" };
+
+      function createQueueingEngine(maxWorkerProcesses: number, clock = new FakeClock()) {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 0,
+          maxWorkerProcesses,
+          queuedRootMaxWaitMs: 60_000,
+          actionWorkerFork,
+          clock,
+        });
+        return { engine, children, actionWorkerFork, clock };
+      }
+
+      it("waits for a free worker instead of failing", async () => {
+        const { engine, children, actionWorkerFork } = createQueueingEngine(1);
+
+        const first = engine.run("root", {});
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+
+        const queued = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+
+        children[0].completeNext();
+        await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+        await rs.waitFor(() => expect(actionWorkerFork).toHaveBeenCalledTimes(2));
+        children[1].completeNext();
+        await expect(queued).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("admits queued roots in arrival order", async () => {
+        const { engine, children } = createQueueingEngine(1);
+
+        const blocker = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+        const registry = (engine as unknown as { registry: ActionRegistryImpl }).registry;
+        registry.register(buildAction("second"));
+        registry.register(buildAction("third"));
+        const second = engine.run("second", {}, queue);
+        const third = engine.run("third", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        children[0].completeNext();
+        await blocker;
+        await rs.waitFor(() => expect(children).toHaveLength(2));
+        expect(actionMessages(children[1])).toMatchObject([{ actionName: "second" }]);
+
+        children[1].completeNext();
+        await second;
+        await rs.waitFor(() => expect(children).toHaveLength(3));
+        expect(actionMessages(children[2])).toMatchObject([{ actionName: "third" }]);
+        children[2].completeNext();
+        await third;
+      });
+
+      it("leaves the reserved slots to fail-fast roots", async () => {
+        // Cap 3 keeps two slots back, so queued roots run one at a time.
+        const { engine, children, actionWorkerFork } = createQueueingEngine(3);
+
+        const queuedFirst = engine.run("root", {}, queue);
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+        const queuedSecond = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+
+        const failFast = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(2));
+        children[1].completeNext();
+        await expect(failFast).resolves.toEqual({ status: "ok", data: "root" });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(2);
+
+        children[0].completeNext();
+        await queuedFirst;
+        await rs.waitFor(() => expect(children).toHaveLength(3));
+        children[2].completeNext();
+        await expect(queuedSecond).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("fails with a capacity error once the queue deadline passes", async () => {
+        const { engine, children, clock } = createQueueingEngine(1);
+
+        const blocker = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+        const queued = engine.run("root", {}, queue);
+        const outcome = queued.catch((err: unknown) => err);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await clock.advance(60_000);
+        await expect(outcome).resolves.toMatchObject({
+          name: "ActionWorkerCapacityError",
+          message: expect.stringContaining("queued 60s"),
+        });
+
+        children[0].completeNext();
+        await blocker;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(children).toHaveLength(1);
+      });
+
+      it("cancels a root while it waits in the queue", async () => {
+        const { engine, children } = createQueueingEngine(1);
+
+        const blocker = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+        const queued = engine.run("root", {}, { ...queue, executionId: "queued-root" });
+        const outcome = queued.catch((err: unknown) => err);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await expect(engine.cancel("queued-root")).resolves.toBe(true);
+        await expect(outcome).resolves.toMatchObject({ name: "ActionCancelledError" });
+
+        children[0].completeNext();
+        await blocker;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(children).toHaveLength(1);
+      });
+
+      it("accepts a detached dispatch while its root waits for a worker", async () => {
+        const { engine, children } = createQueueingEngine(1);
+
+        const blocker = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+
+        await expect(engine.dispatch("root", {})).resolves.toMatchObject({
+          executionId: expect.any(String),
+        });
+        expect(children).toHaveLength(1);
+
+        children[0].completeNext();
+        await blocker;
+        await rs.waitFor(() => expect(children).toHaveLength(2));
+        children[1].completeNext();
+      });
+
+      it("hands a queued root the warm worker, both when it becomes ready and when it returns", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(buildAction("root"));
+        const { children, actionWorkerFork } = installFakeChildProcessFactory({
+          autoRespond: false,
+        });
+        const engine = new ActionEngine(registry, createActionEngineRepos(), {
+          processRole: "main",
+          workerWarmPoolSize: 1,
+          maxWorkerProcesses: 1,
+          actionWorkerFork,
+          clock: new FakeClock(),
+        });
+
+        // The starting warm worker fills the cap, so the root waits for it
+        // rather than counting it as busy or forking past the cap.
+        engine.startWorkerWarmPool();
+        const first = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(actionMessages(children[0])).toHaveLength(0);
+
+        children[0].emit("message", { type: "ready" });
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+
+        const second = engine.run("root", {}, queue);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        children[0].completeNext();
+        await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+        await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(2));
+        children[0].completeNext();
+        await expect(second).resolves.toEqual({ status: "ok", data: "root" });
+
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
+        await engine.stopWorkerWarmPool();
+      });
+
+      it("still fails a nested delegation at once while roots queue", async () => {
+        const { engine, children } = createQueueingEngine(1);
+
+        const blocker = engine.run("root", {});
+        await rs.waitFor(() => expect(children).toHaveLength(1));
+
+        expect(() =>
+          engine.startDelegatedAction({
+            actionName: "root",
+            args: {},
+            context: { executionId: "child", rootExecutionId: "parent" },
+            forkStartedAt: 0,
+          }),
+        ).toThrow(expect.objectContaining({ name: "ActionWorkerCapacityError" }));
+
+        children[0].completeNext();
+        await blocker;
+      });
     });
   });
 
@@ -959,17 +1157,6 @@ describe("ActionEngine", () => {
       const descendant = await rome.repos.actionExecutions.findById("descendant-1");
       expect(descendant).toMatchObject({ status: "error", error: "worker crashed" });
     });
-
-    it("works without optional repos (no journalRepo, no approvalsRepo)", async () => {
-      const registry = new ActionRegistryImpl([]);
-      registry.register(
-        buildAction("minimal", { execute: async () => ({ status: "ok", data: 42 }) }),
-      );
-      const engine = new ActionEngine(registry);
-
-      const result = await engine.run("minimal", {});
-      expect(result).toEqual({ status: "ok", data: 42 });
-    });
   });
 
   // run() — root call, action requires approval
@@ -1029,18 +1216,6 @@ describe("ActionEngine", () => {
         sessionId: "sess-1",
         agentName: "main",
       });
-    });
-
-    it("returns 'no-approvals-repo' as approvalId when approvalsRepo is missing", async () => {
-      const registry = new ActionRegistryImpl([]);
-      registry.register(buildAction("risky", { requiresApproval: true }));
-      const engine = new ActionEngine(registry);
-
-      const result = await engine.run("risky", {});
-      if (result.status !== "pending_approval") {
-        throw new Error(`expected pending_approval, got ${result.status}`);
-      }
-      expect(result.approval.approvalId).toBe("no-approvals-repo");
     });
 
     it("fires onApprovalCreated with the approval id, action args, and channel context", async () => {
@@ -1880,35 +2055,6 @@ describe("ActionEngine", () => {
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
       expect(result.data).toBe("fresh");
       expect(child.calls).toEqual([{ a: 1 }]);
-    });
-
-    it("throws ReplayDivergenceError on divergence in strict mode", async () => {
-      await setup({
-        actions: [
-          buildAction("child_x"),
-          buildAction("parent", {
-            execute: async () => {
-              await callAction("child_x", {});
-              return { status: "ok" };
-            },
-          }),
-        ],
-      });
-
-      const replayJournal: JournalEntry[] = [
-        {
-          sequence: 0,
-          actionName: "child_y",
-          argsHash: hashArgs({}),
-          args: {},
-          result: { status: "ok" },
-          status: "completed",
-        },
-      ];
-
-      await expect(
-        rome.actionEngine.run("parent", {}, { replayJournal, divergenceMode: "strict" }),
-      ).rejects.toThrow(ReplayDivergenceError);
     });
 
     it("handles divergence when replay journal is exhausted (EOF)", async () => {

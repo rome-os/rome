@@ -7,6 +7,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 import { createRunsRepository } from "../../db/repositories/runs.js";
+import { hasChatSince } from "../../lib/chat-activity.js";
 import { RunRecorder, keepRunAlive } from "../../lib/run-recorder.js";
 
 const log = createAppLogger("dream");
@@ -38,6 +39,20 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
 
     async execute(args): Promise<ActionResult> {
       const windowHours = (args.windowHours as number | undefined) ?? 24;
+      // A guardian who presses "Dream now" asked for this run, so only callers
+      // without a reserved run (the nightly routine) need a conversation to
+      // review. Checking before the reservation keeps an idle night out of the
+      // run list.
+      if (
+        typeof args.runId !== "string" &&
+        !hasChatSince(appContext.db, new Date(Date.now() - windowHours * 60 * 60 * 1000))
+      ) {
+        log.info("dream skipped, no chat in window", { windowHours });
+        return {
+          status: "ok",
+          data: { windowHours, skipped: true, reason: "no_recent_chat", summary: "" },
+        };
+      }
       const runs = createRunsRepository(appContext.db);
       // The page reserves a queued run and passes its id, and claiming it is
       // what makes this the one execution that works on it. Any other caller
@@ -52,7 +67,13 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         log.info("dream skipped, another dream has this run", { runId: reservation.id });
         return {
           status: "ok",
-          data: { runId: reservation.id, windowHours, skipped: true, summary: "" },
+          data: {
+            runId: reservation.id,
+            windowHours,
+            skipped: true,
+            reason: "already_running",
+            summary: "",
+          },
         };
       }
       const runId = reservation.id;

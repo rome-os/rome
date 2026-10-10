@@ -1,9 +1,9 @@
 // @rstest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it } from "@rstest/core";
 import i18n from "@/i18n";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import DesktopPage, { applyDesktopSafeAreaBottom, NamedDesktopPage } from "./DesktopPage";
+import DesktopPage, { NamedDesktopPage } from "./DesktopPage";
 
 /** The websocket path `desktop-vnc.html` reads from an iframe's src. */
 function socketPath(iframe: HTMLElement): string | null {
@@ -22,19 +22,9 @@ describe("DesktopPage", () => {
     render(<DesktopPage />);
 
     const iframe = screen.getByTitle("Rome Desktop");
-    expect(iframe.parentElement?.className).toContain("h-[var(--rome-mobile-content-height)]");
     expect(iframe.getAttribute("src")).toMatch(/^\/desktop-vnc\.html\?resize=scale&path=/);
     expect(socketPath(iframe)).toBe("desktop-proxy/websockify");
     expect(iframe.getAttribute("allow")).toBe("clipboard-read; clipboard-write");
-
-    const setProperty = rs.fn();
-    applyDesktopSafeAreaBottom(
-      {
-        contentDocument: { documentElement: { style: { setProperty } } },
-      } as unknown as HTMLIFrameElement,
-      "34px",
-    );
-    expect(setProperty).toHaveBeenCalledWith("--rome-safe-area-bottom", "34px");
   });
 
   it("shows a named desktop through its own proxy path", async () => {

@@ -899,7 +899,7 @@ describe("create_routine — validation and fail-closed", () => {
     expect(row!.actionName).toBe("dream");
   });
 
-  it("accepts FREQ=HOURLY;INTERVAL=2 (the sentinel cadence shape)", async () => {
+  it("accepts FREQ=HOURLY;INTERVAL=2", async () => {
     const result = await createRoutine(
       {
         name: "every-2h",
@@ -910,7 +910,7 @@ describe("create_routine — validation and fail-closed", () => {
           localTime: "00:00",
           rrule: "FREQ=HOURLY;INTERVAL=2",
         },
-        actionName: "sentinel_review",
+        actionName: "send_notification",
         args: {},
       },
       { routinesRepo: repo, actionRegistry: allActions, routineEngine: makeFakeEngine() },

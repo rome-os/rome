@@ -401,7 +401,6 @@ async function handleTrustedMessage(
   if (bondLevel === "guardian") {
     log.info("skipping envoy (guardian)", { channel, channelUserId });
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
@@ -428,7 +427,6 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "approve") {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
@@ -484,8 +482,10 @@ async function handleUntrustedMessage(
   conversationId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
-  const { connectionId, channel, channelUserId, threadId, text, messageId, displayName } =
-    args as Record<string, string>;
+  const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
+    string,
+    string
+  >;
   const bondLevel = (args.bondLevel as string) ?? "other";
   const workingDir =
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
@@ -538,7 +538,6 @@ async function handleUntrustedMessage(
 
   if (decision.action === "replied" && decision.response) {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: decision.response,

@@ -24,8 +24,6 @@ export interface AppRefDto {
   iconUrl: string;
 }
 
-export type TraceEventType = TraceEventDto["type"];
-
 interface TraceEventBase {
   /** Sub-agent that produced this block: "main" | "envoy" | <subagent>. */
   agent?: string;

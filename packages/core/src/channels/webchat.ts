@@ -1,17 +1,19 @@
-import type { ProviderAdapter } from "./adapter.js";
-import type { NormalizedMessage, OutgoingMessage } from "./types.js";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { OutgoingMessage } from "./types.js";
 import type { StoredWebchatHistoryMessage, WebChatRepository } from "../db/repositories/webchat.js";
 import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
 import { createLogger } from "../logger.js";
+import { withoutHostOnlyParts } from "./host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
+import { DEFAULT_BOT_DISPLAY_NAME } from "./mention-only.js";
 
 const log = createLogger("webchat");
 const DEFAULT_HISTORY_WINDOW_HOURS = 24;
 export const WEBCHAT_GUARDIAN_USER_ID = "guardian";
 
 function prettyAgentName(name: string | null): string {
-  if (!name || isCoreMainAgentId(name)) return "Rome";
+  if (!name || isCoreMainAgentId(name)) return DEFAULT_BOT_DISPLAY_NAME;
   return artifactLocalName(name)
     .split(/[-_\s]+/)
     .filter(Boolean)
@@ -49,9 +51,13 @@ function contentToText(content: string): string {
     .join("\n");
 }
 
-export class WebChatAdapter implements ProviderAdapter {
-  readonly channelName = "webchat";
-  private messageHandler: ((msg: NormalizedMessage) => Promise<void>) | null = null;
+/**
+ * The in-process WebChat transport. It persists outbound replies and reads
+ * session history as the channel's own record, a `ChannelMessage` whose `raw`
+ * is the stored history row.
+ */
+export class WebChatAdapter {
+  private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
   constructor(private webchatRepo: WebChatRepository) {}
 
@@ -63,10 +69,18 @@ export class WebChatAdapter implements ProviderAdapter {
     log.info("webchat adapter stopped");
   }
 
-  async sendMessage(channelUserId: string, threadId: string, message: OutgoingMessage) {
+  /** Persist an assistant reply into the session. A message with no text,
+   *  parts or attachments writes nothing, and its receipt has no `messageId`. */
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
+    const threadId: string = conversationId;
+    // Only the host authors routine cards (see host-only-parts.ts).
+    const given = withoutHostOnlyParts(message.parts ?? []);
+    if (message.parts && given.length < message.parts.length) {
+      log.warn("dropped routine_draft_card parts from a sent message", { threadId });
+    }
     const parts =
-      message.parts && message.parts.length > 0
-        ? message.parts
+      given.length > 0
+        ? given
         : message.text
           ? [{ type: "text" as const, content: message.text }]
           : [];
@@ -76,48 +90,48 @@ export class WebChatAdapter implements ProviderAdapter {
       parts.push({ type: "text" as const, content: `[${att.type}] ${label}` });
     }
 
-    if (parts.length === 0) return;
+    if (parts.length === 0) return { conversationId };
 
-    const content = JSON.stringify(parts);
     const messageId = uuid();
-    await this.webchatRepo.addMessage(
-      messageId,
-      threadId,
-      "assistant",
-      content,
-      message.turnId ?? null,
-    );
-    log.info("webchat message persisted", { threadId, channelUserId });
-    return { messageId, threadId };
+    await this.webchatRepo.addSentMessage(messageId, threadId, parts, message.turnId ?? null);
+    log.info("webchat message persisted", { threadId });
+    return { conversationId, messageId };
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.messageHandler = handler;
   }
 
-  async fetchHistory(threadId: string | null, windowHours: number): Promise<NormalizedMessage[]> {
+  /** The guardian's and the agents' lines in one session, or in every
+   *  top-level webchat session when `threadId` is null, oldest first. A line
+   *  the guardian did not write is `outbound`. A line with no text is left
+   *  out. */
+  async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
     const safeWindowHours =
       Number.isFinite(windowHours) && windowHours > 0 ? windowHours : DEFAULT_HISTORY_WINDOW_HOURS;
     const since = new Date(Date.now() - safeWindowHours * 60 * 60 * 1000);
     const rows = await this.webchatRepo.getHistoryMessages(threadId, since);
-    return rows.map((row) => this.historyRowToNormalized(row)).filter((msg) => msg.text.trim());
+    return rows.map((row) => this.historyRowToMessage(row)).filter((msg) => msg.text.trim());
   }
 
-  private historyRowToNormalized(row: StoredWebchatHistoryMessage): NormalizedMessage {
+  private historyRowToMessage(row: StoredWebchatHistoryMessage): ChannelMessage {
     const isUser = row.role === "user";
-    const channelUserId = isUser ? WEBCHAT_GUARDIAN_USER_ID : (row.sessionAgentName ?? "main");
+    const senderId = isUser ? WEBCHAT_GUARDIAN_USER_ID : (row.sessionAgentName ?? "main");
     return {
-      id: row.id,
       channel: "webchat",
-      channelUserId,
-      displayName: isUser ? "Guardian" : prettyAgentName(row.sessionAgentName),
-      threadId: row.sessionId,
-      threadName: row.sessionName,
-      threadType: "private",
-      timestamp: row.createdAt,
+      direction: senderId === WEBCHAT_GUARDIAN_USER_ID ? "inbound" : "outbound",
+      messageId: row.id,
+      conversationId: row.sessionId as ConversationId,
+      senderId,
+      senderDisplayName: isUser ? "Guardian" : prettyAgentName(row.sessionAgentName),
       text: contentToText(row.content),
       attachments: [],
-      rawEvent: row,
+      timestamp: row.createdAt,
+      thread: {
+        kind: "dm",
+        ...(row.sessionName ? { name: row.sessionName } : {}),
+      },
+      raw: row,
     };
   }
 }

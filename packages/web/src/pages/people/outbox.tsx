@@ -133,8 +133,10 @@ function OutboxRowActions({
   // crossing the window grows its Discard within a tick of doing so.
   const dismissable = isDismissable(message, Math.floor(Date.now() / 1000));
 
+  // Capped, because a channel's error can be a sentence, and an uncapped
+  // auto column would take the message column's width.
   return (
-    <span className="col-start-2 flex flex-wrap items-center gap-2 sm:col-auto">
+    <span className="col-start-2 flex flex-wrap items-center gap-2 sm:col-auto sm:max-w-80">
       {failed ? (
         // `error` is what stopped it, shown as the row's detail. Usually the
         // channel's own words, which this page can neither localize nor promise
@@ -163,7 +165,7 @@ function OutboxRowActions({
               : act(() => writes.retry(personId, message.id))
           }
         >
-          <RotateCcw aria-hidden="true" />
+          <RotateCcw data-icon="inline-start" aria-hidden="true" />
           {t("send.retry")}
         </Button>
       )}

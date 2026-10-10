@@ -2,49 +2,53 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface MessageRowProps {
-  /** Left-gutter avatar (AgentAvatar). Sits beside — and the same height as —
-   * the name + subtitle header. */
+  /** Avatar (AgentAvatar), at the top of the gutter beside the name line. */
   avatar: ReactNode;
-  /** Display name shown on the first header line. */
+  /** Display name, in small type above the first bubble. */
   name: string;
-  /** Compact line under the name (the turn's trace). */
+  /** Compact turn trace, on the name line. */
   subtitle?: ReactNode;
-  /** Secondary turn metadata shown inline after the main trace summary. */
+  /** Secondary turn metadata, after the trace on the name line. */
   headerAccessory?: ReactNode;
+  /** The turn's bubbles and cards, stacked top to bottom. */
   children?: ReactNode;
+  /** Turn actions under the bubbles, outside the avatar's column. */
+  footer?: ReactNode;
   className?: string;
 }
 
-/** One row in the group-chat transcript. The header — avatar beside the
- * name (line 1) + trace (line 2) — is a self-contained, vertically-centered
- * unit, so the avatar matches the two-line block's height. The body sits below,
- * indented to align under the name. */
+/** One agent turn in the transcript, laid out like a group chat: the avatar at
+ * the top of the gutter, the name and trace on a small line beside it above the
+ * first bubble, and the turn actions below both. */
 export function MessageRow({
   avatar,
   name,
   subtitle,
   headerAccessory,
   children,
+  footer,
   className,
 }: MessageRowProps) {
   return (
     <div className={cn("mb-4", className)}>
-      <div className="flex items-center gap-4">
+      <div className="flex items-start gap-2">
         <div className="shrink-0">{avatar}</div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-ui text-foreground">{name}</div>
-          {subtitle || headerAccessory ? (
-            <div className="flex min-w-0 items-center">
-              {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
-              {headerAccessory ? (
-                <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
-              ) : null}
-            </div>
-          ) : null}
+          {/* A fixed height keeps the row on whole pixels: the aux line height alone
+              is fractional, and the transcript would carry the fraction into the
+              pinned composer. */}
+          <div className="flex h-5 min-w-0 items-center gap-2 pl-3">
+            <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
+            {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
+            {headerAccessory ? (
+              <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
+            ) : null}
+          </div>
+          {children ? <div className="mt-1 flex flex-col gap-1">{children}</div> : null}
         </div>
       </div>
-      {/* Indent past the avatar (size-8) + gap-4 so the body aligns under the name. */}
-      {children ? <div className="mt-2 pl-12">{children}</div> : null}
+      {/* Indent past the avatar (size-8) and gap-2 so actions align under the bubbles. */}
+      {footer ? <div className="pl-10">{footer}</div> : null}
     </div>
   );
 }

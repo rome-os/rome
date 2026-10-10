@@ -17,10 +17,10 @@ import type { WidgetPlacement, WidgetType } from "./use-free-cells";
 interface WidgetPickerProps {
   onSelect: (type: WidgetType, targetId?: string) => void;
   children: React.ReactNode;
-  placements?: WidgetPlacement[];
+  placements: WidgetPlacement[];
 }
 
-export function WidgetPicker({ onSelect, children, placements = [] }: WidgetPickerProps) {
+export function WidgetPicker({ onSelect, children, placements }: WidgetPickerProps) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

@@ -7,21 +7,12 @@
 // deliberately produced and presented. Those were the source of the false
 // triggers (e.g. an image opening just because a mid-turn `ls` named it).
 
-export interface StreamTextEvent {
-  type: string;
-  content?: string;
-}
-
 // Matches markdown links the assistant emits to point at project files,
 // e.g. `[label](</projects/default/screenshots/foo.png>)`. The URL is
 // required to be wrapped in `< >` and rooted at `/projects/`.
 const PROJECTS_MD_LINK_RE = /\[[^\]]*\]\(<(\/projects\/[^>]+)>\)/g;
 
-export function extractFilePathsFromText(event: StreamTextEvent): string[] {
-  if (event.type !== "text") return [];
-  const content = event.content;
-  if (typeof content !== "string" || content.length === 0) return [];
-
+export function extractFilePathsFromText(content: string): string[] {
   const paths: string[] = [];
   const seen = new Set<string>();
 
@@ -35,10 +26,4 @@ export function extractFilePathsFromText(event: StreamTextEvent): string[] {
     }
   }
   return paths;
-}
-
-export function isProjectPath(p: string): boolean {
-  if (!p) return false;
-  if (p.startsWith("/")) return p.includes("/projects/");
-  return true;
 }

@@ -2,10 +2,12 @@
 //
 // Feishu is a Talker with a single `app` grant: the custom-app credentials
 // (appId + appSecret) plus the domain (feishu vs. lark). The transport core —
-// the SDK long connection, inbound normalization, markdown send, and the
+// the SDK long connection, the inbound `ChannelMessage`, markdown send, and the
 // group-config card flow — is the existing
 // `FeishuAdapter` (packages/core/src/channels/feishu.ts), wrapped here so the
-// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it.
+// runtime's grant-epoch lifecycle and fault→grant-state mapping drive it. The
+// transport already speaks the channel's record, so inbound and send pass
+// through without a projection.
 //
 // The `app` grant is conferred by pasting the two fields (`credentialsPaste`);
 // `validate` mints a tenant-access-token via a transient connect so a bad
@@ -37,8 +39,8 @@ import { z } from "zod";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupView } from "../setup/types.js";
-import type { TalkActivity } from "@rome-os/app-runtime";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { ChannelActivity } from "@rome-os/app-runtime";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import type {
   ConnectionDescriptor,
   ProfileDisplay,
@@ -46,12 +48,7 @@ import type {
   SecretRecord,
   Talker,
 } from "../types.js";
-import {
-  addressIsConversationFeature,
-  directoryPage,
-  toInboundMessage,
-  toMessageReceipt,
-} from "./talk-features.js";
+import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -258,9 +255,8 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       );
     }
 
-    // Same material shape the boot importer's FEISHU_SETTINGS_IMPORT_ROW
-    // extracts: domain (and appType) duplicated into material and profile by
-    // the one atomic write, so the two halves cannot disagree.
+    // Domain (and appType) are duplicated into material and profile by the one
+    // atomic write, so the two halves cannot disagree.
     const material: SecretRecord = {
       appId: pending.appId,
       appSecret: pending.appSecret,
@@ -468,10 +464,59 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
           };
           const adapter = new FeishuAdapter(config, createChannel);
 
+          const activity: ChannelActivity = {
+            async begin(input) {
+              if (!input.messageId) return null;
+              const messageId = input.messageId;
+              const reactionId = await adapter.addProcessingReaction(messageId);
+              if (!reactionId) return null;
+              return {
+                update: async () => {},
+                finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
+              };
+            },
+          };
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                adapter
+                  .listObservedConversations()
+                  .filter(
+                    (conversation) =>
+                      !query || conversation.displayName.toLocaleLowerCase().includes(query),
+                  )
+                  .sort((left, right) =>
+                    `${left.displayName}\0${left.id}`.localeCompare(
+                      `${right.displayName}\0${right.id}`,
+                    ),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((conversation) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    conversationId:
+                      conversation.id as import("@rome-os/app-runtime").ConversationId,
+                  },
+                  service: "feishu",
+                  kind: conversation.kind,
+                  displayName: conversation.displayName,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            directMessaging: addressIsConversationFeature(),
+            activity,
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // start() awaits channel.connect(), which rejects on bad
               // credentials, so a refused `app` grant surfaces here; ongoing
               // long-connection errors route through the adapter's onFault seam.
@@ -482,10 +527,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
             },
             async send(conversationId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(conversationId, msg);
               } catch (err) {
                 // A tenant-access-token failure from send is a refused credential.
                 if (isFeishuAuthError(err)) {
@@ -494,58 +536,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const activity: TalkActivity = {
-                async begin(input) {
-                  if (!input.messageId) return null;
-                  const messageId = input.messageId;
-                  const reactionId = await adapter.addProcessingReaction(messageId);
-                  if (!reactionId) return null;
-                  return {
-                    update: async () => {},
-                    finish: async () => adapter.removeProcessingReaction(messageId, reactionId),
-                  };
-                },
-              };
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    adapter
-                      .listObservedConversations()
-                      .filter(
-                        (conversation) =>
-                          !query || conversation.displayName.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.displayName}\0${left.id}`.localeCompare(
-                          `${right.displayName}\0${right.id}`,
-                        ),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((conversation) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId:
-                          conversation.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "feishu",
-                      kind: conversation.kind,
-                      displayName: conversation.displayName,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                directMessaging: addressIsConversationFeature(),
-                activity,
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

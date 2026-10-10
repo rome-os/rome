@@ -110,16 +110,47 @@ HEADLESS=false npm test
   `.midscene/test-results/<runId>/summary.json` (includes collection-error
   details)
 - Both are covered by `.gitignore`.
-- Every model-backed run uploads each shard report, including failed runs.
-  Repositories with `MIDSCENE_PUBLISH_REPO` set to their full name also upload a
-  combined `midscene-e2e-report` artifact. Each visual shard writes its own Markdown job
-  Summary. The run Summary shows failed, not-run, and incomplete-shard results
-  first; passed cases and their screenshots appear in a collapsed appendix.
-  Midscene merges the six native Test reports into one report that lists every
-  case. The configured repository publishes that report through GitHub Pages,
-  so report links and images work from the Actions Summary. If the merge is
-  incomplete, it still publishes the available shard reports without a broken
-  combined-report link.
+- Every model-backed run uploads each shard report and a combined
+  `midscene-e2e-report` artifact, including failed runs. A read-only job writes
+  results immediately after aggregation, without waiting for Pages approval or deployment.
+  This Summary shows total, passed, failed, and not-run counts with artifact
+  downloads, without case tables or empty screenshot columns. A second read-only
+  job adds publication status after Pages finishes. Only a successful deployment
+  adds the complete case tables with verified report links and screenshots.
+  Failed, not-run, and incomplete-shard results appear first. Passed cases appear
+  in a collapsed appendix. The first Summary remains
+  available if publication waits for approval or the run is cancelled during that wait.
+- Midscene merges the six native Test reports into one report that lists every
+  case. The combined artifact includes that report, available shard reports,
+  screenshots, and machine-readable results. An incomplete merge still saves
+  available diagnostics and fails the aggregation job.
+- Pages publication is enabled for `rome-os/rome` on `main`. A fork can opt in
+  by setting the Actions variable `MIDSCENE_PUBLISH_REPO` to its exact full
+  repository name, then using manual dispatch. Pull requests never publish.
+  A maintainer must select **Settings → Pages → Build and deployment → Source →
+  GitHub Actions** in the publishing repository. The workflow does not enable
+  or change the repository's Pages settings. If Pages configuration is
+  unavailable, publication is skipped with a warning and reports remain
+  available through Actions.
+- After a successful Pages deployment, the same Summary includes a visible
+  Markdown link to the combined native Midscene Test report. Case names and
+  screenshot thumbnails open their exact steps in the native shard reports.
+  If Pages fails or is skipped, the Summary shows result counts and artifact
+  links. If aggregation fails, the final job recovers available shard data and
+  reports missing results. Report-only recovery validates the source run before
+  downloading its artifacts. Partial reports keep available shard links without
+  a broken combined-report link.
+- To rebuild a report without new model calls, manually dispatch the workflow
+  with `report_source_run_id` set to a completed Midscene run whose shard
+  artifacts have not expired. Sources and retained Pages history must come
+  from the same repository: upstream `main` scheduled runs, pushes, or manual dispatches,
+  or a fork's manual dispatches. Pull-request artifacts are rejected.
+  On upstream, dispatch `main` to also publish. Set the dispatch input
+  `publish_pages` to `false` to verify the report job and its Actions Summary
+  without a Pages deployment. Scheduled upstream runs also publish when Pages is available.
+- Pull requests run secret-free harness and mock-browser boundary jobs. The
+  model-backed shard matrix runs on the upstream `main` branch or by manual
+  dispatch in a fork using that fork's model secrets.
 
 ## GitHub Actions
 
@@ -138,8 +169,8 @@ Manual `workflow_dispatch` runs the full suite on upstream `main`.
 A fork owner may manually dispatch a fork branch using that fork's model
 secrets. Set the optional `report_source_run_id` input to an existing run ID
 to rebuild its reports from shard artifacts without new model calls.
-Report publishing still requires the repository to match
-`MIDSCENE_PUBLISH_REPO`.
+Pages publication is enabled upstream. Fork publication requires an exact
+`MIDSCENE_PUBLISH_REPO` match.
 
 ## Authoring Conventions
 

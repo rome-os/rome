@@ -14,19 +14,18 @@
 //
 // IMPORTANT — this does NOT change how webchat's OWN primary chat surface
 // works: the `/api/webchat` routes (packages/core/src/api/routes/webchat.ts)
-// read/write `webchatRepo` directly and bypass `ProviderAdapter.onMessage`
+// read/write `webchatRepo` directly and bypass `WebChatAdapter.onInbound`
 // entirely (webchat skips message_handler). This descriptor's
-// `onMessage`/`deliver` wiring exists only for interface parity; nothing
-// drives it today (same as the pre-cutover `WebChatAdapter.onMessage`, which
-// no caller ever registered a real consumer against either). See cross-stage
-// notes for how the wire stage should source `getPort("webchat")`
-// post-migration.
+// `onInbound`/`deliver` wiring exists only for interface parity; nothing
+// drives it today (no caller ever registered a real consumer against the
+// adapter's inbound hook either). The transport already speaks the channel's
+// record, so send and history pass through without a projection.
 
-import { WEBCHAT_GUARDIAN_USER_ID, WebChatAdapter } from "../../channels/webchat.js";
-import type { TalkFeatureMap, TalkFeatureName } from "../types.js";
+import { WebChatAdapter } from "../../channels/webchat.js";
+import type { TalkFeatures } from "../types.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { ConnectionDescriptor, Talker } from "../types.js";
-import { historyFeature, toInboundMessage, toMessageReceipt } from "./talk-features.js";
+import { historyQueryLimit, historyWindowHours } from "./talk-features.js";
 
 export interface WebchatDescriptorDeps {
   webchatRepo: WebChatRepository;
@@ -48,12 +47,27 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
         // inbound port for the channel-message hook to answer a second time.
         receives: false,
         history: true,
+        // The dashboard renders cards inline and answers them as the next turn.
+        interactiveCards: true,
+        // Every webchat line is a guardian turn or the agent's own reply.
+        promptContext: false,
         build(): Talker {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 
+          const features: TalkFeatures = {
+            history: {
+              async query(input) {
+                const messages = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return messages.slice(0, historyQueryLimit(input.limit));
+              },
+            },
+          };
           return {
             start(deliver, _fault): void {
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // WebChatAdapter.start() is a synchronous no-op (log only) that
               // never rejects — no fault wiring needed (see module doc).
               void adapter.start();
@@ -61,22 +75,10 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
             stop(): Promise<void> {
               return adapter.stop();
             },
-            async send(conversationId, msg) {
-              return toMessageReceipt(
-                conversationId,
-                await adapter.sendMessage(conversationId, conversationId, msg),
-              );
+            send(conversationId, msg) {
+              return adapter.send(conversationId, msg);
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const features: Partial<TalkFeatureMap> = {
-                history: historyFeature(adapter, {
-                  channel: "webchat",
-                  // Every line the guardian did not write is an agent's reply.
-                  isOwn: (message) => message.channelUserId !== WEBCHAT_GUARDIAN_USER_ID,
-                }),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

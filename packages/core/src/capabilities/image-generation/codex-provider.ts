@@ -73,6 +73,7 @@ const PROVIDER_UNAVAILABLE_CODES = new Set([
   "no_model_provider_available",
   "auth_revoked",
   "usage_limit",
+  "credits_used_up",
 ]);
 
 function isProviderUnavailableFailure(message: string, code?: string): boolean {
@@ -117,8 +118,9 @@ export function createCodexImageGenerationProvider(
     async availability(): Promise<ImageProviderAvailability> {
       const state = deps.getCodexState?.();
       if (!state) return { available: true };
-      // Mirrors the resolver's providerUsable(): an undefined loggedIn means
-      // "not probed yet" and is treated optimistically.
+      // Reads the ChatGPT login, not the resolver's Rome credits view: the
+      // credits gateway rejects hosted image generation. An undefined
+      // loggedIn means "not probed yet" and is treated optimistically.
       if (state.loggedIn === false) {
         return {
           available: false,

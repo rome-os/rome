@@ -2,12 +2,13 @@
 
 Rome Cloud is the operator-run service that complements Rome instances. Where each Rome instance serves a single [guardian](people.md#guardian), Rome Cloud is the shared piece of infrastructure that sits in front of all of them.
 
-It plays five roles:
+It plays six roles:
 
 - **Tenant provisioner** — provisions a Rome instance per paying user, manages domains and certificates.
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
+- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected ([Rome credits](#rome-credits)).
 - **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, and guardian sign-ins ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
@@ -59,6 +60,21 @@ The handoff is the last leg of brokered third-party OAuth: a short-lived, single
 - **[Instance sign-in](#instance-sign-in)** — the identity trust root. The handoff delivers a provider token and never asserts who owns the instance.
 - **Sign-in links** — Rome Cloud-side records of which external account signs a user in. They hold no token and are independent of provider connections ([decision](../adrs/sign-in-links-separate-from-provider-connections.md)).
 
+## Rome credits
+
+Rome credits are an account-wide allowance that Rome Cloud serves through its inference gateway. An instance that has a Rome Cloud origin and an instance credential can run Codex on them.
+
+**Contracts:**
+
+- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login alone. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential. A login whose token was revoked counts as disconnected, so credits pay until the guardian signs in to ChatGPT again. Usage limits and quota probes never change the payer.
+- A payer change restarts Codex, which fails the turns running at that moment. A credential change restarts Codex only while Rome credits pay.
+- A Codex turn waiting to start fails if Codex restarts under another payer first.
+- Rome credits and a ChatGPT plan are two ways to pay for Codex. While credits pay, Rome uses only the Codex models the gateway reports serving the account, and needs no plan entitlement for them. The gateway matches a model name exactly, so a dated or differently spelled name of a served model is not served. Rome reads the list when credits start to pay, when the credential changes, on each Codex status refresh, and after the gateway refuses a model. A model the gateway starts serving is therefore picked up at the next status refresh, which runs hourly. While the gateway has reported no list, Rome assumes it serves Sol and Luna.
+- A tier resolves under credits as it does under a ChatGPT plan, then falls back to a served model: a tier that would run Sol or Luna runs Terra when the gateway serves only Terra. Credits do not serve a tier when the gateway serves none of its models. A tier prefers a connected Claude login over Rome credits.
+- A custom tier mapping, a [model pin](sessions.md#model-pin), or a selected model that the current payer cannot run fails with `model_unavailable` until the guardian selects another model or the session ends. Under credits that is a model the gateway does not serve. Under a ChatGPT plan it is a model the plan does not include. A pin that one payer runs can therefore fail after the payer changes.
+- An agent pinned to Codex by tier, such as the image generation agent, still needs the ChatGPT login, because the credits gateway rejects ChatGPT's hosted tools.
+- The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before a turn.
+
 ## Usage reporting
 
 A signed-in instance reports one usage event per [turn](sessions.md#turn), one per app or [routine](data.md#routines) action run, and one per guardian sign-in to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, where the work came from, and what set it off. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
@@ -70,9 +86,9 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
 - An action run event covers a finished top-level action execution that a routine fired, that an app called itself, or that a webhook sent to an app's action. An agent's tool calls are not action runs. Turn events count their model work.
 - Turn and action run events carry a trigger, which records what set the work off:
   - `user`: a person did. This covers a chat or channel message, an app call from a signed-in guardian or visitor session, and a routine's **Run now**.
-  - `schedule`: a schedule or poll trigger fired a routine.
-  - `event`: an event or webhook trigger fired a routine, or a webhook reached an app's action.
-  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page.
+  - `schedule`: a schedule trigger fired a routine.
+  - `event`: an event trigger fired a routine, or a webhook reached an app's action.
+  - `background`: an app's own code ran with no person behind it. A guardian call over loopback (the agent or a CLI in the container) counts here, including a **Run now**. So does a sessionless call to an app, which may be a machine webhook or a person on a public page. So does the skill review Rome starts on its own after a main-agent turn with many tool calls.
   - `unknown`: none of the above can be told.
 
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.

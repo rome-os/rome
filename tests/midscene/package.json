@@ -10,7 +10,7 @@
     "collect": "node scripts/collect-cases.mjs",
     "check:browser-boundary": "node --experimental-strip-types scripts/check-browser-boundary.mjs",
     "check:model-vision": "node scripts/check-model-vision.mjs",
-    "test:summary": "node --test scripts/render-ci-summary.test.mjs scripts/prepare-pages-site.test.mjs"
+    "test:summary": "node --test scripts/render-ci-summary.test.mjs scripts/prepare-pages-site.test.mjs scripts/workflow-policy.test.mjs scripts/trusted-report-runs.test.mjs"
   },
   "engines": {
     "node": "^20.19.0 || ^22.12.0 || >=24.0.0"

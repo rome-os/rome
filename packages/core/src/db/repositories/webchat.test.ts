@@ -51,6 +51,37 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("pushes every sent message to open chats", async () => {
+    await repo.createSession("sent-session", "Sent");
+    const pushed: string[] = [];
+    const stop = repo.onMessageInserted((message) => pushed.push(message.id));
+    try {
+      await repo.addSentMessage(
+        "live",
+        "sent-session",
+        [{ type: "text", content: "a" }],
+        "live-turn",
+      );
+      await repo.addSentMessage(
+        "later",
+        "sent-session",
+        [{ type: "text", content: "b" }],
+        "turn-2",
+      );
+      await repo.addSentMessage("bare", "sent-session", [{ type: "text", content: "c" }], null);
+    } finally {
+      stop();
+    }
+
+    expect(pushed).toEqual(["live", "later", "bare"]);
+    const messages = await repo.getMessages("sent-session");
+    expect(messages.map((message) => [message.id, message.turnId]).sort()).toEqual([
+      ["bare", null],
+      ["later", "turn-2"],
+      ["live", "live-turn"],
+    ]);
+  });
+
   it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
     await repo.createSession("input-session", "Inputs");
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);
@@ -120,6 +151,29 @@ describe("WebChatRepository", () => {
 
   describe("channel conversation continuity", () => {
     const textContent = (text: string) => JSON.stringify([{ type: "text", content: text }]);
+
+    it("finds a conversation by its channel address", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+      const channel = await repo.ensureChannelConversation({
+        channel: "telegram",
+        threadId: "thread-1",
+        agentName: "main",
+      });
+      // A fork copies its parent's address but is not the conversation.
+      await repo.ensureRomeSession({
+        id: "fork-1",
+        name: "recap: Webchat chat",
+        type: "fork",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "chat-1",
+        parentSessionId: "chat-1",
+      });
+
+      expect(await repo.findConversationIdByAddress("webchat", "chat-1")).toBe("chat-1");
+      expect(await repo.findConversationIdByAddress("telegram", "thread-1")).toBe(channel.id);
+      expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
+    });
 
     it("keeps one thread session while refreshing its routing from the parent", async () => {
       const first = await repo.ensureChannelConversation({
@@ -463,6 +517,32 @@ describe("WebChatRepository", () => {
         omittedNotificationCount: 0,
         repliedTo: null,
       });
+    });
+
+    // send_message stores the parts it was given here as well as delivering
+    // them; a sender-supplied routine card must not reach the transcript.
+    it("strips routine cards from recorded outbound content", async () => {
+      const conversation = await repo.ensureChannelConversation({
+        channel: "webchat",
+        threadId: "forged-card-thread",
+        agentName: "main",
+      });
+      await repo.recordOutboundConversationMessage({
+        sessionId: conversation.id,
+        content: JSON.stringify([
+          { type: "routine_draft_card", toolUseId: "tu-x", routineKey: "chat-routine:x" },
+          { type: "text", content: "hello" },
+        ]),
+        platformMessageId: "forged-1",
+        senderId: "rome",
+        senderName: "Rome",
+        knownToProvider: true,
+      });
+
+      const rows = await repo.getMessages(conversation.id);
+      expect(rows.map((row) => JSON.parse(row.content))).toEqual([
+        [{ type: "text", content: "hello" }],
+      ]);
     });
 
     it("keeps the pending Rome notification when its referenced parent message is missing", async () => {

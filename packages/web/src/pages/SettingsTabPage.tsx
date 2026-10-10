@@ -130,6 +130,7 @@ import {
 // ── Types ──────────────────────────────────────────────
 
 interface SettingsData {
+  "feedback.agentReportsEnabled"?: boolean;
   enableModelSelector?: boolean;
   enableFable?: boolean;
   enableImpersonation?: boolean;
@@ -191,8 +192,6 @@ export const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-export const VISIBLE_TABS = TABS;
-
 // Only these tabs read what `loadAll` fetches (/api/settings plus the tailscale
 // device list). Connections, Devices, Channels and Favors own their requests, and
 // Appearance reads the theme/i18n context, so neither the initial settings load
@@ -206,33 +205,7 @@ function tabToSlug(tab: Tab): string {
 
 export function normalizeTab(value: string | null): Tab | null {
   if (!value) return null;
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-  if (normalized === "session" || normalized === "tailscale") {
-    return "Advanced";
-  }
-  if (normalized === "integrations") {
-    return "Connections";
-  }
-  const match = TABS.find((tab) => tab.toLowerCase().replace(/\s+/g, "-") === normalized);
-  return match ?? null;
-}
-
-// Tabs whose controls were relocated to the Inbox page (/apps/inbox). Old
-// bookmarks/links to these slugs redirect there instead of silently rendering
-// an unrelated settings tab.
-const TABS_MOVED_TO_INBOX = new Set(["trust", "sentinel", "sentinel-log"]);
-
-function isMovedToInbox(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return TABS_MOVED_TO_INBOX.has(
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[_\s]+/g, "-"),
-  );
+  return TABS.find((tab) => tabToSlug(tab) === value) ?? null;
 }
 
 // ── Component ──────────────────────────────────────────
@@ -240,7 +213,6 @@ function isMovedToInbox(value: string | null | undefined): boolean {
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
   const params = useParams<{ tab?: string }>();
-  const redirectToInbox = isMovedToInbox(params.tab);
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
   useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
@@ -360,12 +332,6 @@ export default function SettingsPage() {
 
   // ── Render ──
 
-  // Controls relocated to the Inbox page — send legacy /settings/{trust,sentinel,
-  // sentinel-log} links there rather than rendering an unrelated tab.
-  if (redirectToInbox) {
-    return <Navigate to="/apps/inbox" replace />;
-  }
-
   // Unknown settings slugs are not pages. Redirect them to the canonical
   // default instead of rendering Appearance under a stale URL.
   if (params.tab && !normalizedTab) {
@@ -386,7 +352,7 @@ export default function SettingsPage() {
       </PageHeader>
 
       <PageNav aria-label={t("page.title")}>
-        {VISIBLE_TABS.map((tab) => (
+        {TABS.map((tab) => (
           <PageNavLink asChild key={tab} active={tab === activeTab}>
             <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
           </PageNavLink>
@@ -401,7 +367,7 @@ export default function SettingsPage() {
             <CardContent className="flex flex-col items-start gap-3">
               <p className="text-ui text-destructive">{loadError}</p>
               <Button type="button" size="sm" onClick={() => void loadAll()}>
-                <RefreshCw />
+                <RefreshCw data-icon="inline-start" />
                 {t("page.retry")}
               </Button>
             </CardContent>
@@ -416,7 +382,6 @@ export default function SettingsPage() {
               composio={composio}
               loading={connectionsLoading}
               error={connectionsError}
-              onRetry={loadConnections}
               onRefresh={loadConnections}
               onFlash={(message) => toast.error(message)}
             />
@@ -433,7 +398,7 @@ export default function SettingsPage() {
             </Measure>
           )}
           {activeTab === "AI Tools" && (
-            <AiToolsPanel showUsage={settings.showAiToolUsage ?? false} />
+            <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? true} />
           )}
           {activeTab === "Advanced" && (
             <AdvancedSection
@@ -674,9 +639,13 @@ function FavorRequestRow({
                 aria-label={payBusy ? t("favors.payingApprovalRequest") : undefined}
               >
                 {payBusy ? (
-                  <Spinner size="sm" label={t("favors.payingApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.payingApprovalRequest")}
+                  />
                 ) : (
-                  <Check />
+                  <Check data-icon="inline-start" />
                 )}
                 Pay
               </Button>
@@ -689,9 +658,13 @@ function FavorRequestRow({
                 aria-label={declineBusy ? t("favors.decliningApprovalRequest") : undefined}
               >
                 {declineBusy ? (
-                  <Spinner size="sm" label={t("favors.decliningApprovalRequest")} />
+                  <Spinner
+                    data-icon="inline-start"
+                    size="sm"
+                    label={t("favors.decliningApprovalRequest")}
+                  />
                 ) : (
-                  <X />
+                  <X data-icon="inline-start" />
                 )}
                 Decline
               </Button>
@@ -789,7 +762,7 @@ function FavorsSection() {
             className="mt-3"
             onClick={() => void query.refetch()}
           >
-            <RefreshCw />
+            <RefreshCw data-icon="inline-start" />
             Retry
           </Button>
         </CardContent>
@@ -865,7 +838,7 @@ function FavorsSection() {
                 key={pack.id}
                 type="button"
                 variant="outline"
-                className="justify-between"
+                align="between"
                 onClick={() => void startRecharge(pack)}
                 disabled={busyPack !== null}
                 aria-label={busyPack === pack.id ? t("favors.startingPackPurchase") : undefined}
@@ -1029,6 +1002,21 @@ function AdvancedSection({
         {!isElectronShell() && <SystemUpgradeSection />}
         <AccessControlSection tailscale={tailscale} onRefresh={onRefresh} />
         <SystemDiagnosisSection />
+        <Section>
+          <SectionHeader>
+            <SectionTitle>{t("advanced.feedback.title")}</SectionTitle>
+          </SectionHeader>
+          <FormRows>
+            <SettingsToggleRow
+              title={t("advanced.feedback.agentReports.title")}
+              description={t("advanced.feedback.agentReports.description")}
+              label={t("advanced.feedback.agentReports.toggleLabel")}
+              checked={settings["feedback.agentReportsEnabled"] ?? true}
+              onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
+              disabled={saving}
+            />
+          </FormRows>
+        </Section>
         <ComputerUseSection />
         <PresentationModeSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
@@ -1561,7 +1549,7 @@ function AiToolUsageAdvancedSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? false);
+  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? true);
 
   function toggle(next: boolean) {
     setEnabled(next);
@@ -2220,25 +2208,6 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-function normalizePublicAccessConfigPayload(raw: unknown): PublicAccessConfig {
-  const body = (raw ?? {}) as Partial<PublicAccessConfig>;
-  return {
-    enableAccessControl: body.enableAccessControl === true,
-    allowedApps: Array.isArray(body.allowedApps) ? body.allowedApps : [],
-    cloudEmailAccess:
-      body.cloudEmailAccess && typeof body.cloudEmailAccess === "object"
-        ? body.cloudEmailAccess
-        : {},
-  };
-}
-
-function normalizeDashboardAccessConfigPayload(raw: unknown): DashboardAccessConfig {
-  const body = (raw ?? {}) as Partial<DashboardAccessConfig>;
-  return {
-    cloudEmailAccess: Array.isArray(body.cloudEmailAccess) ? body.cloudEmailAccess : [],
-  };
-}
-
 function AllowedCloudEmailsSection() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
@@ -2248,13 +2217,11 @@ function AllowedCloudEmailsSection() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/dashboard-access")
-      .then((response) => response.json())
-      .catch(() => ({ cloudEmailAccess: [] }))
-      .then((dashboardAccess) => {
-        const normalized = normalizeDashboardAccessConfigPayload(dashboardAccess);
-        setEmails(normalized.cloudEmailAccess);
-      })
+    fetchJson<DashboardAccessConfig>("/api/dashboard-access", {
+      fallback: "Failed to load dashboard access.",
+    })
+      .catch((): DashboardAccessConfig => ({ cloudEmailAccess: [] }))
+      .then((dashboardAccess) => setEmails(dashboardAccess.cloudEmailAccess))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -2484,18 +2451,19 @@ function TailnetRestrictionSection() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/public-access")
-        .then((response) => response.json())
-        .catch(() => ({
+      fetchJson<PublicAccessConfig>("/api/public-access", {
+        fallback: "Failed to load public access.",
+      }).catch(
+        (): PublicAccessConfig => ({
           enableAccessControl: false,
           allowedApps: [],
           cloudEmailAccess: {},
-        })),
+        }),
+      ),
       fetchTailnetStatus(),
     ])
       .then(([publicAccess, tailnetStatus]) => {
-        const normalized = normalizePublicAccessConfigPayload(publicAccess);
-        setConfig(normalized);
+        setConfig(publicAccess);
         setTailnetDns(tailnetStatus.tailnetDns);
         setHttpsEnabled(tailnetStatus.httpsEnabled);
         setCertReady(tailnetStatus.certReady);
@@ -2558,7 +2526,7 @@ function TailnetRestrictionSection() {
 
       let handoff: SessionHandoffPayload | null = null;
       if (needsCrossHostHandoff) {
-        handoff = await requestSessionHandoff(targetHost, "/settings/tailscale");
+        handoff = await requestSessionHandoff(targetHost, "/settings/advanced");
         if (!handoff) {
           throw new Error(t("publicAccess.handoffFailed"));
         }

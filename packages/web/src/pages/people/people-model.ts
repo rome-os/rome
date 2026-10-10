@@ -4,7 +4,6 @@ import {
   BOND_LADDER,
   compareAccountCursors,
   compareStreamCursors,
-  formatWhatsAppPhone,
   matchesQuery,
   normalizeBondLevel,
   type AccountCounts,
@@ -15,6 +14,7 @@ import {
   type PersonResource,
   type StreamAccount,
 } from "@rome/api-types/people";
+import { accountHandle } from "./send-model";
 
 // The People page's derivations, kept out of the components so the stream, the
 // directory groups and the counts can be exercised without rendering. Every one
@@ -241,14 +241,14 @@ export function isRowFixed(row: PeopleRow): boolean {
   return row.level === "guardian";
 }
 
-/** The identifier a row is recognized by when its name is not enough: a phone
- *  number where the channel has one, otherwise the raw handle. */
+/** The identifier a row is recognized by when its name is not enough, by the
+ *  same rule as the person page's {@link accountHandle}. Null when that is the
+ *  name itself, as for an agent the row names by its label. */
 export function rowHandle(row: PeopleRow): string | null {
   const account = row.accounts[0];
   if (!account) return null;
-  return account.channel === "whatsapp"
-    ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
-    : account.channelUserId;
+  const handle = accountHandle(account);
+  return handle === row.displayName ? null : handle;
 }
 
 /** What the search box matches over the rows already loaded: the name, and

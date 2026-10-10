@@ -2,17 +2,18 @@ import { Mutex } from "async-mutex";
 import { createLogger } from "../logger.js";
 import type { AppEntry } from "./lockfile.js";
 import type { AppInstaller } from "./installer.js";
-import type {
-  AppId,
-  AppView,
-  ArtifactKind,
-  ArtifactRef,
-  CatalogChange,
-  CatalogEvent,
-  InFlightOp,
-  ResolvedApp,
-  SubscriberHandler,
-  Unsubscribe,
+import {
+  type AppId,
+  type AppView,
+  type ArtifactKind,
+  type ArtifactRef,
+  type CatalogChange,
+  type CatalogEvent,
+  type InFlightOp,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+  type Unsubscribe,
 } from "./state.js";
 
 const log = createLogger("app-catalog");
@@ -78,7 +79,7 @@ export class AppCatalog {
   listResolved(): readonly ResolvedApp[] {
     const out: ResolvedApp[] = [];
     for (const view of this.internalMap.values()) {
-      if (isResolved(view) && view.state === "installed" && view.enabled) {
+      if (isResolvedApp(view) && view.state === "installed" && view.enabled) {
         out.push(view);
       }
     }
@@ -276,8 +277,4 @@ function buildAppView(
     lastError: entry.lastError,
     updatedAt: entry.updatedAt,
   };
-}
-
-function isResolved(view: AppView | ResolvedApp): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }

@@ -302,13 +302,14 @@ describe("standalone CLI daemon processes", () => {
     const request = (method: string, params = {}) =>
       exchange({ jsonrpc: "2.0", id: "test", method, params });
     expect(await request("daemon.status")).toMatchObject({ error: { code: -32001 } });
-    expect(await request("daemon.hello", { protocolVersion: 1 })).toMatchObject({
-      error: { code: -32002 },
-    });
-    expect(await request("daemon.hello", { protocolVersion: 2 })).toEqual({
+    for (const protocolVersion of [1, 2])
+      expect(await request("daemon.hello", { protocolVersion })).toMatchObject({
+        error: { code: -32002 },
+      });
+    expect(await request("daemon.hello", { protocolVersion: 3 })).toEqual({
       jsonrpc: "2.0",
       id: "test",
-      result: { pid: state.pid, protocolVersion: 2, connection: "stopped" },
+      result: { pid: state.pid, protocolVersion: 3, connection: "stopped" },
     });
     expect(await request("devices.run")).toMatchObject({ error: { code: -32602 } });
     expect(await request("events.subscribe", { topic: "unknown" })).toMatchObject({

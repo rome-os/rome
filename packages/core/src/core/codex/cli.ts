@@ -6,9 +6,7 @@
 
 import {
   spawn,
-  type ChildProcess,
   type ChildProcessWithoutNullStreams,
-  type SpawnOptions,
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 import { createRequire } from "node:module";
@@ -64,13 +62,6 @@ export function resolveCodexExecutable(): { command: string; argsPrefix: string[
         `(${(err as Error).message}) and no 'codex' executable was found on PATH.`,
     );
   }
-}
-
-/** Spawn the codex CLI with `args`, resolving the executable (bundled shim or
- *  PATH fallback) so callers never hardcode `"codex"`. */
-export function spawnCodex(args: string[], options: SpawnOptions = {}): ChildProcess {
-  const { command, argsPrefix } = resolveCodexExecutable();
-  return spawn(command, [...argsPrefix, ...args], options);
 }
 
 /** Spawn `codex app-server`, framing JSON-RPC over newline-delimited stdio.

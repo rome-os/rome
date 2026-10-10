@@ -39,6 +39,7 @@ import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
+import { getWidgetFullHref } from "./widget-links";
 import {
   autoPlaceApp,
   autoPlaceProjects,
@@ -188,13 +189,17 @@ export function FreeGrid() {
     return JSON.stringify(initialWidgets);
   }, [initialWidgets]);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>(urlSessionId);
-  const flushLayout = useCallback(() => {
-    for (const p of placementsRef.current) {
-      if (p.type !== "app") continue;
+  const flushAppLink = useCallback(
+    (p: WidgetPlacement) => {
+      if (p.type !== "app") return;
       const link = workspaceContextRegistry.resolveLink(p.id);
       if (link) updatePlacementLink(p.id, link.route, link.params);
-    }
-  }, [workspaceContextRegistry]);
+    },
+    [workspaceContextRegistry],
+  );
+  const flushLayout = useCallback(() => {
+    for (const p of placementsRef.current) flushAppLink(p);
+  }, [flushAppLink]);
 
   const suppressProjectsRef = useRef(false);
   useEffect(() => {
@@ -203,7 +208,7 @@ export function FreeGrid() {
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
     const applyInitialWidgets = (targetSessionId: string | null) => {
-      if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
+      if (!initialWidgetsKey || !initialWidgets) {
         return;
       }
       // A narrow workspace shows one pane at a time, so an expanded panel
@@ -230,7 +235,7 @@ export function FreeGrid() {
 
   useEffect(() => {
     return eventBus.on<{ paths: string[]; force?: boolean }>("projects:opened", (payload) => {
-      if (!payload?.paths || payload.paths.length === 0) return;
+      if (payload.paths.length === 0) return;
       // A forced open (an explicit click on a /projects link in chat) overrides
       // the user's earlier manual close of the panel; the passive agent-link
       // path (no force) still respects that close.
@@ -337,6 +342,10 @@ export function FreeGrid() {
             content={(widget, dragging) => (
               <WidgetContent widget={widget} dragging={dragging} sessionId={chatSessionId} />
             )}
+            fullHref={getWidgetFullHref}
+            // App tiles navigate inside a frozen iframe, so persist the live
+            // route before the link is followed; the href then carries it.
+            onOpenIntent={flushAppLink}
           >
             {!chatSessionId && (
               <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">

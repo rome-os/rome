@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import type { ApprovalCardStatus, ApprovalPreviewPayload } from "@/lib/chat-types";
+import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -24,7 +24,7 @@ export function ApprovalCard({
 }: {
   approvalId: string;
   actionName?: string;
-  preview: ApprovalPreviewPayload;
+  preview: PreviewPayload;
   status: ApprovalCardStatus;
   onResolved: () => void;
 }) {

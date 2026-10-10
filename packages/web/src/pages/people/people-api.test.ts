@@ -16,10 +16,9 @@
 import { afterAll, beforeAll, expect, test } from "@rstest/core";
 import { setupServer } from "msw/node";
 import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
-import { channelMirrorHandlers } from "../../../mock/handlers/people";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
 
-const server = setupServer(...peopleHandlers, ...channelMirrorHandlers);
+const server = setupServer(...peopleHandlers);
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 

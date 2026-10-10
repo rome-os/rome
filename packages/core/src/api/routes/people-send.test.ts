@@ -11,6 +11,7 @@ import type {
 } from "@rome/api-types/people";
 import { peopleRoutes } from "./people.js";
 import {
+  createTestConnections,
   createTestDb,
   buildTestDeps,
   testChannels,
@@ -91,8 +92,8 @@ describe("People send API", () => {
       state: "unconfirmed",
     });
 
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([
-      { channelUserId: TG, threadId: TG, message: { text: "on my way" } },
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([
+      { conversationId: TG, message: { text: "on my way" } },
     ]);
   });
 
@@ -103,7 +104,7 @@ describe("People send API", () => {
     // guardian addressed someone, and delivering to anyone else is worse than
     // refusing.
     expect(res.status).toBe(400);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
   it("claims a client send id once across concurrent requests", async () => {
@@ -113,9 +114,9 @@ describe("People send API", () => {
     for (const response of responses) {
       expect(await response.json()).toMatchObject({ id: body.id, text: "hello" });
     }
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
     expect((await send(body)).status).toBe(202);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
   });
 
   it("delivers identical messages when they have distinct send ids", async () => {
@@ -126,7 +127,7 @@ describe("People send API", () => {
     ]);
 
     expect(responses.map((response) => response.status)).toEqual([202, 202]);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(2);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(2);
   });
 
   it("refuses reuse of a send id for different text or another account", async () => {
@@ -140,7 +141,7 @@ describe("People send API", () => {
       channelMappings: [{ channel: "telegram", channelUserId: OTHER_TG }],
     });
     expect((await send({ ...body, channelUserId: OTHER_TG }, anotherPerson)).status).toBe(409);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
   });
 
   it("validates a supplied send id before contacting the provider", async () => {
@@ -149,12 +150,15 @@ describe("People send API", () => {
         (await send({ id, channel: "telegram", channelUserId: TG, text: "hello" })).status,
       ).toBe(400);
     }
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toEqual([]);
+    expect(deps.transports.get("telegram")?.sentMessages).toEqual([]);
   });
 
   it("refuses a channel that does not do direct messaging, naming the state", async () => {
-    const talkRouter = { ...deps.talkRouter, feature: () => null };
-    const readOnly = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
+    const connections = createTestConnections(deps.transports, (_service, talk) => ({
+      ...talk,
+      directMessaging: undefined,
+    }));
+    const readOnly = { ...deps, connections, channels: testChannels(deps, connections) };
     const readOnlyApp = new Hono().route("/", peopleRoutes(readOnly));
 
     const res = await readOnlyApp.request(`/people/${personId}/messages`, {
@@ -213,7 +217,7 @@ describe("People send API", () => {
     );
     expect(await deps.outboxRepo.find(body.id)).toBeNull();
     expect(await outbox()).toEqual([]);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
     expect((await timeline()).entries.filter((entry) => entry.body === body.text)).toHaveLength(1);
     expect((await send({ ...body, text: "different message" })).status).toBe(409);
   });
@@ -235,17 +239,17 @@ describe("People send API", () => {
 
     rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS - 1);
     expect(await (await send(body)).json()).toEqual(original);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(1);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(1);
 
     rs.setSystemTime(removedAt + SEND_IDEMPOTENCY_RETENTION_MS);
     expect(await deps.outboxRepo.findSend(body.id)).toBeNull();
     expect((await send(body)).status).toBe(202);
-    expect(deps.channelPortMap.get("telegram")?.sentMessages).toHaveLength(2);
+    expect(deps.transports.get("telegram")?.sentMessages).toHaveLength(2);
   });
 
   it("retains a discarded send's response without retrying the provider", async () => {
     const provider = rs
-      .spyOn(deps.channelPortMap.get("telegram")!, "sendMessage")
+      .spyOn(deps.transports.get("telegram")!, "send")
       .mockRejectedValue(new Error("refused"));
     const body = {
       id: crypto.randomUUID(),
@@ -265,10 +269,9 @@ describe("People send API", () => {
   });
 
   it("keeps a refused send in the outbox, and retries it under its own id", async () => {
-    const adapter = deps.channelPortMap.get("telegram")!;
-    adapter.sendMessage = async () => {
-      throw new Error("provider rejected");
-    };
+    const refused = rs
+      .spyOn(deps.transports.get("telegram")!, "send")
+      .mockRejectedValue(new Error("provider rejected"));
 
     await send({ channel: "telegram", channelUserId: TG, text: "will fail" });
 
@@ -284,9 +287,7 @@ describe("People send API", () => {
 
     // The retry succeeds and reuses the row, so the conversation does not grow
     // a second message the guardian never wrote.
-    adapter.sendMessage = async (channelUserId, threadId, message) => {
-      adapter.sentMessages.push({ channelUserId, threadId, message });
-    };
+    refused.mockRestore();
     const retried = await app.request(`/people/${personId}/outbox/${failed!.id}/retry`, {
       method: "POST",
     });
@@ -297,9 +298,7 @@ describe("People send API", () => {
   });
 
   it("discards a failed send when the guardian gives up on it", async () => {
-    deps.channelPortMap.get("telegram")!.sendMessage = async () => {
-      throw new Error("nope");
-    };
+    rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
     await send({ channel: "telegram", channelUserId: TG, text: "abandon me" });
     const [failed] = await outbox();
 
@@ -449,9 +448,7 @@ describe("People send API — delivery bookkeeping", () => {
       approved: true,
       channelMappings: [{ channel: "telegram", channelUserId: "tg-elsewhere" }],
     });
-    deps.channelPortMap.get("telegram")!.sendMessage = async () => {
-      throw new Error("nope");
-    };
+    rs.spyOn(deps.transports.get("telegram")!, "send").mockRejectedValue(new Error("nope"));
     await app.request(`/people/${otherId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -540,10 +537,8 @@ describe("People send API — delivery bookkeeping", () => {
   });
 
   it("never leaves a delivered message with no record when discard races retry", async () => {
-    const adapter = deps.channelPortMap.get("whatsapp")!;
-    adapter.sendMessage = async () => {
-      throw new Error("nope");
-    };
+    const transport = deps.transports.get("whatsapp")!;
+    const refused = rs.spyOn(transport, "send").mockRejectedValue(new Error("nope"));
     await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -551,10 +546,8 @@ describe("People send API — delivery bookkeeping", () => {
     });
     const [failed] = await outbox();
 
-    adapter.sentMessages.length = 0;
-    adapter.sendMessage = async (channelUserId, threadId, message) => {
-      adapter.sentMessages.push({ channelUserId, threadId, message });
-    };
+    transport.sentMessages.length = 0;
+    refused.mockRestore();
 
     // Whichever wins is fine. What must never happen is the discard passing a
     // `failed` check, the retry claiming the row in between, and the delete
@@ -564,8 +557,8 @@ describe("People send API — delivery bookkeeping", () => {
       app.request(`/people/${personId}/outbox/${failed!.id}`, { method: "DELETE" }),
     ]);
 
-    expect(adapter.sentMessages.length).toBeLessThanOrEqual(1);
-    if (adapter.sentMessages.length === 1) {
+    expect(transport.sentMessages.length).toBeLessThanOrEqual(1);
+    if (transport.sentMessages.length === 1) {
       // Somewhere, not necessarily the outbox: a message that reached the
       // timeline has left the outbox legitimately, and that is the row doing
       // its job rather than being lost. What must never happen is a delivered
@@ -580,10 +573,8 @@ describe("People send API — delivery bookkeeping", () => {
   });
 
   it("sends once when a failed row is retried twice at the same moment", async () => {
-    const adapter = deps.channelPortMap.get("whatsapp")!;
-    adapter.sendMessage = async () => {
-      throw new Error("nope");
-    };
+    const transport = deps.transports.get("whatsapp")!;
+    const refused = rs.spyOn(transport, "send").mockRejectedValue(new Error("nope"));
     await app.request(`/people/${personId}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -591,9 +582,7 @@ describe("People send API — delivery bookkeeping", () => {
     });
     const [failed] = await outbox();
 
-    adapter.sendMessage = async (channelUserId, threadId, message) => {
-      adapter.sentMessages.push({ channelUserId, threadId, message });
-    };
+    refused.mockRestore();
 
     // A double-clicked Retry. Reading the state and then writing would let both
     // requests past, and the guardian's one message would arrive twice.
@@ -603,25 +592,22 @@ describe("People send API — delivery bookkeeping", () => {
     ]);
 
     expect(both.map((r) => r.status).sort()).toEqual([202, 404]);
-    expect(adapter.sentMessages).toHaveLength(1);
+    expect(transport.sentMessages).toHaveLength(1);
   });
 
   it("answers no-conversation when the channel throws looking for a thread", async () => {
     // What a thread-keyed channel does when it cannot open a DM. The person
     // read already calls this account `no-conversation`; the send path has to
     // agree rather than answering with a stack trace.
-    const talkRouter = {
-      ...deps.talkRouter,
-      feature: (_connectionId: string, name: string) =>
-        name === "directMessaging"
-          ? {
-              conversationFor: async () => {
-                throw new Error("provider is down");
-              },
-            }
-          : null,
-    } as unknown as TestDeps["talkRouter"];
-    const throwing = { ...deps, talkRouter, channels: testChannels(deps, talkRouter) };
+    const connections = createTestConnections(deps.transports, (_service, talk) => ({
+      ...talk,
+      directMessaging: {
+        conversationFor: async () => {
+          throw new Error("provider is down");
+        },
+      },
+    }));
+    const throwing = { ...deps, connections, channels: testChannels(deps, connections) };
 
     const res = await new Hono()
       .route("/", peopleRoutes(throwing))

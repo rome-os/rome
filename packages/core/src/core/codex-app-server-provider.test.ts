@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { UsageFunding } from "../usage/events.js";
 import { CodexAppServerProvider } from "./codex-app-server-provider.js";
+import { CodexAppServerManager } from "./codex/app-server-manager.js";
 import type {
   ModelSession,
   ModelSessionForkOpenParams,
@@ -962,6 +963,51 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("fails a queued turn instead of starting it after the payer changes", async () => {
+    const previousOrigin = process.env.PANTHEON_BASE_ORIGIN;
+    process.env.PANTHEON_BASE_ORIGIN = "https://rome.example";
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thread-payer" } };
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", {
+          threadId: "thread-payer",
+          turn: { id: "turn-1" },
+        });
+      }
+      return {};
+    });
+    const appServerManager = new CodexAppServerManager();
+    const provider = new CodexAppServerProvider({ appServerManager });
+    try {
+      const session = await provider.openSession(buildParams());
+      const first = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "first" });
+      await rs.waitFor(() => {
+        expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
+      });
+      // Queued behind the active turn while ChatGPT is still the payer.
+      await session.sendUserInput({ text: "second" });
+
+      appServerManager.setDefaultProvider("rome_credits");
+      expect(await first).toEqual([
+        expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+      ]);
+      expect(await collectUntilTerminal(session)).toEqual([
+        expect.objectContaining({
+          type: "error",
+          error: "Model payer changed while preparing this turn; please retry.",
+          code: "transient",
+        }),
+      ]);
+      expect(requestMock.mock.calls.filter((call) => call[0] === "turn/start")).toHaveLength(1);
+      await session.close();
+    } finally {
+      appServerManager.close();
+      if (previousOrigin === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
+      else process.env.PANTHEON_BASE_ORIGIN = previousOrigin;
+    }
+  });
+
   it("lazily resumes an idle thread on a new shared process after exit", async () => {
     let turnNumber = 0;
     requestMock.mockImplementation(async (method: string) => {
@@ -1071,6 +1117,11 @@ describe("CodexAppServerProvider", () => {
           turnId: "fork-turn",
           completedAtMs: 0,
         });
+        n("thread/tokenUsage/updated", {
+          threadId: "source-thread",
+          turnId: "fork-turn",
+          tokenUsage: usage(),
+        });
         n("turn/completed", {
           threadId: "source-thread",
           turn: { id: "fork-turn", status: "completed" },
@@ -1098,10 +1149,15 @@ describe("CodexAppServerProvider", () => {
     // The stable turn-id boundary makes one retry safe: it can never remove an
     // earlier source turn if the first request already applied the revert.
     expect(requestMock.mock.calls.filter((c) => c[0] === "thread/revert")).toHaveLength(2);
-    // The fork never observes success while its turn is still in the source.
+    // The fork never observes success while its turn is still in the source,
+    // but its error still carries the usage the turn spent.
     expect(msgs.find((m) => m.type === "result")).toBeUndefined();
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
       error: expect.stringContaining("revert failed"),
+      accounting: {
+        usage: { inputTokens: 5, outputTokens: 4 },
+        stop: { reason: "error", raw: "completed" },
+      },
     });
     // The source stream carries the contamination error…
     await expect(sourceEvents.next()).resolves.toMatchObject({
@@ -1531,46 +1587,6 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
-  it("treats a missing cache-write field in compatibility usage notifications as zero", async () => {
-    requestMock.mockImplementation(async (method: string) => {
-      if (method === "thread/start") {
-        captured.onNotification?.("thread/started", { thread: { id: "thr-legacy-usage" } });
-      }
-      if (method === "turn/start") {
-        const n = captured.onNotification!;
-        const legacyUsage = usage();
-        delete (legacyUsage.last as Partial<typeof legacyUsage.last>).cacheWriteInputTokens;
-        delete (legacyUsage.total as Partial<typeof legacyUsage.total>).cacheWriteInputTokens;
-        n("turn/started", {
-          threadId: "thr-legacy-usage",
-          turn: { id: "turn-legacy-usage" },
-        });
-        n("thread/tokenUsage/updated", {
-          threadId: "thr-legacy-usage",
-          turnId: "turn-legacy-usage",
-          usage: legacyUsage,
-        });
-        n("turn/completed", {
-          threadId: "thr-legacy-usage",
-          turn: { id: "turn-legacy-usage", status: "completed" },
-        });
-      }
-      return {};
-    });
-
-    const session = await new CodexAppServerProvider().openSession(buildParams());
-    const collected = collectUntilTerminal(session);
-    await session.sendUserInput({ text: "legacy usage" });
-
-    expect((await collected).find((message) => message.type === "result")).toMatchObject({
-      accounting: {
-        usage: { cacheWriteTokens: 0 },
-        rawUsage: { cache_write_tokens: 0 },
-      },
-    });
-    await session.close();
-  });
-
   it("passes outputSchema on turn/start and publishes one parsed structured terminal", async () => {
     const provider = new CodexAppServerProvider();
     const schema = {
@@ -1744,6 +1760,11 @@ describe("CodexAppServerProvider", () => {
           threadId: "thr-interrupted",
           turn: { id: "turn-interrupted" },
         });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-interrupted",
+          turnId: "turn-interrupted",
+          tokenUsage: usage(),
+        });
         n("turn/completed", {
           threadId: "thr-interrupted",
           turn: { id: "turn-interrupted", status: "interrupted" },
@@ -1764,10 +1785,16 @@ describe("CodexAppServerProvider", () => {
     const collected = collectUntilTerminal(session);
     await session.sendUserInput({ text: "return seven" });
 
+    // The error keeps the turn's usage under an `error` stop. An
+    // `interrupted` stop would report this failure as an interrupted turn.
     expect(await collected).toContainEqual(
       expect.objectContaining({
         type: "error",
         error: expect.stringContaining("status interrupted"),
+        accounting: expect.objectContaining({
+          usage: expect.objectContaining({ inputTokens: 5, outputTokens: 4 }),
+          stop: { reason: "error", raw: "interrupted" },
+        }),
       }),
     );
     await session.close();
@@ -2330,6 +2357,54 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("re-reads the served models before exposing a Rome credits model refusal", async () => {
+    let refreshed = false;
+    const provider = new CodexAppServerProvider({
+      isUsingRomeCredits: () => true,
+      onRomeCreditsModelNotServed: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        refreshed = true;
+      },
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: "turn-1",
+            status: "failed",
+            error: {
+              message:
+                "unexpected status 403 Forbidden: This model is not available from Rome credits.",
+            },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    // The terminal waited for the re-read, so a retry sees the new list.
+    expect(refreshed).toBe(true);
+    expect(error).toMatchObject({
+      type: "error",
+      code: "model_unavailable",
+      httpStatus: 403,
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await session.close();
+  });
+
   it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
     let funding: UsageFunding = "byok";
     const provider = new CodexAppServerProvider({ funding: () => funding });
@@ -2359,6 +2434,52 @@ describe("CodexAppServerProvider", () => {
     expect(session.funding).toBe("byok");
     funding = "rome_credits";
     expect(session.funding).toBe("rome_credits");
+    await session.close();
+  });
+
+  it("keeps a failed turn's usage on its error, and prices no failure that used none", async () => {
+    const provider = new CodexAppServerProvider();
+    let turnNumber = 0;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        turnNumber += 1;
+        const turnId = `turn-${turnNumber}`;
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: turnId } });
+        if (turnNumber === 1) {
+          n("thread/tokenUsage/updated", { threadId: "thr-1", turnId, tokenUsage: usage() });
+        }
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: { id: turnId, status: "failed", error: { message: "upstream failed" } },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams({ model: "gpt-5.6-sol" }));
+    let collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "first" });
+    const first = (await collected).find((m) => m.type === "error");
+    expect(first).toMatchObject({
+      type: "error",
+      error: "upstream failed",
+      accounting: {
+        usage: { inputTokens: 5, outputTokens: 4, cacheReadTokens: 1, cacheWriteTokens: 0 },
+        stop: { reason: "error", raw: "failed" },
+        stopReason: "error",
+      },
+    });
+    expect((first as { accounting?: { costUsd?: number } }).accounting?.costUsd).toBeGreaterThan(0);
+
+    collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "second" });
+    const second = (await collected).find((m) => m.type === "error");
+    expect(second).toMatchObject({ type: "error", error: "upstream failed" });
+    expect(second).not.toHaveProperty("accounting");
     await session.close();
   });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Suspense } from "react";
 import { Markdown, type MarkdownTheme, readMarkdownMermaidTheme } from "./markdown.js";
 
@@ -169,20 +169,23 @@ describe("Markdown", () => {
     expect(container.textContent ?? "").not.toContain("graph TD");
   });
 
-  it("renders inline and block math with KaTeX", () => {
+  it("renders inline and block math with KaTeX once the math plugin loads", async () => {
     const { container } = renderMd(
       "Euler's identity is $$e^{i\\pi} + 1 = 0$$.\n\n$$\nE = mc^2\n$$",
     );
 
-    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2));
     expect(container.querySelectorAll(".katex-mathml")).toHaveLength(2);
     expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
   });
 
-  it("does not interpret single dollar signs as math", () => {
-    const { container } = renderMd("The first item costs $5 and the second costs $10.");
+  it("does not interpret single dollar signs as math", async () => {
+    // The $$ loads the math plugin, so the single dollars are parsed with it.
+    const { container } = renderMd(
+      "The first item costs $5 and the second costs $10, unlike $$x$$.",
+    );
 
-    expect(container.querySelector(".katex")).toBeNull();
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(1));
     expect(container.textContent).toContain("$5");
     expect(container.textContent).toContain("$10");
   });

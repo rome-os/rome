@@ -23,7 +23,6 @@ import {
   appMigrationsTableName,
   ArtifactEntrySchema,
   formatZodIssues,
-  hashWorkspace,
   parseAppManifest,
   resolvePathWithinBase,
   safeIsFile,
@@ -117,7 +116,6 @@ const BuildManifestSchema = z.object({
   assetVersion: z.string().regex(/^[0-9a-f]{12}$/),
   displayName: z.string().min(1),
   navLabel: z.string().min(1).optional(),
-  routing: z.literal("client"),
 });
 
 function normalizeArtifactEntry(entry: z.infer<typeof ArtifactEntrySchema>): RomeAppArtifactEntry {
@@ -336,11 +334,6 @@ export class AppInstaller {
       return { ok: false, reason: `bundle missing app.yaml at ${root}` };
     }
     return { ok: true, root };
-  }
-
-  /** Convenience for testing and migration scripts. */
-  computeWorkspaceHash(workspaceRoot: string): Promise<string> {
-    return hashWorkspace(workspaceRoot);
   }
 
   /**

@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
-import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
+import {
+  buildTestDeps,
+  createTestDb,
+  type TestDb,
+  type TestDeps,
+  createActionEngineRepos,
+} from "../../test/helpers.js";
 import { AppKeyInjector } from "../../app-keys/injector.js";
 import { ActionEngine } from "../../actions/engine.js";
 import { ActionRegistryImpl } from "../../actions/registry.js";
@@ -110,23 +116,16 @@ describe("appKeysRoutes", () => {
 
     const forkedEnvs: Array<NodeJS.ProcessEnv | undefined> = [];
     const children: FakeWorkerChild[] = [];
-    const engine = new ActionEngine(
-      new ActionRegistryImpl([]),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        processRole: "main",
-        workerWarmPoolSize: 1,
-        actionWorkerFork: (_entryPath: string, options: ForkOptions) => {
-          forkedEnvs.push(options.env);
-          const child = new FakeWorkerChild();
-          children.push(child);
-          return child as unknown as ChildProcess;
-        },
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 1,
+      actionWorkerFork: (_entryPath: string, options: ForkOptions) => {
+        forkedEnvs.push(options.env);
+        const child = new FakeWorkerChild();
+        children.push(child);
+        return child as unknown as ChildProcess;
       },
-    );
+    });
     deps.actionEngine = engine;
     deps.refreshAppRuntime = () => engine.restartWorkerWarmPool();
     // The engine snapshots the real process.env at fork time, so the injector

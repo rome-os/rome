@@ -107,130 +107,42 @@ export function LinkedInIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
   );
 }
 
-export type ChannelBrandKey =
-  | "telegram"
-  | "telegramUser"
-  | "whatsapp"
-  | "wechat"
-  | "linkedin"
-  | "discord"
-  | "feishu";
+interface ConnectionBadge {
+  Icon: ComponentType<{ className?: string }>;
+  badge: string;
+  iconClassName?: string;
+}
 
-const CHANNEL_BADGES: Record<
-  ChannelBrandKey,
-  { Icon: ComponentType<SVGProps<SVGSVGElement>>; badge: string }
-> = {
+/** Brand mark and badge colors per connection service. The Telegram personal
+    account folds onto the Telegram row as a slot, so it shares the single
+    `telegram` brand mark. Rome-owned surfaces use the Rome mark, while generic
+    transports use a matching Lucide glyph. */
+const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   // Brand hex is intentional logo color (see file header).
   telegram: { Icon: TelegramIcon, badge: "bg-[#229ED9] text-white" },
-  telegramUser: { Icon: TelegramIcon, badge: "bg-[#229ED9] text-white" },
   whatsapp: { Icon: WhatsAppIcon, badge: "bg-[#25D366] text-white" },
   wechat: { Icon: WeChatIcon, badge: "bg-[#07C160] text-white" },
   linkedin: { Icon: LinkedInIcon, badge: "bg-[#0A66C2] text-white" },
   discord: { Icon: DiscordIcon, badge: "bg-[#5865F2] text-white" },
-  // Multi-color brand mark sits on white (the paths carry their own colors).
-  feishu: { Icon: FeishuIcon, badge: "bg-white border border-border" },
+  // Multi-color brand marks sit on white (the paths carry their own colors).
+  feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
+  slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
+  google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
+  github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
+  webchat: {
+    Icon: RomeLogo,
+    badge: "bg-foreground text-background",
+    iconClassName: "[--background:var(--foreground)]",
+  },
+  email: { Icon: Mail, badge: "bg-primary/15 text-primary" },
+  agents: { Icon: Bot, badge: "bg-primary/15 text-primary" },
+  // Composio is a broker, not a single brand — reuse the legacy Integrations
+  // tab's `Blocks` mark so it reads consistently across the app.
+  composio: { Icon: Blocks, badge: "bg-primary/15 text-primary" },
 };
 
-/** Square brand badge for a Settings channel card header. */
-export function ChannelBrandBadge({
-  channel,
-  className,
-  size = "md",
-}: {
-  channel: ChannelBrandKey;
-  className?: string;
-  /** "sm" matches the compact Email-row badge (size-6); "md" is the standalone size. */
-  size?: "sm" | "md";
-}) {
-  const { Icon, badge } = CHANNEL_BADGES[channel];
-  return (
-    <div
-      className={cn(
-        "flex shrink-0 items-center justify-center",
-        size === "sm" ? "size-6 rounded-4" : "h-9 w-9 rounded-8",
-        badge,
-        className,
-      )}
-      aria-hidden
-    >
-      <Icon className={size === "sm" ? "size-3.5" : "h-5 w-5"} />
-    </div>
-  );
-}
-
-/** Square brand badge for a Settings integration (OAuth provider) card header. */
-export function ProviderBrandBadge({
-  provider,
-  className,
-}: {
-  provider: "google" | "github" | "slack";
-  className?: string;
-}) {
-  if (provider === "github") {
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-foreground text-background",
-          className,
-        )}
-        aria-hidden
-      >
-        <GithubIcon className="h-5 w-5" />
-      </div>
-    );
-  }
-  if (provider === "slack") {
-    // Multi-color brand mark sits on white (the paths carry their own colors).
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 border border-border bg-white",
-          className,
-        )}
-        aria-hidden
-      >
-        <SlackIcon className="h-5 w-5" />
-      </div>
-    );
-  }
-  return (
-    <div
-      className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 border border-border bg-white",
-        className,
-      )}
-      aria-hidden
-    >
-      <GoogleIcon className="h-5 w-5" />
-    </div>
-  );
-}
-
-/** Maps a connection card's service name onto the existing per-surface brand badges.
-    The Telegram personal account folds onto the Telegram row as a slot, so it
-    shares the single `telegram` brand mark. */
-const CONNECTION_TO_CHANNEL: Partial<Record<string, ChannelBrandKey>> = {
-  telegram: "telegram",
-  whatsapp: "whatsapp",
-  wechat: "wechat",
-  linkedin: "linkedin",
-  discord: "discord",
-  feishu: "feishu",
-};
-
-const CONNECTION_TO_PROVIDER: Partial<Record<string, "google" | "github" | "slack">> = {
-  github: "github",
-  google: "google",
-  slack: "slack",
-};
-
-/**
- * Square brand badge for a unified Connection card header. Dispatches to the
- * existing glyph badges (`ChannelBrandBadge` / `ProviderBrandBadge`) rather than
- * reimplementing any SVGs — the single entry point the migrated Settings surface
- * uses so both integration surfaces render from one call. Rome-owned surfaces
- * use the Rome mark, while generic transports use a matching Lucide glyph.
- */
+/** Square brand badge for a unified Connection card header. An unknown service
+ *  gets an empty bordered square. */
 export function ConnectionBrandBadge({
   connection,
   className,
@@ -238,76 +150,18 @@ export function ConnectionBrandBadge({
   connection: string;
   className?: string;
 }) {
-  const channel = CONNECTION_TO_CHANNEL[connection];
-  if (channel) {
-    return <ChannelBrandBadge channel={channel} className={className} />;
-  }
-  const provider = CONNECTION_TO_PROVIDER[connection];
-  if (provider) {
-    return <ProviderBrandBadge provider={provider} className={className} />;
-  }
-  if (connection === "webchat") {
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-foreground text-background",
-          className,
-        )}
-        aria-hidden
-      >
-        <RomeLogo className="h-5 w-5 [--background:var(--foreground)]" />
-      </div>
-    );
-  }
-  if (connection === "email") {
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-primary/15 text-primary",
-          className,
-        )}
-        aria-hidden
-      >
-        <Mail className="h-5 w-5" />
-      </div>
-    );
-  }
-  if (connection === "agents") {
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-primary/15 text-primary",
-          className,
-        )}
-        aria-hidden
-      >
-        <Bot className="h-5 w-5" />
-      </div>
-    );
-  }
-  // Composio is a broker, not a single brand — reuse the legacy Integrations
-  // tab's `Blocks` mark so it reads consistently across the app.
-  if (connection === "composio") {
-    return (
-      <div
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 bg-primary/15 text-primary",
-          className,
-        )}
-        aria-hidden
-      >
-        <Blocks className="h-5 w-5" />
-      </div>
-    );
-  }
+  const entry = CONNECTION_BADGES[connection];
   return (
     <div
       className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 border border-border bg-surface",
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8",
+        entry ? entry.badge : "border border-border bg-surface",
         className,
       )}
       aria-hidden
-    />
+    >
+      {entry ? <entry.Icon className={cn("h-5 w-5", entry.iconClassName)} /> : null}
+    </div>
   );
 }
 

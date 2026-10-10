@@ -13,7 +13,6 @@ const CONFIG_ENV_KEYS = [
   "SQLITE_PATH",
   "SQLITE_ENCRYPTION_KEY",
   "POSTGRES_CONNECTION_STRING",
-  "SENTINEL_REVIEW_INTERVAL_MINUTES",
   "ROME_ACTION_MAX_WORKERS",
   "ROME_HOST_EXECUTION_SOCKET",
   "ROME_HOST_EXECUTION_ENABLED",
@@ -139,7 +138,6 @@ describe("loadConfig()", () => {
 
     expect(config.anthropicApiKey).toBe("sk-ant-test-key");
     expect(config.database.type).toBe("sqlite");
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
     expect(config.webServer).toEqual({ port: 3000, host: "localhost" });
   });
 
@@ -151,11 +149,6 @@ describe("loadConfig()", () => {
   it("defaults DATABASE_TYPE to 'sqlite'", () => {
     const config = loadConfig();
     expect(config.database.type).toBe("sqlite");
-  });
-
-  it("defaults sentinel review interval to 120 minutes", () => {
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
   });
 
   it("defaults SQLITE_PATH when DATABASE_TYPE=sqlite", () => {
@@ -215,13 +208,6 @@ describe("loadConfig()", () => {
     expect(() => loadConfig()).toThrow(/Invalid configuration/);
   });
 
-  it("overrides sentinel interval via SENTINEL_REVIEW_INTERVAL_MINUTES", () => {
-    rs.stubEnv("SENTINEL_REVIEW_INTERVAL_MINUTES", "60");
-
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(60);
-  });
-
   it("defaults and overrides the action-worker process cap", () => {
     expect(loadConfig().actionWorkerMaxProcesses).toBe(8);
 
@@ -232,20 +218,13 @@ describe("loadConfig()", () => {
   it("accepts custom SQLITE_PATH", () => {
     rs.stubEnv("SQLITE_PATH", "/tmp/test.db");
 
-    const config = loadConfig();
-    expect(config.database.type).toBe("sqlite");
-    if (config.database.type === "sqlite") {
-      expect(config.database.sqlitePath).toBe("/tmp/test.db");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", sqlitePath: "/tmp/test.db" });
   });
 
   it("passes through SQLITE_ENCRYPTION_KEY", () => {
     rs.stubEnv("SQLITE_ENCRYPTION_KEY", "secret123");
 
-    const config = loadConfig();
-    if (config.database.type === "sqlite") {
-      expect(config.database.encryptionKey).toBe("secret123");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", encryptionKey: "secret123" });
   });
 
   it("surfaces PANTHEON_SLUG as the instance slug", () => {

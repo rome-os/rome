@@ -134,7 +134,7 @@ function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
       state,
       display,
       identity: foldIdentity(display),
-      activeSetupCid: connection.setups?.[grant] ?? null,
+      activeSetupCid: connection.setups[grant] ?? null,
     };
   });
 }

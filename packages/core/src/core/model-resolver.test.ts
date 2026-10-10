@@ -13,6 +13,8 @@ const claude = { id: "anthropic", displayName: "Claude" } as ModelProvider;
 function resolver(
   overrides: Partial<AIToolStateValue> = {},
   settings: { enableFable?: unknown; tierModelMappings?: unknown } = {},
+  usingRomeCredits = false,
+  servedModels: readonly string[] | null = null,
 ) {
   const value: AIToolStateValue = {
     codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
@@ -30,6 +32,10 @@ function resolver(
             ? (settings.tierModelMappings ?? null)
             : null) as T | null,
     },
+    romeCreditsPayer: {
+      isUsingRomeCredits: () => usingRomeCredits,
+      servedModels: () => servedModels,
+    },
   });
 }
 
@@ -45,6 +51,267 @@ describe("ModelResolver", () => {
     await expect(resolver().getModelProvider({ tier: "small" })).resolves.toMatchObject({
       model: "gpt-6-luna",
     });
+  });
+
+  it("resolves Codex models the same way while Rome credits pay and the served list is unknown", async () => {
+    const loggedOut = {
+      codex: { loggedIn: false, quotaExhausted: true, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = resolver(
+      loggedOut,
+      { tierModelMappings: { openai: { medium: "gpt-6-astra" } } },
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: codex,
+      model: "gpt-6.1-sol",
+    });
+    await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+      model: "gpt-6-astra",
+    });
+    await expect(
+      r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol" } }),
+    ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol" });
+  });
+
+  describe("while Rome credits pay with a reported served list", () => {
+    const loggedOut = {
+      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+
+    it("falls a tier back to a model the gateway serves", async () => {
+      const r = resolver(loggedOut, {}, true, ["gpt-5.6-terra", "gpt-6-luna"]);
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        modelProvider: codex,
+        model: "gpt-5.6-terra",
+      });
+      await expect(r.getModelProvider({ tier: "medium" })).resolves.toMatchObject({
+        model: "gpt-5.6-terra",
+      });
+      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+        model: "gpt-6-luna",
+      });
+    });
+
+    it("uses Sol and Luna when the gateway serves them", async () => {
+      const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-terra"]);
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        model: "gpt-6.1-sol",
+      });
+      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+        model: "gpt-6-luna",
+      });
+    });
+
+    it("does not spend credits on a tier the gateway cannot serve", async () => {
+      const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol"]);
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        model: "gpt-6.1-sol",
+      });
+      await expect(r.getModelProvider({ tier: "small" })).rejects.toMatchObject({
+        code: "no_model_provider_available",
+      });
+      await expect(
+        resolver(loggedOut, {}, true, []).getModelProvider({ tier: "large" }),
+      ).rejects.toMatchObject({ code: "no_model_provider_available" });
+    });
+
+    it("prefers a connected Claude login over a tier the gateway cannot serve", async () => {
+      const r = resolver(
+        { ...loggedOut, claude: { loggedIn: true, quotaExhausted: false } },
+        {},
+        true,
+        [],
+      );
+      await expect(r.getModelProvider({ tier: "small" })).resolves.toMatchObject({
+        modelProvider: claude,
+      });
+    });
+
+    it.each([
+      { exact: { providerId: "openai" as const, model: "gpt-6.1-sol" } },
+      { exact: { providerId: "openai" as const, model: "gpt-6-astra" } },
+      { exact: { providerId: "openai" as const, model: "gpt-6.1-sol:high" } },
+      { tier: "large" as const, selectionId: "gpt-6-1-sol" as const },
+    ])("fails an unserved pin or selection with model_unavailable: %o", async (request) => {
+      const r = resolver(loggedOut, {}, true, ["gpt-5.6-terra"]);
+      await expect(r.getModelProvider(request)).rejects.toMatchObject({
+        code: "model_unavailable",
+        provider: "openai",
+        reason: "model_access_denied",
+      });
+    });
+
+    it("runs a served pin by the exact name Codex sends", async () => {
+      const r = resolver(loggedOut, {}, true, ["gpt-6.1-sol"]);
+      await expect(
+        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol:high" } }),
+      ).resolves.toMatchObject({ modelProvider: codex, model: "gpt-6.1-sol:high" });
+      await expect(
+        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6.1-sol-2026-01-01" } }),
+      ).rejects.toMatchObject({ code: "model_unavailable" });
+    });
+
+    it("fails a configured tier model the gateway does not serve", async () => {
+      const r = resolver(
+        loggedOut,
+        { tierModelMappings: { openai: { medium: "gpt-6-astra" } } },
+        true,
+        ["gpt-5.6-terra"],
+      );
+      await expect(r.getModelProvider({ tier: "medium" })).rejects.toMatchObject({
+        code: "model_unavailable",
+      });
+    });
+
+    it("waits for the first served list before resolving", async () => {
+      let served: readonly string[] | null = null;
+      let finish: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        finish = () => {
+          served = ["gpt-5.6-terra"];
+          resolve();
+        };
+      });
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => true,
+          servedModels: () => served,
+          servedModelsSettled: () => settled,
+        },
+      });
+      const resolution = r.getModelProvider({ tier: "large" });
+      finish();
+      await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
+    });
+
+    it("does not wait for the served list when Claude serves the turn", async () => {
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => true,
+          servedModels: () => null,
+          servedModelsSettled: () => new Promise<void>(() => {}),
+        },
+      });
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        modelProvider: claude,
+      });
+      await expect(
+        r.getModelProvider({ exact: { providerId: "anthropic", model: "claude-sonnet-5-5" } }),
+      ).resolves.toMatchObject({ modelProvider: claude });
+    });
+
+    it("ignores the served list while ChatGPT pays", async () => {
+      const r = resolver({}, {}, false, []);
+      await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+        modelProvider: codex,
+        model: "gpt-6.1-sol",
+      });
+      await expect(
+        r.getModelProvider({ exact: { providerId: "openai", model: "gpt-6-astra" } }),
+      ).resolves.toMatchObject({ model: "gpt-6-astra" });
+    });
+  });
+
+  it("keeps a Codex provider pin by tier on the ChatGPT login while Rome credits pay", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "small", providerId: "openai" })).rejects.toMatchObject(
+      {
+        code: "model_provider_unavailable",
+        provider: "openai",
+        reason: "not_logged_in",
+      },
+    );
+  });
+
+  it("fails a tier with no usable provider when credits do not pay", async () => {
+    const state: AIToolStateValue = {
+      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      // Production returns a fresh copy on every read.
+      aiToolState: { get: () => structuredClone(state), refresh: async () => state },
+      providers: [claude, codex],
+      romeCreditsPayer: { isUsingRomeCredits: () => false },
+    });
+    await expect(r.getModelProvider({ tier: "large" })).rejects.toMatchObject({
+      code: "no_model_provider_available",
+    });
+  });
+
+  it("prefers a connected Claude login over spending Rome credits", async () => {
+    const r = resolver(
+      {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: true, quotaExhausted: false },
+      },
+      {},
+      true,
+    );
+    await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
+      modelProvider: claude,
+    });
+  });
+
+  it("uses the payer and provider state that are current after settings reads", async () => {
+    let releaseSettings!: () => void;
+    const settingsReady = new Promise<void>((resolve) => {
+      releaseSettings = resolve;
+    });
+    let settingsRead!: () => void;
+    const settingsStarted = new Promise<void>((resolve) => {
+      settingsRead = resolve;
+    });
+    let usingRomeCredits = false;
+    const state: AIToolStateValue = {
+      codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+      claude: { loggedIn: false, quotaExhausted: false },
+    };
+    const r = createModelResolver({
+      aiToolState: { get: () => state, refresh: async () => state },
+      providers: [claude, codex],
+      settingsRepo: {
+        get: async () => {
+          settingsRead();
+          await settingsReady;
+          return null;
+        },
+      },
+      romeCreditsPayer: {
+        isUsingRomeCredits: () => usingRomeCredits,
+      },
+    });
+
+    const resolution = r.getModelProvider({ tier: "large" });
+    await settingsStarted;
+    state.codex.loggedIn = false;
+    state.claude.loggedIn = true;
+    usingRomeCredits = true;
+    releaseSettings();
+
+    await expect(resolution).resolves.toMatchObject({ modelProvider: claude });
   });
 
   it("falls back from unavailable Sol/Luna to Terra on every tier", async () => {

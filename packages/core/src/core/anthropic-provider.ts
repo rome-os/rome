@@ -36,9 +36,9 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import { parseTimeZone } from "../lib/timezone.js";
 import {
   buildAnthropicCompatibleProviderEnv,
-  CUSTOM_ANTHROPIC_PROVIDER_ID,
   getStoredAnthropicCompatibleCredentials,
 } from "../lib/anthropic-compatible-providers.js";
+import { CUSTOM_ANTHROPIC_PROVIDER_ID } from "@rome/api-types/anthropic-compatible-providers";
 import {
   clearAnthropicAuthRevoked,
   markAnthropicAuthRevoked,
@@ -504,11 +504,12 @@ export class AnthropicProvider implements ModelProvider {
       systemPrompt,
       subagentTools,
       handback,
-      maxTurns = 500,
+      maxTurns = 1000,
       executeAction,
       executeSubagent,
       executeSubmitOutput,
       executeDefer,
+      routineActivation,
     } = params;
     const outputValidator = params.outputSchema
       ? compileOutputSchema(params.outputSchema)
@@ -528,6 +529,7 @@ export class AnthropicProvider implements ModelProvider {
       supportsInteractiveSurface: params.supportsInteractiveSurface,
       interactiveSurfaceDetached: params.interactiveSurfaceDetached,
       executeDefer,
+      routineActivation,
     });
 
     const queryContext = await this.buildQueryContext();

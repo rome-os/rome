@@ -1,3 +1,4 @@
+import type { PairingNotifier } from "../channels/pairing.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
 import type { createNodeDevicesService } from "../lib/node-devices.js";
 import type { ActionEngine } from "../actions/engine.js";
@@ -5,7 +6,6 @@ import type { ActionLoader } from "../actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OutboxRepository } from "../db/repositories/outbox.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
-import type { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
 import type { Channels } from "../channels/channel.js";
 import type { AccountNames } from "../channels/account-names.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -25,12 +25,14 @@ import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../actions/registry.js";
 import type { AgentLoader } from "../core/agent-loader.js";
 import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../db/repositories/app-keys.js";
 import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SessionManager } from "../core/session-manager.js";
+import type { SessionsRepository } from "../db/repositories/sessions.js";
 import type { AgentSessionManager } from "../core/agent-session.js";
 import type { ActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
@@ -46,7 +48,6 @@ import type {
   ConversationSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
-import type { TalkRouter } from "../connections/types.js";
 import type { FavorService } from "../favors/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { SetupManager } from "../connections/setup/manager.js";
@@ -73,7 +74,9 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
-  talkRouter: TalkRouter;
+  /** Tells a paired account that the guardian resolved its request, on the
+   *  Connection the request arrived through (channels/pairing.ts). */
+  notifyPairingResolution: PairingNotifier;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
   conversationSettings: ConversationSettingsControl;
@@ -81,11 +84,9 @@ export interface ApiDeps {
   actionLoader: Pick<ActionLoader, "get">;
   db: DrizzleDb;
   personMappingRepo: PersonMappingRepository;
-  /** Durable mirror of the WhatsApp address book + message history (People tab). */
-  whatsAppStoreRepo: WhatsAppStoreRepository;
   /** Every channel Rome reads, each carrying its address book and what was said
-   *  on it. LinkedIn reaches the API only through here — no route reads its
-   *  store directly. */
+   *  on it. WhatsApp and LinkedIn reach the API only through here — no route
+   *  reads either store directly. */
   channels: Channels;
   /** What each platform calls an account, over every address book Rome mirrors
    *  and the names senders put on their own messages — the display name a
@@ -128,6 +129,7 @@ export interface ApiDeps {
   /** Override for `~/.rome/<profile>/apps/` (tests inject tmpdir). */
   appsRoot?: string;
   settingsRepo: SettingsRepository;
+  feedback: FeedbackRelay;
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
@@ -143,6 +145,7 @@ export interface ApiDeps {
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionManager: SessionManager;
+  sessionsRepo: SessionsRepository;
   agentSessionManager: AgentSessionManager;
   /** Lightweight, tool-free small-model request used to name a new chat. */
   conversationTitleGenerator: ConversationTitleGenerator;

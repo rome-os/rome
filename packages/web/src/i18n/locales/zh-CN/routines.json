@@ -127,13 +127,13 @@
     "placeholders": {
       "name": "每日站会提醒",
       "startDate": "选择日期",
-      "eventName": "action:completed",
+      "eventName": "order.created",
       "sourcePattern": "deploy_*",
       "actionName": "send_reminder",
       "argsJson": "{\"message\": \"该开站会了！\"}"
     },
     "hints": {
-      "eventName": "常见事件包括 action:completed、action:failed、message:received、approval:resolved、routine:fired。",
+      "eventName": "应用或连接器发布的事件类型。",
       "sourcePattern": "可选通配符，用于匹配事件的来源（例如动作名）；留空匹配全部。",
       "manual": "此例程没有自动触发器，仅在你点击「立即运行」时执行。"
     },

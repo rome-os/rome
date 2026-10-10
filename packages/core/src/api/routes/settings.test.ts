@@ -32,6 +32,47 @@ describe("Settings API", () => {
 
   afterEach(() => testDb.close());
 
+  it("defaults agent reports ON, reads the current boolean and leaves guardian reports enabled", async () => {
+    expect(
+      await deps.feedback.send({
+        category: "bug",
+        summary: "Test",
+        details: "",
+        reporter: { kind: "agent" },
+      }),
+    ).not.toEqual({ kind: "disabled" });
+    expect((await putSettings(app, { "feedback.agentReportsEnabled": false })).status).toBe(200);
+    expect(
+      await deps.feedback.send({
+        category: "bug",
+        summary: "Test",
+        details: "",
+        reporter: { kind: "agent" },
+      }),
+    ).toEqual({ kind: "disabled" });
+    expect(await deps.feedback.sendGuardian({ body: "Human", client: {} })).not.toEqual({
+      kind: "disabled",
+    });
+    expect((await putSettings(app, { "feedback.agentReportsEnabled": true })).status).toBe(200);
+    expect(
+      await deps.feedback.send({
+        category: "bug",
+        summary: "Test",
+        details: "",
+        reporter: { kind: "agent" },
+      }),
+    ).not.toEqual({ kind: "disabled" });
+  });
+  it.each([
+    "false",
+    null,
+    {},
+    0,
+  ])("rejects a non-boolean agent reporting setting: %j", async (value) => {
+    expect((await putSettings(app, { "feedback.agentReportsEnabled": value })).status).toBe(400);
+    expect(await deps.settingsRepo.get("feedback.agentReportsEnabled")).toBeNull();
+  });
+
   it("returns an empty object on a fresh DB", async () => {
     const res = await app.request("/settings");
     expect(res.status).toBe(200);

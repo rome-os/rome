@@ -1105,5 +1105,3 @@ function ChatRow({ chat, q, search }: { chat: ProjectDashboardChat; q: string; s
     </Link>
   );
 }
-
-export default ProjectDashboard;

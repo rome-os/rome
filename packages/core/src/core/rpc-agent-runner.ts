@@ -6,7 +6,7 @@
 // CLI alive across turns.
 
 import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";
-import { getWorkerRpc } from "../actions/worker-rpc-client.js";
+import { callMain } from "../actions/worker-rpc-client.js";
 import { getCurrentActionContext, type StreamAgentEvent } from "@rome-os/app-runtime";
 import type { AgentEvent } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "./types.js";
@@ -38,7 +38,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
    * locally.
    */
   async hasAgent(name: string): Promise<boolean> {
-    const res = await getWorkerRpc().call<{ hasAgent: boolean }>("agent.hasAgent", { name });
+    const res = await callMain<{ hasAgent: boolean }>("agent.hasAgent", { name });
     return res.hasAgent;
   }
 
@@ -50,7 +50,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
    * absent answer as "cannot", which is the safe default for guidance).
    */
   async hasAction(agentName: string, actionName: string): Promise<boolean> {
-    const res = await getWorkerRpc().call<{ hasAction: boolean }>("agent.hasAction", {
+    const res = await callMain<{ hasAction: boolean }>("agent.hasAction", {
       agentName,
       actionName,
     });

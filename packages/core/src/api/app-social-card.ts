@@ -2,7 +2,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { OgImageStore } from "../apps/og/store.js";
 import { cardDescription } from "../apps/og/subscriber.js";
 import { appIdToPathSegment } from "../apps/packaging/app-id.js";
-import type { ResolvedApp } from "../apps/state.js";
+import { type AppView, isResolvedApp, type ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
 import type { SocialCard } from "../lib/social-meta.js";
 import { decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
@@ -27,14 +27,9 @@ export interface AppSocialCardDeps {
 }
 
 export function isResolvedWebApp(
-  view: unknown,
+  view: AppView | null | undefined,
 ): view is ResolvedApp & { web: NonNullable<ResolvedApp["web"]> } {
-  return (
-    !!view &&
-    typeof view === "object" &&
-    (view as ResolvedApp).manifest !== undefined &&
-    (view as ResolvedApp).web != null
-  );
+  return isResolvedApp(view) && view.web != null;
 }
 
 /**

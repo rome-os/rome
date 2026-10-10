@@ -27,6 +27,19 @@ async function makeInstalledBundleDir(): Promise<string> {
   return bundle;
 }
 
+// An installed bundle whose listing names its own image, so publish skips
+// rendering a share card (~170ms each) for tests that only read the response.
+async function makeInstalledBundleDirWithImage(): Promise<string> {
+  const bundle = await makeInstalledBundleDir();
+  await mkdir(join(bundle, ".rome_store", "assets"), { recursive: true });
+  await writeFile(
+    join(bundle, ".rome_store", "rome_store.yaml"),
+    "title: Notes\nimage: assets/hero.png\n",
+  );
+  await writeFile(join(bundle, ".rome_store", "assets", "hero.png"), "image-bytes\n");
+  return bundle;
+}
+
 async function makeSourceArtifactWithStoreSidecar(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "rome-publish-sidecar-test-"));
   const source = join(root, "notes");
@@ -214,7 +227,7 @@ describe("publishAppBundle", () => {
   });
 
   it("normalizes a legacy publish response without sourceAvailable to false", async () => {
-    const bundle = await makeInstalledBundleDir();
+    const bundle = await makeInstalledBundleDirWithImage();
     const legacyPayload = {
       ...OK_PAYLOAD,
       version: {
@@ -409,7 +422,7 @@ describe("publishAppBundle", () => {
   });
 
   it("passes the store's rejection message and status through", async () => {
-    const bundle = await makeInstalledBundleDir();
+    const bundle = await makeInstalledBundleDirWithImage();
     const fetchImpl = (async () =>
       new Response(JSON.stringify({ error: "Version 1.2.3 already exists for notes" }), {
         status: 409,
@@ -425,7 +438,7 @@ describe("publishAppBundle", () => {
   });
 
   it("promotes the store's instance-auth sentinels to auth_invalid", async () => {
-    const bundle = await makeInstalledBundleDir();
+    const bundle = await makeInstalledBundleDirWithImage();
     for (const [status, code] of [
       [403, "instance_revoked"],
       [401, "invalid_instance_token"],
@@ -441,7 +454,7 @@ describe("publishAppBundle", () => {
   });
 
   it("keeps an ordinary 403 handle refusal as a rejection with its message", async () => {
-    const bundle = await makeInstalledBundleDir();
+    const bundle = await makeInstalledBundleDirWithImage();
     const fetchImpl = (async () =>
       new Response(JSON.stringify({ error: 'Not authorized to publish under handle "notes"' }), {
         status: 403,
@@ -456,7 +469,7 @@ describe("publishAppBundle", () => {
   });
 
   it("reports unreachable on network failure", async () => {
-    const bundle = await makeInstalledBundleDir();
+    const bundle = await makeInstalledBundleDirWithImage();
     const fetchImpl = (async () => {
       throw new Error("connect ECONNREFUSED");
     }) as typeof fetch;

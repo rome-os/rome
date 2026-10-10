@@ -39,6 +39,7 @@ function createActions(): ContextMenuActions {
     canStartChatFromFolder: true,
     onCreatePath: rs.fn(),
     onCopyPath: rs.fn(),
+    getPathKind: (path) => (path.endsWith(".md") ? "file" : "directory"),
     onDownloadPaths: rs.fn(),
     onUploadForFolder: rs.fn(),
     onUploadFolderForFolder: rs.fn(),
@@ -50,6 +51,7 @@ function createActions(): ContextMenuActions {
     labelNewFile: "New file",
     labelNewFolder: "New folder",
     labelCopyPath: "Copy path",
+    labelCopyPaths: "Copy paths",
     labelDownload: "Download",
     labelUploadFiles: "Upload files",
     labelUploadFolder: "Upload folder",
@@ -244,6 +246,54 @@ describe("shared file action model", () => {
       "destructive-separator",
       "delete",
     ]);
+  });
+
+  it("copies each single-selection kind with its own formatting", () => {
+    const actions = createActions();
+    const copy = (kind: "file" | "directory", path: string) => {
+      const entry = getFileActionMenuEntries({ kind, path, paths: [path], actions }).find(
+        (candidate) => candidate.key === "copy-path",
+      );
+      if (entry?.type !== "action") throw new Error("missing copy-path entry");
+      expect(entry.label).toBe("Copy path");
+      entry.onSelect();
+    };
+
+    copy("file", "/projects/notes.md");
+    copy("directory", "/projects/example");
+    copy("directory", "/projects");
+
+    expect(actions.onCopyPath).toHaveBeenNthCalledWith(1, "/projects/notes.md");
+    expect(actions.onCopyPath).toHaveBeenNthCalledWith(2, "/projects/example/");
+    expect(actions.onCopyPath).toHaveBeenNthCalledWith(3, "projects");
+  });
+
+  it("copies every path of a mixed multi-selection, one per line, in selection order", () => {
+    const actions = createActions();
+    const entries = getFileActionMenuEntries({
+      kind: "file",
+      path: "/projects/notes.md",
+      paths: ["/projects/example", "/projects/notes.md", "/projects/docs"],
+      actions,
+    });
+
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "selection",
+      "selection-separator",
+      "copy-path",
+      "download",
+      "destructive-separator",
+      "delete",
+    ]);
+    const copyEntry = entries.find((entry) => entry.key === "copy-path");
+    if (copyEntry?.type !== "action") throw new Error("missing copy-path entry");
+    expect(copyEntry.label).toBe("Copy paths");
+
+    copyEntry.onSelect();
+
+    expect(actions.onCopyPath).toHaveBeenCalledWith(
+      "/projects/example/\n/projects/notes.md\n/projects/docs/",
+    );
   });
 
   it("allows native tree drag only for the active mouse pointer", () => {

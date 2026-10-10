@@ -58,9 +58,7 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   if (input.romeSessionId) return input.romeSessionId;
   if (input.existingSessionId) return input.existingSessionId;
   if (input.threadContext) {
-    if (input.threadContext.channel === "webchat") {
-      return input.threadContext.threadId;
-    }
+    if (input.threadContext.romeSessionId) return input.threadContext.romeSessionId;
     return `channel:${input.threadContext.channel}:${input.threadContext.threadId}`;
   }
   const actionContext = input.actionContext ?? getCurrentActionContext();

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
 import type { SessionActor } from "../lib/session-actor.js";
-import { UsageAttributionResolver, type UsageAttributionSources } from "./attribution.js";
+import {
+  SKILL_REVIEW_INITIATOR,
+  UsageAttributionResolver,
+  type UsageAttributionSources,
+} from "./attribution.js";
 
 type Row = NonNullable<Awaited<ReturnType<UsageAttributionSources["getSession"]>>>;
 
@@ -166,6 +170,23 @@ describe("UsageAttributionResolver.forTurn", () => {
     expect((await r.forTurn(turn("onEmail"))).trigger).toBe("event");
   });
 
+  it("counts the skill review core starts after a turn as background", async () => {
+    const sessions = {
+      review: session({
+        type: "action",
+        triggerExecutionId: "exec-review",
+        rootActionExecutionId: "exec-review",
+        triggerActionName: "news.digest",
+      }),
+    };
+    const r = resolver(sessions, { "exec-review": SKILL_REVIEW_INITIATOR });
+    expect(await r.forTurn(turn("review"))).toEqual({
+      kind: "app",
+      appId: "@rome/news",
+      trigger: "background",
+    });
+  });
+
   it("falls back to the turn's session type when the row is missing or the root is gone", async () => {
     const sessions = { orphan: session({ type: "subagent", parentSessionId: "deleted" }) };
     const r = resolver(sessions);
@@ -193,7 +214,7 @@ describe("UsageAttributionResolver.forTurn", () => {
 });
 
 describe("UsageAttributionResolver.forActionRun", () => {
-  const r = resolver({}, {}, { "digest-root": "schedule", "poll-root": "poll" });
+  const r = resolver({}, {}, { "digest-root": "schedule" });
   const run = (actionName: string, initiator: string | null, extra: Partial<Execution> = {}) =>
     r.forActionRun({
       actionName,
@@ -229,10 +250,10 @@ describe("UsageAttributionResolver.forActionRun", () => {
   it("reports what fired a routine run", async () => {
     const fired = (rootExecutionId: string) =>
       run("core.memory", "routine:Digest", { rootExecutionId }).then((a) => a?.trigger);
-    expect(await fired("poll-root")).toBe("schedule");
+    expect(await fired("digest-root")).toBe("schedule");
     expect(await fired("missing-root")).toBe("unknown");
     const manual = resolver({}, {}, { root: "run_now" });
-    const webhook = resolver({}, {}, { root: "webhook" });
+    const eventBus = resolver({}, {}, { root: "event-bus" });
     const row = {
       actionName: "core.memory",
       initiator: "routine:Digest",
@@ -240,7 +261,7 @@ describe("UsageAttributionResolver.forActionRun", () => {
       rootExecutionId: "root",
     };
     expect((await manual.forActionRun(row))?.trigger).toBe("user");
-    expect((await webhook.forActionRun(row))?.trigger).toBe("event");
+    expect((await eventBus.forActionRun(row))?.trigger).toBe("event");
   });
 
   it("calls an app's run from a signed-in session user-initiated", async () => {

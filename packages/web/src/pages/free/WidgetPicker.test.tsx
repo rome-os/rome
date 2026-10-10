@@ -28,10 +28,6 @@ rs.mock("@/hooks/use-apps", () => {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(cleanup);
@@ -39,7 +35,7 @@ afterEach(cleanup);
 async function openPicker(onSelect = rs.fn()) {
   const user = userEvent.setup();
   render(
-    <WidgetPicker onSelect={onSelect}>
+    <WidgetPicker onSelect={onSelect} placements={[]}>
       <button type="button">Add widget</button>
     </WidgetPicker>,
   );

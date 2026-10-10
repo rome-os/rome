@@ -6,11 +6,12 @@
 // confer() — conferral runs the setup coroutine (`makeTelegramUserSetup`
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
-// identity profile. The transport core — connect, NewMessage streaming,
-// normalization, media download, send, history — is the existing
-// `TelegramUserAdapter`
-// (packages/core/src/channels/telegram-user.ts), wrapped here so the runtime's
-// grant-epoch lifecycle and fault→grant-state mapping drive it.
+// identity profile. The transport core — connect, NewMessage streaming, the
+// inbound `ChannelMessage`, media download, send, history — is
+// `TelegramUserAdapter` (packages/core/src/channels/telegram-user.ts), wrapped
+// here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
+// drive it. The transport already speaks the channel's record, so inbound and
+// send pass through without a projection.
 //
 // GramJS owns transient reconnection (connectionRetries); only TERMINAL failures
 // reach `fault`:
@@ -33,8 +34,9 @@
 // registry already drops faults from superseded epochs (a re-login rebuilds the
 // epoch and the old epoch's in-flight probe fault is discarded).
 
+import type { ChannelMessage } from "@rome-os/app-runtime";
 import { z } from "zod";
-import type { TalkDirectory, TalkFeatureMap, TalkFeatureName } from "../types.js";
+import type { TalkDirectory, TalkFeatures } from "../types.js";
 import {
   isTelegramUserSessionRejected,
   openTelegramUserLogin,
@@ -56,10 +58,8 @@ import type {
 import {
   directoryCursorOffset,
   directoryPage,
-  historyFeature,
-  inboundMediaFeature,
-  toInboundMessage,
-  toMessageReceipt,
+  historyQueryLimit,
+  historyWindowHours,
 } from "./talk-features.js";
 
 // The `session` grant's profile — the non-secret half of the user-account login
@@ -155,8 +155,7 @@ function telegramUserSession(): AuthScheme {
  * Serialize a `TelegramUserSettings` row into the flat `SecretRecord` the grant
  * ledger stores. Every field is a string (SecretRecord = Record<string,string>);
  * `apiId` is stringified and `username` (nullable) becomes `""` when absent so
- * the round-trip is lossless. Exported so the settings-import row (wire stage)
- * and the connect route build material the same way.
+ * the round-trip is lossless.
  */
 export function telegramUserMaterialFromSettings(settings: TelegramUserSettings): SecretRecord {
   return {
@@ -411,10 +410,68 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             }
           };
 
+          const directory: TalkDirectory = {
+            async listConversations(input) {
+              const dialogs = await adapter.listDialogs(
+                directoryCursorOffset(input.cursor) + input.limit,
+              );
+              const query = input.query?.toLocaleLowerCase();
+              const page = directoryPage(
+                dialogs
+                  .filter((dialog) => !query || dialog.title.toLocaleLowerCase().includes(query))
+                  .sort((left, right) =>
+                    `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
+                  ),
+                input,
+              );
+              return {
+                conversations: page.items.map((dialog) => ({
+                  ref: {
+                    connectionId: kit.connectionId,
+                    conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
+                  },
+                  service: "telegram_user",
+                  kind:
+                    dialog.type === "private"
+                      ? ("dm" as const)
+                      : dialog.type === "group"
+                        ? ("group" as const)
+                        : ("channel" as const),
+                  displayName: dialog.title,
+                })),
+                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+              };
+            },
+          };
+          const features: TalkFeatures = {
+            inboundMedia: {
+              materialize: (message) => adapter.saveIncomingAttachments(message),
+            },
+            history: {
+              async query(input) {
+                const lines = await adapter.fetchHistory(
+                  input.conversationId ?? null,
+                  historyWindowHours(input.since),
+                );
+                return lines.slice(0, historyQueryLimit(input.limit)).map(
+                  (line): ChannelMessage => ({
+                    ...line,
+                    channel: "telegram_user",
+                    // The account's own lines are the ones GramJS marks `out`.
+                    direction:
+                      (line.raw as { out?: unknown } | null | undefined)?.out === true
+                        ? "outbound"
+                        : "inbound",
+                  }),
+                );
+              },
+            },
+            directory,
+          };
           return {
             start(deliver, fault): void {
               faultSink = fault;
-              adapter.onMessage(async (msg) => deliver(toInboundMessage(msg)));
+              adapter.onInbound(async (msg) => deliver(msg));
               // adapter.start() connects then checks authorization, throwing a
               // TelegramUserSessionNotAuthorizedError (→ CredentialRejected) on a
               // revoked session; other terminal transport errors → Disconnected.
@@ -433,10 +490,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
             },
             async send(conversationId, msg) {
               try {
-                return toMessageReceipt(
-                  conversationId,
-                  await adapter.sendMessage(conversationId, conversationId, msg),
-                );
+                return await adapter.send(conversationId, msg);
               } catch (err) {
                 // A 401 / session-revoked from send() is a refused credential.
                 if (isTelegramUserSessionRejected(err)) {
@@ -445,53 +499,7 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
                 throw err;
               }
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const directory: TalkDirectory = {
-                async listConversations(input) {
-                  const dialogs = await adapter.listDialogs(
-                    directoryCursorOffset(input.cursor) + input.limit,
-                  );
-                  const query = input.query?.toLocaleLowerCase();
-                  const page = directoryPage(
-                    dialogs
-                      .filter(
-                        (dialog) => !query || dialog.title.toLocaleLowerCase().includes(query),
-                      )
-                      .sort((left, right) =>
-                        `${left.title}\0${left.id}`.localeCompare(`${right.title}\0${right.id}`),
-                      ),
-                    input,
-                  );
-                  return {
-                    conversations: page.items.map((dialog) => ({
-                      ref: {
-                        connectionId: kit.connectionId,
-                        conversationId: dialog.id as import("@rome-os/app-runtime").ConversationId,
-                      },
-                      service: "telegram_user",
-                      kind:
-                        dialog.type === "private"
-                          ? ("dm" as const)
-                          : dialog.type === "group"
-                            ? ("group" as const)
-                            : ("channel" as const),
-                      displayName: dialog.title,
-                    })),
-                    ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-                  };
-                },
-              };
-              const features: Partial<TalkFeatureMap> = {
-                inboundMedia: inboundMediaFeature(adapter),
-                history: historyFeature(adapter, {
-                  channel: "telegram_user",
-                  // The account's own lines, the way the adapter tells them apart.
-                  isOwn: (message) => (message.rawEvent as { out?: unknown } | null)?.out === true,
-                }),
-                directory,
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
           };
         },
       },

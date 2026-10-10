@@ -32,19 +32,13 @@ describe("UserMessage input state", () => {
     "queued",
     "submitted",
     "accepted",
-  ] as const)("uses a visibly pending bubble for %s without a status line", (state) => {
+  ] as const)("breathes a normal bubble for %s without a status line", (state) => {
     render(userMessage(state));
 
     const bubble = screen.getByTitle(`inputState.${state}`);
-    expect(bubble.classList.contains("bg-transparent")).toBe(true);
-    expect(bubble.classList.contains("border-dashed")).toBe(true);
-    expect(bubble.classList.contains("border-border-strong")).toBe(true);
-    expect(bubble.classList.contains("opacity-60")).toBe(false);
     expect(bubble.getAttribute("aria-busy")).toBe("true");
     expect(bubble.textContent).toBe(message.content);
-    const status = screen.getByRole("status");
-    expect(status.className).toBe("sr-only");
-    expect(status.textContent).toBe(`inputState.${state}`);
+    expect(screen.getByRole("status").textContent).toBe(`inputState.${state}`);
   });
 
   it("restores the same bubble when the provider consumes the input", () => {
@@ -54,31 +48,27 @@ describe("UserMessage input state", () => {
     for (const state of ["submitted", "accepted"] as const) {
       rerender(userMessage(state));
       expect(screen.getByTitle(`inputState.${state}`)).toBe(bubble);
-      expect(bubble.classList.contains("border-dashed")).toBe(true);
+      expect(bubble.getAttribute("aria-busy")).toBe("true");
     }
     rerender(userMessage("consumed"));
 
     expect(bubble.isConnected).toBe(true);
-    expect(bubble.classList.contains("bg-surface-muted")).toBe(true);
-    expect(bubble.classList.contains("border-dashed")).toBe(false);
     expect(bubble.hasAttribute("title")).toBe(false);
     expect(bubble.hasAttribute("aria-busy")).toBe(false);
     expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it.each([
-    ["failed", "border-destructive/50", "text-destructive"],
-    ["unknown", "border-warning/50", "text-warning"],
-    ["cancelled", "bg-transparent", "text-muted-foreground"],
-  ] as const)("keeps %s distinct from pending delivery", (state, bubbleClass, iconClass) => {
+    "failed",
+    "unknown",
+    "cancelled",
+  ] as const)("keeps %s distinct from pending delivery", (state) => {
     render(userMessage(state));
 
     const bubble = screen.getByTitle(`inputState.${state}`);
-    expect(bubble.classList.contains(bubbleClass)).toBe(true);
-    expect(bubble.classList.contains("bg-transparent")).toBe(state === "cancelled");
-    expect(bubble.querySelector("svg")?.classList.contains(iconClass)).toBe(true);
+    expect(bubble.hasAttribute("aria-busy")).toBe(false);
     expect(bubble.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getByRole("status").className).toBe("sr-only");
+    expect(screen.getByRole("status").textContent).toBe(`inputState.${state}`);
   });
 
   it.each([
@@ -89,8 +79,9 @@ describe("UserMessage input state", () => {
     const { container } = render(userMessage(state));
 
     expect(screen.getByText(message.content)).toBeTruthy();
-    expect(container.querySelector(".bg-surface-muted")).not.toBeNull();
+    expect(container.querySelector(".bg-primary")).not.toBeNull();
     expect(container.querySelector(".border-dashed")).toBeNull();
+    expect(container.querySelector(".rome-bubble-pending")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("");
   });
 

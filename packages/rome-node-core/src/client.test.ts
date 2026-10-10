@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, it, rs as vi } from "@rstest/core";
 import { connectGateway, type ClientSocket } from "./client.js";
 import { CLOSE } from "./protocol.js";
+import {
+  decodeMeta,
+  encodeFrame,
+  encodeMeta,
+  FRAME_HEADER_BYTES,
+  FRAME_TYPE,
+  MAX_FRAME_BYTES,
+  parseFrame,
+  type Frame,
+} from "./frame.js";
 
 class Socket implements ClientSocket {
   readyState = 0;
   bufferedAmount = 0;
-  sent: string[] = [];
+  sent: (string | Uint8Array)[] = [];
   listeners = new Map<string, ((event: never) => void)[]>();
   addEventListener(type: string, listener: (event: never) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
@@ -17,7 +27,7 @@ class Socket implements ClientSocket {
     this.readyState = 1;
     this.emit("open");
   }
-  send(data: string) {
+  send(data: string | Uint8Array) {
     this.sent.push(data);
   }
   close(code = 1000) {
@@ -32,6 +42,7 @@ function fixture() {
   vi.useFakeTimers();
   const sockets: Socket[] = [];
   const messages = vi.fn();
+  const frames = vi.fn();
   const statuses = vi.fn();
   const factory = vi.fn((_url: string, _authorization: string) => {
     const socket = new Socket();
@@ -43,10 +54,11 @@ function fixture() {
     deviceToken: `romedev_${"a".repeat(43)}`,
     createSocket: factory,
     onMessage: messages,
+    onFrame: frames,
     onStatus: statuses,
     random: () => 0.5,
   });
-  return { client, sockets, factory, messages, statuses };
+  return { client, sockets, factory, messages, frames, statuses };
 }
 describe("device connection helper", () => {
   it("uses a header credential, rejects offline sends, and never queues or resends after disconnect", async () => {
@@ -73,6 +85,79 @@ describe("device connection helper", () => {
       data: JSON.stringify({ id: "new", from: "source", payload: "yes" }),
     });
     expect(f.messages).toHaveBeenCalledOnce();
+    f.client.stop();
+  });
+  it("delivers binary messages as frames and drops unparseable binary", () => {
+    const f = fixture();
+    f.sockets[0].open();
+    const frame: Frame = {
+      type: FRAME_TYPE.response,
+      id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      peer: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      meta: encodeMeta({ type: "response", ok: true, result: {} }),
+      body: Uint8Array.from([0, 255, 1]),
+    };
+    f.sockets[0].emit("message", { data: Buffer.from(encodeFrame(frame)) });
+    f.sockets[0].emit("message", { data: encodeFrame(frame).buffer });
+    f.sockets[0].emit("message", { data: Buffer.from([1, 2, 3]) });
+    expect(f.frames).toHaveBeenCalledTimes(2);
+    expect(f.messages).not.toHaveBeenCalled();
+    const received: Frame = f.frames.mock.calls[0][0];
+    expect(received).toMatchObject({ type: 2, id: frame.id, peer: frame.peer });
+    expect(Array.from(received.body)).toEqual([0, 255, 1]);
+    f.sockets[0].emit("message", {
+      data: JSON.stringify({ id: "text", from: "source", payload: "yes" }),
+    });
+    expect(f.messages).toHaveBeenCalledOnce();
+    expect(f.frames).toHaveBeenCalledTimes(2);
+    f.client.stop();
+  });
+  it("sends request and response frames as binary without queueing", async () => {
+    const f = fixture();
+    const frame: Frame = {
+      type: FRAME_TYPE.request,
+      id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      peer: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      meta: encodeMeta({ type: "request", action: "exec", args: {} }),
+      body: Uint8Array.from([0, 255]),
+    };
+    expect(f.client.sendFrame(frame)).toBe(false);
+    f.sockets[0].open();
+    expect(f.client.sendFrame({ ...frame, type: FRAME_TYPE.routeError })).toBe(false);
+    expect(f.client.sendFrame({ ...frame, peer: "caller" })).toBe(false);
+    expect(f.client.sendFrame(frame)).toBe(true);
+    expect(f.sockets[0].sent).toHaveLength(1);
+    const sent = parseFrame(f.sockets[0].sent[0] as Uint8Array);
+    expect(sent).toMatchObject({ type: 1, id: frame.id, peer: frame.peer });
+    expect(decodeMeta(sent!.meta)).toEqual({ type: "request", action: "exec", args: {} });
+    expect(Array.from(sent!.body)).toEqual([0, 255]);
+    f.sockets[0].close();
+    await vi.advanceTimersByTimeAsync(1000);
+    f.sockets[1].open();
+    expect(f.sockets[1].sent).toEqual([]);
+    f.sockets[0].emit("message", { data: Buffer.from(encodeFrame(frame)) });
+    expect(f.frames).not.toHaveBeenCalled();
+    f.client.stop();
+    expect(f.client.sendFrame(frame)).toBe(false);
+  });
+  it("refuses a frame over the Gateway limit without sending it or closing the socket", () => {
+    const f = fixture();
+    f.sockets[0].open();
+    const meta = encodeMeta({ type: "request", action: "exec", args: {} });
+    const fits = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - meta.byteLength;
+    const frame = (bodyBytes: number): Frame => ({
+      type: FRAME_TYPE.request,
+      id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      peer: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      meta,
+      body: new Uint8Array(bodyBytes),
+    });
+    expect(f.client.sendFrame(frame(fits + 1))).toBe(false);
+    expect(f.sockets[0].sent).toEqual([]);
+    expect(f.sockets[0].readyState).toBe(1);
+    expect(f.client.sendFrame(frame(fits))).toBe(true);
+    expect((f.sockets[0].sent[0] as Uint8Array).byteLength).toBe(MAX_FRAME_BYTES);
+    expect(f.client.sendFrame(frame(1))).toBe(true);
     f.client.stop();
   });
   it.each([
@@ -111,7 +196,7 @@ describe("device connection helper", () => {
     f.sockets[0].bufferedAmount = 128 * 1024 * 1024;
     const payload = "x".repeat(33 * 1024 * 1024);
     expect(f.client.send({ id: "large", to: "target", payload })).toBe(true);
-    expect(f.sockets[0].sent[0].length).toBeGreaterThan(payload.length);
+    expect((f.sockets[0].sent[0] as string).length).toBeGreaterThan(payload.length);
     f.sockets[0].emit("message", {
       data: JSON.stringify({ id: "large", from: "target", payload }),
     });

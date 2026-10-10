@@ -57,6 +57,7 @@ function connection(
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
     ...overrides,
   };
 }

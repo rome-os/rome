@@ -10,7 +10,7 @@ export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
 export type UsageFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
- * What set the work off: a person, a schedule or poll, an event or webhook, or
+ * What set the work off: a person, a schedule, an event or webhook, or
  * an app's own code with no person behind it.
  */
 export type UsageTrigger = "user" | "schedule" | "event" | "background" | "unknown";

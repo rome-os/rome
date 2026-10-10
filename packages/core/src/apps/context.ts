@@ -66,6 +66,13 @@ export interface RomeAppRuntimeServices {
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  /** What this context's out-of-execution `runAction` does when every action
+   * worker is busy (see ActionRunContext.whenWorkersBusy). Defaults to
+   * `"fail"`. Set `"queue"` only for a context built for one caller that no
+   * action worker waits on. App code can run on behalf of a waiting worker,
+   * such as turn middleware during a `summon`-driven turn, so a shared app
+   * context must stay fail-fast. */
+  whenWorkersBusy?: "fail" | "queue";
 }
 
 interface AppApiRequestContext {
@@ -218,6 +225,7 @@ export function createRomeAppContext(
             {
               initiator: `app:${app.appId}`,
               callerAppId: app.appId,
+              whenWorkersBusy: services.whenWorkersBusy ?? "fail",
             },
             undefined,
             actionEventObserver,

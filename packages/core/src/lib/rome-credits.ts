@@ -16,6 +16,10 @@ function isMicros(value: unknown): value is string {
   return typeof value === "string" && /^-?\d+$/.test(value);
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
 /**
  * Read the account's Rome credits from the Rome Cloud inference gateway.
  *
@@ -68,5 +72,8 @@ export async function fetchRomeCredits(
     balanceMicros: body.balanceMicros,
     availableMicros: body.availableMicros,
     enabled: body.enabled,
+    // A gateway that omits the list, or sends one that is not all strings,
+    // leaves the served models unknown rather than empty.
+    ...(isStringArray(body.models) ? { models: body.models } : {}),
   };
 }

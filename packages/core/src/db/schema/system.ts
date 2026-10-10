@@ -8,7 +8,7 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
 import type { OutboxMessage } from "@rome/api-types/people";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
@@ -20,53 +20,43 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
-// Superseded by `routines`. No code reads or writes this table; kept only
-// pending a removal + drop migration. Do not add new readers/writers.
-export const events = sqliteTable("events", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  type: text("type", { enum: ["one-off", "recurring"] }).notNull(),
-  tzid: text("tzid").notNull(),
-  localTime: text("local_time").notNull(),
-  rrule: text("rrule"),
-  startTime: integer("start_time", { mode: "timestamp" }).notNull(),
-  endTime: integer("end_time", { mode: "timestamp" }),
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastRunAt: integer("last_run_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
-
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  agentName: text("agent_name").notNull(),
-  channelThreadKey: text("channel_thread_key"),
-  /** Which provider produced this conversation's thread, so a resumed session
-   *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
-   *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
-  provider: text("provider"),
-  providerThreadId: text("provider_thread_id"),
-  /** The concrete model that produced the session's last successful turn,
-   *  written by the same after-turn provider-info write. Null for legacy
-   *  rows and sessions that never completed a turn. Nothing reads it yet. */
-  model: text("model"),
-  /** The reasoning effort the session's last successful model turn ran with,
-   *  as the provider reported it in its own terms (for example `xhigh`).
-   *  Display only: it never seeds the next turn's effort. Null for
-   *  legacy rows and sessions that never completed a model turn. */
-  reasoningEffort: text("reasoning_effort"),
-  /** The cwd the session's provider ran in, so an explicit resume reopens the
-   *  provider where its transcript lives. Null for legacy rows, which resume
-   *  in the default project. */
-  workingDir: text("working_dir"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
-  status: text("status", {
-    enum: ["active", "completed", "error"],
-  }).notNull(),
-});
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    agentName: text("agent_name").notNull(),
+    channelThreadKey: text("channel_thread_key"),
+    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
+     *  rows written before the column existed and for sessions whose caller
+     *  named no conversation. No foreign key: channel, action and subagent
+     *  conversations are recorded after their first session is created. */
+    conversationId: text("conversation_id"),
+    /** Which provider produced this conversation's thread, so a resumed session
+     *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
+     *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
+    provider: text("provider"),
+    providerThreadId: text("provider_thread_id"),
+    /** The concrete model that produced the session's last successful turn,
+     *  written by the same after-turn provider-info write. Null for legacy
+     *  rows and sessions that never completed a turn. Nothing reads it yet. */
+    model: text("model"),
+    /** The reasoning effort the session's last successful model turn ran with,
+     *  as the provider reported it in its own terms (for example `xhigh`).
+     *  Display only: it never seeds the next turn's effort. Null for
+     *  legacy rows and sessions that never completed a model turn. */
+    reasoningEffort: text("reasoning_effort"),
+    /** The cwd the session's provider ran in, so an explicit resume reopens the
+     *  provider where its transcript lives. Null for legacy rows, which resume
+     *  in the default project. */
+    workingDir: text("working_dir"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
+    status: text("status", {
+      enum: ["active", "completed", "error"],
+    }).notNull(),
+  },
+  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+);
 
 // Provider-native history anchor for one successfully completed Rome turn.
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
@@ -436,24 +426,6 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const providerAccounts = sqliteTable("provider_accounts", {
-  id: text("id").primaryKey(),
-  provider: text("provider").notNull().unique(),
-  providerAccountId: text("provider_account_id"),
-  displayName: text("display_name"),
-  email: text("email"),
-  login: text("login"),
-  avatarUrl: text("avatar_url"),
-  scopes: text("scopes", { mode: "json" }),
-  tokenCiphertext: text("token_ciphertext").notNull(),
-  tokenVersion: integer("token_version").notNull().default(1),
-  tokenExpiresAt: integer("token_expires_at", { mode: "timestamp" }),
-  metadata: text("metadata", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }).notNull(),
-});
-
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -514,7 +486,7 @@ export const romeSessions = sqliteTable(
     sourceThreadType: text("source_thread_type"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
-    channelSettings: text("channel_settings", { mode: "json" }),
+    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredConversationSettings>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -897,9 +869,8 @@ export const connections = sqliteTable(
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
-// stored as plain JSON (repo precedent: encryption deliberately dropped, see
-// `packages/core/src/lib/provider-accounts.ts`); the envelope shape is kept so
-// encryption can return later. A grant row is present in "unauthorized" from
+// stored as plain JSON (encryption was deliberately dropped); the envelope
+// shape is kept so encryption can return later. A grant row is present in "unauthorized" from
 // connection creation; conferral fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",

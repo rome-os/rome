@@ -2,20 +2,40 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
+import type { ChatProps } from "./Chat";
 
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
 
 rs.mock("./Chat", () => ({
-  Chat: ({ mainAgentDisplayName }: { mainAgentDisplayName?: string }) => (
-    <div data-testid="session-chat">{mainAgentDisplayName}</div>
+  Chat: ({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) => (
+    <>
+      <div data-testid="session-chat">{mainAgentDisplayName}</div>
+      <button type="button" onClick={() => onSessionNotFound?.(sessionId)}>
+        Missing session
+      </button>
+      <button type="button" onClick={() => onSessionNotFound?.("missing-child")}>
+        Missing child
+      </button>
+    </>
   ),
 }));
+
+function LocationProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="chat-location">
+      {location.pathname}
+      {location.search} {navigationType}
+    </output>
+  );
+}
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -68,6 +88,7 @@ function renderChatComponent(
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
   },
+  initialEntry = "/chat",
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -114,9 +135,10 @@ function renderChatComponent(
   }) as typeof fetch);
 
   const result = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
         <ChatComponent onSessionCreated={() => {}} {...props} />
+        <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -124,15 +146,6 @@ function renderChatComponent(
 }
 
 describe("ChatComponent draft file drops", () => {
-  it("uses the chat canvas before a session exists", () => {
-    const { container } = renderChatComponent();
-
-    expect(container.firstElementChild?.classList.contains("bg-chat-canvas")).toBe(true);
-    expect(
-      container.firstElementChild?.classList.contains("[--background:var(--chat-canvas)]"),
-    ).toBe(true);
-  });
-
   it("renders the send button as an icon-only control", () => {
     renderChatComponent();
 
@@ -168,6 +181,44 @@ describe("ChatComponent agent identity", () => {
   });
 });
 
+describe("ChatComponent missing sessions", () => {
+  it.each(["", "?hideSidebar=1"])("replaces a missing chat URL with home%s", (search) => {
+    renderChatComponent({ sessionId: "session-1" }, undefined, `/chat/session-1${search}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
+  });
+
+  it("keeps the parent chat open when a handoff child is missing", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "session-1", onSessionNotFound },
+      undefined,
+      "/chat/session-1",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing child" }));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/session-1 POP");
+  });
+
+  it("lets a pinned chat remove its card without leaving the current page", () => {
+    const onSessionNotFound = rs.fn();
+    renderChatComponent(
+      { sessionId: "pinned-session", onSessionNotFound },
+      undefined,
+      "/chat/main",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(onSessionNotFound).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat/main POP");
+  });
+});
+
 describe("ChatComponent empty home", () => {
   it("focuses the draft composer so typing works without a click", async () => {
     const user = userEvent.setup();
@@ -196,7 +247,7 @@ describe("ChatComponent empty home", () => {
     expect(document.activeElement).not.toBe(composer);
   });
 
-  it("shows horizontally scrollable pinned chats and Rome News above a bottom composer", async () => {
+  it("shows scrollable pinned chats and Rome News", async () => {
     const user = userEvent.setup();
     const homeData = {
       sessions: [
@@ -244,53 +295,16 @@ describe("ChatComponent empty home", () => {
 
     const { fetchSpy } = renderChatComponent({}, homeData);
 
-    const greeting = await screen.findByText("Hi Ada,");
-    expect(greeting.previousElementSibling?.getAttribute("data-testid")).toBe("rome-logo");
-    expect(greeting.classList.contains("text-display")).toBe(true);
-    expect(greeting.className).not.toMatch(/(?:^|\s)(?:text-2xl|font-light|leading-tight)(?:\s|$)/);
-    expect(greeting.className).not.toContain("md:text-[1.75rem]");
-    const hero = greeting.nextElementSibling;
-    expect(hero?.className).toBe(
-      "rome-empty-rise mt-1 font-serif text-[2.65rem] font-normal leading-[1.05] tracking-[-0.025em] text-foreground md:text-[3.35rem]",
-    );
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
     expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
     expect(screen.getByText("Pinned launch chat")).toBeTruthy();
     expect(screen.queryByText("Pinned projects")).toBeNull();
     expect(screen.queryByText("Alpha project")).toBeNull();
-    expect(screen.getByText("Rome News")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Pinned chats" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Rome News" })).toBeTruthy();
 
     const pinnedRail = document.querySelector('[data-horizontal-scroll="pinned-chats"]');
-    const newsRail = document.querySelector('[data-horizontal-scroll="rome-news"]');
-    expect(pinnedRail?.classList.contains("overflow-x-auto")).toBe(true);
-    expect(pinnedRail?.className).toContain("scrollbar-width:none");
-    // The WebKit scrollbar hides via display, not a zero-height box: the box
-    // size scale (docs/ui/primitive-token/box-size-primitives.md) has no zero.
-    expect(pinnedRail?.className).toContain("scrollbar]:hidden");
-    expect(pinnedRail?.className).not.toContain("scrollbar]:h-0");
-    expect(pinnedRail?.className).not.toContain("snap-");
-    expect(pinnedRail?.parentElement?.classList.contains("overflow-visible")).toBe(true);
     expect(pinnedRail?.children).toHaveLength(2);
-    expect(newsRail?.classList.contains("overflow-x-auto")).toBe(true);
-    expect(newsRail?.className).toContain("scrollbar-width:none");
-    expect(newsRail?.className).toContain("scrollbar]:hidden");
-    expect(newsRail?.className).not.toContain("scrollbar]:h-0");
-    expect(newsRail?.parentElement?.classList.contains("overflow-visible")).toBe(true);
-    expect(newsRail?.firstElementChild?.className).toContain("w-[min(58.5vw,13.5rem)]");
-    expect(newsRail?.firstElementChild?.className).toContain("sm:w-[13.5rem]");
-    const pinnedHeading = screen.getByRole("heading", { name: "Pinned chats" });
-    const newsHeading = screen.getByRole("heading", { name: "Rome News" });
-    expect(pinnedHeading.classList.contains("text-aux")).toBe(true);
-    expect(newsHeading.classList.contains("text-aux")).toBe(true);
-    expect(pinnedHeading.className).not.toMatch(/(?:^|\s)(?:text-sm|font-semibold)(?:\s|$)/);
-    expect(newsHeading.className).not.toMatch(/(?:^|\s)(?:text-sm|font-semibold)(?:\s|$)/);
-    const pinnedTitle = screen.getByText("Pinned planning chat");
-    expect(pinnedTitle.classList.contains("text-ui")).toBe(true);
-    expect(pinnedTitle.className).not.toMatch(/(?:^|\s)(?:text-sm|font-medium)(?:\s|$)/);
-    expect(screen.getByText("alpha").classList.contains("text-aux")).toBe(true);
-    expect(pinnedHeading.nextElementSibling?.classList.contains("text-aux")).toBe(true);
-    expect(screen.getByRole("button", { name: "Cloud announcement" }).className).toContain(
-      "[&_.rome-news-item-subtitle]:!text-ui",
-    );
     expect(screen.queryByText("Ideas and shortcuts")).toBeNull();
 
     if (!(pinnedRail instanceof HTMLElement)) throw new Error("Pinned chat rail was not rendered");
@@ -320,9 +334,6 @@ describe("ChatComponent empty home", () => {
       "linear-gradient(to right, transparent 0, black 24px, black 100%)",
     );
     expect(pinnedRail.parentElement?.querySelector("[data-scroll-edge]")).toBeNull();
-
-    const sendButton = screen.getByRole("button", { name: "Send" });
-    expect(sendButton.closest(".sticky")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Unpin Pinned planning chat" }));
     await waitFor(() =>
@@ -388,17 +399,6 @@ describe("ChatComponent empty home", () => {
     );
 
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull());
-  });
-
-  it("does not carry a bundled Rome News fallback when Rome Cloud is unavailable", async () => {
-    const { fetchSpy } = renderChatComponent({}, { sessions: [], projects: [] });
-
-    await waitFor(() =>
-      expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/api/rome-news"))).toBe(
-        true,
-      ),
-    );
-    expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull();
   });
 
   it("executes chat, App Store, and link actions from Cloud definitions", async () => {

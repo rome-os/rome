@@ -41,7 +41,11 @@ import {
   type ImageTraceSessionState,
   type ToolTraceState,
 } from "./codex/image-trace.js";
-import { CodexAppServerManager, type CodexThreadBinding } from "./codex/app-server-manager.js";
+import {
+  CodexAppServerManager,
+  PayerChangedError,
+  type CodexThreadBinding,
+} from "./codex/app-server-manager.js";
 import {
   Method,
   Notify,
@@ -81,6 +85,11 @@ import {
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
 import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import {
+  isRomeCreditsExhaustedError,
+  isRomeCreditsModelNotServedError,
+  ROME_CREDITS_USED_UP_MESSAGE,
+} from "./rome-credits-error.js";
 import { codexToolItemIsError } from "./codex/tool-result-error.js";
 import type { FacadeToolResult } from "./mcp-facade.js";
 import { codexStop } from "./stop-reason.js";
@@ -243,24 +252,13 @@ function toolNameForItem(item: ThreadItem): string {
   }
 }
 
-function notificationTokenUsage(
-  notification: ThreadTokenUsageUpdatedNotification,
-): ThreadTokenUsage | undefined {
-  return notification.tokenUsage ?? notification.usage;
-}
-
-/** Compatibility for older local stubs/binaries that predate the field. */
-function cacheWriteTokens(u: TokenUsageBreakdown): number {
-  return u.cacheWriteInputTokens ?? 0;
-}
-
 /** App-server token usage (camelCase) → the snake_case shape buildOpenAiAccounting reads. */
 function toSdkUsage(u: TokenUsageBreakdown | undefined): Usage | undefined {
   if (!u) return undefined;
   return {
     input_tokens: u.inputTokens,
     cached_input_tokens: u.cachedInputTokens,
-    cache_write_input_tokens: cacheWriteTokens(u),
+    cache_write_input_tokens: u.cacheWriteInputTokens,
     output_tokens: u.outputTokens,
     reasoning_output_tokens: u.reasoningOutputTokens,
     total_tokens: u.totalTokens,
@@ -272,7 +270,7 @@ function tokenUsageBreakdownEquals(left: TokenUsageBreakdown, right: TokenUsageB
     left.totalTokens === right.totalTokens &&
     left.inputTokens === right.inputTokens &&
     left.cachedInputTokens === right.cachedInputTokens &&
-    cacheWriteTokens(left) === cacheWriteTokens(right) &&
+    left.cacheWriteInputTokens === right.cacheWriteInputTokens &&
     left.outputTokens === right.outputTokens &&
     left.reasoningOutputTokens === right.reasoningOutputTokens
   );
@@ -290,13 +288,7 @@ function isMissingRevertBoundary(error: unknown, beforeTurnId: string): boolean 
  * turn instead of replacing the prior value with the newest one.
  */
 function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
-  // Compatibility notifications from older local app-server stubs predate
-  // this 0.153.4 field. Normalize them before arithmetic so a missing value
-  // cannot poison the turn total with NaN.
-  const last: TokenUsageBreakdown = {
-    ...update.last,
-    cacheWriteInputTokens: cacheWriteTokens(update.last),
-  };
+  const last = update.last;
   const usage = turn.usage;
   turn.usage = usage
     ? {
@@ -357,6 +349,9 @@ interface ActiveTurn {
   errorCode: AgentErrorCode | null;
   /** HTTP status codex reported for the failed request, if any. */
   errorHttpStatus?: number;
+  /** Provider and cause, for clients that offer recovery (see `TurnErrorEvent`). */
+  errorProvider?: TurnErrorEvent["provider"];
+  errorReason?: TurnErrorEvent["reason"];
   /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
   nativeStatus: string | null;
   /** Last reasoning part each in-flight reasoning item streamed, by item id.
@@ -370,26 +365,37 @@ interface CodexAppServerProviderOptions {
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
   onQuotaExhausted?: () => void;
-  /** Who pays for a turn that ends now. Read once per turn, at turn end. */
+  /** Only the Rome credits payer may classify its 402 as exhausted credits. */
+  isUsingRomeCredits?: () => boolean;
+  /** The Rome credits gateway refused a model it no longer serves. */
+  onRomeCreditsModelNotServed?: () => Promise<void> | void;
+  /** Who pays for Codex now. AgentSession reads it when it sends each turn. */
   funding?: () => UsageFunding;
 }
 
 interface CodexFailureClassification {
   code: AgentErrorCode | null;
+  error?: string;
   httpStatus?: number;
+  provider?: TurnErrorEvent["provider"];
+  reason?: TurnErrorEvent["reason"];
   pending?: Promise<void>;
 }
 
 /** Terminal `error` block for a classified codex failure. */
 function codexErrorEvent(
   error: string,
-  classification: Pick<CodexFailureClassification, "code" | "httpStatus">,
+  classification: Pick<CodexFailureClassification, "code" | "httpStatus" | "provider" | "reason">,
+  accounting?: TurnErrorEvent["accounting"],
 ): TurnErrorEvent {
   return {
     type: "error",
     error,
     ...(classification.code ? { code: classification.code } : {}),
     ...(classification.httpStatus !== undefined ? { httpStatus: classification.httpStatus } : {}),
+    ...(classification.provider ? { provider: classification.provider } : {}),
+    ...(classification.reason ? { reason: classification.reason } : {}),
+    ...(accounting ? { accounting } : {}),
   };
 }
 
@@ -422,6 +428,26 @@ function classifyCodexFailure(
   turnError: unknown,
   options: CodexAppServerProviderOptions,
 ): CodexFailureClassification {
+  if (options.isUsingRomeCredits?.() && isRomeCreditsExhaustedError(turnError)) {
+    return { code: "credits_used_up", error: ROME_CREDITS_USED_UP_MESSAGE, httpStatus: 402 };
+  }
+  // The served list is stale. Re-read it before the terminal block, so a retry
+  // falls back or fails closed instead of choosing the same model again.
+  if (options.isUsingRomeCredits?.() && isRomeCreditsModelNotServedError(turnError)) {
+    const refreshed = options.onRomeCreditsModelNotServed?.();
+    return {
+      code: "model_unavailable",
+      httpStatus: 403,
+      // Matches the resolver's refusal, so clients show the same recovery.
+      provider: "openai",
+      reason: "model_access_denied",
+      ...(refreshed ? { pending: refreshed } : {}),
+    };
+  }
+  // The turn never started; a retry runs under the new payer.
+  if (turnError instanceof PayerChangedError) {
+    return { code: "transient" };
+  }
   if (isCodexUsageLimitError(turnError)) {
     options.onQuotaExhausted?.();
     return { code: "usage_limit" };
@@ -775,26 +801,21 @@ export class CodexAppServerProvider implements ModelProvider {
         }
         case Notify.tokenUsageUpdated: {
           const p = params2 as ThreadTokenUsageUpdatedNotification;
-          const usage = notificationTokenUsage(p);
+          const usage = p.tokenUsage;
           if (!usage) return;
           // Once turn/started establishes the active id, a delayed snapshot
           // from another turn must not reset this thread's cumulative
           // baseline. Keep accepting updates while the id is still null so
           // notifications that race ahead of turn/started remain buffered.
-          if (p.turnId && activeTurn?.turnId && activeTurn.turnId !== p.turnId) return;
+          if (activeTurn?.turnId && activeTurn.turnId !== p.turnId) return;
           const previousTotal = lastCumulativeUsageByThreadId.get(p.threadId);
           const hasNewRequestUsage =
             previousTotal === undefined || !tokenUsageBreakdownEquals(previousTotal, usage.total);
           lastCumulativeUsageByThreadId.set(p.threadId, usage.total);
-          if (p.turnId) {
-            usageByTurnId.set(p.turnId, { usage, hasNewRequestUsage });
-            if (hasNewRequestUsage && activeTurn?.turnId === p.turnId) {
-              updateTurnUsage(activeTurn, usage);
-            }
-            return;
+          usageByTurnId.set(p.turnId, { usage, hasNewRequestUsage });
+          if (hasNewRequestUsage && activeTurn?.turnId === p.turnId) {
+            updateTurnUsage(activeTurn, usage);
           }
-          // Compatibility for early app-server stubs that omitted turnId.
-          if (hasNewRequestUsage && activeTurn) updateTurnUsage(activeTurn, usage);
           return;
         }
         case Notify.turnCompleted: {
@@ -812,10 +833,13 @@ export class CodexAppServerProvider implements ModelProvider {
               // not a string — extract the human message and classify quota
               // exhaustion / revoked credentials off it.
               activeTurn.failed = true;
-              activeTurn.errorMessage = codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               const classification = classifyCodexFailure(p.turn?.error, this.options);
+              activeTurn.errorMessage =
+                classification.error ?? codexTurnErrorMessage(p.turn?.error, "codex turn failed");
               activeTurn.errorCode = classification.code;
               activeTurn.errorHttpStatus = classification.httpStatus;
+              activeTurn.errorProvider = classification.provider;
+              activeTurn.errorReason = classification.reason;
               if (classification.pending) activeTurn.pending.push(classification.pending);
             } else if (params.outputSchema && p.turn?.status !== "completed") {
               activeTurn.failed = true;
@@ -831,11 +855,9 @@ export class CodexAppServerProvider implements ModelProvider {
           if (p.turnId && (!activeTurn || (activeTurn.turnId && activeTurn.turnId !== p.turnId))) {
             return;
           }
-          // v2 wraps the structured TurnError under `error`; tolerate older
-          // shapes that put `message` at the top level.
-          const payload = p.error ?? (params2 as { message?: unknown });
-          const message = codexTurnErrorMessage(payload, "codex app-server error");
-          const classification = classifyCodexFailure(payload, this.options);
+          const classification = classifyCodexFailure(p.error, this.options);
+          const message =
+            classification.error ?? codexTurnErrorMessage(p.error, "codex app-server error");
           const code = classification.code;
           if (activeTurn) {
             // Route the terminal through runOne (see turn/completed).
@@ -844,10 +866,11 @@ export class CodexAppServerProvider implements ModelProvider {
             activeTurn.errorMessage = message;
             activeTurn.errorCode = code;
             activeTurn.errorHttpStatus = classification.httpStatus;
+            activeTurn.errorProvider = classification.provider;
+            activeTurn.errorReason = classification.reason;
             if (classification.pending) activeTurn.pending.push(classification.pending);
             activeTurn.resolveDone();
           } else {
-            if (classification.pending) void classification.pending;
             // Out-of-turn error: no turn to attach to, emit directly.
             sink.push(codexErrorEvent(message, classification));
           }
@@ -932,6 +955,29 @@ export class CodexAppServerProvider implements ModelProvider {
     // normal source turn while its dynamic callbacks and event sink are borrowed.
     const turnCoordinator = new SerialTurnCoordinator();
 
+    const turnAccounting = (turn: ActiveTurn, failed: boolean) =>
+      buildOpenAiAccounting({
+        usage: toSdkUsage(turn.usage),
+        model: modelName,
+        agentName: params.agentName,
+        appStoreListingId: params.appStoreListingId,
+        reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
+        stop: codexStop(turn.nativeStatus ?? undefined, failed),
+        stopReason: failed ? "error" : "end_turn",
+        durationMs: Date.now() - turn.startedAt,
+      });
+
+    // A failed turn still counts, and its token cost comes from the
+    // accounting on its terminal (docs/concepts/sessions.md#turn). A turn
+    // that failed before Codex reported any usage gets none, because
+    // accounting built from no usage prices the failure at $0.
+    const failedTurnAccounting = (turn: ActiveTurn) =>
+      turn.usage ? turnAccounting(turn, true) : undefined;
+
+    // The payer each source input was sent under. Codex may replace its
+    // process while an input waits in the turn lane or in buildTurnInput.
+    const payerAtSend = new WeakMap<ModelUserInput, string | null>();
+
     const runOne = async (inputs: ModelUserInput[], runtime: CodexTurnRuntime): Promise<void> => {
       const text = inputs
         .map((i) => i.text)
@@ -991,13 +1037,25 @@ export class CodexAppServerProvider implements ModelProvider {
       // A borrowed exact fork runs here too; only the session's own turns report.
       if (runtime === sourceRuntime) appliedReasoningEffort = effort;
       try {
-        const started = (await this.appServerManager.requestForThread(tid, Method.turnStart, {
-          threadId: tid,
-          input: turnInput,
-          effort,
-          ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
-          ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
-        })) as { turn?: { id?: string } } | undefined;
+        const payers = new Set(
+          inputs.filter((i) => payerAtSend.has(i)).map((i) => payerAtSend.get(i) ?? null),
+        );
+        // A batch that spans a payer change fails whole, including inputs sent
+        // under the current payer, and surfaces as a transient failure to retry.
+        if (payers.size > 1) throw new PayerChangedError();
+        const [expectedProvider] = payers;
+        const started = (await this.appServerManager.requestForThread(
+          tid,
+          Method.turnStart,
+          {
+            threadId: tid,
+            input: turnInput,
+            effort,
+            ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
+            ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
+          },
+          { expectedProvider },
+        )) as { turn?: { id?: string } } | undefined;
         turn.turnId ??= started?.turn?.id ?? null;
         if (turn.turnId) runtime.onProviderTurn?.(turn.turnId);
         // turn/start can acknowledge before the native input becomes steerable.
@@ -1024,25 +1082,22 @@ export class CodexAppServerProvider implements ModelProvider {
         if (!closed && !runtime.isClosed()) {
           if (turn.errorMessage) {
             runtime.sink.push(
-              codexErrorEvent(turn.errorMessage, {
-                code: turn.errorCode,
-                httpStatus: turn.errorHttpStatus,
-              }),
+              codexErrorEvent(
+                turn.errorMessage,
+                {
+                  code: turn.errorCode,
+                  httpStatus: turn.errorHttpStatus,
+                  provider: turn.errorProvider,
+                  reason: turn.errorReason,
+                },
+                failedTurnAccounting(turn),
+              ),
             );
           } else {
             if (runtime === sourceRuntime && turn.turnId) {
               lastCompletedTurnCheckpoint = turn.turnId;
             }
-            const accounting = buildOpenAiAccounting({
-              usage: toSdkUsage(turn.usage),
-              model: modelName,
-              agentName: params.agentName,
-              appStoreListingId: params.appStoreListingId,
-              reportedCostUsd: calculateTurnCostUsd(turn.requestUsages, modelName),
-              stop: codexStop(turn.nativeStatus ?? undefined),
-              stopReason: turn.failed ? "error" : "end_turn",
-              durationMs: Date.now() - turn.startedAt,
-            });
+            const accounting = turnAccounting(turn, turn.failed);
             if (params.outputSchema) {
               try {
                 const structuredOutput: unknown = JSON.parse(turn.finalText);
@@ -1080,7 +1135,13 @@ export class CodexAppServerProvider implements ModelProvider {
         const classification = classifyCodexFailure(err, this.options);
         if (classification.pending) await classification.pending;
         if (!closed && !runtime.isClosed()) {
-          runtime.sink.push(codexErrorEvent(message, classification));
+          runtime.sink.push(
+            codexErrorEvent(
+              classification.error ?? message,
+              classification,
+              failedTurnAccounting(turn),
+            ),
+          );
         }
       } finally {
         if (runtime === sourceRuntime) resolveSourceStarted?.();
@@ -1106,6 +1167,7 @@ export class CodexAppServerProvider implements ModelProvider {
         sourceStarted = new Promise<void>((resolve) => {
           resolveSourceStarted = resolve;
         });
+        payerAtSend.set(input, this.appServerManager.getDefaultProvider());
         dispatcher.enqueue(input);
       }
     };
@@ -1241,6 +1303,8 @@ export class CodexAppServerProvider implements ModelProvider {
               openParams,
               runExclusive: async (work) => await turnCoordinator.run(work),
               runTurn: async (input, runtime) => await runOne([input], runtime),
+              // The fork turn queues behind the source's turns like any other.
+              onSend: (input) => payerAtSend.set(input, this.appServerManager.getDefaultProvider()),
               revertTurn: async (threadIdToRevert, beforeTurnId) => {
                 // Revert is the only thing keeping the borrowed turn out of
                 // the source conversation, so its failure cannot be a plain

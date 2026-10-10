@@ -26,26 +26,11 @@ import {
   resolveNearestGitTarget,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { resolveWebchatLargeModelSelection } from "../../core/model-selector.js";
 import type { ApiDeps } from "../deps.js";
 
-// Directories that must never surface as project roots (top-level entries
-// under the projects root): build outputs and dependency trees are not
-// projects, so they stay out of the "all projects" list.
-const PROJECTS_ROOT_IGNORED_NAMES = [
-  ".next",
-  ".turbo",
-  "build",
-  "coverage",
-  "dist",
-  "node_modules",
-];
-// Directories skipped *inside* a project tree. `dist` is intentionally not in
-// this list: a folder literally named `dist` is a legitimate, browsable part
-// of a project, and hiding it makes the tree (and thus the editor) unusable.
-const PROJECTS_TREE_IGNORED_NAMES = [".next", ".turbo", "build", "coverage", "node_modules"];
 const PROJECT_DASHBOARD_DAYS = 14;
 const PROJECT_DASHBOARD_CHAT_LIMIT = 20;
 const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
@@ -153,7 +138,7 @@ function isSameOrChildProjectPath(relativePath: string, projectPath: string): bo
 }
 
 function shouldSkipProjectEntry(name: string): boolean {
-  return name.startsWith(".") || PROJECTS_ROOT_IGNORED_NAMES.includes(name);
+  return name.startsWith(".") || PROJECTS_IGNORED_NAMES.includes(name);
 }
 
 function listTopLevelShadowProjectPaths(rootDir: string): string[] {
@@ -162,11 +147,8 @@ function listTopLevelShadowProjectPaths(rootDir: string): string[] {
     .map((entry) => entry.name);
 }
 
-function buildWebchatChannelThreadKey(sessionId: string, largeModelSelection: unknown): string {
-  const modelSelection = resolveWebchatLargeModelSelection(largeModelSelection);
-  return modelSelection
-    ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-    : `webchat:${sessionId}`;
+function buildWebchatChannelThreadKey(sessionId: string): string {
+  return `webchat:${sessionId}`;
 }
 
 async function closeLiveProjectSessions(
@@ -181,7 +163,7 @@ async function closeLiveProjectSessions(
     sessions.map(async (session) => {
       const liveSession = agentSessionManager.peek({
         agentName: session.agentName ?? "main",
-        channelThreadKey: buildWebchatChannelThreadKey(session.id, session.largeModelSelection),
+        channelThreadKey: buildWebchatChannelThreadKey(session.id),
       });
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);
@@ -732,7 +714,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
 
   const baseScope: FileBrowserScope = {
     assetBasePath: "/api/projects/asset",
-    ignoredNames: PROJECTS_TREE_IGNORED_NAMES,
+    ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir: projectsRoot,
   };
@@ -776,15 +758,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     "/projects/search",
     createSearchHandler({
       ...baseScope,
-      searchGlobs: [
-        "!**/.git/**",
-        "!**/.next/**",
-        "!**/.turbo/**",
-        "!**/build/**",
-        "!**/coverage/**",
-        "!**/dist/**",
-        "!**/node_modules/**",
-      ],
+      searchGlobs: PROJECTS_SEARCH_GLOBS,
     }),
   );
 
