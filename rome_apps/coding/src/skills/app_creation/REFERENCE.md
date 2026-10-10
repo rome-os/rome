@@ -7,7 +7,7 @@ build* (iteration loop, design rules, validation, delivery); this file covers
 patterns).
 
 For more public, end-to-end examples, see
-[`amantru/rome-apps`](https://github.com/amantru/rome-apps). Each app in that
+[`rome-os/rome-apps`](https://github.com/rome-os/rome-apps). Each app in that
 repo is a self-contained, readable sample covering different shapes:
 action / agent / api / web / db / hook.
 
@@ -1304,7 +1304,7 @@ request, not to this hook.
 
 - [`AUTHORING.md`](./AUTHORING.md) (sibling file) — workflow guide: iteration loop, product design rules, icon design, recurring runs, validation, delivery checklist.
 - Community samples:
-  [`amantru/rome-apps`](https://github.com/amantru/rome-apps) — covers web
+  [`rome-os/rome-apps`](https://github.com/rome-os/rome-apps) — covers web
   + api + action + skill, multi-action + agent orchestration, channel
   hooks, etc.
 - SDK type definitions: jump to definition into `@rome-os/app-runtime` and

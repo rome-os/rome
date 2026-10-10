@@ -60,6 +60,10 @@ export interface SkillMcpDefinition {
   description: string;
   tools?: string[];
   content: string;
+  /** Absolute skill directory; set only when the skill ships companion files. */
+  directory?: string;
+  /** Companion files relative to `directory`, returned by `read_skill`. */
+  files?: string[];
   ownerType: "core" | "app";
   ownerId: string;
 }

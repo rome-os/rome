@@ -1,11 +1,23 @@
 ---
 name: app-lifecycle
-description: Install, reinstall, uninstall, enable, or disable Rome apps, including deployment after app edits and the first-party build and restart procedure.
+description: Install, reinstall, uninstall, enable, or disable Rome apps, share an app with other people through its URL (private, public, or a Rome Cloud email list), and publish it to the Rome App Store. Includes deployment after app edits and the first-party build and restart procedure.
 ---
 
 # App lifecycle
 
 Read `system:app_management` with `read_action` before calling it through `execute_action`. For new app scaffolding, also read `coding:app_creation`.
+
+## Three different endpoints
+
+An app can reach three separate states. Each one is a different decision. Do not treat one as another.
+
+| Endpoint | Who can use it | How |
+|---|---|---|
+| **Installed** | Only the guardian, in this Rome dashboard | `install` (below) |
+| **Shared** | Other people, through this Rome's own URL. No extra hosting or domain. | Change the app's access mode. Read [`SHARING.md`](./SHARING.md). |
+| **In the App Store** | Anyone, who installs a copy into their own Rome | Publish a version. Read [`PUBLISHING.md`](./PUBLISHING.md). |
+
+Installing does not share or publish. Sharing and publishing are visible outside this Rome, so do them only when the guardian asks for that app and that endpoint. When you describe how to release an app, name the endpoint first. Rome has no Apple App Store or Google Play path. Say that instead of improvising one.
 
 ## Install or reinstall a standalone app
 
