@@ -143,6 +143,58 @@ describe("Routines API", () => {
     expect(body.trigger).toEqual(trigger);
   });
 
+  it("stores a caller key and answers a repeat create with 409 and the existing id", async () => {
+    const create = () =>
+      app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "chat card",
+          key: "chat-routine:card-1",
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+
+    const first = await create();
+    expect(first.status).toBe(201);
+    const created = (await first.json()) as { id: string; key: string };
+    expect(created.key).toBe("chat-routine:card-1");
+
+    const second = await create();
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { id: string }).id).toBe(created.id);
+    const rows = await testDb.db.select().from(routines);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("rejects a key that is not a non-empty string", async () => {
+    for (const key of ["", 42, "k".repeat(201)]) {
+      const res = await app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("rejects creation without trigger", async () => {
     const res = await app.request("/routines", {
       method: "POST",

@@ -165,7 +165,13 @@ export function renderSingleEntry(
         />
       );
     case "routine_draft_card":
-      return <RoutineDraftCard key={`routine-${block.toolUseId}`} draft={block.draft} />;
+      return (
+        <RoutineDraftCard
+          key={`routine-${block.toolUseId}`}
+          draft={block.draft}
+          routineKey={block.routineKey}
+        />
+      );
     case "submission_card":
       // The borrowed agent's submit_output is not rendered in the conversation
       // flow — the result already lives on the app's own surface beside the

@@ -1497,6 +1497,13 @@ export type MessagePart =
       type: "routine_draft_card";
       toolUseId: string;
       draft: RoutineDraftSpec;
+      /**
+       * Unique key minted by the server with the card. Turning the card on
+       * creates the routine with this `key`, so the card finds the exact
+       * routine it created (and links to its run history) after a reload.
+       * Absent on cards written before keys existed.
+       */
+      routineKey?: string;
     }
   | {
       /**

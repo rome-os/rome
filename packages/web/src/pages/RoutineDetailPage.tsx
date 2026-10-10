@@ -29,8 +29,11 @@ export default function RoutineDetailPage() {
   const { id = "" } = useParams();
   // Reuse the cached list rather than a per-routine endpoint — a deep link just
   // triggers the list fetch, which is small and already the source of truth.
-  const { routines, isLoading } = useRoutines();
+  const { routines, isLoading, isFetching } = useRoutines();
   const routine = routines?.find((r) => r.id === id) ?? null;
+  // A cached list can predate a routine just created elsewhere (e.g. from a
+  // chat card), so only call it missing once the mount refetch has settled.
+  const isResolving = isLoading || isFetching;
   useDocumentTitle(routine === null ? null : [routineDisplayName(routine), t("header.title")]);
 
   return (
@@ -44,7 +47,7 @@ export default function RoutineDetailPage() {
           {t("detail.back")}
         </Link>
 
-        {isLoading && !routine ? (
+        {isResolving && !routine ? (
           <p className="text-ui text-subtle-foreground">{t("loading")}</p>
         ) : !routine ? (
           <p className="text-ui text-subtle-foreground">{t("detail.notFound")}</p>
