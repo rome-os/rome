@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelSetup,
   getSetupState,
+  isTerminalSetup,
   startSetup,
   submitSetupInput,
   type SetupState,
@@ -165,6 +166,14 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       clearInterval(handle);
     };
   }, [cid, state, settle, reset]);
+
+  // Clear `busy` once a terminal state lands. A submit or cancel request that
+  // rejects never clears it itself, so a later poll reaching `failed` or
+  // `cancelled` is what re-enables the card's buttons.
+  const settled = state ? isTerminalSetup(state) : false;
+  useEffect(() => {
+    if (settled) setBusy(false);
+  }, [settled]);
 
   return { cid, state, busy, error, start, submit, cancel, reset };
 }
