@@ -88,9 +88,27 @@ describe("webchat thread key migration", () => {
     }
   });
 
-  it("completes all but the newest active row when two keys collapse into one", () => {
+  it("keeps the selected-model row over a newer stray row for the same chat", () => {
     const sqlite = databaseWithRows([
-      { id: "older", key: "webchat:chat-a", createdAt: 1 },
+      { id: "live", key: "webchat:chat-a:large-model:claude-opus", createdAt: 1 },
+      { id: "stray", key: "webchat:chat-a", createdAt: 2 },
+      { id: "stray-subagent", key: "webchat:chat-a:subagent:child-1", createdAt: 2 },
+    ]);
+    try {
+      applyMigration(sqlite, keyMigration());
+      expect(sessionRows(sqlite)).toEqual([
+        { id: "live", key: "webchat:chat-a", status: "active" },
+        { id: "stray", key: "webchat:chat-a", status: "completed" },
+        { id: "stray-subagent", key: "webchat:chat-a:subagent:child-1", status: "active" },
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("completes all but the newest active row when two selected-model keys collapse into one", () => {
+    const sqlite = databaseWithRows([
+      { id: "older", key: "webchat:chat-a:large-model:gpt-5-6-sol", createdAt: 1 },
       { id: "newer", key: "webchat:chat-a:large-model:claude-opus", createdAt: 2 },
       { id: "other-agent", key: "webchat:chat-a", createdAt: 1, agent: "helper" },
       { id: "done", key: "webchat:chat-a", createdAt: 3, status: "completed" },

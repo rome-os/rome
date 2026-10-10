@@ -1,3 +1,20 @@
+-- A chat can have a stray active `webchat:<id>` row beside the selected-model
+-- row its turns actually used (an old defer resume opened one). Complete the
+-- stray row first, so the rewrite below leaves the live row in charge.
+UPDATE `sessions`
+SET `status` = 'completed'
+WHERE `status` = 'active'
+  AND `channel_thread_key` LIKE 'webchat:%'
+  AND instr(`channel_thread_key`, ':large-model:') = 0
+  AND EXISTS (
+    SELECT 1 FROM `sessions` AS `selected`
+    WHERE `selected`.`status` = 'active'
+      AND `selected`.`agent_name` = `sessions`.`agent_name`
+      AND substr(`selected`.`channel_thread_key`, 1, length(`sessions`.`channel_thread_key`) + 13)
+        = `sessions`.`channel_thread_key` || ':large-model:'
+      AND instr(substr(`selected`.`channel_thread_key`, length(`sessions`.`channel_thread_key`) + 14), ':') = 0
+  );
+--> statement-breakpoint
 -- Webchat keys no longer carry the chat's model selection, which lives on
 -- rome_sessions.large_model_selection. Strip the `:large-model:<id>` segment
 -- and keep anything after it, such as a subagent's `:subagent:<uuid>`.
@@ -14,9 +31,8 @@ SET `channel_thread_key` =
   END
 WHERE `channel_thread_key` LIKE 'webchat:%:large-model:%';
 --> statement-breakpoint
--- A chat that had rows under both key shapes now has two active rows under
--- one key. Keep the one the session lookup picks (newest created_at, then
--- last_active_at) and complete the rest.
+-- Any other rows that now share an active key keep the one the session
+-- lookup picks (newest created_at, then last_active_at) and complete the rest.
 UPDATE `sessions`
 SET `status` = 'completed'
 WHERE `status` = 'active'
