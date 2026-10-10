@@ -498,6 +498,13 @@
       "when": 1791331737062,
       "tag": "0071_drop_events",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1791625172515,
+      "tag": "0072_drop_provider_accounts",
+      "breakpoints": true
     }
   ]
 }

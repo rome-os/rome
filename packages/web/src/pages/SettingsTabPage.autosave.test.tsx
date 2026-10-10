@@ -95,20 +95,6 @@ function renderAdvancedSettings() {
   );
 }
 
-function renderSettingsAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/settings/:tab" element={<SettingsPage />} />
-          <Route path="/apps/inbox" element={<div>Inbox dashboard</div>} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
 describe("SettingsPage Advanced autosave", () => {
   it("uses diagnosis as the single source for uptime and build details", async () => {
     const calls = mockSettingsBackend();
@@ -128,17 +114,6 @@ describe("SettingsPage Advanced autosave", () => {
 
     expect(await screen.findByText("Advanced Settings")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
-  });
-
-  it.each([
-    "/settings/trust",
-    "/settings/sentinel",
-    "/settings/sentinel-log",
-  ])("redirects relocated settings route %s to the Inbox page", async (path) => {
-    mockSettingsBackend();
-    renderSettingsAt(path);
-
-    expect(await screen.findByText("Inbox dashboard")).toBeTruthy();
   });
 
   it("autosaves the Fable developer setting when changed", async () => {

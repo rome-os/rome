@@ -3,8 +3,7 @@
 // contract suites (registry-*.test.ts) run against this implementation.
 //
 // The `credential` column stores a PersistedCredential envelope as plain JSON
-// (repo precedent: encryption deliberately dropped — see
-// `packages/core/src/lib/provider-accounts.ts`). The envelope shape is kept so
+// (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
 import { and, eq } from "drizzle-orm";
