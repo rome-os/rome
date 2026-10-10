@@ -415,7 +415,6 @@ export default function SettingsPage() {
               composio={composio}
               loading={connectionsLoading}
               error={connectionsError}
-              onRetry={loadConnections}
               onRefresh={loadConnections}
               onFlash={(message) => toast.error(message)}
             />

@@ -14,8 +14,6 @@ export interface ListingDetail {
   longDescription: string | null;
   /** Absolute icon URL persisted by the store (S3 object or the store's default icon). */
   iconUrl: string | null;
-  /** @deprecated The store API never emitted this; kept so older callers still typecheck. */
-  iconPath?: string | null;
   categories: string[];
   state: "published" | "taken_down" | "deleted";
   highestVersion: string;
@@ -35,7 +33,6 @@ export interface ListingDetailPayload {
   available: boolean;
   reason?: string;
   error?: string;
-  browseOrigin?: string | null;
   listing?: ListingDetail;
   versions?: VersionRow[];
 }
@@ -46,21 +43,8 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function resolveIconUrl(
-  browseOrigin: string | null | undefined,
-  iconPath: string | null,
-): string | null {
-  if (!iconPath) return null;
-  if (/^https?:\/\//i.test(iconPath)) return iconPath;
-  if (!browseOrigin) return null;
-  try {
-    const resolved = new URL(iconPath, browseOrigin);
-    return resolved.protocol === "http:" || resolved.protocol === "https:"
-      ? resolved.toString()
-      : null;
-  } catch {
-    return null;
-  }
+function httpIconUrl(iconUrl: string | null): string | null {
+  return iconUrl && /^https?:\/\//i.test(iconUrl) ? iconUrl : null;
 }
 
 export interface AppInstallConfirmProps {
@@ -170,11 +154,8 @@ export function AppInstallConfirm({
     }
   }, [target, installing, listingId, data, onInstalled, t]);
 
-  const browseOrigin = data?.browseOrigin ?? null;
   const listing = data?.listing ?? null;
-  const iconUrl = listing
-    ? resolveIconUrl(browseOrigin, listing.iconUrl ?? listing.iconPath ?? null)
-    : null;
+  const iconUrl = listing ? httpIconUrl(listing.iconUrl) : null;
   const displayName = listing?.name ?? listing?.id ?? listingId;
 
   if (loading) {

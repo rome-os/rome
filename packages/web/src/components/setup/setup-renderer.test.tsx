@@ -1,8 +1,8 @@
 // @rstest-environment jsdom
 //
-// Standard renderers plus the per-(service, state) custom registry.
+// Standard renderers plus the optional custom presenting component.
 // Each state kind renders from its server-authored payload alone; a custom
-// component overrides rendering only for its (service, status) pair.
+// component overrides rendering only for the presenting state.
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -30,7 +30,6 @@ function asDesktopApp() {
 
 function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
   const props: SetupRenderProps = {
-    service: "discord",
     state,
     busy: false,
     error: null,
@@ -163,23 +162,26 @@ describe("SetupRenderer standard renderers", () => {
   });
 });
 
-describe("SetupRenderer custom registry", () => {
-  it("uses a custom component for a matching (service, status), else the standard renderer", () => {
-    const Custom = (_props: SetupRenderProps) => <div>custom-discord-presenting</div>;
-    render(
-      <SetupRenderer
-        service="discord"
-        state={{ status: "presenting", view: { title: "std" } }}
-        busy={false}
-        error={null}
-        onSubmit={rs.fn()}
-        onCancel={rs.fn()}
-        onRetry={rs.fn()}
-        registry={{ "discord:presenting": Custom }}
-      />,
+describe("SetupRenderer custom presenting component", () => {
+  it("uses the custom component for a presenting state, else the standard renderer", () => {
+    const Custom = (_props: SetupRenderProps) => <div>custom-presenting</div>;
+    const props = {
+      busy: false,
+      error: null,
+      onSubmit: rs.fn(),
+      onCancel: rs.fn(),
+      onRetry: rs.fn(),
+      renderPresenting: Custom,
+    };
+    const { rerender } = render(
+      <SetupRenderer {...props} state={{ status: "presenting", view: { title: "std" } }} />,
     );
-    expect(screen.getByText("custom-discord-presenting")).toBeTruthy();
+    expect(screen.getByText("custom-presenting")).toBeTruthy();
     expect(screen.queryByText("std")).toBeNull();
+
+    rerender(<SetupRenderer {...props} state={{ status: "cancelled" }} />);
+    expect(screen.queryByText("custom-presenting")).toBeNull();
+    expect(screen.getByTestId("setup-cancelled")).toBeTruthy();
   });
 });
 

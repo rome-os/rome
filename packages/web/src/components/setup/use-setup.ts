@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelSetup,
   getSetupState,
-  isTerminalSetup,
   startSetup,
   submitSetupInput,
   type SetupState,
@@ -22,12 +21,13 @@ export interface UseSetupOptions {
   /** A live setup id discovered on the connection response — the hook
    *  re-attaches to it (polls its state) instead of starting fresh. */
   activeCid?: string | null;
-  /** Poll interval (ms) while the setup awaits an external event. */
-  pollMs?: number;
   /** Fired once when the setup reaches `done` — the card refreshes
    *  connections so the slot flips to connected. */
   onDone?: () => void;
 }
+
+// Poll interval while the setup awaits an external event.
+const POLL_MS = 2000;
 
 export interface SetupRunner {
   cid: string | null;
@@ -44,7 +44,7 @@ export interface SetupRunner {
 }
 
 export function useSetup(options: UseSetupOptions): SetupRunner {
-  const { idOrService, grant, activeCid, pollMs = 2000, onDone } = options;
+  const { idOrService, grant, activeCid, onDone } = options;
   const [cid, setCid] = useState<string | null>(activeCid ?? null);
   const [state, setState] = useState<SetupState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,12 +91,10 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
 
   const start = useCallback(
     (force = false) => {
-      let cancelled = false;
       setBusy(true);
       setError(null);
       void (async () => {
         const result = await startSetup(idOrService, grant, { force });
-        if (cancelled) return;
         setBusy(false);
         if (!result.ok) {
           setError(result.error);
@@ -107,9 +105,6 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
         setCid(result.start.cid);
         settle(result.start.state);
       })();
-      return () => {
-        cancelled = true;
-      };
     },
     [idOrService, grant, settle],
   );
@@ -162,21 +157,14 @@ export function useSetup(options: UseSetupOptions): SetupRunner {
       }
       settle(next);
     };
-    const handle = setInterval(() => void tick(), pollMs);
+    const handle = setInterval(() => void tick(), POLL_MS);
     // Fetch once immediately when we (re-)attach to an unseen setup.
     if (!state) void tick();
     return () => {
       cancelled = true;
       clearInterval(handle);
     };
-  }, [cid, state, pollMs, settle, reset]);
-
-  // Stop the render loop the moment a terminal state lands (defensive; the poll
-  // effect already bails on every state it does not watch).
-  const settled = state ? isTerminalSetup(state) : false;
-  useEffect(() => {
-    if (settled) setBusy(false);
-  }, [settled]);
+  }, [cid, state, settle, reset]);
 
   return { cid, state, busy, error, start, submit, cancel, reset };
 }

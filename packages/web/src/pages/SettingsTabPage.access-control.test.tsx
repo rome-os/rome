@@ -69,6 +69,7 @@ function mockSettingsBackend(options?: {
         previousVersion: null,
         instance: { auth: "no_token", accountId: null, instanceId: null },
         database: { ok: true },
+        relay: { configured: false, depositUrlConfigured: false },
         channels: [],
         apps: { total: 0, failed: [], broken: [] },
       });

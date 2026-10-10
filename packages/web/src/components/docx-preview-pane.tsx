@@ -32,7 +32,7 @@ const DOCX_PREVIEW_PAGE_SELECTOR = `section.${DOCX_PREVIEW_OPTIONS.className}`;
 const DOCX_PREVIEW_PAGE_SHELL_CLASS = "docx-preview-page-shell";
 const DOCX_PREVIEW_MAX_SCALE = 1.15;
 
-export const DOCX_PREVIEW_LAYOUT_CSS = `
+const DOCX_PREVIEW_LAYOUT_CSS = `
 .docx-preview-pane .docx-preview-pages {
   box-sizing: border-box;
   min-height: 100%;

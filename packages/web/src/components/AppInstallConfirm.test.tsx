@@ -14,13 +14,9 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
-function listingPayload(overrides?: {
-  iconUrl?: string | null;
-  iconPath?: string | null;
-}): ListingDetailPayload {
+function listingPayload(overrides?: { iconUrl?: string | null }): ListingDetailPayload {
   return {
     available: true,
-    browseOrigin: "https://store.example",
     listing: {
       id: "customer-service",
       handle: "rome",
@@ -29,7 +25,6 @@ function listingPayload(overrides?: {
       description: "Grounded customer-service agent.",
       longDescription: null,
       iconUrl: overrides?.iconUrl ?? null,
-      iconPath: overrides?.iconPath ?? null,
       categories: [],
       state: "published",
       highestVersion: "0.1.19",
@@ -75,16 +70,6 @@ describe("AppInstallConfirm", () => {
     const icon = container.querySelector("img");
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("src")).toBe("https://cdn.example/icons/customer-service.png");
-  });
-
-  it("resolves a relative legacy iconPath against browseOrigin", async () => {
-    mockListingFetch(listingPayload({ iconPath: "/icons/customer-service.png" }));
-    const { container } = renderConfirm();
-
-    await screen.findByText("Install this app?");
-    expect(container.querySelector("img")?.getAttribute("src")).toBe(
-      "https://store.example/icons/customer-service.png",
-    );
   });
 
   it("falls back to a letter avatar when the listing has no icon", async () => {

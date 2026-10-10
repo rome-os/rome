@@ -42,20 +42,18 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
 export function ConnectionsSection({
   connections,
   composio,
-  loading = false,
-  error = null,
-  onRetry,
+  loading,
+  error,
   onRefresh,
   onFlash,
 }: {
   connections: ApiConnection[];
   composio: ComposioCliStatus | null;
-  loading?: boolean;
-  error?: string | null;
-  onRetry?: () => void | Promise<void>;
-  /** Re-fetch `/api/connections` + the Composio status after a ceremony. */
-  onRefresh?: () => void | Promise<void>;
-  onFlash?: (message: string) => void;
+  loading: boolean;
+  error: string | null;
+  /** Re-fetch `/api/connections` + the Composio status, after a load error or a ceremony. */
+  onRefresh: () => void | Promise<void>;
+  onFlash: (message: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const cards = buildConnectionCards(connections, composio);
@@ -101,7 +99,7 @@ export function ConnectionsSection({
                   variant="outline"
                   size="sm"
                   className="mt-3"
-                  onClick={() => void onRetry?.()}
+                  onClick={() => void onRefresh()}
                 >
                   <RefreshCw data-icon="inline-start" aria-hidden />
                   {t("page.retry")}
@@ -142,12 +140,10 @@ export function ConnectionsSection({
           card={selected}
           composio={composio}
           onClose={() => setSelectedService(null)}
-          onRefresh={() => void onRefresh?.()}
-          onFlash={(message) => onFlash?.(message)}
+          onRefresh={() => void onRefresh()}
+          onFlash={onFlash}
         />
       </Section>
     </Measure>
   );
 }
-
-export default ConnectionsSection;

@@ -37,20 +37,13 @@ import {
 } from "@/lib/sync-api";
 import { SourceIcon } from "./source-icon";
 
-export type SourceConnectProps =
-  | {
-      mode: "link";
-      projectPath: string;
-      open: boolean;
-      onClose: () => void;
-      onLinked?: (status: SyncStatus) => void;
-    }
-  | {
-      mode: "select";
-      open: boolean;
-      onClose: () => void;
-      onResolved: (target: RemoteTarget, strategy: LinkStrategy) => void;
-    };
+export interface SourceConnectProps {
+  mode: "link";
+  projectPath: string;
+  open: boolean;
+  onClose: () => void;
+  onLinked?: (status: SyncStatus) => void;
+}
 
 type Step = "source" | "auth" | "target" | "strategy" | "working";
 
@@ -59,9 +52,7 @@ function repoName(fullName: string): string {
   return parts.length > 1 ? parts.slice(1).join("/") : fullName;
 }
 
-export function SourceConnect(props: SourceConnectProps) {
-  const { open, onClose, mode } = props;
-
+export function SourceConnect({ projectPath, open, onClose, onLinked }: SourceConnectProps) {
   const uid = useId();
   const [step, setStep] = useState<Step>("source");
   const [sources, setSources] = useState<SyncSourceInfo[]>([]);
@@ -177,21 +168,16 @@ export function SourceConnect(props: SourceConnectProps) {
 
   const finishLink = useCallback(
     async (target: RemoteTarget, strategy: LinkStrategy) => {
-      if (mode === "select") {
-        props.onResolved(target, strategy);
-        onClose();
-        return;
-      }
       setStep("working");
       setError(null);
       try {
         const status = await linkProject({
-          projectPath: props.projectPath,
+          projectPath,
           source: target.sourceId,
           target,
           strategy,
         });
-        props.onLinked?.(status);
+        onLinked?.(status);
         onClose();
       } catch (err) {
         if (err instanceof SyncApiError && err.status === 409 && strategy === "auto") {
@@ -204,7 +190,7 @@ export function SourceConnect(props: SourceConnectProps) {
         setStep("target");
       }
     },
-    [mode, onClose, props],
+    [projectPath, onClose, onLinked],
   );
 
   const handleCreate = useCallback(async () => {
@@ -231,9 +217,7 @@ export function SourceConnect(props: SourceConnectProps) {
       <DialogHeader onClose={onClose}>
         <div className="flex items-center gap-2">
           {source ? <SourceIcon source={source.id} className="size-4" /> : null}
-          <DialogTitle>
-            {mode === "select" ? "Connect this folder" : "Connect to a source"}
-          </DialogTitle>
+          <DialogTitle>Connect to a source</DialogTitle>
         </div>
       </DialogHeader>
 
