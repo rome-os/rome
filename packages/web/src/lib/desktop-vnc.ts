@@ -1,5 +1,6 @@
 import { splitGraphemes } from "./graphemes";
 import { COARSE_POINTER_QUERY, matchesMediaQuery } from "./media-query";
+import { isApplePlatform } from "./platform";
 
 interface RemoteKeySender {
   sendKey(keysym: number, code: string | null, down?: boolean): void;
@@ -179,10 +180,6 @@ export function createDeferredPasteController({
       return true;
     },
   };
-}
-
-export function isApplePlatform(platform: string): boolean {
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
 }
 
 export function createMetaToControlController(rfb: RemoteKeySender, enabled: boolean) {

@@ -38,7 +38,6 @@ import {
 import { SourceIcon } from "./source-icon";
 
 export interface SourceConnectProps {
-  mode: "link";
   projectPath: string;
   open: boolean;
   onClose: () => void;

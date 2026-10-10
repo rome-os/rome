@@ -15,7 +15,8 @@ export const THEME_NAME_STORAGE_KEY = "rome-theme-name";
  *  The suffix versions the payload's shape. A cached entry outlives the build
  *  that wrote it, so a deploy that changes what `buildThemeCss` emits could
  *  otherwise replay an incompatible payload until the bundle boots. Bump the
- *  suffix whenever the emitted shape changes. */
+ *  suffix whenever the emitted shape changes, and remove the old key on boot so
+ *  its payload does not linger in localStorage. */
 export const THEME_CSS_CACHE_KEY = "rome-theme-css-5";
 
 /** The product default theme — explicit, not "whichever is first in

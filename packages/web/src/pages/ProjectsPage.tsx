@@ -129,7 +129,6 @@ export default function ProjectsPage() {
       />
       {connectProjectPath ? (
         <SourceConnect
-          mode="link"
           projectPath={connectProjectPath}
           open={!!connectProjectPath}
           onClose={() => setConnectProjectPath(null)}

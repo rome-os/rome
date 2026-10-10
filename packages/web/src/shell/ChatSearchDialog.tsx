@@ -47,7 +47,7 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
 } from "@/lib/chat-types";
-import { isApplePlatform } from "@/lib/desktop-vnc";
+import { isApplePlatform } from "@/lib/platform";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";

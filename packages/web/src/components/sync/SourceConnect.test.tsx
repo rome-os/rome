@@ -70,13 +70,7 @@ describe("SourceConnect repository picker", () => {
     const onLinked = rs.fn();
     const user = userEvent.setup();
     render(
-      <SourceConnect
-        mode="link"
-        projectPath="/projects/demo"
-        open
-        onClose={rs.fn()}
-        onLinked={onLinked}
-      />,
+      <SourceConnect projectPath="/projects/demo" open onClose={rs.fn()} onLinked={onLinked} />,
     );
 
     const input = await screen.findByRole("combobox", { name: "Repository" });
@@ -101,13 +95,7 @@ describe("SourceConnect repository picker", () => {
     const onLinked = rs.fn();
     const user = userEvent.setup();
     render(
-      <SourceConnect
-        mode="link"
-        projectPath="/projects/demo"
-        open
-        onClose={rs.fn()}
-        onLinked={onLinked}
-      />,
+      <SourceConnect projectPath="/projects/demo" open onClose={rs.fn()} onLinked={onLinked} />,
     );
 
     const input = await screen.findByRole("combobox", { name: "Repository" });

@@ -136,7 +136,6 @@ export function SyncStatusPanel({ path, className }: SyncStatusPanelProps) {
             </Button>
           </div>
           <SourceConnect
-            mode="link"
             projectPath={path}
             open={connectOpen}
             onClose={() => setConnectOpen(false)}

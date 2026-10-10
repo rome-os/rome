@@ -1138,7 +1138,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             )}
             {pendingConnectPath ? (
               <SourceConnect
-                mode="link"
                 projectPath={pendingConnectPath}
                 open={!!pendingConnectPath}
                 onClose={() => setPendingConnectPath(null)}
