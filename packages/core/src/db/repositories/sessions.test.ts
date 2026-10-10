@@ -248,4 +248,19 @@ describe("SessionsRepository", () => {
     });
     expect(named.conversationId).toBe("conv-renamed");
   });
+
+  it("fillConversationId() fills a missing conversation and never overwrites one", async () => {
+    const legacy = await repo.create({ agentName: "main", channelThreadKey: "webchat:conv-1" });
+    const bound = await repo.create({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-2",
+      conversationId: "conv-2",
+    });
+
+    await repo.fillConversationId(legacy, "conv-1");
+    await repo.fillConversationId(bound, "other");
+
+    expect((await repo.findById(legacy))?.conversationId).toBe("conv-1");
+    expect((await repo.findById(bound))?.conversationId).toBe("conv-2");
+  });
 });

@@ -102,6 +102,12 @@ export class SessionManager {
     });
   }
 
+  /** Record the conversation on a reused row that predates the column or was
+   *  created without one. A row that already names a conversation keeps it. */
+  async fillConversationId(sessionId: string, conversationId: string): Promise<void> {
+    await this.sessionsRepository.fillConversationId(sessionId, conversationId);
+  }
+
   async setWorkingDir(sessionId: string, workingDir: string): Promise<void> {
     await this.sessionsRepository.setWorkingDir(sessionId, workingDir);
   }

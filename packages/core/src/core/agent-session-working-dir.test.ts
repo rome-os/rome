@@ -198,6 +198,18 @@ describe("AgentSessionManager working dirs", () => {
     expect((await sessionsRepo.findById(replacement.sessionId))?.conversationId).toBe("conv-1");
   });
 
+  it("records the conversation on a reused row that had none", async () => {
+    const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
+    const original = await manager.acquire(key);
+    await original.close("idle");
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBeNull();
+
+    const reused = await manager.acquire(key, { romeSessionId: "legacy" });
+
+    expect(reused.sessionId).toBe(original.sessionId);
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("legacy");
+  });
+
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
     const firstDir = join(directory, "first");
     const secondDir = join(directory, "second");

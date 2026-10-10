@@ -948,6 +948,8 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionManager.setWorkingDir(sessionId, workingDir);
+  } else if (romeSessionId) {
+    await deps.sessionManager.fillConversationId(sessionId, romeSessionId);
   }
 
   if (config.outputSchema && init.handback) {

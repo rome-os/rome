@@ -1,4 +1,4 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { sessions, sessionTurnCheckpoints } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
@@ -117,6 +117,14 @@ export class SessionsRepository {
       if (!replacement) throw new Error("Failed to rotate provider session generation");
       return replacement;
     });
+  }
+
+  /** Record the conversation on a row that has none. Never overwrites. */
+  async fillConversationId(id: string, conversationId: string): Promise<void> {
+    await this.db
+      .update(sessions)
+      .set({ conversationId })
+      .where(and(eq(sessions.id, id), isNull(sessions.conversationId)));
   }
 
   async setWorkingDir(id: string, workingDir: string): Promise<void> {
