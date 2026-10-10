@@ -127,14 +127,32 @@ test("classifyGeminiVideoState reads page-level failures before a model turn ren
   );
 });
 
+test("classifyGeminiVideoState reads a page-level failure while the reply shows progress", () => {
+  const state = classifyGeminiVideoState({
+    videos: [],
+    responseText: "Generating your video… This could take a few minutes.",
+    bodyTail: "Generating your video… Something went wrong. Please try again.",
+  });
+  assert.equal(state.status, "error");
+  assert.match(state.message, /Something went wrong/);
+  assert.equal(
+    classifyGeminiVideoState({
+      videos: [],
+      responseText: "Generating your video… This could take a few minutes.",
+      bodyTail: "Generating your video… Gemini can make mistakes",
+    }).status,
+    "generating",
+  );
+});
+
 test("geminiVideoPhaseBudgets splits the remaining --timeout budget", () => {
-  assert.deepEqual(geminiVideoPhaseBudgets(560), { generationSeconds: 470, downloadSeconds: 110 });
+  assert.deepEqual(geminiVideoPhaseBudgets(560), { generationSeconds: 470, downloadSeconds: 90 });
   assert.deepEqual(geminiVideoPhaseBudgets(560, { skipDownload: true }).generationSeconds, 560);
-  // A short budget still leaves the download a share and finishes inside the
-  // 30 s padding OpenCLI adds on top of --timeout.
+  // The download fits inside its share, leaving OpenCLI's 30 s padding for
+  // teardown.
   const tight = geminiVideoPhaseBudgets(100);
   assert.equal(tight.generationSeconds, 50);
-  assert.equal(tight.downloadSeconds, 70);
+  assert.equal(tight.downloadSeconds, 50);
   assert.equal(geminiVideoPhaseBudgets(-5).generationSeconds, 1);
 });
 

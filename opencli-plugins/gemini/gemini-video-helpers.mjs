@@ -73,14 +73,15 @@ export const GEMINI_VIDEO_DOWNLOAD_RESERVE = 90;
 /**
  * Split what is left of the overall `--timeout` budget. OpenCLI treats an arg
  * named `timeout` as the whole command's budget (it aborts at timeout + 30s),
- * so the generation wait gets the remainder minus the download's share.
+ * so the generation wait gets the remainder minus the download's share, and
+ * the download fits in that share, leaving OpenCLI's padding for teardown.
  */
 export function geminiVideoPhaseBudgets(remainingSeconds, { skipDownload = false } = {}) {
   const remaining = Math.max(0, Number(remainingSeconds) || 0);
   const reserve = skipDownload ? 0 : Math.min(GEMINI_VIDEO_DOWNLOAD_RESERVE, remaining / 2);
   return {
     generationSeconds: Math.max(1, Math.floor(remaining - reserve)),
-    downloadSeconds: Math.max(15, Math.ceil(reserve) + 20),
+    downloadSeconds: Math.max(15, Math.ceil(reserve)),
   };
 }
 
@@ -171,6 +172,17 @@ export function pickGeminiVideoSource(videos) {
   return null;
 }
 
+function findGeminiVideoFailure(text, patterns) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const start = Math.max(0, match.index - 80);
+      return text.slice(start, match.index + 160).trim();
+    }
+  }
+  return null;
+}
+
 /**
  * Reduce a page snapshot to one of `ready`, `error`, `generating`, or `pending`.
  * A rendered video wins over any wording because Gemini keeps the earlier
@@ -179,19 +191,15 @@ export function pickGeminiVideoSource(videos) {
 export function classifyGeminiVideoState(snapshot) {
   const source = pickGeminiVideoSource(snapshot?.videos);
   if (source) return { status: "ready", source };
-  const fromResponse = normalizeText(snapshot?.responseText).length > 0;
+  const response = normalizeText(snapshot?.responseText);
+  // Gemini's reply is checked with every pattern; the end of the page only
+  // with the specific ones, and always, because a page-level failure can
+  // appear while the reply still shows its progress copy.
+  const failure =
+    findGeminiVideoFailure(response, RESPONSE_ERROR_PATTERNS) ||
+    findGeminiVideoFailure(normalizeText(snapshot?.bodyTail), PAGE_ERROR_PATTERNS);
+  if (failure) return { status: "error", message: failure };
   const text = geminiVideoStatusText(snapshot);
-  const patterns = fromResponse ? RESPONSE_ERROR_PATTERNS : PAGE_ERROR_PATTERNS;
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const start = Math.max(0, match.index - 80);
-      return {
-        status: "error",
-        message: text.slice(start, match.index + 160).trim(),
-      };
-    }
-  }
   if (GENERATING_PATTERNS.some((pattern) => pattern.test(text))) {
     return { status: "generating" };
   }

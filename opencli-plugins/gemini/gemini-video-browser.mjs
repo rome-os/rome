@@ -86,11 +86,12 @@ export function readGeminiVideoComposer() {
 export function readGeminiVideoTurn() {
   var responses = document.querySelectorAll("model-response");
   var last = responses.length ? responses[responses.length - 1] : null;
-  // The clip belongs to the newest turn. Gemini has rendered its player
-  // inside that turn; the page-wide scan only covers a player mounted outside
-  // any turn, and never one from an earlier reply.
+  // The clip belongs to the newest turn, so nothing counts before one exists
+  // (the /videos page may show sample clips). Gemini renders the player inside
+  // that turn; the page-wide scan only covers a player mounted outside any
+  // turn, and never one from an earlier reply.
   var players = last ? last.querySelectorAll("video") : [];
-  if (!players.length) {
+  if (last && !players.length) {
     var all = document.querySelectorAll("video");
     var loose = [];
     for (var k = 0; k < all.length; k++) {
@@ -160,7 +161,7 @@ async function pollComposer(page, predicate, { timeoutMs = 15000, intervalSecond
   for (;;) {
     state = await page.evaluate(readGeminiVideoComposer);
     if (predicate(state) || Date.now() >= deadline) return state;
-    await page.wait(intervalSeconds);
+    await page.sleep(intervalSeconds);
   }
 }
 
@@ -198,7 +199,7 @@ export async function selectGeminiVideoRatio(page, label) {
   if (current.ratioLabel === label) return label;
   const opened = await page.evaluate(SCRIPT_OPEN_RATIO_MENU);
   if (!opened) throw new CommandExecutionError("Gemini aspect ratio control was not found");
-  await page.wait(0.7);
+  await page.sleep(0.7);
   const picked = await page.evaluate(scriptClickRatioMenuItem(label));
   if (picked !== true) {
     const seen =
@@ -325,7 +326,9 @@ export async function waitForGeminiVideo(page, timeoutSeconds, { intervalSeconds
       throw new CommandExecutionError(`Gemini did not generate the video: ${last.message}`);
     }
     if (Date.now() >= deadline) return null;
-    await page.wait(Math.min(intervalSeconds, Math.max(0.5, (deadline - Date.now()) / 1000)));
+    // A fixed interval: `page.wait(n)` waits for DOM quiet and can return
+    // after 0.5 s, which would re-read the whole page far more often.
+    await page.sleep(Math.min(intervalSeconds, Math.max(0.5, (deadline - Date.now()) / 1000)));
   }
 }
 
