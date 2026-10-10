@@ -629,6 +629,67 @@ describe("ReplyDelivery", () => {
     ]);
   });
 
+  it("keeps a settled part's message, reported as differing, when a shorter final text leaves nothing at its place", async () => {
+    // Three parts are written from the deltas, then the complete block holds only the first.
+    const narrow = new MemoryPlatform({ maxPartLength: 10, edit: true, budget: OPEN_BUDGET });
+    const delivery = reply({ editIntervalMs: 0 }, narrow);
+    delivery.accept(delta("aaaa bbbb cccc dddd eeee ffff", "a"));
+    await advance(1000);
+    expect(narrow.messages.length).toBeGreaterThanOrEqual(3);
+    delivery.accept(text("aaaa", "a"));
+    const outcome = await delivery.finish();
+
+    // A blank edit would be refused and end the reply. The messages stay as they are.
+    expect(outcome.failure).toBeUndefined();
+    expect(outcome.status).toBe("delivered");
+    expect(outcome.parts.slice(1).every((part) => part.diverged === true)).toBe(true);
+  });
+
+  it("keeps a reply's pacer lane when the platform reports another conversation id after the first create", async () => {
+    const pacer = new Pacer({ ...OPEN_BUDGET, conversationSpacingMs: 1000 }, clock);
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer,
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "@channel",
+      clock,
+    });
+    delivery.accept(delta("Hello", "a"));
+    await advance(100);
+    delivery.accept(delta(" world", "a"));
+    await advance(100);
+    // The platform named the chat "c1" in its receipt, but the pacer still knows one lane.
+    expect(pacer.size).toBe(1);
+    const finished = delivery.finish();
+    await advance(5000);
+    await finished;
+  });
+
+  it("does not count text a split passed over, or a whitespace tail, as unsent", async () => {
+    // Each block carries 25 spaces that are never sent. With them counted, 50 characters would wait.
+    const delivery = reply({ editIntervalMs: 0, maxPendingChars: 40 });
+    delivery.accept(text(`${" ".repeat(25)}hello`, "a"));
+    await advance(100);
+    delivery.accept(text(`${" ".repeat(25)}world`, "b"));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(platform.shown.map((shown) => shown.trim())).toEqual(["hello", "world"]);
+  });
+
+  it("falls back to blocks, instead of reporting unknown, when a transport declares edits and has none", async () => {
+    const lying: DeliveryTransport = Object.create(platform, { edit: { value: undefined } });
+    const delivery = reply({ editIntervalMs: 0 }, lying);
+    delivery.accept(delta("Hello", "a"));
+    await advance(100);
+    delivery.accept(delta(" world", "a"));
+    delivery.accept(text("Hello world", "a"));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(platform.shown.join("")).toBe("Hello world");
+  });
+
   it("does no planning work for a final reply until it finishes", async () => {
     let renders = 0;
     const counting: DeliveryTransport = Object.create(platform, {
@@ -674,7 +735,7 @@ describe("ReplyDelivery", () => {
 
     expect(outcome).toMatchObject({
       status: "failed",
-      failure: { kind: "rejected", message: "codec exploded" },
+      failure: { kind: "internal", message: "codec exploded" },
     });
   });
 
@@ -707,7 +768,7 @@ describe("ReplyDelivery", () => {
 
     expect(outcome).toMatchObject({
       status: "failed",
-      failure: { kind: "rejected", message: expect.stringContaining("one character") },
+      failure: { kind: "internal", message: expect.stringContaining("one character") },
     });
   });
 });

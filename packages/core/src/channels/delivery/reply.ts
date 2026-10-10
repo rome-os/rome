@@ -6,7 +6,7 @@ import { type Pacer, SKIPPED } from "./pacer.js";
 import { lastBreak, splitPoint } from "./split.js";
 import {
   asDeliveryFailure,
-  type DeliveryFailure,
+  DeliveryFailure,
   type DeliveryMode,
   type DeliveryPolicy,
   type DeliveryTransport,
@@ -51,7 +51,12 @@ export interface ReplyOutcome {
    */
   status: "delivered" | "partial" | "failed" | "unknown" | "stopped";
   parts: DeliveredPart[];
-  failure?: { kind: DeliveryFailure["kind"] | "overflow"; message: string };
+  /**
+   * Why the reply stopped. A platform's refusal has a `DeliveryFailure` kind.
+   * `overflow` is a reply that outran its bound on unsent text, and `internal`
+   * is a fault in the engine or its codec, which no platform caused.
+   */
+  failure?: { kind: DeliveryFailure["kind"] | "overflow" | "internal"; message: string };
 }
 
 export interface ReplyOptions {
@@ -137,30 +142,57 @@ export class ReplyDelivery {
   private readonly blocks: BlockState[] = [];
   private readonly abort = new AbortController();
   private mode: DeliveryMode;
+  /** Where messages go. After the first create it follows the id the platform
+   *  reports, which can differ from the one the reply started with. */
   private conversation: string;
+  /** The pacer's key for every write of this reply: the conversation it
+   *  started in, whatever the platform later reports, so that the
+   *  conversation's spacing holds. */
+  private readonly paceKey: string;
   private closed = false;
   private writing = false;
   private failure?: ReplyOutcome["failure"];
   private unknownEdits = 0;
-  private sourceChars = 0;
-  private settledChars = 0;
   private timer?: ClockTimer;
   private readonly idle: Array<() => void> = [];
 
   constructor(private readonly options: ReplyOptions) {
     this.mode = effectiveMode(options.policy, options.transport.capabilities);
     this.conversation = options.conversation;
+    this.paceKey = options.conversation;
   }
 
   /** Takes one event of the run. Events after `finish()` or `stop()` are ignored. */
   accept(event: StreamAgentEvent): void {
     if (this.closed || this.failure) return;
-    this.sourceChars += this.assembler.apply(event);
-    const waiting = this.sourceChars - this.settledChars;
+    this.assembler.apply(event);
+    const waiting = this.pendingChars();
     // A `final` reply waits for its end by design, so nothing bounds its text.
     if (this.mode !== "final" && waiting > this.options.policy.maxPendingChars)
       this.fail({ kind: "overflow", message: `${waiting} characters wait unsent` });
     this.pump();
+  }
+
+  /**
+   * Source text that is not in a settled message yet: in every block, what
+   * follows its last settled part or the prefix passed over, including a
+   * preview that is still open. It is read off the blocks and parts, so text a
+   * split passed over, and a block that shrank, cannot leave it drifting.
+   */
+  private pendingChars(): number {
+    let total = 0;
+    for (const [index, block] of this.assembler.blocks.entries()) {
+      const state = this.blocks[index];
+      let consumed = state?.skipped ?? 0;
+      for (let i = (state?.parts.length ?? 0) - 1; i >= 0; i--) {
+        const part = state!.parts[i]!;
+        if (!part.settled) continue;
+        consumed = Math.max(consumed, part.end);
+        break;
+      }
+      total += Math.max(0, block.text.length - consumed);
+    }
+    return total;
   }
 
   /** Closes the reply and resolves once every part is written or the reply
@@ -209,7 +241,7 @@ export class ReplyDelivery {
     this.writing = true;
     void this.options.pacer
       .run(
-        this.conversation,
+        this.paceKey,
         async (): Promise<void | typeof SKIPPED> => {
           // The reply can change while a write waits its turn. Its text may
           // have grown, it may have failed, and the write may have become
@@ -230,7 +262,7 @@ export class ReplyDelivery {
         // same write again, so the reply fails.
         const message = error instanceof Error ? error.message : String(error);
         log.warn("reply write failed outside the transport", { error: message });
-        this.fail({ kind: "rejected", message });
+        this.fail({ kind: "internal", message });
       })
       .finally(() => {
         this.writing = false;
@@ -245,7 +277,7 @@ export class ReplyDelivery {
       return this.plan(now, ignoreWaits);
     } catch (error) {
       this.fail({
-        kind: "rejected",
+        kind: "internal",
         message: error instanceof Error ? error.message : String(error),
       });
       return null;
@@ -269,7 +301,9 @@ export class ReplyDelivery {
         const source = block.text.slice(part.start, part.end);
         if (source === part.sentSource && !part.uncertain) continue;
         const rendered = codec.render(source, true);
-        if (this.mode !== "edit" || codec.measure(rendered) > limit) {
+        // A platform refuses a blank edit, so a message whose place in the block
+        // is now empty stays as it is, and the part is reported as differing.
+        if (!rendered.trim() || this.mode !== "edit" || codec.measure(rendered) > limit) {
           part.diverged = true;
           continue;
         }
@@ -300,6 +334,7 @@ export class ReplyDelivery {
             active.diverged = true;
             this.settlePart(active, active.start + active.sentSource.length);
           }
+          state.skipped = block.text.length;
           break;
         }
         let end = start + splitPoint(remaining, limit, codec);
@@ -423,7 +458,8 @@ export class ReplyDelivery {
     const { part } = plan;
     const partIndex = state.parts.indexOf(part);
     try {
-      if (!transport.edit) throw new Error("unreachable: edit mode without edit");
+      if (!transport.edit)
+        throw new DeliveryFailure("unsupported", "the transport declares edits but has no edit");
       await transport.edit(part.receipt!, rendered);
       Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
       delete part.uncertain;
@@ -460,7 +496,6 @@ export class ReplyDelivery {
   private settlePart(part: Part, end: number): void {
     part.end = end;
     part.settled = true;
-    this.settledChars += part.end - part.start;
   }
 
   private outcome(): ReplyOutcome {

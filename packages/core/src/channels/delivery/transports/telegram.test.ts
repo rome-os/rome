@@ -90,6 +90,8 @@ describe("telegramTransport", () => {
       throw new Error("Telegram's spacing depends on the chat");
     expect(conversationSpacingMs("-1001234567890")).toBe(3000);
     expect(conversationSpacingMs("-4242")).toBe(3000);
+    // A channel named by its username is group-like too.
+    expect(conversationSpacingMs("@somechannel")).toBe(3000);
     expect(conversationSpacingMs("55")).toBe(1000);
   });
 

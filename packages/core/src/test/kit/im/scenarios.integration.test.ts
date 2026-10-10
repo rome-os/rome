@@ -3,10 +3,11 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Pacer } from "../../../channels/delivery/pacer.js";
 import { ReplyDelivery, type ReplyOutcome } from "../../../channels/delivery/reply.js";
-import { effectiveMode } from "../../../channels/delivery/types.js";
+import { type DeliveryTransport, effectiveMode } from "../../../channels/delivery/types.js";
 import { systemClock } from "../../../lib/clock.js";
 import { checkDelivery } from "./invariants.js";
 import { runScenario, type ScenarioContext } from "./scenario.js";
+import { TELEGRAM_TOKEN } from "./telegram.js";
 import { type Platform, TEST_CHANNELS, type TestChannel } from "./test-channel.js";
 
 const platforms = Object.keys(TEST_CHANNELS) as Platform[];
@@ -33,6 +34,15 @@ const TODAY: Record<
   discord: { linksReply: false, longText: [2000, 2000, 1000], streams: false },
   // iLink has no reply reference, and documents no length limit for the peer to model.
   wechat: { linksReply: false, longText: null, streams: false },
+};
+
+// The request of a platform's API that a scenario holds in flight and then cuts
+// off, so the platform applies it and the client never hears. Null where no
+// transport streams.
+const EDIT_REQUEST: Record<Platform, string | null> = {
+  telegram: `/bot${TELEGRAM_TOKEN}/editMessageText`,
+  discord: null,
+  wechat: null,
 };
 
 describe.each(platforms)("%s", (platform) => {
@@ -168,6 +178,89 @@ describe.each(platforms)("%s", (platform) => {
       });
     },
   );
+
+  // An edit the platform applies but whose answer never arrives leaves the
+  // client not knowing what the message shows. If the block then completes
+  // back to the text the client last saw acknowledged, the reply must still
+  // put that text back, not take the old text as settled.
+  it.skipIf(EDIT_REQUEST[platform] === null)(
+    "puts the final text back after an edit whose answer was lost",
+    ({ task }) => {
+      const channel = open();
+      return runScenario(task, channel, async (context) => {
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => (release = resolve));
+        const { outcome } = await streamScript(context, channel, async ({ emit }) => {
+          emit({ type: "text_delta", content: "Hello", blockId: "a" });
+          await channel.peer.server.waitFor((e) => e.accepted);
+          // The next edit reaches the platform and waits there, applies, and loses its answer.
+          channel.peer.server.once({
+            method: "POST",
+            path: EDIT_REQUEST[platform]!,
+            before: () => held,
+            dropAfterAccept: true,
+          });
+          emit({ type: "text_delta", content: " world", blockId: "a" });
+          await channel.peer.server.waitFor((e) => e.request.path === EDIT_REQUEST[platform]);
+          // The block completes back to what the client last saw acknowledged.
+          emit({ type: "text", content: "Hello", blockId: "a", turnPhase: "final" });
+          release();
+        });
+
+        await context.step("The user sees the final text, and the reply delivered", () => {
+          expect(outcome.status).toBe("delivered");
+          expect(romeMessages(channel).map((message) => message.text)).toEqual(["Hello"]);
+        });
+        await context.step("The lost edit had been applied before it was put back", () => {
+          const texts = channel.peer
+            .changes(channel.conversation)
+            .filter((change) => change.message.from === "rome")
+            .map((change) => change.message.text);
+          expect(texts).toEqual(["Hello", "Hello world", "Hello"]);
+        });
+      });
+    },
+  );
+
+  // A complete text can come out shorter than the deltas it replaces. A message
+  // the reply already settled stays as it is, since the platform refuses an
+  // edit to nothing, and the reply reports it as differing.
+  it.skipIf(!TODAY[platform].streams)(
+    "keeps messages it already settled when the final text is shorter than what streamed",
+    ({ task }) => {
+      const channel = open();
+      return runScenario(task, channel, async (context) => {
+        const { outcome } = await streamScript(
+          context,
+          channel,
+          async ({ emit }) => {
+            emit({
+              type: "text_delta",
+              content: "aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+              blockId: "a",
+            });
+            await channel.peer.server.waitFor((e) => e.accepted);
+            await sleep(60);
+            emit({ type: "text", content: "aaaa", blockId: "a", turnPhase: "final" });
+          },
+          { maxPartLength: 12 },
+        );
+
+        await context.step("The platform refused no request, and the reply delivered", () => {
+          const refused = channel.peer.server.exchanges.filter(
+            (e) => (e.response?.status ?? 0) >= 400,
+          );
+          expect(refused).toEqual([]);
+          expect(outcome.status).toBe("delivered");
+        });
+        await context.step("The later messages stay as they were, reported as differing", () => {
+          expect(romeMessages(channel).length).toBeGreaterThanOrEqual(3);
+          expect(outcome.parts.length).toBeGreaterThanOrEqual(3);
+          expect(outcome.parts.slice(1).every((part) => part.diverged === true)).toBe(true);
+        });
+      });
+    },
+  );
 });
 
 const COMMENTARY = "Let me think of a story first.";
@@ -239,6 +332,44 @@ async function streamReply(
     mode: effectiveMode(policy, transport.capabilities),
     source: lead + COMMENTARY + STORY,
   };
+}
+
+/**
+ * Streams the reply `script` writes, from a scripted agent, through the test
+ * channel's delivery transport. The script gets `emit`, which notes the event
+ * on the agent's lane and gives it to the engine. `maxPartLength` narrows the
+ * platform's limit so a short text makes several messages.
+ */
+async function streamScript(
+  { step, note }: ScenarioContext,
+  channel: TestChannel,
+  script: (tools: { emit: (event: StreamAgentEvent) => void }) => Promise<void>,
+  { maxPartLength }: { maxPartLength?: number } = {},
+): Promise<{ outcome: ReplyOutcome }> {
+  const wide = transportOf(channel);
+  const transport: DeliveryTransport = maxPartLength
+    ? { ...wide, capabilities: { ...wide.capabilities, maxPartLength } }
+    : wide;
+  await step("The user writes", () => channel.receive("tell me something"));
+  const delivery = new ReplyDelivery({
+    transport,
+    pacer: new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, systemClock),
+    policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 100_000 },
+    conversation: channel.conversation,
+    clock: systemClock,
+    observe: (event) =>
+      note("rome", `${event.write} part ${event.block}.${event.part}: ${event.result}`, event),
+  });
+  await step("The agent streams its reply", () =>
+    script({
+      emit: (event) => {
+        note("agent", event.type, event);
+        delivery.accept(event);
+      },
+    }),
+  );
+  const outcome = await step("The reply settles", () => delivery.finish());
+  return { outcome };
 }
 
 function transportOf(channel: TestChannel) {

@@ -13,11 +13,13 @@ export function telegramTransport(api: Api): DeliveryTransport {
       edit: true,
       // Telegram allows a bot about 30 messages a second across chats, about
       // one a second in a private chat, and 20 a minute in a group. Group and
-      // channel chat ids are negative.
+      // channel chat ids are negative, and a channel can also be named by its
+      // @username.
       budget: {
         burst: 30,
         refillMs: 34,
-        conversationSpacingMs: (chat) => (chat.startsWith("-") ? 3000 : 1000),
+        conversationSpacingMs: (chat) =>
+          chat.startsWith("-") || chat.startsWith("@") ? 3000 : 1000,
       },
     },
     codec: plainText,
