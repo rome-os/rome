@@ -21,4 +21,4 @@
  * module, and this one has no entry, so the roles stay an internal detail
  * rather than published API.
  */
-export const TYPOGRAPHY_ROLES = ["display", "title", "section", "body", "ui", "badge", "aux"];
+export const TYPOGRAPHY_ROLES = ["display", "title", "section", "composer", "ui", "badge", "aux"];

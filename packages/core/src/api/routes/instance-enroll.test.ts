@@ -145,10 +145,17 @@ describe("GET /instance/enroll/callback", () => {
     }
   });
 
-  it("provisions the relay mailbox after persisting the newly enrolled token", async () => {
+  it("provisions relay and CLI credentials after enrollment without waiting for CLI setup", async () => {
     const store = memoryStore();
     let tokenSeenByProvision: string | null = null;
-    const app = mount(depsWithStore(store), {
+    let tokenSeenByNode: string | null = null;
+    const deps = depsWithStore(store, {
+      provisionNodeCaller: () => {
+        tokenSeenByNode = getInstanceToken();
+        return new Promise<void>(() => {});
+      },
+    });
+    const app = mount(deps, {
       fetchImpl: async (input, init) => {
         expect(String(input)).toBe("https://rome-cloud.example/api/instance/token");
         const body = JSON.parse(String(init?.body)) as {
@@ -181,5 +188,6 @@ describe("GET /instance/enroll/callback", () => {
     expect(store.data.get("instanceToken")).toBe(TOKEN);
     expect(getInstanceToken()).toBe(TOKEN);
     expect(tokenSeenByProvision).toBe(TOKEN);
+    expect(tokenSeenByNode).toBe(TOKEN);
   });
 });

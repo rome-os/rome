@@ -13,8 +13,14 @@ export class ArgumentError extends Error {}
 export class CommandExecutionError extends Error {}
 export class AuthRequiredError extends Error {constructor(domain,message){super(message);this.domain=domain;}}
 `)}`;
+const formUrl = new URL("./aa-form.mjs", import.meta.url).href;
+const formStubUrl = `data:text/javascript,${encodeURIComponent(`
+  export * from ${JSON.stringify(formUrl)};
+  export async function submitAaSearch() {}
+`)}`;
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "./aa-form.mjs") return { url: formStubUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/registry")
       return { url: registryUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/errors") return { url: errorsUrl, shortCircuit: true };

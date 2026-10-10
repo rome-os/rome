@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { createLogger } from "../../logger.js";
 import { appIdToPathSegment } from "../packaging/app-id.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../state.js";
+import {
+  type CatalogEvent,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+} from "../state.js";
 import { svgToPng } from "./rasterize.js";
 import type { OgImageStore } from "./store.js";
 import { type OgIcon, renderOgSvg } from "./template.js";
@@ -14,11 +19,20 @@ const ICON_MIMES: Record<string, OgIcon["mime"]> = {
   ".png": "image/png",
 };
 
-async function readIcon(app: ResolvedApp): Promise<OgIcon | null> {
+function iconMime(app: Pick<ResolvedApp, "iconAbsolutePath">): OgIcon["mime"] | null {
   const iconPath = app.iconAbsolutePath;
-  if (!iconPath) return null;
-  const mime = ICON_MIMES[extname(iconPath).toLowerCase()];
-  if (!mime) return null; // webp etc. → default mark
+  return iconPath ? (ICON_MIMES[extname(iconPath).toLowerCase()] ?? null) : null;
+}
+
+/** Whether the app's icon is a format the renderer can draw (svg or png). */
+export function hasRenderableIcon(app: Pick<ResolvedApp, "iconAbsolutePath">): boolean {
+  return iconMime(app) !== null;
+}
+
+export async function readIcon(app: ResolvedApp): Promise<OgIcon | null> {
+  const iconPath = app.iconAbsolutePath;
+  const mime = iconMime(app);
+  if (!iconPath || !mime) return null; // webp etc. → default mark
   try {
     return { mime, bytes: await readFile(iconPath) };
   } catch {
@@ -50,13 +64,7 @@ export interface AppOgImageSubscriberOptions {
 }
 
 function isResolvedWebApp(view: CatalogEvent["current"]): view is ResolvedApp {
-  return (
-    view !== null &&
-    (view as ResolvedApp).manifest !== undefined &&
-    view.state === "installed" &&
-    view.enabled &&
-    (view as ResolvedApp).web != null
-  );
+  return isResolvedApp(view) && view.state === "installed" && view.enabled && view.web != null;
 }
 
 /**

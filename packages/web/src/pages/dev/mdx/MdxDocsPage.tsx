@@ -44,11 +44,11 @@ export default function MdxDocsPage() {
       <main className="min-w-0 flex-1">
         <div className="mx-auto max-w-3xl px-8 py-10">
           {active ? (
-            <Suspense fallback={<p className="text-body text-muted-foreground">Loading…</p>}>
+            <Suspense fallback={<p className="text-ui text-muted-foreground">Loading…</p>}>
               <active.Doc components={mdxComponents} />
             </Suspense>
           ) : (
-            <p className="text-body text-muted-foreground">No doc named “{slug}”.</p>
+            <p className="text-ui text-muted-foreground">No doc named “{slug}”.</p>
           )}
         </div>
       </main>

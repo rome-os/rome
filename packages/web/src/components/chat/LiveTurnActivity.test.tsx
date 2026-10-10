@@ -118,3 +118,23 @@ describe("transient turn activity", () => {
     }
   });
 });
+
+describe("typing bubble", () => {
+  it("shows only the rising dots for plain thinking, and names it for screen readers", () => {
+    render(<LiveTurnActivity snapshot={null} hasText={false} />);
+    const bubble = screen.getByRole("status");
+    expect(bubble.classList.contains("rounded-16")).toBe(true);
+    expect(bubble.querySelectorAll(".rome-typing-dot")).toHaveLength(3);
+    expect(screen.getByText("Thinking…").className).toBe("sr-only");
+  });
+
+  it("cuts a specific step to one line inside the bubble", () => {
+    render(
+      <LiveTurnActivity snapshot={snapshot(thinking(0, "Checking results"))} hasText={false} />,
+    );
+    const label = screen.getByText("Checking results");
+    expect(label.closest("[role=status]")?.classList.contains("rounded-16")).toBe(true);
+    expect(label.classList.contains("truncate")).toBe(true);
+    expect(label.className).not.toContain("shimmer");
+  });
+});

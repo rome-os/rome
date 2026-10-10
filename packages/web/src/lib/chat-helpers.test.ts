@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { detectAppInstalls, resolveAppToOpen } from "./chat-helpers";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 
 function actionResult(toolUseId: string, tool: string, payload: Record<string, unknown>) {
   return {
@@ -8,7 +8,7 @@ function actionResult(toolUseId: string, tool: string, payload: Record<string, u
     tool,
     toolUseId,
     output: { content: [{ type: "text", text: JSON.stringify(payload) }] },
-  } as unknown as TraceBlockDto;
+  } as unknown as TraceEventDto;
 }
 
 describe("detectAppInstalls", () => {
@@ -27,7 +27,7 @@ describe("detectAppInstalls", () => {
             source: { mode: "source", path: "/rome-home/.rome/default/projects/apps/user-skills" },
           },
         },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("item_6", "execute_action", {
         appId: "user-skills",
         state: "installed",
@@ -45,7 +45,7 @@ describe("detectAppInstalls", () => {
         tool: "system:app_management",
         id: "use-1",
         input: { op: "install", source: { mode: "bundle", path: "/tmp/artifact" } },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-1", "system:app_management", { appId: "my-app", state: "installed" }),
     ];
 
@@ -59,7 +59,7 @@ describe("detectAppInstalls", () => {
         tool: "app_management",
         id: "use-2",
         input: { op: "create", appId: "fresh-app", rootPath: "/tmp/fresh-app" },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-2", "app_management", { state: "installed" }),
     ];
 
@@ -73,7 +73,7 @@ describe("detectAppInstalls", () => {
         tool: "third-party:app_management",
         id: "use-third-party-direct",
         input: { op: "install" },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-third-party-direct", "third-party:app_management", {
         appId: "unrelated-app",
         state: "installed",
@@ -93,7 +93,7 @@ describe("detectAppInstalls", () => {
           action_name: "third-party:app_management",
           json_args: { op: "install" },
         },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-third-party-wrapped", "execute_action", {
         appId: "unrelated-app",
         state: "installed",
@@ -110,7 +110,7 @@ describe("detectAppInstalls", () => {
         tool: "app_management",
         id: "use-3",
         input: { op: "install", source: { mode: "source", path: "/tmp/broken-app" } },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-3", "app_management", {
         appId: "broken-app",
         state: "failed",
@@ -128,14 +128,14 @@ describe("detectAppInstalls", () => {
         tool: "app_management",
         id: "use-4",
         input: { op: "uninstall", appId: "old-app" },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       actionResult("use-4", "app_management", { appId: "old-app", state: "installed" }),
       {
         type: "tool_use",
         tool: "list_actions",
         id: "use-5",
         input: {},
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
     ];
 
     expect(detectAppInstalls(blocks)).toEqual([]);
@@ -148,16 +148,67 @@ describe("detectAppInstalls", () => {
         tool: "Bash",
         id: "use-6",
         input: { command: "pnpm app:install --source ~/projects/apps/cli-app/" },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
       {
         type: "tool_result",
         tool: "Bash",
         toolUseId: "use-6",
         output: { exit_code: 0, aggregated_output: "installed" },
-      } as unknown as TraceBlockDto,
+      } as unknown as TraceEventDto,
     ];
 
     expect(detectAppInstalls(blocks)).toEqual([{ appId: "cli-app" }]);
+  });
+
+  const bashInstall = (result: Record<string, unknown>): TraceEventDto[] => [
+    {
+      type: "tool_use",
+      tool: "Bash",
+      id: "use-7",
+      input: { command: "pnpm app:install --source ~/projects/apps/cli-app/" },
+    } as unknown as TraceEventDto,
+    { type: "tool_result", tool: "Bash", toolUseId: "use-7", ...result } as TraceEventDto,
+  ];
+
+  it("reads the normalized isError flag on any provider's Bash result", () => {
+    // Claude's output is text, with no exit code to read.
+    expect(detectAppInstalls(bashInstall({ output: "installed", isError: false }))).toEqual([
+      { appId: "cli-app" },
+    ]);
+    expect(detectAppInstalls(bashInstall({ output: "Exit code 1", isError: true }))).toEqual([]);
+    // The flag wins over an exit code in the output.
+    expect(detectAppInstalls(bashInstall({ output: { exitCode: 0 }, isError: true }))).toEqual([]);
+  });
+
+  it("does not count a Bash install started in the background", () => {
+    // Claude returns at once for `run_in_background`, before the install ends.
+    const blocks = [
+      {
+        type: "tool_use",
+        tool: "Bash",
+        id: "use-8",
+        input: {
+          command: "pnpm app:install --source ~/projects/apps/cli-app/",
+          run_in_background: true,
+        },
+      } as unknown as TraceEventDto,
+      {
+        type: "tool_result",
+        tool: "Bash",
+        toolUseId: "use-8",
+        output: "Command running in background with ID: bash_1",
+        isError: false,
+      } as TraceEventDto,
+    ];
+
+    expect(detectAppInstalls(blocks)).toEqual([]);
+  });
+
+  it("reads Codex's camelCase exit code on a result recorded before isError", () => {
+    expect(
+      detectAppInstalls(bashInstall({ output: { exitCode: 0, aggregatedOutput: "installed" } })),
+    ).toEqual([{ appId: "cli-app" }]);
+    expect(detectAppInstalls(bashInstall({ output: { exitCode: 1 } }))).toEqual([]);
   });
 });
 

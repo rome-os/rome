@@ -27,15 +27,24 @@
     "addSection": "Add",
     "remove": "Remove",
     "add": "Add",
-    "newApps": "New apps available",
-    "new": "New",
-    "appDisabled": "Disabled"
+    "appDisabled": "Disabled",
+    "recent": "Recent",
+    "recentApps": "Recent apps",
+    "showMore": "Show more",
+    "showLess": "Show less",
+    "moreRecentApps": "More recent apps",
+    "notOpened": "Not opened on this device"
   },
   "recentChats": {
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",
-    "unread": "Unread",
+    "rowStatus": {
+      "waiting": "Waiting for you",
+      "running": "Replying now",
+      "failed": "Stopped with an error",
+      "done": "Done · new replies"
+    },
     "delete": "Delete",
     "deleteConfirm": "Delete this chat permanently? This can't be undone.",
     "archive": "Archive",
@@ -46,27 +55,53 @@
     "newChatInProject": "New chat in this project",
     "loadMore": "Load {{count}} more",
     "settings": "List settings",
-    "search": "Search chats",
-    "searchShortcut": "Search chats ({{shortcut}})",
-    "searchDescription": "Find a chat by its title, project, or message content.",
-    "searchPlaceholder": "Search chats and messages",
+    "search": "Search apps and chats",
+    "searchShortcut": "Search apps and chats ({{shortcut}})",
+    "searchDescription": "Find an app by name or id, or a chat by title, project, or message content. Type @ to start a new chat with an agent.",
+    "searchPlaceholder": "Search apps and chats, or type @ to message an agent",
     "searchClear": "Clear search",
     "searchLoading": "Loading chats…",
     "searchLoadError": "Chats couldn't be loaded",
+    "searchChatLoadError": "Chats couldn't be loaded",
+    "searchAppLoadError": "Apps couldn't be loaded",
     "searchRetry": "Try again",
-    "searchNoResults": "No chats found",
-    "searchNoResultsDescription": "Try another chat title, project, or message text.",
-    "searchingMessages": "Searching messages…",
+    "searchRetryChats": "Retry loading chats",
+    "searchRetryApps": "Retry loading apps",
+    "searchEmpty": "No recent chats. Type to find an app.",
+    "searchNoResults": "No apps or chats found",
+    "searchNoResultsDescription": "Try another app name, app id, chat title, project, or message text.",
+    "searchNoAvailableResults": "No results from the available sources",
+    "searchNoAvailableResultsDescription": "Retry the unavailable source or try another search.",
+    "searchingResults": "Searching apps and chats…",
     "searchMatchUser": "You",
     "searchMatchAssistant": "Assistant",
     "searchRecent": "Recent chats",
     "searchResultsCount_one": "{{count}} result",
     "searchResultsCount_other": "{{count}} results",
-    "searchResultsLabel": "Chat search results",
+    "searchResultsLabel": "App and chat search results",
+    "searchAppsGroup": "Apps",
+    "searchChatsGroup": "Chats",
     "searchCurrent": "Current",
     "searchNavigateHint": "Navigate",
     "searchOpenHint": "Open",
     "searchCloseHint": "Close",
+    "agentLoading": "Loading agents…",
+    "agentLoadError": "Agents couldn't be loaded",
+    "agentEmpty": "No agents available",
+    "agentNoMatch": "No matching agents",
+    "agentPickHeading": "Message an agent",
+    "agentResultsLabel": "Agents",
+    "agentMessageLabel": "Message {{agent}}",
+    "agentMessagePlaceholder": "Message {{agent}}…",
+    "agentMessageHint": "Type a message, then press Enter to start a new chat with {{agent}}.",
+    "agentStartChat": "Start a new chat with {{agent}}",
+    "agentSending": "Starting a chat with {{agent}}…",
+    "agentSendFailed": "Your message to {{agent}} wasn't sent: {{error}}",
+    "agentSent": "Message sent to {{agent}}",
+    "agentSentOpen": "Open",
+    "agentRemove": "Remove {{agent}}",
+    "agentPickHint": "Select",
+    "agentSendHint": "Send",
     "projectActions": "Project actions",
     "pinned": "Pinned",
     "sectionProjects": "Projects",
@@ -154,7 +189,44 @@
     "retrying": "Retrying every {{seconds}}s…"
   },
   "desktop": {
-    "iframeTitle": "Rome Desktop"
+    "iframeTitle": "Rome Desktop",
+    "namedIframeTitle": "Rome desktop “{{name}}”",
+    "notFound": "There is no desktop called “{{name}}”."
+  },
+  "wechatApp": {
+    "loading": "Checking WeChat…",
+    "loadFailed": "Could not check WeChat",
+    "installFailed": "Could not install WeChat",
+    "startFailed": "Could not start WeChat",
+    "retry": "Try again",
+    "unavailable": {
+      "title": "WeChat is not enabled",
+      "description": "WECHAT_USER_ENABLED is off on this instance. To turn WeChat on, set it to true and restart Rome."
+    },
+    "absent": {
+      "title": "WeChat is not installed",
+      "description": "Rome downloads the WeChat desktop client once and opens it here. The download takes a few minutes.",
+      "action": "Install WeChat",
+      "failed": "Install did not finish: {{error}}"
+    },
+    "installing": {
+      "title": "Installing WeChat",
+      "description": "Rome is downloading the WeChat client and opens it here when it finishes. Leaving this page does not stop the download."
+    },
+    "stopped": {
+      "title": "WeChat is not running",
+      "description": "The WeChat client is installed on this instance.",
+      "action": "Start WeChat",
+      "failed": "WeChat did not start: {{error}}"
+    },
+    "starting": {
+      "title": "Starting WeChat"
+    },
+    "sharedDesktop": {
+      "title": "WeChat is running on the shared desktop",
+      "description": "This desktop stays empty while WeChat runs there.",
+      "action": "Open the shared desktop"
+    }
   },
   "chat": {
     "add": "Open an app",

@@ -245,7 +245,7 @@ export default function StyleGuidePage({ compareModes = true }: { compareModes?:
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-surface px-6 py-4">
         <h1 className="text-title text-foreground">Design System — Styleguide</h1>
-        <p className="text-body text-muted-foreground">
+        <p className="text-ui text-muted-foreground">
           {compareModes
             ? "Light and dark specimens are shown together for comparison."
             : `Showing ${resolved} mode. Specimens follow the active color mode.`}
@@ -266,7 +266,7 @@ export default function StyleGuidePage({ compareModes = true }: { compareModes?:
 
       <div className="border-t border-border bg-surface px-6 py-8">
         <h2 className="text-ui text-foreground">App shadow-DOM parity</h2>
-        <p className="mt-1 max-w-2xl text-body text-muted-foreground">
+        <p className="mt-1 max-w-2xl text-ui text-muted-foreground">
           A real shadow root with <em>nothing injected</em>. The markup references host tokens only
           — it ships no baked values — yet renders correctly because Rome's semantic tokens are
           inherited custom properties that pierce the shadow boundary:{" "}

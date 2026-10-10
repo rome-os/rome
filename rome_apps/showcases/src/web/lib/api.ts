@@ -1,6 +1,6 @@
 import { fetchAppApi, getBootstrap } from "@rome-os/app-web-sdk";
 import type { PresetCatalog, PresetCategory, ShowcaseBundle } from "../../trace/portable.js";
-import type { TraceBlockDto, TraceSnapshot, TraceSummary } from "../../trace/types.js";
+import type { TraceEventDto, TraceSnapshot, TraceSummary } from "../../trace/types.js";
 
 export interface CollectionView {
   id: string;
@@ -33,7 +33,7 @@ export interface TraceListItem {
 }
 
 export interface TraceDetail extends TraceListItem {
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   snapshot: TraceSnapshot;
   inputTokens: number | null;
   outputTokens: number | null;

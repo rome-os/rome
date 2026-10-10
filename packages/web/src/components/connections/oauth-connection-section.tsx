@@ -133,7 +133,7 @@ export function OAuthConnectionSection({
   // desktop shell no longer navigates the window away.
   const pendingRedirectControls = redirectUrl ? (
     <div className="space-y-2">
-      <p className="text-body text-muted-foreground">
+      <p className="text-ui text-muted-foreground">
         {t("connections.oauth.resumePending", { label })}
       </p>
       <div className="flex gap-2">
@@ -163,7 +163,7 @@ export function OAuthConnectionSection({
           <Button variant="outline" disabled title={reason}>
             {t("common.connect")}
           </Button>
-          <p className="mt-2 text-body text-muted-foreground">{reason}</p>
+          <p className="mt-2 text-ui text-muted-foreground">{reason}</p>
         </div>
       </ConnectionSlotCard>
     );
@@ -188,7 +188,6 @@ export function OAuthConnectionSection({
           pendingRedirectControls
         ) : setup.state && setup.state.status !== "cancelled" ? (
           <SetupRenderer
-            service={card.service}
             state={setup.state}
             busy={setup.busy}
             error={setup.error}
@@ -205,7 +204,7 @@ export function OAuthConnectionSection({
               aria-label={setup.busy ? t("common.connecting") : undefined}
               onClick={() => beginConnect()}
             >
-              {setup.busy && <Spinner label={t("common.connecting")} />}
+              {setup.busy && <Spinner data-icon="inline-start" label={t("common.connecting")} />}
               {t("common.connect")}
             </Button>
           </div>
@@ -241,7 +240,9 @@ export function OAuthConnectionSection({
       aria-label={disconnecting ? t("common.disconnecting") : undefined}
       onClick={() => void handleDisconnect()}
     >
-      {disconnecting && <Spinner size="sm" label={t("common.disconnecting")} />}
+      {disconnecting && (
+        <Spinner data-icon="inline-start" size="sm" label={t("common.disconnecting")} />
+      )}
       {t("common.disconnect")}
     </Button>
   );
@@ -269,7 +270,13 @@ export function OAuthConnectionSection({
             aria-label={setup.busy ? t("connections.oauth.reconnecting") : undefined}
             onClick={() => beginConnect(true)}
           >
-            {setup.busy && <Spinner size="sm" label={t("connections.oauth.reconnecting")} />}
+            {setup.busy && (
+              <Spinner
+                data-icon="inline-start"
+                size="sm"
+                label={t("connections.oauth.reconnecting")}
+              />
+            )}
             {t("connections.oauth.reconnect")}
           </Button>
         )}

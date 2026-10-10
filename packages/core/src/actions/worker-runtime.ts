@@ -28,9 +28,11 @@ import {
   EventBusProxy,
   EventCatalogProxy,
   NotifyServiceProxy,
+  AgentNamesProxy,
+  FeedbackServiceProxy,
   RoutineEngineProxy,
   SystemUpgradeServiceProxy,
-  TalkRouterProxy,
+  ChannelsServiceProxy,
 } from "./service-proxies.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
@@ -45,6 +47,7 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
+import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -88,9 +91,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const agentLoader = new AgentLoader(artifactIdentity);
   const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
-  // The worker executes actions dispatched from main; it never resolves
-  // per-agent tool visibility, so it needs no globally-granted action names.
-  const actionRegistry = new ActionRegistryImpl([], artifactIdentity);
+  const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
     lockfilePath,
     catalog: appCatalog,
@@ -109,48 +110,16 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
 
-  const talkRouter = new TalkRouterProxy();
+  const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    actionExecutionsRepo,
-    approvalsRepo,
-    executionJournalRepo,
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
-      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
-        if (!channelContext) return;
-        const matches = (await talkRouter.list()).filter(
-          (connection) => connection.service === channelContext.channel,
-        );
-        const connectionId =
-          channelContext.connectionId ??
-          (matches.length === 1 ? matches[0]!.connectionId : undefined);
-        if (!connectionId) return;
-        const payload = preview ?? {
-          kind: "generic" as const,
-          title: actionName,
-          summary: `The agent wants to run "${actionName}" and needs your approval.`,
-        };
-        await talkRouter.send(
-          connectionId,
-          channelContext.threadId as import("@rome-os/app-runtime").ConversationId,
-          {
-            parts: [
-              {
-                type: "approval_card",
-                approvalId,
-                actionName,
-                preview: payload,
-                status: "pending",
-              },
-            ],
-          },
-        );
-      },
+      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -168,14 +137,14 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     actionRegistry,
   });
 
-  const appActionReload = registerLazyAppActions(
+  registerLazyAppActions(
     actionLoader,
     actionRegistry,
     appCatalog,
     {
       agentRunner,
       resolveArtifactReference,
-      talkRouter,
+      channelsService,
       conversationSettings,
       capabilityDiscovery,
       personMappingRepo,
@@ -218,6 +187,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         socketPath: config.hostExecutionSocket,
         enabled: config.hostExecutionEnabled,
       }),
+      feedback: new FeedbackServiceProxy(),
+      agentNames: new AgentNamesProxy(),
     },
   );
   if (agentLoader.getRegistryLoadFailures().length > 0) {
@@ -233,11 +204,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   if (actionLoader.getRegistryLoadFailures().length > 0) {
     log.warn("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
-    });
-  }
-  if (appActionReload.failed.length > 0) {
-    log.warn("some app actions failed to initialize", {
-      failures: appActionReload.failed,
     });
   }
 

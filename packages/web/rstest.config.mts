@@ -28,6 +28,7 @@ export default defineConfig({
   setupFiles: ["./src/test/setup.ts"],
   include: [
     "src/**/*.test.ts",
+    "mock/**/*.test.ts",
     "src/**/*.test.tsx",
     ".storybook/*.test.ts",
     ".storybook/*.test.tsx",

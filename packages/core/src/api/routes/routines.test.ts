@@ -143,6 +143,100 @@ describe("Routines API", () => {
     expect(body.trigger).toEqual(trigger);
   });
 
+  it("stores a caller key and answers a repeat create with 409 and the existing id", async () => {
+    const create = () =>
+      app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "chat card",
+          key: "chat-routine:card-1",
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+
+    const first = await create();
+    expect(first.status).toBe(201);
+    const created = (await first.json()) as { id: string; key: string };
+    expect(created.key).toBe("chat-routine:card-1");
+
+    const second = await create();
+    expect(second.status).toBe(409);
+    expect(((await second.json()) as { id: string }).id).toBe(created.id);
+    const rows = await testDb.db.select().from(routines);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("answers a keyed retry with the existing id even if the body no longer validates", async () => {
+    // A dated one-off created before its date, retried after it: the past date
+    // would be a 400, but the routine already exists, so the caller gets its id.
+    const [row] = await testDb.db
+      .insert(routines)
+      .values({
+        id: "r-dated",
+        key: "chat-routine:card-dated",
+        name: "one-off",
+        enabled: true,
+        trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2020-01-01" },
+        actionName: "send_message",
+        args: {},
+        createdAt: new Date(),
+      })
+      .returning();
+    const res = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: "chat-routine:card-dated",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "fixed",
+          localTime: "09:00",
+          date: "2020-01-01",
+        },
+        actionName: "send_message",
+      }),
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { id: string }).id).toBe(row!.id);
+  });
+
+  it("rejects a key that is not a non-empty chat-routine key", async () => {
+    // Keys outside the chat-card prefix belong to apps' managed routines.
+    for (const key of [
+      "",
+      42,
+      "chat-routine:",
+      `chat-routine:${"k".repeat(200)}`,
+      "briefing-morning",
+    ]) {
+      const res = await app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key,
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "fixed",
+            localTime: "09:00",
+            rrule: "FREQ=DAILY",
+          },
+          actionName: "send_message",
+        }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("rejects creation without trigger", async () => {
     const res = await app.request("/routines", {
       method: "POST",
@@ -221,21 +315,13 @@ describe("Routines API", () => {
       }),
     });
     expect(accepted.status).toBe(201);
-    const { id } = (await accepted.json()) as { id: string };
-
-    const invalidPatch = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args: { channel: "bogus", op: "uninstall" } }),
-    });
-    expect(invalidPatch.status).toBe(400);
   });
 
   it("rejects an actionName that is not a registered action and names the remedy", async () => {
     // The propose_routine card POSTs here; when actionRegistry is wired (as in
     // production) a routine bound to an unbuilt action is rejected with the
     // remedy, instead of persisting and failing on every fire.
-    const registry = new ActionRegistryImpl([]);
+    const registry = new ActionRegistryImpl();
     registry.register({
       config: {
         name: "summon",
@@ -283,64 +369,6 @@ describe("Routines API", () => {
     expect(accepted.status).toBe(201);
   });
 
-  it("rejects re-binding via PATCH to an unregistered action (no guard bypass)", async () => {
-    const registry = new ActionRegistryImpl([]);
-    registry.register({
-      config: {
-        name: "summon",
-        type: "system",
-        description: "stub",
-        complexity: "simple",
-        speed: "fast",
-        reliability: "high",
-        sideEffects: "read-only",
-      },
-      async execute() {
-        return { status: "ok" };
-      },
-    });
-    const baseDeps = await buildTestDeps(testDb.db);
-    const guardedApp = new Hono().route(
-      "/",
-      routinesRoutes({ ...baseDeps, routineEngine, actionRegistry: registry }),
-    );
-    const trigger: Trigger = {
-      type: "schedule",
-      tzid: "UTC",
-      tzMode: "fixed",
-      localTime: "07:00",
-      rrule: "FREQ=DAILY",
-    };
-
-    // Create bound to a registered action.
-    const created = await guardedApp.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "rebind", trigger, actionName: "summon" }),
-    });
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
-
-    // PATCHing actionName to an unregistered action is rejected, not silently accepted.
-    const toGhost = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionName: "ghost_run" }),
-    });
-    expect(toGhost.status).toBe(400);
-    expect(((await toGhost.json()) as { error: string }).error).toContain(
-      "not a registered action",
-    );
-
-    // PATCHing other fields (no actionName) still works.
-    const renamed = await guardedApp.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "rebind-renamed" }),
-    });
-    expect(renamed.status).toBe(200);
-  });
-
   it("rejects creation when args contains reserved key __triggerPayload", async () => {
     const res = await app.request("/routines", {
       method: "POST",
@@ -355,26 +383,6 @@ describe("Routines API", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain("__triggerPayload");
-  });
-
-  it("rejects PATCH when args contains reserved key __triggerPayload", async () => {
-    const create = await app.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "patch-collision",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "12:00" },
-        actionName: "anything",
-      }),
-    });
-    const { id } = (await create.json()) as { id: string };
-
-    const res = await app.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ args: { __triggerPayload: "nope" } }),
-    });
-    expect(res.status).toBe(400);
   });
 
   it("rejects args that is not a plain object (fan-out semantics not supported)", async () => {
@@ -633,6 +641,27 @@ describe("Routines API", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects patch of fields other than name and enabled", async () => {
+    const create = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
+        actionName: "some_action",
+      }),
+    });
+    const created = (await create.json()) as { id: string };
+
+    const res = await app.request(`/routines/${created.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed", actionName: "other_action" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toContain("actionName");
+  });
+
   it("returns 404 when patching unknown id", async () => {
     const res = await app.request("/routines/nonexistent", {
       method: "PATCH",
@@ -692,97 +721,10 @@ describe("Routines API", () => {
     const [row] = await testDb.db.select().from(routines).where(eq(routines.id, id));
     expect(row).toBeDefined();
   });
-
-  it("returns runs for a routine", async () => {
-    const deps = await buildTestDeps(testDb.db);
-    registerStubAction(deps.actionRegistry, "test_action");
-    const routineRunsRepo = new RoutineRunsRepository(testDb.db);
-    const appWithRuns = new Hono().route(
-      "/",
-      routinesRoutes({ ...deps, routineRunsRepo, routineEngine }),
-    );
-
-    const create = await appWithRuns.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "with-runs",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
-        actionName: "test_action",
-      }),
-    });
-    const created = (await create.json()) as { id: string };
-
-    await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-001",
-      status: "success",
-      payload: { scheduledTime: "2026-05-25T10:00:00Z" },
-    });
-
-    const runsRes = await appWithRuns.request(`/routines/${created.id}/runs?limit=10`);
-    expect(runsRes.status).toBe(200);
-    const runs = (await runsRes.json()) as { routineId: string; status: string }[];
-    expect(runs.length).toBe(1);
-    expect(runs[0].status).toBe("success");
-  });
-
-  it("returns stats for a routine", async () => {
-    const deps = await buildTestDeps(testDb.db);
-    registerStubAction(deps.actionRegistry, "test_action");
-    const routineRunsRepo = new RoutineRunsRepository(testDb.db);
-    const appWithRuns = new Hono().route(
-      "/",
-      routinesRoutes({ ...deps, routineRunsRepo, routineEngine }),
-    );
-
-    const create = await appWithRuns.request("/routines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: "stats-routine",
-        trigger: { type: "schedule", tzid: "UTC", tzMode: "floating", localTime: "10:00" },
-        actionName: "test_action",
-      }),
-    });
-    const created = (await create.json()) as { id: string };
-
-    const runId1 = await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-001",
-      status: "success",
-    });
-    await routineRunsRepo.updateStatus(runId1, {
-      status: "success",
-      durationMs: 100,
-    });
-
-    const runId2 = await routineRunsRepo.create({
-      routineId: created.id,
-      executionId: "exec-002",
-      status: "error",
-    });
-    await routineRunsRepo.updateStatus(runId2, {
-      status: "error",
-      durationMs: 200,
-      error: "something failed",
-    });
-
-    const statsRes = await appWithRuns.request(`/routines/${created.id}/stats`);
-    expect(statsRes.status).toBe(200);
-    const stats = (await statsRes.json()) as {
-      totalRuns: number;
-      successCount: number;
-      errorCount: number;
-    };
-    expect(stats.totalRuns).toBe(2);
-    expect(stats.successCount).toBe(1);
-    expect(stats.errorCount).toBe(1);
-  });
 });
 
 // Routines fire path — exercises POST /routines → engine.activate → provider
-// fires → engine.dispatch → action executes → /runs + /stats reflect outcome.
+// fires → engine.dispatch → action executes → /runs reflects outcome.
 // Uses the same ManualTriggerProvider declared at the top of the file so
 // tests can trigger fires deterministically without waiting on a real
 // schedule.
@@ -853,16 +795,17 @@ async function buildFireHarness(testDb: TestDb, retryDelayMs = 0): Promise<FireH
   // Use processRole "worker" so root actions execute in-process — the default
   // "main" path forks a subprocess which has no test entrypoint and can't be
   // observed via captures.
-  const actionRegistry = new ActionRegistryImpl([]);
+  const actionRegistry = new ActionRegistryImpl();
   // Both engines share one FakeClock, so run durations / lastFiredAt are
   // exact and retry timers fire only when a test advances the clock.
   const clock = new FakeClock();
   const actionEngine = new ActionEngine(
     actionRegistry,
-    undefined,
-    baseDeps.actionExecutionsRepo,
-    baseDeps.approvalsRepo,
-    baseDeps.executionJournalRepo,
+    {
+      executions: baseDeps.actionExecutionsRepo,
+      approvals: baseDeps.approvalsRepo,
+      journal: baseDeps.executionJournalRepo,
+    },
     { processRole: "worker", clock },
   );
   const manualProvider = new ManualTriggerProvider();
@@ -1070,35 +1013,6 @@ describe("Routines fire path", () => {
     expect(harness.manualProvider.isActive(id)).toBe(true);
   });
 
-  it("PATCH trigger re-activates the routine with the new trigger spec", async () => {
-    registerStubAction(harness.actionRegistry, "noop_action");
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "reschedule",
-      trigger: scheduleTrigger,
-      actionName: "noop_action",
-    });
-    expect(harness.manualProvider.routineSnapshot(id)?.trigger.type).toBe("schedule");
-    expect(harness.manualProvider.activateCount(id)).toBe(1);
-
-    const newTrigger: Trigger = {
-      type: "schedule",
-      tzid: "Asia/Shanghai",
-      tzMode: "fixed",
-      localTime: "23:00",
-    };
-    await harness.app.request(`/routines/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ trigger: newTrigger }),
-    });
-    const snapshot = harness.manualProvider.routineSnapshot(id);
-    expect(snapshot?.trigger).toEqual(newTrigger);
-    // The engine must deactivate-then-reactivate, not stack — entries.size
-    // stays 1 even though activate has been called twice.
-    expect(harness.manualProvider.activateCount(id)).toBe(2);
-    expect(harness.manualProvider.activeIds()).toEqual([id]);
-  });
-
   it("PATCH name-only still re-activates (engine deactivates+reactivates on any PATCH)", async () => {
     registerStubAction(harness.actionRegistry, "noop_action");
     const { id } = await createRoutineViaApi(harness.app, {
@@ -1165,27 +1079,7 @@ describe("Routines fire path", () => {
     expect(stored!.lastFiredAt).toEqual(harness.clock.now());
   });
 
-  it("records status=error with the message when the action returns a structured error", async () => {
-    // The action returns `{status:"error"}` without throwing. Before the fix the
-    // run was recorded "success" (only thrown errors were caught), so the detail
-    // view's trace showed a failing leaf under a green run header.
-    registerStubAction(harness.actionRegistry, "soft_failing_action", {
-      returnError: "model request timed out",
-    });
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "soft-fails",
-      trigger: scheduleTrigger,
-      actionName: "soft_failing_action",
-    });
-    await harness.manualProvider.triggerNow(id);
-
-    const runs = await harness.routineRunsRepo.findByRoutineId(id);
-    expect(runs).toHaveLength(1);
-    expect(runs[0].status).toBe("error");
-    expect(runs[0].error).toContain("model request timed out");
-  });
-
-  it("does not retry an action that returns a structured error (only thrown ones retry)", async () => {
+  it("records a returned structured error with its message and does not retry it (only thrown ones retry)", async () => {
     const localDb = createTestDb();
     const retryHarness = await buildFireHarness(localDb, 30_000);
     try {
@@ -1202,6 +1096,7 @@ describe("Routines fire path", () => {
       expect(stub.calls).toHaveLength(1);
       const runs = await retryHarness.routineRunsRepo.findByRoutineId(id);
       expect(runs[0].status).toBe("error");
+      expect(runs[0].error).toContain("permanent config error");
 
       // Past the retry delay the action must not re-run — a returned error is a
       // deliberate failure, so (unlike a thrown one) it does not take the retry path.
@@ -1332,8 +1227,10 @@ describe("Routines fire path", () => {
     }
 
     const page1 = await harness.app.request(`/routines/${id}/runs?limit=10`);
-    const rows1 = (await page1.json()) as { executionId: string }[];
+    expect(page1.status).toBe(200);
+    const rows1 = (await page1.json()) as { executionId: string; status: string }[];
     expect(rows1).toHaveLength(10);
+    expect(rows1[0].status).toBe("success");
     // Newest first
     expect(rows1[0].executionId).toBe("exec-024");
     expect(rows1[9].executionId).toBe("exec-015");
@@ -1343,63 +1240,6 @@ describe("Routines fire path", () => {
     expect(rows2).toHaveLength(10);
     expect(rows2[0].executionId).toBe("exec-014");
     expect(rows2[9].executionId).toBe("exec-005");
-  });
-
-  it("/stats reports avgDurationMs, lastStatus, and lastFiredAt", async () => {
-    registerStubAction(harness.actionRegistry, "anything");
-    const { id } = await createRoutineViaApi(harness.app, {
-      name: "stats",
-      trigger: scheduleTrigger,
-      actionName: "anything",
-    });
-
-    // Same firedAt-collision concern as the pagination test — seed directly
-    // with explicit, spaced timestamps so "last run" is unambiguous.
-    const t1 = new Date("2026-05-25T09:00:00Z");
-    const t2 = new Date("2026-05-25T09:01:00Z");
-    await harness.db.insert(routineRuns).values({
-      id: "run-1",
-      routineId: id,
-      executionId: "e-1",
-      status: "success",
-      payload: null as unknown,
-      firedAt: t1,
-      durationMs: 100,
-      error: null,
-    });
-    await harness.db.insert(routineRuns).values({
-      id: "run-2",
-      routineId: id,
-      executionId: "e-2",
-      status: "error",
-      payload: null as unknown,
-      firedAt: t2,
-      durationMs: 300,
-      error: "nope",
-    });
-
-    const res = await harness.app.request(`/routines/${id}/stats`);
-    const stats = (await res.json()) as {
-      totalRuns: number;
-      successCount: number;
-      errorCount: number;
-      avgDurationMs: number | null;
-      lastStatus: string | null;
-      lastFiredAt: string | null;
-    };
-    expect(stats.totalRuns).toBe(2);
-    expect(stats.successCount).toBe(1);
-    expect(stats.errorCount).toBe(1);
-    // SQLite avg() returns a float — use toBeCloseTo to avoid IEEE-754 jitter
-    // if seeded durations ever change.
-    expect(stats.avgDurationMs).not.toBeNull();
-    expect(stats.avgDurationMs!).toBeCloseTo(200, 5);
-    // Last run was r2 (error)
-    expect(stats.lastStatus).toBe("error");
-    // lastFiredAt round-trips through Hono JSON as a number (Drizzle timestamp
-    // mode + JSON.stringify of Date). Either way, assert it matches t2 exactly.
-    expect(stats.lastFiredAt).not.toBeNull();
-    expect(new Date(stats.lastFiredAt!).toISOString()).toBe(t2.toISOString());
   });
 
   it("engine.start() hydrates enabled routines persisted in the DB", async () => {

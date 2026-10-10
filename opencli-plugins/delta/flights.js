@@ -101,7 +101,7 @@ cli({
       name: "timeout",
       type: "int",
       default: 90,
-      help: "Result-loading deadline in seconds (5-180)",
+      help: "Seconds allowed for form setup and separately for loading all results",
     },
   ],
   columns: [

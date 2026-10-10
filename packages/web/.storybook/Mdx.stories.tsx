@@ -7,7 +7,7 @@ function StorybookDevIndex() {
   return (
     <main className="min-h-screen bg-background px-6 py-8 text-foreground">
       <h1 className="text-title">Dev pages</h1>
-      <p className="mt-2 text-body text-muted-foreground">
+      <p className="mt-2 text-ui text-muted-foreground">
         Use Storybook’s Dev/Design group to open another design page.
       </p>
       <Link

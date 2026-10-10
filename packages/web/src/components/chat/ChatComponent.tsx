@@ -3,15 +3,15 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Chat, type SessionMessage } from "@/components/chat/Chat";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
-import {
-  fetchRomeNewsDefinitions,
-  getQuickEntries,
-  type QuickEntry,
-  type QuickEntryDefinition,
-} from "@/config/quick-entries";
+import { fetchRomeNewsDefinitions, getQuickEntries } from "@/config/quick-entries";
+import type {
+  ResolvedRomeNewsItem,
+  RomeNewsDefinition,
+} from "@rome-os/rome-web-components/news-item/schema";
 import {
   ChatComposer,
   type ChatComposerHandle,
+  type ChatComposerSendControls,
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
@@ -23,6 +23,7 @@ import {
   postSessionTurn,
 } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import type { AgentMention, ChatErrorNotice, ChatSession } from "@/lib/chat-types";
 import {
@@ -63,6 +64,7 @@ export function ChatComponent({
   const { t, i18n } = useTranslation("chat");
 
   const { data: settings } = useSettings();
+  const coarsePointer = useCoarsePointer();
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   const mainAgentDisplayName =
     typeof settings?.agentName === "string" ? settings.agentName : undefined;
@@ -72,6 +74,9 @@ export function ChatComponent({
   }, []);
 
   const draftComposerRef = useRef<ChatComposerHandle>(null);
+  useEffect(() => {
+    if (!sessionId && !coarsePointer) draftComposerRef.current?.focus();
+  }, [sessionId, coarsePointer]);
   const draftDragDepthRef = useRef(0);
   const [draftStreamError, setDraftStreamError] = useState<string | ChatErrorNotice | null>(null);
   const [isDraggingDraftFiles, setIsDraggingDraftFiles] = useState(false);
@@ -90,8 +95,8 @@ export function ChatComponent({
     if (!initialDraftText || sessionId) return;
     if (appliedDraftRef.current === initialDraftText) return;
     appliedDraftRef.current = initialDraftText;
-    draftComposerRef.current?.insertText(initialDraftText);
-  }, [initialDraftText, sessionId]);
+    draftComposerRef.current?.insertText(initialDraftText, { focus: !coarsePointer });
+  }, [initialDraftText, sessionId, coarsePointer]);
 
   // Same once-per-value seeding for a structured skill selection — the chip
   // counterpart of the draft text.
@@ -105,7 +110,7 @@ export function ChatComponent({
 
   const navigate = useNavigate();
   const [cloudQuickEntryDefinitions, setCloudQuickEntryDefinitions] = useState<
-    QuickEntryDefinition[]
+    RomeNewsDefinition[]
   >([]);
   const quickEntries = useMemo(
     () => getQuickEntries(cloudQuickEntryDefinitions, i18n.language),
@@ -182,7 +187,7 @@ export function ChatComponent({
   const [appStoreSrc, setAppStoreSrc] = useState<string | null>(null);
 
   const handleActivateQuickEntry = useCallback(
-    (entry: QuickEntry) => {
+    (entry: ResolvedRomeNewsItem) => {
       switch (entry.type) {
         case "chat": {
           draftComposerRef.current?.setSkillSelection(
@@ -212,7 +217,7 @@ export function ChatComponent({
   );
 
   const handleDraftSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
+    async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       if (draftSendInFlightRef.current) return;
       draftSendInFlightRef.current = true;
       setDraftStreamError(null);
@@ -259,6 +264,7 @@ export function ChatComponent({
 
         const formData = new FormData();
         formData.set("text", snapshot.text);
+        if (snapshot.inputId) formData.set("inputId", snapshot.inputId);
         if (snapshot.skillName) formData.set("skillName", snapshot.skillName);
         if (snapshot.personaId) formData.set("personaId", snapshot.personaId);
         if (snapshot.largeModelSelection) {
@@ -271,7 +277,10 @@ export function ChatComponent({
         const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
         if (ws) formData.set("workspace", JSON.stringify(ws));
 
-        const result = await postSessionTurn(newSessionId, formData);
+        const result = await postSessionTurn(newSessionId, formData, {
+          onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
+          signal: controls.signal,
+        });
         if (!result.ok) {
           const message =
             result.message ||
@@ -347,7 +356,7 @@ export function ChatComponent({
 
   return (
     <div
-      className="relative flex h-full flex-col"
+      className="relative flex h-full min-h-0 flex-col bg-chat-canvas [--background:var(--chat-canvas)]"
       onDragEnter={handleDraftDragEnter}
       onDragOver={handleDraftDragOver}
       onDragLeave={handleDraftDragLeave}

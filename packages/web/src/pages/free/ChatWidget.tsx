@@ -1,24 +1,20 @@
 import { useCallback, useRef } from "react";
 import { ChatComponent, type SessionMessage } from "@/components/chat/ChatComponent";
 import { detectAppInstalls } from "@/lib/chat-helpers";
-import { extractFilePathsFromText, isProjectPath } from "@/lib/extract-file-paths";
+import { extractFilePathsFromText } from "@/lib/extract-file-paths";
 import type { AgentMention } from "@/lib/chat-types";
-import type { TraceBlockDto } from "@rome/api-types/trace-segments";
+import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import { useWorkspaceEventBus } from "./workspace-event-bus";
 import { useWorkspaceStore } from "./workspace-store";
 
-function extractProjectPathsFromBlocks(blocks: TraceBlockDto[]): string[] {
+function extractProjectPathsFromBlocks(blocks: TraceEventDto[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
 
   for (const block of blocks) {
     if (block.type !== "text") continue;
-    const paths = extractFilePathsFromText({
-      type: "text",
-      content: block.content,
-    });
-    for (const p of paths) {
-      if (isProjectPath(p) && !seen.has(p)) {
+    for (const p of extractFilePathsFromText(block.content)) {
+      if (!seen.has(p)) {
         seen.add(p);
         result.push(p);
       }

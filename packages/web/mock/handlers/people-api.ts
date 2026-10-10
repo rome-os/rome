@@ -17,8 +17,10 @@ import {
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
+  sendRefusalMessage,
   sliceAccountDirectory,
   sliceAccountStream,
+  STRANDED_SEND_ERROR,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
@@ -272,33 +274,6 @@ const LANDS_AFTER_MS = 1_400;
 const STRANDED_AFTER_MS = 5 * 60_000;
 
 /**
- * The fallback line on a refusal, in the route's own words.
- *
- * A fallback and not the copy: the dashboard keys off `send` and owns every
- * sentence a reader sees, which is what lets the refusal localize. Kept
- * identical to the route's so nothing can come to depend on the difference.
- */
-function refusalMessage(send: Exclude<AccountSendState, "yes">): string {
-  switch (send) {
-    case "not-connected":
-      return "That channel is not connected";
-    case "unsupported":
-      return "Rome cannot send on that channel";
-    case "no-conversation":
-      return "Rome has no conversation open with that account";
-  }
-}
-
-/**
- * The server's own line for a send whose process died before the channel
- * answered. Not a provider message, and deliberately equivocal — Rome does not
- * know whether it went out. Kept identical to `people/outbox.ts`'s, so the
- * dashboard is exercised against the text production actually sends.
- */
-const STRANDED_ERROR =
-  "Rome stopped before the channel answered; this may or may not have been sent";
-
-/**
  * Why this attempt stops, or null when it goes through.
  *
  * Text-triggered, because nothing else in mock mode can go wrong: there is no
@@ -309,7 +284,7 @@ const STRANDED_ERROR =
  */
 function stops(row: OutboxRow): string | null {
   const text = row.text.toLowerCase();
-  if (text.startsWith("stranded")) return STRANDED_ERROR;
+  if (text.startsWith("stranded")) return STRANDED_SEND_ERROR;
   if (text.startsWith("fail") && row.attempts === 1) return "the channel rejected this message";
   return null;
 }
@@ -489,6 +464,7 @@ export const peopleHandlers = [
     return HttpResponse.json(
       sliceAccountDirectory(observedAccounts().map(directoryRow), {
         query: params.get("q"),
+        channel: params.get("channel"),
         state: state.state,
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
@@ -655,7 +631,7 @@ export const peopleHandlers = [
     // disconnect renders the reason it would already have shown.
     const send = sendState(parsed.request);
     if (send !== "yes") {
-      return HttpResponse.json({ error: refusalMessage(send), send } satisfies SendRefusal, {
+      return HttpResponse.json({ error: sendRefusalMessage(send), send } satisfies SendRefusal, {
         status: 409,
       });
     }

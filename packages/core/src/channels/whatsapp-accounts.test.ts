@@ -110,9 +110,9 @@ describe("WhatsAppAccounts", () => {
     await repo.upsertContacts([{ jid: PHONE, phoneNumber: "15550007777", name: "One Contact" }]);
     let reads = 0;
     const listContacts = repo.listContacts.bind(repo);
-    repo.listContacts = async (opts) => {
+    repo.listContacts = async () => {
       reads += 1;
-      return listContacts(opts);
+      return listContacts();
     };
 
     await Promise.all([accounts.listAccounts({ limit: 50 }), accounts.resolve(PHONE)]);

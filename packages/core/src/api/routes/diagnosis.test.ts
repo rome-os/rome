@@ -18,12 +18,8 @@ function buildDeps(
     settingsRepo: {
       get: overrides.settingsByKey ?? overrides.settingsGet ?? (async () => null),
     },
-    talkRouter: {
-      list: () =>
-        (overrides.channels ?? []).map((service) => ({
-          connectionId: `connection:${service}`,
-          service,
-        })),
+    channelsService: {
+      list: async () => (overrides.channels ?? []).map((name) => ({ name, sendable: true })),
     },
     appCatalog: {
       list: () => overrides.apps ?? [],

@@ -70,7 +70,6 @@ function buildResolvedApp(
           styles: [],
           assetVersion: "abcdef123456",
           displayName: appId,
-          routing: "client",
           manifestPath: "/tmp/unused-web-manifest.json",
           distPath: "/tmp/unused-dist",
         }

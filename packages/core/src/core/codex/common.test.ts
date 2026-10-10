@@ -19,6 +19,7 @@ describe("buildOpenAiAccounting", () => {
       outputTokens: 40,
       cacheReadTokens: 300,
       cacheWriteTokens: 200,
+      reasoningTokens: 15,
     });
     expect(accounting.rawUsage).toEqual({
       input_tokens: 1000,

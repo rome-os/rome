@@ -1,5 +1,4 @@
 export type {
-  NormalizedMessage,
   Attachment,
   MessageReplyReference,
   OutgoingMessage,

@@ -152,7 +152,7 @@ describe.each(
     expect(conn.auth.grants()).toEqual({ [grant]: "unauthorized" });
     // No Actor in this phase — connector_proxy keeps its legacy token path.
     expect(conn.act).toBeNull();
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.watch).toBeNull();
     expect(conn.status()).toEqual({
       talk: { state: "unsupported" },

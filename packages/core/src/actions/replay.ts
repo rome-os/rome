@@ -23,7 +23,6 @@ export interface ReplayStore {
   nextSequence: number;
   replayIndex: number;
   mode: "record" | "replay";
-  divergenceMode: "fallthrough" | "strict";
   /**
    * Set when a nested call requests approval during this run. The root call
    * surfaces this as its own `pending_approval` result so callers of the root
@@ -33,19 +32,6 @@ export interface ReplayStore {
 }
 
 export const replayContext = new AsyncLocalStorage<ReplayStore>();
-
-export class ReplayDivergenceError extends Error {
-  constructor(
-    public readonly expected: { actionName: string; argsHash: string },
-    public readonly actual: { actionName: string; argsHash: string },
-    public readonly sequence: number,
-  ) {
-    super(
-      `Replay diverged at seq ${sequence}: expected "${expected.actionName}" but got "${actual.actionName}"`,
-    );
-    this.name = "ReplayDivergenceError";
-  }
-}
 
 /** Deterministic JSON serialization with sorted keys for stable hashing. */
 function stableStringify(value: unknown): string {

@@ -4,10 +4,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
+import Markdown from "@/components/markdown";
 import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
-import { CompactTextBlock } from "./blocks/TextBlock";
+import { CompactTextBlock } from "./entries/TextBlock";
 import ChatMarkdown from "./ChatMarkdown";
 
 const i18n = createInstance();
@@ -18,17 +19,98 @@ afterEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-function Message({ text }: { text: string }) {
+function Message({ text, chat = true }: { text: string; chat?: boolean }) {
+  const MarkdownComponent = chat ? ChatMarkdown : Markdown;
   return (
     <I18nextProvider i18n={i18n}>
       <ThemeProvider>
         <MemoryRouter>
-          <ChatMarkdown>{text}</ChatMarkdown>
+          <MarkdownComponent>{text}</MarkdownComponent>
         </MemoryRouter>
       </ThemeProvider>
     </I18nextProvider>
   );
 }
+
+describe("ChatMarkdown file images", () => {
+  it("keeps unsafe URL protocols out of rendered images and links", () => {
+    const { container } = render(
+      <Message text={"![Unsafe](javascript:alert%281%29)\n\n[Unsafe](javascript:alert%281%29)"} />,
+    );
+    expect(container.querySelector('[src^="javascript:"], [href^="javascript:"]')).toBeNull();
+  });
+
+  it.each([true, false])("renders file images through the asset API (chat=%s)", (chat) => {
+    const path = "projects/demo/调色版/image one.png";
+    render(<Message chat={chat} text={`![Preview](</${path}>)\n\n[Open file](</${path}>)`} />);
+
+    const image = screen.getByRole("img", { name: "Preview" }) as HTMLImageElement;
+    const source = new URL(image.src);
+    expect(source.pathname).toBe("/api/projects/asset/image%20one.png");
+    expect(source.searchParams.get("path")).toBe(path);
+    expect(screen.getByRole("link", { name: "Open file" }).getAttribute("href")).toBe(
+      "/projects/demo/%E8%B0%83%E8%89%B2%E7%89%88/image%20one.png",
+    );
+    expect(screen.queryByText("Image not available")).toBeNull();
+  });
+});
+
+describe("ChatMarkdown hexadecimal color previews", () => {
+  it("previews complete three- and six-digit inline-code colors", () => {
+    const { container } = render(<Message text={"Colors: `#fdfcf9`, `#abc`, and `#A1b2C3`."} />);
+
+    const previews = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-chat-color-preview]"),
+    );
+    expect(previews.map((preview) => preview.dataset.chatColorPreview)).toEqual([
+      "#fdfcf9",
+      "#abc",
+      "#A1b2C3",
+    ]);
+    expect(previews.map((preview) => preview.style.backgroundColor)).toEqual([
+      "rgb(253, 252, 249)",
+      "rgb(170, 187, 204)",
+      "rgb(161, 178, 195)",
+    ]);
+    expect(previews.every((preview) => preview.classList.contains("border-border-strong"))).toBe(
+      true,
+    );
+  });
+
+  it("does not preview prose, longer code, fenced code, or unsupported colors", () => {
+    const { container } = render(
+      <Message
+        text={[
+          "Bare #fdfcf9.",
+          "`background: #fdfcf9` `#abcd` `#12345` `#12345678` `#ggg` `red` `rgb(1 2 3)`",
+          "```css",
+          "#abc",
+          "```",
+        ].join("\n\n")}
+      />,
+    );
+
+    expect(container.querySelector("[data-chat-color-preview]")).toBeNull();
+  });
+
+  it("keeps the literal as the inline code's only accessible and copyable text", () => {
+    const { container } = render(<Message text={"Color: `#fdfcf9`."} />);
+    const code = container.querySelector('[data-streamdown="inline-code"]');
+    const preview = code?.querySelector<HTMLElement>("[data-chat-color-preview]");
+
+    expect(code?.textContent).toBe("#fdfcf9");
+    expect(preview?.getAttribute("aria-hidden")).toBe("true");
+    expect(preview?.hasAttribute("tabindex")).toBe(false);
+    expect(preview?.hasAttribute("title")).toBe(false);
+  });
+
+  it("leaves hexadecimal inline code unchanged outside chat Markdown", () => {
+    const { container } = render(<Message chat={false} text={"Color: `#fdfcf9`."} />);
+
+    expect(container.querySelector("[data-chat-color-preview]")).toBeNull();
+    expect(container.querySelector('[data-streamdown="inline-code"]')?.textContent).toBe("#fdfcf9");
+  });
+});
 
 describe("ChatMarkdown collapsible blocks", () => {
   it("re-measures compact text when an inner block collapses", () => {

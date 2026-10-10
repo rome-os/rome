@@ -49,8 +49,8 @@ describe("parseListingId", () => {
   });
 
   it("accepts boundary lengths: 2-char and 32-char handles, 64-char slugs", () => {
-    expect(parseListingId("ab")).not.toBeNull();
-    expect(parseListingId("a".repeat(32))).not.toBeNull();
-    expect(parseListingId(`@alice/${"a".repeat(64)}`)).not.toBeNull();
+    expect(parseListingId("ab")).toMatchObject({ handle: "ab" });
+    expect(parseListingId("a".repeat(32))).toMatchObject({ handle: "a".repeat(32) });
+    expect(parseListingId(`@alice/${"a".repeat(64)}`)).toMatchObject({ slug: "a".repeat(64) });
   });
 });

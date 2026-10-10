@@ -12,6 +12,7 @@ Two policies decide reach, each held as its own setting:
 ### Invariants
 
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
+- Dashboard access does not grant approval authority. Approval reads and decisions require a verified guardian identity at the approval API, even after edge authorization.
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
 - An app manifest's no-auth declaration opens only that app's public webhook paths. The dashboard-side app surface stays gated regardless.
@@ -25,7 +26,9 @@ browser ──every request──► edge proxy ──consults──► verify p
                        backend route ──app-API dispatch──► app handler (caller re-derived)
 ```
 
-The edge consults the probe on every proxied request and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
+The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
+
+`/desktop-proxy/*` and `/ws/terminal` bypass the edge probe. Rome checks guardian identity and browser origin before accepting either WebSocket upgrade, including requests that arrive through Tailnet Serve. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

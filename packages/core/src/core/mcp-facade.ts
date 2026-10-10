@@ -661,7 +661,8 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
     },
     {
       name: "read_skill",
-      description: "Read the full markdown for one available skill.",
+      description:
+        "Read the full markdown for one available skill. When the skill ships companion files, the result also returns its `directory` and `files`; open one with your file tools only when the skill body points you to it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -673,9 +674,13 @@ function buildSkillFacadeTools(getSkillCatalog: () => SkillMcpDefinition[]): Fac
       handler: (input) =>
         runFacadeTool("read_skill", input, async (args) => {
           const skillName = resolveSkillLookupName(args);
+          const skill = requireSkill(getSkillCatalog(), skillName);
           return {
             name: skillName,
-            content: requireSkill(getSkillCatalog(), skillName).content,
+            content: skill.content,
+            ...(skill.directory && skill.files?.length
+              ? { directory: skill.directory, files: skill.files }
+              : {}),
           };
         }),
     },
@@ -1071,7 +1076,7 @@ function buildInteractiveTools(
     {
       name: "ask_question",
       description:
-        "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text) instead of writing the questions in your text reply — rendered as an interactive card in web chat, or relayed as a plain message on other surfaces. Reach for this whenever a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know — ask first, do not guess a generic result. Each call collects one set of questions and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once. Ask only the few questions that actually change what you do next.",
+        "Ask the guardian one or more clarifying questions (single-choice, multi-choice, or short free-text), rendered as an interactive card in web chat or relayed as a plain message on other surfaces. Use it only when the answer would significantly change the direction of the work; otherwise proceed with your recommended approach and state your assumptions. When you do ask, use this tool rather than writing the questions in your text reply. Each call collects one set of questions, and the guardian's answers come back as the next turn. Prefer single-choice questions with concrete options when the likely answers are enumerable (set freeText so they can still type their own); use multi when several answers can apply at once.",
       inputSchema: {
         type: "object",
         required: ["questions"],
@@ -1310,7 +1315,3 @@ function buildSubmitOutputFacadeTool(
     },
   ];
 }
-
-// Maximum search-result limit is shared between facade tools and any caller
-// (e.g. anthropic adapter's zod `.max()`) that needs to advertise the cap.
-export const MCP_FACADE_MAX_SEARCH_LIMIT = MAX_SEARCH_LIMIT;

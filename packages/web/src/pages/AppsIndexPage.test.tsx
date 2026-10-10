@@ -67,11 +67,6 @@ rs.mock("@/shell/AppGrid", () => ({
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix menu + dialog poke pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
   // Radix tooltip arrows measure themselves with ResizeObserver, also absent.
   class TestResizeObserver implements ResizeObserver {
     observe(): void {}
@@ -132,7 +127,6 @@ function mockBackend(initial: {
   installed: InstalledAppCard[];
   onInstall?: (id: string) => InstalledAppCard;
   upgradable?: FakeUpgradeCandidate[];
-  appsGate?: Promise<void>;
   /** When set, POST /apps/:id/publish fails with this store rejection message. */
   publishError?: string;
   /**
@@ -161,7 +155,6 @@ function mockBackend(initial: {
       return ok({ kind: "guardian", userId: "ray", displayName: "Ray", avatarUrl: null });
     }
     if (url === "/api/apps" && method === "GET") {
-      if (initial.appsGate) await initial.appsGate;
       return ok({ apps: installed });
     }
     if (url === "/api/apps" && method === "POST") {
@@ -238,13 +231,15 @@ function LocationProbe() {
 }
 
 describe("AppsIndexPage reactivity", () => {
-  it("starts an update chat in the app's remembered source project", async () => {
+  it("chats with an app in its source project, beside the app", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
         installedCard({
           id: "weather",
           displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
           source: { mode: "source", path: "/projects/apps/weather" },
           projectPath: "apps/weather",
         }),
@@ -254,14 +249,43 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    await user.click(await screen.findByRole("menuitem", { name: "Start chat here" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
 
     expect(screen.getByTestId("location").textContent).toBe(
-      JSON.stringify({ pathname: "/chat", state: { projectPath: "apps/weather" } }),
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }], projectPath: "apps/weather" },
+      }),
     );
   });
 
-  it("does not offer an update chat without a remembered source project", async () => {
+  it("chats beside an app that has no source project", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({
+          id: "weather",
+          displayName: "Weather",
+          hasFrontend: true,
+          href: "/apps/weather",
+        }),
+      ],
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByLabelText("More actions for Weather"));
+    await user.click(await screen.findByRole("menuitem", { name: "Chat with app" }));
+
+    expect(screen.getByTestId("location").textContent).toBe(
+      JSON.stringify({
+        pathname: "/chat",
+        state: { widgets: [{ type: "app", appId: "weather" }] },
+      }),
+    );
+  });
+
+  it("offers no chat for an app with neither a page nor a source project", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [installedCard({ id: "weather", displayName: "Weather" })],
@@ -270,7 +294,7 @@ describe("AppsIndexPage reactivity", () => {
     renderPage();
 
     await user.click(await screen.findByLabelText("More actions for Weather"));
-    expect(screen.queryByRole("menuitem", { name: "Start chat here" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Chat with app" })).toBeNull();
   });
 
   it("offers Remix only for an installed Store app whose local manifest includes source", async () => {
@@ -777,12 +801,12 @@ describe("AppsIndexPage tile interactions", () => {
 });
 
 describe("AppsIndexPage tile name tooltip", () => {
-  // jsdom performs no layout, so scrollWidth/clientWidth are both 0 and the
+  // jsdom performs no layout, so scrollHeight/clientHeight are both 0 and the
   // page's "is the label clipped?" probe reads false. Fake the geometry of a
   // clipped label on the name span to exercise the tooltip path.
   function fakeClippedLabel(el: HTMLElement) {
-    Object.defineProperty(el, "scrollWidth", { configurable: true, value: 180 });
-    Object.defineProperty(el, "clientWidth", { configurable: true, value: 84 });
+    Object.defineProperty(el, "scrollHeight", { configurable: true, value: 60 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, value: 40 });
   }
 
   it("reveals the full name in a tooltip when hovering a tile whose name is clipped", async () => {
@@ -848,6 +872,19 @@ describe("AppsIndexPage disabled apps", () => {
 });
 
 describe("AppsIndexPage search", () => {
+  // The toolbar and the field it holds are two named things. Giving them one
+  // name makes every `getByLabelText("Search apps")` in this file ambiguous,
+  // which is how the List migration first broke.
+  it("names the toolbar apart from the search field inside it", async () => {
+    mockBackend({ installed: [installedCard({ id: "weather", displayName: "Weather" })] });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const toolbar = screen.getByRole("toolbar", { name: "Filter apps" });
+    expect(toolbar.contains(screen.getByLabelText("Search apps"))).toBe(true);
+  });
+
   it("filters the grid to the apps and built-ins matching the query", async () => {
     const user = userEvent.setup();
     mockBackend({
@@ -871,7 +908,7 @@ describe("AppsIndexPage search", () => {
     expect(screen.queryByText("Projects")).toBeNull();
   });
 
-  it("derives displayed section and header counts from visible search results", async () => {
+  it("derives the displayed section count from visible search results", async () => {
     const user = userEvent.setup();
     mockBackend({
       installed: [
@@ -898,42 +935,10 @@ describe("AppsIndexPage search", () => {
     await screen.findByText("Weather");
     await user.type(screen.getByLabelText("Search apps"), "weath");
 
-    expect(screen.getByText("1 built by you")).toBeTruthy();
-    expect(screen.getByText("0 installed")).toBeTruthy();
-    expect(screen.getByText("0 built-in")).toBeTruthy();
-
     const mySection = screen.getByRole("region", { name: "My apps" });
     expect(within(mySection).getByText("1")).toBeTruthy();
     expect(within(mySection).getByText("Weather")).toBeTruthy();
     expect(within(mySection).queryByText("Calendar")).toBeNull();
-  });
-
-  it("defers the built-in header summary until installed apps have loaded", async () => {
-    let releaseApps: () => void = () => {};
-    const appsGate = new Promise<void>((resolve) => {
-      releaseApps = resolve;
-    });
-    mockBackend({
-      installed: [
-        installedCard({
-          id: "system",
-          displayName: "System",
-          origin: "builtin",
-          canUninstall: false,
-          canPublish: false,
-        }),
-      ],
-      appsGate,
-    });
-
-    renderPage();
-
-    expect(screen.queryByText("1 built-in")).toBeNull();
-    expect(screen.queryByText("2 built-in")).toBeNull();
-
-    releaseApps();
-
-    expect(await screen.findByText("2 built-in")).toBeTruthy();
   });
 
   it("shows an empty state for a query with no matches, and clearing restores the grid", async () => {

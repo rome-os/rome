@@ -1,25 +1,6 @@
 {
   "page": {
-    "title": "Rome",
-    "tagline": "Name your agent. Give it a brain. That's it.",
-    "enter": "Enter Rome",
-    "entering": "Entering...",
-    "enterRequiresAiHint": "Sign in to Claude or ChatGPT to enter Rome.",
-    "errors": {
-      "profileSaveFailed": "Couldn't save your profile.",
-      "networkError": "Network error. Please try again.",
-      "completeFailed": "Couldn't finish setup."
-    }
-  },
-  "steps": {
-    "account": "Account",
-    "profile": "Profile"
-  },
-  "done": {
-    "title": "You're all set",
-    "tagline": "Rome can manage your projects, remember what matters, automate routines, connect your tools, and more.",
-    "guideButton": "See what it can do",
-    "chatButton": "Start chatting"
+    "title": "Rome"
   },
   "account": {
     "tagline": "Set the login that locks this Rome to you. One account, one keeper.",
@@ -34,22 +15,6 @@
     "errorUsernameRequired": "Username is required.",
     "errorPasswordTooShort": "Password must be at least 8 characters.",
     "networkError": "Network error. Please try again."
-  },
-  "guardian": {
-    "nameLabel": "Your name",
-    "namePlaceholder": "e.g. Alex",
-    "nameHint": "What your agent calls you. You can change it later in Settings."
-  },
-  "agent": {
-    "nameLabel": "Agent name",
-    "namePlaceholder": "e.g. Atlas, Friday",
-    "nameHint": "You can rename your agent anytime from Settings.",
-    "reroll": "Random",
-    "rerollTitle": "Suggest a different name"
-  },
-  "ai": {
-    "title": "Connect a brain",
-    "pickOneHint": "Pick one"
   },
   "codexDeviceLogin": {
     "title": "Sign in with a device code",

@@ -64,13 +64,29 @@ describe("accountSegments", () => {
 
 describe("accountHandle", () => {
   it("renders a WhatsApp jid as the number a guardian would recognize", () => {
-    expect(accountHandle({ channel: "whatsapp", channelUserId: "6591881123@s.whatsapp.net" })).toBe(
-      "+6591881123",
-    );
+    expect(
+      accountHandle({
+        channel: "whatsapp",
+        channelUserId: "6591881123@s.whatsapp.net",
+        displayName: "Sandy",
+      }),
+    ).toBe("+6591881123");
   });
 
   it("leaves a channel with no phone shape its own identifier", () => {
-    expect(accountHandle({ channel: "telegram", channelUserId: "418820113" })).toBe("418820113");
+    expect(
+      accountHandle({ channel: "telegram", channelUserId: "418820113", displayName: "Sandy" }),
+    ).toBe("418820113");
+  });
+
+  it("names an agent by its label rather than its Cloud id", () => {
+    expect(
+      accountHandle({
+        channel: "agents",
+        channelUserId: "agt_01JZ8Q3V4K",
+        displayName: "atlas (dot)",
+      }),
+    ).toBe("atlas (dot)");
   });
 });
 

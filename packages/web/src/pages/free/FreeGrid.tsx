@@ -23,6 +23,7 @@ import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
 import {
   DropdownMenu,
@@ -37,7 +38,7 @@ import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
-import { ToolWorkspace } from "./ToolWorkspace";
+import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import {
   autoPlaceApp,
   autoPlaceProjects,
@@ -202,10 +203,14 @@ export function FreeGrid() {
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
     const applyInitialWidgets = (targetSessionId: string | null) => {
-      if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
+      if (!initialWidgetsKey || !initialWidgets) {
         return;
       }
-      placeWidgetsIfSessionActive(targetSessionId, initialWidgets);
+      // A narrow workspace shows one pane at a time, so an expanded panel
+      // would hide the chat this navigation opened.
+      placeWidgetsIfSessionActive(targetSessionId, initialWidgets, {
+        chatFirst: window.innerWidth < COMPACT_WIDTH,
+      });
     };
     if (urlSessionId) {
       const targetSessionId = urlSessionId;
@@ -225,7 +230,7 @@ export function FreeGrid() {
 
   useEffect(() => {
     return eventBus.on<{ paths: string[]; force?: boolean }>("projects:opened", (payload) => {
-      if (!payload?.paths || payload.paths.length === 0) return;
+      if (payload.paths.length === 0) return;
       // A forced open (an explicit click on a /projects link in chat) overrides
       // the user's earlier manual close of the panel; the passive agent-link
       // path (no force) still respects that close.
@@ -285,7 +290,12 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, pinnedAgentMention, pinnedAt } = useSessionIdentity(chatSessionId);
+  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
+    useSessionIdentity(chatSessionId);
+  // The chat a guardian names is the one they keep a tab on, so the name
+  // outranks the route's own title. Claimed here rather than in FreePage so it
+  // reads the same identity the header does, and follows a rename with it.
+  useDocumentTitle(sessionName);
   const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
@@ -365,7 +375,7 @@ export function FreeGrid() {
                   {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
                 </span>
                 <div className="flex min-w-0 items-center gap-2">
-                  <SessionModelLabel model={model} />
+                  <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
                   {sessionName?.trim() && pinnedAgentMention && (
                     <span className="truncate text-aux text-muted-foreground">
                       {pinnedAgentMention.appLabel}

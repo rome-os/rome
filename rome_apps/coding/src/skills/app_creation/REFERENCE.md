@@ -7,7 +7,7 @@ build* (iteration loop, design rules, validation, delivery); this file covers
 patterns).
 
 For more public, end-to-end examples, see
-[`amantru/rome-apps`](https://github.com/amantru/rome-apps). Each app in that
+[`rome-os/rome-apps`](https://github.com/rome-os/rome-apps). Each app in that
 repo is a self-contained, readable sample covering different shapes:
 action / agent / api / web / db / hook.
 
@@ -31,7 +31,7 @@ A complete Rome app has the following root layout (not every file is required
 ├── components.json             # shadcn CLI config, for the rare copied recipe (web UI only)
 └── src/
     ├── actions/<name>/         # One directory per action
-    │   ├── action.yaml         # Public action contract
+    │   ├── action.yaml         # Action contract
     │   ├── index.ts            # Implementation
     │   └── index.test.ts       # Tests (recommended)
     ├── agents/<name>.yaml      # App-private agent definitions
@@ -80,7 +80,6 @@ api:                             # Optional — enables the HTTP API
   entry: api/index               # Without extension
 
 agents:                          # Optional — app-private agents
-  - agents/planning.yaml
   - agents/coding.yaml
 
 actions:                         # Optional — action directories the app exposes
@@ -131,7 +130,7 @@ Use these fixed ids instead of guessing the owner of a platform artifact:
 | Call a connected provider API | `connector:connector_proxy` |
 | Core agents | `core:main`, `core:envoy` |
 | General-purpose agents | `assistant:assistant`, `assistant:explore` |
-| Coding agents | `coding:planning`, `coding:coding` |
+| Coding agent | `coding:coding` |
 | App authoring skills | `coding:app_creation`, `coding:workflow_creation`, `coding:app_remix`, `coding:app_verification` |
 
 For an app whose id is `notes`, an action definition is `name: notes_create`,
@@ -171,11 +170,25 @@ media:
   - type: image
     path: assets/dashboard.png
     alt: Morning Brief dashboard
+  - type: video
+    path: assets/demo.mp4
+    poster: assets/demo-poster.png
+    alt: Morning Brief demo
 noindex: false
 ```
 
 Store asset paths are relative to `.rome_store/`, so the example above expects
-files under `.rome_store/assets/`.
+files under `.rome_store/assets/`. Rome Cloud's
+[submission rules](https://romeos.cc/docs/building-apps/app-store-submission)
+set these limits:
+
+- The packed `.rome_store` directory must stay under 30 MB, or Rome Cloud
+  rejects the whole publish. Plan for one short demo video, not several.
+- `media` holds up to 8 entries. Images may be PNG, JPEG, or WebP up to 2 MB.
+  Videos may be MP4, WebM, or MOV up to 25 MB, and a video's optional `poster`
+  must point at an image.
+- A single asset over its limit or in another format still publishes, but the
+  store page leaves it out.
 
 ### `action.yaml`
 
@@ -187,11 +200,16 @@ name: dream                  # Action name; this is what agents call
 type: custom                 # Almost always `custom`
 description: Concise summary # The agent sees this — write it clearly
 entry: ./index.ts            # Optional; defaults to ./index.ts
+visibility: public|explicit  # Optional; defaults to public
 complexity: simple|moderate|complex   # Call cost
 speed: fast|moderate|slow
 reliability: low|medium|high
 sideEffects: read-only|write # IMPORTANT: write may trigger approval policies
 ```
+
+`public` actions enter an agent's catalog through `actions: ["*"]` or an exact
+canonical reference. `explicit` actions require the exact reference. This field
+does not restrict routines, hooks, app APIs, or calls from another action.
 
 ### `agents/<name>.yaml`
 
@@ -212,7 +230,7 @@ tools:                         # Built-in tool allowlist
   - Edit
   - Grep
   - Glob
-actions:                       # Action allowlist; "*" opens everything
+actions:                       # Action allowlist; "*" opens public actions
   - research-app:notes_create
   - system:fetch_channel_history
 allowedSubagents:              # Optional: canonical ids this agent may run through `system:summon`
@@ -403,20 +421,24 @@ export function createAction(
   form returns `{ executionId }` after main accepts it, not the action result.
 - `appContext.listRoutines()` — list registered routines.
 - `agentRunner.run({ agentName, prompt })` — stream-run an agent; returns
-  an async iterable of `AgentMessage`. Handle each message by `msg.type`.
+  an async iterable of `AgentEvent`. Handle each event by `event.type`.
   Full example in
   [Actions calling actions / agents](#actions-calling-actions--agents).
 
-  The stream's event vocabulary has three categories:
+  The stream's events fall into four groups, each exported as a type
+  (`AgentBlockEvent`, `AgentDeltaEvent`, `AgentLifecycleEvent`,
+  `AgentOtherEvent`). `AgentMessage` and the `*Message` names are deprecated
+  aliases of the same types.
 
-  | Category | Types | Semantics |
+  | Group | Types | Semantics |
   | --- | --- | --- |
-  | Lifecycle | `turn_start`, `turn_end`, `session_init` | Bracketing: `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `session_init` describes the session. |
-  | Content | `thinking`, `text`, `tool_use`, `tool_result`, `structured_output`, `result`, `error` | Durable blocks. `structured_output` is reserved for interactive handback submissions. `result`/`error` is the agent's terminal block (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. |
-  | Transient | `text_delta` | Streaming preview of an in-flight `text` block; never persisted — ignore unless you render live text. |
+  | Block | `text`, `thinking`, `tool_use`, `tool_result` | One completed block each. A `text` or `thinking` block is identified by its `blockId` when the provider gives one. A `tool_use` is identified by its `id`, which the `tool_result` that answers it carries as `toolUseId`. |
+  | Delta | `text_delta`, `thinking_delta`, `tool_input_delta`, `tool_output_delta` | Increments of a block still being produced; never persisted — ignore unless you render live output. Each carries its block's identity when the block has one: `text_delta` and `thinking_delta` the `blockId` of their `text` or `thinking` block, `tool_input_delta` and `tool_output_delta` the `toolUseId` of their `tool_use` and `tool_result`. The complete block normally follows; discard deltas left unmatched when the turn ends. |
+  | Lifecycle | `session_init`, `turn_start`, `turn_end`, `input_status`, `result`, `error` | `turn_start` (`turnId`, `sessionId`, `userPrompt`) precedes all content; `turn_end` (`turnId`, `status`, `durationMs`) is the stream's last event. `result`/`error` is an agent's terminal event (at most one per agent per turn); `result.structuredOutput` carries provider-native structured data and `accounting` carries provider usage. `session_init` describes the session; `input_status` reports each user input's state. |
+  | Other | `subagent_start`, `subagent_result`, `structured_output`, `plan_update` | Subagent activity, accepted structured output (reserved for interactive handback submissions), and the provider's plan. |
 
   Typical consumption: read `sessionId` from `turn_start` (to resume the
-  session later), accumulate or forward content blocks, and take the final
+  session later), accumulate or forward block events, and take the final
   answer from `result.content`.
 
 **Custom deps:** widen the factory signature with
@@ -556,6 +578,9 @@ export function createApiHandler(ctx: RomeAppContext): RomeAppApiHandler {
   public app any surviving header is attacker-controlled. In the web UI,
   `useCaller()` / `getCaller()` from `@rome-os/app-web-sdk` return the same
   identity for UI gating only; enforcement belongs in the API handler.
+  For per-visitor private data, quotas, or favor charges
+  (`favorRequirement` + `ctx.favors.requestAction`), follow
+  [`PAID_APPS.md`](./PAID_APPS.md).
 - `RomeAppContext` — handler-injected context; common fields: `ctx.app.id`,
   `ctx.app.version`, `ctx.log`, `ctx.runAction`, `ctx.db`,
   `ctx.repositories`.
@@ -596,7 +621,7 @@ fires. RRULE syntax follows the iCalendar spec. The action returns
 `{ status: "error", error }` for caller-fixable problems (bad `localTime`, a
 `date`/`rrule` conflict, array `args`) so you can surface the message.
 
-**Recurring routine** — e.g. a daily 03:00 UTC job:
+**Recurring routine** — e.g. a daily job at 03:00 in the guardian's timezone:
 
 ```ts
 await appContext.runAction("system:create_routine", {
@@ -604,7 +629,8 @@ await appContext.runAction("system:create_routine", {
   trigger: {
     type: "schedule",
     tzid: "UTC",               // IANA tz id, NOT "+00:00"
-    localTime: "03:00",        // "HH:mm" in tzid's local time
+    tzMode: "floating",        // follows the guardian's timezone, not tzid
+    localTime: "03:00",        // "HH:mm", 24-hour
     rrule: "FREQ=DAILY",       // iCal RRULE; recurring
   },
   actionName: "dream:dream",   // canonical action id to execute at trigger time
@@ -621,6 +647,7 @@ await appContext.runAction("system:create_routine", {
   trigger: {
     type: "schedule",
     tzid: "America/Los_Angeles",
+    tzMode: "fixed",           // a dated one-off always fires in tzid
     localTime: "09:00",
     date: "2026-06-01",        // "YYYY-MM-DD"; one-off on this calendar date
   },
@@ -637,8 +664,9 @@ authoritative reference):
 |---|---|---|---|
 | `name` | `string` | yes | Human-readable identifier; use for dedup. |
 | `trigger.type` | `"schedule" \| "event-bus"` | yes | Schedule or watched-event. |
-| `trigger.tzid` | string | schedule | IANA timezone (e.g. `"UTC"`, `"America/Los_Angeles"`). |
-| `trigger.localTime` | `"HH:mm"` | schedule | Local wall-clock time in `tzid`. |
+| `trigger.tzid` | string | schedule | IANA timezone (e.g. `"UTC"`, `"America/Los_Angeles"`). A `floating` schedule does not fire in it, but it must still be valid. |
+| `trigger.tzMode` | `"fixed" \| "floating"` | schedule | Picks the timezone for `localTime`. With `floating`, the routine fires in the guardian's current timezone and reschedules when that timezone changes. Use `floating` for most routines. With `fixed`, it fires in `tzid`, for a time tied to one place, such as a market open. `system:create_routine` stores a routine that has a `date` as `fixed`. |
+| `trigger.localTime` | `"HH:mm"` | schedule | Local wall-clock time in the timezone `tzMode` picks. |
 | `trigger.rrule` | string | recurring | iCal RRULE, e.g. `FREQ=DAILY`, `FREQ=WEEKLY;BYDAY=MO,WE,FR`. Mutually exclusive with `date`. `FREQ=MONTHLY` must pin `BYMONTHDAY=N`. |
 | `trigger.date` | `"YYYY-MM-DD"` | one-off | Mutually exclusive with `rrule`; omit both to fire once at the next `localTime`. |
 | `trigger.eventName` | string | event-bus | Watchable event type — find it with `system:search_event_catalog`, which also returns each type's `payloadSchema` (JSON Schema for the fields a `trigger.filter` dot-path can match). |
@@ -662,6 +690,9 @@ if (!alreadyScheduled) {
 }
 ```
 
+If the app cannot work without the routine, register it from an
+[`app-started` hook](#setting-up-on-start-app-started).
+
 ### Actions calling actions / agents
 
 App-internal call relationships form a graph: API handlers invoke actions,
@@ -680,7 +711,7 @@ points:
   an acceptance receipt `{ executionId }`, not an `ActionResult`; use the ID
   to inspect or cancel the independent execution.
 - **`agentRunner.run({ agentName, prompt, ... })`** — streams an agent.
-  Returns `AsyncIterable<AgentMessage>` and must be consumed event by
+  Returns `AsyncIterable<AgentEvent>` and must be consumed event by
   event. While running, the agent will call the actions declared on its
   yaml `actions:` allowlist through LLM tool-use — you **do not** manually
   orchestrate those tool calls.
@@ -926,6 +957,10 @@ See the community sample repo for full web app examples.
   `:host` when it injects the bundle into the shadow root
   (`packages/web/src/components/rome-app-host.tsx`), which is what makes an
   app-declared value beat the inherited host token.
+- A full-page app root uses `bg-[var(--app-canvas)]`; an inline chat component
+  leaves its root canvas transparent. The host maps `--background` onto
+  `--app-canvas` inside the app ShadowRoot so installed bundles that use
+  `bg-background` receive the app canvas too.
 - **Read only the tokens your own bundle supplies.** The host promises one
   thing across the shadow boundary: the theme layer, meaning color and shadow
   values, which arrive as inherited custom properties and track the live theme
@@ -1205,12 +1240,53 @@ Hook directory layout:
 
 ```
 src/hooks/<name>/
-├── hook.yaml      # Declares the hook type and trigger conditions
 └── index.ts       # Implementation: export function createHook(deps): Hook
 ```
 
-The exact shape varies by hook type. See the community sample repo for an
-inbox-style channel hook.
+The directory name is the hook type, and `app.yaml` lists the directory
+under `hooks:`. The hook types are `channel-message`, `agent-turn-started`,
+`agent-turn-finished`, `turn-middleware`, and `app-started`. Each type's
+`createHook` deps and hook interface are exported from
+`@rome-os/app-runtime`. See the community sample repo for an inbox-style
+channel hook.
+
+### Setting up on start: `app-started`
+
+Use an `app-started` hook for state the app must always have, such as a
+routine that has to exist for the app to work. Rome calls `onAppStarted` at
+boot for every enabled app and after each install, upgrade, or re-enable,
+once boot has finished. Nothing waits for it, and a throw is logged, not
+retried. Every boot calls it again, so check before you create:
+
+```ts
+// src/hooks/app-started/index.ts
+import type { AppStartedHook, AppStartedHookDeps } from "@rome-os/app-runtime";
+
+export function createHook(deps: AppStartedHookDeps): AppStartedHook {
+  return {
+    async onAppStarted() {
+      const routines = await deps.appContext.listRoutines();
+      if (routines.some((routine) => routine.name === "nightly-sync")) return;
+      const result = await deps.appContext.runAction("system:create_routine", {
+        name: "nightly-sync",
+        trigger: {
+          type: "schedule",
+          tzid: "UTC",
+          tzMode: "floating", // 02:00 in the guardian's timezone
+          localTime: "02:00",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: "my-app:sync",
+        args: {},
+      });
+      if (result.status === "error") throw new Error(result.error);
+    },
+  };
+}
+```
+
+A routine the user asks for belongs to the action or API that handles the
+request, not to this hook.
 
 ---
 
@@ -1234,7 +1310,7 @@ inbox-style channel hook.
 
 - [`AUTHORING.md`](./AUTHORING.md) (sibling file) — workflow guide: iteration loop, product design rules, icon design, recurring runs, validation, delivery checklist.
 - Community samples:
-  [`amantru/rome-apps`](https://github.com/amantru/rome-apps) — covers web
+  [`rome-os/rome-apps`](https://github.com/rome-os/rome-apps) — covers web
   + api + action + skill, multi-action + agent orchestration, channel
   hooks, etc.
 - SDK type definitions: jump to definition into `@rome-os/app-runtime` and

@@ -18,11 +18,21 @@ import { PromptBuilder } from "../core/prompt-builder.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
-import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
-import type { ProviderAdapter } from "../channels/adapter.js";
+import type { ChannelMessage } from "@rome-os/app-runtime";
+import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
-import type { NormalizedMessage, AgentMessage } from "../types.js";
-import { createTestDb, MockProviderAdapter, type TestDb } from "./helpers.js";
+import { channelList } from "../channels/channel-list.js";
+import type { AgentEvent } from "../types.js";
+import {
+  createTestConnections,
+  createTestDb,
+  FakeTransport,
+  noAccounts,
+  type TestDb,
+  createActionEngineRepos,
+} from "./helpers.js";
+import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import { testChannelSurface } from "./channel-surface.js";
 
 export const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "agents");
 
@@ -34,18 +44,23 @@ export const FIXTURES_DIR = join(import.meta.dirname, "fixtures", "agents");
  *
  * The only pure inputs are the `ModelProvider` (so tests drive a predictable
  * turn sequence) and the channel names (so tests can simulate inbound
- * messages without booting Telegram/Discord/WhatsApp transports).
+ * messages without booting Telegram/Discord/WhatsApp transports). Inbound
+ * reaches the rig's handler through the production channel list and the same
+ * `withInboundSpans` instrumentation the channel-message hook hears through.
  */
 export interface GoldenTraceRig {
   testDb: TestDb;
-  adapters: Map<string, MockProviderAdapter>;
+  transports: Map<string, FakeTransport>;
   actionEngine: ActionEngine;
   runner: AgentRunner;
   /** Direct AgentSessionManager handle — for tests that bypass the channel
    * adapter path (e.g. the webchat-style direct `sendTurn` flow). */
   manager: AgentSessionManager;
-  /** Simulate one inbound message through the real wrapping + hook path. */
-  simulateInbound(channel: string, msg: NormalizedMessage): Promise<void>;
+  /** Deliver one inbound message on `channel` through the real channel and
+   *  instrumentation path, resolving once the rig's handler has finished
+   *  with it. The message needs text, or the channel drops it (R2) and this
+   *  never resolves. */
+  simulateInbound(channel: string, overrides?: Partial<ChannelMessage>): Promise<void>;
   shutdown(): void;
 }
 
@@ -64,12 +79,15 @@ export interface GoldenTraceOptions {
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
   const sessionsRepo = new SessionsRepository(testDb.db);
-  const sessionManager = new SessionManager(sessionsRepo);
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
+  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
   const promptBuilder = new PromptBuilder();
-  const actionRegistry = new ActionRegistryImpl([]);
-  const actionEngine = new ActionEngine(actionRegistry, options.tracer);
+  const actionRegistry = new ActionRegistryImpl();
+  const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
+    tracer: options.tracer,
+  });
 
-  const agentLoader = new AgentLoader();
+  const agentLoader = new AgentLoader(artifactIdentity);
   await agentLoader.loadAll(options.fixturesDir ?? FIXTURES_DIR);
 
   for (const action of options.extraActions ?? []) {
@@ -92,51 +110,73 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const manager = createAgentSessionManager({
     agentLoader,
     sessionManager,
+    sessionsRepo,
     promptBuilder,
     actionRegistry,
     modelResolver,
     actionEngine,
     capabilityDiscovery: new CapabilityDiscovery(),
-    skillCatalog: new SkillCatalog(),
+    skillCatalog: new SkillCatalog(artifactIdentity),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
   });
-  const runner = new AgentRunner(manager);
+  const runner = new AgentRunner(manager, agentLoader);
 
-  const adapters = new Map<string, MockProviderAdapter>();
+  const transports = new Map<string, FakeTransport>();
   for (const name of options.channels) {
-    adapters.set(name, new MockProviderAdapter(name));
+    transports.set(name, new FakeTransport(name));
   }
+  const channels = withInboundSpans(
+    channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: { registry: createTestConnections(transports) },
+    }),
+    "channel-message",
+  );
 
-  wrapProviderAdaptersWithSpans(adapters);
+  // The channel holds each message until its handler settles, so a delivery
+  // resolves before the turn ends. This handler signals when a message is
+  // done, by id.
+  const handled = new Map<string, () => void>();
 
-  // Register the test's hook handler: drive the agent runner for the
+  // Subscribe the test's hook handler: drive the agent runner for the
   // configured `agentName`. This takes the place of the real inbox-app
   // channel-message hook (which has heavy deps — policy engine, person
   // repo, etc.) and keeps the rig focused on the trace shape.
-  for (const adapter of adapters.values()) {
-    adapter.onMessage(async (msg: NormalizedMessage) => {
-      // drain — the test asserts via the span exporter, not via messages
-      for await (const _m of runner.run({
-        agentName: options.agentName,
-        prompt: msg.text,
-        channelThreadKey: `${msg.channel}:${msg.threadId}`,
-        workingDir: "/tmp",
-      })) {
-        // intentionally empty
+  for (const channel of channels) {
+    channel.inbound?.subscribe(async ({ message }) => {
+      try {
+        // drain — the test asserts via the span exporter, not via messages
+        for await (const _m of runner.run({
+          agentName: options.agentName,
+          prompt: message.text,
+          channelThreadKey: `${message.channel}:${message.conversationId}`,
+          workingDir: "/tmp",
+        })) {
+          // intentionally empty
+        }
+      } finally {
+        handled.get(message.messageId)?.();
       }
     });
   }
 
   return {
     testDb,
-    adapters,
+    transports,
     actionEngine,
     runner,
     manager,
-    async simulateInbound(channel, msg) {
-      const adapter = adapters.get(channel);
-      if (!adapter) throw new Error(`channel not registered: ${channel}`);
-      await adapter.simulateMessage(msg);
+    async simulateInbound(channel, overrides = {}) {
+      const transport = transports.get(channel);
+      if (!transport) throw new Error(`channel not registered: ${channel}`);
+      const messageId = overrides.messageId ?? randomUUID();
+      const done = new Promise<void>((resolve) => handled.set(messageId, resolve));
+      await transport.receive({ ...overrides, messageId });
+      await done;
+      handled.delete(messageId);
     },
     shutdown() {
       testDb.close();
@@ -149,7 +189,7 @@ export function makeSingleActionProvider(
   actionName: string,
   input: Record<string, unknown>,
 ): ModelProvider {
-  const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentMessage> {
+  const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentEvent> {
     const id = randomUUID();
     yield { type: "tool_use", id, tool: actionName, input };
     await params.executeAction(actionName, input);

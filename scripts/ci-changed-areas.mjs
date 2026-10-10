@@ -21,6 +21,9 @@ import { fileURLToPath } from "node:url";
 export const AREA_PATHS = {
   core: [
     "packages/core/",
+    "packages/channel-test-ui/",
+    "packages/rome-node-cli/",
+    "packages/rome-node-core/",
     "packages/app-runtime-sdk/",
     "packages/api-types/",
     "packages/lib/",
@@ -42,6 +45,8 @@ export const AREA_PATHS = {
   rest: [
     "packages/lib/",
     "packages/discord-cli/",
+    "packages/rome-node-cli/",
+    "packages/rome-node-core/",
     "packages/app-runtime-sdk/",
     "packages/desktop/",
     "packages/desktop-base-web/",

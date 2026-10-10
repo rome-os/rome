@@ -4,6 +4,8 @@ import { useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { RomeAppHost } from "@/components/rome-app-host";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useRecordAppOpened } from "@/hooks/use-recent-apps";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 
@@ -39,6 +41,8 @@ export default function AppFullPage() {
   const [manifest, setManifest] = useState<AppManifestResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useDocumentTitle(manifest?.appName ?? null);
+
   useEffect(() => {
     if (!appId) return;
     let cancelled = false;
@@ -65,9 +69,18 @@ export default function AppFullPage() {
     };
   }, [appId, splat, t]);
 
+  // Only a top-level visit counts as the guardian opening the app. Split view
+  // mounts this same page inside an iframe for every tile of a restored chat
+  // layout, and those mounts are the layout coming back, not a choice — letting
+  // them count would reorder the sidebar's Recent zone on every session visit.
+  // Guardian only, as in AppEmbeddedPage.
+  const isGuardian = manifest?.bootstrap.caller?.kind === "guardian";
+  const isTopLevel = typeof window !== "undefined" && window.self === window.top;
+  useRecordAppOpened(appId, isGuardian && isTopLevel);
+
   if (error) {
     return (
-      <main className="min-h-dvh bg-background pb-safe pt-safe">
+      <main className="min-h-dvh bg-app-canvas pb-safe pt-safe">
         <div className="p-8">
           <Alert variant="destructive" className="mx-auto max-w-xl rounded-16 p-6">
             <AlertTitle className="text-title">{t("full.failedTitle")}</AlertTitle>
@@ -82,7 +95,7 @@ export default function AppFullPage() {
 
   if (manifest.accessMode === "cloud-email" && manifest.callerAccessAllowed !== true) {
     return (
-      <main className="flex min-h-dvh items-center bg-background pb-safe pt-safe">
+      <main className="flex min-h-dvh items-center bg-app-canvas pb-safe pt-safe">
         <div className="w-full p-8">
           <AppAccessPanel
             appId={manifest.appId}
@@ -107,7 +120,7 @@ export default function AppFullPage() {
   };
 
   return (
-    <main className="min-h-dvh bg-background pb-safe pt-safe">
+    <main className="min-h-dvh bg-app-canvas pb-safe pt-safe">
       <RomeAppHost
         appId={manifest.appId}
         appName={manifest.appName}

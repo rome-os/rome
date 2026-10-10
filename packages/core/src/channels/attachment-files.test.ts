@@ -12,7 +12,8 @@ import {
   saveIncomingAttachmentPayloads,
   saveUrlAttachments,
 } from "./attachment-files.js";
-import type { Attachment, NormalizedMessage } from "./types.js";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
+import type { Attachment } from "./types.js";
 
 const profileMemoryDir = rs.hoisted(() => ({ value: "" }));
 
@@ -20,18 +21,18 @@ rs.mock("../paths.js", () => ({
   getProfileMemoryDir: () => profileMemoryDir.value,
 }));
 
-function messageWithAttachments(attachments: Attachment[]): NormalizedMessage {
+function messageWithAttachments(attachments: Attachment[]): ChannelMessage {
   return {
-    id: "msg-1",
     channel: "discord",
-    channelUserId: "user-1",
-    displayName: "User",
-    threadId: "thread-1",
-    threadType: "private",
-    timestamp: new Date("2026-05-10T00:00:00Z"),
+    direction: "inbound",
+    messageId: "msg-1",
+    conversationId: "thread-1" as ConversationId,
+    senderId: "user-1",
+    senderDisplayName: "User",
     text: "",
     attachments,
-    rawEvent: {},
+    timestamp: new Date("2026-05-10T00:00:00Z"),
+    thread: { kind: "dm" },
   };
 }
 
@@ -219,8 +220,8 @@ describe("attachment file sanitization", () => {
       fileName: `${"a".repeat(300)}.png`,
     };
     const message = messageWithAttachments([duplicateA, duplicateB, generated, unicode, longName]);
-    message.threadId = "thread/../../secret";
-    message.id = "..";
+    message.conversationId = "thread/../../secret" as ConversationId;
+    message.messageId = "..";
 
     const attachments = await saveIncomingAttachmentPayloads(message, [
       { attachment: duplicateA, data: Buffer.from("a") },

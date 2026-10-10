@@ -30,7 +30,17 @@
   // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
   // invokes it at root scope, where that dependency is out of view. Removing it
   // here on the strength of the mobile dependency reintroduces the finding.
-  "ignoreBinaries": ["tailscale", "composio", "rg", "lipo", "vale", "expo", "gofmt"],
+  "ignoreBinaries": [
+    "tailscale",
+    "composio",
+    "rg",
+    "lipo",
+    "vale",
+    "expo",
+    "gofmt",
+    "flock",
+    "mkfifo"
+  ],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
@@ -61,12 +71,14 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,ts,js}", "infra/**/*.test.mjs"],
+      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "infra/**/*.test.mjs"],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
     },
     "packages/core": {
+      // Installed separately in the runtime image and invoked as a CLI.
+      "ignoreBinaries": ["rome-node"],
       "entry": [
         // The action engine spawns these by resolved path, so no import
         // reaches them. See packages/core/src/actions/engine.ts.
@@ -95,7 +107,15 @@
         ".storybook/*.test.ts",
         "mock/main.tsx",
         "mock/rsbuild.config.ts",
+        "mock/rsbuild.e2e.config.ts",
         "mock/rsbuild.static.config.ts",
+        "mock/**/*.test.{ts,tsx}",
+        // The mock build loads these through NormalModuleReplacementPlugin
+        // paths, which Knip cannot follow as imports.
+        "mock/TourAppsPage.tsx",
+        "mock/TourChatComposer.tsx",
+        "mock/use-tour-scroll.ts",
+        "mock/use-tour-workspace.ts",
         // The desktop VNC suite reaches both of these through a string, not an
         // import: playwright.desktop-vnc.config.ts names the rsbuild config in
         // its `webServer.command`, and that config swaps @novnc/novnc for
@@ -125,6 +145,22 @@
       "ignoreDependencies": ["expo-notifications"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
+    "packages/rome-node-core": {
+      "entry": [
+        "src/**/*.test.ts",
+        "src/index.ts",
+        "src/daemon-entry.ts",
+        "bin/daemon.js",
+        "src/daemon-client.ts",
+        "src/host.ts",
+        "src/auth.ts",
+        "src/storage.ts",
+        "src/daemon.ts"
+      ]
+    },
+    "packages/rome-node-cli": {
+      "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
+    },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
     "packages/app-web-sdk": {
       // bin/rome.js reaches the CLI through a dynamic import of the compiled
@@ -135,6 +171,14 @@
       // environment. Keep the config and setup in the explicit entry graph.
       "rstest": false,
       "entry": ["src/cli/index.ts", "src/**/*.test.ts", "src/test/setup.ts", "rstest.config.mts"]
+    },
+    // Midscene installs with npm outside the pnpm workspace. Its config and
+    // CLI/test scripts are invoked by Midscene, npm scripts, or CI.
+    "tests/midscene": {
+      "entry": ["midscene.config.ts", "scripts/*.mjs"],
+      // The root CI install omits this package's npm-only binary. The Midscene
+      // harness job installs and invokes it with the package lockfile.
+      "ignoreBinaries": ["midscene-test"]
     },
 
     // An app's manifest, not its imports, decides what the runtime loads. Each

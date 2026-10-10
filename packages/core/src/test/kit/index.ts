@@ -28,7 +28,7 @@ export {
 export type { ReplyStep, ReplyBuilder, ActionCallStep } from "./fake-model.js";
 
 export { FakeChannelEndpoint } from "./fake-channel.js";
-export type { ChannelReply } from "./fake-channel.js";
+export type { SentMessage } from "../helpers.js";
 
 export { FakeTelegramApi } from "./fake-telegram.js";
 export type { TelegramApiCall } from "./fake-telegram.js";

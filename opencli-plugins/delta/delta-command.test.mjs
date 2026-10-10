@@ -13,8 +13,14 @@ export class ArgumentError extends Error {}
 export class CommandExecutionError extends Error {}
 export class AuthRequiredError extends Error {constructor(domain,message){super(message);this.domain=domain;}}
 `)}`;
+const formUrl = new URL("./delta-form.mjs", import.meta.url).href;
+const formStubUrl = `data:text/javascript,${encodeURIComponent(`
+  export * from ${JSON.stringify(formUrl)};
+  export async function submitDeltaSearch() {}
+`)}`;
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (specifier === "./delta-form.mjs") return { url: formStubUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/registry")
       return { url: registryUrl, shortCircuit: true };
     if (specifier === "@jackwener/opencli/errors") return { url: errorsUrl, shortCircuit: true };
@@ -34,6 +40,9 @@ function pageFor(data) {
   let reads = 0;
   return {
     async goto() {},
+    async selectTab(index) {
+      assert.equal(index, 0);
+    },
     async wait() {},
     async evaluate(fn) {
       if (typeof fn === "string" || fn.name !== "readDeltaPage") return true;

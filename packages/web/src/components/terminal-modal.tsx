@@ -247,7 +247,7 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
           </div>
         ) : isLogin ? (
           <>
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-body text-muted-foreground">
+            <ol className="flex list-decimal flex-col gap-1 pl-5 text-ui text-muted-foreground">
               <li>{t("terminal.claudeLogin.step1")}</li>
               <li>{t("terminal.claudeLogin.step2")}</li>
               <li>{t("terminal.claudeLogin.step3")}</li>
@@ -262,9 +262,9 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
               aria-label={!authUrl ? t("terminal.claudeLogin.preparingUrl") : undefined}
             >
               {authUrl ? (
-                <ExternalLink />
+                <ExternalLink data-icon="inline-start" />
               ) : (
-                <Spinner label={t("terminal.claudeLogin.preparingUrl")} />
+                <Spinner data-icon="inline-start" label={t("terminal.claudeLogin.preparingUrl")} />
               )}
               {t("terminal.claudeLogin.openButton")}
             </Button>

@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql, type SQL } from "drizzle-orm";
 import {
   linkedinMessages,
   linkedinParticipants,
@@ -692,43 +692,81 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
 
   /**
    * Recent mirrored messages for the history talk feature: a bounded
-   * chronological slice (newest `HISTORY_READ_LIMIT` kept, returned oldest
-   * first). `threadId: null` spans every thread. Rows without a LinkedIn
-   * delivery time order (and filter) by the mirror's first-seen time.
+   * chronological slice (newest `limit` kept, at most `HISTORY_READ_LIMIT`,
+   * returned oldest first). `threadId: null` spans every thread. Rows without a
+   * LinkedIn delivery time order (and filter) by the mirror's first-seen time.
    */
-  async fetchHistory(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]> {
+  async fetchHistory(
+    threadId: string | null,
+    since: Date,
+    limit: number = HISTORY_READ_LIMIT,
+  ): Promise<LinkedInHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadId != null ? sql`AND m.thread_id = ${threadId}` : sql``;
     const rows = (await this.db.all(sql`
-      SELECT
-        m.message_id AS messageId,
-        m.thread_id AS threadId,
-        coalesce(t.conversation_name, t.person_name) AS threadName,
-        coalesce(m.sent_at, m.created_at) AS sentAt,
-        m.sender_name AS senderName,
-        m.sender_profile_url AS senderProfileUrl,
-        m.sender_is_self AS senderIsSelf,
-        m.text AS text,
-        m.subject AS subject
+      SELECT ${linkedInHistoryColumns()}
       FROM linkedin_messages m
       LEFT JOIN linkedin_threads t ON t.thread_id = m.thread_id
       WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause}
       ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
-      LIMIT ${HISTORY_READ_LIMIT}
+      LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;
 
-    return rows
-      .map((r) => ({
-        messageId: String(r.messageId),
-        threadId: String(r.threadId),
-        threadName: (r.threadName as string | null) ?? null,
-        sentAt: new Date(Number(r.sentAt) * 1000),
-        senderName: (r.senderName as string | null) ?? null,
-        senderProfileUrl: (r.senderProfileUrl as string | null) ?? null,
-        senderIsSelf: Boolean(r.senderIsSelf),
-        text: (r.text as string | null) ?? null,
-        subject: (r.subject as string | null) ?? null,
-      }))
-      .reverse();
+    return rows.map(linkedInHistoryRow).reverse();
   }
+}
+
+/**
+ * The fields a mirrored message is read with, each an alias and the expression
+ * over `linkedin_messages m` and its thread `linkedin_threads t` that answers
+ * it. One list, so the history read and the channel's per-account view read a
+ * row the same way and {@link linkedInHistoryRow} parses either.
+ */
+const LINKEDIN_HISTORY_FIELDS: ReadonlyArray<readonly [string, SQL]> = [
+  ["messageId", sql`m.message_id`],
+  ["threadId", sql`m.thread_id`],
+  ["threadName", sql`coalesce(t.conversation_name, t.person_name)`],
+  ["isGroup", sql`t.is_group`],
+  ["sentAt", sql`coalesce(m.sent_at, m.created_at)`],
+  ["senderName", sql`m.sender_name`],
+  ["senderProfileUrl", sql`m.sender_profile_url`],
+  ["senderIsSelf", sql`m.sender_is_self`],
+  ["text", sql`m.text`],
+  ["subject", sql`m.subject`],
+];
+
+function linkedInHistoryColumns(): SQL {
+  return sql.join(
+    LINKEDIN_HISTORY_FIELDS.map(([alias, expression]) => sql`${expression} AS ${sql.raw(alias)}`),
+    sql`, `,
+  );
+}
+
+/** Every field of a mirrored message as one JSON object, for a query that
+ *  carries the row through columns of its own. {@link linkedInHistoryRow}
+ *  parses it. */
+export function linkedInHistoryJson(): SQL {
+  return sql`json_object(${sql.join(
+    LINKEDIN_HISTORY_FIELDS.map(
+      ([alias, expression]) => sql`${sql.raw(`'${alias}'`)}, ${expression}`,
+    ),
+    sql`, `,
+  )})`;
+}
+
+/** A row read with {@link LINKEDIN_HISTORY_FIELDS}, as a column set or as the
+ *  JSON object {@link linkedInHistoryJson} builds. */
+export function linkedInHistoryRow(r: Record<string, unknown>): LinkedInHistoryMessage {
+  return {
+    messageId: String(r.messageId),
+    threadId: String(r.threadId),
+    threadName: (r.threadName as string | null) ?? null,
+    isGroup: r.isGroup === null || r.isGroup === undefined ? null : Boolean(r.isGroup),
+    sentAt: new Date(Number(r.sentAt) * 1000),
+    senderName: (r.senderName as string | null) ?? null,
+    senderProfileUrl: (r.senderProfileUrl as string | null) ?? null,
+    senderIsSelf: Boolean(r.senderIsSelf),
+    text: (r.text as string | null) ?? null,
+    subject: (r.subject as string | null) ?? null,
+  };
 }

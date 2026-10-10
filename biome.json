@@ -15,6 +15,7 @@
       "!**/first-party-artifacts/**",
       "!scratch/**",
       "!**/mockServiceWorker.js",
+      "!packages/web/mock/public/recorded-apps/**",
       "!**/*.css",
       "!**/*.html"
     ]

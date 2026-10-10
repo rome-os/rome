@@ -13,6 +13,7 @@ import {
   like,
   or,
   sql,
+  type SQL,
 } from "drizzle-orm";
 import {
   sharedChats,
@@ -125,6 +126,99 @@ interface ProjectUsageTotalsOptions {
   monthStart: Date;
 }
 
+interface ProviderUsageAmounts {
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+const UNKNOWN_USAGE_PROVIDER = "unknown";
+
+function providerUsageAmountsSql(condition = sql`1`) {
+  const sum = (path: string) =>
+    sql`COALESCE(SUM(CASE WHEN ${condition} AND json_type(block, ${path}) IN ('integer', 'real') THEN json_extract(block, ${path}) ELSE 0 END), 0)`;
+  return {
+    cacheReadTokens: sum("$.accounting.usage.cacheReadTokens"),
+    cacheWriteTokens: sum("$.accounting.usage.cacheWriteTokens"),
+    costUsd: sum("$.accounting.costUsd"),
+    inputTokens: sum("$.accounting.usage.inputTokens"),
+    outputTokens: sum("$.accounting.usage.outputTokens"),
+  };
+}
+
+function readProviderUsageAmounts(
+  row: Record<string, unknown>,
+  prefix: string,
+): ProviderUsageAmounts {
+  return {
+    cacheReadTokens: Number(row[`${prefix}CacheReadTokens`] ?? 0),
+    cacheWriteTokens: Number(row[`${prefix}CacheWriteTokens`] ?? 0),
+    costUsd: Number(row[`${prefix}CostUsd`] ?? 0),
+    inputTokens: Number(row[`${prefix}InputTokens`] ?? 0),
+    outputTokens: Number(row[`${prefix}OutputTokens`] ?? 0),
+  };
+}
+
+/**
+ * Every terminal block carrying accounting, with its trace row's `created_at`
+ * for bucketing. A trace's stored accounting columns are summed from these
+ * same blocks, so per-provider sums reconcile with the row totals while still
+ * splitting a turn that ran on more than one provider. Block-store traces read
+ * through the terminal-block partial index; legacy traces still hold their
+ * blocks inline, and `mergeTraceContent` ignores that copy once block rows
+ * exist. `rowFilter` sees `session_id` and `created_at` unambiguously.
+ */
+function terminalAccountingBlocksSql(rowFilter: SQL) {
+  return sql`
+    SELECT m.created_at AS created_at, terminal.content AS block
+    FROM rome_agent_messages m
+    JOIN (
+      SELECT message_id, content
+      FROM rome_agent_trace_blocks
+      WHERE json_extract(content, '$.type') IN ('result', 'error')
+    ) terminal ON terminal.message_id = m.id
+    WHERE m.role = 'trace'
+      ${rowFilter}
+    UNION ALL
+    SELECT m.created_at AS created_at, inline_block.value AS block
+    FROM rome_agent_messages m, json_each(m.content) inline_block
+    WHERE m.role = 'trace'
+      AND m.content <> '[]'
+      AND json_valid(m.content)
+      AND json_type(m.content) = 'array'
+      AND NOT EXISTS (
+        SELECT 1 FROM rome_agent_trace_blocks stored WHERE stored.message_id = m.id
+      )
+      AND json_extract(inline_block.value, '$.type') IN ('result', 'error')
+      ${rowFilter}
+  `;
+}
+
+const terminalBlockProviderSql = sql`COALESCE(NULLIF(TRIM(json_extract(block, '$.accounting.provider')), ''), ${UNKNOWN_USAGE_PROVIDER})`;
+
+function usageDayRangeSql(dayRanges: ProjectUsageDayRange[]) {
+  const dateCase = sql`CASE ${sql.join(
+    dayRanges.map(
+      (range) =>
+        sql`WHEN created_at >= ${Math.floor(range.start.getTime() / 1000)}
+            AND created_at < ${Math.floor(range.end.getTime() / 1000)}
+            THEN ${range.date}`,
+    ),
+    sql.raw(" "),
+  )} END`;
+  const dateFilter = sql.join(
+    dayRanges.map(
+      (range) =>
+        sql`(created_at >= ${Math.floor(range.start.getTime() / 1000)}
+            AND created_at < ${Math.floor(range.end.getTime() / 1000)})`,
+    ),
+    sql.raw(" OR "),
+  );
+  return { dateCase, dateFilter };
+}
+
 export interface AddTurnRecapMessageInput {
   sessionId: string;
   turnId: string;
@@ -208,6 +302,47 @@ const sessionSelectFields = {
 };
 
 const sessionActivityAt = sql<number>`cast(${romeSessions.activityAt} as integer)`;
+
+// Whether the session's latest turn ended in an error, read from the
+// `turn_end` block of its newest trace. A turn still running has no
+// `turn_end` yet and a stopped turn ends `interrupted`, so neither counts.
+// `created_at` has one-second precision, so rowid (insertion order) breaks
+// ties between turns that start in the same second.
+export const sessionLastTurnFailed = sql<boolean>`coalesce((
+  select json_extract(b."content", '$.status') = 'error'
+  from "rome_agent_trace_blocks" b
+  where b."message_id" = (
+    select m."id" from "rome_agent_messages" m
+    where m."session_id" = "rome_sessions"."id" and m."role" = 'trace'
+    order by m."created_at" desc, m."rowid" desc
+    limit 1
+  )
+  and json_extract(b."content", '$.type') = 'turn_end'
+  order by b."seq" desc
+  limit 1
+), 0)`.mapWith(Boolean);
+// Whether the session waits on the guardian: a card (question, connect-AI,
+// app component) posted since their last message, or an approval still
+// pending in this chat. Any answer to a card is saved as a user message, so a
+// card after the last one is still open. rowid is insertion order. Every reply
+// adds an auto-approved row to `approvals`, so the pending thread ids are
+// collected once per list rather than scanned per chat. json_valid and the
+// object check skip rows that aren't block arrays (non-JSON, or legacy plain
+// text), which would otherwise fail the whole list.
+export const sessionAwaitingGuardian = sql<boolean>`(exists (
+  select 1 from "rome_agent_messages" m, json_each(m."content") part
+  where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
+  and json_valid(m."content")
+  and m."rowid" > coalesce((
+    select max(u."rowid") from "rome_agent_messages" u
+    where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+  ), 0)
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+) or "rome_sessions"."id" in (
+  select json_extract(a."payload", '$.channelContext.threadId') from "approvals" a
+  where a."status" = 'pending'
+  and json_extract(a."payload", '$.channelContext.threadId') is not null
+))`.mapWith(Boolean);
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const CONVERSATION_CONTEXT_NOTIFICATION_LIMIT = 20;
 const SQL_LIKE_ESCAPE = "\\";
@@ -1176,6 +1311,26 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
+  /** The id of the conversation a channel address names, or null when none
+   *  exists yet. A webchat conversation's address is its own id. Forks and
+   *  subagent runs copy their parent's address, so only conversation types
+   *  match. */
+  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          inArray(romeSessions.type, ["webchat", "webchat_handoff", "channel"]),
+          eq(romeSessions.sourceChannel, channel),
+          eq(romeSessions.sourceThreadId, threadId),
+        ),
+      )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
   async deleteSession(id: string) {
     // One transaction so a crash mid-cascade can't leave orphan messages or
     // feedback rows behind. `webchat_turn_feedback` also cascades via its FK,
@@ -1211,7 +1366,11 @@ export class WebChatRepository {
           ? isNotNull(romeSessions.archivedAt)
           : undefined;
     return this.db
-      .select(sessionSelectFields)
+      .select({
+        ...sessionSelectFields,
+        lastTurnFailed: sessionLastTurnFailed,
+        awaitingGuardian: sessionAwaitingGuardian,
+      })
       .from(romeSessions)
       .where(and(eq(romeSessions.type, "webchat"), archivePredicate))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
@@ -1540,7 +1699,7 @@ export class WebChatRepository {
 
   async updateUserInput(
     sessionId: string,
-    status: import("@rome-os/app-runtime").InputStatusMessage,
+    status: import("@rome-os/app-runtime").InputStatusEvent,
   ): Promise<void> {
     await this.db
       .update(romeAgentMessages)
@@ -1604,16 +1763,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1640,6 +1800,19 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {
@@ -1720,7 +1893,7 @@ export class WebChatRepository {
    *
    * The stub insert (first batch only), block inserts, and accounting bump
    * commit in one transaction: a failed append leaves no partial state, so
-   * the caller's `persistedTraceBlockCount` cursor stays truthful and a
+   * the caller's `persistedTraceEventCount` cursor stays truthful and a
    * retry re-appends the same `startSeq` without double-counting. A replay
    * that *would* double-write trips the (message_id, seq) primary key and
    * fails loudly instead.
@@ -1731,7 +1904,7 @@ export class WebChatRepository {
     turnId: string | null;
     /** 0-based index of the first block in `blocks` within the whole trace. */
     startSeq: number;
-    /** Pre-shaped trace blocks (already passed through toTraceBlock). */
+    /** Pre-shaped trace blocks (already passed through toTraceEvent). */
     blocks: unknown[];
     trigger?: RomeAgentTraceTriggerMetadata;
     transcriptMessages?: RomeAgentTranscriptMessageInput[];
@@ -2127,8 +2300,18 @@ export class WebChatRepository {
           }>)
         : [];
 
+    const providerTotals = await this.getProviderUsageTotals(
+      options.monthStart,
+      sessionScopeFilter,
+    );
+    const providerDays = options.dayRanges
+      ? await this.getProviderUsageDayRangeTotals(options.dayRanges, sessionScopeFilter)
+      : [];
+
     const totals = totalsRows[0];
     return {
+      providerDays,
+      providerTotals,
       days: dailyRows.map((row) => ({
         cacheReadTokens: Number(row.cacheReadTokens ?? 0),
         cacheWriteTokens: Number(row.cacheWriteTokens ?? 0),
@@ -2147,29 +2330,10 @@ export class WebChatRepository {
     };
   }
 
-  private async getUsageDayRangeTotals(
-    dayRanges: ProjectUsageDayRange[],
-    sessionScopeFilter: ReturnType<typeof sql>,
-  ) {
+  private async getUsageDayRangeTotals(dayRanges: ProjectUsageDayRange[], sessionScopeFilter: SQL) {
     if (dayRanges.length === 0) return [];
 
-    const dateCase = sql`CASE ${sql.join(
-      dayRanges.map(
-        (range) =>
-          sql`WHEN created_at >= ${Math.floor(range.start.getTime() / 1000)}
-              AND created_at < ${Math.floor(range.end.getTime() / 1000)}
-              THEN ${range.date}`,
-      ),
-      sql.raw(" "),
-    )} END`;
-    const dateFilter = sql.join(
-      dayRanges.map(
-        (range) =>
-          sql`(created_at >= ${Math.floor(range.start.getTime() / 1000)}
-              AND created_at < ${Math.floor(range.end.getTime() / 1000)})`,
-      ),
-      sql.raw(" OR "),
-    );
+    const { dateCase, dateFilter } = usageDayRangeSql(dayRanges);
     return (await this.db.all(sql`
       SELECT
         ${dateCase} AS date,
@@ -2192,6 +2356,66 @@ export class WebChatRepository {
       inputTokens: number | null;
       outputTokens: number | null;
     }>;
+  }
+
+  private async getProviderUsageTotals(monthStart: Date, sessionScopeFilter: SQL) {
+    const isThisMonth = sql`created_at >= ${Math.floor(monthStart.getTime() / 1000)}`;
+    const total = providerUsageAmountsSql();
+    const month = providerUsageAmountsSql(isThisMonth);
+    const rows = (await this.db.all(sql`
+      SELECT
+        ${terminalBlockProviderSql} AS provider,
+        ${total.inputTokens} AS totalInputTokens,
+        ${total.outputTokens} AS totalOutputTokens,
+        ${total.cacheReadTokens} AS totalCacheReadTokens,
+        ${total.cacheWriteTokens} AS totalCacheWriteTokens,
+        ${total.costUsd} AS totalCostUsd,
+        ${month.inputTokens} AS monthInputTokens,
+        ${month.outputTokens} AS monthOutputTokens,
+        ${month.cacheReadTokens} AS monthCacheReadTokens,
+        ${month.cacheWriteTokens} AS monthCacheWriteTokens,
+        ${month.costUsd} AS monthCostUsd
+      FROM (${terminalAccountingBlocksSql(sessionScopeFilter)})
+      WHERE json_type(block, '$.accounting') = 'object'
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `)) as Array<Record<string, unknown> & { provider: string }>;
+
+    return rows.map((row) => ({
+      month: readProviderUsageAmounts(row, "month"),
+      provider: row.provider,
+      total: readProviderUsageAmounts(row, "total"),
+    }));
+  }
+
+  private async getProviderUsageDayRangeTotals(
+    dayRanges: ProjectUsageDayRange[],
+    sessionScopeFilter: SQL,
+  ) {
+    if (dayRanges.length === 0) return [];
+
+    const { dateCase, dateFilter } = usageDayRangeSql(dayRanges);
+    const amounts = providerUsageAmountsSql();
+    const rows = (await this.db.all(sql`
+      SELECT
+        ${dateCase} AS date,
+        ${terminalBlockProviderSql} AS provider,
+        ${amounts.inputTokens} AS dayInputTokens,
+        ${amounts.outputTokens} AS dayOutputTokens,
+        ${amounts.cacheReadTokens} AS dayCacheReadTokens,
+        ${amounts.cacheWriteTokens} AS dayCacheWriteTokens,
+        ${amounts.costUsd} AS dayCostUsd
+      FROM (${terminalAccountingBlocksSql(sql`AND (${dateFilter}) ${sessionScopeFilter}`)})
+      WHERE json_type(block, '$.accounting') = 'object'
+      GROUP BY 1, 2
+      ORDER BY 1 ASC, 2 ASC
+    `)) as Array<Record<string, unknown> & { date: string; provider: string }>;
+
+    return rows.map((row) => ({
+      ...readProviderUsageAmounts(row, "day"),
+      date: row.date,
+      provider: row.provider,
+    }));
   }
 
   async getUsageTotals(options: ProjectUsageTotalsOptions) {

@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
+import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
 import type { RuntimeManager, RuntimeStatus } from "./runtime/manager";
@@ -84,10 +85,12 @@ export interface SetupTrayOptions {
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
   openSettings: () => void;
   runtimeManager: RuntimeManager;
+  /** Null where the pill does not exist (every platform but macOS). */
+  floatingPill: FloatingPill | null;
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
-  const { getMainWindow, ensureMainWindow, openSettings, runtimeManager } = options;
+  const { getMainWindow, ensureMainWindow, openSettings, runtimeManager, floatingPill } = options;
 
   tray = new Tray(resolveTrayIcon());
   tray.setToolTip("Rome");
@@ -124,6 +127,18 @@ export function setupTray(options: SetupTrayOptions): Tray {
         label: "Settings…",
         click: openSettings,
       },
+      // The floating icon is off until it is ticked here, and this is the way
+      // back after its own menu has hidden it.
+      ...(floatingPill
+        ? [
+            {
+              label: "Show floating icon",
+              type: "checkbox" as const,
+              checked: floatingPill.isEnabled(),
+              click: (item: Electron.MenuItem) => floatingPill.setEnabled(item.checked),
+            },
+          ]
+        : []),
       { type: "separator" },
       {
         // No accelerator: tray menus cannot register shortcuts of their own,
@@ -146,6 +161,8 @@ export function setupTray(options: SetupTrayOptions): Tray {
 
   rebuildMenu(runtimeManager.getStatus());
   runtimeManager.on("status", (status: RuntimeStatus) => rebuildMenu(status));
+  // Hiding the pill from its own menu has to untick the box here.
+  floatingPill?.onEnabledChange(() => rebuildMenu(runtimeManager.getStatus()));
 
   tray.on("click", () => {
     void showWindow();

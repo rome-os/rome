@@ -144,31 +144,6 @@ describe("PersonMappingRepository", () => {
     expect(found).toBeNull();
   });
 
-  it("deleteGuardianChannelMappings() removes only guardian mappings for that channel", async () => {
-    const guardianId = await repo.create({
-      displayName: "Guardian",
-      bondLevel: "guardian",
-      channelMappings: [
-        { channel: "feishu", channelUserId: "ou-old" },
-        { channel: "telegram", channelUserId: "tg-guardian" },
-      ],
-    });
-    const friendId = await repo.create({
-      displayName: "Friend",
-      bondLevel: "inner-circle",
-      channelMappings: [{ channel: "feishu", channelUserId: "ou-friend" }],
-    });
-
-    await repo.deleteGuardianChannelMappings("feishu");
-
-    expect((await repo.findById(guardianId))!.channelMappings).toEqual([
-      { channel: "telegram", channelUserId: "tg-guardian" },
-    ]);
-    expect((await repo.findById(friendId))!.channelMappings).toEqual([
-      { channel: "feishu", channelUserId: "ou-friend" },
-    ]);
-  });
-
   it("writeDeleteGuardianChannelMappings() removes only guardian mappings inside a caller transaction", async () => {
     const guardianId = await repo.create({
       displayName: "Guardian",
@@ -690,41 +665,6 @@ describe("PersonMappingRepository", () => {
         channelMappings: [{ channel: "whatsapp", channelUserId: "+15557777" }],
       });
       expect((await repo.findById(retried))!.displayName).toBe("Bob");
-    });
-
-    it("refuses a held account from the dashboard path too, leaving no person", async () => {
-      const alice = await repo.create({
-        displayName: "Alice",
-        bondLevel: "inner-circle",
-        channelMappings: [{ channel: "whatsapp", channelUserId: "+15551234" }],
-      });
-
-      await expect(
-        repo.create({
-          displayName: "Bob",
-          bondLevel: "inner-circle",
-          approved: true,
-          channelMappings: [{ channel: "whatsapp", channelUserId: "+15551234" }],
-        }),
-      ).rejects.toThrow(/already belongs to person "alice"/);
-
-      // Creating a person is not a re-point, whichever path asks for it.
-      expect((await repo.findByChannelUser("whatsapp", "+15551234"))?.id).toBe(alice);
-      expect(await repo.findById("bob")).toBeNull();
-    });
-
-    it("reclaims a dismissed account from the dashboard path", async () => {
-      await dismiss("whatsapp", "+15558888", "Carol");
-
-      await repo.create({
-        displayName: "Carol",
-        bondLevel: "inner-circle",
-        approved: true,
-        channelMappings: [{ channel: "whatsapp", channelUserId: "+15558888" }],
-      });
-
-      expect((await repo.findByChannelUser("whatsapp", "+15558888"))?.id).toBe("carol");
-      expect((await repo.findById(STRANGER_PERSON_ID))!.channelMappings).toHaveLength(0);
     });
   });
 });

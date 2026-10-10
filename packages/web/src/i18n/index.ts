@@ -37,8 +37,7 @@ export function getActiveLocale(): string {
   return i18n.resolvedLanguage || i18n.language || "en";
 }
 
-// Native-script labels for the picker. Keep one entry per SUPPORTED_LANGUAGES
-// member; the i18n test asserts this stays exhaustive.
+// Native-script labels for the picker.
 export const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
   en: "English",
   "zh-CN": "中文",
@@ -92,19 +91,7 @@ i18n
     fallbackLng: "en",
     supportedLngs: SUPPORTED_LANGUAGES,
     defaultNS: "common",
-    ns: [
-      "common",
-      "settings",
-      "auth",
-      "activity",
-      "routines",
-      "chat",
-      "people",
-      "apps",
-      "files",
-      "inbox",
-      "onboard",
-    ],
+    ns: Object.keys(resources.en),
     interpolation: { escapeValue: false },
     detection: {
       // Explicit user choice (cached under rome.lang) always wins; without one,
@@ -125,6 +112,7 @@ i18n
 if (typeof document !== "undefined") {
   const sync = (lng: string) => {
     document.documentElement.lang = lng;
+    document.documentElement.dir = i18n.dir(lng);
   };
   sync(i18n.language || "en");
   i18n.on("languageChanged", sync);

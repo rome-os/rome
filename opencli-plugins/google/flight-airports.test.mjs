@@ -307,6 +307,7 @@ function commandFixture(options = {}) {
       }
     },
     async evaluate(script) {
+      assert.ok(navigations.length > 0, "navigate before evaluating an uninitialized tab");
       if (script.includes("var cards =")) {
         extractions.push({ script, navigations: [...navigations] });
         return { available: 1, items: [{ leg_route: "OAK–HOU" }] };
@@ -318,9 +319,35 @@ function commandFixture(options = {}) {
     ...b,
     navigations,
     extractions,
+    command,
     run: (args) => command.func(page, { ...defaults, depart: "2026-10-15", ...args }),
   };
 }
+
+test("command keeps the Google session instead of releasing its tab to about:blank", () => {
+  const b = commandFixture();
+  try {
+    assert.equal(b.command.siteSession, "persistent");
+  } finally {
+    b.close();
+  }
+});
+
+test("repeated searches navigate directly to Flights before evaluating the page", async () => {
+  const b = commandFixture();
+  try {
+    await b.run({ from: "SFO", to: "LAX" });
+    await b.run({ from: "JFK", to: "LHR" });
+    assert.equal(b.navigations.length, 2);
+    for (const url of b.navigations) {
+      assert.equal(new URL(url).origin, "https://www.google.com");
+      assert.equal(new URL(url).pathname, "/travel/flights");
+    }
+    assert.match(new URL(b.navigations[1]).searchParams.get("q"), /from JFK to LHR/);
+  } finally {
+    b.close();
+  }
+});
 
 for (const returnDate of [undefined, "2026-10-20"]) {
   test(`command reloads the combined route before extraction (${returnDate ? "round trip" : "one way"})`, async () => {

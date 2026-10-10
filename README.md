@@ -9,7 +9,7 @@
 <h1 align="center">Rome</h1>
 
 <p align="center">
-  <strong>The agentic OS for humans and agents.</strong>
+  <strong>A compounding agent OS for recursive agents.</strong>
 </p>
 
 <p align="center">
@@ -90,6 +90,16 @@ volumes, so re-running the script upgrades the container without losing data.
 Telemetry export stays off unless you set `OTEL_EXPORTER_OTLP_ENDPOINT`. Run
 the script with `--help` for ports, profiles, and the other settings it
 forwards.
+
+Rome Docker images default to `PANTHEON_BASE_ORIGIN=https://romeos.cc`.
+To use another Rome Cloud deployment, pass your origin when starting the container
+with `docker run -e PANTHEON_BASE_ORIGIN=https://cloud.example.com` or set it in
+the Compose `.env` file. Recreate the container after changing the value.
+The quickstart script also accepts a shell override:
+
+```bash
+PANTHEON_BASE_ORIGIN=https://cloud.example.com ./scripts/quickstart-docker.sh
+```
 
 ### Run the development environment
 

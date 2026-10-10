@@ -52,7 +52,7 @@ function makeLifecycle(overrides: Partial<AppLifecycle> = {}): AppLifecycle {
     requestUninstall: rs.fn(),
     requestPublish: rs.fn(),
     requestAccess: rs.fn(),
-    startChatToUpdate: rs.fn(),
+    chatWithApp: rs.fn(),
     dialogs: null,
     ...overrides,
   };
@@ -68,7 +68,7 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: false,
       pin: { pinned: false, onToggle: rs.fn() },
-      onRemix: null,
+      onRemix: rs.fn(),
     });
     expect(keysOf(entries)).toEqual([
       "details",
@@ -101,7 +101,7 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: false,
       pin: { pinned: false, onToggle: rs.fn() },
-      onRemix: null,
+      onRemix: rs.fn(),
     });
     expect(keysOf(entries)).toEqual(["details"]);
   });
@@ -119,64 +119,44 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: false,
       pin: { pinned: false, onToggle: rs.fn() },
-      onRemix: null,
+      onRemix: rs.fn(),
     });
     expect(keysOf(entries).slice(0, 3)).toEqual(["upgrade", "upgrade-separator", "details"]);
   });
 
-  it("shows Remix only for a remixable app with a handler", () => {
+  it("shows Remix only for a remixable app", () => {
     const remixable = makeApp({ origin: "appstore", includeSource: true });
-    const withHandler = getAppActionMenuEntries({
+    const remixableEntries = getAppActionMenuEntries({
       app: remixable,
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: null,
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: rs.fn(),
     });
-    expect(keysOf(withHandler).slice(0, 2)).toEqual(["remix", "remix-separator"]);
-
-    const withoutHandler = getAppActionMenuEntries({
-      app: remixable,
-      lifecycle: makeLifecycle(),
-      t,
-      disabled: false,
-      pin: null,
-      onRemix: null,
-    });
-    expect(keysOf(withoutHandler)).not.toContain("remix");
+    expect(keysOf(remixableEntries).slice(0, 2)).toEqual(["remix", "remix-separator"]);
 
     const notRemixable = getAppActionMenuEntries({
       app: makeApp({ origin: "local" }),
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: null,
+      pin: { pinned: false, onToggle: rs.fn() },
       onRemix: rs.fn(),
     });
     expect(keysOf(notRemixable)).not.toContain("remix");
   });
 
-  it("hides Pin without an embedded frontend or without pin wiring", () => {
+  it("hides Pin without an embedded frontend", () => {
     const noFrontend = getAppActionMenuEntries({
       app: makeApp({ hasFrontend: false, href: null }),
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
       pin: { pinned: false, onToggle: rs.fn() },
-      onRemix: null,
+      onRemix: rs.fn(),
     });
     expect(keysOf(noFrontend)).not.toContain("pin");
-
-    const noPinWiring = getAppActionMenuEntries({
-      app: makeApp(),
-      lifecycle: makeLifecycle(),
-      t,
-      disabled: false,
-      pin: null,
-      onRemix: null,
-    });
-    expect(keysOf(noPinWiring)).not.toContain("pin");
   });
 
   it("marks destructive entries and routes disabled only to mutating ones", () => {
@@ -186,7 +166,7 @@ describe("getAppActionMenuEntries", () => {
       t,
       disabled: true,
       pin: { pinned: false, onToggle: rs.fn() },
-      onRemix: null,
+      onRemix: rs.fn(),
     });
     const byKey = new Map(entries.map((entry) => [entry.key, entry]));
     const action = (key: string) => {
@@ -213,8 +193,8 @@ describe("getAppActionMenuEntries", () => {
       lifecycle: makeLifecycle(),
       t,
       disabled: false,
-      pin: null,
-      onRemix: null,
+      pin: { pinned: false, onToggle: rs.fn() },
+      onRemix: rs.fn(),
     });
     const toggle = entries.find((entry) => entry.key === "toggle");
     expect(toggle?.type === "action" && toggle.destructive).toBe(false);
@@ -229,8 +209,8 @@ describe("getAppActionMenuEntries", () => {
       lifecycle,
       t,
       disabled: false,
-      pin: null,
-      onRemix: null,
+      pin: { pinned: false, onToggle: rs.fn() },
+      onRemix: rs.fn(),
     });
     const select = (key: string) => {
       const entry = entries.find((candidate) => candidate.key === key);
@@ -238,7 +218,7 @@ describe("getAppActionMenuEntries", () => {
       entry.onSelect();
     };
     select("chat");
-    expect(lifecycle.startChatToUpdate).toHaveBeenCalledWith(app);
+    expect(lifecycle.chatWithApp).toHaveBeenCalledWith(app);
     select("uninstall");
     expect(lifecycle.requestUninstall).toHaveBeenCalledWith(app, false);
     select("uninstall-purge");

@@ -1,64 +1,4 @@
-import type {
-  Attachment,
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  NormalizedMessage,
-  TalkActivity,
-  TalkDirectMessaging,
-  TalkHistory,
-  TalkInboundMedia,
-} from "@rome-os/app-runtime";
-
-/** Adapters still normalize their provider SDK events into the established
- * internal shape. The integration owns the one-way projection into Talk's
- * provider-neutral contract. */
-export function toInboundMessage(message: NormalizedMessage): InboundMessage {
-  return {
-    messageId: message.id,
-    conversationId: message.threadId as ConversationId,
-    ...(message.parentThreadId
-      ? { parentConversationId: message.parentThreadId as ConversationId }
-      : {}),
-    senderId: message.channelUserId,
-    senderDisplayName: message.displayName,
-    text: message.text,
-    attachments: message.attachments,
-    timestamp: message.timestamp,
-    replyTo: message.replyTo,
-    ...(message.addressing ? { addressing: message.addressing } : {}),
-    thread: {
-      kind: message.threadType === "private" ? "dm" : message.parentThreadId ? "topic" : "group",
-      ...(message.threadName ? { name: message.threadName } : {}),
-    },
-    // Only provider-owned semantic features may inspect this value. Generic
-    // consumers receive the typed fields above and must leave it untouched.
-    raw: message,
-  };
-}
-
-export function normalizedFromInbound(message: InboundMessage): NormalizedMessage {
-  const raw = message.raw;
-  if (raw && typeof raw === "object" && "channel" in raw && "rawEvent" in raw) {
-    return raw as NormalizedMessage;
-  }
-  throw new Error("Inbound message does not carry its provider materialization token");
-}
-
-export function toMessageReceipt(
-  conversationId: ConversationId,
-  result: {
-    messageId?: string;
-    threadId?: string;
-    parts?: Array<{ messageId: string; kind: string }>;
-  } | void,
-): MessageReceipt {
-  return {
-    conversationId: (result?.threadId ?? conversationId) as ConversationId,
-    ...(result?.messageId ? { messageId: result.messageId } : {}),
-    ...(result?.parts ? { parts: result.parts } : {}),
-  };
-}
+import type { ConversationId, ChannelActivity, ChannelDirectMessaging } from "@rome-os/app-runtime";
 
 export function historyWindowHours(since?: Date): number {
   if (!since) return 24;
@@ -102,14 +42,6 @@ export function directoryPage<T>(
   };
 }
 
-export function inboundMediaFeature(adapter: {
-  saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]>;
-}): TalkInboundMedia {
-  return {
-    materialize: (message) => adapter.saveIncomingAttachments(normalizedFromInbound(message)),
-  };
-}
-
 /**
  * Direct messaging for a channel whose direct chat is addressed by the contact
  * themselves — WhatsApp, Telegram — where the account's own address already
@@ -120,7 +52,7 @@ export function inboundMediaFeature(adapter: {
  * implementation instead, opening or looking up the thread; that one is a
  * provider call and should be priced as one.
  */
-export function addressIsConversationFeature(): TalkDirectMessaging {
+export function addressIsConversationFeature(): ChannelDirectMessaging {
   return {
     async conversationFor(channelUserId: string) {
       const trimmed = channelUserId.trim();
@@ -129,23 +61,9 @@ export function addressIsConversationFeature(): TalkDirectMessaging {
   };
 }
 
-export function historyFeature(adapter: {
-  fetchHistory(conversationId: string | null, windowHours: number): Promise<NormalizedMessage[]>;
-}): TalkHistory {
-  return {
-    async query(input) {
-      const messages = await adapter.fetchHistory(
-        input.conversationId ?? null,
-        historyWindowHours(input.since),
-      );
-      return messages.slice(0, historyQueryLimit(input.limit)).map(toInboundMessage);
-    },
-  };
-}
-
 export function typingActivityFeature(adapter: {
   notifyTyping(conversationId: string): Promise<void>;
-}): TalkActivity {
+}): ChannelActivity {
   return {
     async begin(input) {
       await adapter.notifyTyping(input.conversationId);

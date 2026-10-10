@@ -1,0 +1,17 @@
+cases:
+  - name: E2E-01 Enable a proposed routine from Chat
+    tags:
+      - poc
+      - story
+      - routines
+      - shard-3
+    steps:
+      - app.open:
+          path: /chat/mock-chat-3
+      - aiAct: >-
+          Enable the visible "Scheduled routine" proposal by clicking its orange "Turn it on"
+          button once. Stop immediately after the click.
+      - aiAssert: >-
+          The routine proposal card shows a green "On" badge and the footer "Saved. Next time it
+          matches, Rome will run it within a minute. Manage it in Routines." There is no "Turn it
+          on" button anymore.

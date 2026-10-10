@@ -5,6 +5,7 @@ An agent is an LLM-backed runtime entity: a named configuration that sets a mode
 **Contracts:**
 
 - An agent definition declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`, and `main` is reserved for Rome Core. Its `actions` and `allowedSubagents` references use canonical `<app-id>:<local-name>` ids for both same-app and cross-app references.
+- An exact `actions` reference grants a public or explicit action. The `*` entry grants only public actions.
 - An agent can remain provider-agnostic by declaring `tier: large|medium|small`. The runtime maps the tier to an available provider and concrete model.
 - An agent whose behavior depends on a provider-specific capability may pin a provider. A provider-pinned tier resolves only on that provider and fails rather than falling back to another provider.
 - An agent that needs a specific model may declare `provider` with `modelId` instead of a tier. Rome requests that exact ID without tier mapping or automatic substitution. The provider and connected account must support the requested model.
@@ -66,4 +67,4 @@ provider's native structured-output API.
 
 ## Agent hierarchy
 
-Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (planning, quick tasks, read-only exploration). Coding work is not a subagent delegation — the main agent starts it through a coding [action](actions.md), so the work crosses the coding app's boundary. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.
+Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration). Coding work is not a subagent delegation — the main agent starts it through a coding [action](actions.md), so the work crosses the coding app's boundary. The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.

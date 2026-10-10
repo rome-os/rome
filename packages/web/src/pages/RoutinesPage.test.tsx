@@ -17,10 +17,6 @@ import type { Routine, RoutineRun } from "@/lib/routine-language";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -33,7 +29,13 @@ afterEach(() => {
 function scheduleRoutine(overrides: Partial<Routine> & Pick<Routine, "id" | "name">): Routine {
   return {
     enabled: true,
-    trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", rrule: "FREQ=DAILY" },
+    trigger: {
+      type: "schedule",
+      tzid: "UTC",
+      tzMode: "floating",
+      localTime: "09:00",
+      rrule: "FREQ=DAILY",
+    },
     actionName: "send_message",
     args: {},
     createdAt: new Date("2026-06-01T00:00:00Z").toISOString(),
@@ -76,6 +78,9 @@ function mockBackend(initial: {
   // Holds the action catalog response until resolved, so the in-flight window is
   // observable instead of instantaneous.
   actionsGate?: Promise<unknown>;
+  // Holds the POST /run response until resolved. The real endpoint answers only
+  // once the run finishes.
+  runGate?: Promise<unknown>;
 }) {
   const routines = initial.routines.map((r) => ({ ...r }));
   const runs = initial.runs ?? {};
@@ -120,6 +125,7 @@ function mockBackend(initial: {
     const runNowMatch = url.match(/^\/api\/routines\/([^/]+)\/run$/);
     if (runNowMatch && method === "POST") {
       if (unreachable.run) throw new TypeError("Failed to fetch");
+      if (initial.runGate) await initial.runGate;
       // Mirror the real backend: the run is recorded, so the next GET reflects
       // it as the routine's latest run (drives the status badge).
       const id = decodeURIComponent(runNowMatch[1]);
@@ -196,6 +202,7 @@ describe("RoutinesPage", () => {
           trigger: {
             type: "schedule",
             tzid: browserTzid,
+            tzMode: "floating",
             localTime: "09:00",
             rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
           },
@@ -219,7 +226,13 @@ describe("RoutinesPage", () => {
           actionName: "summon",
           args: { prompt: "scrape trending and email me" },
           enabled: false,
-          trigger: { type: "schedule", tzid: browserTzid, localTime: "08:00", rrule: "FREQ=DAILY" },
+          trigger: {
+            type: "schedule",
+            tzid: browserTzid,
+            tzMode: "floating",
+            localTime: "08:00",
+            rrule: "FREQ=DAILY",
+          },
         }),
       ],
     });
@@ -244,6 +257,7 @@ describe("RoutinesPage", () => {
           trigger: {
             type: "schedule",
             tzid: browserTzid,
+            tzMode: "floating",
             localTime: "00:00",
             rrule: "FREQ=HOURLY;INTERVAL=2",
           },
@@ -270,7 +284,7 @@ describe("RoutinesPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Whenever a new order comes in")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
   });
 
   it("keeps run state off the event card and navigates to its detail view on click", async () => {
@@ -281,7 +295,7 @@ describe("RoutinesPage", () => {
     renderPage();
 
     // The card itself carries no waiting/last-ran/run-count line.
-    expect(await screen.findByText("Whenever a new order comes in")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
     expect(screen.queryByText(/Waiting/)).toBeNull();
     expect(screen.queryByText(/hasn't run yet/)).toBeNull();
 
@@ -349,6 +363,38 @@ describe("RoutinesPage", () => {
       const run = calls.find((c) => c.url.endsWith("/api/routines/s1/run") && c.method === "POST");
       expect(run).toBeTruthy();
     });
+  });
+
+  it("shows a run started from the menu and blocks a second one while it is pending", async () => {
+    let finishRun!: () => void;
+    const calls = mockBackend({
+      routines: [scheduleRoutine({ id: "s1", name: "Morning tidy" })],
+      runGate: new Promise<void>((resolve) => {
+        finishRun = resolve;
+      }),
+    });
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Routine options" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Run now" }));
+
+    // The inline button carries the spinner, and stays on phones while it does.
+    const inline = await screen.findByRole("button", { name: "Running Morning tidy" });
+    expect(inline.className).not.toContain("max-sm:hidden");
+
+    await user.click(screen.getByRole("button", { name: "Routine options" }));
+    const menuRun = await screen.findByRole("menuitem", { name: "Run now" });
+    expect(menuRun.getAttribute("aria-disabled")).toBe("true");
+    await user.click(menuRun);
+    await user.keyboard("{Escape}");
+
+    finishRun();
+    expect(await screen.findByRole("button", { name: "Run Morning tidy now" })).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.url.endsWith("/api/routines/s1/run") && c.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
   });
 
   it("a running routine shows Stop, and stopping it restores Run now", async () => {
@@ -442,7 +488,13 @@ describe("RoutinesPage", () => {
           id: "s1",
           name: "Image test",
           enabled: false,
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-29" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-29",
+          },
           lastFiredAt: "2026-07-29T09:00:00Z",
           nextRunAt: null,
           lastRun: { status: "error", firedAt: "2026-07-29T09:00:00Z" },
@@ -489,7 +541,13 @@ describe("RoutinesPage", () => {
           id: "s1",
           name: "Ship the report",
           enabled: false,
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-20" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-20",
+          },
           lastFiredAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
           nextRunAt: null,
           lastRun: {
@@ -525,7 +583,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s1",
           name: "Ship the report",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2027-01-01" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2027-01-01",
+          },
         }),
       ],
     });
@@ -545,7 +609,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s1",
           name: "Long export",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-23" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-23",
+          },
           lastFiredAt: new Date().toISOString(),
           nextRunAt: null,
           lastRun: { status: "running", firedAt: new Date().toISOString() },
@@ -785,7 +855,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s2",
           name: "Ship the report",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-15" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-15",
+          },
           nextRunAt: midMonth.toISOString(),
         }),
       ],

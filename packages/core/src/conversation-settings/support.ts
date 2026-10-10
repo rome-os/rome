@@ -1,16 +1,7 @@
-import type {
-  ConversationDescriptor,
-  ConversationSettingField,
-  ConversationSettings,
-} from "@rome-os/app-runtime";
+import type { ConversationSettingField, ConversationSettings } from "@rome-os/app-runtime";
 import { DEFAULT_PROVIDER_SESSION_RESET_POLICY } from "./reset-policy.js";
 
-export interface ConversationSettingsSupport {
-  fields: readonly ConversationSettingField[];
-  defaults(context: ConversationDescriptor): ConversationSettings;
-}
-
-const defaults = (): ConversationSettings => ({
+export const defaultConversationSettings = (): ConversationSettings => ({
   enabled: true,
   activation: {
     mode: "mention",
@@ -22,50 +13,33 @@ const defaults = (): ConversationSettings => ({
   session: { reset: structuredClone(DEFAULT_PROVIDER_SESSION_RESET_POLICY) },
 });
 
-export const CORE_CONVERSATION_SETTING_FIELDS = ["session.reset"] as const;
+/** Fields every provider supports. Direct messages own only these. */
+export const CORE_CONVERSATION_SETTING_FIELDS: readonly ConversationSettingField[] = [
+  "session.reset",
+];
 
-export const CORE_CONVERSATION_SETTINGS_SUPPORT: ConversationSettingsSupport = {
-  fields: CORE_CONVERSATION_SETTING_FIELDS,
-  defaults,
-};
-
-export const CONVERSATION_SETTINGS_SUPPORT: ReadonlyMap<string, ConversationSettingsSupport> =
-  new Map([
+/** The fields each provider enforces. Unlisted providers get the core fields. */
+export const CONVERSATION_SETTING_FIELDS_BY_SERVICE: ReadonlyMap<
+  string,
+  readonly ConversationSettingField[]
+> = new Map<string, readonly ConversationSettingField[]>([
+  [
+    "discord",
     [
-      "discord",
-      {
-        fields: [
-          "enabled",
-          "activation.mode",
-          "activation.botMessages",
-          "activation.whenOthersMentioned",
-          "replies.placement",
-          "routing.agentName",
-          "session.reset",
-        ],
-        defaults,
-      },
+      "enabled",
+      "activation.mode",
+      "activation.botMessages",
+      "activation.whenOthersMentioned",
+      "replies.placement",
+      "routing.agentName",
+      "session.reset",
     ],
-    [
-      "feishu",
-      {
-        fields: [
-          "enabled",
-          "activation.mode",
-          "replies.placement",
-          "routing.agentName",
-          "session.reset",
-        ],
-        defaults,
-      },
-    ],
-    [
-      "wechat",
-      {
-        // Admission and agent routing are enforced by the shared inbox hook,
-        // independent of provider-native group policy or reply placement.
-        fields: ["enabled", "routing.agentName", "session.reset"],
-        defaults,
-      },
-    ],
-  ] satisfies Array<[string, ConversationSettingsSupport]>);
+  ],
+  [
+    "feishu",
+    ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
+  ],
+  // Admission and agent routing are enforced by the shared inbox hook,
+  // independent of provider-native group policy or reply placement.
+  ["wechat", ["enabled", "routing.agentName", "session.reset"]],
+]);

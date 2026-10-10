@@ -24,7 +24,7 @@ const WIDTH_KEY = "rome:tool-chat-ratio";
 const DEFAULT_RATIO = 0.4;
 const MIN_PANE_WIDTH = 360;
 const SEPARATOR_WIDTH = 1;
-const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
+export const COMPACT_WIDTH = MIN_PANE_WIDTH * 2 + SEPARATOR_WIDTH;
 
 function readRatio() {
   try {
@@ -293,7 +293,7 @@ export function ToolWorkspace({
               <EmptyStateTitle>{t("chat.emptyAppsTitle")}</EmptyStateTitle>
               <EmptyStateDescription>{t("chat.emptyAppsDescription")}</EmptyStateDescription>
               <EmptyStateAction>
-                <WidgetPicker onSelect={addWidget}>
+                <WidgetPicker onSelect={addWidget} placements={placements}>
                   <Button data-coach="add-widget" variant="outline">
                     <Plus data-icon="inline-start" />
                     {t("chat.add")}

@@ -1,21 +1,37 @@
 import "./styles.css";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { fetchAppApi, type RomeAppBootstrap } from "@rome-os/app-web-sdk";
-import { RefreshCw, Sparkles } from "lucide-react";
-// Primitives are imported from the published component kit, never copied into
-// this tree: `pnpm up @rome-os/ui` is the whole upgrade path for fixes and new
-// components. Copy a shadcn recipe into `components/ui/` only for a primitive
-// the kit does not publish.
+import { CircleAlert, LayoutTemplate, TriangleAlert } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@rome-os/ui/alert";
 import { Button } from "@rome-os/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@rome-os/ui/card";
+  FormRow,
+  FormRowControl,
+  FormRowDescription,
+  FormRowHeading,
+  FormRowIcon,
+  FormRowLabel,
+  FormRows,
+} from "@rome-os/ui/layout-form";
+import { ListCollection } from "@rome-os/ui/layout-list";
+import {
+  Measure,
+  Page,
+  PageActions,
+  PageDescription,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+  Section,
+  SectionDescription,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+} from "@rome-os/ui/page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@rome-os/ui/select";
+import { Spinner } from "@rome-os/ui/spinner";
+import { Table, TableBody, TableCell, TableHead, TableRow } from "@rome-os/ui/table";
 
 interface AppStatus {
   appId: string;
@@ -23,100 +39,145 @@ interface AppStatus {
   status: string;
 }
 
-export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBootstrap }) {
-  const [status, setStatus] = useState<AppStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [defaultView, setDefaultView] = useState("overview");
+// Every query stays current without the guardian asking: it refetches on an
+// interval while the page is visible and again when the tab regains focus. A
+// failed refetch keeps the last good data, so the UI can show it with a warning.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
 
-  async function loadStatus(): Promise<void> {
-    setRefreshing(true);
-    setError(null);
-    try {
-      const response = await fetchAppApi("");
-      // Query params are supported, e.g. fetchAppApi("repos?limit=50")
-      const data = (await response.json()) as AppStatus;
-      setStatus(data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRefreshing(false);
-    }
+async function fetchStatus(): Promise<AppStatus> {
+  const response = await fetchAppApi("status");
+  if (!response.ok) {
+    throw new Error(`Status request failed (${response.status})`);
   }
+  return (await response.json()) as AppStatus;
+}
 
-  useEffect(() => {
-    void loadStatus();
-  }, []);
+export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBootstrap }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AppPage />
+    </QueryClientProvider>
+  );
+}
+
+function AppPage() {
+  const [defaultView, setDefaultView] = useState("overview");
+  const { data: status, error: queryError } = useQuery({
+    queryKey: ["status"],
+    queryFn: fetchStatus,
+  });
+  const error = queryError?.message ?? null;
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="flex items-center gap-3">
-        <Sparkles className="text-primary" />
-        <h1 className="text-3xl font-semibold tracking-tight">__APP_NAME__</h1>
-      </div>
-      <p className="mt-2 text-muted-foreground">
-        Starter UI for your new Rome app. Tailwind v4 and the Rome component kit are wired up —
-        replace this screen with something useful.
-      </p>
-      {/* Visitor-facing app (public link + Rome Cloud sign-in)? One line adds
-          the whole identity control — the signed-in user's avatar icon, the
-          owner icon, or a sign-in button — sized for the top-right corner of
-          the header row above; the server-side counterpart is
-          `requireVisitor(request)` in src/api/index.ts:
-
-          import { CallerBadge } from "@rome-os/app-web-sdk";
-          <CallerBadge className="ml-auto" />
-      */}
-
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle>App status</CardTitle>
-          <CardDescription>
-            Live read from <code>GET /api/apps/__APP_ID__/</code>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-6 grid gap-2 sm:max-w-xs">
-            <label className="text-sm font-medium" htmlFor="default-view">
-              Default view
-            </label>
-            <Select value={defaultView} onValueChange={setDefaultView}>
-              {/* Kit controls size to their content; widen from the call site. */}
-              <SelectTrigger id="default-view" className="w-full">
-                <SelectValue placeholder="Choose a view" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="overview">Overview</SelectItem>
-                <SelectItem value="activity">Activity</SelectItem>
-                <SelectItem value="settings">Settings</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {error ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
-              {error}
-            </div>
-          ) : status ? (
-            <pre className="overflow-x-auto rounded-md border bg-muted p-4 text-sm">
-              {JSON.stringify(status, null, 2)}
-            </pre>
-          ) : (
-            <p className="text-sm text-muted-foreground">Loading status…</p>
-          )}
-        </CardContent>
-        <CardFooter className="gap-2">
-          <Button onClick={() => void loadStatus()} disabled={refreshing}>
-            <RefreshCw className={refreshing ? "animate-spin" : undefined} />
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </Button>
+    <Page className="min-h-full bg-[var(--app-canvas)]">
+      <PageHeader>
+        <PageHeading>
+          <PageTitle>__APP_NAME__</PageTitle>
+          <PageDescription>
+            Starter UI for your new Rome app, built with the shared layout system.
+          </PageDescription>
+        </PageHeading>
+        <PageActions>
           <Button variant="outline" asChild>
             <a href="https://www.npmjs.com/package/@rome-os/ui" target="_blank" rel="noreferrer">
               Component kit
             </a>
           </Button>
-        </CardFooter>
-      </Card>
-    </main>
+        </PageActions>
+      </PageHeader>
+
+      <Measure className="flex flex-col gap-6">
+        <Section>
+          <SectionHeader>
+            <SectionHeading>
+              <SectionTitle>Display</SectionTitle>
+              <SectionDescription>Choose the view this app should open with.</SectionDescription>
+            </SectionHeading>
+          </SectionHeader>
+
+          <FormRows>
+            <FormRow>
+              <FormRowIcon>
+                <LayoutTemplate />
+              </FormRowIcon>
+              <FormRowHeading>
+                <FormRowLabel htmlFor="default-view">Default view</FormRowLabel>
+                <FormRowDescription>Controls the starting section of the app.</FormRowDescription>
+              </FormRowHeading>
+              <FormRowControl>
+                <Select value={defaultView} onValueChange={setDefaultView}>
+                  <SelectTrigger id="default-view" className="w-36">
+                    <SelectValue placeholder="Choose a view" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="overview">Overview</SelectItem>
+                    <SelectItem value="activity">Activity</SelectItem>
+                    <SelectItem value="settings">Settings</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormRowControl>
+            </FormRow>
+          </FormRows>
+        </Section>
+
+        <Section>
+          <SectionHeader>
+            <SectionHeading>
+              <SectionTitle>App status</SectionTitle>
+              <SectionDescription>
+                Live read from <code>GET /api/apps/__APP_ID__/status</code>.
+              </SectionDescription>
+            </SectionHeading>
+          </SectionHeader>
+
+          {error && status ? (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>Updates are failing</AlertTitle>
+              <AlertDescription>Showing the last loaded status. {error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {error && !status ? (
+            <Alert variant="destructive">
+              <CircleAlert />
+              <AlertTitle>Status unavailable</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : status ? (
+            <ListCollection className="rounded-12 border border-border bg-surface">
+              <Table>
+                <TableBody>
+                  <TableRow>
+                    <TableHead scope="row">App ID</TableHead>
+                    <TableCell>{status.appId}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableHead scope="row">Version</TableHead>
+                    <TableCell>{status.version}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableHead scope="row">Status</TableHead>
+                    <TableCell>{status.status}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </ListCollection>
+          ) : (
+            <div className="flex min-h-24 items-center justify-center gap-2 rounded-12 border border-border bg-surface text-ui text-muted-foreground">
+              <Spinner size="sm" label="Loading status" />
+              Loading status…
+            </div>
+          )}
+        </Section>
+      </Measure>
+    </Page>
   );
 }

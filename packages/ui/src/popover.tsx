@@ -58,7 +58,10 @@ function PopoverDescription({ className, ...props }: React.ComponentProps<"p">) 
   );
 }
 
+const PopoverArrow = PopoverPrimitive.Arrow;
+
 export {
+  PopoverArrow,
   Popover,
   PopoverAnchor,
   PopoverContent,

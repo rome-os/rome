@@ -99,16 +99,39 @@ describe("/api/auth/visitor dashboard access", () => {
     });
   });
 
-  it("rejects dashboard visitor callback when the email is not allowed", async () => {
+  it.each([
+    "lin@example.com",
+    "Lin+Work@Example.com",
+  ])("identifies the rejected dashboard account %s without granting access", async (email) => {
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
-    const app = await buildRoute(state, { fetchImpl: mockAccountSession("lin@example.com") });
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession(email) });
     const nonce = await startDashboardLogin(app);
 
-    const res = await app.request(`/api/auth/visitor/callback?state=${nonce}&code=abc`);
+    const res = await app.request(
+      `/api/auth/visitor/callback?state=${nonce}&code=abc&email=ada%40example.com`,
+    );
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/login?visitor=error&reason=forbidden");
+    const target = new URL(res.headers.get("location")!, "https://rome.example.com");
+    expect(`${target.pathname}${target.search}`).toBe("/login?visitor=error&reason=forbidden");
+    expect(new URLSearchParams(target.hash.slice(1)).get("email")).toBe(email.toLowerCase());
+    expect(target.toString()).not.toContain("ada");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("does not include an account when the account session is malformed", async () => {
+    const state = new DashboardAccessState();
+    state.setCloudEmailAccess(["ada@example.com"]);
+    const app = await buildRoute(state, { fetchImpl: mockAccountSession("") });
+    const nonce = await startDashboardLogin(app);
+
+    const res = await app.request(
+      `/api/auth/visitor/callback?state=${nonce}&code=abc&email=ada%40example.com`,
+    );
+
+    expect(res.headers.get("location")).toBe("/login?visitor=error&reason=malformed");
     expect(res.headers.get("set-cookie")).toBeNull();
   });
 });

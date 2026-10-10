@@ -6,6 +6,8 @@ const execFileAsync = promisify(execFile);
 const baseUrl = process.env.ROME_NOVNC_BASE_URL ?? "http://main.rome.localhost:3000";
 const chromeContainer = process.env.ROME_NOVNC_CONTAINER ?? "main-chrome-1";
 const restartSidecar = process.env.ROME_NOVNC_RESTART_SIDECAR !== "0";
+const guardianUserId = process.env.ROME_NOVNC_USERID ?? "dev";
+const guardianPassword = process.env.ROME_NOVNC_PASSWORD ?? "rome-dev-default";
 const longUnicodePayload = `${"春夏秋冬".repeat(10)}${"🌱☀️🍂❄️".repeat(10)}`;
 
 const remoteProbeHtml = `<!doctype html>
@@ -98,6 +100,14 @@ test.beforeAll(async ({ browser }) => {
   remoteTargetId = await createRemoteProbeTab();
 
   context = await browser.newContext();
+  const login = await context.request.post(`${baseUrl}/api/auth/login`, {
+    data: { userId: guardianUserId, password: guardianPassword },
+  });
+  if (!login.ok()) {
+    throw new Error(
+      `Guardian login failed (${login.status()}); enroll this instance and set ROME_NOVNC_USERID and ROME_NOVNC_PASSWORD`,
+    );
+  }
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: new URL(baseUrl).origin,
   });

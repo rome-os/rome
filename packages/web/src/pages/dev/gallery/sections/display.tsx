@@ -163,7 +163,7 @@ export function DisplaySection() {
           <div className="grid gap-4 sm:grid-cols-2">
             <section className="rounded-12 border border-border bg-surface p-4">
               <h3 className="text-section text-foreground">Allowed accounts</h3>
-              <p className="mt-1 text-body text-muted-foreground">
+              <p className="mt-1 text-ui text-muted-foreground">
                 Google accounts that may sign in from the cloud.
               </p>
               <p className="mt-4 text-ui text-muted-foreground">2 accounts</p>
@@ -505,13 +505,13 @@ export function DisplaySection() {
           <Row>
             <Item label="sm — replacing the icon">
               <Button size="sm" disabled>
-                <Spinner size="sm" />
+                <Spinner data-icon="inline-start" size="sm" />
                 Installing
               </Button>
             </Item>
             <Item label="md — destructive tone">
               <Button variant="destructive" disabled>
-                <Spinner />
+                <Spinner data-icon="inline-start" />
                 Deleting
               </Button>
             </Item>

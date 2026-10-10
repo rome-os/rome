@@ -16,6 +16,12 @@ function cssFiles(directory) {
   while (queue.length > 0) {
     const current = queue.pop();
     for (const entry of readdirSync(current, { withFileTypes: true })) {
+      // Recorded app bundles own their Shadow DOM styles, not dashboard tokens.
+      if (
+        relative(directory, join(current, entry.name)) === join("mock", "public", "recorded-apps")
+      ) {
+        continue;
+      }
       if (entry.isDirectory() && !["dist", "dist-mock", "node_modules"].includes(entry.name)) {
         queue.push(join(current, entry.name));
       } else if (entry.isFile() && entry.name.endsWith(".css")) {
@@ -145,4 +151,16 @@ test("a generated web declaration participates in the ownership check", async (t
       return true;
     },
   );
+});
+
+test("recorded app CSS does not claim dashboard token ownership", async (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "rome-token-recordings-"));
+  const packages = { web: join(fixtureRoot, "web"), ui: join(fixtureRoot, "ui") };
+  const recordedApp = join(packages.web, "mock", "public", "recorded-apps", "sample");
+  mkdirSync(recordedApp, { recursive: true });
+  mkdirSync(packages.ui, { recursive: true });
+  writeFileSync(join(recordedApp, "index.css"), ":root { --radius-sm: 6px; }");
+  writeFileSync(join(packages.ui, "styles.css"), ":root { --radius-sm: 6px; }");
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  await assertDisjointDeclarations(packages, fixtureRoot);
 });

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { NormalizedMessage } from "@rome-os/app-runtime";
+import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
 import { EmailAdapter, type EmailInboxCoordinates } from "./email.js";
 import type {
   MailProvider,
@@ -106,8 +106,8 @@ describe("EmailAdapter.ingestInbound", () => {
   it("dispatches an authenticated guardian email on the trusted identity", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -115,18 +115,28 @@ describe("EmailAdapter.ingestInbound", () => {
     const result = await adapter.ingestInbound(raw, sign(raw));
 
     expect(result.status).toBe("dispatched");
-    expect(received).toHaveLength(1);
-    expect(received[0].channel).toBe("email");
-    expect(received[0].channelUserId).toBe(GUARDIAN);
-    expect(received[0].text).toBe("hello from the full body");
-    expect(received[0].threadId).toBe("t1");
+    expect(received).toEqual([
+      {
+        channel: "email",
+        direction: "inbound",
+        messageId: "msg_1",
+        conversationId: "t1",
+        senderId: GUARDIAN,
+        senderDisplayName: "Guardian",
+        text: "hello from the full body",
+        attachments: [],
+        timestamp: new Date(0),
+        thread: { kind: "dm", name: "Hi" },
+        raw: buildEvent(),
+      },
+    ]);
   });
 
   it("rejects a deposit with a bad HMAC and never dispatches", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -141,8 +151,8 @@ describe("EmailAdapter.ingestInbound", () => {
   it("routes a spoofed guardian (From matches but unauthenticated) as untrusted", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -156,14 +166,14 @@ describe("EmailAdapter.ingestInbound", () => {
     expect(result.status).toBe("dispatched");
     expect(received).toHaveLength(1);
     // Namespaced so it can never match the preset guardian channel mapping.
-    expect(received[0].channelUserId).toBe(`unauthenticated:${GUARDIAN}`);
+    expect(received[0].senderId).toBe(`unauthenticated:${GUARDIAN}`);
   });
 
   it("dispatches an unknown authenticated sender under their own address", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -172,14 +182,14 @@ describe("EmailAdapter.ingestInbound", () => {
     const result = await adapter.ingestInbound(raw, sign(raw));
 
     expect(result.status).toBe("dispatched");
-    expect(received[0].channelUserId).toBe("stranger@elsewhere.com");
+    expect(received[0].senderId).toBe("stranger@elsewhere.com");
   });
 
   it("namespaces a non-guardian sender that fails authentication so it can't match a person mapping", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -195,14 +205,14 @@ describe("EmailAdapter.ingestInbound", () => {
     const result = await adapter.ingestInbound(raw, sign(raw));
 
     expect(result.status).toBe("dispatched");
-    expect(received[0].channelUserId).toBe("unauthenticated:contact@elsewhere.com");
+    expect(received[0].senderId).toBe("unauthenticated:contact@elsewhere.com");
   });
 
   it("dedupes an at-least-once redelivery of the same providerMessageId", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -220,16 +230,16 @@ describe("EmailAdapter.ingestInbound", () => {
   });
 });
 
-describe("EmailAdapter.sendMessage", () => {
+describe("EmailAdapter.send", () => {
   it("replies on-thread after an inbound (uses inReplyToMessageId)", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
-    adapter.onMessage(async () => {});
+    adapter.onInbound(async () => {});
 
     const raw = JSON.stringify(buildEvent());
     await adapter.ingestInbound(raw, sign(raw));
 
-    await adapter.sendMessage(GUARDIAN, "t1", { text: "my reply" });
+    const receipt = await adapter.send("t1" as ConversationId, { text: "my reply" });
 
     expect(provider.sent).toHaveLength(1);
     // Multipart: markdown text + rendered HTML.
@@ -237,13 +247,16 @@ describe("EmailAdapter.sendMessage", () => {
     expect(provider.sent[0].text).toBe("my reply");
     expect(provider.sent[0].html).toContain("my reply");
     expect(provider.sent[0].to).toBeUndefined();
+    // The provider's thread id names the conversation the email went out in.
+    expect(receipt).toEqual({ conversationId: "t_out", messageId: "m_out" });
   });
 
   it("starts a fresh email when the thread is unknown", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.sendMessage("zoolsher@gmail.com", "new-thread", { text: "cold open" });
+    // An unseen conversation id is read as the recipient's address.
+    await adapter.send("zoolsher@gmail.com" as ConversationId, { text: "cold open" });
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].to).toBe("zoolsher@gmail.com");
@@ -270,7 +283,7 @@ describe("EmailAdapter.sendMessage", () => {
     });
     await adapter.start();
 
-    await adapter.sendMessage("ignored", "", {
+    await adapter.send("" as ConversationId, {
       kind: "email",
       text: "**hi**",
       to: ["guardian", "Other <other@x.com>"],
@@ -292,7 +305,7 @@ describe("EmailAdapter.sendMessage", () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.sendMessage("someone@x.com", "t-restarted", {
+    await adapter.send("t-restarted" as ConversationId, {
       kind: "email",
       text: "after restart",
       inReplyToMessageId: "msg_persisted",
@@ -307,7 +320,7 @@ describe("EmailAdapter.sendMessage", () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await adapter.sendMessage("x", "", {
+    await adapter.send("" as ConversationId, {
       kind: "email",
       to: "report@x.com",
       subject: "Report",
@@ -318,6 +331,16 @@ describe("EmailAdapter.sendMessage", () => {
     expect(provider.sent[0].html).toContain("Safe");
     expect(provider.sent[0].html).not.toContain("<script");
     expect(provider.sent[0].text).toContain("Safe");
+  });
+
+  it("receipts the conversation it was asked for when nothing is sent", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    const receipt = await adapter.send("t-empty" as ConversationId, { text: "   " });
+
+    expect(provider.sent).toHaveLength(0);
+    expect(receipt).toEqual({ conversationId: "t-empty" });
   });
 });
 
@@ -351,8 +374,8 @@ describe("EmailAdapter inbound attachments", () => {
       })),
     });
     const adapter = makeAdapter(provider);
-    const received: NormalizedMessage[] = [];
-    adapter.onMessage(async (m) => {
+    const received: ChannelMessage[] = [];
+    adapter.onInbound(async (m) => {
       received.push(m);
     });
 
@@ -373,8 +396,30 @@ describe("EmailAdapter inbound attachments", () => {
     expect(provider.getAttachment).toHaveBeenCalledWith("msg_1", "att_1");
     expect(fetchMock).toHaveBeenCalledWith("https://files.example/presigned", expect.anything());
     expect(saved[0].localPath).toBeTruthy();
+    // Saved under the same channel/conversation/message path as before.
+    expect(saved[0].localPath).toContain(join("channel-attachments", "email", "t1", "msg_1"));
 
     rs.unstubAllGlobals();
+  });
+
+  it("returns the attachments unchanged for a message it did not ingest", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+    const attachments = [{ type: "document" as const, fileName: "doc.pdf" }];
+
+    const saved = await adapter.saveIncomingAttachments({
+      channel: "email",
+      direction: "inbound",
+      messageId: "msg_unknown",
+      conversationId: "t1" as ConversationId,
+      senderId: GUARDIAN,
+      text: "",
+      attachments,
+      timestamp: new Date(0),
+    });
+
+    expect(saved).toBe(attachments);
+    expect(provider.getAttachment).not.toHaveBeenCalled();
   });
 });
 
@@ -555,10 +600,45 @@ describe("EmailAdapter.fetchHistory", () => {
       Date.now() - 24 * 60 * 60 * 1000 + 1000,
     );
     // Body hydrated per message; oldest (m1) first.
-    expect(messages.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(messages.map((m) => m.messageId)).toEqual(["m1", "m2"]);
     expect(messages[0].text).toBe("body-m1");
-    expect(messages[0].displayName).toBe("Alice");
+    expect(messages[0].senderDisplayName).toBe("Alice");
     expect(provider.getMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("recognises its own sends however the inbox address is written", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [
+          listItem({ providerMessageId: "mine", labels: ["sent"], from: "slug@mail.romeos.cc" }),
+          listItem({ providerMessageId: "theirs", receivedAt: new Date(2000).toISOString() }),
+        ],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    // The configured address in display-name form, with capitals.
+    const adapter = makeAdapter(provider, { address: "Rome <Slug@Mail.RomeOS.cc>" });
+
+    const messages = await adapter.fetchHistory(null, 24);
+
+    expect(messages.map((m) => [m.messageId, m.direction])).toEqual([
+      ["mine", "outbound"],
+      ["theirs", "inbound"],
+    ]);
+  });
+
+  it("counts a line labelled sent as its own even with no address to match", async () => {
+    const provider = makeProvider({
+      listMessages: rs.fn(async () => ({
+        messages: [listItem({ providerMessageId: "sent", labels: ["sent"], from: "" })],
+      })),
+      getMessage: rs.fn(async (id: string) => fullMessage(id, `body-${id}`)),
+    });
+    const adapter = makeAdapter(provider, { address: "" });
+
+    const [line] = await adapter.fetchHistory(null, 24);
+
+    expect(line?.direction).toBe("outbound");
   });
 
   it("filters to a single thread when threadId is given", async () => {
@@ -579,7 +659,7 @@ describe("EmailAdapter.fetchHistory", () => {
 
     const messages = await adapter.fetchHistory("tA", 24);
 
-    expect(messages.map((m) => m.id)).toEqual(["m1"]);
+    expect(messages.map((m) => m.messageId)).toEqual(["m1"]);
     expect(provider.getMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -614,7 +694,7 @@ describe("EmailAdapter.fetchHistory", () => {
 
     const messages = await adapter.fetchHistory("tWanted", 24);
 
-    expect(messages.map((m) => m.id)).toEqual(["wanted"]);
+    expect(messages.map((m) => m.messageId)).toEqual(["wanted"]);
     // Only the one match is hydrated; the 250 noise messages never are.
     expect(provider.getMessage).toHaveBeenCalledTimes(1);
   });
@@ -664,7 +744,11 @@ describe("EmailAdapter.fetchHistory", () => {
     await adapter.fetchHistory(null, 24);
     // fetchHistory must not have recorded a reply target for tA — so a send to
     // that thread starts a fresh email (with `to`) rather than an in-thread reply.
-    await adapter.sendMessage("alice@example.com", "tA", { text: "hello" });
+    await adapter.send("tA" as ConversationId, {
+      kind: "email",
+      to: "alice@example.com",
+      text: "hello",
+    });
 
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0].inReplyToMessageId).toBeUndefined();
@@ -708,12 +792,12 @@ describe("EmailAdapter.fetchHistory", () => {
 
     const messages = await adapter.fetchHistory("tA", 24);
 
-    expect(messages.map((m) => m.id)).toEqual(["in", "out"]);
+    expect(messages.map((m) => m.messageId)).toEqual(["in", "out"]);
     // Inbound → counterparty; outbound → Rome's own address.
-    expect(messages[0].channelUserId).toBe("alice@example.com");
-    expect(messages[0].displayName).toBe("Alice");
-    expect(messages[1].channelUserId).toBe("slug@mail.romeos.cc");
-    expect(messages[1].displayName).toBe("slug@mail.romeos.cc");
+    expect(messages[0].senderId).toBe("alice@example.com");
+    expect(messages[0].senderDisplayName).toBe("Alice");
+    expect(messages[1].senderId).toBe("slug@mail.romeos.cc");
+    expect(messages[1].senderDisplayName).toBe("slug@mail.romeos.cc");
   });
 
   it("clamps an invalid windowHours to the default look-back", async () => {

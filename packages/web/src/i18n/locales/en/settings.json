@@ -14,7 +14,8 @@
     "Trust": "Trust",
     "Channels": "Channels",
     "AI Tools": "AI Tools",
-    "Advanced": "Advanced"
+    "Advanced": "Advanced",
+    "Devices": "Devices"
   },
   "appearance": {
     "title": "Appearance",
@@ -110,6 +111,15 @@
             "reply": "Reply when people message you on WeChat",
             "start": "Start a task when a new message arrives"
           }
+        },
+        "session": {
+          "title": "Your account",
+          "bullets": {
+            "read": "Read your own WeChat chats, groups and message history",
+            "recap": "Recap what you missed while you were away",
+            "search": "Find what someone told you, without scrolling for it"
+          },
+          "privacyNote": "Read-only — Rome never sends WeChat messages. WeChat runs on your own instance and your chats are read there; they never leave it. Disconnect anytime."
         }
       },
       "linkedin": {
@@ -149,6 +159,15 @@
           "bullets": {
             "reply": "Email your agent and it replies",
             "start": "Start a task when a new email arrives"
+          }
+        }
+      },
+      "agents": {
+        "bot": {
+          "title": "Messages with your other agents",
+          "bullets": {
+            "reply": "Your dots message your agent through Rome Cloud",
+            "start": "Your agent messages a dot when something needs its attention"
           }
         }
       },
@@ -238,11 +257,30 @@
       "consent": "Any app installed on your Rome will be able to read this.",
       "save": "Save for all apps",
       "saving": "Saving…",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "inputMethod": "How to add keys",
+      "singleKey": "Single key",
+      "pasteEnv": "Paste .env",
+      "envContent": ".env content",
+      "envHint": "Paste KEY=value lines, including comments and quoted values. Matching keys are replaced. Variable references stay literal.",
+      "envEmpty": "Paste at least one KEY=value entry",
+      "envError": "Line {{line}}: {{reason}}",
+      "envErrors": {
+        "assignment": "Expected KEY=value",
+        "quote": "Unclosed quote or unexpected text after a quoted value",
+        "duplicate": "Duplicate key name",
+        "emptyValue": "Enter a non-empty value",
+        "longValue": "Value exceeds 32,768 characters",
+        "name": "Invalid key name"
+      },
+      "batchFailed": "{{saved}} saved, {{count}} failed. Only failed entries remain in the form. Retry to save them."
     },
     "saved": "Saved. Apps can now read {{name}}.",
     "savedOverridden": "Saved, but a server setting with the same name takes precedence — the value you entered is not in use.",
-    "removed": "Removed {{name}}."
+    "removed": "Removed {{name}}.",
+    "batchSaved_one": "Saved {{count}} key for all apps.",
+    "batchSaved_other": "Saved {{count}} keys for all apps.",
+    "batchOverridden": "Some saved keys are overridden by server settings. Their entered values are not in use."
   },
   "trust": {
     "title": "Bond Level Rules",
@@ -406,6 +444,10 @@
     "feishu": {
       "title": "Feishu",
       "guardianLinked": "Your Feishu account is linked as guardian."
+    },
+    "wechatUser": {
+      "fallbackName": "WeChat account",
+      "disconnectFailedFallback": "Failed to disconnect the WeChat account."
     }
   },
   "favors": {
@@ -505,6 +547,19 @@
     "refresh": "Refresh",
     "refreshing": "Refreshing…",
     "refreshFailed": "Could not refresh AI tools. Please try again.",
+    "romeCredits": {
+      "name": "Rome credits",
+      "status": {
+        "inUse": "In use",
+        "ready": "Ready",
+        "standby": "Standby",
+        "usedUp": "Used up",
+        "usedUpWithClaude": "Used up",
+        "paused": "Paused"
+      },
+      "ofGranted": "of {{amount}}",
+      "meterLabel": "Rome credits left"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"
@@ -628,6 +683,22 @@
       "description": "Only applies when Claude is available.",
       "toggleLabel": "Route large models to Fable"
     },
+    "tierModelMappings": {
+      "title": "Model ID mappings",
+      "description": "Set the model ID each tier uses for a provider. Leave an ID blank to keep its default.",
+      "openai": {
+        "large": "Codex large model ID",
+        "medium": "Codex medium model ID",
+        "small": "Codex small model ID"
+      },
+      "anthropic": {
+        "large": "Claude large model ID",
+        "medium": "Claude medium model ID",
+        "small": "Claude small model ID"
+      },
+      "fableNote": "A Claude large mapping replaces Fable's model ID while Fable still prefers Claude for large tiers.",
+      "save": "Save mappings"
+    },
     "modelSelector": {
       "title": "Model selector",
       "toggleLabel": "Enable model selector in chat"
@@ -733,6 +804,14 @@
       "lastSeen": "Last seen",
       "notReported": "Not reported",
       "installExtension": "Install OpenCLI extension"
+    },
+    "feedback": {
+      "title": "Feedback",
+      "agentReports": {
+        "title": "Agent platform reports",
+        "description": "Sends the agent’s description of Rome platform problems to the Rome team, with the same instance diagnostics as the Feedback dialog. Does not affect feedback you send yourself.",
+        "toggleLabel": "Allow agent reports"
+      }
     }
   },
   "system": {
@@ -765,16 +844,64 @@
     "restartTimeoutBody": "Rome hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud."
   },
-  "sentinel": {
-    "title": "Sentinel Settings",
-    "intervalLabel": "Review interval (minutes)",
-    "intervalHelp": "How often the guardian is reminded to review sentinel log entries."
-  },
   "easterEgg": {
     "closeLabel": "Close advanced easter egg",
     "console": "Console",
     "artLabel": "Advanced easter egg",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "Devices",
+    "description": "Devices linked to your Rome account. Connection checks refresh every 15 seconds.",
+    "refresh": "Refresh",
+    "loading": "Checking device connections…",
+    "loadFailed": "Failed to load devices",
+    "connectionLabel": "Rome connection",
+    "connectedCount_one": "{{count}} connected device",
+    "connectedCount_other": "{{count}} connected devices",
+    "connectedAtLeast_one": "At least {{count}} connected device",
+    "connectedAtLeast_other": "At least {{count}} connected devices",
+    "totalCount_one": "{{count}} authorized device",
+    "totalCount_other": "{{count}} authorized devices",
+    "unknownCount_one": "The connection status of {{count}} device could not be confirmed.",
+    "unknownCount_other": "The connection status of {{count}} devices could not be confirmed.",
+    "checkedAt": "Last checked at {{time}}.",
+    "empty": "No computers are linked to this account.",
+    "connection": {
+      "not_running": "Service not running",
+      "online": "Connected",
+      "stopped": "Idle",
+      "connecting": "Connecting",
+      "retrying": "Reconnecting",
+      "revoked": "Access revoked",
+      "superseded": "Connection replaced",
+      "not_configured": "Not configured",
+      "unavailable": "Unavailable",
+      "incompatible": "Restart required"
+    },
+    "help": {
+      "not_running": "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
+      "unavailable": "Device status is unavailable. Try refreshing.",
+      "not_configured": "Device access is not configured. Link this Rome instance to Rome Cloud to prepare access.",
+      "incompatible": "On the Rome instance, run rome-node daemon stop, then rome-node daemon start. This restarts the shared service and interrupts device requests in progress.",
+      "stopped": "The device service is running. Its connection stays idle until a linked computer needs to be checked or used."
+    },
+    "status": {
+      "connected": "Connected",
+      "not_connected": "Not connected",
+      "unknown": "Unknown",
+      "revoked": "Access revoked"
+    },
+    "start": "Start service",
+    "starting": "Starting…",
+    "startFailed": "Could not start the device service",
+    "setup": {
+      "title": "Connect a computer",
+      "description": "The device service runs on your Rome instance. Each computer you want to use needs its own connection.",
+      "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
+      "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
+      "instructions": "Installation and connection guide"
+    }
   }
 }

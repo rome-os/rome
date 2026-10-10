@@ -59,24 +59,24 @@ export function AppStoreRemixConfirm({ intent, onConfirm, onCancel, inDialog = f
       <GitFork className="size-8 text-primary" aria-hidden />
       <Title className="text-title text-foreground">{t("remixStore.title")}</Title>
       {!current ? (
-        <p role="status" className="text-body text-muted-foreground">
+        <p role="status" className="text-ui text-muted-foreground">
           {t("install.loading")}
         </p>
       ) : null}
       {current?.error ? (
-        <p role="alert" className="text-body text-destructive">
+        <p role="alert" className="text-ui text-destructive">
           {t(`remixStore.${current.error}`)}
         </p>
       ) : null}
       {detail ? (
         <>
           <div>
-            <p className="text-body text-foreground">{detail.name}</p>
+            <p className="text-ui text-foreground">{detail.name}</p>
             <p className="break-all text-ui text-muted-foreground">
               {detail.pin.listingId} · v{detail.pin.version}
             </p>
           </div>
-          <p className="text-body text-muted-foreground">{t("remixStore.description")}</p>
+          <p className="text-ui text-muted-foreground">{t("remixStore.description")}</p>
           <p className="text-ui text-muted-foreground">{t("remixStore.installNotice")}</p>
         </>
       ) : null}

@@ -4,13 +4,8 @@ import { basename, dirname, join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { getProfileDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import type { ProviderAdapter } from "./adapter.js";
-import type {
-  Attachment,
-  MessageReplyReference,
-  NormalizedMessage,
-  OutgoingMessage,
-} from "./types.js";
+import type { ChannelMessage, ConversationId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, MessageReplyReference, OutgoingMessage } from "./types.js";
 import {
   isAllowedAttachmentUrl,
   readAttachmentResponseBody,
@@ -53,8 +48,6 @@ const MEDIA_TYPE_FILE = 3;
 const MEDIA_TYPE_VOICE = 4;
 
 const UPLOAD_MAX_RETRIES = 3;
-
-export const WECHAT_SETTINGS_KEY = "wechat";
 
 export interface WechatSettings {
   token: string;
@@ -513,14 +506,45 @@ function generateClientId(): string {
   return `rome-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
+interface SendMessageResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+  message_id?: number | string;
+}
+
+/**
+ * Throws when iLink refused a send. The live service refuses with HTTP 200 and
+ * a non-zero `ret` or `errcode`, so the status alone says nothing.
+ */
+function assertSendAccepted(raw: string): SendMessageResp {
+  let response: SendMessageResp;
+  try {
+    response = JSON.parse(raw) as SendMessageResp;
+  } catch {
+    throw new Error("WeChat send unconfirmed: the answer is not JSON");
+  }
+  if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) {
+    const detail = [
+      response.ret !== undefined ? `ret=${response.ret}` : undefined,
+      response.errcode !== undefined ? `errcode=${response.errcode}` : undefined,
+      response.errmsg,
+    ];
+    throw new Error(`WeChat send refused: ${detail.filter(Boolean).join(" ")}`);
+  }
+  return response;
+}
+
+/** Sends text and answers the id iLink gave it. An accepted text send carries
+ *  its `message_id`; an answer without one does not show the send was accepted. */
 async function sendTextMessage(
   baseUrl: string,
   token: string,
   to: string,
   text: string,
   contextToken: string,
-): Promise<void> {
-  await apiFetch({
+): Promise<string> {
+  const raw = await apiFetch({
     baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({
@@ -538,6 +562,10 @@ async function sendTextMessage(
     token,
     timeoutMs: 15_000,
   });
+  const messageId = assertSendAccepted(raw).message_id;
+  if (messageId === undefined || messageId === null || messageId === "")
+    throw new Error("WeChat send unconfirmed: the answer has no message_id");
+  return String(messageId);
 }
 
 function encodeAesKeyHex(key: Buffer): string {
@@ -707,7 +735,9 @@ async function sendMediaMessage(
   }
 
   const encryptQueryParam = await uploadToCdn(uploadUrl, encrypted);
-  await apiFetch({
+  // No capture shows what an accepted media send answers, so only a refusal
+  // fails it.
+  const raw = await apiFetch({
     baseUrl,
     endpoint: "ilink/bot/sendmessage",
     body: JSON.stringify({
@@ -733,6 +763,7 @@ async function sendMediaMessage(
     token,
     timeoutMs: 15_000,
   });
+  assertSendAccepted(raw);
 }
 
 function inferMessageItemType(item: MessageItem): number | undefined {
@@ -923,7 +954,26 @@ function extractContent(msg: WechatMessage): ExtractedContent | null {
   return null;
 }
 
-export function normalizeWechatMessage(msg: WechatMessage): NormalizedMessage | null {
+/** The files a message carries, each still holding the CDN reference that
+ *  downloads and decrypts it. */
+function wechatAttachments(extracted: ExtractedContent): Attachment[] {
+  return extracted.attachments.filter((att) => att.url || att.fileName || att.mimeType);
+}
+
+/** True when `value` is an iLink user message, the event a WeChat
+ *  `ChannelMessage` carries as `raw`. */
+function isWechatUserMessage(value: unknown): value is WechatMessage {
+  if (typeof value !== "object" || value === null) return false;
+  const msg = value as WechatMessage;
+  return msg.message_type === MSG_TYPE_USER && Array.isArray(msg.item_list);
+}
+
+/**
+ * Build the channel's record of an iLink event, or null for a bot message or
+ * one with nothing to read. `raw` is the event itself, which holds the CDN keys
+ * the record's attachments leave out.
+ */
+export function normalizeWechatMessage(msg: WechatMessage): ChannelMessage | null {
   if (msg.message_type !== MSG_TYPE_USER) return null;
 
   const extracted = extractContent(msg);
@@ -932,29 +982,29 @@ export function normalizeWechatMessage(msg: WechatMessage): NormalizedMessage | 
   const senderId = msg.from_user_id?.trim() || "unknown";
   const rawGroupId = msg.group_id?.trim();
   const groupId = rawGroupId || undefined;
-  const threadId = senderId;
+  const conversationId = senderId;
   const senderShort = senderId.split("@")[0] || senderId;
 
   return {
-    id:
+    channel: "wechat",
+    direction: "inbound",
+    messageId:
       extracted.messageId ??
       normalizeWechatMessageId(msg.message_id) ??
       msg.client_id ??
-      `${threadId}:${msg.create_time_ms ?? Date.now()}`,
-    channel: "wechat",
-    channelUserId: senderId,
-    displayName: senderShort,
-    threadId,
-    threadName: groupId,
-    threadType: groupId ? "group" : "private",
-    timestamp: new Date(msg.create_time_ms ?? Date.now()),
+      `${conversationId}:${msg.create_time_ms ?? Date.now()}`,
+    conversationId: conversationId as ConversationId,
+    senderId,
+    senderDisplayName: senderShort,
     text: extracted.text,
-    attachments: extracted.attachments.filter((att) => att.url || att.fileName || att.mimeType),
+    attachments: wechatAttachments(extracted).map(stripWechatMedia),
+    timestamp: new Date(msg.create_time_ms ?? Date.now()),
     ...(extracted.replyTo ? { replyTo: extracted.replyTo } : {}),
+    thread: { kind: groupId ? "group" : "dm", ...(groupId ? { name: groupId } : {}) },
     // WeChat group traffic is partitioned by senderId, so a command can only
     // address that sender's Rome conversation, never another group member's.
     addressing: "direct",
-    rawEvent: msg,
+    raw: msg,
   };
 }
 
@@ -1109,9 +1159,13 @@ export class WechatAuthService {
   }
 }
 
-export class WechatAdapter implements ProviderAdapter {
-  readonly channelName = "wechat";
-  private handler?: (msg: NormalizedMessage) => Promise<void>;
+/**
+ * The iLink bot transport. Inbound events arrive as the channel's own record, a
+ * `ChannelMessage` whose `raw` is the iLink event, so the Connection
+ * integration delivers them as they are.
+ */
+export class WechatAdapter {
+  private handler?: (msg: ChannelMessage) => Promise<void>;
   private stopped = true;
   private pollGeneration = 0;
   private contextTokens = new Map<string, string>();
@@ -1157,16 +1211,13 @@ export class WechatAdapter implements ProviderAdapter {
     this.connectionStatus = "disconnected";
   }
 
-  async sendMessage(
-    channelUserId: string,
-    threadId: string,
-    message: OutgoingMessage,
-  ): Promise<void> {
+  async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     this.assertSessionActive();
-    const target = this.resolveSendTarget(channelUserId, threadId);
+    const target = this.resolveSendTarget(conversationId);
 
+    let messageId: string | undefined;
     if (message.text) {
-      await sendTextMessage(
+      messageId = await sendTextMessage(
         this.config.baseUrl,
         this.config.token,
         target.to,
@@ -1199,23 +1250,31 @@ export class WechatAdapter implements ProviderAdapter {
         fileName,
       );
     }
+    return { conversationId, ...(messageId ? { messageId } : {}) };
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
 
-  async saveIncomingAttachments(message: NormalizedMessage): Promise<Attachment[]> {
-    const attachments = message.attachments.map(stripWechatMedia);
+  /** Download and decrypt a message's files into the profile. The CDN keys
+   *  live only in the iLink event, so they are read from `raw`. A message
+   *  without that event keeps its attachments as they are. */
+  async saveIncomingAttachments(message: ChannelMessage): Promise<Attachment[]> {
+    const extracted = isWechatUserMessage(message.raw) ? extractContent(message.raw) : null;
+    if (!extracted) return message.attachments;
+
+    const sources = wechatAttachments(extracted);
+    const attachments = sources.map(stripWechatMedia);
     const payloads: IncomingAttachmentPayload[] = [];
 
-    for (const [index, sourceAttachment] of message.attachments.entries()) {
+    for (const [index, sourceAttachment] of sources.entries()) {
       const payload = await downloadWechatAttachmentPayload(sourceAttachment, attachments[index]);
       if (payload) payloads.push(payload);
     }
 
     if (payloads.length === 0) return attachments;
-    return saveIncomingAttachmentPayloads({ ...message, attachments }, payloads);
+    return saveIncomingAttachmentPayloads({ ...message, channel: "wechat", attachments }, payloads);
   }
 
   async notifyTyping(threadId: string): Promise<void> {
@@ -1326,46 +1385,34 @@ export class WechatAdapter implements ProviderAdapter {
 
   private async handleRawMessage(raw: WechatMessage): Promise<void> {
     logReplyReferences(raw);
-    const normalized = normalizeWechatMessage(raw);
-    if (!normalized) return;
+    const message = normalizeWechatMessage(raw);
+    if (!message) return;
 
     if (raw.context_token) {
-      this.rememberContextToken(normalized.threadId, raw.context_token, normalized.channelUserId);
-      this.rememberContextToken(
-        normalized.channelUserId,
-        raw.context_token,
-        normalized.channelUserId,
-      );
+      this.rememberContextToken(message.conversationId, raw.context_token, message.senderId);
+      this.rememberContextToken(message.senderId, raw.context_token, message.senderId);
       await this.saveContextTokens().catch(() => {});
     }
 
     if (!this.handler) return;
 
     try {
-      await this.handler(normalized);
+      await this.handler(message);
     } catch (err) {
       log.error("message handler error", {
-        messageId: normalized.id,
+        messageId: message.messageId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  private resolveSendTarget(channelUserId: string, threadId: string): WechatSendTarget {
-    const keys = [channelUserId, threadId].filter((value, index, all) => {
-      return value.trim() && all.indexOf(value) === index;
-    });
-
-    for (const key of keys) {
-      const contextToken = this.contextTokens.get(key);
-      if (!contextToken) continue;
-      return {
-        to: this.typingTargets.get(key) ?? (channelUserId.trim() || threadId.trim() || key),
-        contextToken,
-      };
+  private resolveSendTarget(conversationId: string): WechatSendTarget {
+    const target = conversationId.trim();
+    const contextToken = target ? this.contextTokens.get(conversationId) : undefined;
+    if (contextToken) {
+      return { to: this.typingTargets.get(conversationId) ?? target, contextToken };
     }
 
-    const target = channelUserId.trim() || threadId.trim();
     throw new Error(
       `No WeChat context token for ${target}. The user must send a new message first.`,
     );

@@ -7,14 +7,18 @@ import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
 import { SlotOutlet } from "../components/slot";
-import { AppGrid } from "./AppGrid";
+import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
+import { AppGrid, APP_NAV } from "./AppGrid";
 import { ChatSearchDialog } from "./ChatSearchDialog";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
 import { useDesktop } from "@/hooks/use-desktop";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings } from "@/hooks/use-settings";
+import { routeTitle } from "@/lib/page-title";
+import { isApplePlatform } from "@/lib/platform";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -32,7 +36,7 @@ function readSidebarCollapsed(): boolean {
 
 function sidebarShortcutForPlatform(): string {
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
-  return /Mac|iPhone|iPad|iPod/i.test(platform) ? "⌘B" : "Ctrl B";
+  return isApplePlatform(platform) ? "⌘B" : "Ctrl B";
 }
 
 export function RomeShellLayout() {
@@ -45,6 +49,12 @@ export function RomeShellLayout() {
   const [appGridControlsHost, setAppGridControlsHost] = useState<HTMLDivElement | null>(null);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // The fallback title for whatever the shell is showing. A routed page that
+  // can name its own subject claims the page slot, which outranks this.
+  // Sourced from the sidebar's own destinations: the nav already has to know
+  // what each route is called, so the title has no list of its own to drift from.
+  const route = routeTitle(location.pathname, APP_NAV);
+  useDocumentTitle(route === null ? null : [route.detail, t(route.key)], "route");
   // The rail is a desktop arrangement: below `md` the sidebar is a slide-over
   // that should always open at full width, so a collapse saved on desktop
   // must not shrink the mobile drawer.
@@ -134,16 +144,53 @@ export function RomeShellLayout() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [hideSidebar, navigate, toggleCollapsed]);
 
+  // On a phone a swipe right anywhere opens the sidebar and a swipe left closes
+  // it. The menu button in the mobile header stays as the visible way in.
+  const sidebarRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
+  const scrimRef = useRef<HTMLButtonElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  useSwipeSidebar({
+    disabled: hideSidebar,
+    open: sidebarOpen,
+    setOpen: setSidebarOpen,
+    sidebar: sidebarRef,
+    page: pageRef,
+    scrim: scrimRef,
+    frame: frameRef,
+  });
+  // On a phone the open sidebar pushes the page right rather than covering
+  // it. The clip keeps that push from scrolling the document sideways. It
+  // holds while the page is pushed and until the page has slid back home, so
+  // a page that overflows at rest still shows it.
+  const pushed = sidebarOpen && !hideSidebar;
+  const [clipped, setClipped] = useState(pushed);
+  if (pushed && !clipped) setClipped(true);
+  useEffect(() => {
+    if (pushed || !clipped) return;
+    const timer = window.setTimeout(() => setClipped(false), SLIDE_MS + 50);
+    return () => window.clearTimeout(timer);
+  }, [pushed, clipped]);
+
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
+    <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
       <UpgradeCountdownBanner />
-      <div className="relative flex flex-1">
-        {sidebarOpen && !hideSidebar ? (
-          <MobileBackdrop label={t("nav.closeSidebar")} onDismiss={() => setSidebarOpen(false)} />
+      <div
+        ref={frameRef}
+        className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}
+      >
+        {!hideSidebar ? (
+          <MobileBackdrop
+            ref={scrimRef}
+            open={sidebarOpen}
+            label={t("nav.closeSidebar")}
+            onDismiss={() => setSidebarOpen(false)}
+          />
         ) : null}
         {!hideSidebar ? (
           <aside
-            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[transform,width] duration-200 ease-out md:sticky md:top-0 md:h-dvh md:translate-x-0 md:pb-0 md:pt-0 ${
+            ref={sidebarRef}
+            className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border bg-background pb-safe pt-safe transition-[translate,width] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               railMode ? "md:w-16" : ""
             } ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
           >
@@ -180,7 +227,10 @@ export function RomeShellLayout() {
                 data-app-titlebar="header"
                 className="flex shrink-0 items-center justify-between px-5 pb-4 pt-5"
               >
-                <Link to="/" className="text-title text-foreground">
+                <Link
+                  to="/"
+                  className="text-title text-foreground flex min-h-[var(--control-min-h)] items-center"
+                >
                   {t("appName")}
                 </Link>
                 <div className="flex items-center gap-1">
@@ -228,7 +278,10 @@ export function RomeShellLayout() {
             drawer can align to the chat column. The public share tree has no
             shell, so its drawer falls back to 0px. */}
         <main
-          className="flex min-w-0 flex-1 flex-col bg-background"
+          ref={pageRef}
+          className={`flex min-w-0 flex-1 flex-col bg-background max-md:transition-[translate] max-md:duration-200 max-md:ease-out motion-reduce:transition-none ${
+            sidebarOpen && !hideSidebar ? "max-md:translate-x-64" : ""
+          }`}
           style={
             {
               "--rome-chat-left": hideSidebar ? "0px" : railMode ? "4rem" : "16rem",
@@ -254,7 +307,7 @@ export function RomeShellLayout() {
                 name="mobileHeader"
                 className="flex min-w-0 flex-1 items-center gap-2"
                 fallback={
-                  <Link to="/" className="flex items-center gap-2">
+                  <Link to="/" className="flex items-center gap-2 min-h-[var(--control-min-h)]">
                     <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
                     <span className="text-ui text-foreground">{t("appName")}</span>
                   </Link>

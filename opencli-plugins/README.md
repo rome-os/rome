@@ -61,7 +61,7 @@ so disconnection detection includes its heartbeat timeout and the next Rome chec
 An unreachable daemon makes browser status unknown and preserves the last seen time.
 Remote browsers can reach the daemon through a private SSH tunnel.
 
-- **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
+- **Production image**: `scripts/docker/rome-init.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
 - **Dev stack**: `scripts/dev-up.sh` (step 4c) installs every `/workspace/opencli-plugins/*/`
@@ -284,6 +284,10 @@ opencli craigslist listing "https://www.craigslist.org/view/d/..." -f json
 The Google plugin adds a browser-backed, read-only flight search command. It accepts airport
 codes, cities, or airport names, supports one-way and round-trip dates, cabin/passenger settings,
 and can filter or sort the returned flight choices without clicking into a booking flow.
+
+The command uses a persistent Google browser session. Results stay open after a search instead of resetting the tab to `about:blank`.
+Later searches reuse that session and navigate directly to the requested Flights search.
+Use `--site-session ephemeral` for an isolated search with automatic tab cleanup.
 
 For multiple airports, pass comma-separated airport codes on either side, such as `SFO,OAK` and
 `IAH,HOU`. Lists accept up to seven distinct codes per side, ignore case and whitespace, and remove duplicates.

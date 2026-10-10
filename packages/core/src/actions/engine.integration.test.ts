@@ -4,7 +4,7 @@ import { ActionEngine } from "./engine.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { hashArgs, ReplayDivergenceError } from "./replay.js";
+import { hashArgs } from "./replay.js";
 import { callAction } from "./call-action.js";
 import type { Action, ActionConfig, ActionRegistry, ActionResult } from "./types.js";
 
@@ -88,13 +88,11 @@ describe("Approval flow integration", () => {
     });
 
     const registry = makeRegistry(parent, childA, childB);
-    const engine = new ActionEngine(
-      registry,
-      undefined,
-      executionsRepo,
-      approvalsRepo,
-      journalRepo,
-    );
+    const engine = new ActionEngine(registry, {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
 
     const recordResult = await engine.run(
       "parent",
@@ -192,13 +190,11 @@ describe("Approval flow integration", () => {
     });
 
     const registry = makeRegistry(parent, childA, childX);
-    const engine = new ActionEngine(
-      registry,
-      undefined,
-      executionsRepo,
-      approvalsRepo,
-      journalRepo,
-    );
+    const engine = new ActionEngine(registry, {
+      executions: executionsRepo,
+      approvals: approvalsRepo,
+      journal: journalRepo,
+    });
 
     // Record a journal entry for child_a
     const recordResult = await engine.run("parent", {});
@@ -223,14 +219,7 @@ describe("Approval flow integration", () => {
     ];
 
     // Replay — parent now calls child_x, which diverges from child_a
-    const replayResult = await engine.run(
-      "parent",
-      {},
-      {
-        replayJournal,
-        divergenceMode: "fallthrough",
-      },
-    );
+    const replayResult = await engine.run("parent", {}, { replayJournal });
 
     // Should succeed — child_x was executed despite divergence
     if (replayResult.status !== "ok") {
@@ -241,56 +230,5 @@ describe("Approval flow integration", () => {
       { id: 1 },
       expect.objectContaining({ emitActionEvent: expect.any(Function) }),
     );
-  });
-
-  it("divergence during replay throws in strict mode", async () => {
-    const execA = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "A" }));
-    const execX = rs.fn(async (): Promise<ActionResult> => ({ status: "ok", data: "X" }));
-
-    const childA = makeAction("child_a", { execute: execA });
-    const childX = makeAction("child_x", { execute: execX });
-
-    const parent = makeAction("parent", {
-      execute: async () => {
-        // Always calls child_x — will diverge from journal entry for child_a
-        const r = await callAction("child_x", { id: 1 });
-        if (r.status !== "ok") throw new Error(`expected ok, got ${r.status}`);
-        return { status: "ok", data: r.data };
-      },
-    });
-
-    const registry = makeRegistry(parent, childA, childX);
-    const engine = new ActionEngine(
-      registry,
-      undefined,
-      executionsRepo,
-      approvalsRepo,
-      journalRepo,
-    );
-
-    const replayJournal = [
-      {
-        sequence: 0,
-        actionName: "child_a",
-        argsHash: hashArgs({ id: 1 }),
-        args: { id: 1 },
-        result: { status: "ok" as const, data: "A" },
-        status: "completed" as const,
-      },
-    ];
-
-    await expect(
-      engine.run(
-        "parent",
-        {},
-        {
-          replayJournal,
-          divergenceMode: "strict",
-        },
-      ),
-    ).rejects.toThrow(ReplayDivergenceError);
-
-    // child_x should NOT have been executed (divergence is strict)
-    expect(execX).not.toHaveBeenCalled();
   });
 });

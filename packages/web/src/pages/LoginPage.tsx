@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -11,6 +11,7 @@ import { CloudLoginButton, cloudErrorReasonKey } from "@/components/cloud-login-
 import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { AUTH_QUERY_KEY, useAuthStateSnapshot } from "@/lib/auth-state";
+import { takeLoginReturn } from "@/lib/login-return";
 import { beginDashboardVisitorLogin, visitorErrorReasonKey } from "@/lib/visitor-login";
 
 function envFlagEnabled(value: unknown): boolean {
@@ -28,6 +29,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
+  const { hash } = useLocation();
   const { bootstrap } = useAuthStateSnapshot();
   const [serverError, setServerError] = useState("");
   const [cloudError, setCloudError] = useState("");
@@ -51,9 +53,12 @@ export default function LoginPage() {
   // error slot: surface whichever arrived until the next attempt clears it.
   const cloudCallbackError =
     searchParams.get("cloud") === "error" ? t(cloudErrorReasonKey(searchParams.get("reason"))) : "";
+  const rejectedEmail = new URLSearchParams(hash.slice(1)).get("email")?.trim();
   const visitorCallbackError =
     searchParams.get("visitor") === "error"
-      ? t(visitorErrorReasonKey(searchParams.get("reason")))
+      ? searchParams.get("reason") === "forbidden" && rejectedEmail
+        ? t("visitorDashboard.errorForbiddenAccount", { email: rejectedEmail })
+        : t(visitorErrorReasonKey(searchParams.get("reason")))
       : "";
   const cloudErrorMessage = cloudError || cloudCallbackError || visitorCallbackError;
   const visitorErrorMessage = visitorError || visitorCallbackError;
@@ -83,7 +88,7 @@ export default function LoginPage() {
         }
 
         await queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY });
-        navigate("/");
+        navigate(takeLoginReturn());
       } catch {
         setServerError(t("networkError"));
       }
@@ -109,7 +114,7 @@ export default function LoginPage() {
       </div>
       <div className="w-full max-w-sm">
         <h1 className="mb-2 text-center text-title text-foreground">{t("login.title")}</h1>
-        <p className="mb-8 text-center text-body text-muted-foreground">
+        <p className="mb-8 text-center text-ui text-muted-foreground">
           {t(dashboardVisitorAccess ? "login.descriptionShared" : "login.description")}
         </p>
 
@@ -123,7 +128,7 @@ export default function LoginPage() {
             <div className="mb-6">
               {visitorErrorMessage && (
                 <Alert variant="destructive" className="mb-4">
-                  <AlertDescription>{visitorErrorMessage}</AlertDescription>
+                  <AlertDescription className="break-words">{visitorErrorMessage}</AlertDescription>
                 </Alert>
               )}
               <Button
@@ -156,7 +161,7 @@ export default function LoginPage() {
             <div className="mb-6">
               {cloudErrorMessage && (
                 <Alert variant="destructive" className="mb-4">
-                  <AlertDescription>{cloudErrorMessage}</AlertDescription>
+                  <AlertDescription className="break-words">{cloudErrorMessage}</AlertDescription>
                 </Alert>
               )}
               <CloudLoginButton onStartError={setCloudError} />

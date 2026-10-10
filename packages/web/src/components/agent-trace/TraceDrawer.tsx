@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 import { Cross2Icon, DownloadIcon } from "@radix-ui/react-icons";
 import type {
-  TraceBlockDto,
+  TraceEventDto,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
@@ -10,9 +10,8 @@ import type {
 import { Button } from "@/components/ui/button";
 import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
-import { isTraceScrollNearBottom } from "./scroll-follow";
 import { turnApiPath } from "./turn-api";
-import { TraceUsageOptionsContext } from "@/components/chat/blocks/UsageSummaryBlock";
+import { TraceUsageOptionsContext } from "@/components/chat/entries/UsageSummaryView";
 
 export type TraceDrawerTarget =
   | {
@@ -38,7 +37,7 @@ export type TraceDrawerTarget =
       dumpHref?: string;
     };
 
-export function traceDrawerOpenPlacementClass(hasApps: boolean): string {
+function traceDrawerOpenPlacementClass(hasApps: boolean): string {
   if (hasApps) {
     // A widget already owns the surface beside chat. Keep it visible and cover
     // the actual desktop chat column, regardless of how wide that column may
@@ -90,31 +89,29 @@ async function fetchTurnTrace(
   return data.trace;
 }
 
+// How close to the bottom still counts as following the live trace. The slack
+// absorbs inertial scrolling and subpixel rounding.
+const TRACE_SCROLL_BOTTOM_THRESHOLD_PX = 48;
+
 export function TraceDrawer({
   target,
   onClose,
   renderInlineBlock,
   renderRunBlocks,
   loadStoredTrace = fetchStoredTrace,
-  loadTurnTrace = fetchTurnTrace,
   allowSubagentUsage = true,
   readOnly = false,
   hasApps = false,
 }: {
   target: TraceDrawerTarget | null;
   onClose: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   // Resolve a stored trace's segments. Defaults to the authed content endpoint;
   // the share page passes a map-backed resolver so traces render from the frozen
   // snapshot. A thrown error surfaces as the drawer's retryable error state.
   loadStoredTrace?: (
     messageId: string,
-    includeSubagentUsage: boolean,
-  ) => Promise<TraceSnapshot | null>;
-  loadTurnTrace?: (
-    sessionId: string,
-    turnId: string,
     includeSubagentUsage: boolean,
   ) => Promise<TraceSnapshot | null>;
   /** Whether this surface can ask the backend for derived descendant usage. */
@@ -173,7 +170,7 @@ export function TraceDrawer({
         const trace = storedId
           ? await loadStoredTrace(storedId, includeSubagentUsage)
           : turnTarget
-            ? await loadTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
+            ? await fetchTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
             : null;
         if (cancelled) return;
         if (!trace) {
@@ -196,16 +193,7 @@ export function TraceDrawer({
     return () => {
       cancelled = true;
     };
-  }, [
-    remoteTargetKey,
-    storedId,
-    turnTarget,
-    includeSubagentUsage,
-    retryNonce,
-    t,
-    loadStoredTrace,
-    loadTurnTrace,
-  ]);
+  }, [remoteTargetKey, storedId, turnTarget, includeSubagentUsage, retryNonce, t, loadStoredTrace]);
 
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
@@ -225,11 +213,9 @@ export function TraceDrawer({
     if (target?.kind !== "live") return;
     const container = scrollContainerRef.current;
     if (!container) return;
-    shouldFollowLiveTraceRef.current = isTraceScrollNearBottom(
-      container.scrollHeight,
-      container.scrollTop,
-      container.clientHeight,
-    );
+    shouldFollowLiveTraceRef.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight <=
+      TRACE_SCROLL_BOTTOM_THRESHOLD_PX;
   }, [target?.kind]);
 
   useLayoutEffect(() => {
@@ -310,7 +296,11 @@ export function TraceDrawer({
             : "fixed inset-y-0 right-0 w-[480px] translate-x-full"
         }`}
       >
-        <div className="flex min-w-0 items-center gap-2 border-b border-border px-4 py-3">
+        {/* `h-12` is the chat title header's height (Chat.tsx). The docked
+            drawer sits beside that header, so the two bottom borders must
+            meet; a padding-driven height around the 28px close button lands
+            lower. */}
+        <div className="flex h-12 min-w-0 shrink-0 items-center gap-2 border-b border-border pl-4 pr-2">
           <h3 className="text-ui text-foreground">{t("trace.drawer.title")}</h3>
           {streaming && (
             <span className="inline-flex items-center gap-1 rounded-full bg-info-bg px-2 py-1 text-badge text-info-fg">

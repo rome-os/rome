@@ -1,7 +1,8 @@
-// The obligations messages.ts states, as a suite every `Messages` adapter
-// enrolls in. One store answering them its own way is a preview that opens on
-// an entry its pages never show, so the law is asserted once here rather than
-// re-tested per adapter.
+// The obligations messages.ts states, as suites every store enrolls in: the
+// account law every `AccountMessages` store owes, and the `query` every
+// channel's `Messages` answers. One store answering them its own way is a
+// preview that opens on an entry its pages never show, so the law is asserted
+// once here rather than re-tested per adapter.
 
 import { describe, expect, it } from "@rstest/core";
 import {
@@ -10,15 +11,16 @@ import {
   messageCursor,
   type Message,
 } from "@rome/api-types/message";
-import type { MessageAccount, MessageConversation, Messages } from "./messages.js";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { AccountMessages, MessageAccount, Messages } from "./messages.js";
 
 /** A limit large enough to hold any history a store can answer — what
  *  messages.ts calls the full read. */
 export const WHOLE_HISTORY = Number.MAX_SAFE_INTEGER;
 
-/** A store to run the contract against, with the accounts to run it for. */
+/** A store to run the account law against, with the accounts to run it for. */
 export interface MessagesContractSubject {
-  messages: Messages;
+  messages: AccountMessages;
   /**
    * Accounts the store holds messages for.
    *
@@ -29,24 +31,13 @@ export interface MessagesContractSubject {
   accounts: MessageAccount[];
   /** Accounts on the store's own channels that it holds nothing for. */
   silent: MessageAccount[];
-  /**
-   * A conversation the store holds, enrolled on the same terms as `accounts`:
-   * at least four messages, two of them in the same second.
-   *
-   * A group wherever the store can hold one. A group is the conversation no
-   * account read reaches, so enrolling one is what proves the verb answers
-   * more than the account reads already did.
-   */
-  conversation: MessageConversation;
-  /** A conversation on one of the store's channels that it holds nothing of. */
-  silentConversation: MessageConversation;
 }
 
 /** Page size the paging assertions walk with. Smaller than the history the
  *  subject owes, so exhausting it crosses at least one boundary. */
 const PAGE = 2;
 
-export function testMessagesContract(
+export function testAccountMessagesContract(
   name: string,
   subject: () => MessagesContractSubject | Promise<MessagesContractSubject>,
 ): void {
@@ -151,86 +142,98 @@ export function testMessagesContract(
         [],
       );
     });
+  });
+}
 
-    // The conversation read pages the same store the account reads page, so it
-    // owes the same page: the order, the cursor and the exhaustion are asserted
-    // over again rather than assumed to carry across. A store is free to answer
-    // the two from two queries — four of the five do — and the query that only
-    // the conversation read reaches is the one nothing else here covers.
-    const fullConversation = async ({ messages, conversation }: MessagesContractSubject) =>
-      messages.readConversation({ conversation, limit: WHOLE_HISTORY });
+/** A channel's `Messages` to run the query suite against. */
+export interface MessagesQuerySubject {
+  messages: Messages;
+  /** The channel the store serves. */
+  channel: string;
+  /**
+   * A conversation the store holds at least three messages of, said at no
+   * fewer than two distinct times, beside at least one message in another
+   * conversation. A group wherever the store can hold one, since a group is
+   * what the account reads never reach.
+   */
+  conversation: ConversationId;
+  /** A conversation on the store's channel that it holds nothing of. */
+  silentConversation: ConversationId;
+}
 
-    it("holds enough of a conversation to prove the law", async () => {
+export function testMessagesQueryContract(
+  name: string,
+  subject: () => MessagesQuerySubject | Promise<MessagesQuerySubject>,
+): void {
+  describe(`Messages query contract: ${name}`, () => {
+    const newestFirst = (entries: { timestamp: Date }[]) =>
+      entries.every(
+        (entry, index) =>
+          index === 0 || entry.timestamp.getTime() <= entries[index - 1]!.timestamp.getTime(),
+      );
+
+    it("answers every conversation, newest first, as the store's channel", async () => {
       const store = await subject();
-      const full = await fullConversation(store);
-      expect(full.length).toBeGreaterThanOrEqual(4);
-      expect(new Set(full.map((entry) => entry.timestamp)).size).toBeLessThan(full.length);
-    });
-
-    it("answers a conversation page newest first, no longer than its limit", async () => {
-      const store = await subject();
-      const page = await store.messages.readConversation({
-        conversation: store.conversation,
-        limit: PAGE,
-      });
-      expect(page.length).toBeLessThanOrEqual(PAGE);
-      expect(page).toEqual([...page].sort(compareMessages));
-    });
-
-    it("answers only messages of a conversation strictly after the cursor", async () => {
-      const store = await subject();
-      const first = await store.messages.readConversation({
-        conversation: store.conversation,
-        limit: PAGE,
-      });
-      const cursor = first.at(-1);
-      if (!cursor) throw new Error("the store answered no first page to resume from");
-      const next = await store.messages.readConversation({
-        conversation: store.conversation,
-        after: cursor,
-        limit: WHOLE_HISTORY,
-      });
-      expect(next.every((entry) => isAfterMessageCursor(entry, cursor))).toBe(true);
-    });
-
-    it("pages a conversation to exhaustion over exactly its full read", async () => {
-      const store = await subject();
-      const full = await fullConversation(store);
-
-      const walked: Message[] = [];
-      let after: Message | null = null;
-      for (let page = 0; page <= Math.ceil(full.length / PAGE); page++) {
-        const entries: Message[] = await store.messages.readConversation({
-          conversation: store.conversation,
-          after,
-          limit: PAGE,
-        });
-        if (entries.length === 0) break;
-        walked.push(...entries);
-        after = entries[entries.length - 1] ?? null;
+      const all = await store.messages.query({ limit: WHOLE_QUERY });
+      expect(new Set(all.map((entry) => entry.conversationId)).size).toBeGreaterThan(1);
+      expect(newestFirst(all)).toBe(true);
+      for (const entry of all) {
+        expect(entry.channel).toBe(store.channel);
+        expect(["inbound", "outbound"]).toContain(entry.direction);
       }
-
-      expect(walked).toEqual(full);
     });
 
-    it("gives every message of a conversation its own cursor position", async () => {
+    it("answers no more than its limit, keeping the newest", async () => {
       const store = await subject();
-      const full = await fullConversation(store);
-      expect(new Set(full.map(messageCursor)).size).toBe(full.length);
+      const all = await store.messages.query({ limit: WHOLE_QUERY });
+      const page = await store.messages.query({ limit: 2 });
+      expect(page).toEqual(all.slice(0, 2));
     });
 
-    // An empty page rather than a failure or a null: a conversation the store
-    // has never heard of and one it holds empty are one answer, so a caller
-    // asking about a thread the mirror has not caught up with reads it as a
-    // history with nothing in it yet.
+    it("answers only the conversation it names", async () => {
+      const store = await subject();
+      const held = await store.messages.query({
+        conversationId: store.conversation,
+        limit: WHOLE_QUERY,
+      });
+      expect(held.length).toBeGreaterThanOrEqual(3);
+      expect(held.every((entry) => entry.conversationId === store.conversation)).toBe(true);
+      expect(newestFirst(held)).toBe(true);
+    });
+
+    it("answers only what was said at or after `since`", async () => {
+      const store = await subject();
+      const held = await store.messages.query({
+        conversationId: store.conversation,
+        limit: WHOLE_QUERY,
+      });
+      const times = [...new Set(held.map((entry) => entry.timestamp.getTime()))].sort(
+        (a, b) => a - b,
+      );
+      const since = new Date(times[times.length - 1]!);
+      const recent = await store.messages.query({
+        conversationId: store.conversation,
+        since,
+        limit: WHOLE_QUERY,
+      });
+      expect(recent.length).toBeGreaterThan(0);
+      expect(recent.length).toBeLessThan(held.length);
+      expect(recent.every((entry) => entry.timestamp.getTime() >= since.getTime())).toBe(true);
+    });
+
+    // An empty list rather than a failure: a conversation the store has never
+    // heard of and one it holds empty are one answer.
     it("holds nothing for a silent conversation", async () => {
       const store = await subject();
       expect(
-        await store.messages.readConversation({
-          conversation: store.silentConversation,
-          limit: WHOLE_HISTORY,
+        await store.messages.query({
+          conversationId: store.silentConversation,
+          limit: WHOLE_QUERY,
         }),
       ).toEqual([]);
     });
   });
 }
+
+/** The most a query answers — large enough for any subject's history. */
+const WHOLE_QUERY = 1_000;

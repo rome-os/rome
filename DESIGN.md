@@ -1,6 +1,6 @@
 ---
 name: Rome
-description: The agentic OS for humans and agents.
+description: A compounding agent OS for recursive agents.
 colors:
   # Ember light, the default theme. Ash and Slate remap every role below to
   # their own palettes; the mappings live in packages/web/src/lib/themes.ts.
@@ -8,6 +8,8 @@ colors:
   deep-ember: "#c2410c"
   ember-flare: "#e55a22"
   linen-canvas: "#f4f3ef"
+  chat-canvas: "#f4f3ef"
+  app-canvas: "#fdfcf9"
   warm-paper: "#fdfcf9"
   paper-white: "#ffffff"
   recessed-linen: "#efe9e1"
@@ -52,7 +54,7 @@ typography:
     fontWeight: 500
     lineHeight: 1.3333
     letterSpacing: "0"
-  body:
+  composer:
     fontFamily: "Funnel Sans, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue, Arial, PingFang SC, Hiragino Sans GB, Microsoft YaHei, Noto Sans CJK SC, Source Han Sans SC, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji"
     fontSize: "1rem"
     fontWeight: 400
@@ -282,7 +284,7 @@ Visual rejections are the ones the codebase already enforces. There is no market
 **Key Characteristics:**
 - Warm neutrals with a single chromatic accent, remapped per theme rather than restyled per component.
 - Seven typography roles in one sans, with Petrona reserved for reading surfaces and IBM Plex Mono for code and identifiers.
-- Fixed control scale (28, 32, 44px) with concentric radii (8, 10, 12px).
+- Fixed control scale (28, 32, 44px) with concentric radii (8, 10, 12px). The large platform scale uses a 44px control floor and larger control typography.
 - Flat at rest. Shadows mark hover, checked state, and floating layers only.
 - One focus edge everywhere: a 1px outline in the ring color at 50% alpha, quieter than the 2px solid invalid edge.
 - Meaning in tinted chips and alerts, never in the canvas.
@@ -299,7 +301,9 @@ Rome has three themes, each with a light and a dark half. The frontmatter record
 - **Ember Flare** (`#e55a22`): The focus ring under Ember and the Ember `info` mark. A slightly hotter step than the accent so a focused control stands apart from a resting primary button.
 
 ### Neutral
-- **Linen Canvas** (`#f4f3ef`): The page ground behind every region. Never assumed to be white.
+- **Linen Canvas** (`#f4f3ef`): The generic dashboard ground, used where no dedicated context canvas applies.
+- **Linen Chat Canvas** (`#f4f3ef`): The ground behind chat prose and its composer. Kept softly tinted for long-form reading.
+- **Warm App Canvas** (`#fdfcf9`): The brighter ground behind compact app UI. It may share a fill with a card, whose border then carries the boundary.
 - **Warm Paper** (`#fdfcf9`): A raised card, panel, or table row on the canvas. Dialogs and sheets use it too.
 - **Paper White** (`#ffffff`): The highest layer, for popovers, menus, and toasts.
 - **Recessed Linen** (`#efe9e1`): A region recessed inside a card: a well, a code block, a table header, the segmented control track, and the `muted` fill behind ghost-button hover.
@@ -343,10 +347,23 @@ Every text run takes exactly one of seven roles. A role sets size, line height, 
 - **Badge** (500, 13px/16px): Text inside a compact labeled container: chips, tags, status pills, counters.
 - **Aux** (400, 13px/16px): Metadata that annotates other content: timestamps, uncontained counts, group headers, captions. Columns of times or counts add `tabular-nums`.
 
-The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The seven roles read 13, 14, 15, 16, 18, and 30. Steps 20, 22, and 24 back the Markdown heading tokens, not a dashboard role.
+The font size scale has eleven steps (13, 14, 15, 16, 17, 18, 20, 22, 24, 28, 30px). The seven roles read 13, 14, 15, 16, 18, and 30. Steps 20, 22, and 24 back the Markdown heading tokens, not a dashboard role, and 17 and 28 back the phone ramp.
+
+In the large platform scale, UI, Body, Section, Aux, and Badge rise and keep their names. Display and Title keep their shared values. Below 768px, `PageTitle` sets the Title role locally to 28px/36px at weight 700.
+
+| Role | Medium scale | Large scale |
+| --- | --- | --- |
+| UI | 400, 14px/20px | 400, 17px/24px |
+| Body (`text-composer`) | 400, 16px/20px | 400, 17px/24px |
+| Section | 500, 15px/20px | 600, 17px/24px |
+| Title | 500, 18px/24px | 500, 18px/24px |
+| Aux | 400, 13px/16px | 400, 15px/20px |
+| Badge | 500, 13px/16px | 500, 15px/20px |
+
+In the large platform scale, editable controls read `text-ui` at 17px. A native field with no role gets the same default. The viewport allows pinch zoom.
 
 ### Named Rules
-**The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-body`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
+**The Seven Roles Rule.** Text reads `text-display`, `text-title`, `text-section`, `text-composer`, `text-ui`, `text-badge`, or `text-aux`. A one-off size or line height is unfinished migration, not a pattern.
 
 **The Weight, Not Size Rule.** Emphasis comes from color, weight, or position within the same role. A label is never bumped one size to read as important, and an active row leads by fill, not by scale. The CJK system fallbacks ship no 500 face, so the weight on Title, Section, and Badge is Latin-only. Hierarchy on a bilingual surface also comes from size through a different role, ink, position, or container geometry.
 
@@ -354,15 +371,17 @@ The font size scale has nine steps (13, 14, 15, 16, 18, 20, 22, 24, 30px). The s
 
 The grid is 4px. Spacing comes from one scale of fifteen steps (0, 4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 48, 64, 80, 96px) and every gap, padding, and inset is a step. A value between steps never enters as a one-off.
 
-The guardian shell is a sidebar plus a content column. On desktop (768px and up) the sidebar is sticky and 256px wide, collapsing to a 64px rail. Below 768px it becomes a fixed slide-over, and a 48px mobile header (plus the safe-area inset) sits at the top of the content column. The file browser switches from two panes to a compact single pane below a 1024px container width. Apps mount inside the content column in a Shadow DOM and inherit the theme layer.
+The guardian shell is a sidebar plus a content column. On desktop (768px and up) the sidebar is sticky and 256px wide, collapsing to a 64px rail. Below 768px it becomes a fixed slide-over, and a 48px mobile header (plus the safe-area inset) sits at the top of the content column. Chat is the home screen. A swipe right anywhere drags the sidebar out under the finger, and the page slides right with it under the scrim, so the sidebar pushes the page rather than covering it. On release it settles open past a third of its width or on a flick. A swipe left or a tap on the dimmed page closes it, and the header's menu button stays as the visible way in. A swipe gives way to a sideways scroller that is not at its start, to a surface that handles its own touch (`touch-action: none`, such as a diagram's pan), and to text fields. Mobile Safari keeps the screen's left edge for its back gesture, so there a swipe starts a little way in. The file browser switches from two panes to a compact single pane below a 1024px container width. Apps mount inside the content column in a Shadow DOM and inherit the theme layer.
 
 Density is operational but not cramped. Cards carry 16px inner padding, tiles 12px, menu items 4px by 8px. Controls sit on three heights: 28px (`sm`), 32px (`md`, the default), and 44px (`lg`, square icon buttons only, for touch). Badges are 22px. Avatars are 24, 32, and 40px. When a control shares a row with loose text, the row takes the taller of the two, and the air around the text inside a control is never more than the text's own line box.
 
-Touch targets on compact surfaces reach 44 to 48px through padding or a `::after` hit area, not by enlarging the visible control. Hover-only disclosure is never the only path to an action.
+In the large platform scale, controls on the shared scale and menu options take a visible 44px floor. Both shared steps and the `xs` step rise to it, square icon buttons and calendar days are 44px squares, chips, tabs and page-nav entries are 44px tall, and the switch is 48 by 28 at both sizes, with a hit area 44px tall. A control is a visible 44px box rather than a small box with a hidden hit area. A hidden hit area that reaches past its own box can land on a neighbour's box and take taps meant for it, and no stacking order can prevent that. The one exception stays inside its own composite: a segmented control's 36px segments reach over their own track's padding, which belongs to no other control. Row floors follow the control step to 52px.
+
+Selection controls keep their glyph geometry inside accessible labels or their composite hit areas. Hover-only disclosure is never the only path to an action.
 
 ## Elevation & Depth
 
-Rome is flat at rest. Four depths exist, and tone plus a hairline border tell them apart: the canvas (`background`), a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). In dark mode the stack lightens as it rises, so a recessed region is lighter than the canvas, which is why depth names describe position rather than lightness.
+Rome is flat at rest. Two context canvases sit beneath three content depths: a raised card (`surface`), a recessed region inside a card (`surface-muted`), and a floating layer (`surface-elevated`). Chat uses `chat-canvas`; compact app UI uses the brighter `app-canvas`; dashboard pages without a dedicated context use `background`. A canvas and card may share a fill, so the card's hairline border must still carry its boundary. In dark mode the distinct steps lighten as they rise, which is why depth names describe position rather than lightness.
 
 Shadows appear as a response to state or to floating. A card takes `shadow-4` on hover. A checked segment and the active sidebar row take `shadow-1`. Menus, popovers, and selects take `shadow-4` with a 10% ink ring, and a submenu that opens beside a menu takes `shadow-10`. Dialogs and sheets take `shadow-25` over their backdrop. Nothing else in the kit casts. A dashboard page that paints `shadow-1` on a resting card is unfinished migration, not a pattern.
 
@@ -411,7 +430,7 @@ Components are precise and restrained. Each one declares its own typography role
 - **Filter chip:** Pill with 12px by 4px padding on Warm Paper with a strong hairline. Selected fills Coral Ember with a white label. An optional count trails in `tabular-nums`, in Subtle Ink when unselected.
 
 ### Cards and Tiles
-- **Card:** Warm Paper on the canvas, 12px radius, hairline border, 16px padding, 16px gap between header, content, and footer. Title is `text-section`, description is `text-body` in Muted Ink. No shadow at rest. Interactive cards take `shadow-4` on hover.
+- **Card:** Warm Paper on the canvas, 12px radius, hairline border, 16px padding, 16px gap between header, content, and footer. Title is `text-section`, description is `text-ui` in Muted Ink. No shadow at rest. Interactive cards take `shadow-4` on hover.
 - **Tile:** 8px radius, 12px padding, strong hairline border. Hover recesses the fill. A selected tile takes a coral border, a 5% coral fill, and a 1px coral ring.
 - **Alert:** 8px radius, 12px by 16px padding, `text-ui` in both rows with the title at weight 600, and a 16px leading icon. Default is Warm Paper with a hairline and a Muted Ink description. Status variants use the tint, ink, and edge of their family and set the description to `foreground`.
 
@@ -426,14 +445,14 @@ Components are precise and restrained. Each one declares its own typography role
 - **Select trigger:** Matches the input, with the value clamped to one line and a 16px chevron.
 
 ### Segmented Control and Tabs
-- **Segmented control:** A 32px Recessed Linen track with 4px inner padding and 10px radius. Segments are 8px-radius items at 60% ink. The checked segment lifts to the canvas color with `shadow-1` and full ink.
+- **Segmented control:** A 32px Recessed Linen track with 4px inner padding and 10px radius. Segments are 8px-radius items at 60% ink. The checked segment lifts to its context canvas color with `shadow-1` and full ink.
 - **Tabs:** Transparent list, 32px tall. Triggers are `text-ui` at 60% ink, full ink on hover and when active. The active trigger draws a 2px ink underline 5px below the label. No fill.
-- **Switch:** A pill track that fills coral when checked. The thumb is the canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
+- **Switch:** A pill track that fills coral when checked. The thumb follows its context canvas color, 16px in the default size, 12px in small, with a 1px inset. The hit area extends 12px horizontally and 8px vertically past the track.
 
 ### Navigation
-- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action.
+- **Sidebar:** Canvas fill with a hairline right border, 256px wide, 64px as a rail. Rows are 32px, 8px radius, `text-ui`. Hover takes `surface-hover`. The current chat is Warm Paper with `shadow-1`. Archived chats read in Subtle Ink. Unread activity is an 8px `info` dot that hides on hover to reveal the row action. Below the pinned entries, a hairline and an aux "Recent" label introduce up to three unpinned apps the guardian built or opened in the last 14 days, most recent first, with a "Show more" row for the rest. The zone is absent when empty. An installed, never-opened app carries the same 8px `info` dot, which on hover gives way to a Pin action. On touch the Pin action is always visible and the dot sits beside it.
 - **Mobile header:** 48px plus the safe-area inset, hairline bottom border, hidden from 768px up.
-- **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path.
+- **Chat search:** `Command+K` on Apple platforms and `Ctrl+K` elsewhere open a command dialog. The trigger stays visible beside the list settings, since a shortcut is never the only path. A leading `@` turns the field into an agent picker, and a picked agent pins as a composer chip before the text. From then on the field holds a message, and Enter starts a new chat with that agent in the default project. Backspace in the empty field unpins the agent.
 
 ### Floating Layers
 - **Menu and context menu:** Paper White, 12px radius, 4px padding, `shadow-4` with a 10% ink ring, the same as popovers and selects. A submenu takes `shadow-10`. Items are 8px radius with 4px by 8px padding, and the focused item takes the `accent` fill. Destructive items take a 10% red tint on hover.
@@ -444,14 +463,6 @@ Components are precise and restrained. Each one declares its own typography role
 
 ### Empty State
 A centered block with a 44px Recessed Linen glyph well (12px radius), a `text-section` title, and a `text-ui` description in Muted Ink. Minimum height 192px.
-
-### File browser
-
-The guardian can inspect generated files and dependencies through the existing tree, editor, and download action. The [project contracts](docs/concepts/data.md#projects) define visibility and archive contents independently.
-
-Directory listings load incrementally. Live updates follow expanded or selected directories through shallow watches. Showing a dependency folder does not require traversing its entire tree.
-
-The read-only shared-project view uses the same browsing and archive policies within its authorized project. Dot-entry visibility follows the existing convention. This surface adds no new controls or visual variants.
 
 ## Do's and Don'ts
 

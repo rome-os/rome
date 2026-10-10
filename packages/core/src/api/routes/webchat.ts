@@ -11,15 +11,14 @@ import {
 import { createLogger } from "../../logger.js";
 import { logInboundChannelMessage } from "../../telemetry.js";
 import { getGuardianProfileFile } from "../../profile-memory.js";
-import { toWebchatSessionResponse, type TraceableAgentMessage } from "../helpers.js";
+import { toTraceEvent, toWebchatSessionResponse, type TraceableEvent } from "../helpers.js";
 import { AgentTraceRecorder } from "../../core/agent-trace-recorder.js";
 import {
-  agentMessageToBlock,
   buildTraceSnapshot,
   createSegmentBuilder,
   type AppResolver,
   type SegmentBuilder,
-  type TraceBlockDto,
+  type TraceEventDto,
 } from "../trace-segments.js";
 import type {
   TraceAccounting,
@@ -49,9 +48,9 @@ import {
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { StoredTurnFeedback } from "../../db/repositories/webchat.js";
-import type { AgentMessage, MessagePart } from "../../types.js";
+import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
-import type { RomeSessionType, StreamAgentMessage } from "@rome-os/app-runtime";
+import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
@@ -73,12 +72,13 @@ import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
-  fallbackConversationTitle,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import { isTransientDelta } from "../../core/agent-message.js";
+import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -217,6 +217,8 @@ async function persistRoutineDraftCard(
     type: "routine_draft_card" as const,
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
+    // Minted here, not taken from the agent's input, so it names this card only.
+    routineKey: `chat-routine:${randomUUID()}`,
   };
   try {
     await webchatRepo.addMessage(
@@ -352,21 +354,34 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
   return null;
 }
 
-/** Validate and shape the one host-owned suspension a tool result may emit.
+/** The host-owned inline cards rome-web renders itself, each paired with the
+ * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
+ * has no agent tool and is emitted by turn middleware alone (the welcome
+ * conversation), so an exact name is the whole allow-list. */
+const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: string) => boolean }> =
+  [
+    {
+      componentId: "question-card",
+      emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
+    },
+    { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+  ];
+
+/** Validate and shape a host-owned suspension a tool result may emit.
  *
  * `readSuspensionFromOutput` intentionally parses arbitrary tool output, so a
- * caller must not trust `builtin: true` by itself. Only the genuine
- * `ask_question` tool may mount the core `question-card`. Keep this check shared
- * by foreground turns and system-initiated backend continuations so a deferred
- * turn cannot claim the card was shown while leaving it only in the trace. */
-function buildBuiltinQuestionCard(
-  msg: Extract<AgentMessage, { type: "tool_result" }>,
+ * caller must not trust `builtin: true` by itself. Only the tool paired with a
+ * card in `BUILTIN_CARDS` may mount it. Keep this check shared by foreground
+ * turns and system-initiated backend continuations so a deferred turn cannot
+ * claim the card was shown while leaving it only in the trace. */
+function buildBuiltinCard(
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
   suspension: Extract<Suspension, { kind: "inline" }>,
   sessionId: string,
 ): PendingInteractionPart | null {
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
-  const isAskQuestion = toolName === "ask_question" || toolName.endsWith("__ask_question");
-  if (isAskQuestion && suspension.appId === "core" && suspension.componentId === "question-card") {
+  const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
+  if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -594,10 +609,10 @@ interface ActiveWebchatStream {
   // rather than every historical frame. Map preserves insertion order, so
   // the replay matches the order the segments were first opened.
   events: Map<string, WebchatSseEvent>;
-  traceBlocks: (TraceableAgentMessage & { agent?: string })[];
+  traceEvents: (TraceableEvent & { agent?: string })[];
   traceRecorder: AgentTraceRecorder;
   /**
-   * Accumulated preview of the in-flight assistant text block, plus the index
+   * Accumulated deltas of the in-flight assistant text block, plus the index
    * of that block within the turn. The server states stream facts only:
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
@@ -606,7 +621,7 @@ interface ActiveWebchatStream {
    */
   assistantText: string;
   assistantBlockIx: number;
-  persistedTraceBlockCount: number;
+  persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
   subscribers: Map<string, StreamSubscriber>;
@@ -640,12 +655,11 @@ export interface WebchatRuntime {
    *
    * The task receives an `emit` helper that pushes `agent_message` events to
    * subscribers and accumulates them into the persisted trace, identical to
-   * the /chat/send code path.
+   * the /chat/send code path. An event emitted as `recorded` already has its
+   * trace saved and its reply delivered by the task, so the stream only shows
+   * it live and mounts its cards.
    */
-  enqueueSessionTask(
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentMessage & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void>;
+  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -670,6 +684,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+
+  /** Listeners told when a session starts or stops running a turn. */
+  const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
+  // turns in the shared registry, such as a side chat's first answer.
+  const isSessionRunning = (sessionId: string): boolean =>
+    (activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false) ||
+    deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // Sessions running right now, so a status stream can open with a snapshot.
+  const runningSessions = new Set<string>();
+  const notifyRunning = (sessionId: string): void => {
+    const event = { sessionId, running: isSessionRunning(sessionId) };
+    if (event.running) runningSessions.add(sessionId);
+    else runningSessions.delete(sessionId);
+    for (const listener of runningListeners) listener(event);
+  };
+  deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -709,7 +740,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
     const row = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(session.id, null),
+      buildWebchatChannelThreadKey(session.id),
       session.agentName ?? "main",
     );
     return !!row?.providerThreadId;
@@ -738,6 +769,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       activeStreams.set(sessionId, [stream]);
     }
     streamsByTurnId.set(stream.turnId, stream);
+    notifyRunning(sessionId);
   };
 
   /**
@@ -774,10 +806,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     agentLoader: deps.agentLoader,
   });
 
-  const parseStoredTraceBlocks = (content: string): TraceBlockDto[] => {
+  const parseStoredTraceEvents = (content: string): TraceEventDto[] => {
     try {
       const parsed = JSON.parse(content);
-      return Array.isArray(parsed) ? (parsed as TraceBlockDto[]) : [];
+      return Array.isArray(parsed) ? (parsed as TraceEventDto[]) : [];
     } catch {
       // Legacy non-JSON content; render as text so the drawer degrades gracefully.
       return [{ type: "text", content, agent: "main" }];
@@ -793,21 +825,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const value = usage && typeof usage === "object" ? (usage as Record<string, unknown>) : {};
     const finiteOrZero = (field: unknown): number =>
       typeof field === "number" && Number.isFinite(field) ? field : 0;
+    const reasoningTokens = value.reasoningTokens;
     return {
       cacheReadTokens: finiteOrZero(value.cacheReadTokens),
       cacheWriteTokens: finiteOrZero(value.cacheWriteTokens),
       inputTokens: finiteOrZero(value.inputTokens),
       outputTokens: finiteOrZero(value.outputTokens),
+      ...(typeof reasoningTokens === "number" && Number.isFinite(reasoningTokens)
+        ? { reasoningTokens }
+        : {}),
     };
   };
   const addTokenUsage = (left: TraceTokenUsage, right: TraceTokenUsage): TraceTokenUsage => {
     const normalizedLeft = normalizeTokenUsage(left);
     const normalizedRight = normalizeTokenUsage(right);
+    // Reasoning is reported only by some runs. Sum what was reported, and
+    // stay absent when no run reported it, rather than showing a false zero.
+    const hasReasoning =
+      normalizedLeft.reasoningTokens !== undefined || normalizedRight.reasoningTokens !== undefined;
     return {
       cacheReadTokens: normalizedLeft.cacheReadTokens + normalizedRight.cacheReadTokens,
       cacheWriteTokens: normalizedLeft.cacheWriteTokens + normalizedRight.cacheWriteTokens,
       inputTokens: normalizedLeft.inputTokens + normalizedRight.inputTokens,
       outputTokens: normalizedLeft.outputTokens + normalizedRight.outputTokens,
+      ...(hasReasoning
+        ? {
+            reasoningTokens:
+              (normalizedLeft.reasoningTokens ?? 0) + (normalizedRight.reasoningTokens ?? 0),
+          }
+        : {}),
     };
   };
   const modelUsageForAccounting = (accounting: TraceAccounting): TraceModelUsage => ({
@@ -840,7 +886,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     return [...byModel.values()];
   };
-  const terminalAccounting = (blocks: TraceBlockDto[]): TraceAccounting | null => {
+  const terminalAccounting = (blocks: TraceEventDto[]): TraceAccounting | null => {
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
       if ((block.type === "result" || block.type === "error") && block.accounting) {
@@ -857,7 +903,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     usageByModel: TraceModelUsage[];
   };
   const collectDescendantUsage = async (
-    blocks: TraceBlockDto[],
+    blocks: TraceEventDto[],
     visited: Set<string>,
   ): Promise<DescendantUsage> => {
     const refs = blocks.filter((block) => block.type === "subagent_start");
@@ -884,9 +930,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             usageByModel: [],
           };
         }
-        const childBlocks = parseStoredTraceBlocks(row.content);
-        const accounting = terminalAccounting(childBlocks);
-        const nested = await collectDescendantUsage(childBlocks, visited);
+        const childEvents = parseStoredTraceEvents(row.content);
+        const accounting = terminalAccounting(childEvents);
+        const nested = await collectDescendantUsage(childEvents, visited);
         return {
           usage: accounting ? addTokenUsage(accounting.usage, nested.usage) : nested.usage,
           costUsd: (accounting?.costUsd ?? 0) + nested.costUsd,
@@ -917,7 +963,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       },
     );
   };
-  const includeSubagentUsage = async (blocks: TraceBlockDto[]): Promise<TraceBlockDto[]> => {
+  const includeSubagentUsage = async (blocks: TraceEventDto[]): Promise<TraceEventDto[]> => {
     let terminalIndex = -1;
     for (let index = blocks.length - 1; index >= 0; index -= 1) {
       const block = blocks[index];
@@ -955,7 +1001,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     content: string,
     options: { includeSubagentUsage?: boolean } = {},
   ): Promise<TraceSnapshot> => {
-    let blocks = parseStoredTraceBlocks(content);
+    let blocks = parseStoredTraceEvents(content);
     if (options.includeSubagentUsage) blocks = await includeSubagentUsage(blocks);
     return buildTraceSnapshot({
       idPrefix,
@@ -1055,10 +1101,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (row.role === "trace") {
           const content = contentById.get(row.id);
           if (content) {
-            let blocks: TraceBlockDto[] = [];
+            let blocks: TraceEventDto[] = [];
             try {
               const parsed = JSON.parse(content);
-              if (Array.isArray(parsed)) blocks = parsed as TraceBlockDto[];
+              if (Array.isArray(parsed)) blocks = parsed as TraceEventDto[];
             } catch {
               blocks = [];
             }
@@ -1128,14 +1174,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
   const generateShareToken = (): string => randomBytes(32).toString("base64url");
 
-  const buildWebchatChannelThreadKey = (
-    sessionId: string,
-    modelSelection: WebchatLargeModelSelection | null,
-  ): string => {
-    return modelSelection
-      ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-      : `webchat:${sessionId}`;
-  };
+  // The chat's model selection lives on its row and reaches the session at
+  // acquire, so the key names only the chat.
+  const buildWebchatChannelThreadKey = (sessionId: string): string => `webchat:${sessionId}`;
 
   const resolveSessionHandback = (
     session: StoredWebchatSession,
@@ -1190,16 +1231,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const agentName = input.session.agentName ?? "main";
     const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
-    const channelThreadKey = buildWebchatChannelThreadKey(input.session.id, modelSelection);
+    const channelThreadKey = buildWebchatChannelThreadKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
-        ? parseStoredTraceBlocks(traceRow.content)
+        ? parseStoredTraceEvents(traceRow.content)
             .filter(
-              (block): block is Extract<TraceBlockDto, { type: "turn_end" }> =>
+              (block): block is Extract<TraceEventDto, { type: "turn_end" }> =>
                 block.type === "turn_end" && block.turnId === input.turnId,
             )
             .at(-1)?.status
@@ -1249,7 +1290,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
       );
       sourceSessionId = source.sessionId;
-      const storedCheckpoint = await deps.sessionManager.getTurnCheckpoint(
+      const storedCheckpoint = await deps.sessionsRepo.getTurnCheckpoint(
         source.sessionId,
         input.turnId,
       );
@@ -1293,16 +1334,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
-        // Keyed by the fork's own id with no model-selection suffix — exactly
-        // what `handleChatSend` will derive for it later, since a fork row
-        // carries no stored selection.
+        // Keyed by the fork's own id, exactly what `handleChatSend` will
+        // derive for it later.
         ...(input.continuable
-          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id, null) }
+          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id) }
           : {}),
       })
       [Symbol.asyncIterator]();
 
-    let first: IteratorResult<AgentMessage>;
+    let first: IteratorResult<AgentEvent>;
     try {
       first = await iterator.next();
     } catch (err) {
@@ -1334,7 +1374,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // every type-keyed gate grants ordinary-chat behavior from the 201 on.
       // The send guard in handleChatSend keeps "visible" from outrunning
       // "continuable" until persistForkThread lands the provider thread.
-      const fallbackTitle = fallbackConversationTitle(input.prompt);
+      const fallbackTitle = normalizeConversationTitle(input.prompt);
       const current = await deps.webchatRepo.getSession(forkSessionId);
       if (current && fallbackTitle) {
         await deps.webchatRepo.updateSessionNameIfCurrent(
@@ -1570,22 +1610,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
 
     const persist = async () => {
-      while (stream.persistedTraceBlockCount < stream.traceBlocks.length) {
+      while (stream.persistedTraceEventCount < stream.traceEvents.length) {
         // Append-only: serialize and write only the tail that arrived since
         // the last successful persist. A full-array rewrite is O(N²) over a
         // turn and blocks the event loop for tens of milliseconds per event
         // once traces reach megabytes — long enough to stall every
         // concurrent HTTP request in this process.
-        const startSeq = stream.persistedTraceBlockCount;
-        const persistedCount = stream.traceBlocks.length;
+        const startSeq = stream.persistedTraceEventCount;
+        const persistedCount = stream.traceEvents.length;
         try {
-          // Transactional: on failure nothing lands, persistedTraceBlockCount
+          // Transactional: on failure nothing lands, persistedTraceEventCount
           // stays put, and the next call retries the same tail.
           await stream.traceRecorder.recordBatch(
-            stream.traceBlocks.slice(startSeq, persistedCount),
+            stream.traceEvents.slice(startSeq, persistedCount),
             startSeq,
           );
-          stream.persistedTraceBlockCount = persistedCount;
+          stream.persistedTraceEventCount = persistedCount;
         } catch (err) {
           log.error("failed to persist webchat trace", {
             sessionId: stream.sessionId,
@@ -1634,13 +1674,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
-  // Push an AgentMessage through the segment builder and emit segment_upsert
+  // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
-  const emitTraceBlock = (
+  const emitLiveTraceEvent = (
     stream: ActiveWebchatStream,
-    msg: TraceableAgentMessage & { agent?: string },
+    msg: TraceableEvent & { agent?: string },
   ): void => {
-    const block = agentMessageToBlock(msg);
+    const block = toTraceEvent(msg);
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);
@@ -1657,10 +1697,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const snap = stream.segmentBuilder.snapshot();
       emitToStream(stream, "summary_update", snap.summary, "summary");
     }
+  };
+
+  // Show an AgentEvent live and persist it into the stream's trace.
+  const emitTraceEvent = (
+    stream: ActiveWebchatStream,
+    msg: TraceableEvent & { agent?: string },
+  ): void => {
+    emitLiveTraceEvent(stream, msg);
     // Incrementally persist so trace blocks survive a mid-turn crash (e.g.
     // CDP connection closed, long-running tool errors). persistTrace is
     // idempotent + serialized via tracePersistPromise and writes only the
-    // new tail since persistedTraceBlockCount, so frequent calls are safe.
+    // new tail since persistedTraceEventCount, so frequent calls are safe.
     // Fire-and-forget — the runOnStream tail still calls safePersistTrace
     // as the final flush.
     void persistTrace(stream).catch((err) => {
@@ -1680,6 +1728,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // already attached received it live; this only affects future replays.
     stream.events.delete("assistant_text");
     stream.resolveFinish();
+    notifyRunning(stream.sessionId);
     if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
     stream.cleanupTimer = setTimeout(() => {
       removeStream(stream);
@@ -1708,7 +1757,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       startedAt: new Date().toISOString(),
       finished: false,
       events: new Map(),
-      traceBlocks: [],
+      traceEvents: [],
       traceRecorder: new AgentTraceRecorder({
         webchatRepo: deps.webchatRepo,
         agentName,
@@ -1718,7 +1767,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }),
       assistantText: "",
       assistantBlockIx: 0,
-      persistedTraceBlockCount: 0,
+      persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
       subscribers: new Map(),
@@ -1748,7 +1797,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    title ??= fallbackConversationTitle(firstMessage);
+    title ??= normalizeConversationTitle(firstMessage);
     if (!title) return;
 
     // The model runs in parallel with the main turn. Do not overwrite a title
@@ -1879,9 +1928,53 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const sessions = await deps.webchatRepo.listSessions(status);
     return c.json(
-      sessions.map((session) => toWebchatSessionResponse(session, session.messageCount)),
+      sessions.map((session) => {
+        const running = isSessionRunning(session.id);
+        return {
+          ...toWebchatSessionResponse(session, session.messageCount),
+          running,
+          // A new turn's trace is written a moment after it starts, so until
+          // then the newest trace is the previous turn's. Running wins.
+          lastTurnFailed: session.lastTurnFailed && !running,
+          awaitingGuardian: session.awaitingGuardian && !running,
+        };
+      }),
     );
   });
+
+  // One stream for the whole sidebar: a `session_running` event for each chat
+  // running when it opens, then one whenever a chat starts or stops running a
+  // turn. Clients refetch the list on a stop to pick up unread and
+  // lastTurnFailed. Outside `/chat/sessions/` so no `:id` route can claim the
+  // path.
+  app.get("/chat/status/events", (c) =>
+    streamSSE(c, async (sse) => {
+      let close!: () => void;
+      let finished = false;
+      const closed = new Promise<void>((resolve) => {
+        close = resolve;
+      });
+      const listener = (event: { sessionId: string; running: boolean }) => {
+        // Fire-and-forget so a stalled client can't hold up the stream that
+        // is starting or finishing.
+        sse.writeSSE({ event: "session_running", data: JSON.stringify(event) }).catch(finish);
+      };
+      const heartbeat = setInterval(() => {
+        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+      }, 20_000);
+      function finish() {
+        if (finished) return;
+        finished = true;
+        clearInterval(heartbeat);
+        runningListeners.delete(listener);
+        close();
+      }
+      runningListeners.add(listener);
+      for (const sessionId of runningSessions) listener({ sessionId, running: true });
+      sse.onAbort(finish);
+      await closed;
+    }),
+  );
 
   // Register before `/chat/sessions/:id` so "search" is not captured as an ID.
   app.get("/chat/sessions/search", async (c) => {
@@ -2135,15 +2228,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      buildWebchatChannelThreadKey(sessionId),
       session.agentName ?? "main",
     );
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
+      reasoningEffort: runtimeSession?.reasoningEffort ?? null,
     });
   });
 
@@ -2152,12 +2243,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
-    const modelSelection = resolveStoredModelSelection(session?.largeModelSelection);
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.peek({
       agentName: session?.agentName ?? "main",
-      channelThreadKey: buildWebchatChannelThreadKey(sessionId, modelSelection),
+      channelThreadKey: buildWebchatChannelThreadKey(sessionId),
     });
     if (sess) {
       await sess.close("user").catch(() => undefined);
@@ -2410,7 +2500,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.json({ trace: snapshot });
   });
 
-  // Raw trace dump: returns the original TraceBlockDto[] for a (session, turn)
+  // Raw trace dump: returns the original TraceEventDto[] for a (session, turn)
   // as a downloadable JSON file. Always the pre-segmentation blocks so the
   // dump can be replayed/inspected verbatim. Falls back to the in-memory
   // active stream when the row hasn't been persisted yet (very early in a turn).
@@ -2426,7 +2516,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     } else {
       const stream = streamsByTurnId.get(turnId);
       if (stream && stream.sessionId === sessionId) {
-        const blocks = stream.traceBlocks.map((m) => agentMessageToBlock(m));
+        const blocks = stream.traceEvents.map((m) => toTraceEvent(m));
         content = JSON.stringify(blocks);
       }
     }
@@ -2700,16 +2790,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         let queue = Promise.resolve();
         let assistantText = "";
         let assistantBlockIx = 0;
-        let terminalError: Extract<StreamAgentMessage, { type: "error" }> | undefined;
+        let terminalError: Extract<StreamAgentEvent, { type: "error" }> | undefined;
         let interrupted = false;
         const write = (event: WebchatEventName, data: unknown) => {
           queue = queue.then(() => sse.writeSSE({ event, data: JSON.stringify(data) }));
         };
-        const project = (message: StreamAgentMessage) => {
+        const project = (message: StreamAgentEvent) => {
           if (message.type === "input_status") {
             write("input_status", message);
             return;
           }
+          if (isTransientDelta(message) && message.type !== "text_delta") return;
           if (message.type === "text_delta") {
             assistantText += message.content;
             write("assistant_text", {
@@ -2725,7 +2816,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }
           if (message.type === "error") terminalError = message;
           if (message.type === "turn_end" && message.status === "interrupted") interrupted = true;
-          const block = agentMessageToBlock(message);
+          const block = toTraceEvent(message);
           const changed = builder.push(block);
           for (const segment of changed) write("segment_upsert", segment);
           if (
@@ -2916,7 +3007,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionManager.findReusableSession(
-        buildWebchatChannelThreadKey(session.id, null),
+        buildWebchatChannelThreadKey(session.id),
         session.agentName ?? "main",
       );
       if (!branchThread?.providerThreadId) {
@@ -3056,10 +3147,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
-    // A branch resumes by recomputing its channel-thread key, and
-    // `persistForkThread` stored that key without a model-selection suffix. Pin
-    // the selection to null so the two derivations cannot drift: a suffix here
-    // would open a fresh provider thread and silently lose the branch history.
+    // A branch has no stored selection: it continues the provider thread
+    // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
       session.parentSessionId !== null
         ? null
@@ -3072,7 +3161,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             body.largeModelSelection,
           );
     const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
-    const channelThreadKey = buildWebchatChannelThreadKey(sessionId, modelSelection);
+    const channelThreadKey = buildWebchatChannelThreadKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
     // re-check here so a stale row from a removed app surfaces a clear error
@@ -3172,7 +3261,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // stream remains replayable for 30 seconds after completion and the
         // persisted trace renders on reload even if navigation finishes later.
         void runOnStream(stream, "webchat model resolution", async () => {
-          const failedTurn: Array<TraceableAgentMessage & { agent?: string }> = [
+          const failedTurn: Array<TraceableEvent & { agent?: string }> = [
             {
               type: "turn_start",
               turnId,
@@ -3190,8 +3279,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             },
           ];
           for (const message of failedTurn) {
-            stream.traceBlocks.push(message);
-            emitTraceBlock(stream, message);
+            stream.traceEvents.push(message);
+            emitTraceEvent(stream, message);
           }
           return { success: false, ...modelError };
         });
@@ -3243,20 +3332,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             let lastCompletedText:
               | {
                   blockIx: number;
+                  blockId?: string;
                   content: string;
                   turnPhase?: "commentary" | "final";
                 }
               | undefined;
             let finalTextBlockIx: number | undefined;
-            let resultError: Extract<AgentMessage, { type: "error" }> | undefined;
+            let finalTextBlockId: string | undefined;
+            // Block id of the in-flight text block, from its deltas.
+            let inFlightTextBlockId: string | undefined;
+            let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
-              // Live preview of the in-flight text block. Transient — never a
+              // Deltas other than text have no webchat consumer yet.
+              if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
+              // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
               // late subscriber gets one event with the latest block's
               // accumulated text.
               if (msg.type === "text_delta") {
                 stream.assistantText += msg.content;
+                if (msg.blockId) inFlightTextBlockId = msg.blockId;
                 emitToStream(
                   stream,
                   "assistant_text",
@@ -3265,8 +3361,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 );
                 continue;
               }
-              // Block boundary: a complete `text` block closes the in-flight
-              // preview. If the deltas didn't cover the block (non-streaming
+              // Block boundary: a complete `text` block ends its in-flight
+              // deltas. If the deltas didn't cover the block (non-streaming
               // provider, or a dropped frame), emit a corrective event with the
               // full text — this is what gives block-level previews on
               // providers that never stream deltas. The next text block gets a
@@ -3298,6 +3394,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         type: "text",
                         content: msg.content,
                         turnPhase: "commentary",
+                        ...(msg.blockId ? { blockId: msg.blockId } : {}),
                         blockIx,
                       },
                     ]);
@@ -3311,29 +3408,43 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 lastCompletedText = {
                   blockIx,
+                  ...(msg.blockId ? { blockId: msg.blockId } : {}),
                   content: msg.content,
                   turnPhase: msg.turnPhase,
                 };
-                if (msg.turnPhase === "final") finalTextBlockIx = blockIx;
+                if (msg.turnPhase === "final") {
+                  finalTextBlockIx = blockIx;
+                  finalTextBlockId = msg.blockId;
+                }
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
+                inFlightTextBlockId = undefined;
               }
               if (msg.type === "turn_end" && stream.assistantText) {
                 const blockIx = stream.assistantBlockIx;
+                const blockId = inFlightTextBlockId;
                 const partial = {
                   type: "text" as const,
                   content: stream.assistantText,
                   turnPhase: "final" as const,
+                  ...(blockId ? { blockId } : {}),
                 };
-                lastCompletedText = { blockIx, content: partial.content, turnPhase: "final" };
+                lastCompletedText = {
+                  blockIx,
+                  ...(blockId ? { blockId } : {}),
+                  content: partial.content,
+                  turnPhase: "final",
+                };
+                inFlightTextBlockId = undefined;
                 finalTextBlockIx = blockIx;
-                stream.traceBlocks.push(partial);
-                emitTraceBlock(stream, partial);
+                finalTextBlockId = blockId;
+                stream.traceEvents.push(partial);
+                emitTraceEvent(stream, partial);
                 stream.assistantBlockIx += 1;
                 stream.assistantText = "";
               }
-              stream.traceBlocks.push(msg);
-              emitTraceBlock(stream, msg);
+              stream.traceEvents.push(msg);
+              emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
                 const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
                 if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
@@ -3422,15 +3533,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               if (msg.type === "tool_result") {
                 const suspension = readSuspensionFromOutput(msg.output);
                 if (suspension && suspension.kind === "inline" && suspension.builtin) {
-                  // Host built-in inline card (the ask_question question-card):
-                  // rendered by rome-web, so there is no owning app to validate.
-                  const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
+                  // Host built-in inline card (the ask_question question-card,
+                  // the connect_ai ai-tools-card): rendered by rome-web, so
+                  // there is no owning app to validate.
+                  const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
                     await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
-                    ?.listResolved()
+                    .listResolved()
                     .find((a) => a.appId === suspension.appId);
                   if (!resolvedApp) {
                     log.warn("rejected suspension: app not installed", {
@@ -3509,7 +3621,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 const place = readPlaceWidgetFromOutput(msg.output);
                 if (place) {
                   const resolvedApp = deps.appCatalog
-                    ?.listResolved()
+                    .listResolved()
                     .find((a) => a.appId === place.appId);
                   const isHostApp = place.appId === SESSIONS_HOST_APP_ID;
                   if (!resolvedApp && !isHostApp) {
@@ -3552,6 +3664,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   : undefined;
               const resultBlockIx =
                 finalTextBlockIx ?? reusableResultBlockIx ?? stream.assistantBlockIx;
+              // The id of the block whose index the answer takes, when it has one.
+              const resultBlockId =
+                finalTextBlockIx !== undefined
+                  ? finalTextBlockId
+                  : reusableResultBlockIx !== undefined
+                    ? lastCompletedText?.blockId
+                    : undefined;
               await deps.actionEngine.run(
                 "send_message",
                 {
@@ -3563,6 +3682,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       type: "text" as const,
                       content: resultContent,
                       turnPhase: "final" as const,
+                      ...(resultBlockId ? { blockId: resultBlockId } : {}),
                       blockIx: resultBlockIx,
                     },
                   ],
@@ -3636,27 +3756,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           }),
         );
       },
-      onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusMessage) => {
+      onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
         if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
       },
     };
     const input = { inputId, prompt: promptText, reasoningEffort };
-    let receipt;
-    if (agentSess.submitInput) {
-      receipt = agentSess.submitInput(input, options);
-    } else {
-      const handle = agentSess.sendTurn(input, options);
-      options.onTurn(handle);
-      await options.onInputStatus({
-        type: "input_status",
-        inputId,
-        turnId: handle.turnId,
-        state: "submitted",
-      });
-      receipt = { inputId, turnId: handle.turnId, disposition: "started" as const };
-    }
+    const receipt = agentSess.submitInput(input, options);
     const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
     return c.json({
       ...receipt,
@@ -3671,10 +3778,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return handleChatSend(c, id, body);
   });
 
-  const runEnqueuedTask = async (
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentMessage & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void> => {
+  const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
     if (predecessor && !predecessor.finished) {
@@ -3714,10 +3818,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stream = await createStream(
       sessionId,
       syntheticTurnId,
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      buildWebchatChannelThreadKey(sessionId),
       session.agentName ?? "main",
     );
     enqueueStream(sessionId, stream);
@@ -3732,7 +3833,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
     const builtinQuestionCards: PendingInteractionPart[] = [];
-    const emit = (msg: AgentMessage & { agent?: string }) => {
+    // A recorded event's turn delivers its own reply, so its cards are written
+    // as they arrive, ahead of that reply, under the turn's own id.
+    let recordedTurnId: string | undefined;
+    let recordedCardWrites: Promise<void> = Promise.resolve();
+    const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
+      const recorded = options?.recorded === true;
+      if (recorded && msg.type === "turn_start") recordedTurnId = msg.turnId;
       if (msg.type === "turn_start" && stream.channelThreadKey) {
         const owner = deps.agentSessionManager.peek({
           agentName: msg.agent ?? stream.agentName,
@@ -3746,22 +3853,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           };
         }
       }
-      // Backend turns have no live bubble; drop transient text previews.
-      if (msg.type === "text_delta" || msg.type === "input_status") return;
-      stream.traceBlocks.push(msg);
-      emitTraceBlock(stream, msg);
-      if (msg.type === "result") replyText = msg.content;
+      // Backend turns have no live bubble; drop delta events.
+      if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
+      if (recorded) {
+        emitLiveTraceEvent(stream, msg);
+      } else {
+        stream.traceEvents.push(msg);
+        emitTraceEvent(stream, msg);
+        if (msg.type === "result") replyText = msg.content;
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
         if (suspension && suspension.kind === "inline" && suspension.builtin) {
-          const card = buildBuiltinQuestionCard(msg, suspension, sessionId);
-          if (card) builtinQuestionCards.push(card);
+          const card = buildBuiltinCard(msg, suspension, sessionId);
+          if (card && recorded) {
+            const cardTurnId = recordedTurnId ?? syntheticTurnId;
+            recordedCardWrites = recordedCardWrites.then(() =>
+              persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
+            );
+          } else if (card) {
+            builtinQuestionCards.push(card);
+          }
         }
       }
+      return recordedCardWrites;
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
       await task({ emit });
+      await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.

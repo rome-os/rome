@@ -1,13 +1,24 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { BackendTurnRunnerProxy, NotifyServiceProxy, TalkRouterProxy } from "./service-proxies.js";
 import {
-  setWorkerRpcInProcessDispatcher,
-  WorkerRpcDisconnectError,
-  WorkerRpcSendError,
-  WorkerRpcTimeoutError,
-} from "./worker-rpc-client.js";
+  AppManagerProxy,
+  BackendTurnRunnerProxy,
+  AgentNamesProxy,
+  ChannelsServiceProxy,
+  NotifyServiceProxy,
+  FeedbackServiceProxy,
+} from "./service-proxies.js";
+import {
+  runWithHookInvocationContext,
+  runWithoutHookInvocationContext,
+  type HookInvocationContext,
+} from "../core/hook-recursion.js";
+import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { AppLifecycleService } from "../apps/lifecycle-service.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
+import { setWorkerRpcInProcessDispatcher } from "./worker-rpc-client.js";
+import { IpcRpcDisconnectError, IpcRpcTimeoutError } from "./ipc.js";
 
-describe("TalkRouterProxy", () => {
+describe("ChannelsServiceProxy", () => {
   const originalSend = process.send;
 
   afterEach(() => {
@@ -15,43 +26,90 @@ describe("TalkRouterProxy", () => {
     setWorkerRpcInProcessDispatcher(null);
   });
 
-  it("reads the live main-process connection list on every call", async () => {
-    process.send = undefined;
-    let connections = [{ connectionId: "discord-1", service: "discord" }];
-    const calls: string[] = [];
-    setWorkerRpcInProcessDispatcher(async (method) => {
-      calls.push(method);
-      return connections;
-    });
-    const proxy = new TalkRouterProxy();
+  const wireLine = {
+    channel: "discord",
+    direction: "inbound",
+    messageId: "message-1",
+    conversationId: "conversation-1",
+    senderId: "user-1",
+    text: "hello",
+    attachments: [],
+    timestamp: "2026-08-04T10:00:00.000Z",
+  };
 
-    await expect(proxy.list()).resolves.toEqual(connections);
-    connections = [{ connectionId: "wechat-1", service: "wechat" }];
-    await expect(proxy.list()).resolves.toEqual(connections);
-    expect(calls).toEqual(["talk.list", "talk.list"]);
+  it("sends a read's since as an instant and rehydrates the answer", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return [wireLine];
+    });
+    const proxy = new ChannelsServiceProxy();
+    const since = new Date("2026-08-04T09:00:00.000Z");
+
+    const queried = await proxy.query("discord", { since, limit: 2 });
+
+    expect(queried[0]?.timestamp).toBeInstanceOf(Date);
+    expect(queried[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
+    expect(calls).toEqual([
+      {
+        method: "channels.query",
+        params: { channel: "discord", since: "2026-08-04T09:00:00.000Z", limit: 2 },
+      },
+    ]);
   });
 
-  it("rehydrates history timestamps after worker RPC serialization", async () => {
+  it("sends by channel name", async () => {
     process.send = undefined;
-    setWorkerRpcInProcessDispatcher(async (method) => {
-      expect(method).toBe("talk.history.query");
-      return [
-        {
-          messageId: "message-1",
-          conversationId: "conversation-1",
-          senderId: "user-1",
-          text: "hello",
-          attachments: [],
-          timestamp: "2026-08-04T10:00:00.000Z",
-        },
-      ];
+    const calls: unknown[] = [];
+    setWorkerRpcInProcessDispatcher(async (_method, params) => {
+      calls.push(params);
+      return { messageId: "m1" };
     });
-    const history = new TalkRouterProxy().feature("discord-1", "history");
+    const proxy = new ChannelsServiceProxy();
 
-    const messages = await history?.query({});
+    await proxy.send("discord", "c1" as never, { text: "a" });
 
-    expect(messages?.[0]?.timestamp).toBeInstanceOf(Date);
-    expect(messages?.[0]?.timestamp.toISOString()).toBe("2026-08-04T10:00:00.000Z");
+    expect(calls).toEqual([{ channel: "discord", conversationId: "c1", message: { text: "a" } }]);
+  });
+
+  // TODO(0.8): remove with the migration getters.
+  it("tells an app built on 0.6 how to migrate off history and connectionIds", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => [{ name: "discord", sendable: true }]);
+    const proxy = new ChannelsServiceProxy();
+
+    const [summary] = await proxy.list();
+
+    expect(summary).toEqual({ name: "discord", sendable: true });
+    expect(() => (proxy as unknown as { history: unknown }).history).toThrow(
+      "ChannelsService.history was removed in @rome-os/app-runtime 0.7",
+    );
+    expect(() => (summary as unknown as { connectionIds: unknown }).connectionIds).toThrow(
+      "ChannelSummary.connectionIds was removed in @rome-os/app-runtime 0.7",
+    );
+  });
+});
+
+describe("AgentNamesProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  it("asks main to resolve the name", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const answer = { status: "none" };
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return answer;
+    });
+
+    expect(await new AgentNamesProxy().resolve("atlas")).toEqual(answer);
+    expect(calls).toEqual([{ method: "agentNames.resolve", params: { name: "atlas" } }]);
   });
 });
 
@@ -90,7 +148,7 @@ describe("BackendTurnRunnerProxy", () => {
     expect(settled).toBe(false);
 
     const rejection = expect(promise).rejects.toThrow(
-      "WorkerRPC timeout: session.continue (1800000ms)",
+      "IpcRpc timeout: session.continue (1800000ms)",
     );
     await rs.advanceTimersByTimeAsync(20 * 60 * 1000);
     await rejection;
@@ -102,7 +160,7 @@ describe("NotifyServiceProxy", () => {
 
   afterEach(() => {
     rs.useRealTimers();
-    // getWorkerRpc() only uses the in-process dispatcher when process.send is
+    // callMain() only uses the in-process dispatcher when process.send is
     // undefined (Rstest's forks pool otherwise leaves it defined); restore both.
     process.send = originalSend;
     setWorkerRpcInProcessDispatcher(null);
@@ -129,7 +187,7 @@ describe("NotifyServiceProxy", () => {
     });
   });
 
-  it("configures a 150s RPC timeout, not the 30s WorkerRPC default", async () => {
+  it("configures a 150s RPC timeout, not the 30s default", async () => {
     rs.useFakeTimers();
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {})); // never settles
@@ -181,12 +239,11 @@ describe("NotifyServiceProxy", () => {
     expect(seenParams).toEqual(expectedParams);
   });
 
-  // The three delivery-uncertain worker→main transport failures all convert to
+  // Delivery-uncertain worker→main transport failures convert to
   // outcome_unknown; a later caller must not retry them.
   it.each([
-    new WorkerRpcTimeoutError("notify.send", 150_000),
-    new WorkerRpcDisconnectError(),
-    new WorkerRpcSendError("notify.send", new Error("EPIPE")),
+    new IpcRpcTimeoutError("notify.send", 150_000),
+    new IpcRpcDisconnectError(),
   ])("converts %s to outcome_unknown", async (err) => {
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(async () => {
@@ -201,7 +258,7 @@ describe("NotifyServiceProxy", () => {
     // send that times out is just as delivery-ambiguous as a zero-arg one.
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(async () => {
-      throw new WorkerRpcTimeoutError("notify.send", 150_000);
+      throw new IpcRpcTimeoutError("notify.send", 150_000);
     });
 
     expect(await new NotifyServiceProxy().send({ body: "Build failed" })).toEqual({
@@ -225,5 +282,119 @@ describe("NotifyServiceProxy", () => {
     await expect(new NotifyServiceProxy().send()).rejects.toThrow(
       /not running in a Node\.js child process/,
     );
+  });
+});
+
+describe("AppManagerProxy", () => {
+  const originalSend = process.send;
+
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+
+  const chain: HookInvocationContext = {
+    rootInvocationId: "root-1",
+    depth: 1,
+    chain: [{ hookType: "app", appId: "looper", hookName: "app-started" }],
+  };
+
+  it("sends the caller's hook chain with every lifecycle call", async () => {
+    process.send = undefined;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      calls.push({ method, params });
+      return {};
+    });
+    const proxy = new AppManagerProxy();
+
+    await runWithHookInvocationContext(chain, async () => {
+      await proxy.install({ source: { mode: "bundle", path: "/tmp/app" } });
+      await proxy.uninstall({ appId: "looper" });
+      await proxy.setEnabled({ appId: "looper", enabled: true });
+    });
+    await proxy.setEnabled({ appId: "looper", enabled: false });
+
+    expect(calls).toEqual([
+      {
+        method: "apps.install",
+        params: { source: { mode: "bundle", path: "/tmp/app" }, hookInvocationContext: chain },
+      },
+      { method: "apps.uninstall", params: { appId: "looper", hookInvocationContext: chain } },
+      {
+        method: "apps.setEnabled",
+        params: { appId: "looper", enabled: true, hookInvocationContext: chain },
+      },
+      { method: "apps.setEnabled", params: { appId: "looper", enabled: false } },
+    ]);
+  });
+
+  it("delivers the chain to the app manager across the worker hop", async () => {
+    process.send = undefined;
+    let seen: HookInvocationContext | undefined;
+    const appManager = {
+      setEnabled: rs.fn(async () => {
+        seen = getCurrentHookInvocationContext();
+      }),
+    };
+    const server = new WorkerRpcServer({
+      appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
+    } as unknown as WorkerRpcServices);
+    // A real worker hop serializes the params and loses the caller's async
+    // context. Model both, so only the params can carry the chain.
+    setWorkerRpcInProcessDispatcher((method, params) =>
+      runWithoutHookInvocationContext(() =>
+        server.dispatchInProcess(method, JSON.parse(JSON.stringify(params))),
+      ),
+    );
+
+    await runWithHookInvocationContext(chain, () =>
+      new AppManagerProxy().setEnabled({ appId: "looper", enabled: true }),
+    );
+
+    expect(appManager.setEnabled).toHaveBeenCalledWith("looper", true);
+    expect(seen).toEqual(chain);
+  });
+});
+
+describe("FeedbackServiceProxy", () => {
+  const originalSend = process.send;
+  const input = {
+    category: "bug" as const,
+    summary: "Broken",
+    details: "Repro",
+    reporter: { kind: "agent" as const, agentName: "main" },
+  };
+  afterEach(() => {
+    process.send = originalSend;
+    setWorkerRpcInProcessDispatcher(null);
+  });
+  it("forwards runtime provenance and returns only the classified outcome", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async (method, params) => {
+      expect(method).toBe("feedback.send");
+      expect(params).toEqual(input);
+      return { kind: "ok" };
+    });
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "ok" });
+  });
+  it.each([
+    new IpcRpcTimeoutError("feedback.send", 30_000),
+    new IpcRpcDisconnectError(),
+  ])("classifies transport uncertainty without retry: %s", async (err) => {
+    process.send = undefined;
+    const dispatch = rs.fn(async () => {
+      throw err;
+    });
+    setWorkerRpcInProcessDispatcher(dispatch);
+    expect(await new FeedbackServiceProxy().send(input)).toEqual({ kind: "unreachable" });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+  it("does not hide a genuine handler bug", async () => {
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(async () => {
+      throw new Error("bug");
+    });
+    await expect(new FeedbackServiceProxy().send(input)).rejects.toThrow("bug");
   });
 });

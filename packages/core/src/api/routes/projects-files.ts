@@ -5,6 +5,7 @@ import type {
   ProjectDashboardChatsResponse,
   ProjectDashboardResolveResponse,
   ProjectDashboardResponse,
+  ProjectDashboardProviderUsageTotals,
   ProjectDashboardUsageDay,
 } from "@rome/api-types/projects";
 import { existsSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
@@ -26,11 +27,14 @@ import {
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
-import { PROJECT_FILE_BROWSER_POLICY } from "../../lib/project-file-browser.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { resolveWebchatLargeModelSelection } from "../../core/model-selector.js";
 import type { ApiDeps } from "../deps.js";
 
+// Dependency trees are skipped at every level of the Projects browser: as
+// project roots, in the tree, in live updates, uploads, and folder downloads.
+// Build outputs (`build`, `coverage`, `dist`) are real project content and
+// stay visible. Dot entries are always skipped by the file browser itself.
+export const PROJECTS_IGNORED_NAMES = ["node_modules"];
 const PROJECT_DASHBOARD_DAYS = 14;
 const PROJECT_DASHBOARD_CHAT_LIMIT = 20;
 const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
@@ -138,7 +142,7 @@ function isSameOrChildProjectPath(relativePath: string, projectPath: string): bo
 }
 
 function shouldSkipProjectEntry(name: string): boolean {
-  return name.startsWith(".");
+  return name.startsWith(".") || PROJECTS_IGNORED_NAMES.includes(name);
 }
 
 function listTopLevelShadowProjectPaths(rootDir: string): string[] {
@@ -147,11 +151,8 @@ function listTopLevelShadowProjectPaths(rootDir: string): string[] {
     .map((entry) => entry.name);
 }
 
-function buildWebchatChannelThreadKey(sessionId: string, largeModelSelection: unknown): string {
-  const modelSelection = resolveWebchatLargeModelSelection(largeModelSelection);
-  return modelSelection
-    ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-    : `webchat:${sessionId}`;
+function buildWebchatChannelThreadKey(sessionId: string): string {
+  return `webchat:${sessionId}`;
 }
 
 async function closeLiveProjectSessions(
@@ -166,7 +167,7 @@ async function closeLiveProjectSessions(
     sessions.map(async (session) => {
       const liveSession = agentSessionManager.peek({
         agentName: session.agentName ?? "main",
-        channelThreadKey: buildWebchatChannelThreadKey(session.id, session.largeModelSelection),
+        channelThreadKey: buildWebchatChannelThreadKey(session.id),
       });
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);
@@ -387,6 +388,7 @@ function createUsageDays(
       date: shiftDayKey(today, -index),
       inputTokens: 0,
       outputTokens: 0,
+      providers: [],
     });
   }
 
@@ -472,6 +474,19 @@ function applyUsageTotals(usage: ProjectDashboardUsageDay[], totals: ProjectUsag
       day.costUsd = row.costUsd;
     }
   }
+  for (const row of totals.providerDays) {
+    const { date: dayKey, ...providerUsage } = row;
+    usageByDate.get(dayKey)?.providers.push(providerUsage);
+  }
+}
+
+function createProviderUsageTotals(
+  totals: ProjectUsageTotals,
+): ProjectDashboardProviderUsageTotals {
+  return {
+    month: totals.providerTotals.map((row) => ({ ...row.month, provider: row.provider })),
+    total: totals.providerTotals.map((row) => ({ ...row.total, provider: row.provider })),
+  };
 }
 
 function createUsageStats(totals: ProjectUsageTotals, usage: ProjectDashboardUsageDay[]) {
@@ -483,6 +498,7 @@ function createUsageStats(totals: ProjectUsageTotals, usage: ProjectDashboardUsa
     ),
     monthCostUsd: totals.monthCostUsd,
     monthTokens: totals.monthTokens,
+    providerUsage: createProviderUsageTotals(totals),
     totalCacheReadTokens: totals.totalCacheReadTokens,
     totalCacheWriteTokens: totals.totalCacheWriteTokens,
     totalCostUsd: totals.totalCostUsd,
@@ -583,6 +599,7 @@ async function buildProjectUsageStats(
   cacheHitRate: number;
   monthCostUsd: number;
   monthTokens: number;
+  providerUsage: ProjectDashboardProviderUsageTotals;
   totalCacheReadTokens: number;
   totalCacheWriteTokens: number;
   totalCostUsd: number;
@@ -685,6 +702,7 @@ async function buildAllProjectsDashboard(
       totalCostUsd: usageStats.totalCostUsd,
       totalTokens: usageStats.totalTokens,
     },
+    providerUsage: usageStats.providerUsage,
     usage: usageStats.usage,
   };
 }
@@ -699,8 +717,8 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
   const projectsRoot = ensureProjectsRootInitialized();
 
   const baseScope: FileBrowserScope = {
-    ...PROJECT_FILE_BROWSER_POLICY,
     assetBasePath: "/api/projects/asset",
+    ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir: projectsRoot,
   };
@@ -740,7 +758,21 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
   app.get("/projects/asset/:fileName", createAssetHandler(baseScope));
   app.get("/projects/download", createDownloadHandler(baseScope));
   app.get("/projects/history", createHistoryHandler(fileScope));
-  app.get("/projects/search", createSearchHandler(baseScope));
+  app.get(
+    "/projects/search",
+    createSearchHandler({
+      ...baseScope,
+      searchGlobs: [
+        "!**/.git/**",
+        "!**/.next/**",
+        "!**/.turbo/**",
+        "!**/build/**",
+        "!**/coverage/**",
+        "!**/dist/**",
+        "!**/node_modules/**",
+      ],
+    }),
+  );
 
   app.get("/projects/dashboard", async (c) => {
     const webchatRepo = deps.webchatRepo;
@@ -809,6 +841,7 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
         totalCostUsd: usageStats.totalCostUsd,
         totalTokens: usageStats.totalTokens,
       },
+      providerUsage: usageStats.providerUsage,
       usage: usageStats.usage,
     };
 

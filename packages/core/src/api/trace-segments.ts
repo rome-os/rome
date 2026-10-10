@@ -1,25 +1,25 @@
 import type {
   AppRefDto,
-  SubagentResultBlock,
-  SubagentStartBlock,
+  TraceSubagentResultEvent,
+  TraceSubagentStartEvent,
   ToolUseBlock,
   ToolResultBlock,
-  TraceBlockDto,
+  TraceEventDto,
   TraceRunSegment,
   TraceSegment,
   TraceSnapshot,
   TraceSummary,
 } from "@rome/api-types/trace-segments";
-import { toTraceBlock, type TraceableAgentMessage } from "./helpers.js";
-import { isTerminalBlock } from "../core/agent-message.js";
+import { toTraceEvent } from "./helpers.js";
+import { isTerminalEvent } from "../core/agent-message.js";
 
 export type {
   AppRefDto,
-  SubagentResultBlock,
-  SubagentStartBlock,
+  TraceSubagentResultEvent,
+  TraceSubagentStartEvent,
   ToolUseBlock,
   ToolResultBlock,
-  TraceBlockDto,
+  TraceEventDto,
   TraceRunSegment,
   TraceSegment,
   TraceSnapshot,
@@ -28,11 +28,11 @@ export type {
 
 export interface AppResolver {
   /** Resolve the App that owns a given tool invocation. */
-  resolveTool(block: ToolUseBlock | SubagentStartBlock): AppRefDto;
+  resolveTool(block: ToolUseBlock | TraceSubagentStartEvent): AppRefDto;
 }
 
-type InvocationStartBlock = ToolUseBlock | SubagentStartBlock;
-type InvocationResultBlock = ToolResultBlock | SubagentResultBlock;
+type InvocationStart = ToolUseBlock | TraceSubagentStartEvent;
+type InvocationResult = ToolResultBlock | TraceSubagentResultEvent;
 
 interface RunState {
   segId: string;
@@ -40,7 +40,7 @@ interface RunState {
   ordinal: number;
   count: number;
   /** Live, mutable block list. Snapshots are sliced before leaving the builder. */
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   pairedAny: boolean;
   /** Once any paired step lacked timestamps, the run's duration becomes
    *  permanently unknown. */
@@ -53,8 +53,8 @@ interface RunState {
 }
 
 function pairedDurationMs(
-  use: InvocationStartBlock,
-  result: InvocationResultBlock | undefined,
+  use: InvocationStart,
+  result: InvocationResult | undefined,
 ): number | null {
   if (!result) return null;
   if (!use.startedAt || !result.endedAt) return null;
@@ -78,7 +78,7 @@ function runSegmentFromState(s: RunState): TraceRunSegment {
 
 export interface SegmentBuilder {
   /** Append a block (live SSE) and return the segments whose payload changed. */
-  push(block: TraceBlockDto): TraceSegment[];
+  push(block: TraceEventDto): TraceSegment[];
   /** Snapshot the full ordered segment list and aggregate summary. */
   snapshot(): TraceSnapshot;
 }
@@ -120,7 +120,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   let latestPlan: TraceSummary["plan"];
   /** Most recent result/error block; the turn's own `turn_end` reads it to
    *  derive the summary (stop/error state). */
-  let lastTerminal: (TraceBlockDto & { type: "result" | "error" }) | undefined;
+  let lastTerminal: (TraceEventDto & { type: "result" | "error" }) | undefined;
 
   const observeApp = (app: AppRefDto) => {
     if (!seenAppIds.has(app.id)) {
@@ -140,21 +140,21 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
     return seg;
   };
 
-  const applyPairing = (state: RunState, useIdx: number, result: InvocationResultBlock): void => {
+  const applyPairing = (state: RunState, useIdx: number, result: InvocationResult): void => {
     state.blocks.splice(useIdx + 1, 0, result);
     for (const [otherId, otherIdx] of state.useIndexById) {
       if (otherIdx > useIdx) state.useIndexById.set(otherId, otherIdx + 1);
     }
     const use = state.blocks[useIdx];
-    const stepDuration =
+    const toolCallDuration =
       use.type === "tool_use" || use.type === "subagent_start"
         ? pairedDurationMs(use, result)
         : null;
     state.pairedAny = true;
-    if (stepDuration === null) {
+    if (toolCallDuration === null) {
       state.durationDirty = true;
     } else {
-      state.durationMs += stepDuration;
+      state.durationMs += toolCallDuration;
     }
   };
 
@@ -180,7 +180,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   };
 
   return {
-    push(block: TraceBlockDto): TraceSegment[] {
+    push(block: TraceEventDto): TraceSegment[] {
       const changed: TraceSegment[] = [];
 
       // Lifecycle blocks carry boundary metadata for the summary; they render
@@ -263,7 +263,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         // but the run's RunState lives on so a late tool_result can still pair
         // by id.
         activeRunSegId = null;
-        if (isTerminalBlock(block)) {
+        if (isTerminalEvent(block)) {
           lastTerminal = block;
         }
         const seg: TraceSegment = {
@@ -365,7 +365,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
 export interface BuildTraceSnapshotArgs {
   /** Stable id namespace; segment ids are `${idPrefix}-N`. */
   idPrefix: string;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   resolver: AppResolver;
 }
 
@@ -379,13 +379,4 @@ export function buildTraceSnapshot(args: BuildTraceSnapshotArgs): TraceSnapshot 
     builder.push(block);
   }
   return builder.snapshot();
-}
-
-/** Convenience for the SSE wiring: project an AgentMessage to a TraceBlockDto
- *  using the same shape persisted on disk. Transient `text_delta` previews
- *  have no block representation and are excluded at the type level. */
-export function agentMessageToBlock(
-  msg: TraceableAgentMessage & { agent?: string },
-): TraceBlockDto {
-  return toTraceBlock(msg);
 }

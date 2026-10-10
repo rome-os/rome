@@ -8,10 +8,6 @@ import { LARGE_MODEL_OPTIONS } from "@/lib/chat-constants";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(cleanup);
@@ -39,7 +35,7 @@ describe("ModelSelectorMenu", () => {
     const names = optionNames();
     // Curated set: auto + latest-generation flagship per family (GPT-6 Astra is
     // the newest OpenAI generation in the catalog).
-    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5", "GPT-6 Astra"]));
+    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5.5", "GPT-6 Astra"]));
     // The long tail is folded away until the guardian expands or searches.
     expect(names).not.toContain("Sonnet");
     expect(names).not.toContain("Haiku");
@@ -83,6 +79,18 @@ describe("ModelSelectorMenu", () => {
     });
   });
 
+  it("finds GPT-6.1 Sol and submits its model selection ID", async () => {
+    const user = userEvent.setup();
+    const props = baseProps();
+    render(<ModelSelectorMenu {...props} />);
+
+    await user.type(screen.getByPlaceholderText("Search models…"), "6.1");
+    await user.click(await screen.findByRole("option", { name: "GPT-6.1 Sol" }));
+
+    expect(props.onChange).toHaveBeenCalledWith("gpt-6-1-sol");
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("shows an empty state when nothing matches", async () => {
     const user = userEvent.setup();
     render(<ModelSelectorMenu {...baseProps()} />);
@@ -98,9 +106,9 @@ describe("ModelSelectorMenu", () => {
     const props = baseProps();
     render(<ModelSelectorMenu {...props} />);
 
-    await user.click(screen.getByRole("option", { name: /Opus 5/ }));
+    await user.click(screen.getByRole("option", { name: /Opus 5\.5/ }));
 
-    expect(props.onChange).toHaveBeenCalledWith("claude-opus-5");
+    expect(props.onChange).toHaveBeenCalledWith("claude-opus-5-5");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -132,7 +140,7 @@ describe("ModelSelectorMenu", () => {
 
     // Back to the curated rows + show-all — not the stale "sonnet" filter.
     const names = optionNames();
-    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5", "GPT-6 Astra"]));
+    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5.5", "GPT-6 Astra"]));
     expect(names).not.toContain("Sonnet");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
     // The search field is cleared too.

@@ -133,7 +133,7 @@ export { compareCodePoints };
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
   const normalizedB = b.normalize("NFC");
-  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  const byFolded = compareCodePoints(caseFold(normalizedA), caseFold(normalizedB));
   return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
 }
 
@@ -148,9 +148,40 @@ export function compareDisplayNames(a: string, b: string): number {
  * should find a row that stored it decomposed, and the reverse.
  */
 export function matchesQuery(query: string, haystack: readonly string[]): boolean {
-  const q = query.normalize("NFC").trim().toLowerCase();
+  const q = caseFold(query.normalize("NFC").trim());
   if (!q) return true;
-  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+  return caseFold(haystack.join(" ").normalize("NFC")).includes(q);
+}
+
+/**
+ * Unicode case folding, which JavaScript has no built-in for, shared by the
+ * name orderings and search so they fold alike.
+ *
+ * Lowercasing alone misses the folds that expand or merge letters: "ß" and
+ * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
+ * up, except for the dotless "ı", which folds to itself but would come back
+ * as "i", so it stays out of the round trip. Then final sigma becomes the
+ * medial one and Cherokee its uppercase, as folding does, and the result is
+ * normalized again, since the round trip can decompose a letter.
+ *
+ * A directory sort folds every name on each comparison, so text that folds
+ * exactly as it lowercases skips the round trip: printable ASCII, and the
+ * caseless CJK punctuation, kana, ideographs and Hangul syllables most names
+ * here are written in. That holds for NFC input, which both callers pass; a
+ * decomposed kana voicing mark would otherwise stay apart from its letter.
+ */
+function caseFold(value: string): string {
+  if (!/[^ -~\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(value)) {
+    return value.toLowerCase();
+  }
+  return value
+    .toLowerCase()
+    .split("ı")
+    .map((part) => part.toUpperCase().toLowerCase())
+    .join("ı")
+    .replaceAll("ς", "σ")
+    .replace(/[\u13f8-\u13fd\uab70-\uabbf]/g, (letter) => letter.toUpperCase())
+    .normalize("NFC");
 }
 
 /**
@@ -443,12 +474,20 @@ export function accountRef(account: { channel: string; channelUserId: string }):
 
 /** What `?q=` matches: the display name, the linked person's name, and every
  *  address — so a phone number finds an account the platform named something
- *  else, and a person's name finds the accounts they were placed on. */
-export function accountMatchesQuery(account: DirectoryAccount, query: string): boolean {
+ *  else, and a person's name finds the accounts they were placed on.
+ *
+ *  The channel's name too, unless the caller has already fixed the channel:
+ *  then every row shares it, and a term that happens to fall inside it
+ *  ("mail", "ai") would answer every row instead of the ones it names. */
+export function accountMatchesQuery(
+  account: DirectoryAccount,
+  query: string,
+  options: { matchChannel?: boolean } = {},
+): boolean {
   return matchesQuery(query, [
     account.displayName,
     account.personName ?? "",
-    account.channel,
+    ...(options.matchChannel === false ? [] : [account.channel]),
     ...account.addresses,
   ]);
 }
@@ -512,12 +551,7 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
   return { displayName, ref };
 }
 
-/** {@link compareAccountCursors} over the accounts themselves. */
-export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
-  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareAccounts} order —
+/** Whether an account falls after a cursor in {@link compareAccountCursors} order —
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
@@ -608,13 +642,7 @@ export function streamCursorOf(account: StreamAccount): StreamCursor {
   return activityPosition(account, accountRef(account));
 }
 
-/** The stream's order: newest activity first, ties broken by name and then ref
- *  so the sequence is total. */
-export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
-  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+/** Whether an account falls after a cursor in {@link compareStreamCursors}
  *  order — i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
   return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
@@ -638,7 +666,8 @@ export function accountPageLimit(raw: string | number | null | undefined): numbe
  * Takes every account there is, in any order: the order is this function's, so
  * a producer cannot page one order while a client renders another.
  *
- * `query` scopes everything, including the counts. `state` and the cursor scope
+ * `query` and `channel` scope everything, including the counts — a listing
+ * fixed to one channel is that channel's directory. `state` and the cursor scope
  * the page alone, so a client filtered to one chip still reads every chip's
  * number, and a client on page four reads the same numbers it read on page one.
  *
@@ -651,13 +680,18 @@ export function sliceAccountDirectory(
   directory: readonly DirectoryAccount[],
   options: {
     query?: string | null;
+    channel?: string | null;
     state?: AccountState | null;
     cursor?: AccountCursor | null;
     limit?: number | null;
   } = {},
 ): AccountDirectory {
   const query = options.query?.trim() ?? "";
-  const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
+  const channel = options.channel || null;
+  const onChannel = channel ? directory.filter((a) => a.channel === channel) : directory;
+  const matching = query
+    ? onChannel.filter((a) => accountMatchesQuery(a, query, { matchChannel: !channel }))
+    : onChannel;
 
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
   for (const account of matching) counts[account.state] += 1;
@@ -858,11 +892,9 @@ export const PERSON_BOND_LEVELS: readonly PlacedBondLevel[] = [
   "other",
 ];
 
-export type PersonBondLevel = PlacedBondLevel;
-
 /** A level the listing can be filtered and counted by: a bond level, or "all"
  *  — every curated person whatever their level. */
-export type PersonFilterLevel = "all" | PersonBondLevel;
+export type PersonFilterLevel = "all" | PlacedBondLevel;
 
 /**
  * How many people sit at each level.
@@ -1343,3 +1375,22 @@ export interface SendRefusal {
   error: string;
   send: Exclude<AccountSendState, "yes">;
 }
+
+/** The {@link SendRefusal} `error` line for each reason. A fallback, not the
+ *  copy: the dashboard renders `send` through its own locale files. */
+export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): string {
+  switch (send) {
+    case "not-connected":
+      return "That channel is not connected";
+    case "unsupported":
+      return "Rome cannot send on that channel";
+    case "no-conversation":
+      return "Rome has no conversation open with that account";
+  }
+}
+
+/** The `error` the server writes on a send whose process died before the
+ *  channel answered. Not a provider message, and deliberately equivocal: Rome
+ *  does not know whether it went out. */
+export const STRANDED_SEND_ERROR =
+  "Rome stopped before the channel answered; this may or may not have been sent";

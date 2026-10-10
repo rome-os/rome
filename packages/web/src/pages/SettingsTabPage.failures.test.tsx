@@ -51,10 +51,19 @@ function defaultResponse(url: string): Response {
       previousVersion: null,
       instance: { auth: "no_token", accountId: null, instanceId: null },
       database: { ok: true },
+      relay: { configured: false, depositUrlConfigured: false },
       channels: [],
       apps: { total: 0, failed: [], broken: [] },
     });
   }
+  if (url === "/api/public-access") {
+    return response(true, 200, {
+      enableAccessControl: false,
+      allowedApps: [],
+      cloudEmailAccess: {},
+    });
+  }
+  if (url === "/api/dashboard-access") return response(true, 200, { cloudEmailAccess: [] });
   return response(true, 200, {});
 }
 
@@ -99,6 +108,26 @@ describe("SettingsPage failures", () => {
     expect(settingsLoads).toBe(2);
   });
 
+  it("keeps the Favors loading and error content within the same measure", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/favors/")) return pending;
+      return defaultResponse(url);
+    }) as typeof fetch);
+
+    renderSettings("/settings/favors");
+    const loading = await screen.findByText("Loading favors...");
+    const measure = loading.closest('[data-slot="measure"]');
+    expect(measure).not.toBeNull();
+    release(response(false, 503, { error: "Favors unavailable" }));
+    const error = await screen.findByText("Favors unavailable");
+    expect(error.closest('[data-slot="measure"]')).toBe(measure);
+  });
+
   it("shows a save failure toast whose retry action reissues the rejected patch", async () => {
     let putAttempts = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (
@@ -136,5 +165,44 @@ describe("SettingsPage failures", () => {
 
     await waitFor(() => expect(putAttempts).toBe(2));
     expect(rs.mocked(toast.success)).toHaveBeenCalledWith("Settings saved");
+  });
+});
+
+describe("Agent feedback setting", () => {
+  it.each([
+    undefined,
+    false,
+    true,
+  ])("loads %s (unset defaults ON) and persists the toggle", async (stored) => {
+    const patches: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      if (String(input) === "/api/settings") {
+        if (init?.method === "PUT") {
+          const patch = JSON.parse(init.body as string);
+          patches.push(patch);
+          return response(true, 200, { ok: true });
+        }
+        return response(
+          true,
+          200,
+          stored === undefined ? {} : { "feedback.agentReportsEnabled": stored },
+        );
+      }
+      return defaultResponse(String(input));
+    }) as typeof fetch);
+    renderSettings();
+    const toggle = await screen.findByRole("switch", { name: "Allow agent reports" });
+    expect(toggle.getAttribute("aria-checked")).toBe(String(stored ?? true));
+    await userEvent.click(toggle);
+    await waitFor(() =>
+      expect(patches).toEqual([{ "feedback.agentReportsEnabled": !(stored ?? true) }]),
+    );
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe(String(!(stored ?? true))),
+    );
+    expect(screen.getByText(/same instance diagnostics as the Feedback dialog/)).toBeTruthy();
   });
 });

@@ -57,7 +57,6 @@ export type AppRemixSource =
   | AppRemixStorePin;
 
 export const PERSISTED_APP_STATES = ["installed", "failed", "broken"] as const;
-export type PersistedAppState = (typeof PERSISTED_APP_STATES)[number];
 
 export const APP_VIEW_STATES = [...PERSISTED_APP_STATES, "installing", "uninstalling"] as const;
 export type AppViewState = (typeof APP_VIEW_STATES)[number];
@@ -127,6 +126,11 @@ export interface InstalledAppCard {
    */
   projectPath: string | null;
   origin: AppOrigin;
+  /**
+   * When the app first installed, ISO-8601. `null` for installs that predate
+   * the field. Optional on the wire; consumers must default to `null`.
+   */
+  installedAt?: string | null;
   /** Root-relative icon URL, or `null` when the manifest declares no icon. */
   iconUrl: string | null;
   /** Optional on the wire; consumers must default to `[]`. */

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { settings } from "../../db/schema.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
@@ -16,7 +17,10 @@ export function publicAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   app.get("/public-access", async (c) => {
-    const rows = await deps.db.select().from(settings).where(eq(settings.key, "publicAccess"));
+    const rows = await deps.db
+      .select()
+      .from(settings)
+      .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
 
     const config =
       rows.length > 0 && rows[0].value
@@ -32,7 +36,7 @@ export function publicAccessRoutes(deps: ApiDeps): Hono {
     const now = new Date();
     await deps.db
       .insert(settings)
-      .values({ key: "publicAccess", value: config, updatedAt: now })
+      .values({ key: PUBLIC_ACCESS_SETTING_KEY, value: config, updatedAt: now })
       .onConflictDoUpdate({
         target: settings.key,
         set: { value: config, updatedAt: now },

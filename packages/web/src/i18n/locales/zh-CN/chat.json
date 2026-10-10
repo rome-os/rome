@@ -20,6 +20,7 @@
   },
   "navbar": {
     "sessionModel": "会话模型：{{model}}",
+    "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
     "pin": "置顶对话",
     "unpin": "取消置顶",
@@ -107,7 +108,6 @@
     "emptyList": "(空列表)",
     "emptyObject": "(空对象)",
     "agentRunFailed": "智能体执行失败",
-    "unknownTool": "未知",
     "showMore": "展开",
     "showLess": "收起",
     "input": "输入",
@@ -146,6 +146,11 @@
       "title": "没有可用的 AI Provider",
       "description": "请连接 AI Tool，或检查当前登录和额度状态。"
     },
+    "creditsUsedUp": {
+      "title": "Rome 额度已用完",
+      "description": "连接 ChatGPT 或 Claude，或选择已连接服务的模型。",
+      "action": "连接 AI"
+    },
     "openAiTools": "打开 AI Tools"
   },
   "usage": {
@@ -176,9 +181,11 @@
       "cacheWrite": "缓存写入",
       "input": "输入",
       "output": "输出",
+      "reasoning": "推理",
       "context": "上下文",
       "mainContext": "主智能体上下文"
-    }
+    },
+    "reasoningHint": "已计入输出。部分提供方报告的是估算值；合计只包含报告了该数值的运行。"
   },
   "approvals": {
     "headerPending": "需要守护者批准",
@@ -220,7 +227,16 @@
     "uploadFiles": "上传文件",
     "dropFiles": "拖放文件以上传",
     "removeFile": "移除 {{name}}",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置",
+    "zoomLevel": "缩放",
+    "previewImage": "预览",
+    "playVideo": "播放",
+    "closeImagePreview": "关闭",
     "filePill": "#文件 {{index}}",
+    "uploadProgressFor": "{{name}} 的上传进度",
+    "cancelUpload": "取消",
     "send": "发送",
     "sendTitle": "发送",
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",
@@ -237,6 +253,27 @@
     "dismiss": "跳过",
     "send": "发送"
   },
+  "aiToolsCard": {
+    "title": "连接 Claude 或 ChatGPT",
+    "hint": "我会使用你已有的订阅来思考。登录其中一个，我就可以开始工作了。",
+    "waiting": "等待登录",
+    "connected": "已连接",
+    "skipped": "暂时跳过",
+    "skip": "暂时跳过",
+    "connectedSummary": "已连接 AI",
+    "skippedSummary": "暂时跳过连接 AI",
+    "connectedTitle": "AI 已连接",
+    "checking": "正在检查你的 AI 连接…",
+    "credits": {
+      "title": "使用免费 Rome 额度开始",
+      "hint": "你的账户有 {{amount}} 的 Rome 额度，我现在就可以开始。你也可以随时登录 Claude 或 ChatGPT，改用自己的订阅。",
+      "continue": "使用额度继续",
+      "summary": "使用 Rome 额度继续",
+      "usingTitle": "正在使用 Rome 额度",
+      "using": "Rome 额度使用中",
+      "ready": "Rome 额度可用"
+    }
+  },
   "modelSelector": {
     "label": "模型",
     "saveFailed": "保存模型选择失败。",
@@ -247,12 +284,16 @@
     "options": {
       "auto": "自动",
       "claudeOpus": "Claude Opus",
+      "opus55": "Opus 5.5",
       "opus5": "Opus 5",
       "opus46": "Opus 4.6",
       "sonnet": "Sonnet",
       "haiku": "Haiku",
       "fable": "Fable",
       "gpt6Astra": "GPT-6 Astra",
+      "gpt61Sol": "GPT-6.1 Sol",
+      "gpt6Sol": "GPT-6 Sol",
+      "gpt6Luna": "GPT-6 Luna",
       "gpt56Sol": "GPT-5.6 Sol",
       "gpt56Terra": "GPT-5.6 Terra",
       "gpt56Luna": "GPT-5.6 Luna"
@@ -337,7 +378,6 @@
       "sendStatus": "发送消息失败({{status}})。",
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
-      "attachStreamStatus": "附加流失败,轮次 {{turnId}}({{status}})。",
       "stopFallback": "停止生成失败。",
       "stopStatus": "停止失败({{status}})。"
     }

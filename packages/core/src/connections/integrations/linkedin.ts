@@ -19,12 +19,8 @@
 // Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type {
-  ConversationId,
-  NormalizedMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
@@ -36,7 +32,7 @@ import {
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
 import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -48,7 +44,6 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { historyFeature } from "./talk-features.js";
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("linkedin-reply");
@@ -262,42 +257,6 @@ interface LinkedInTalker extends Talker {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
-/**
- * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
- *
- * The bare member id is the address the mirror keys on — `linkedin_participants`
- * is primary-keyed by it and promotion writes it into the mapping — so a promoted
- * participant is recognised on their next message with nothing else wired up.
- *
- * The stored profile URL stays the fallback rather than being replaced by one:
- * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
- * the form the guardian's own mapping is conferred in at connect time. Narrowing
- * to the member id alone would strand it.
- */
-function linkedInChannelUserId(row: LinkedInHistoryMessage): string {
-  return (
-    linkedInMemberIdFromProfileUrl(row.senderProfileUrl) ??
-    row.senderProfileUrl ??
-    (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown")
-  );
-}
-
-function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
-  return {
-    id: row.messageId,
-    channel: "linkedin",
-    channelUserId: linkedInChannelUserId(row),
-    displayName: row.senderName ?? "",
-    threadId: row.threadId,
-    ...(row.threadName ? { threadName: row.threadName } : {}),
-    threadType: "private",
-    timestamp: row.sentAt,
-    text: row.subject ? `${row.subject}\n${row.text ?? ""}`.trim() : (row.text ?? ""),
-    attachments: [],
-    rawEvent: row,
-  };
-}
-
 export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): ConnectionDescriptor {
   const run = deps.run ?? runOpencli;
   const sessionScheme = linkedinSessionScheme(run);
@@ -315,6 +274,9 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     capabilities: {
       talker: {
         needs: ["session"] as const,
+        // The inbox is mirrored into the store by the poller; nothing is
+        // delivered as an inbound turn.
+        receives: false,
         build(): Talker {
           const poller = new LinkedInInboxPoller({
             sink: deps.syncSink,
@@ -323,6 +285,17 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             maxIntervalMs: deps.maxIntervalMs,
           });
 
+          const sink = deps.syncSink;
+          const features: TalkFeatures = {};
+          if (sink.findReplyTarget) {
+            features.directMessaging = {
+              async conversationFor(address: string) {
+                const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
+                const target = await sink.findReplyTarget?.({ participantId });
+                return target ? (target.threadId as ConversationId) : null;
+              },
+            };
+          }
           const talker: LinkedInTalker = {
             // v1 is a mirror: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused until LinkedIn messages join the routed
@@ -394,29 +367,7 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
               }
               return { conversationId, messageId: message.messageId };
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const sink = deps.syncSink;
-              const features: Partial<TalkFeatureMap> = {};
-              if (sink.findReplyTarget) {
-                features.directMessaging = {
-                  async conversationFor(address: string) {
-                    const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
-                    const target = await sink.findReplyTarget?.({ participantId });
-                    return target ? (target.threadId as ConversationId) : null;
-                  },
-                };
-              }
-              if (sink.fetchHistory) {
-                features.history = historyFeature({
-                  fetchHistory: async (conversationId, windowHours) => {
-                    const since = new Date(Date.now() - windowHours * 3_600_000);
-                    const rows = await sink.fetchHistory?.(conversationId, since);
-                    return (rows ?? []).map(toHistoryNormalizedMessage);
-                  },
-                });
-              }
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return poller.getRuntimeDegradation();
             },

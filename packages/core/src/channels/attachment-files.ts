@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
-import type { Attachment, NormalizedMessage } from "./types.js";
+import type { ChannelMessage } from "@rome-os/app-runtime";
+import type { Attachment } from "./types.js";
 import { getProfileMemoryDir } from "../paths.js";
 import { createLogger } from "../logger.js";
 
@@ -222,18 +223,25 @@ export function isAllowedAttachmentUrl(value: string): boolean {
   return rule.pathnamePrefixes.some((prefix) => url.pathname.startsWith(prefix));
 }
 
-export function getIncomingAttachmentDirectory(message: NormalizedMessage): string {
+/** The message whose files are saved: which channel, conversation and message
+ *  carried them. */
+export type IncomingAttachmentOwner = Pick<
+  ChannelMessage,
+  "channel" | "conversationId" | "messageId" | "attachments"
+>;
+
+export function getIncomingAttachmentDirectory(message: IncomingAttachmentOwner): string {
   return join(
     getProfileMemoryDir(),
     "channel-attachments",
     safePathSegment(message.channel),
-    safePathSegment(message.threadId),
-    safePathSegment(message.id),
+    safePathSegment(message.conversationId),
+    safePathSegment(message.messageId),
   );
 }
 
 export async function saveIncomingAttachmentPayloads(
-  message: NormalizedMessage,
+  message: IncomingAttachmentOwner,
   payloads: IncomingAttachmentPayload[],
 ): Promise<Attachment[]> {
   if (payloads.length === 0) return message.attachments;
@@ -266,7 +274,7 @@ export async function saveIncomingAttachmentPayloads(
   return next;
 }
 
-export async function saveUrlAttachments(message: NormalizedMessage): Promise<Attachment[]> {
+export async function saveUrlAttachments(message: IncomingAttachmentOwner): Promise<Attachment[]> {
   const payloads: IncomingAttachmentPayload[] = [];
   for (const attachment of message.attachments) {
     if (!attachment.url) continue;

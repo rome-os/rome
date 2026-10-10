@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm build:kit && rsbuild dev",
     "dev:mock": "pnpm build:kit && rsbuild dev --config mock/rsbuild.config.ts",
+    "dev:mock:e2e": "pnpm build:kit && rsbuild dev --config mock/rsbuild.e2e.config.ts",
     "storybook": "storybook dev --host 127.0.0.1 --port 6006 --exact-port --no-open",
     "build:storybook": "storybook build --output-dir ../../storybook-static",
     "build:kit": "pnpm --filter \"rome-web^...\" run build",
@@ -55,7 +56,7 @@
     "react-router-dom": "^7.1.0",
     "recharts": "^3.9.2",
     "sonner": "^2.0.7",
-    "streamdown": "^2.5.0",
+    "streamdown": "^2.6.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.2"
   },

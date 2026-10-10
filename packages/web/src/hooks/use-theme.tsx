@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ThemeContext, type ThemeContextValue } from "./theme-context";
@@ -7,7 +8,6 @@ import {
   getThemeDefinitions,
   readStoredPreference,
   readStoredThemeName,
-  resolveTheme,
   systemPrefersDark,
   THEME_NAME_STORAGE_KEY,
   THEME_STORAGE_KEY,
@@ -17,6 +17,17 @@ import {
 } from "../lib/theme";
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const scale = useUiScale();
+  useEffect(() => {
+    const root = document.documentElement;
+    const previous = root.getAttribute("data-ui-scale");
+    root.setAttribute("data-ui-scale", scale);
+    return () => {
+      if (previous === null) root.removeAttribute("data-ui-scale");
+      else root.setAttribute("data-ui-scale", previous);
+    };
+  }, [scale]);
+
   const [preference, setPreferenceState] = useState<ThemePreference>(() => readStoredPreference());
   const [systemDark, setSystemDark] = useState<boolean>(() => systemPrefersDark());
   const [theme, setThemeState] = useState<ThemeName>(() => readStoredThemeName());
@@ -60,10 +71,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const toggle = useCallback(() => {
-    setPreference(resolved === "dark" ? "light" : "dark");
-  }, [resolved, setPreference]);
-
   const setTheme = useCallback((next: ThemeName) => {
     setThemeState(next);
     if (typeof window === "undefined") return;
@@ -71,8 +78,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ preference, resolved, setPreference, toggle, theme, setTheme, themes }),
-    [preference, resolved, setPreference, toggle, theme, setTheme, themes],
+    () => ({ preference, resolved, setPreference, theme, setTheme, themes }),
+    [preference, resolved, setPreference, theme, setTheme, themes],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -83,5 +90,3 @@ export function useTheme(): ThemeContextValue {
   if (!ctx) throw new Error("useTheme must be used inside a ThemeProvider");
   return ctx;
 }
-
-export { resolveTheme };

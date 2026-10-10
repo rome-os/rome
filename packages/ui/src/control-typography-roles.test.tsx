@@ -7,6 +7,7 @@ import { Input } from "./input.js";
 import { SegmentedControl } from "./segmented-control.js";
 import { Select, SelectTrigger, SelectValue } from "./select.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.js";
+import { TYPOGRAPHY_ROLES } from "./typography-roles.js";
 import { Textarea } from "./textarea.js";
 
 afterEach(cleanup);
@@ -67,7 +68,7 @@ describe("control typography roles", () => {
       screen.getByRole("textbox", { name: "Notes" }),
     ]) {
       expect(field.classList).toContain("text-ui");
-      expect(field.classList).not.toContain("text-body");
+      expect(field.classList).not.toContain("text-composer");
       expect([...field.classList].some((token) => token.startsWith("md:text-"))).toBe(false);
     }
   });
@@ -115,7 +116,7 @@ describe("control typography roles", () => {
     }
   });
 
-  it("uses UI for tab labels and Body for tab-panel values", () => {
+  it("uses UI for tab labels and leaves the tab panel roleless", () => {
     render(
       <Tabs defaultValue="profile">
         <TabsList>
@@ -128,7 +129,15 @@ describe("control typography roles", () => {
     const tab = screen.getByRole("tab", { name: "Profile" });
     expect(tab.classList).toContain("text-ui");
     expect(tab.classList).not.toContain("font-medium");
-    expect(screen.getByRole("tabpanel").classList).toContain("text-body");
+    // The panel is a container, not a text element: whatever it holds declares
+    // its own role, so a role here would silently size any undeclared
+    // descendant instead of the surface's author choosing one. Checked against
+    // the whole roster rather than one name, so a future role cannot be added
+    // to the panel without this failing.
+    const panelRoles = [...screen.getByRole("tabpanel").classList].filter((token) =>
+      TYPOGRAPHY_ROLES.includes(token.replace(/^text-/, "")),
+    );
+    expect(panelRoles).toEqual([]);
   });
 
   it("uses UI for select triggers", () => {

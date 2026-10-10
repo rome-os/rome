@@ -16,8 +16,12 @@ function authHeaders(bearer: CliBearer): Record<string, string> {
 }
 
 async function readError(response: Response): Promise<string> {
+  // Read the body once: after a failed json() the body is consumed, so a
+  // text() fallback could never return a non-JSON error page.
+  const text = await response.text().catch(() => "");
+  if (!text) return response.statusText;
   try {
-    const body = await response.json();
+    const body: unknown = JSON.parse(text);
     if (
       body &&
       typeof body === "object" &&
@@ -25,14 +29,10 @@ async function readError(response: Response): Promise<string> {
     ) {
       return (body as { error: string }).error;
     }
-    return JSON.stringify(body);
   } catch {
-    try {
-      return await response.text();
-    } catch {
-      return response.statusText;
-    }
+    // Not JSON: show the body as sent.
   }
+  return text;
 }
 
 export async function getJson<T>(host: string, path: string, bearer?: CliBearer): Promise<T> {
@@ -72,30 +72,6 @@ export async function postJson<T>(
     throw new CliError(msg);
   }
   return { response, body: json as T, setCookies };
-}
-
-export async function postBinary<T>(
-  host: string,
-  path: string,
-  body: Uint8Array,
-  headers: Record<string, string>,
-  bearer: CliBearer,
-): Promise<T> {
-  const finalHeaders: Record<string, string> = {
-    "content-type": "application/octet-stream",
-    accept: "application/json",
-    ...headers,
-    ...authHeaders(bearer),
-  };
-  const response = await fetch(urlFor(host, path), {
-    method: "POST",
-    headers: finalHeaders,
-    body: body as unknown as BodyInit,
-  });
-  if (!response.ok) {
-    throw new CliError(`${response.status} ${await readError(response)}`);
-  }
-  return (await response.json()) as T;
 }
 
 export async function postMultipart<T>(

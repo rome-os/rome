@@ -14,9 +14,14 @@
 import { existsSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createLogger } from "../logger.js";
 import { getFirstPartyArtifactDir } from "../paths.js";
-import { hashArtifact, readManifestIdAndVersion } from "./packaging/index.js";
+import {
+  hashArtifact,
+  PNPM_TIMEOUT_MESSAGE_PREFIX,
+  readManifestIdAndVersion,
+} from "./packaging/index.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
 
@@ -69,9 +74,21 @@ export async function listPackedFirstPartyAppIds(projectRoot: string): Promise<s
 }
 
 export interface InstallFirstPartyAppsAtBootOptions {
-  appManager: AppManager;
+  appManager: Pick<AppManager, "install" | "uninstall">;
   appCatalog: AppCatalog;
   projectRoot: string;
+  /** Wait before the single retry of a failed install. Defaults to 2s. */
+  retryDelayMs?: number;
+}
+
+const DEFAULT_RETRY_DELAY_MS = 2_000;
+
+export interface FirstPartyBootFailure {
+  appId: string;
+  /** Message of the last attempt, including the tail of pnpm's output when pnpm failed. */
+  error: string;
+  /** Hash of the last successful install still on disk (not loaded while the app is `failed`), or null when never installed. */
+  priorHash: string | null;
 }
 
 export interface FirstPartyBootResult {
@@ -80,6 +97,11 @@ export interface FirstPartyBootResult {
   installed: readonly string[];
   reinstalled: readonly string[];
   skipped: readonly string[];
+  /**
+   * First-party apps whose install failed twice. Boot continues without them,
+   * and the lockfile records them as `failed`.
+   */
+  failed: readonly FirstPartyBootFailure[];
   /** First-party apps removed because their packed artifact no longer exists. */
   removed: readonly string[];
 }
@@ -94,6 +116,11 @@ export interface FirstPartyBootResult {
  *   - Entry not yet flagged `firstParty` → reinstall once so the flag is
  *     recorded durably (converges lockfiles written before the flag existed).
  *   - Otherwise → no-op.
+ *
+ * A failed install is retried once after `retryDelayMs`, which absorbs a
+ * transient registry or network fault. A second failure does not fail boot:
+ * Rome comes up without that app, the failure lands in the result's `failed`
+ * list, and the next boot tries again.
  *
  * Installs omit `enabled` so `AppManager.install()` preserves the prior
  * value — a refresh must not silently re-enable apps the user has disabled.
@@ -114,6 +141,7 @@ export async function installFirstPartyAppsAtBoot(
   opts: InstallFirstPartyAppsAtBootOptions,
 ): Promise<FirstPartyBootResult> {
   const { appManager, appCatalog, projectRoot } = opts;
+  const retryDelayMs = opts.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const firstPartyAppIds = await listPackedFirstPartyAppIds(projectRoot);
   if (firstPartyAppIds.length === 0) {
     throw new Error(
@@ -153,6 +181,7 @@ export async function installFirstPartyAppsAtBoot(
   const installed: string[] = [];
   const reinstalled: string[] = [];
   const skipped: string[] = [];
+  const failed: FirstPartyBootFailure[] = [];
   for (const entry of plan) {
     if (entry.action === "skip") {
       skipped.push(entry.appId);
@@ -179,10 +208,34 @@ export async function installFirstPartyAppsAtBoot(
     }
     // For first install, AppManager defaults enabled to true; for reinstall,
     // omitting `enabled` preserves the prior lockfile value.
-    await appManager.install({
-      source: { mode: "bundle", path: entry.artifactPath },
-      firstParty: true,
-    });
+    const install = () =>
+      appManager.install({
+        source: { mode: "bundle", path: entry.artifactPath },
+        firstParty: true,
+      });
+    let result = await install();
+    // A timeout already spent PNPM_TIMEOUT_MS; retrying it would double the
+    // boot delay against a registry that hangs rather than refuses.
+    const timedOut = result.error?.message.includes(PNPM_TIMEOUT_MESSAGE_PREFIX) ?? false;
+    if (result.state === "failed" && !timedOut) {
+      log.warn("retrying failed first-party app install at boot", {
+        appId: entry.appId,
+        error: result.error?.message,
+        retryDelayMs,
+      });
+      await delay(retryDelayMs);
+      result = await install();
+    }
+    if (result.state === "failed") {
+      const failure: FirstPartyBootFailure = {
+        appId: entry.appId,
+        error: result.error?.message ?? "unknown error",
+        priorHash: result.installedHash,
+      };
+      failed.push(failure);
+      log.error("first-party app install failed at boot", { ...failure });
+      continue;
+    }
     (entry.action === "reinstall" ? reinstalled : installed).push(entry.appId);
     log.info(
       entry.action === "reinstall"
@@ -205,5 +258,5 @@ export async function installFirstPartyAppsAtBoot(
     removed.push(view.appId);
   }
 
-  return { firstPartyAppIds, installed, reinstalled, skipped, removed };
+  return { firstPartyAppIds, installed, reinstalled, skipped, failed, removed };
 }

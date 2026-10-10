@@ -9,10 +9,6 @@ import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -30,11 +26,9 @@ function ok(json: unknown): Response {
   return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
 }
 
-function mockSettingsBackend() {
+function mockSettingsBackend(initialSettings: Record<string, unknown> = {}) {
   const calls: FetchCall[] = [];
-  const settings = {
-    sentinelReviewIntervalMinutes: 60,
-  };
+  const settings = { ...initialSettings };
 
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
@@ -57,7 +51,7 @@ function mockSettingsBackend() {
       return ok({ mode: "oauth", configured: false, devices: [] });
     }
     if (url === "/api/public-access") {
-      return ok({ enableAccessControl: false, allowedApps: [] });
+      return ok({ enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} });
     }
     if (url === "/api/dashboard-access") {
       return ok({ cloudEmailAccess: [] });
@@ -77,6 +71,7 @@ function mockSettingsBackend() {
         previousVersion: null,
         instance: { auth: "no_token", accountId: null, instanceId: null },
         database: { ok: true },
+        relay: { configured: false, depositUrlConfigured: false },
         channels: [],
         apps: { total: 0, failed: [], broken: [] },
       });
@@ -94,20 +89,6 @@ function renderAdvancedSettings() {
       <MemoryRouter initialEntries={["/settings/advanced"]}>
         <Routes>
           <Route path="/settings/:tab" element={<SettingsPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-}
-
-function renderSettingsAt(path: string) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/settings/:tab" element={<SettingsPage />} />
-          <Route path="/apps/inbox" element={<div>Inbox dashboard</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -135,17 +116,6 @@ describe("SettingsPage Advanced autosave", () => {
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
-  it.each([
-    "/settings/trust",
-    "/settings/sentinel",
-    "/settings/sentinel-log",
-  ])("redirects relocated settings route %s to the Inbox page", async (path) => {
-    mockSettingsBackend();
-    renderSettingsAt(path);
-
-    expect(await screen.findByText("Inbox dashboard")).toBeTruthy();
-  });
-
   it("autosaves the Fable developer setting when changed", async () => {
     const calls = mockSettingsBackend();
     const user = userEvent.setup();
@@ -158,6 +128,28 @@ describe("SettingsPage Advanced autosave", () => {
         url: "/api/settings",
         method: "PUT",
         body: { enableFable: true },
+      }),
+    );
+  });
+
+  it("saves trimmed, per-provider tier model mappings", async () => {
+    const calls = mockSettingsBackend({
+      tierModelMappings: { openai: { large: "gpt-6-astra" } },
+    });
+    const user = userEvent.setup();
+    renderAdvancedSettings();
+
+    const largeModel = await screen.findByLabelText("Codex large model ID");
+    expect((largeModel as HTMLInputElement).value).toBe("gpt-6-astra");
+    await user.clear(largeModel);
+    await user.type(largeModel, "  gpt-6-sol-2026-04-01  ");
+    await user.click(screen.getByRole("button", { name: "Save mappings" }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: "/api/settings",
+        method: "PUT",
+        body: { tierModelMappings: { openai: { large: "gpt-6-sol-2026-04-01" } } },
       }),
     );
   });

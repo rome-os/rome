@@ -2,12 +2,12 @@ import { describe, it, expect } from "@rstest/core";
 import {
   buildTraceSnapshot,
   createSegmentBuilder,
-  agentMessageToBlock,
   type AppResolver,
-  type TraceBlockDto,
+  type TraceEventDto,
   type TraceRunSegment,
   type TraceSegment,
 } from "./trace-segments.js";
+import { toTraceEvent } from "./helpers.js";
 import type { AppRefDto, TraceAccounting } from "@rome/api-types/trace-segments";
 
 // Tiny deterministic resolver for tests so we don't depend on the FNV hash
@@ -25,10 +25,10 @@ const testResolver: AppResolver = {
   },
 };
 
-describe("agentMessageToBlock", () => {
+describe("toTraceEvent", () => {
   it("preserves machine-readable error recovery fields", () => {
     expect(
-      agentMessageToBlock({
+      toTraceEvent({
         type: "error",
         error: "Selected model provider is unavailable: Codex",
         code: "model_provider_unavailable",
@@ -45,7 +45,7 @@ describe("agentMessageToBlock", () => {
 
   it("preserves first-class subagent lifecycle blocks", () => {
     expect(
-      agentMessageToBlock({
+      toTraceEvent({
         type: "subagent_result",
         toolUseId: "tool-1",
         agentName: "planning",
@@ -65,7 +65,7 @@ describe("agentMessageToBlock", () => {
   });
 });
 
-function toolUse(tool: string, agent = "main", startedAt?: string): TraceBlockDto {
+function toolUse(tool: string, agent = "main", startedAt?: string): TraceEventDto {
   return { type: "tool_use", tool, input: {}, agent, startedAt };
 }
 function toolUseWithId(
@@ -73,10 +73,10 @@ function toolUseWithId(
   id: string,
   agent = "main",
   startedAt?: string,
-): TraceBlockDto {
+): TraceEventDto {
   return { type: "tool_use", tool, input: {}, id, agent, startedAt };
 }
-function toolResult(tool: string, agent = "main", endedAt?: string): TraceBlockDto {
+function toolResult(tool: string, agent = "main", endedAt?: string): TraceEventDto {
   return { type: "tool_result", tool, output: "ok", agent, endedAt };
 }
 function toolResultWithId(
@@ -84,10 +84,10 @@ function toolResultWithId(
   toolUseId: string,
   agent = "main",
   endedAt?: string,
-): TraceBlockDto {
+): TraceEventDto {
   return { type: "tool_result", tool, output: "ok", toolUseId, agent, endedAt };
 }
-function text(content: string, agent = "main"): TraceBlockDto {
+function text(content: string, agent = "main"): TraceEventDto {
   return { type: "text", content, agent };
 }
 function accounting(overrides: Partial<TraceAccounting> = {}): TraceAccounting {
@@ -103,7 +103,7 @@ function accounting(overrides: Partial<TraceAccounting> = {}): TraceAccounting {
     ...overrides,
   };
 }
-function result(durationMs?: number, agent = "main"): TraceBlockDto {
+function result(durationMs?: number, agent = "main"): TraceEventDto {
   return {
     type: "result",
     content: "done",
@@ -115,10 +115,10 @@ function turnEnd(
   durationMs: number,
   agent = "main",
   status: "completed" | "interrupted" | "error" = "completed",
-): TraceBlockDto {
+): TraceEventDto {
   return { type: "turn_end", turnId: "turn-1", status, durationMs, agent };
 }
-function turnStart(agent = "main"): TraceBlockDto {
+function turnStart(agent = "main"): TraceEventDto {
   return {
     type: "turn_start",
     turnId: "turn-2",
@@ -130,7 +130,7 @@ function turnStart(agent = "main"): TraceBlockDto {
 
 function planUpdate(
   steps: Array<{ text: string; status: "pending" | "in_progress" | "completed" }>,
-): Extract<TraceBlockDto, { type: "plan_update" }> {
+): Extract<TraceEventDto, { type: "plan_update" }> {
   return { type: "plan_update", plan: { steps }, agent: "main" };
 }
 
@@ -258,7 +258,7 @@ describe("buildTraceSnapshot — pairing and durations", () => {
   });
 
   it("pairs tool_result by id into a finalized run after a block boundary", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUseWithId("Edit", "use-1", "main", "2026-01-01T00:00:00.000Z"),
       text("still working"),
       // The result arrives late, with the matching tool_use_id.
@@ -276,7 +276,7 @@ describe("buildTraceSnapshot — pairing and durations", () => {
   });
 
   it("pairs first-class subagent lifecycle blocks", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       {
         type: "subagent_start",
         toolUseId: "subagent-use",
@@ -318,7 +318,7 @@ describe("buildTraceSnapshot — pairing and durations", () => {
   });
 
   it("pairs by id correctly when results arrive out of call order", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUseWithId("Edit", "u1", "main", "2026-01-01T00:00:00.000Z"),
       toolUseWithId("Edit", "u2", "main", "2026-01-01T00:00:00.100Z"),
       // Result for u2 arrives first.
@@ -418,7 +418,7 @@ describe("buildTraceSnapshot — summary", () => {
     // Mirrors what AgentSession emits when the user clicks Stop: the bracket
     // carries the classification, so the builder never inspects the
     // terminal's accounting.
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUse("Edit", "main", "2026-01-01T00:00:00.000Z"),
       { type: "result", content: "", agent: "main" },
       turnEnd(700, "main", "interrupted"),
@@ -436,7 +436,7 @@ describe("buildTraceSnapshot — summary", () => {
   it("turn_start clears the previous turn's terminal summary for the live trace", () => {
     // Mid-turn live state: turn 1 failed, turn 2 has started but not ended.
     // The summary must not keep showing turn 1's error/stopped pill.
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       { type: "error", error: "Access token expired", agent: "main" },
       turnEnd(700, "main", "error"),
       turnStart("main"),
@@ -453,7 +453,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("stoppedByUser resets when a later turn in the same trace completes normally", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       { type: "result", content: "", agent: "main" },
       turnEnd(700, "main", "interrupted"),
       { type: "result", content: "done", agent: "main" },
@@ -470,7 +470,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("stoppedByUser resets when a later turn in the same trace fails", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       { type: "result", content: "", agent: "main" },
       turnEnd(700, "main", "interrupted"),
       { type: "error", error: "boom", agent: "main" },
@@ -487,7 +487,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("result block with a non-interrupted stopReason leaves stoppedByUser unset", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       {
         type: "result",
         content: "done",
@@ -505,7 +505,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("totalDurationMs reads the turn_end block, not summed tool durations", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUseWithId("Edit", "u1", "main", "2026-01-01T00:00:00.000Z"),
       toolUseWithId("Edit", "u2", "main", "2026-01-01T00:00:00.100Z"),
       toolResultWithId("Edit", "u2", "main", "2026-01-01T00:00:00.500Z"),
@@ -524,7 +524,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("turn_start and turn_end produce no renderable segments", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "hi", agent: "main" },
       toolUse("Edit", "main"),
       result(),
@@ -542,7 +542,7 @@ describe("buildTraceSnapshot — summary", () => {
   });
 
   it("trace without a turn_end block leaves summary fields undefined", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       {
         type: "result",
         content: "ok",
@@ -563,7 +563,7 @@ describe("buildTraceSnapshot — summary", () => {
 
 describe("createSegmentBuilder — live equals bulk", () => {
   it("incremental push() yields the same final snapshot as buildTraceSnapshot", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUse("Edit", "main", "2026-01-01T00:00:00.000Z"),
       toolResult("Edit", "main", "2026-01-01T00:00:00.500Z"),
       text("midpoint"),
@@ -610,7 +610,7 @@ describe("createSegmentBuilder — live equals bulk", () => {
 
 describe("buildTraceSnapshot — provider Plan projection", () => {
   it("replaces the latest Plan without adding segments or tool totals", () => {
-    const blocks: TraceBlockDto[] = [
+    const blocks: TraceEventDto[] = [
       toolUseWithId("Edit", "u1"),
       planUpdate([
         { text: "Inspect", status: "in_progress" },

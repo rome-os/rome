@@ -11,9 +11,9 @@ case "$GITHUB_EVENT_NAME" in
     fi
     tag="${GITHUB_REF#refs/tags/}"
     ;;
-  schedule)
+  schedule | workflow_dispatch)
     if [[ "$GITHUB_REF" != refs/heads/main || "$target_sha" != "$GITHUB_SHA" ]]; then
-      echo "::error::Scheduled releases must use the triggering main commit."
+      echo "::error::Scheduled and manual releases must use the triggering main commit."
       exit 1
     fi
 

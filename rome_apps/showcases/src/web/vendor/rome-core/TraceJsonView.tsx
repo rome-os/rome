@@ -1,4 +1,4 @@
-// Vendored from packages/web/src/components/chat/blocks/TraceJsonView.tsx with
+// Vendored from packages/web/src/components/chat/entries/TraceJsonView.tsx with
 // import and typography seams. The showcase replay keeps the same payload
 // structure and semantic typography roles.
 //   "@/lib/trace-format"  → "./trace-format.js"

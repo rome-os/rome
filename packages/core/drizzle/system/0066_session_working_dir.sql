@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `working_dir` text;

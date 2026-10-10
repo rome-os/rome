@@ -28,6 +28,7 @@ export interface ActionCatalogEntry {
   name: string;
   description: string;
   type: "system" | "custom";
+  visibility: "public" | "explicit";
   sideEffects: "read-only" | "write";
   requiresApproval: boolean;
   ownerType: string;

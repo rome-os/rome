@@ -1,0 +1,28 @@
+cases:
+  - name: PPL-01 Open the people directory
+    tags:
+      - people
+      - shard-4
+    steps:
+      - app.open:
+          path: /people
+      - aiAct: >-
+          Click the visible "Directory" tab once, then stop.
+      - aiAssert: >-
+          The Directory view shows bond filter chips including "All", "Inner circle",
+          "Acquaintance", "Other", and "Stranger", with "All" active, plus a separate "Unknown 11"
+          count control. People are grouped under headings "INNER CIRCLE 2" ("Nadia Petrova", "Ray
+          Oster"), "ACQUAINTANCE 2" ("Arvind Srivastav", "Mira Chen"), and "OTHER 2" ("Hollis Park",
+          "Sam Okafor"), each row showing an avatar; rows that have linked accounts additionally
+          show an account handle or phone number.
+  - name: PPL-02 Filter a person timeline by channel
+    tags:
+      - people
+      - shard-4
+    steps:
+      - app.open:
+          path: /people/person/ray-oster
+      - aiAct: Click the visible "WhatsApp" timeline filter once, then stop.
+      - aiAssert: >-
+          The WhatsApp filter is selected, the timeline shows WhatsApp messages, and the composer
+          addresses "WhatsApp · +1 (415) 555-0142".

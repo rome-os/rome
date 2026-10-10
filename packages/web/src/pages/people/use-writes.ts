@@ -74,7 +74,7 @@ export interface PeopleWrites {
     personId: string,
     account: AccountRef,
     text: string,
-    options?: { id?: string; onAccepted?: (message: OutboxMessage) => void },
+    options: { id: string; onAccepted: (message: OutboxMessage) => void },
   ): Promise<WriteOutcome<OutboxMessage, SendRefusal>>;
   /**
    * Try a failed send again, under its own outbox id.
@@ -157,12 +157,8 @@ export function usePeopleWrites(): PeopleWrites {
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
       say: (personId, account, text, options) =>
         settling(async () => {
-          const outcome = await sendMessage(
-            personId,
-            { ...ref(account), text, ...(options?.id ? { id: options.id } : {}) },
-            t,
-          );
-          if (outcome.ok) options?.onAccepted?.(outcome.value);
+          const outcome = await sendMessage(personId, { ...ref(account), text, id: options.id }, t);
+          if (outcome.ok) options.onAccepted(outcome.value);
           return outcome;
         }),
       retry: (personId, messageId) => resettling(() => retrySend(personId, messageId, t)),

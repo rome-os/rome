@@ -138,14 +138,21 @@ interface CreateRoutineBody {
   actionName?: string;
   args?: Record<string, unknown>;
   enabled?: boolean;
+  /** Optional caller-assigned identity (the unique `routines.key`). A chat
+   * routine card sends the key minted with it, so retries and reloads find the
+   * routine it created instead of matching by name. */
+  key?: string;
 }
+
+const MAX_ROUTINE_KEY_LENGTH = 200;
+// Keys this route may assign. Apps key their own managed routines (briefing
+// uses `briefing-*`) through create_routine; keeping this route to its own
+// prefix stops a chat card from claiming, or being answered with, one of those.
+const CHAT_ROUTINE_KEY_PREFIX = "chat-routine:";
 
 interface UpdateRoutineBody {
   name?: string;
   enabled?: boolean;
-  trigger?: Trigger;
-  actionName?: string;
-  args?: Record<string, unknown>;
 }
 
 // Rebuilds the action-execution tree for a run from the flat `action_executions`
@@ -232,9 +239,8 @@ export function buildActionTrace(rows: ActionExecutionRowLike[]): ActionTraceNod
 export function routinesRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
-  // Reject binding a routine to an action that isn't registered — at both
-  // create (POST) and re-bind (PATCH) time, so neither path can persist a
-  // routine that errors on every fire.
+  // Reject binding a routine to an action that isn't registered, so POST can't
+  // persist a routine that errors on every fire.
   const unregisteredActionError = (actionName: string): string | null =>
     !deps.actionRegistry.has(actionName) ? unknownActionError(actionName) : null;
   const canonicalActionName = (actionName: string): string =>
@@ -248,12 +254,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const latest = await deps.routineRunsRepo.findLatestByRoutineIds(rows.map((r) => r.id));
     const enriched = rows.map((row) => {
       const lr = latest.get(row.id);
-      // Normalize the trigger so a backfill-escaped schedule never surfaces
-      // `tzMode: undefined` to API/dashboard consumers — the read
-      // contract must match the now-required type, not just the scheduler.
       return {
         ...row,
-        trigger: toRoutine(row).trigger,
         lastRun: lr ? { status: lr.status, firedAt: lr.firedAt } : null,
       };
     });
@@ -262,6 +264,32 @@ export function routinesRoutes(deps: ApiDeps): Hono {
 
   app.post("/routines", async (c) => {
     const body = await c.req.json<CreateRoutineBody>().catch(() => ({}) as CreateRoutineBody);
+
+    if (
+      body.key !== undefined &&
+      (typeof body.key !== "string" ||
+        !body.key.startsWith(CHAT_ROUTINE_KEY_PREFIX) ||
+        body.key.length <= CHAT_ROUTINE_KEY_PREFIX.length ||
+        body.key.length > MAX_ROUTINE_KEY_LENGTH)
+    ) {
+      return c.json(
+        {
+          error: `key must start with "${CHAT_ROUTINE_KEY_PREFIX}" and be at most ${MAX_ROUTINE_KEY_LENGTH} characters`,
+        },
+        400,
+      );
+    }
+    // A key that already names a routine means this create already happened
+    // (a retried click, a second tab). Answer 409 with the existing id so the
+    // caller can link to it rather than creating a duplicate. Checked before
+    // the create-time validation below, which can change after creation (a
+    // dated one-off's date passes, an action is uninstalled).
+    const existingIdForKey = async (key: string | undefined): Promise<string | undefined> =>
+      key === undefined ? undefined : (await deps.routinesRepo.findByKey(key))?.id;
+    const keyTaken = (id: string) =>
+      c.json({ error: "A routine with this key already exists", id }, 409);
+    const takenId = await existingIdForKey(body.key);
+    if (takenId) return keyTaken(takenId);
 
     if (!body.trigger || !body.trigger.type) {
       return c.json({ error: "trigger is required" }, 400);
@@ -309,6 +337,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const now = new Date();
     const record = {
       id: uuid(),
+      key: body.key ?? null,
       name: body.name ?? "",
       enabled: body.enabled ?? true,
       trigger: body.trigger as unknown,
@@ -319,7 +348,15 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       nextRunAt: null,
     };
 
-    await deps.db.insert(routines).values(record);
+    try {
+      await deps.db.insert(routines).values(record);
+    } catch (err) {
+      // Lost a race with a concurrent create of the same key: the UNIQUE
+      // constraint is the backstop for the check above.
+      const existingId = await existingIdForKey(body.key);
+      if (existingId) return keyTaken(existingId);
+      throw err;
+    }
     const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
 
     if (inserted?.enabled) {
@@ -329,67 +366,23 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     return c.json(inserted, 201);
   });
 
+  // The dashboard only toggles and renames, so PATCH accepts just those two
+  // fields and needs none of POST's trigger, action or args validation.
   app.patch("/routines/:id", async (c) => {
     const id = c.req.param("id");
     const body = await c.req.json<UpdateRoutineBody>().catch(() => ({}) as UpdateRoutineBody);
 
-    if (body.args !== undefined) {
-      if (!isPlainObject(body.args)) {
-        return c.json({ error: "args must be a plain object" }, 400);
-      }
-      if (RESERVED_ARG_KEY in body.args) {
-        return c.json({ error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` }, 400);
-      }
-    }
-    if (body.trigger !== undefined) {
-      if (!body.trigger.type) {
-        return c.json({ error: "trigger.type is required" }, 400);
-      }
-      const triggerError = validateTrigger(body.trigger, (t) => deps.routineEngine.hasProvider(t));
-      if (triggerError) {
-        return c.json({ error: triggerError }, 400);
-      }
-      // A dated one-off pins to a fixed absolute zone, same as POST,
-      // and must not be re-pointed to an already-past instant.
-      if (body.trigger.type === "schedule" && body.trigger.date) {
-        body.trigger.tzMode = "fixed";
-        const datedError = datedOneOffError(body.trigger);
-        if (datedError) {
-          return c.json({ error: datedError }, 400);
-        }
-      }
-    }
-    // Re-binding to an unregistered action would recreate the zombie the POST
-    // guard prevents, so validate the new actionName here too.
-    if (body.actionName !== undefined) {
-      const actionError = unregisteredActionError(body.actionName);
-      if (actionError) {
-        return c.json({ error: actionError }, 400);
-      }
-    }
-    if (body.actionName !== undefined || body.args !== undefined) {
-      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
-      if (!current) {
-        return c.json({ error: "Routine not found" }, 404);
-      }
-      const actionName = canonicalActionName(body.actionName ?? current.actionName);
-      const args = body.args ?? toRoutine(current).args;
-      const argsError = validateActionArgs(
-        actionName,
-        args,
-        deps.actionRegistry.get(actionName)?.inputSchema,
+    const unsupported = Object.keys(body).filter((key) => key !== "name" && key !== "enabled");
+    if (unsupported.length > 0) {
+      return c.json(
+        { error: `Only name and enabled can be updated (got ${unsupported.join(", ")})` },
+        400,
       );
-      if (argsError) {
-        return c.json({ error: argsError }, 400);
-      }
     }
 
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name;
     if (body.enabled !== undefined) updates.enabled = body.enabled;
-    if (body.trigger !== undefined) updates.trigger = body.trigger;
-    if (body.actionName !== undefined) updates.actionName = canonicalActionName(body.actionName);
-    if (body.args !== undefined) updates.args = body.args;
 
     if (Object.keys(updates).length === 0) {
       return c.json({ error: "No fields to update" }, 400);
@@ -510,12 +503,6 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       error: run.error ?? null,
       roots: buildActionTrace(rows),
     });
-  });
-
-  app.get("/routines/:id/stats", async (c) => {
-    const id = c.req.param("id");
-    const stats = await deps.routineRunsRepo.getStats(id);
-    return c.json(stats);
   });
 
   return app;

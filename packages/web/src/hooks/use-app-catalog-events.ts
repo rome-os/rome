@@ -43,3 +43,23 @@ export function useAppCatalogEvents(
     { enabled: Boolean(appId && enabled), onReconnect: onChange },
   );
 }
+
+/**
+ * The sidebar's counterpart: it lists every app, so it wants every
+ * `catalog-change` (an app the agent just built, an uninstall, a rename) plus
+ * the reconnect catch-up, and answers each by invalidating the apps list.
+ * `enabled` is the guardian check: a public-app visitor renders the shell too,
+ * and the backend refuses them this stream.
+ */
+export function useAppCatalogChanges(enabled: boolean, onChange: () => void): void {
+  useSseEvents(
+    "/api/apps/events",
+    {
+      "catalog-change": {
+        schema: catalogChangeSchema,
+        fn: () => onChange(),
+      },
+    },
+    { enabled, onReconnect: onChange },
+  );
+}

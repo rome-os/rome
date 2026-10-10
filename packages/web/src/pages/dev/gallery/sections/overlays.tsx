@@ -66,7 +66,7 @@ export function OverlaysSection() {
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <p className="text-body text-foreground">
+              <p className="text-ui text-foreground">
                 Twelve routines reference this app. They'll stop running until it's back.
               </p>
             </DialogBody>

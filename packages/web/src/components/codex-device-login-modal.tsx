@@ -254,8 +254,8 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
         <DialogBody className="px-5 py-4">
           <div className="flex flex-col items-center gap-3 py-8 text-center">
             <CircleCheck className="h-12 w-12 text-success-fg" aria-hidden />
-            <p className="text-body text-foreground">{t("codexDeviceLogin.connectedTitle")}</p>
-            <p className="text-body text-muted-foreground">{t("codexDeviceLogin.connectedBody")}</p>
+            <p className="text-ui text-foreground">{t("codexDeviceLogin.connectedTitle")}</p>
+            <p className="text-ui text-muted-foreground">{t("codexDeviceLogin.connectedBody")}</p>
           </div>
         </DialogBody>
       ) : (
@@ -272,7 +272,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
 
             {step === STEP_ENABLE && (
               <div className="flex flex-col gap-4">
-                <p className="text-body text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   <Trans
                     ns="onboard"
                     i18nKey="codexDeviceLogin.enable.body"
@@ -319,7 +319,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
 
             {step === STEP_COPY && (
               <div className="flex flex-col gap-4">
-                <p className="text-body text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   {t("codexDeviceLogin.copyCode.body")}
                 </p>
                 {userCode ? (
@@ -360,7 +360,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
                   onClick={() => window.open(CHATGPT_SECURITY_URL, "_blank", "noopener")}
                 >
                   {t("codexDeviceLogin.enable.openSettings")}
-                  <ExternalLink className="h-4 w-4" aria-hidden />
+                  <ExternalLink data-icon="inline-end" className="h-4 w-4" aria-hidden />
                 </Button>
                 <Button onClick={() => setStep(STEP_COPY)}>
                   {t("codexDeviceLogin.enable.confirm")}
@@ -369,7 +369,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
             ) : (
               <>
                 <Button variant="ghost" className="mr-auto" onClick={() => setStep(STEP_ENABLE)}>
-                  <ArrowLeft className="h-4 w-4" aria-hidden />
+                  <ArrowLeft data-icon="inline-start" className="h-4 w-4" aria-hidden />
                   {t("codexDeviceLogin.back")}
                 </Button>
                 <Button
@@ -382,7 +382,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
                     <Spinner label={t("codexDeviceLogin.retrying")} />
                   ) : (
                     <>
-                      <RotateCcw className="h-4 w-4" aria-hidden />
+                      <RotateCcw data-icon="inline-start" className="h-4 w-4" aria-hidden />
                       {t("codexDeviceLogin.retry")}
                     </>
                   )}
@@ -400,7 +400,7 @@ export function CodexDeviceLoginModal({ open, onClose, onConnected }: CodexDevic
                           disabled={!verificationUrl || !hasCopied}
                         >
                           {t("codexDeviceLogin.openButton")}
-                          <ExternalLink className="h-4 w-4" aria-hidden />
+                          <ExternalLink data-icon="inline-end" className="h-4 w-4" aria-hidden />
                         </Button>
                       </span>
                     </TooltipTrigger>

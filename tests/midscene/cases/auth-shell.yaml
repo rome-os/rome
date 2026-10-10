@@ -1,0 +1,45 @@
+cases:
+  - name: AUTH-01 Inspect the authenticated account identity
+    tags:
+      - poc
+      - auth
+      - shard-5
+    steps:
+      - app.open:
+          path: /
+      - aiAct: >-
+          Click the visible "Account" button at the bottom of the application sidebar once, then
+          stop.
+      - aiAssert: >-
+          The account menu identifies the signed-in user as "Rome Demo" with the "Guardian" role
+          and offers Settings, Feedback, and Log out actions.
+  - name: AUTH-02 Login validation and failed submission preserve the form
+    tags:
+      - auth
+      - shard-5
+    steps:
+      - app.open:
+          path: /dev/login
+          waitUntil: login
+      - aiAct: >-
+          1. Find and click the "Sign in" button with both fields empty.
+
+          2. Before continuing, confirm these visible checkpoints: The sign-in page is shown in
+          English with the heading "Sign In" and the description "Use your guardian account to
+          access Rome." It has "Username" and "Password" fields and a "Sign in" submit button. A
+          language switcher is visible in the top-right corner.
+      - aiAssert: >-
+          Inline validation messages "Username is required." and "Password is required." appear and
+          no navigation happens.
+      - aiAct: >-
+          1. Close transient menus and clear temporary searches, filters, or drafts before
+          continuing, without undoing saved changes.
+
+          2. Find the field identified by "Username", enter text with "guardian".
+
+          3. Find the field identified by "Password", enter text with "demo-password".
+
+          4. Find and click the "Sign in" button.
+      - aiAssert: >-
+          The page stays on the sign-in form and shows a red error saying "Login failed". The filled
+          username is still present so it can be retried.

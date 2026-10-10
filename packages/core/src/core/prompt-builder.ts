@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { AgentConfig } from "../types.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -14,7 +14,7 @@ import {
   getRepoAppsDir,
 } from "../paths.js";
 import { getInternalApiBaseUrl } from "../internal-api-url.js";
-import { getWebchatProjectPath, getWebchatProjectsRoot } from "../webchat/projects.js";
+import { getWebchatProjectsRoot, resolveWebchatProjectPath } from "../webchat/projects.js";
 
 // Workspace context injection.
 //
@@ -39,6 +39,9 @@ export interface WorkspaceContextSnapshot {
 
 /** Whole-block cap. */
 export const WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT = 2000;
+
+/** Per-project summary cap in Unicode code points, including the truncation marker. */
+export const PROJECT_SUMMARY_CHAR_LIMIT = 160;
 
 export interface PromptBuildOptions {
   /**
@@ -375,11 +378,14 @@ export class PromptBuilder {
   }
 
   /**
-   * Behavioral directive steering general-purpose agents toward the built-in
-   * `ask_question` tool (an interactive card) instead of asking clarifying
-   * questions in prose. Reinforces the tool's own description from the system
-   * prompt. Lives here (rather than in a single agent's systemPromptPrefix) so
-   * every @-mentionable core agent gets the same behavior.
+   * Behavioral directive for clarifying questions: ask only when the answer
+   * would change the direction of the work, otherwise proceed on the agent's
+   * recommendation; before long-running work, state a short plan (without
+   * waiting for approval) so a wrong direction is caught early; and when asking,
+   * use the built-in `ask_question` tool (an interactive card) instead of prose.
+   * Reinforces the tool's own description from the system prompt. Lives here
+   * (rather than in a single agent's systemPromptPrefix) so every
+   * @-mentionable core agent gets the same behavior.
    *
    * Gated on the agent holding the `*` action grant — the conversational agents
    * (main, assistant, planning, coding, explore) that actually talk to the
@@ -395,9 +401,11 @@ export class PromptBuilder {
     return [
       "# Asking The Guardian For Input",
       "",
-      "Whenever a clarifying question blocks you — one you'd otherwise write out and wait for a reply on — you MUST ask via the `ask_question` tool, never in your text reply; listing such questions in prose (even a numbered list or inline options) is not allowed.",
+      "Ask a clarifying question only when the answer would significantly change the direction of the work. Otherwise, proceed with the approach you recommend and briefly state the assumptions you made, so the guardian can redirect you.",
       "",
-      "This applies most often when a request is open-ended or underspecified and a good result depends on the guardian's preferences, constraints, or choices you do not yet know: invoke `ask_question` first to collect those answers as an interactive card, then continue once the guardian replies — do not guess a generic result. Ask only the few questions that actually change what you do next, and prefer single-choice questions with concrete options when the likely answers are enumerable.",
+      "Before you start a long-running task (many steps or several minutes of work), state your plan, then start without waiting for approval, so the guardian can correct you early. Write the plan like ASD-STE100 Simplified Technical English: a few short, direct sentences, one action each, no filler. If you already show the plan as a todo list, do not repeat it in prose.",
+      "",
+      "When you do need to ask, use the `ask_question` tool — never write the questions in your text reply. Keep to the few questions that matter, and offer concrete options when the likely answers are enumerable.",
     ].join("\n");
   }
 
@@ -456,6 +464,7 @@ export class PromptBuilder {
       "# Command Line Tools",
       "",
       "- A global `discord` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer `discord api` over memory because it is live and authoritative. Run `discord api --help` when needed.",
+      '- Run `rome-node help` to learn the remote computer CLI and `rome-node help device run` for action arguments and result handling. Use `rome-node device` to list authorized remote computers. Authorization does not mean online. Use `rome-node device describe <id>` to query its platform and supported actions. Execute a program with `rome-node device run <id> exec --args \'{"command":"git","args":["status"],"cwd":"/workspace"}\'`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.',
     ].join("\n");
   }
 
@@ -518,8 +527,11 @@ export class PromptBuilder {
         continue;
       }
 
+      const location = this.resolveProjectLocation(projectName);
       projectLines.push(
-        `- \`${projectName}\` (\`${getWebchatProjectPath(projectName)}\`): ${summary}`,
+        location
+          ? `- \`${projectName}\` (\`${location}\`): ${summary}`
+          : `- \`${projectName}\`: ${summary}`,
       );
     }
 
@@ -528,6 +540,28 @@ export class PromptBuilder {
     }
 
     return ["# Projects", "", ...projectLines].join("\n");
+  }
+
+  /**
+   * Where a memory project's files live on disk. `memory/projects/<name>` only
+   * mirrors `projects/<name>` best-effort (see memory/projects/README.md), and
+   * app projects keep their source under the custom app authoring root, so
+   * point at whichever directory actually exists — and show no path rather
+   * than a made-up one.
+   */
+  private resolveProjectLocation(projectName: string): string | null {
+    const candidates = [
+      resolveWebchatProjectPath(projectName),
+      join(this.customAppAuthoringRoot, projectName),
+    ];
+    for (const candidate of candidates) {
+      try {
+        if (statSync(candidate).isDirectory()) return candidate;
+      } catch {
+        // Missing or unreadable — try the next candidate.
+      }
+    }
+    return null;
   }
 
   private readFirstParagraph(filePath: string): string | null {
@@ -556,7 +590,15 @@ export class PromptBuilder {
         continue;
       }
 
-      return paragraphLines.join(" ");
+      const summary = paragraphLines.join(" ");
+      const characters = Array.from(summary);
+      if (characters.length > PROJECT_SUMMARY_CHAR_LIMIT) {
+        return `${characters
+          .slice(0, PROJECT_SUMMARY_CHAR_LIMIT - 1)
+          .join("")
+          .trimEnd()}…`;
+      }
+      return summary;
     }
 
     return null;

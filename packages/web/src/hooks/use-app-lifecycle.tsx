@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useMutation } from "@tanstack/react-query";
-import { Globe, Lock, Mail, X } from "lucide-react";
+import { Globe, Link2, Lock, Mail, X } from "lucide-react";
 import type {
   AppAccessMode,
   AppInstallResponse,
@@ -11,6 +11,7 @@ import type {
   InstalledAppCard,
   SpecSource,
 } from "@rome/api-types/apps";
+import { AccessEmailInput } from "@/components/access-email-input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { parseEmailTextarea } from "@/lib/email-list";
+import { shareableOrigin } from "@/lib/shareable-origin";
 import { fetchJson } from "@/lib/fetch-json";
 import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "@/hooks/use-apps";
 
@@ -74,9 +76,19 @@ export interface AppLifecycle {
   requestUninstall: (app: InstalledAppCard, purge: boolean) => void;
   requestPublish: (app: InstalledAppCard) => void;
   requestAccess: (app: InstalledAppCard) => void;
-  startChatToUpdate: (app: InstalledAppCard) => void;
+  chatWithApp: (app: InstalledAppCard) => void;
   /** Render once per page — the uninstall/publish confirms and access dialog. */
   dialogs: ReactNode;
+}
+
+function hasAppPage(app: InstalledAppCard): boolean {
+  return app.hasFrontend && app.href !== null;
+}
+
+// Chat with app opens a new chat in the app's source folder, beside the app's
+// own page. An app with neither would get only a blank chat, so it offers none.
+export function canChatWithApp(app: InstalledAppCard): boolean {
+  return hasAppPage(app) || app.projectPath !== null;
 }
 
 export function useAppLifecycle(
@@ -114,6 +126,7 @@ export function useAppLifecycle(
   const [accessEmailsDraft, setAccessEmailsDraft] = useState<string[]>([]);
   const [accessEmailInput, setAccessEmailInput] = useState("");
   const [accessDialogError, setAccessDialogError] = useState("");
+  const [accessLinkCopied, setAccessLinkCopied] = useState(false);
 
   // Every lifecycle write follows the same shape: mark the app as acting, run
   // the request, toast any error, then invalidate the apps query so consumers
@@ -189,8 +202,9 @@ export function useAppLifecycle(
 
   // POST /apps/:id/publish — repack the installed bundle and push it to the
   // App Store. Nothing changes locally on success (the published version equals
-  // the installed one, so it can't become an upgrade candidate either) — no
-  // query invalidation, just the acting state and toasts.
+  // the installed one, so it can't become an upgrade candidate either) — only
+  // the app's store listing version is refetched, so the details page stops
+  // showing the pre-publish version.
   const publishMutation = useMutation({
     mutationFn: (vars: { id: string; fallback: string }) =>
       fetchJson<AppPublishResponse>(`/api/apps/${encodeURIComponent(vars.id)}/publish`, {
@@ -199,6 +213,9 @@ export function useAppLifecycle(
       }),
     onMutate: ({ id }) => markActing(id, t("installed.publishing")),
     onError: (err) => toastError(err),
+    onSuccess: (_result, { id }) => {
+      void invalidateApps.storeListing(id);
+    },
     onSettled: clearActing,
   });
 
@@ -253,8 +270,8 @@ export function useAppLifecycle(
       const config = await fetchJson<PublicAccessConfigPayload>("/api/public-access", {
         fallback: t("installed.errors.publicAccessLoadFailed", { name: app.displayName }),
       });
-      const allowedApps = new Set(Array.isArray(config.allowedApps) ? config.allowedApps : []);
-      const cloudEmailAccess = { ...(config.cloudEmailAccess ?? {}) };
+      const allowedApps = new Set(config.allowedApps);
+      const cloudEmailAccess = { ...config.cloudEmailAccess };
       allowedApps.delete(app.id);
       delete cloudEmailAccess[app.id];
 
@@ -267,7 +284,7 @@ export function useAppLifecycle(
       await fetchJson<unknown>("/api/public-access", {
         method: "PUT",
         json: {
-          enableAccessControl: config.enableAccessControl === true,
+          enableAccessControl: config.enableAccessControl,
           allowedApps: Array.from(allowedApps).sort(),
           cloudEmailAccess,
         } satisfies PublicAccessConfigPayload,
@@ -419,9 +436,10 @@ export function useAppLifecycle(
     if (!app.canManagePublicAccess || accessBusy || lifecycleBusy) return;
     setAccessTarget(app);
     setAccessModeDraft(app.accessMode ?? (app.isPublic ? "public" : "private"));
-    setAccessEmailsDraft(app.cloudAllowedEmails ?? []);
+    setAccessEmailsDraft(app.cloudAllowedEmails);
     setAccessEmailInput("");
     setAccessDialogError("");
+    setAccessLinkCopied(false);
   };
 
   const cancelAccessDialog = () => {
@@ -485,7 +503,21 @@ export function useAppLifecycle(
         emails,
       },
       {
-        onSuccess: () => setAccessTarget(null),
+        // A shared mode keeps the dialog open so its link can be copied right
+        // away; the target takes the saved mode, which enables copy.
+        onSuccess: (_result, { mode }) => {
+          if (mode === "private" || !app.fullHref || !shareableOrigin()) {
+            setAccessTarget(null);
+            return;
+          }
+          setAccessDialogError("");
+          setAccessTarget({
+            ...app,
+            accessMode: mode,
+            isPublic: mode === "public",
+            cloudAllowedEmails: emails,
+          });
+        },
         onError: (err) =>
           setAccessDialogError(
             err instanceof Error ? err.message : t("installed.errors.publicAccessFailed"),
@@ -494,9 +526,13 @@ export function useAppLifecycle(
     );
   };
 
-  const startChatToUpdate = (app: InstalledAppCard) => {
-    if (!app.projectPath) return;
-    navigate("/chat", { state: { projectPath: app.projectPath } });
+  const chatWithApp = (app: InstalledAppCard) => {
+    navigate("/chat", {
+      state: {
+        ...(hasAppPage(app) ? { widgets: [{ type: "app", appId: app.id }] } : {}),
+        ...(app.projectPath ? { projectPath: app.projectPath } : {}),
+      },
+    });
   };
 
   const uninstallDialogOpen = uninstallTarget !== null;
@@ -517,6 +553,42 @@ export function useAppLifecycle(
     ? t("installed.accessDialog.title", { name: accessTarget.displayName })
     : "";
   const accessSaving = accessMutation.isPending;
+  // The link to share is the standalone route: it is what a visitor lands on
+  // anyway, and it opens without the guardian's shell around the app. None is
+  // offered on a loopback host, whose links open nowhere else.
+  const shareOrigin = shareableOrigin();
+  const accessShareUrl =
+    accessTarget?.fullHref && shareOrigin ? `${shareOrigin}${accessTarget.fullHref}` : null;
+  // The link only opens once the picked mode is saved, so copy waits for a
+  // saved shared mode. The Clipboard API exists in
+  // secure contexts only; elsewhere the field, which selects on focus, is the
+  // way to copy.
+  const accessSavedMode: AppAccessMode | null = accessTarget
+    ? (accessTarget.accessMode ?? (accessTarget.isPublic ? "public" : "private"))
+    : null;
+  const accessLinkUnsaved = accessModeDraft !== accessSavedMode;
+  // Nothing left to save: the dismiss button reads "Done" rather than "Cancel".
+  // Save stays enabled, since re-saving is how a guardian retries a save whose
+  // policy was stored but whose proxy reload failed.
+  const accessSavedEmails = accessTarget?.cloudAllowedEmails ?? [];
+  const accessDraftUnsaved =
+    accessLinkUnsaved ||
+    (accessModeDraft === "cloud-email" &&
+      (accessEmailInput.trim() !== "" ||
+        accessEmailsDraft.length !== accessSavedEmails.length ||
+        // The server stores the list as a sorted set, so order is no change.
+        accessEmailsDraft.some((email) => !accessSavedEmails.includes(email))));
+  const canCopyAccessLink = typeof navigator !== "undefined" && Boolean(navigator.clipboard);
+  const copyAccessShareUrl = () => {
+    if (!accessShareUrl) return;
+    void navigator.clipboard?.writeText(accessShareUrl).then(
+      () => {
+        setAccessLinkCopied(true);
+        setTimeout(() => setAccessLinkCopied(false), 1500);
+      },
+      () => {},
+    );
+  };
 
   const dialogs = (
     <>
@@ -630,27 +702,21 @@ export function useAppLifecycle(
               </FieldLabel>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <Input
+                  <AccessEmailInput
                     id="app-access-emails"
-                    size="md"
-                    icon={<Mail />}
-                    type="email"
                     value={accessEmailInput}
-                    onChange={(event) => {
-                      setAccessEmailInput(event.target.value);
+                    onChange={(value) => {
+                      setAccessEmailInput(value);
                       if (accessDialogError) setAccessDialogError("");
                     }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      commitAccessEmails(accessEmailInput);
+                    onCommit={(raw) => {
+                      commitAccessEmails(raw);
                     }}
                     onPaste={handleAccessEmailPaste}
+                    exclude={accessEmailsDraft}
                     disabled={accessSaving}
+                    invalid={Boolean(accessDialogError)}
                     placeholder={t("installed.accessDialog.emailPlaceholder")}
-                    autoComplete="off"
-                    spellCheck={false}
-                    aria-invalid={accessDialogError ? true : undefined}
                   />
                 </div>
                 <Button
@@ -698,6 +764,42 @@ export function useAppLifecycle(
             </div>
           ) : null}
 
+          {accessModeDraft !== "private" && accessShareUrl ? (
+            <div className="space-y-2">
+              <FieldLabel htmlFor="app-access-link">
+                {t("installed.accessDialog.linkLabel")}
+              </FieldLabel>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Input
+                    id="app-access-link"
+                    size="md"
+                    icon={<Link2 />}
+                    value={accessShareUrl}
+                    readOnly
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </div>
+                {canCopyAccessLink ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    onClick={copyAccessShareUrl}
+                    disabled={accessLinkUnsaved}
+                  >
+                    {accessLinkCopied
+                      ? t("installed.accessDialog.linkCopied")
+                      : t("installed.accessDialog.copyLink")}
+                  </Button>
+                ) : null}
+              </div>
+              {accessLinkUnsaved ? (
+                <FieldDescription>{t("installed.accessDialog.linkSaveFirst")}</FieldDescription>
+              ) : null}
+            </div>
+          ) : null}
+
           {accessDialogError ? (
             <p role="alert" className="text-ui text-destructive-fg">
               {accessDialogError}
@@ -711,7 +813,9 @@ export function useAppLifecycle(
             onClick={cancelAccessDialog}
             disabled={accessSaving}
           >
-            {t("installed.accessDialog.cancel")}
+            {accessDraftUnsaved
+              ? t("installed.accessDialog.cancel")
+              : t("installed.accessDialog.done")}
           </Button>
           <Button
             type="button"
@@ -744,7 +848,7 @@ export function useAppLifecycle(
     requestUninstall,
     requestPublish,
     requestAccess,
-    startChatToUpdate,
+    chatWithApp,
     dialogs,
   };
 }

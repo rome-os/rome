@@ -9,11 +9,11 @@ import {
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
-import { PROJECT_FILE_BROWSER_POLICY } from "../../lib/project-file-browser.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
+import { PROJECTS_IGNORED_NAMES } from "./projects-files.js";
 
 const log = createLogger("api:share");
 
@@ -82,8 +82,8 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // stays "projects" while rootDir is the project dir, so the frozen layout's
   // project-relative `selectedPath` (rewritten at share time) stays addressable.
   const scopeFor = (token: string, rootDir: string): FileBrowserScope => ({
-    ...PROJECT_FILE_BROWSER_POLICY,
     assetBasePath: `/api/share/${encodeURIComponent(token)}/projects/asset`,
+    ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir,
   });
@@ -108,7 +108,23 @@ export function shareRoutes(deps: ApiDeps): Hono {
   app.get("/share/:token/projects/asset", readHandler(createAssetHandler));
   app.get("/share/:token/projects/asset/:fileName", readHandler(createAssetHandler));
   app.get("/share/:token/projects/download", readHandler(createDownloadHandler));
-  app.get("/share/:token/projects/search", readHandler(createSearchHandler));
+  app.get(
+    "/share/:token/projects/search",
+    readHandler((scope) =>
+      createSearchHandler({
+        ...scope,
+        searchGlobs: [
+          "!**/.git/**",
+          "!**/.next/**",
+          "!**/.turbo/**",
+          "!**/build/**",
+          "!**/coverage/**",
+          "!**/dist/**",
+          "!**/node_modules/**",
+        ],
+      }),
+    ),
+  );
 
   return app;
 }

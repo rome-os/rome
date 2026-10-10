@@ -15,22 +15,6 @@ interface ProjectsWidgetProps {
   initialSelectedPath?: string;
 }
 
-// File-following follows a single shared signal: `followTargetPath`, published
-// by ChatWidget from the link the agent presents in its own message (markdown
-// links rooted at `/projects/`). All intermediate trace activity — `tool_use`
-// inputs and `tool_result` outputs alike — is deliberately ignored upstream;
-// those surface files the agent merely touched, which is what kept yanking the
-// view to images named by a mid-turn `ls`/`file`/script output. ChatWidget owns
-// the extraction so the signal rides the authoritative chat stream rather than a
-// second per-turn subscription that could be aborted before the terminal
-// segment is read. Following is always on: navigation now fires only on the
-// agent's deliberate end-of-turn links, which is unobtrusive enough that no
-// opt-out toggle is needed, and a manual selection is never overridden until the
-// next link arrives.
-function useFileFollowing(): string | null {
-  return useWorkspaceValue<string | null>("followTargetPath") ?? null;
-}
-
 function useActiveProjectPath(): string | null {
   const activeSessionId = useWorkspaceValue<string | null>("activeSessionId");
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -97,7 +81,19 @@ export function ProjectsWidget({
 }: ProjectsWidgetProps) {
   const { t: tFiles } = useTranslation("files");
   const registry = useWorkspaceContextRegistry();
-  const targetPath = useFileFollowing();
+  // File-following follows a single shared signal: `followTargetPath`, published
+  // by ChatWidget from the link the agent presents in its own message (markdown
+  // links rooted at `/projects/`). All intermediate trace activity — `tool_use`
+  // inputs and `tool_result` outputs alike — is deliberately ignored upstream;
+  // those surface files the agent merely touched, which is what kept yanking the
+  // view to images named by a mid-turn `ls`/`file`/script output. ChatWidget owns
+  // the extraction so the signal rides the authoritative chat stream rather than a
+  // second per-turn subscription that could be aborted before the terminal
+  // segment is read. Following is always on: navigation now fires only on the
+  // agent's deliberate end-of-turn links, which is unobtrusive enough that no
+  // opt-out toggle is needed, and a manual selection is never overridden until the
+  // next link arrives.
+  const targetPath = useWorkspaceValue<string | null>("followTargetPath") ?? null;
   const activeProjectPath = useActiveProjectPath();
 
   // Restore the file selected before the last reload. Frozen at mount so our
@@ -171,10 +167,8 @@ export function ProjectsWidget({
           onSelectionChange={handleSelectionChange}
           rootLabel={tFiles("projects.rootLabel")}
           rootPanelTrigger
-          selectInitialFolderOnMobile={false}
           searchPlaceholder={tFiles("projects.searchPlaceholder")}
           sidebarHeading={tFiles("projects.title")}
-          title={tFiles("projects.title")}
         />
       </div>
       {dragging && <div className="absolute inset-0 z-10" />}

@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,29 +28,116 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { renameSession } from "@/lib/chat-api";
+import { deleteSession, listSessions, renameSession } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
+import type { ChatSession } from "@/lib/chat-types";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
+import { useSseEvents } from "@/hooks/use-sse-events";
 import {
   emitSessionsChanged,
   useArchiveSession,
   usePinSession,
   useSessionsChanged,
 } from "@/lib/session-events";
-import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
 
-interface ChatSession {
-  id: string;
-  name: string;
-  createdAt: string;
-  activityAt: string;
-  lastSeenActivityAt: string | null;
-  unread: boolean;
-  projectName: string;
-  projectPath: string;
-  archivedAt: string | null;
-  archived: boolean;
-  pinnedAt: string | null;
+/** What a chat row's mark says. Waiting, running and failed describe the chat,
+ *  so they show even while it is open; done means unseen replies, so the open
+ *  chat never shows it. */
+export type ChatRowStatus = "waiting" | "running" | "failed" | "done";
+
+export function chatRowStatus(
+  session: Pick<ChatSession, "running" | "lastTurnFailed" | "awaitingGuardian" | "unread">,
+  isActive: boolean,
+): ChatRowStatus | null {
+  // The list hides lastTurnFailed and awaitingGuardian while a turn runs, and
+  // a live start clears them, so neither outranks a running turn.
+  if (session.awaitingGuardian) return "waiting";
+  if (session.lastTurnFailed) return "failed";
+  if (session.running) return "running";
+  if (session.unread && !isActive) return "done";
+  return null;
+}
+
+function withLiveRunning<
+  T extends Pick<ChatSession, "id" | "running" | "lastTurnFailed" | "awaitingGuardian">,
+>(session: T, live: ReadonlyMap<string, boolean>): T {
+  const running = live.get(session.id);
+  if (running === undefined) return session;
+  if (!running) return { ...session, running };
+  return { ...session, running, lastTurnFailed: false, awaitingGuardian: false };
+}
+
+const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
+
+// Same shapes as the browser tab badge: an open ring (spinning here), an
+// exclamation mark, a cross and a check mark.
+function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
+  if (status === "running") {
+    return (
+      <svg
+        viewBox="0 0 16 16"
+        fill="none"
+        className="h-4 w-4 animate-spin text-running motion-reduce:animate-none"
+        aria-hidden
+      >
+        <circle
+          cx="8"
+          cy="8"
+          r="5.5"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+          strokeWidth="1.75"
+        />
+        <path
+          d="M8 2.5A5.5 5.5 0 1 1 2.5 8"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-destructive" aria-hidden>
+        <path
+          d="M4.5 4.5l7 7M11.5 4.5l-7 7"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+  if (status === "waiting") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-warning" aria-hidden>
+        <line
+          x1="8"
+          y1="3"
+          x2="8"
+          y2="7.75"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        />
+        <circle cx="8" cy="12.5" r="1.55" fill="currentColor" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 text-success" aria-hidden>
+      <polyline
+        points="3.5,8.5 6.75,11.5 12.5,4.75"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 type GroupMode = "project" | "date";
@@ -77,11 +165,6 @@ const DATE_BUCKETS = [
 ] as const;
 
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
-
-function activeSessionFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/chat\/([^/?#]+)/);
-  return match ? decodeURIComponent(match[1]) : null;
-}
 
 function readGroupMode(): GroupMode {
   if (typeof window === "undefined") return "project";
@@ -122,13 +205,6 @@ function dateBucketFor(createdAt: string, now: number): DateBucketId {
   return "older";
 }
 
-function sessionActivityTime(session: ChatSession): number {
-  const activity = new Date(session.activityAt || session.createdAt).getTime();
-  if (Number.isFinite(activity)) return activity;
-  const created = new Date(session.createdAt).getTime();
-  return Number.isFinite(created) ? created : 0;
-}
-
 function projectNameFromPath(projectPath: string): string {
   return projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath;
 }
@@ -151,8 +227,8 @@ const PROJECT_LOAD_MORE_COUNT = 10;
 const SESSION_NAME_MAX_LENGTH = 50;
 
 /**
- * The chat's name, linking to the chat and revealing its full text in a
- * tooltip while the sidebar is too narrow to show it whole.
+ * The chat's name, linking to the chat. Its tooltip shows the full name while
+ * the sidebar is too narrow to show it whole.
  */
 function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
@@ -222,16 +298,14 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const activeSessionId = activeSessionFromPath(location.pathname);
   const searchShortcut = chatSearchShortcutForPlatform();
 
+  // The newest running state the status stream has reported per chat. A list
+  // response can be older than an event that arrived while it was in flight,
+  // so the stream's word wins over the row's.
+  const liveRunning = useRef(new Map<string, boolean>());
   const loadSessions = useCallback(async () => {
     try {
-      const query = statusFilter === "active" ? "" : `?status=${statusFilter}`;
-      const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include" });
-      if (!res.ok) {
-        setPhase("error");
-        return;
-      }
-      const data = (await res.json()) as ChatSession[];
-      setSessions(data.map((s) => ({ ...s, archived: Boolean(s.archivedAt) })));
+      const data = await listSessions(statusFilter);
+      setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
       setPhase("ready");
     } catch {
       setPhase("error");
@@ -245,6 +319,32 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   useSessionsChanged(() => {
     void loadSessions();
   });
+
+  // Live running state. A stop refetches the list for unread and
+  // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
+  useSseEvents(
+    "/api/chat/status/events",
+    {
+      session_running: {
+        schema: sessionRunningSchema,
+        fn: ({ sessionId, running }) => {
+          liveRunning.current.set(sessionId, running);
+          setSessions((prev) =>
+            prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
+          );
+          if (!running) void loadSessions();
+        },
+      },
+    },
+    {
+      // Events missed while disconnected are gone, so start over from the list
+      // and the snapshot the new connection sends.
+      onReconnect: () => {
+        liveRunning.current.clear();
+        void loadSessions();
+      },
+    },
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -335,7 +435,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     const now = Date.now();
     const buckets = new Map<DateBucketId, ChatSession[]>();
     for (const session of regularSessions) {
-      const id = dateBucketFor(session.activityAt || session.createdAt, now);
+      const id = dateBucketFor(session.activityAt, now);
       const existing = buckets.get(id);
       if (existing) existing.push(session);
       else buckets.set(id, [session]);
@@ -391,9 +491,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
           return prev.filter((s) => s.id !== id);
         }
         return prev.map((s) =>
-          s.id === id
-            ? { ...s, archived, archivedAt: archived ? new Date().toISOString() : null }
-            : s,
+          s.id === id ? { ...s, archivedAt: archived ? new Date().toISOString() : null } : s,
         );
       });
     },
@@ -428,10 +526,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        await fetch(`/api/chat/sessions/${id}`, {
-          method: "DELETE",
-          credentials: "include",
-        });
+        await deleteSession(id);
       } catch {
         // ignore — refetch anyway
       }
@@ -492,11 +587,12 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
 
   const renderChatRow = (session: ChatSession, nested = false) => {
     const isActive = activeSessionId === session.id;
-    const unread = session.unread && !isActive;
+    const status = chatRowStatus(session, isActive);
+    const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
     const isEditing = editingId === session.id;
     const togglePin = () => void setPinned(session.id, !session.pinnedAt);
     const beginRename = () => startRename(session);
-    const toggleArchive = session.archived
+    const toggleArchive = session.archivedAt
       ? () => void handleUnarchive(session.id)
       : () => void setArchived(session.id, true);
     const shortcuts: Record<string, () => void> = {
@@ -508,8 +604,8 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       <div
         key={session.id}
         data-chat-row
-        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition ${
-          session.archived ? "text-subtle-foreground" : "text-foreground"
+        className={`group flex h-8 items-center gap-1 rounded-8 text-ui transition min-h-[var(--control-min-h)] ${
+          session.archivedAt ? "text-subtle-foreground" : "text-foreground"
         } ${
           isActive
             ? "bg-surface shadow-1 dark:bg-surface-hover"
@@ -546,12 +642,14 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
             isEditing ? "hidden" : ""
           }`}
         >
-          {unread ? (
+          {status ? (
             <span
-              className="h-2 w-2 rounded-full bg-info transition-opacity group-hover:opacity-0"
+              className="flex transition-opacity group-hover:opacity-0"
               role="img"
-              aria-label={t("recentChats.unread")}
-            />
+              aria-label={statusLabel ?? undefined}
+            >
+              <ChatStatusGlyph status={status} />
+            </span>
           ) : null}
           <DropdownMenu
             open={openMenuId === session.id}
@@ -607,7 +705,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 {t("recentChats.rename")}
                 <DropdownMenuShortcut aria-hidden>R</DropdownMenuShortcut>
               </DropdownMenuItem>
-              {session.archived ? (
+              {session.archivedAt ? (
                 <DropdownMenuItem aria-keyshortcuts="A" onSelect={toggleArchive}>
                   <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
                   {t("recentChats.unarchive")}
@@ -663,7 +761,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     );
     return (
       <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
-        <div className="group/project flex h-8 items-center gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
+        <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           <button
             type="button"
             onClick={() => toggleGroup(key)}
@@ -722,7 +820,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               <button
                 type="button"
                 onClick={() => loadMore(key)}
-                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+                className="ml-4 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
               >
                 {t("recentChats.loadMore", { count: remainingCount })}
               </button>
@@ -743,7 +841,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
     <TooltipProvider delayDuration={300} skipDelayDuration={0}>
       <div className="flex flex-col">
         <div className="flex items-center justify-between px-5 pt-4">
-          <span className="text-body text-foreground">{t("recentChats.title")}</span>
+          <span className="text-section text-foreground">{t("recentChats.title")}</span>
           <div className="flex items-center gap-1">
             <IconButton
               size="sm"

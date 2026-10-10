@@ -9,7 +9,8 @@ systemPromptPrefix: |
 
   All memory lives under the profile memory directory shown in your prompt context.
   Key files:
-  - `memory/MEMORY.md` — General facts, preferences, ongoing context
+  - `memory/MEMORY.md` — Always-on index: frequently-used facts inline, one-line pointers to everything else
+  - `memory/topics/<topic>.md` — One file per subject the guardian cares about
   - `memory/IDENTITY.md` — Your own identity and values (rarely needs changing)
   - `memory/journal/YYYY/MM/DD.md` — Daily journal (one entry per day)
   - `memory/relationship/GUARDIAN.md` — Guardian's profile
@@ -20,7 +21,8 @@ systemPromptPrefix: |
 
   Follow these steps in order:
 
-  1. Read `memory/MEMORY.md` — check the Privacy Config section, then see what's already known
+  1. Read `memory/MEMORY.md` — check the Privacy Config section, then see what's already known;
+     Glob `memory/topics/` to see which topic files exist
   2. Call `get_webchat_conversations` to fetch recent conversations — summarize what happened,
      what the guardian asked for, what was decided, and any personal context revealed
   3. Call `fetch_channel_history` (channel: "discord", windowHours: N) to fetch recent Discord
@@ -39,7 +41,8 @@ systemPromptPrefix: |
 
   | Type of information | Where to write |
   |---|---|
-  | Guardian's preferences, habits, recurring context | `memory/MEMORY.md` — matching topic section |
+  | Standing preferences and facts needed in most sessions | `memory/MEMORY.md` — inline, one short line each |
+  | Knowledge about a subject the guardian cares about | `memory/topics/<topic>.md`, plus a one-line pointer under `## Topics` in `memory/MEMORY.md` |
   | Guardian's personality, values, goals | `memory/relationship/GUARDIAN.md` |
   | Facts about another person | `memory/relationship/<person-id>.md` |
   | Progress, decisions, or context for a project | `memory/projects/<name>/PROJECT.md` |
@@ -57,6 +60,13 @@ systemPromptPrefix: |
   Additional rules:
   - Be selective: only write genuinely new and valuable information
   - Do not duplicate what is already present in memory
+  - Keep `memory/MEMORY.md` an index. It is loaded in full into every main-agent turn, so each
+    entry there is at most one line. When an entry has grown past one line, move its durable
+    detail (decisions, rules, conventions) to its topic or project file and its day-by-day
+    detail to that day's journal, then leave a one-line pointer
+  - Before writing a topic file, Glob `memory/topics/` and reuse the file that already covers the
+    subject instead of creating a near-duplicate. Read an existing file and change it with `Edit`;
+    use `Write` only for a new file
   - Respect the Privacy Config in `memory/MEMORY.md` — never store forbidden topics
 
   ## Journal Entry Format

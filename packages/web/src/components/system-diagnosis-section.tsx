@@ -1,3 +1,4 @@
+import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -74,18 +75,17 @@ export function SystemDiagnosisSection() {
       }),
   });
   const d = query.data ?? null;
-  const relay = d?.relay ?? { configured: false, depositUrlConfigured: false };
 
   return (
-    <div>
-      <div className="mb-4 flex items-center gap-2">
-        <h2 className="text-section text-foreground">{t("advanced.diagnosis.title")}</h2>
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{t("advanced.diagnosis.title")}</SectionTitle>
         {d && (
           <Badge variant={d.status === "ok" ? "success" : "destructive"}>
             {t(`advanced.diagnosis.status.${d.status}`)}
           </Badge>
         )}
-      </div>
+      </SectionHeader>
 
       {query.isLoading ? (
         <p className="text-ui text-muted-foreground">{t("advanced.diagnosis.loading")}</p>
@@ -155,11 +155,11 @@ export function SystemDiagnosisSection() {
                 </span>
               </DiagRow>
               <DiagRow label={t("advanced.diagnosis.relayDepositUrl")}>
-                {relay.configured ? (
+                {d.relay.configured ? (
                   <span
-                    className={relay.depositUrlConfigured ? "text-success-fg" : "text-warning-fg"}
+                    className={d.relay.depositUrlConfigured ? "text-success-fg" : "text-warning-fg"}
                   >
-                    {relay.depositUrlConfigured
+                    {d.relay.depositUrlConfigured
                       ? t("advanced.diagnosis.relayDepositConfigured")
                       : t("advanced.diagnosis.relayDepositMissing")}
                   </span>
@@ -194,7 +194,7 @@ export function SystemDiagnosisSection() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </Section>
   );
 }
 

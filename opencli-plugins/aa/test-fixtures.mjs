@@ -22,6 +22,9 @@ export function mockPage(frames) {
     async goto(url) {
       urls.push(url);
     },
+    async selectTab(index) {
+      if (index !== 0) throw new Error("Unexpected tab");
+    },
     async wait() {
       time += 1000;
     },

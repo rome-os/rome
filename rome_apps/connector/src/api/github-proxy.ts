@@ -58,12 +58,14 @@ export async function githubProxyCall(params: {
 
   // Caller headers win over the defaults so an explicit Accept/Content-Type
   // (e.g. a GraphQL or raw-blob request) can override GitHub's JSON defaults.
-  const headers: Record<string, string> = {
+  // `Headers` matches names case-insensitively, so `x-github-api-version`
+  // replaces the default instead of being joined to it as "a, b".
+  const headers = new Headers({
     Authorization: `Bearer ${params.token}`,
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "rome-connector",
-  };
+  });
 
   let serializedBody: string | undefined;
   if (params.body !== undefined && params.method !== "GET" && params.method !== "HEAD") {
@@ -71,10 +73,12 @@ export async function githubProxyCall(params: {
       serializedBody = params.body;
     } else {
       serializedBody = JSON.stringify(params.body);
-      headers["Content-Type"] = "application/json";
+      headers.set("Content-Type", "application/json");
     }
   }
-  Object.assign(headers, params.headers ?? {});
+  for (const [name, value] of Object.entries(params.headers ?? {})) {
+    headers.set(name, value);
+  }
 
   const res = await fetch(url, { method: params.method, headers, body: serializedBody });
 

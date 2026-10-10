@@ -3,14 +3,13 @@ import type { DrizzleDb } from "../db/index.js";
 import { romeSessions, sentinelLog } from "../db/schema.js";
 import { createTestDb } from "../test/helpers.js";
 import {
-  testMessagesContract,
+  testAccountMessagesContract,
   WHOLE_HISTORY,
   type MessagesContractSubject,
 } from "./messages-contract.js";
 import { sentinelLogMessages } from "./messages-sentinel.js";
-import type { MessageConversation } from "./messages.js";
 
-// `sentinel_log` read as a `Messages` store, holding exactly what
+// `sentinel_log` read as an `AccountMessages` store, holding exactly what
 // `sentinelLogSource` holds today: one row as the two lines it records, and
 // the threads Rome knows to be groups subtracted.
 
@@ -21,8 +20,6 @@ const GROUP = "tg-group-1";
 
 const account = { channel: CHANNEL, addresses: [DIRECT, DIRECT_ALT] };
 const silent = [{ channel: CHANNEL, addresses: ["tg-nobody"] }];
-const groupThread: MessageConversation = { channel: CHANNEL, id: GROUP };
-const emptyThread: MessageConversation = { channel: CHANNEL, id: "tg-nothing-logged" };
 
 function row(
   db: DrizzleDb,
@@ -76,9 +73,8 @@ async function seed(db: DrizzleDb) {
   // An empty reply is no reply.
   await row(db, "quiet", { at: 1200, text: "hm", response: "", threadId: "tg-quiet-thread" });
 
-  // Out of every account's scope: the thread a group session covers, which only
-  // a conversation read reaches, and another sender. Two rows in the group, so
-  // the four lines they record are enough to page.
+  // Out of every account's scope: the thread a group session covers, and
+  // another sender.
   await row(db, "in-group", { at: 900, text: "hi all", response: "hello", threadId: GROUP });
   await row(db, "in-group-2", { at: 950, text: "still here", response: "yep", threadId: GROUP });
   await row(db, "stranger", { at: 1300, text: "who?", channelUserId: "tg-stranger" });
@@ -110,50 +106,20 @@ describe("sentinelLogMessages", () => {
     expect(entries.indexOf(outbound!)).toBeLessThan(entries.indexOf(inbound!));
   });
 
-  it("reads a row with no reply as the inbound message alone", async () => {
-    expect(await refs()).toContain("sentinel:unheard");
-    expect(await refs()).not.toContain("sentinel:unheard:reply");
+  it("names the sender and the thread the row recorded", async () => {
+    const entries = await page();
+    const inbound = entries.find((entry) => entry.ref === "sentinel:answered");
+    const outbound = entries.find((entry) => entry.ref === "sentinel:answered:reply");
+    expect(inbound?.sender).toEqual({ id: DIRECT, name: null });
+    expect(inbound?.conversation).toEqual({ id: DIRECT, name: null, kind: null });
+    // Rome's reply: the log does not record Rome as a sender.
+    expect(outbound?.sender).toBeUndefined();
+    expect(outbound?.conversation?.id).toBe(DIRECT);
   });
 
-  it("counts an empty reply as no reply", async () => {
-    expect(await refs()).toContain("sentinel:quiet");
-    expect(await refs()).not.toContain("sentinel:quiet:reply");
-  });
-
-  it("subtracts a thread Rome knows to be a group, reply included", async () => {
-    expect(await refs()).not.toContain("sentinel:in-group");
-    expect(await refs()).not.toContain("sentinel:in-group:reply");
-  });
-
-  // The row names its thread as well as its sender, so a conversation read
-  // keys on the thread — which is the only way to the group the account reads
-  // subtract.
-  it("answers a group thread asked for as a conversation", async () => {
-    const page = await sentinelLogMessages(db).readConversation({
-      conversation: groupThread,
-      limit: WHOLE_HISTORY,
-    });
-    expect(page.map((entry) => entry.ref)).toEqual([
-      "sentinel:in-group-2:reply",
-      "sentinel:in-group-2",
-      "sentinel:in-group:reply",
-      "sentinel:in-group",
-    ]);
-  });
-
-  it("keeps a conversation on its own channel", async () => {
-    const elsewhere = await sentinelLogMessages(db).readConversation({
-      conversation: { channel: "discord", id: GROUP },
-      limit: WHOLE_HISTORY,
-    });
-    expect(elsewhere).toEqual([]);
-  });
-
-  it("subtracts only a group on the row's own channel", async () => {
-    // "quiet" sits on a thread id a *discord* group session names.
-    expect(await refs()).toContain("sentinel:quiet");
-  });
-
+  // Exact, so it also pins what stays out: no reply line for `unheard` or for
+  // the empty reply on `quiet`, and nothing from the group thread. `quiet` stays
+  // in, since only a group on its own channel subtracts its thread.
   it("merges every address of the account into one newest-first history", async () => {
     expect(await refs()).toEqual([
       "sentinel:quiet",
@@ -175,20 +141,13 @@ describe("sentinelLogMessages", () => {
     });
     expect(elsewhere).toEqual([]);
   });
-
-  it("holds nothing for an empty scope", async () => {
-    const messages = sentinelLogMessages(db);
-    expect(await messages.latest([])).toBeNull();
-    expect(await messages.count([])).toBe(0);
-    expect(await messages.read({ accounts: [], limit: WHOLE_HISTORY })).toEqual([]);
-  });
 });
 
 // One seeded database for the whole suite: every assertion in it reads, so a
 // fresh one per case would only buy migrations.
 let enrolled: Promise<MessagesContractSubject> | null = null;
 
-testMessagesContract("sentinelLogMessages", () => {
+testAccountMessagesContract("sentinelLogMessages", () => {
   enrolled ??= (async () => {
     const { db } = createTestDb();
     await seed(db);
@@ -196,8 +155,6 @@ testMessagesContract("sentinelLogMessages", () => {
       messages: sentinelLogMessages(db),
       accounts: [account],
       silent,
-      conversation: groupThread,
-      silentConversation: emptyThread,
     };
   })();
   return enrolled;

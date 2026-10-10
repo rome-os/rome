@@ -11,7 +11,7 @@ Fake a dependency only if it crosses the process boundary:
 | Edge | Fake |
 |---|---|
 | Model API | `FakeModel` (scriptable `ModelProvider`) |
-| Chat-network SDK | `FakeChannelEndpoint` (plays the remote side of the adapter); for adapter units, `FakeTelegramApi` (plays the Bot API server behind a real grammy `Bot`) |
+| Chat-network SDK | `FakeChannelEndpoint` (plays the platform behind a channel's Connection); for adapter units, `FakeTelegramApi` (plays the Bot API server behind a real grammy `Bot`); for the HTTP wire and recorded platform responses, the peers in [`im/`](im/README.md) |
 | Wall clock | `FakeClock` (injectable `Clock` seam); `installTestClock()` for ambient-time code |
 | Subprocess fork | avoided via `ActionEngine` `processRole: "worker"` (the harness does this) |
 | Outbound HTTP | `createFetchRecorder()` (inject `recorder.fetch` via a module's `fetch?: typeof fetch` option) |
@@ -46,9 +46,9 @@ expect(await rome.repos.actionExecutions.findByAction("send_message")).toHaveLen
 await rome.cleanup(); // always — restores env scoping, closes sessions/DB, removes temp dirs
 ```
 
-Approval flows: record through `rome.actionEngine.run(...)` (the gate persists journal + payload for real), approve via `rome.repos.approvals.resolvePending(id, "approve")` or seed directly with `rome.seed.approvedActionApproval(payload)`, then drive `rome.approvalHandler.onApproved(id)`. See `src/actions/approval-handler.test.ts` for the reference conversion.
+Approval flows: record through `rome.actionEngine.run(...)` (the gate persists journal + payload for real), approve via `rome.repos.approvals.resolvePending(id, "approve", "test-guardian")` or seed directly with `rome.seed.approvedActionApproval(payload)`, then drive `rome.approvalHandler.onApproved(id)`. See `src/actions/approval-handler.test.ts` for the reference conversion.
 
-Channels: `rome.channel("telegram").send({ text: "hello" })` injects an incoming message at the adapter seam; `nextReply()` awaits what Rome sent back. (The inbox pipeline — the system-app message hook — is not booted by the harness yet; attach your handler under test via `onMessage`.)
+Channels: `rome.channels` is the production channel list over fake Connections, so a test hears and answers through the channel's `inbound` and `send` ports. `rome.channel("telegram").receive({ text: "hello" })` delivers an incoming `ChannelMessage` where the platform would, and `nextReply()` awaits what Rome sent back. (The inbox pipeline — the system-app message hook — is not booted by the harness yet; subscribe your handler under test to `channel.inbound`.)
 
 Adapter units (testing the adapter itself, below the harness): inject through the adapter's factory seam — `new TelegramAdapter({ botToken }, fake.createBot)` with `const fake = new FakeTelegramApi()`. The fake is a *server*, not an SDK replica: `createBot` returns a real grammy `Bot` whose API transformer answers outbound calls with canned wire JSON, so middleware filters, init, and the long-poll lifecycle run grammy's production code instead of a hand-rolled imitation that drifts. Await `fake.untilPolling()` after `adapter.start()`, drive incoming traffic with `fake.emitUpdate(update)` (a Telegram `Update`, through real `bot.handleUpdate`), and assert the outbound contract on `fake.sent` (`{ method, payload }` pairs captured pre-serialization — an `InputFile` is still an instance, since multipart encoding happens in grammy's HTTP caller below the seam; methods the fake doesn't model throw instead of fake-succeeding); no `createTestRome()` and no DB needed. See `src/channels/telegram.test.ts` for the reference conversion.
 

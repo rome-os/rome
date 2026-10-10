@@ -1,3 +1,9 @@
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { useState } from "react";
 import { ArrowRight, Check, Plus, Search, Sparkles, Star, Trash2 } from "lucide-react";
 import { Toggle } from "@rome-os/ui/toggle";
@@ -62,6 +68,27 @@ export function ControlsSection() {
       title="Controls"
       description="Primitives and composites that take input. Core controls use the --control-* / --field-* scale, so a button and a field on the same row agree."
     >
+      <Component id="platform-scale" name="Platform scale" source="@rome-os/ui/ui-scale">
+        <Specimen
+          label="Control scale"
+          note="Use Control scale in the page header to resize every specimen. Auto follows the primary pointer."
+        >
+          <div data-scale-preview className="flex flex-wrap items-center gap-3">
+            <Button size="xs">Scale button</Button>
+            <div className="w-64">
+              <Input aria-label="Scale field" placeholder="Shared field sizing" />
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button>Scale menu</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem>Scale option</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </Specimen>
+      </Component>
       <Component id="button" name="Button" source="@rome-os/ui/button">
         <Specimen label="Button — variants" note="One primary action per screen.">
           <Row>
@@ -279,7 +306,7 @@ export function ControlsSection() {
                   <Input size={size} icon={<Search aria-hidden />} placeholder={`size="${size}"`} />
                 </div>
                 <Button size={size}>
-                  <Search aria-hidden />
+                  <Search data-icon="inline-start" aria-hidden />
                   Search
                 </Button>
               </div>

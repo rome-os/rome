@@ -431,7 +431,7 @@ tagline: One line for the card.
   // An interrupted teardown leaves `installed/<appId>/` on disk with no
   // matching lockfile entry. Boot must NOT sweep it: a blanket "anything
   // not in the lockfile is garbage" rule wipes every cached bundle when
-  // the lockfile is freshly empty (e.g. after `discardNonCurrentLockfile`).
+  // the lockfile is freshly empty.
   // The dangling dir is harmless — boot only probes lockfile entries, and
   // a re-install of the same appId is a content-addressed cache hit on
   // the existing dir.
@@ -588,6 +588,27 @@ sideEffects: read-only
     expect(finalA.current?.state).toBe("installed");
   });
 
+  it("runs settled listeners after every subscriber, even ones registered later", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    const order: string[] = [];
+    harness.catalog.onSettled(function settled(event) {
+      order.push(`settled:${event.current?.state}`);
+    });
+    harness.catalog.subscribe(async function slowSubscriber(event) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      order.push(`subscriber:${event.current?.state}`);
+    });
+
+    await harness.appManager.install({ source });
+
+    expect(order).toEqual([
+      "subscriber:installing",
+      "settled:installing",
+      "subscriber:installed",
+      "settled:installed",
+    ]);
+  });
+
   it("does not resolve install until the active bundle reaches catalog subscribers", async () => {
     const source: SpecSource = { mode: "bundle", path: packedRoot };
     let releaseInstalledSubscriber!: () => void;
@@ -684,53 +705,16 @@ sideEffects: read-only
     expect(existsSync(harness.lockfilePath)).toBe(false);
   });
 
-  // Pre-#314 dev profiles have an `apps.lock.json` written under the prior
-  // `schemaVersion: 2` shape (string `source: "seed:first_party"`, raw `hash`,
-  // etc.). Boot must rename it aside and start clean so install/seed paths
-  // don't trip on `LockfileTopLevelError`.
-  it("boot discards a non-current schemaVersion lockfile and starts clean", async () => {
-    const legacyLockfile = JSON.stringify({
-      schemaVersion: 2,
-      apps: {
-        legacy: {
-          source: "seed:first_party",
-          enabled: true,
-          version: "0.0.1",
-          hash: "0".repeat(64),
-        },
-      },
-    });
-    await writeFile(harness.lockfilePath, legacyLockfile, "utf-8");
+  it("creates an empty lockfile on a fresh profile", async () => {
+    const result = await harness.appManager.boot();
+    expect(result.appCount).toBe(0);
 
-    const fresh = await createTestApps({ profileRoot: harness.profileRoot });
-    try {
-      const boot = await fresh.appManager.boot();
-      expect(boot.appCount).toBe(0);
-
-      const lockfile = await readLockfile(fresh);
-      expect(lockfile.schemaVersion).toBe(APPS_LOCKFILE_SCHEMA_VERSION);
-      expect(Object.keys(lockfile.apps)).toEqual([]);
-
-      // Backup file is named with a `.bak-<timestamp>-<pid>` suffix.
-      const profileEntries = await readdir(harness.profileRoot);
-      const backups = profileEntries.filter((name) => name.startsWith("apps.lock.json.bak-"));
-      expect(backups).toHaveLength(1);
-      const backupRaw = await readFile(join(harness.profileRoot, backups[0]), "utf-8");
-      expect(JSON.parse(backupRaw)).toMatchObject({ schemaVersion: 2 });
-
-      // Subsequent installs through the same manager must work — the legacy
-      // file no longer blocks `readLockfileWithEntryIsolation`.
-      const result = await fresh.appManager.install({
-        source: { mode: "bundle", path: packedRoot },
-      });
-      expect(result.state).toBe("installed");
-    } finally {
-      await fresh.cleanup();
-    }
+    const lockfile = await readLockfile(harness);
+    expect(lockfile.schemaVersion).toBe(APPS_LOCKFILE_SCHEMA_VERSION);
+    expect(lockfile.apps).toEqual({});
   });
 
-  // Genuine corruption (missing schemaVersion, malformed shape) must still
-  // surface loudly — only stale-but-shaped lockfiles get auto-discarded.
+  // Corruption (missing schemaVersion, malformed shape) must surface loudly.
   it("boot throws on a malformed lockfile rather than silently discarding", async () => {
     await writeFile(
       harness.lockfilePath,
@@ -944,6 +928,49 @@ sideEffects: read-only
       expect(entry?.source).toEqual({ mode: "bundle", path: packedRoot });
     } finally {
       await fresh.cleanup();
+    }
+  });
+
+  it("stamps installedAt on the first successful install and keeps it across re-installs", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+    expect(typeof first).toBe("string");
+    expect(Number.isNaN(Date.parse(first as string))).toBe(false);
+
+    const view = harness.catalog.list().find((candidate) => candidate.appId === "testapp");
+    expect(view?.installedAt).toBe(first);
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+  });
+
+  it("never backfills installedAt onto an entry that predates the field", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const lockfile = await readLockfile(harness);
+    delete lockfile.apps.testapp.installedAt;
+    await writeFile(harness.lockfilePath, JSON.stringify(lockfile, null, 2));
+
+    await harness.appManager.install({ source });
+    expect((await readLockfile(harness)).apps.testapp.installedAt).toBeUndefined();
+  });
+
+  it("keeps installedAt when a later install fails", async () => {
+    const source: SpecSource = { mode: "bundle", path: packedRoot };
+    await harness.appManager.install({ source });
+    const first = (await readLockfile(harness)).apps.testapp.installedAt;
+
+    const realMaterialize = harness.installer.materialize.bind(harness.installer);
+    harness.installer.materialize = async () => {
+      throw new Error("simulated disk failure during materialize");
+    };
+    try {
+      const failed = await harness.appManager.install({ source });
+      expect(failed.state).toBe("failed");
+      expect((await readLockfile(harness)).apps.testapp.installedAt).toBe(first);
+    } finally {
+      harness.installer.materialize = realMaterialize;
     }
   });
 });

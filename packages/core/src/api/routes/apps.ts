@@ -23,7 +23,7 @@ import type { AppManager } from "../../apps/manager.js";
 import { AppManagerError, SYSTEM_APP_ID } from "../../apps/manager.js";
 import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscriber.js";
 import { SpecSourceSchema } from "../../apps/lockfile.js";
-import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
+import { type ArtifactRef, isResolvedApp } from "../../apps/state.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
@@ -33,6 +33,7 @@ import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
 import { settings } from "../../db/schema.js";
 import {
   DEFAULT_PUBLIC_ACCESS_CONFIG,
+  PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
@@ -48,10 +49,6 @@ function getErrorMessage(err: unknown): string {
 
 function formatCount(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? "" : "s"}`;
-}
-
-function isResolvedApp(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }
 
 // Provenance for the dashboard's grouped apps page. `firstParty` wins over the
@@ -137,6 +134,7 @@ function toInstalledAppCard(
     source: view.source,
     projectPath: deriveAppProjectPath(view.source),
     origin: deriveAppOrigin(view),
+    installedAt: view.installedAt ?? null,
     suggestedChannelBindings: resolved?.manifest.suggestedChannelBindings ?? [],
   };
 }
@@ -276,7 +274,10 @@ async function loadArtifactDetailsByApp(
 }
 
 async function loadPublicAccessConfig(deps: ApiDeps): Promise<PublicAccessConfig> {
-  const rows = await deps.db.select().from(settings).where(eq(settings.key, "publicAccess"));
+  const rows = await deps.db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
   return rows.length > 0 && rows[0].value
     ? normalizePublicAccessConfig(rows[0].value)
     : DEFAULT_PUBLIC_ACCESS_CONFIG;
@@ -464,7 +465,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const path = c.req.query("path") ?? "";
 
     const view = deps.appCatalog.get(appId);
-    if (!view || !isResolvedApp(view) || !view.web) {
+    if (!isResolvedApp(view) || !view.web) {
       return c.json({ error: `App "${appId}" has no frontend` }, 404);
     }
 
@@ -707,9 +708,6 @@ export function appsRoutes(deps: ApiDeps): Hono {
     }
     const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be published');
     if (systemBlock) return systemBlock;
-    if (!deps.appCatalog) {
-      return c.json({ error: "App catalog is not configured" }, 501);
-    }
     const view = deps.appCatalog.get(appId);
     if (!view) {
       return c.json({ error: `App "${appId}" is not installed` }, 404);

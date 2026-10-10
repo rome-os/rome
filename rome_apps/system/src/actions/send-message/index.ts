@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { createAppLogger, getCurrentActionContext } from "@rome-os/app-runtime";
+import { createAppLogger, getCurrentActionContext, isCoreMainAgentId } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
@@ -9,8 +9,8 @@ import type {
   ConversationId,
   ConversationRepository,
   MessageReceipt,
+  ChannelsService,
   PreviewPayload,
-  TalkRouter,
 } from "@rome-os/app-runtime";
 import type { SendMessageInput, SendMessageChatInput, SendMessageEmailInput } from "./types.js";
 export type { SendMessageInput, SendMessageOutput } from "./types.js";
@@ -28,6 +28,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   discord: "Discord",
   webchat: "Web chat",
   email: "Email",
+  agents: "Agents",
 };
 
 type GuardianPerson = {
@@ -38,9 +39,23 @@ interface PersonMappingResolver {
   findByBondLevel(bondLevel: "guardian"): Promise<GuardianPerson[]>;
 }
 
+/** Core's agent-name lookup, handed to the system app alone. Declared here
+ *  because an app cannot import core, and a worker receives a proxy. */
+export interface AgentNamesService {
+  resolve(
+    name: string,
+  ): Promise<
+    | { status: "found"; agentId: string }
+    | { status: "ambiguous"; matches: { label: string; agentId: string }[] }
+    | { status: "none" }
+    | { status: "not_connected" }
+  >;
+}
+
 interface SendMessageRuntimeDeps {
   personMappingRepo?: PersonMappingResolver;
   conversations?: ConversationRepository;
+  agentNames?: AgentNamesService;
 }
 
 function outboundContent(input: SendMessageInput): string {
@@ -221,41 +236,96 @@ async function resolveGuardianThreadId(
   return mapping.channelUserId;
 }
 
+const AGENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * An agent's id from its name, for `to` on `agents`. Cloud lists the
+ * guardian's agents and linked accounts' agents, so only Rome's main agent
+ * looks a name up there; any other caller passes the id. A name two agents
+ * share is refused with each one's label and id rather than guessed between.
+ */
+async function resolveAgentThreadId(name: string, deps: SendMessageRuntimeDeps): Promise<string> {
+  const wanted = name.trim();
+  if (AGENT_ID.test(wanted)) return wanted.toLowerCase();
+  const context = getCurrentActionContext();
+  // `main` is a name only core may define, so an installed app's agent cannot
+  // take it; an app calling through runAction is refused the same way.
+  const fromApp = !!context?.callerAppId && context.callerAppId !== "system";
+  if (fromApp || !context?.agentName || !isCoreMainAgentId(context.agentName)) {
+    throw new Error("Only Rome's main agent sends to an agent by name; pass its id as `threadId`");
+  }
+  if (!deps.agentNames) {
+    throw new Error(
+      "Sending to an agent by name is not available in this Rome; pass its id as `threadId`",
+    );
+  }
+  const found = await deps.agentNames.resolve(wanted);
+  switch (found.status) {
+    case "found":
+      return found.agentId;
+    case "not_connected":
+      throw new Error('Channel "agents" is not connected');
+    case "none":
+      throw new Error(`No agent named "${wanted}"`);
+    case "ambiguous": {
+      const options = found.matches
+        .map((match) => `"${match.label}" (threadId ${match.agentId})`)
+        .join(", ");
+      // Two agents of one account can share a whole label, which then names
+      // neither, so only distinct labels are offered as a way to pick.
+      const labels = new Set(found.matches.map((match) => match.label.toLowerCase()));
+      const retry =
+        labels.size === found.matches.length
+          ? "Send again with the full name as `to` or the id as `threadId`."
+          : "Send again with the id as `threadId`.";
+      throw new Error(`"${wanted}" does not name one of your agents: ${options}. ${retry}`);
+    }
+  }
+}
+
+/** The agent a send on "agents" names in `to`, read the same way for the
+ *  send and for its approval card, so the card never shows less than the
+ *  send acts on. "guardian" keeps its alias meaning. The card shows the name
+ *  as given: a bare name reaches only the guardian's own agent, and another
+ *  account's agent is named by its whole label, such as `Atlas (@ouou's dot)`. */
+function agentRecipient(channel: unknown, to: unknown): string | undefined {
+  if (channel !== "agents" || typeof to !== "string") return undefined;
+  const name = to.trim();
+  return name && name !== "guardian" ? name : undefined;
+}
+
 async function resolveChatThreadId(
   chat: SendMessageChatInput,
   deps: SendMessageRuntimeDeps,
 ): Promise<string> {
-  if (chat.to !== undefined && chat.to !== "guardian") {
+  const agent = agentRecipient(chat.channel, chat.to);
+  if (agent) return resolveAgentThreadId(agent, deps);
+  // Trimmed as `agentRecipient` trims, so the alias reads the same here.
+  const to = typeof chat.to === "string" ? chat.to.trim() : chat.to;
+  if (to !== undefined && to !== "guardian") {
     throw new Error(
-      `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
+      chat.channel === "agents"
+        ? 'Channel "agents" takes an agent\'s name or "guardian" as `to`, or an agent\'s id as `threadId`'
+        : `Channel "${chat.channel}" only supports to: "guardian"; use threadId for explicit recipients`,
     );
   }
-  if (chat.to === "guardian") return resolveGuardianThreadId(chat.channel, deps);
+  if (to === "guardian") return resolveGuardianThreadId(chat.channel, deps);
   if (chat.threadId) return chat.threadId;
   throw new Error(`Channel "${chat.channel}" requires a threadId or to: "guardian"`);
 }
 
-async function resolveConnectionIdForService(
-  talkRouter: TalkRouter,
-  service: string,
-  requested?: string,
-): Promise<string> {
-  const matches = (await talkRouter.list()).filter((connection) => connection.service === service);
-  if (requested) {
-    if (!matches.some((connection) => connection.connectionId === requested)) {
-      throw new Error(`Connection "${requested}" does not provide channel "${service}"`);
-    }
-    return requested;
-  }
-  if (matches.length === 0) throw new Error(`No Talk connection registered for "${service}"`);
-  if (matches.length > 1) {
-    throw new Error(`Channel "${service}" has multiple connections; connectionId is required`);
-  }
-  return matches[0]!.connectionId;
+/**
+ * Refuse a channel no Connection can send on before anything else is checked,
+ * so an unconfigured channel is not reported as a bad attachment or a missing
+ * guardian mapping. The text is the one the channels service rejects with.
+ */
+async function requireSendableChannel(channels: ChannelsService, channel: string): Promise<void> {
+  const target = (await channels.list()).find((candidate) => candidate.name === channel);
+  if (!target?.sendable) throw new Error(`No Talk connection registered for "${channel}"`);
 }
 
 export async function executeSendMessage(
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   input: SendMessageInput,
   deps: SendMessageRuntimeDeps = {},
 ): Promise<ActionResult> {
@@ -263,7 +333,7 @@ export async function executeSendMessage(
   const hasAttachments = !!attachments && attachments.length > 0;
   const hasParts = !!parts && parts.length > 0;
 
-  const connectionId = await resolveConnectionIdForService(talkRouter, channel, input.connectionId);
+  await requireSendableChannel(channels, channel);
 
   const safeInput = await validateAttachmentSources(input);
 
@@ -285,7 +355,7 @@ export async function executeSendMessage(
       reply: !!(email.threadId || replyTarget),
       attachmentCount: attachments?.length ?? 0,
     });
-    const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
+    const delivery = await channels.send(channel, threadId as ConversationId, {
       kind: "email",
       text,
       parts,
@@ -318,7 +388,7 @@ export async function executeSendMessage(
     channelUserId,
     attachmentCount: attachments?.length ?? 0,
   });
-  const delivery = await talkRouter.send(connectionId, threadId as ConversationId, {
+  const delivery = await channels.send(channel, threadId as ConversationId, {
     text,
     parts,
     attachments: safeInput.attachments,
@@ -341,7 +411,7 @@ export async function executeSendMessage(
  */
 export function createSendMessageAction(
   config: ActionConfig,
-  talkRouter: TalkRouter,
+  channels: ChannelsService,
   deps: SendMessageRuntimeDeps = {},
 ): Action {
   return {
@@ -359,9 +429,10 @@ export function createSendMessageAction(
             "webchat",
             "email",
             "feishu",
+            "agents",
           ],
           description:
-            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email".',
+            'Registered channel adapter name, e.g. "telegram", "whatsapp", "discord", "feishu", or "email". "agents" messages an agent on Rome Cloud, such as a dot, in this account or a linked one: pass its id (a UUID, the threadId its messages arrive on) as `threadId`, or, from the main agent, its name as `to`.',
         },
         threadId: {
           type: "string",
@@ -386,7 +457,7 @@ export function createSendMessageAction(
           type: ["string", "array"],
           items: { type: "string" },
           description:
-            'Recipient alias/address. For chat channels, only the literal "guardian" is supported and resolves through the guardian\'s channel mapping. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
+            'Recipient alias/address. For chat channels, the literal "guardian" resolves through the guardian\'s channel mapping, and on "agents" the main agent can give an agent\'s name, which resolves to its id. For email, pass recipient address(es); the literal "guardian" resolves to the guardian\'s address. Omit when replying on a thread.',
         },
         subject: {
           type: "string",
@@ -436,7 +507,7 @@ export function createSendMessageAction(
       required: ["channel"],
     },
     execute: async (input: Record<string, unknown>): Promise<ActionResult> =>
-      executeSendMessage(talkRouter, input as unknown as SendMessageInput, deps),
+      executeSendMessage(channels, input as unknown as SendMessageInput, deps),
     // Ground-truth render of the bound call. Pure over args (no I/O), so it
     // surfaces the message body and channel — the decision-relevant facts — but
     // deliberately omits the raw threadId/channelUserId recipient, which would
@@ -444,13 +515,19 @@ export function createSendMessageAction(
     preview(args: Record<string, unknown>): PreviewPayload {
       const input = args as Partial<SendMessageInput>;
       const channel = typeof input.channel === "string" ? input.channel : undefined;
+      // An agent's name given as `to` is already readable, so the card names
+      // the agent. An id stays off the card, as every recipient id does.
+      const recipient = agentRecipient(channel, input.to);
+      const agentName = recipient && !AGENT_ID.test(recipient) ? recipient : undefined;
+      const fields = [
+        ...(channel ? [{ label: "Channel", value: CHANNEL_LABELS[channel] ?? channel }] : []),
+        ...(agentName ? [{ label: "To", value: agentName }] : []),
+      ];
       return {
         kind: "generic",
         title: "Send a message",
         summary: typeof input.text === "string" && input.text ? input.text : "(no message text)",
-        ...(channel
-          ? { fields: [{ label: "Channel", value: CHANNEL_LABELS[channel] ?? channel }] }
-          : {}),
+        ...(fields.length > 0 ? { fields } : {}),
       };
     },
   };
@@ -458,11 +535,11 @@ export function createSendMessageAction(
 
 export function createAction(
   config: ActionConfig,
-  deps: { talkRouter: TalkRouter } & SendMessageRuntimeDeps & {
+  deps: { channelsService: ChannelsService } & SendMessageRuntimeDeps & {
       appContext?: { repositories?: { conversations?: ConversationRepository } };
     },
 ): Action {
-  return createSendMessageAction(config, deps.talkRouter, {
+  return createSendMessageAction(config, deps.channelsService, {
     ...deps,
     conversations: deps.conversations ?? deps.appContext?.repositories?.conversations,
   });

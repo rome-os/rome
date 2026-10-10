@@ -228,9 +228,23 @@ describe("scaffoldDevApp", () => {
 
     const appEntry = readFileSync(join(templateRoot, "src", "web", "App.tsx"), "utf-8");
     expect(appEntry).not.toContain("@/components/ui/");
-    for (const subpath of ["button", "card", "select"]) {
+    for (const subpath of [
+      "alert",
+      "button",
+      "layout-form",
+      "layout-list",
+      "page",
+      "select",
+      "spinner",
+      "table",
+    ]) {
       expect(appEntry).toContain(`from "@rome-os/ui/${subpath}"`);
     }
+    expect(appEntry).not.toContain('from "@rome-os/ui/card"');
+    expect(appEntry).toContain('fetchAppApi("status")');
+
+    const appApi = readFileSync(join(templateRoot, "src", "api", "index.ts"), "utf-8");
+    expect(appApi).toContain('request.method === "GET" && route === "status"');
 
     // One import. `@rome-os/ui` is an optional peer of the SDK, so the kit the
     // app declares above is the only copy in the tree, and the canon reaches the

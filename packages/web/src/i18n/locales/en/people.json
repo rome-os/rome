@@ -33,7 +33,11 @@
     "whatsapp": "WhatsApp",
     "discord": "Discord",
     "webchat": "Webchat",
-    "linkedin": "LinkedIn"
+    "linkedin": "LinkedIn",
+    "wechat": "WeChat",
+    "email": "Email",
+    "agents": "Agents",
+    "feishu": "Feishu"
   },
   "filters": {
     "groupLabel": "Filter people by bond level",

@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./bootstrap": "./src/bootstrap.ts",
+    "./chat": "./src/chat.ts",
     "./computer-use": "./src/computer-use.ts",
     "./conversation-settings": "./src/conversation-settings.ts",
     "./trace-segments": "./src/trace-segments.ts",
@@ -21,9 +22,12 @@
     "./apps-runtime": "./src/apps-runtime.ts",
     "./discord-broker": "./src/discord-broker.ts",
     "./favors": "./src/favors.ts",
+    "./rome-credits": "./src/rome-credits.ts",
     "./message": "./src/message.ts",
     "./people": "./src/people.ts",
-    "./persons": "./src/persons.ts"
+    "./persons": "./src/persons.ts",
+    "./devices": "./src/devices.ts",
+    "./wechat-app": "./src/wechat-app.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

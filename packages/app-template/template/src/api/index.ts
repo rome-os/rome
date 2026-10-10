@@ -34,7 +34,7 @@ class TemplateApiHandler implements RomeAppApiHandler {
     //   if (!auth.ok) return auth.response;
     //   // auth.caller is guardian | visitor from here on
 
-    if (request.method === "GET" && request.path.length === 0) {
+    if (request.method === "GET" && route === "status") {
       return json({
         appId: this.ctx.app.id,
         version: this.ctx.app.version,

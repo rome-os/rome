@@ -134,3 +134,29 @@ describe("generateCaddyfile social card images", () => {
     );
   });
 });
+
+describe("generateCaddyfile home-screen manifests and icons", () => {
+  it("proxies them through the dynamic matcher in open mode", () => {
+    const caddyfile = generateCaddyfile(openConfig);
+    const dynamic =
+      caddyfile.split("\n").find((line) => line.trim().startsWith("@dynamic path")) ?? "";
+    expect(dynamic).toContain(" /app-manifest/* /app-icon/*");
+  });
+
+  it("exposes them only for allowlisted and cloud-email apps in public-access mode", () => {
+    const caddyfile = generateCaddyfile({
+      enableAccessControl: true,
+      allowedApps: ["morning-brief", "@foo/bar"],
+      cloudEmailAccess: { "night-brief": ["a@b.co"] },
+    });
+    expect(caddyfile).not.toContain("handle /app-manifest/* {");
+    expect(caddyfile).not.toContain("handle /app-icon/* {");
+    for (const seg of ["morning-brief", "%40foo%2Fbar", "night-brief"]) {
+      for (const path of [`/app-manifest/${seg}.webmanifest`, `/app-icon/${seg}.png`]) {
+        const block = caddyfile.split(`handle ${path} {`)[1]?.split("}")[0] ?? "";
+        expect(block).toContain("reverse_proxy 127.0.0.1:");
+        expect(block).not.toContain("forward_auth");
+      }
+    }
+  });
+});

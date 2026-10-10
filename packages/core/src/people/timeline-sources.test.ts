@@ -35,9 +35,16 @@ class FakeAccounts {
 
 /** A channel list as this file reads one: names bound to address books, a null
  *  book for a channel that can say nothing about who it reaches. No message
- *  store, since nothing under test reads a history. */
+ *  store or transport, since nothing under test reads a history or sends. */
 const channelList = (books: Record<string, Accounts | null>): Channels =>
-  Object.entries(books).map(([name, accounts]) => ({ name, accounts, messages: null }));
+  Object.entries(books).map(([name, accounts]) => ({
+    name,
+    accounts,
+    messages: null,
+    send: null,
+    inbound: null,
+    directory: null,
+  }));
 
 const ada = "12025550100@s.whatsapp.net";
 const adaLid = "77770001@lid";

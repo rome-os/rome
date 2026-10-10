@@ -11,8 +11,8 @@ import {
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
+  sendRefusalMessage,
   timelinePageLimit,
-  type AccountSendState,
   type OutboxPage,
   type PeopleList,
   type SendRefusal,
@@ -190,7 +190,7 @@ export function peopleRoutes(deps: ApiDeps): Hono {
     return result.ok
       ? c.json(result.message, 202)
       : c.json(
-          { error: refusalMessage(result.send), send: result.send } satisfies SendRefusal,
+          { error: sendRefusalMessage(result.send), send: result.send } satisfies SendRefusal,
           409,
         );
   });
@@ -274,23 +274,4 @@ export function peopleRoutes(deps: ApiDeps): Hono {
 async function respondWithPerson(deps: ApiDeps, c: Context, id: string) {
   const person = await readPerson(deps, id);
   return person ? c.json(person) : c.json({ error: "Unknown person" }, 404);
-}
-
-/**
- * The line a refusal carries when a client has nothing better.
- *
- * A fallback, not the copy: the dashboard renders `send` through its own
- * locale files, because why a channel cannot be written to is a fact about the
- * channel and every surface that states it has to state it in the reader's
- * language.
- */
-function refusalMessage(send: Exclude<AccountSendState, "yes">): string {
-  switch (send) {
-    case "not-connected":
-      return "That channel is not connected";
-    case "unsupported":
-      return "Rome cannot send on that channel";
-    case "no-conversation":
-      return "Rome has no conversation open with that account";
-  }
 }

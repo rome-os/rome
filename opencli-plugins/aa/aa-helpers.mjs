@@ -97,40 +97,6 @@ export function normalizeSearch(args) {
   };
 }
 
-export function buildSearchUrl(search) {
-  const slices = [
-    {
-      orig: search.from,
-      origNearby: false,
-      dest: search.to,
-      destNearby: false,
-      date: search.depart,
-    },
-  ];
-  if (search.returnDate)
-    slices.push({
-      orig: search.to,
-      origNearby: false,
-      dest: search.from,
-      destNearby: false,
-      date: search.returnDate,
-    });
-  const url = new URL("https://www.aa.com/booking/search/find-flights");
-  url.search = new URLSearchParams({
-    locale: "en_US",
-    fareType: "Lowest",
-    pax: String(search.adults),
-    adult: String(search.adults),
-    type: search.returnDate ? "RoundTrip" : "OneWay",
-    searchType: search.miles ? "Award" : "Revenue",
-    cabin: "",
-    carriers: "ALL",
-    travelType: "personal",
-    slices: JSON.stringify(slices),
-  }).toString();
-  return url.toString();
-}
-
 export function assertSearchPage(data, search) {
   if (data.origin !== "https://www.aa.com" || data.path !== "/booking/choose-flights/1")
     throw new Error("AA did not open its outbound flight results page");
@@ -299,7 +265,7 @@ export function normalizeResults(data, search) {
         loyalty_program: search.miles ? "AAdvantage" : null,
         alerts: raw.alerts,
         displayed_flight_count: data.expected_count,
-        search_url: buildSearchUrl(search),
+        search_url: data.url,
       });
     }
   }

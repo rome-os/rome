@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.1.20](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.19...rome-web-components-v0.1.20) (2026-10-10)
+
+
+### Bug Fixes
+
+* **ui:** repair Mermaid diagram downloads ([#521](https://github.com/rome-os/rome/issues/521)) ([a23a01a](https://github.com/rome-os/rome/commit/a23a01a1dca75604791f766e303b2a736e98a5b6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.4
+
+## [0.1.19](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.18...rome-web-components-v0.1.19) (2026-09-25)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.3
+
+## [0.1.18](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.17...rome-web-components-v0.1.18) (2026-09-17)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.2
+
+## [0.1.17](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.16...rome-web-components-v0.1.17) (2026-09-16)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.1
+
+## [0.1.16](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.15...rome-web-components-v0.1.16) (2026-09-15)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.3.0
+
+## [0.1.15](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.14...rome-web-components-v0.1.15) (2026-09-14)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/ui bumped to 0.2.8
+
 ## [0.1.14](https://github.com/rome-os/rome/compare/rome-web-components-v0.1.13...rome-web-components-v0.1.14) (2026-09-10)
 
 

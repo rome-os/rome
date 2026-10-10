@@ -27,14 +27,14 @@ test("network-free stories stay isolated and issue no service requests", async (
   ).toBeVisible();
   await expect(styleGuide.getByRole("heading", { name: "Semantic tokens" })).toHaveCount(2);
 
-  await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
+  await page.goto("/iframe.html?id=dev-chat-entries--compact-question&viewMode=story");
   const warm = page.getByRole("button", { name: "Warm" });
   await expect(warm).toHaveAttribute("aria-pressed", "false");
   await warm.focus();
   await page.keyboard.press("Enter");
   await expect(warm).toHaveAttribute("aria-pressed", "true");
 
-  await page.goto("/iframe.html?id=dev-chat-blocks--resolved-question&viewMode=story");
+  await page.goto("/iframe.html?id=dev-chat-entries--resolved-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Send" })).toHaveCount(0);
 
   await page.goto("/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story");
@@ -60,7 +60,7 @@ test("network-free stories stay isolated and issue no service requests", async (
   await page.goto("/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story");
   await expect(page.getByRole("button", { name: "Add session" })).toBeVisible();
 
-  await page.goto("/iframe.html?id=dev-chat-blocks--compact-question&viewMode=story");
+  await page.goto("/iframe.html?id=dev-chat-entries--compact-question&viewMode=story");
   await expect(page.getByRole("button", { name: "Warm" })).toHaveAttribute("aria-pressed", "false");
 
   expect(requests).toEqual([]);

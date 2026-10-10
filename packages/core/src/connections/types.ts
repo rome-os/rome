@@ -4,15 +4,67 @@
 // the `expiresAt` envelope).
 
 import type {
+  ChannelMessage,
+  ConversationDescriptor,
   ConversationId,
-  InboundMessage,
   MessageReceipt,
   OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
+  ChannelActivity,
+  ChannelDirectMessaging,
+  ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { CredentialRejected, Disconnected } from "./errors.js";
+
+// ── Talk ─────────────────────────────────────────────────────────────────────
+// A Connection's conversational surface, as its builder implements it
+// (`Talker`). Only the channel ports (channels/connection-ports.ts) reach it,
+// through `Connection.withTalker`: apps reach channels through the channels
+// service (actions) or a hook's `channels`. A talker delivers each message as
+// the channel's own record: a `ChannelMessage` naming the channel it backs,
+// with direction `inbound`.
+
+/**
+ * The platform's own history of a Connection's conversations: at most `limit`
+ * of them at or after `since`, oldest first, each saying which channel carried
+ * it and which way it went. It backs `messages.query` for a channel with no
+ * store of its own (channels/connection-ports.ts).
+ */
+export interface TalkHistory {
+  query(input: {
+    conversationId?: ConversationId;
+    since?: Date;
+    limit?: number;
+  }): Promise<ChannelMessage[]>;
+}
+
+/** The conversations a Connection can see, for conversation settings. */
+export interface TalkDirectory {
+  listConversations(input: {
+    query?: string;
+    cursor?: string;
+    limit: number;
+    includeTopics?: boolean;
+  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
+}
+
+export interface TalkFeatureMap {
+  history: TalkHistory;
+  inboundMedia: ChannelInboundMedia;
+  activity: ChannelActivity;
+  directory: TalkDirectory;
+  directMessaging: ChannelDirectMessaging;
+}
+
+export type TalkFeatureName = keyof TalkFeatureMap;
+
+/**
+ * What a talker offers beyond sending and hearing, one optional field per
+ * channel port it backs. An absent field is the declaration that the talker
+ * does not offer it. The registry reads a field each time it is used, so a
+ * getter defined on the talker literal stays live; spreading an object into the
+ * talker reads its getters once.
+ */
+export type TalkFeatures = { [K in TalkFeatureName]?: TalkFeatureMap[K] };
 
 export type ConnectionId = string; // opaque; minted with crypto.randomUUID()
 export type GrantName = string;
@@ -27,15 +79,7 @@ export type ProfileRecord = Record<string, unknown>;
 
 // OutgoingMessage is the existing @rome-os/app-runtime shape (phase 2 collapses
 // the message contract; do not invent a new shape now).
-export type {
-  ConversationId,
-  InboundMessage,
-  MessageReceipt,
-  OutgoingMessage,
-  Talk,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+export type { ConversationId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 
 export interface OperationCall {
   operation: string;
@@ -168,8 +212,22 @@ export interface Connection {
   readonly auth: AuthState;
   /** Discovery with reasons — drives the dashboard and connect hints. */
   status(): Record<Capability, CapabilityStatus>;
+  /** Whether `cap` is built and live now. `status()` reads the grants; this
+   *  reads whether the capability's instance exists. */
+  isUnlocked(cap: Capability): boolean;
+  /**
+   * Calls `call` with the talker of the live epoch and answers what it
+   * returns, or undefined while talk is locked. Starting and stopping the
+   * talker are the registry's. A `CredentialRejected` that
+   * `call` throws, or that the promise it returns rejects with, runs the
+   * grant's fault flow before it reaches the caller. Read the talker inside
+   * `call` only: a talker held past it outlives a relock unguarded.
+   */
+  withTalker<T>(call: (talker: Omit<Talker, "start" | "stop">) => T): T | undefined;
+  /** Hears each message the live talker delivers until talk relocks, or null
+   *  while talk is locked. */
+  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null;
   /** A typed handle iff unlocked, else null — presence IS the runtime check. */
-  get talk(): Talk | null;
   get act(): Act | null;
   get watch(): Watch | null;
 }
@@ -189,14 +247,13 @@ export interface RuntimeKit {
 }
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
-export interface Talker {
-  start(deliver: (msg: InboundMessage) => void, fault: (err: StreamFault) => void): void;
+export interface Talker extends TalkFeatures {
+  start(deliver: (msg: ChannelMessage) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
   stop(): void | Promise<void>;
   send(conversationId: ConversationId, msg: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
 }
 
 /** Builder-side Act implementation. */
@@ -255,6 +312,27 @@ export interface ConnectionDescriptor {
       needs: readonly GrantName[];
       build(creds: Record<GrantName, Credential>, kit: RuntimeKit): Talker;
       degradation?(instance: Talker): CapabilityDegradation | null;
+      /** False when the talker can never send, so the channel it backs has no
+       *  `send` port. Absent means it can. */
+      sends?: boolean;
+      /** False when this Talk's deliveries do not back the channel's `inbound`
+       *  port, so that channel has none. It says what the Talk backs, not what
+       *  the talker does: webchat's talker is wired to `deliver`, but its turns
+       *  start from its own route. Absent means the deliveries back it. */
+      receives?: boolean;
+      /** True when the Talk reads the platform's own history, so the channel it
+       *  backs answers `messages.query` through it. Absent means it does not:
+       *  the channel's messages come from a store, or from nowhere. */
+      history?: boolean;
+      /** True when the surface that delivers this channel's next human turn
+       *  renders interactive cards, so an agent may pause on one for a reply.
+       *  Absent means it does not, and a card falls back to prose. */
+      interactiveCards?: boolean;
+      /** False when every message in a conversation already reaches the agent
+       *  as a turn, so a prompt needs no preamble of stored messages the agent
+       *  has not seen. Absent means the channel stores messages the agent
+       *  never saw, such as other people's lines in a group. */
+      promptContext?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

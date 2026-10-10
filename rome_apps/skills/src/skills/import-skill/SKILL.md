@@ -122,11 +122,13 @@ Skills install into one carrier app, `user-skills`, at
 `<custom app authoring directory from your Runtime Context>/user-skills`
 (`~/.rome/<profile>/projects/apps/user-skills`).
 
+<!-- Keep this layout in sync with rome_apps/dream/src/lib/user-skills-carrier.ts,
+which scaffolds the same carrier for Dream's skill review. -->
+
 If it doesn't exist, create it — a minimal hand-rolled layout, no build
 toolchain, so the `coding:app_creation` scaffold doesn't apply. It must ship a logo and a minimal web UI, or it shows up in the Apps
 list as a broken-looking entry. Write the files below exactly; the manifest is
-schema-validated (`assetVersion` 12 hex chars, `routing: "client"`, entry
-exports `mount`). Backfill these into an existing carrier that's missing them.
+schema-validated (`assetVersion` 12 hex chars, entry exports `mount`). Backfill these into an existing carrier that's missing them.
 
 ```yaml
 # user-skills/app.yaml
@@ -158,8 +160,7 @@ skills: []
   "styles": [],
   "assetVersion": "000000000001",
   "displayName": "User Skills",
-  "navLabel": "User Skills",
-  "routing": "client"
+  "navLabel": "User Skills"
 }
 ```
 

@@ -40,10 +40,8 @@ interface FileBrowserPageProps {
   }) => void;
   rootLabel: string;
   rootPanelTrigger?: boolean;
-  selectInitialFolderOnMobile?: boolean;
   sidebarHeading?: string;
   searchPlaceholder: string;
-  title: string;
 }
 
 export function FileBrowserPage({
@@ -62,15 +60,9 @@ export function FileBrowserPage({
   onSelectionChange,
   rootLabel,
   rootPanelTrigger = false,
-  selectInitialFolderOnMobile = true,
   sidebarHeading,
   searchPlaceholder,
-  title,
 }: FileBrowserPageProps) {
-  // `title` is part of the public contract but rendered upstream — keep the
-  // prop so callers don't break, but don't reference it here.
-  void title;
-
   const { t } = useTranslation("files");
   const location = useLocation();
   const navigate = useNavigate();
@@ -89,7 +81,6 @@ export function FileBrowserPage({
     return resolveInitialSelectedFolderPath({
       initialSelectedFolderPath,
       isDesktopViewport: getIsDesktopViewport(),
-      selectInitialFolderOnMobile,
     });
   });
 
@@ -118,11 +109,9 @@ export function FileBrowserPage({
       t,
       embedded,
       getDeleteDescription,
-      onStartChatFromFolder,
       onPathsDeleted,
       onFolderCreated,
       renderCreateExtra,
-      onSelectionChange,
     }),
     [
       apiBasePath,
@@ -136,11 +125,9 @@ export function FileBrowserPage({
       t,
       embedded,
       getDeleteDescription,
-      onStartChatFromFolder,
       onPathsDeleted,
       onFolderCreated,
       renderCreateExtra,
-      onSelectionChange,
     ],
   );
 

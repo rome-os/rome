@@ -2,17 +2,18 @@ import { Mutex } from "async-mutex";
 import { createLogger } from "../logger.js";
 import type { AppEntry } from "./lockfile.js";
 import type { AppInstaller } from "./installer.js";
-import type {
-  AppId,
-  AppView,
-  ArtifactKind,
-  ArtifactRef,
-  CatalogChange,
-  CatalogEvent,
-  InFlightOp,
-  ResolvedApp,
-  SubscriberHandler,
-  Unsubscribe,
+import {
+  type AppId,
+  type AppView,
+  type ArtifactKind,
+  type ArtifactRef,
+  type CatalogChange,
+  type CatalogEvent,
+  type InFlightOp,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+  type Unsubscribe,
 } from "./state.js";
 
 const log = createLogger("app-catalog");
@@ -57,6 +58,7 @@ export class AppCatalog {
   private readonly markBroken: MarkBrokenFn;
   private readonly internalMap = new Map<AppId, AppView | ResolvedApp>();
   private readonly subscribers: RegisteredSubscriber[] = [];
+  private readonly settledListeners: RegisteredSubscriber[] = [];
   private readonly refreshMutex = new Mutex();
 
   constructor(opts: AppCatalogOptions) {
@@ -77,7 +79,7 @@ export class AppCatalog {
   listResolved(): readonly ResolvedApp[] {
     const out: ResolvedApp[] = [];
     for (const view of this.internalMap.values()) {
-      if (isResolved(view) && view.state === "installed" && view.enabled) {
+      if (isResolvedApp(view) && view.state === "installed" && view.enabled) {
         out.push(view);
       }
     }
@@ -111,6 +113,30 @@ export class AppCatalog {
       const idx = this.subscribers.indexOf(entry);
       if (idx >= 0) this.subscribers.splice(idx, 1);
     };
+  }
+
+  /**
+   * Registers a listener that runs once every subscriber has handled an event,
+   * so it observes the runtime after the whole change has been absorbed. It
+   * runs inside the serialized refresh, like a subscriber, so it must not await
+   * another refresh. A throw is logged and does not reach the other listeners.
+   */
+  onSettled(handler: SubscriberHandler): Unsubscribe {
+    const entry: RegisteredSubscriber = { name: handler.name || "anonymous", handler };
+    this.settledListeners.push(entry);
+    return () => {
+      const idx = this.settledListeners.indexOf(entry);
+      if (idx >= 0) this.settledListeners.splice(idx, 1);
+    };
+  }
+
+  /**
+   * Runs `fn` between refreshes: after any refresh in progress has finished,
+   * settled listeners included, and before the next one starts. `fn` must not
+   * await a refresh.
+   */
+  whenIdle<T>(fn: () => T | Promise<T>): Promise<T> {
+    return this.refreshMutex.runExclusive(fn);
   }
 
   /**
@@ -189,7 +215,7 @@ export class AppCatalog {
   }
 
   private async fireEvent(event: CatalogEvent): Promise<void> {
-    for (const subscriber of this.subscribers) {
+    for (const subscriber of [...this.subscribers, ...this.settledListeners]) {
       try {
         await subscriber.handler(event);
       } catch (err) {
@@ -234,6 +260,7 @@ function buildAppView(
       state: inFlight.kind === "install" ? "installing" : "uninstalling",
       installedHash: entry.installedHash,
       installedVersion: entry.installedVersion,
+      installedAt: entry.installedAt,
       lastError: entry.lastError,
       updatedAt: inFlight.startedAt,
     };
@@ -246,11 +273,8 @@ function buildAppView(
     state: entry.state,
     installedHash: entry.installedHash,
     installedVersion: entry.installedVersion,
+    installedAt: entry.installedAt,
     lastError: entry.lastError,
     updatedAt: entry.updatedAt,
   };
-}
-
-function isResolved(view: AppView | ResolvedApp): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }
