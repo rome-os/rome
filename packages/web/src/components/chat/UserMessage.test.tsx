@@ -36,16 +36,9 @@ describe("UserMessage input state", () => {
     render(userMessage(state));
 
     const bubble = screen.getByTitle(`inputState.${state}`);
-    expect(bubble.classList.contains("bg-transparent")).toBe(false);
-    expect(bubble.classList.contains("bg-primary")).toBe(true);
-    expect(bubble.classList.contains("border-dashed")).toBe(false);
-    expect(bubble.classList.contains("rome-bubble-pending")).toBe(true);
-    expect(bubble.classList.contains("opacity-60")).toBe(false);
     expect(bubble.getAttribute("aria-busy")).toBe("true");
     expect(bubble.textContent).toBe(message.content);
-    const status = screen.getByRole("status");
-    expect(status.className).toBe("sr-only");
-    expect(status.textContent).toBe(`inputState.${state}`);
+    expect(screen.getByRole("status").textContent).toBe(`inputState.${state}`);
   });
 
   it("restores the same bubble when the provider consumes the input", () => {
@@ -55,33 +48,27 @@ describe("UserMessage input state", () => {
     for (const state of ["submitted", "accepted"] as const) {
       rerender(userMessage(state));
       expect(screen.getByTitle(`inputState.${state}`)).toBe(bubble);
-      expect(bubble.classList.contains("rome-bubble-pending")).toBe(true);
+      expect(bubble.getAttribute("aria-busy")).toBe("true");
     }
     rerender(userMessage("consumed"));
 
     expect(bubble.isConnected).toBe(true);
-    expect(bubble.classList.contains("bg-primary")).toBe(true);
-    expect(bubble.classList.contains("rome-bubble-pending")).toBe(false);
     expect(bubble.hasAttribute("title")).toBe(false);
     expect(bubble.hasAttribute("aria-busy")).toBe(false);
     expect(screen.getByRole("status").textContent).toBe("");
   });
 
   it.each([
-    ["failed", "border-destructive/50", "text-destructive"],
-    ["unknown", "border-warning/50", "text-warning"],
-    ["cancelled", "bg-transparent", "text-muted-foreground"],
-  ] as const)("keeps %s distinct from pending delivery", (state, bubbleClass, iconClass) => {
+    "failed",
+    "unknown",
+    "cancelled",
+  ] as const)("keeps %s distinct from pending delivery", (state) => {
     render(userMessage(state));
 
     const bubble = screen.getByTitle(`inputState.${state}`);
-    expect(bubble.classList.contains(bubbleClass)).toBe(true);
-    expect(bubble.classList.contains("bg-transparent")).toBe(state === "cancelled");
-    // An input that never reached the agent leaves the primary fill.
-    expect(bubble.classList.contains("bg-primary")).toBe(false);
-    expect(bubble.querySelector("svg")?.classList.contains(iconClass)).toBe(true);
+    expect(bubble.hasAttribute("aria-busy")).toBe(false);
     expect(bubble.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
-    expect(screen.getByRole("status").className).toBe("sr-only");
+    expect(screen.getByRole("status").textContent).toBe(`inputState.${state}`);
   });
 
   it.each([

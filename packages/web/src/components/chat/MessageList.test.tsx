@@ -650,7 +650,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("still addressable", "u-share", "turn-9");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},
@@ -669,7 +668,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("no turn id", "u-dimmed");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},

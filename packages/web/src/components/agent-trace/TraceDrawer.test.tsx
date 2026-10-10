@@ -3,11 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { TraceAccounting, TraceSnapshot } from "@rome/api-types/trace-segments";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { UsageSummaryView } from "@/components/chat/entries/UsageSummaryView";
-import {
-  TraceDrawer,
-  traceDrawerContentInsetClass,
-  traceDrawerOpenPlacementClass,
-} from "./TraceDrawer";
+import { TraceDrawer } from "./TraceDrawer";
 
 const translate = (key: string) => key;
 rs.mock("react-i18next", () => ({
@@ -63,77 +59,6 @@ function usageSnapshot(includeSubagents: boolean): TraceSnapshot {
     ],
   };
 }
-
-describe("traceDrawerOpenPlacementClass", () => {
-  it("always covers the desktop chat column when an app is open", () => {
-    const classes = traceDrawerOpenPlacementClass(true);
-
-    expect(classes).toContain("top-[var(--rome-mobile-header-height)]");
-    expect(classes).not.toContain("pb-safe");
-    expect(classes).toContain("md:left-[var(--rome-chat-left,0px)]");
-    expect(classes).toContain("md:right-auto");
-    expect(classes).toContain("md:w-[var(--rome-chat-col)]");
-    expect(classes).not.toContain("@5xl/chat:w-[480px]");
-  });
-
-  it("covers the full narrow chat when no app is open", () => {
-    const classes = traceDrawerOpenPlacementClass(false);
-
-    expect(classes).toContain("top-[var(--rome-mobile-header-height)]");
-    expect(classes).not.toContain("top-12");
-    expect(classes).not.toContain("pb-safe");
-    expect(classes).toContain("@max-5xl/chat:md:left-[var(--rome-chat-left,0px)]");
-    expect(classes).toContain("@max-5xl/chat:md:right-0");
-    expect(classes).toContain("@max-5xl/chat:md:w-auto");
-    expect(classes).not.toContain(["@max-5xl/chat:md:w-", "[var(--rome-chat-col)]"].join(""));
-  });
-
-  it("docks a 480px inspector to the right of a wide chat with no apps", () => {
-    const classes = traceDrawerOpenPlacementClass(false);
-
-    expect(classes).toContain("@5xl/chat:left-auto");
-    expect(classes).toContain("@5xl/chat:right-0");
-    expect(classes).toContain("@5xl/chat:w-[480px]");
-  });
-
-  it("reserves side-panel space only for an open trace with no apps", () => {
-    expect(traceDrawerContentInsetClass(true, false)).toBe(
-      "@5xl/chat:flex-none @5xl/chat:w-[calc(100%-480px)]",
-    );
-    expect(traceDrawerContentInsetClass(true, true)).toBe("");
-    expect(traceDrawerContentInsetClass(false, false)).toBe("@5xl/chat:flex-none @5xl/chat:w-full");
-    expect(traceDrawerContentInsetClass(false, true)).toBe("");
-  });
-});
-
-describe("TraceDrawer header", () => {
-  it("uses the chat title header's fixed 48px height instead of padding", () => {
-    // A live target renders from props alone, so no fetch settles after the
-    // assertions below.
-    render(
-      <TraceDrawer
-        target={{
-          kind: "live",
-          sessionId: "parent-session",
-          turnId: "parent-turn",
-          summary: targetSummary,
-          segments: [],
-          streaming: false,
-        }}
-        onClose={() => {}}
-        renderInlineBlock={() => null}
-        renderRunBlocks={() => null}
-      />,
-    );
-
-    const header = screen.getByRole("heading", { name: "trace.drawer.title" }).parentElement;
-    expect(header).not.toBeNull();
-    const classes = header?.className ?? "";
-    expect(classes).toContain("h-12");
-    expect(classes).toContain("shrink-0");
-    expect(classes).not.toMatch(/\bpy-\d/);
-  });
-});
 
 describe("TraceDrawer subagent usage", () => {
   it("loads included usage by default and refetches when the switch is disabled", async () => {

@@ -23,7 +23,6 @@ import { UsageSummaryView } from "./UsageSummaryView";
 export interface RenderEntryOptions {
   onApprovalResolved?: () => void;
   compact?: boolean;
-  toolUseInput?: unknown;
   /** Trace drawer is currently live-streaming (forwarded to ToolCallView). */
   live?: boolean;
   /** Session that owns the message these blocks belong to — namespaces resolved
@@ -57,7 +56,6 @@ export function renderSingleEntry(
   const {
     onApprovalResolved,
     compact = false,
-    toolUseInput,
     sessionId,
     turnId,
     interactionResults,
@@ -93,9 +91,7 @@ export function renderSingleEntry(
     case "tool_use":
       return <ToolUseBlock key={key} tool={block.tool} input={block.input} />;
     case "tool_result":
-      return (
-        <ToolResultBlock key={key} tool={block.tool} output={block.output} input={toolUseInput} />
-      );
+      return <ToolResultBlock key={key} tool={block.tool} output={block.output} />;
     case "subagent_start":
       return (
         <SubagentCallView

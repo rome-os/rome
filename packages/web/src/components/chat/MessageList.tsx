@@ -1,6 +1,6 @@
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import type { TraceSnapshot, TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatEntries } from "@/components/chat/entries";
@@ -8,10 +8,7 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
-import {
-  DelegatedSubagentGroup,
-  type DelegatedSubagentNode,
-} from "@/components/chat/DelegatedSubagentGroup";
+import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
@@ -52,13 +49,12 @@ export interface LivePreview {
   identity: AgentIdentity;
 }
 
-// When inline share selection is active, every selectable turn
+// While inline share selection is on (`selection` is set), every selectable turn
 // in the transcript gets a checkbox + click target so the guardian picks the
 // turns to freeze directly on the messages instead of in a separate list. Only
 // rows belonging to `selectableSessionId` (the main session) are checkable —
 // handoff child turns ride along with their parent automatically.
 export interface ShareSelection {
-  active: boolean;
   selectedTurns: Set<string>;
   selectableSessionId: string;
   onToggleTurn: (turnId: string) => void;
@@ -76,7 +72,7 @@ export interface MessageListProps {
   contentRef: (node: HTMLElement | null) => void;
   onOpenLiveTrace: () => void;
   onOpenStoredTrace: (target: TraceDrawerTarget) => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   actions: BlockActions;
@@ -146,14 +142,13 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       turnId={trace.turnId ?? null}
       summary={trace.traceSummary}
       onOpen={onOpen}
-      compact
     />
   ) : null;
 }
 
 function renderSubagents(
   subagents: TraceSnapshot["summary"]["subagents"],
-  onOpenSubagentTrace: ((node: DelegatedSubagentNode) => void) | undefined,
+  onOpenSubagentTrace: ((node: TraceSubagentSummary) => void) | undefined,
   activeTraceTarget: TraceDrawerTarget | null | undefined,
   subagentIconByName: ReadonlyMap<string, string | null> | undefined,
 ) {
@@ -219,7 +214,7 @@ const RowView = memo(function RowView({
   actions: BlockActions;
   onOpenLiveTrace: () => void;
   onOpenStoredTrace: (target: TraceDrawerTarget) => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   feedback?: boolean;
@@ -249,7 +244,7 @@ const RowView = memo(function RowView({
   // Running turn: its persisted trace isn't written yet, so the live trace button
   // carries it. Settled turn: its stored trace.
   const subtitle = live ? (
-    <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live compact />
+    <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live />
   ) : row.trace ? (
     renderTrace(row.trace, onOpenStoredTrace)
   ) : undefined;
@@ -403,7 +398,7 @@ function StandaloneLiveTail({
   live: LivePreview;
   actions: BlockActions;
   onOpenLiveTrace: () => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
 }) {
@@ -412,12 +407,7 @@ function StandaloneLiveTail({
       name={live.identity.name}
       avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
       subtitle={
-        <CollapsedTraceButton
-          summary={live.snapshot?.summary}
-          onClick={onOpenLiveTrace}
-          live
-          compact
-        />
+        <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live />
       }
       headerAccessory={renderSubagents(
         live.snapshot?.summary.subagents,
@@ -584,7 +574,7 @@ export function MessageList({
             ) : (
               node
             );
-          if (!selection?.active) return [anchored(view, row.key), tail];
+          if (!selection) return [anchored(view, row.key), tail];
           const { turnId, sessionId } = rowTurnRef(row);
           if (!turnId || sessionId !== selection.selectableSessionId) {
             // Not selectable (child-session row, or no turn): still dim it so the

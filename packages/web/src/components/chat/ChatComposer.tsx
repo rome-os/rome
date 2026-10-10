@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Lock, Paperclip, Sparkles, X } from "lucide-react";
+import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -89,7 +89,6 @@ export interface ChatComposerSendControls {
 export interface ChatComposerHandle {
   focus: () => void;
   insertText: (text: string, options?: { focus?: boolean }) => void;
-  setAgentMention: (mention: AgentMention | null) => void;
   setSkillSelection: (skill: SkillSelection | null) => void;
   addFiles: (files: File[]) => void;
   /**
@@ -132,8 +131,6 @@ export interface ChatComposerProps {
   // defaulted to `main` (no `pinnedAgentMention`) — the agent is still fixed
   // for the session's lifetime, so the `@` menu must stay suppressed.
   lockAgentMention?: boolean;
-  // Disable the entire composer (e.g., while the host is initializing).
-  disabled?: boolean;
   // Streaming-aware affordances. When `isStreaming` is true and `onStop` is
   // provided, a Stop button shows next to Send.
   isStreaming?: boolean;
@@ -152,11 +149,6 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
-  // When set, the composer is read-only and shows this hint instead of
-  // accepting input. Used while a design interaction holds the floor: the
-  // guardian is suspended, so its "main" view can be read but not typed into
-  // until the design resolves.
-  disabledHint?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
@@ -198,12 +190,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     pinnedAgentMention = null,
     initialAgentMention = null,
     lockAgentMention = false,
-    disabled = false,
     isStreaming = false,
     onStop,
     streamError,
     designingInteraction = null,
-    disabledHint = null,
     boxClassName,
     onSend,
   },
@@ -514,16 +504,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           el.setSelectionRange(text.length, text.length);
         });
       },
-      setAgentMention: (mention: AgentMention | null) => {
-        if (agentMentionLocked || uploadInFlightRef.current) return;
-        // Mirror acceptMention's cleanup: scoping the draft programmatically
-        // must also dismiss any open `@` menu, or its stale anchor/query keeps
-        // intercepting Enter/arrow keys against the wrong token.
-        setDraftAgentMention(mention);
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-      },
       setSkillSelection: (skill: SkillSelection | null) => {
         if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
@@ -532,7 +512,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
-        if (disabled || disabledHint != null || uploadInFlightRef.current) return;
+        if (uploadInFlightRef.current) return;
         const trimmed = text.trim();
         const skillName = opts?.skillName ?? draftSkill?.name;
         if (!trimmed && pendingUploads.length === 0 && !skillName) return;
@@ -568,9 +548,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       impersonationEnabled,
       selectedPersonId,
       reasoningEffort,
-      agentMentionLocked,
-      disabled,
-      disabledHint,
       draftSkill,
       pendingUploads,
       showModelSelector,
@@ -595,20 +572,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (disabled) return;
       const files = extractFilesFromClipboard(event.clipboardData);
       if (files.length > 0) {
         event.preventDefault();
         addPendingFiles(files);
       }
     },
-    [addPendingFiles, disabled],
+    [addPendingFiles],
   );
 
-  const isComposerBusy = disabled || disabledHint != null || uploadInFlight;
-
   const runSend = useCallback(async () => {
-    if (isComposerBusy || uploadInFlightRef.current) return;
+    if (uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
@@ -686,7 +660,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     reasoningEffort,
     draftProjectName,
     draftAgentMention,
-    isComposerBusy,
+    uploadInFlight,
     invokeOnSend,
   ]);
 
@@ -1009,7 +983,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              isComposerBusy
+              uploadInFlight
                 ? undefined
                 : collaborating
                   ? collaborating.onCancel
@@ -1023,18 +997,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         {draftSkill && (
           <SkillCommandChip
             skill={draftSkill}
-            onRemove={isComposerBusy ? undefined : () => setDraftSkill(null)}
+            onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
           />
         )}
         <WorkspaceContextChips />
       </div>
       <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
-        {disabledHint && (
-          <div className="mb-3 flex items-center gap-2 rounded-8 border border-border bg-surface-muted px-3 py-2 text-ui text-muted-foreground">
-            <Lock className="size-4 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{disabledHint}</span>
-          </div>
-        )}
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
             <AlertDescription>{composerError}</AlertDescription>
@@ -1053,7 +1021,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <PendingUploadsList
             uploads={pendingUploads}
             onRemove={removePendingUpload}
-            disabled={isComposerBusy}
+            disabled={uploadInFlight}
             uploadProgress={uploadInFlight ? uploadProgress : undefined}
           />
         </div>
@@ -1065,7 +1033,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <div className="[grid-area:input] @max-[28rem]/composer:self-center">
             <SlashSkillMenu
               ref={slashMenuRef}
-              open={slashMenuOpen && !isComposerBusy}
+              open={slashMenuOpen && !uploadInFlight}
               onOpenChange={(next) => {
                 if (uploadInFlightRef.current) return;
                 setSlashMenuOpen(next);
@@ -1077,7 +1045,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 <div>
                   <AgentMentionMenu
                     ref={mentionMenuRef}
-                    open={mentionMenuOpen && !agentMentionLocked && !isComposerBusy}
+                    open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
                     onOpenChange={(next) => {
                       if (uploadInFlightRef.current) return;
                       setMentionMenuOpen(next);
@@ -1110,7 +1078,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                         onInput={(e) =>
                           clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
                         }
-                        disabled={isComposerBusy}
+                        disabled={uploadInFlight}
                       />
                     }
                   />
@@ -1126,7 +1094,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             {showProjectSelector && (
               <ProjectSelector
                 ref={projectMenuRef}
-                disabled={isComposerBusy}
+                disabled={uploadInFlight}
                 t={t}
                 projectCatalog={projectCatalog}
                 projectsLoading={projectsLoading}
@@ -1178,7 +1146,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             ) : null}
             {impersonationEnabled && (
               <ImpersonationMenu
-                disabled={isComposerBusy}
+                disabled={uploadInFlight}
                 open={impersonationMenuOpen}
                 onOpenChange={(next) => {
                   if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
@@ -1198,7 +1166,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               variant="ghost"
               size="icon-sm"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isComposerBusy}
+              disabled={uploadInFlight}
               aria-label={t("composer.uploadFiles")}
               title={t("composer.uploadFiles")}
               className="touch-target"
@@ -1211,7 +1179,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 onOpenChange={setModelMenuOpen}
                 value={largeModelSelection}
                 onChange={(next) => void updateLargeModelSelection(next)}
-                disabled={isComposerBusy}
+                disabled={uploadInFlight}
               />
             )}
             <ReasoningEffortMenu
@@ -1219,7 +1187,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
               onOpenChange={setReasoningMenuOpen}
               value={reasoningEffort}
               onChange={(next) => void updateReasoningEffort(next)}
-              disabled={isComposerBusy}
+              disabled={uploadInFlight}
             />
           </div>
           {/* Stop sits just left of Send. */}
@@ -1258,7 +1226,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 size="icon-sm"
                 onClick={() => void runSend()}
                 disabled={
-                  isComposerBusy ||
+                  uploadInFlight ||
                   (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
                 }
                 title={sendActionLabel}

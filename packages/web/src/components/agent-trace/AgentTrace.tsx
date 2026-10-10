@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { ChevronRightIcon } from "@radix-ui/react-icons";
 import type { TraceEventDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
 import { CollapsedTraceSummary, formatDuration } from "./CollapsedTraceSummary";
@@ -51,60 +50,36 @@ export function TraceBody({
   );
 }
 
+// A single inline line sized to sit under the agent name beside the avatar.
 export function CollapsedTraceButton({
   summary,
   onClick,
   live = false,
-  compact = false,
 }: {
   summary?: TraceSummary;
   onClick: () => void;
   live?: boolean;
-  compact?: boolean;
 }) {
-  if (compact) {
-    // A single inline line sized to sit under the agent name beside the avatar.
-    return (
-      <Button
-        type="button"
-        variant="link"
-        size="xs"
-        onClick={onClick}
-        className="-mx-2 max-w-none select-text justify-start text-left hover:no-underline"
-      >
-        <CollapsedTraceContent summary={summary} live={live} compact />
-      </Button>
-    );
-  }
   return (
-    <button
+    <Button
       type="button"
+      variant="link"
+      size="xs"
       onClick={onClick}
-      className="transition-all flex w-full select-text items-center gap-2 rounded-8 py-1 px-0 text-left hover:px-2 hover:bg-surface-muted/80"
+      className="-mx-2 max-w-none select-text justify-start text-left hover:no-underline"
     >
       <CollapsedTraceContent summary={summary} live={live} />
-      <span className="ml-auto flex-none text-subtle-foreground">
-        <ChevronRightIcon />
-      </span>
-    </button>
+    </Button>
   );
 }
 
-function CollapsedTraceContent({
-  summary,
-  live,
-  compact = false,
-}: {
-  summary?: TraceSummary;
-  live: boolean;
-  compact?: boolean;
-}) {
+function CollapsedTraceContent({ summary, live }: { summary?: TraceSummary; live: boolean }) {
   const { t } = useTranslation("activity");
 
   if (summary?.terminalError) {
     return <TraceErrorSummary error={summary.terminalError} />;
   }
-  if (compact && live) {
+  if (live) {
     return (
       <CollapsedTraceSummary
         summary={summary ?? { distinctApps: [], totalSteps: 0, invocationCounts: {} }}
@@ -114,42 +89,23 @@ function CollapsedTraceContent({
     );
   }
   if (summary && !isEmptySummary(summary)) {
-    return <CollapsedTraceSummary summary={summary} live={live} compact={compact} />;
+    return <CollapsedTraceSummary summary={summary} live={live} compact />;
   }
   if (summary?.stoppedByUser) {
-    return <StatusPill label={t("trace.stoppedByUser")} compact={compact} />;
+    return <StatusPill label={t("trace.stoppedByUser")} />;
   }
   if (summary?.totalDurationMs !== undefined) {
     return (
       <StatusPill
         label={t("trace.thoughtFor", { duration: formatDuration(summary.totalDurationMs) })}
-        compact={compact}
       />
     );
   }
-  return <StatusPill label={t("trace.thinking")} pulse compact={compact} />;
+  return <StatusPill label={t("trace.thinking")} />;
 }
 
-function StatusPill({
-  label,
-  pulse = false,
-  compact = false,
-}: {
-  label: string;
-  pulse?: boolean;
-  compact?: boolean;
-}) {
-  if (compact) {
-    return <span className="text-aux text-muted-foreground">{label}</span>;
-  }
-  return (
-    <div className="text-ui text-subtle-foreground">
-      <span
-        className={`inline-block h-2 w-2 rounded-full bg-border-strong${pulse ? " animate-pulse" : ""}`}
-      />
-      &nbsp;<span>{label}</span>
-    </div>
-  );
+function StatusPill({ label }: { label: string }) {
+  return <span className="text-aux text-muted-foreground">{label}</span>;
 }
 
 function TraceErrorSummary({ error }: { error: string }) {

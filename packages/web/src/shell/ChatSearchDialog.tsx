@@ -96,7 +96,7 @@ export function agentMentionQuery(query: string): string | null {
   return match ? match[1] : null;
 }
 
-function activeSessionFromPath(pathname: string): string | null {
+export function activeSessionFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/chat\/([^/?#]+)/);
   if (!match) return null;
   try {
@@ -106,11 +106,8 @@ function activeSessionFromPath(pathname: string): string | null {
   }
 }
 
-function activityTime(session: ChatSession): number {
-  const activity = new Date(session.activityAt || session.createdAt).getTime();
-  if (Number.isFinite(activity)) return activity;
-  const created = new Date(session.createdAt).getTime();
-  return Number.isFinite(created) ? created : 0;
+export function sessionActivityTime(session: ChatSession): number {
+  return new Date(session.activityAt).getTime();
 }
 
 function normalizeSearchText(value: string): string {
@@ -400,7 +397,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       .sort(
         (a, b) =>
           b.rank - a.rank ||
-          activityTime(b.session) - activityTime(a.session) ||
+          sessionActivityTime(b.session) - sessionActivityTime(a.session) ||
           a.originalIndex - b.originalIndex,
       )
       .map((entry) => entry.session);
@@ -421,14 +418,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       session,
       match: matchBySession.get(session.id),
     }));
-    // One row per session. The endpoint documents one match per session, but
-    // nothing here enforces it, and a second match for the same session would
-    // otherwise append a duplicate row — same React key, and two cmdk options
-    // sharing a value.
-    const seen = new Set(matchingSessions.map((session) => session.id));
+    // The endpoint returns one match per session, so only a session that
+    // already matched by title needs skipping here.
+    const titleMatched = new Set(matchingSessions.map((session) => session.id));
     for (const match of currentContentMatches) {
-      if (seen.has(match.session.id)) continue;
-      seen.add(match.session.id);
+      if (titleMatched.has(match.session.id)) continue;
       entries.push({ session: match.session, match: match.message });
     }
     return entries;
@@ -714,7 +708,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     const archived = Boolean(session.archivedAt);
     const current = session.id === currentSessionId;
     const project = session.projectPath || session.projectName;
-    const timestamp = formatMessageTimestamp(session.activityAt || session.createdAt);
+    const timestamp = formatMessageTimestamp(session.activityAt);
     return (
       <CommandItem
         key={`chat:${session.id}`}

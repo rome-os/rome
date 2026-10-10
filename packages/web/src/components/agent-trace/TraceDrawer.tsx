@@ -10,7 +10,6 @@ import type {
 import { Button } from "@/components/ui/button";
 import { CollapsedTraceSummary } from "./CollapsedTraceSummary";
 import { TraceBody } from "./AgentTrace";
-import { isTraceScrollNearBottom } from "./scroll-follow";
 import { turnApiPath } from "./turn-api";
 import { TraceUsageOptionsContext } from "@/components/chat/entries/UsageSummaryView";
 
@@ -38,7 +37,7 @@ export type TraceDrawerTarget =
       dumpHref?: string;
     };
 
-export function traceDrawerOpenPlacementClass(hasApps: boolean): string {
+function traceDrawerOpenPlacementClass(hasApps: boolean): string {
   if (hasApps) {
     // A widget already owns the surface beside chat. Keep it visible and cover
     // the actual desktop chat column, regardless of how wide that column may
@@ -90,13 +89,16 @@ async function fetchTurnTrace(
   return data.trace;
 }
 
+// How close to the bottom still counts as following the live trace. The slack
+// absorbs inertial scrolling and subpixel rounding.
+const TRACE_SCROLL_BOTTOM_THRESHOLD_PX = 48;
+
 export function TraceDrawer({
   target,
   onClose,
   renderInlineBlock,
   renderRunBlocks,
   loadStoredTrace = fetchStoredTrace,
-  loadTurnTrace = fetchTurnTrace,
   allowSubagentUsage = true,
   readOnly = false,
   hasApps = false,
@@ -110,11 +112,6 @@ export function TraceDrawer({
   // snapshot. A thrown error surfaces as the drawer's retryable error state.
   loadStoredTrace?: (
     messageId: string,
-    includeSubagentUsage: boolean,
-  ) => Promise<TraceSnapshot | null>;
-  loadTurnTrace?: (
-    sessionId: string,
-    turnId: string,
     includeSubagentUsage: boolean,
   ) => Promise<TraceSnapshot | null>;
   /** Whether this surface can ask the backend for derived descendant usage. */
@@ -173,7 +170,7 @@ export function TraceDrawer({
         const trace = storedId
           ? await loadStoredTrace(storedId, includeSubagentUsage)
           : turnTarget
-            ? await loadTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
+            ? await fetchTurnTrace(turnTarget.sessionId, turnTarget.turnId, includeSubagentUsage)
             : null;
         if (cancelled) return;
         if (!trace) {
@@ -196,16 +193,7 @@ export function TraceDrawer({
     return () => {
       cancelled = true;
     };
-  }, [
-    remoteTargetKey,
-    storedId,
-    turnTarget,
-    includeSubagentUsage,
-    retryNonce,
-    t,
-    loadStoredTrace,
-    loadTurnTrace,
-  ]);
+  }, [remoteTargetKey, storedId, turnTarget, includeSubagentUsage, retryNonce, t, loadStoredTrace]);
 
   const onRetry = remoteTargetKey ? () => setRetryNonce((n) => n + 1) : undefined;
 
@@ -225,11 +213,9 @@ export function TraceDrawer({
     if (target?.kind !== "live") return;
     const container = scrollContainerRef.current;
     if (!container) return;
-    shouldFollowLiveTraceRef.current = isTraceScrollNearBottom(
-      container.scrollHeight,
-      container.scrollTop,
-      container.clientHeight,
-    );
+    shouldFollowLiveTraceRef.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight <=
+      TRACE_SCROLL_BOTTOM_THRESHOLD_PX;
   }, [target?.kind]);
 
   useLayoutEffect(() => {

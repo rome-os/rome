@@ -1,14 +1,14 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { PlanPanel } from "./PlanPanel";
+import { TurnSummaryGroup } from "./TurnSummaryGroup";
 
 afterEach(() => cleanup());
 
-describe("PlanPanel", () => {
+describe("TurnSummaryGroup plan", () => {
   it("shows provider activity wording and accessible three-state steps while live", () => {
     const { container } = render(
-      <PlanPanel
+      <TurnSummaryGroup
         live
         plan={{
           explanation: "Implementing the requested workflow",
@@ -49,7 +49,7 @@ describe("PlanPanel", () => {
 
   it("collapses a completed settled Plan by default and toggles its steps", () => {
     const { container } = render(
-      <PlanPanel
+      <TurnSummaryGroup
         live={false}
         plan={{
           steps: [
@@ -89,7 +89,7 @@ describe("PlanPanel", () => {
 
   it("keeps an unfinished settled Plan expanded at the stopping point", () => {
     render(
-      <PlanPanel
+      <TurnSummaryGroup
         live={false}
         plan={{
           steps: [
@@ -116,7 +116,7 @@ describe("PlanPanel", () => {
   });
 
   it("renders nothing for an explicit empty Plan", () => {
-    const { container } = render(<PlanPanel live plan={{ steps: [] }} />);
+    const { container } = render(<TurnSummaryGroup live plan={{ steps: [] }} />);
     expect(container.innerHTML).toBe("");
   });
 });
