@@ -663,7 +663,16 @@ export class WebChatRepository {
   private messageInsertedListeners = new Set<WebchatMessageInsertedListener>();
   private sessionNameChangedListeners = new Set<WebchatSessionNameChangedListener>();
 
+  private liveTurnProbe: (sessionId: string, turnId: string) => boolean = () => false;
+
   constructor(private db: DrizzleDb) {}
+
+  /** Tell the repository which turns the browser renders live off their own
+   *  stream. A message a channel sends for one of those turns is written
+   *  silently, because the stream already shows it. */
+  setLiveTurnProbe(probe: (sessionId: string, turnId: string) => boolean): void {
+    this.liveTurnProbe = probe;
+  }
 
   onMessageInserted(listener: WebchatMessageInsertedListener): () => void {
     this.messageInsertedListeners.add(listener);
@@ -1763,16 +1772,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1799,6 +1809,24 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat. It notifies
+   * subscribers like {@link insertBackendMessage}, unless the browser renders
+   * the message's turn live off that turn's own stream.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    if (turnId && this.liveTurnProbe(sessionId, turnId)) {
+      await this.addMessage(id, sessionId, "assistant", JSON.stringify(parts), turnId);
+      return;
+    }
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {
