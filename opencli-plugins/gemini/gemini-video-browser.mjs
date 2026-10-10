@@ -5,6 +5,7 @@ import {
   buildGeminiVideoCookieHeader,
   classifyGeminiVideoState,
   GEMINI_VIDEO_URL,
+  geminiVideoSubmissionError,
   isVideoContentType,
 } from "./gemini-video-helpers.mjs";
 
@@ -94,6 +95,13 @@ export function readGeminiVideoTurn() {
     });
   }
   var body = String((document.body && document.body.innerText) || "");
+  // The fallback text must not include the user's own turns: a prompt that
+  // mentions "something went wrong" would otherwise read as a failure.
+  var queries = document.querySelectorAll('user-query, [class*="query-text"]');
+  for (var q = 0; q < queries.length; q++) {
+    var asked = String(queries[q].innerText || "").trim();
+    if (asked) body = body.split(asked).join(" ");
+  }
   return {
     url: location.href,
     videos: videos,
@@ -266,19 +274,14 @@ export async function submitGeminiVideoPrompt(page, prompt) {
   if (!typed.sendEnabled) throw new CommandExecutionError("Gemini send button stayed disabled");
   const sent = await page.evaluate(SCRIPT_CLICK_SEND);
   if (!sent) throw new CommandExecutionError("Gemini send button could not be clicked");
-  // A accepted submission clears the editor and opens a conversation URL; a
-  // dropped one leaves the prompt in place, which must fail fast instead of
-  // waiting the whole generation timeout for a clip that never comes.
-  const after = await pollComposer(
-    page,
-    (s) => s.editorText.length === 0 && /\/app\/[a-z0-9]+/i.test(s.url),
-    { timeoutMs: 30000 },
-  );
-  if (after.editorText.length > 0) {
-    throw new CommandExecutionError(
-      "Gemini did not accept the prompt; the composer still holds it",
-    );
-  }
+  // An accepted submission clears the editor and opens a conversation URL; a
+  // dropped one does not, which must fail fast instead of waiting the whole
+  // generation timeout for a clip that never comes.
+  const after = await pollComposer(page, (s) => geminiVideoSubmissionError(s) === null, {
+    timeoutMs: 30000,
+  });
+  const rejected = geminiVideoSubmissionError(after);
+  if (rejected) throw new CommandExecutionError(rejected);
 }
 
 /**
@@ -307,24 +310,49 @@ export async function waitForGeminiVideo(page, timeoutSeconds, { intervalSeconds
 }
 
 /** Download the clip with the browser session's cookies; Gemini's media host refuses anonymous requests. */
-export async function downloadGeminiVideo(page, src, filePath, { fetchImpl = fetch } = {}) {
+export async function downloadGeminiVideo(
+  page,
+  src,
+  filePath,
+  { fetchImpl = fetch, timeoutMs = 120000 } = {},
+) {
   const cookies = await page.getCookies({ url: src });
   const cookie = buildGeminiVideoCookieHeader(cookies, src);
-  const response = await fetchImpl(src, {
-    redirect: "follow",
-    headers: {
-      ...(cookie ? { cookie } : {}),
-      "user-agent": BROWSER_USER_AGENT,
-      referer: "https://gemini.google.com/",
-    },
-  });
+  // Bounds the whole transfer, body included, so a stalled media host fails
+  // like every other step instead of hanging the command.
+  const signal = AbortSignal.timeout(timeoutMs);
+  const timedOut = (error) => {
+    if (!signal.aborted) return error;
+    return new CommandExecutionError(
+      `Gemini video download did not finish within ${Math.round(timeoutMs / 1000)}s; open the conversation and download it manually`,
+    );
+  };
+  let response;
+  try {
+    response = await fetchImpl(src, {
+      redirect: "follow",
+      signal,
+      headers: {
+        ...(cookie ? { cookie } : {}),
+        "user-agent": BROWSER_USER_AGENT,
+        referer: "https://gemini.google.com/",
+      },
+    });
+  } catch (error) {
+    throw timedOut(error);
+  }
   const type = response.headers.get("content-type") || "";
   if (!response.ok || !isVideoContentType(type)) {
     throw new CommandExecutionError(
       `Gemini video download returned ${response.status} ${type || "unknown type"}; open the conversation and download it manually`,
     );
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
+  let bytes;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    throw timedOut(error);
+  }
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, bytes);
   return bytes.length;

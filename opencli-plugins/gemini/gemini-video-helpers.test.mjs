@@ -12,7 +12,9 @@ import {
   GEMINI_VIDEO_DEFAULT_OUTPUT,
   geminiVideoRatioLabel,
   geminiVideoStatusText,
+  geminiVideoSubmissionError,
   integerInRange,
+  isGeminiConversationUrl,
   isVideoContentType,
   parseGeminiVideoImages,
   pickGeminiVideoSource,
@@ -89,6 +91,43 @@ test("geminiVideoStatusText prefers the model turn over the body tail", () => {
     "Gemini said Your video is ready!",
   );
   assert.equal(geminiVideoStatusText({ bodyTail: " tail " }), "tail");
+  // The page reader always supplies responseText, empty before a turn renders.
+  assert.equal(geminiVideoStatusText({ responseText: "  \n", bodyTail: " tail " }), "tail");
+});
+
+test("classifyGeminiVideoState reads page-level failures before a model turn renders", () => {
+  const state = classifyGeminiVideoState({
+    videos: [],
+    responseText: "",
+    bodyTail: "Videos\nSomething went wrong. Please try again.\nGemini can make mistakes",
+  });
+  assert.equal(state.status, "error");
+  assert.match(state.message, /Something went wrong/);
+  assert.equal(
+    classifyGeminiVideoState({ videos: [], responseText: "", bodyTail: "Gemini can make mistakes" })
+      .status,
+    "pending",
+  );
+});
+
+test("geminiVideoSubmissionError requires a cleared editor and a conversation URL", () => {
+  const conversation = "https://gemini.google.com/app/6f1c2b9a0d3e4f57";
+  assert.equal(geminiVideoSubmissionError({ editorText: "", url: conversation }), null);
+  assert.equal(
+    geminiVideoSubmissionError({ editorText: "", url: "https://gemini.google.com/u/1/app/abc123" }),
+    null,
+  );
+  assert.match(
+    geminiVideoSubmissionError({ editorText: "a paper boat", url: conversation }),
+    /composer still holds it/,
+  );
+  // Editor cleared but Gemini stayed on /videos: the prompt was dropped.
+  assert.match(
+    geminiVideoSubmissionError({ editorText: "", url: "https://gemini.google.com/videos" }),
+    /did not open a conversation/,
+  );
+  assert.equal(isGeminiConversationUrl("https://gemini.google.com/app"), false);
+  assert.equal(isGeminiConversationUrl(undefined), false);
 });
 
 test("classifyGeminiVideoState reports ready when a clip has rendered", () => {

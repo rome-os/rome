@@ -93,10 +93,38 @@ const ERROR_PATTERNS = [
 
 const GENERATING_PATTERNS = [/generating your video/i, /could take a few minutes/i];
 
-/** The part of the page that describes the current turn, without the sidebar. */
+/**
+ * The text that describes the current turn: the newest model response, or the
+ * end of the page when no response has rendered yet (page-level failures such
+ * as "Something went wrong" show up there). The page reader leaves the user's
+ * own turns out of that fallback, so words in the prompt cannot read as errors.
+ */
 export function geminiVideoStatusText(snapshot) {
-  const text = String(snapshot?.responseText ?? snapshot?.bodyTail ?? "");
+  const response = String(snapshot?.responseText ?? "").trim();
+  const text = response || String(snapshot?.bodyTail ?? "");
   return text.replace(/\s+/g, " ").trim();
+}
+
+const CONVERSATION_PATH = /\/app\/[a-z0-9]+/i;
+
+/** Whether a page URL is a Gemini conversation (`/app/<id>`), which a sent prompt opens. */
+export function isGeminiConversationUrl(url) {
+  return CONVERSATION_PATH.test(String(url ?? ""));
+}
+
+/**
+ * Why a sent prompt was not accepted, or null when it was. An accepted
+ * submission both clears the editor and opens a conversation URL; anything
+ * else must fail now rather than after the whole generation timeout.
+ */
+export function geminiVideoSubmissionError(state) {
+  if (String(state?.editorText ?? "").length > 0) {
+    return "Gemini did not accept the prompt; the composer still holds it";
+  }
+  if (!isGeminiConversationUrl(state?.url)) {
+    return "Gemini did not open a conversation for the prompt; it was likely dropped";
+  }
+  return null;
 }
 
 /** Pick the generated clip: the first `<video>` with a fetchable http(s) source. */
