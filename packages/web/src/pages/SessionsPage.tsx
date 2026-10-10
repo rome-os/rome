@@ -1282,7 +1282,7 @@ function SessionDetailsSheet({
                     relative="path"
                     state={location.state}
                   >
-                    <GitFork data-icon="inline-start" />
+                    <GitFork />
                     Parent · {session.lineage.parent.displayTitle}
                   </Link>
                 </Button>
@@ -1294,7 +1294,7 @@ function SessionDetailsSheet({
                     relative="path"
                     state={location.state}
                   >
-                    <GitFork data-icon="inline-start" />
+                    <GitFork />
                     Child · {child.displayTitle}
                   </Link>
                 </Button>
