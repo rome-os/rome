@@ -137,7 +137,7 @@ export function createSubagentExecutionService(deps: {
         });
         // A subagent's conversation is minted under its own session id.
         try {
-          await context.childManager.recordConversation?.(child.sessionId, child.sessionId);
+          await context.childManager.recordConversation(child.sessionId, child.sessionId);
         } catch (err) {
           log.warn("failed to record the subagent session's conversation", {
             sessionId: child.sessionId,

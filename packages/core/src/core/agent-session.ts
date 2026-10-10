@@ -355,7 +355,7 @@ export interface AgentSessionManager {
    * after acquire (a subagent's conversation is minted under its own id).
    * Never overwrites a recorded conversation.
    */
-  recordConversation?(sessionId: string, conversationId: string): Promise<void>;
+  recordConversation(sessionId: string, conversationId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
