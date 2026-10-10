@@ -24,8 +24,7 @@
       "package-name": "@rome-os/rome-web-components"
     },
     "packages/rome-node-cli": {
-      "package-name": "@rome-os/node",
-      "release-as": "0.1.3"
+      "package-name": "@rome-os/node"
     },
     "packages/rome-node-core": {
       "package-name": "@rome-os/node-core"

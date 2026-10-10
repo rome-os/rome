@@ -1,4 +1,4 @@
-import { ChevronDown, LayoutGrid, PanelRightClose, Plus, X } from "lucide-react";
+import { ChevronDown, ExternalLink, LayoutGrid, PanelRightClose, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -98,6 +98,10 @@ interface ToolWorkspaceProps {
   label: (widget: WidgetPlacement) => string;
   icon: (widget: WidgetPlacement) => ReactNode;
   content: (widget: WidgetPlacement, dragging: boolean) => ReactNode;
+  /** Standalone page showing the same surface, or null when there is none. */
+  fullHref: (widget: WidgetPlacement) => string | null;
+  /** Fires just before the full-page link can be followed, to refresh it. */
+  onOpenIntent?: (widget: WidgetPlacement) => void;
   children: ReactNode;
 }
 
@@ -111,6 +115,8 @@ export function ToolWorkspace({
   label,
   icon,
   content,
+  fullHref,
+  onOpenIntent,
   children,
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
@@ -121,6 +127,8 @@ export function ToolWorkspace({
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const compact = width < COMPACT_WIDTH;
   const open = !view.collapsed;
+  const activeWidget = sorted.find((widget) => widget.id === view.activeId);
+  const activeHref = activeWidget ? fullHref(activeWidget) : null;
   const available = Math.max(0, width - SEPARATOR_WIDTH);
   const chatWidth = Math.max(
     MIN_PANE_WIDTH,
@@ -249,6 +257,23 @@ export function ToolWorkspace({
             <span className="flex h-full flex-1 items-center px-2 text-ui text-muted-foreground">
               {t("chat.tools")}
             </span>
+          )}
+          {activeWidget && activeHref && (
+            // A real link, so middle-click, Cmd-click and copy-link work natively.
+            <Button asChild variant="ghost" size="icon-sm">
+              <a
+                href={activeHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("chat.openToolNewTab", { name: label(activeWidget) })}
+                title={t("chat.openToolNewTab", { name: label(activeWidget) })}
+                onPointerEnter={() => onOpenIntent?.(activeWidget)}
+                onPointerDown={() => onOpenIntent?.(activeWidget)}
+                onFocus={() => onOpenIntent?.(activeWidget)}
+              >
+                <ExternalLink />
+              </a>
+            </Button>
           )}
           {sorted.length > 0 && (
             <DropdownMenu>

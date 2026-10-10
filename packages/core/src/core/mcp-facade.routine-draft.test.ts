@@ -272,4 +272,190 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(res.content[0].text).toContain("nothing was shipped");
     });
   });
+
+  // `activate: true` creates the routine on the guardian's explicit
+  // instruction, but only through the agent's own create_routine and only for
+  // a target the agent may call — otherwise the click stays the gate.
+  describe("propose_routine activate: true", () => {
+    type Call = { name: string; input: unknown };
+    const setup = (opts: {
+      permissions?: Record<string, "permitted" | "denied" | "unknown">;
+      argsError?: string;
+      createResult?: unknown;
+      createThrows?: boolean;
+      withGate?: boolean;
+      detached?: boolean;
+    }) => {
+      const calls: Call[] = [];
+      const permissions = opts.permissions ?? {};
+      const bundle = buildFacadeBundle({
+        getActionCatalog: () => [],
+        getSkillCatalog: () => [],
+        subagentTools: [],
+        executeAction: async (name, input) => {
+          calls.push({ name, input });
+          if (opts.createThrows) throw new Error("worker RPC timed out");
+          return opts.createResult ?? { routineId: "r-42" };
+        },
+        executeSubagent: async () => ({}),
+        supportsInteractiveSurface: true,
+        interactiveSurfaceDetached: opts.detached ?? false,
+        ...(opts.withGate === false
+          ? {}
+          : {
+              routineActivation: {
+                canCallAction: (name: string) => permissions[name] ?? "permitted",
+                validateArgs: () => opts.argsError ?? null,
+                routineKeyFor: (toolUseId: string) => `chat-routine:turn-1:${toolUseId}`,
+              },
+            }),
+      });
+      const tool = bundle.interactiveTools.find((t) => t.name === "propose_routine")!;
+      const run = async (input: Record<string, unknown>, toolUseId: string | null = "toolu_1") =>
+        (await tool.handler(input, toolUseId === null ? undefined : { toolUseId })) as {
+          content: { text: string }[];
+          isError?: boolean;
+        };
+      return { calls, run, bundle };
+    };
+    const DRAFTED = "A draft card was shown instead";
+
+    it("creates the routine via create_routine and reports it active", async () => {
+      const { calls, run } = setup({});
+      const res = await run({ ...validSchedule, activate: true });
+      expect(res.isError).toBeUndefined();
+      expect(calls).toEqual([
+        {
+          name: "create_routine",
+          input: {
+            // Derived from the tool call, so the drain computes the card's key
+            // itself instead of reading it from this result.
+            key: "chat-routine:turn-1:toolu_1",
+            name: "Weekly update reminder",
+            trigger: {
+              type: "schedule",
+              tzid: "America/Los_Angeles",
+              tzMode: "floating",
+              localTime: "09:00",
+              rrule: "FREQ=WEEKLY;BYDAY=FR",
+            },
+            actionName: "summon",
+            args: validSchedule.args,
+          },
+        },
+      ]);
+      expect(res.content[0].text).toContain('Routine "Weekly update reminder" is on (id r-42)');
+      expect(res.content[0].text).toContain("Do NOT call any create action");
+    });
+
+    it("falls back to a draft card when the agent may not call the target", async () => {
+      const { calls, run } = setup({ permissions: { summon: "denied" } });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
+      expect(res.content[0].text).toContain('"summon" is not an action you are permitted to call');
+    });
+
+    it("falls back to a draft card when the agent may not call create_routine", async () => {
+      const { calls, run } = setup({ permissions: { create_routine: "denied" } });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
+    });
+
+    it("falls back to a draft card when the session wires no permission check", async () => {
+      const { calls, run } = setup({ withGate: false });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain(DRAFTED);
+    });
+
+    it("falls back to a draft card when the call has no tool-use id to key by", async () => {
+      const { calls, run } = setup({});
+      const res = await run({ ...validInput, activate: true }, null);
+      expect(calls).toEqual([]);
+      expect(res.content[0].text).toContain(DRAFTED);
+    });
+
+    it("errors without a card for an unregistered target action", async () => {
+      const { calls, run } = setup({ permissions: { summon: "unknown" } });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("not a registered action");
+    });
+
+    // create_routine checks only that the target exists, so the args check the
+    // card's "Turn it on" gets must run here too.
+    it("creates nothing when the args don't fit the target action's schema", async () => {
+      const { calls, run } = setup({
+        argsError: 'args do not satisfy the input schema for action "summon"',
+      });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("do not satisfy the input schema");
+    });
+
+    // A throw doesn't say whether the row was saved: show the card (its lookup
+    // settles it) and stop the agent from retrying under a new key.
+    it("reports an uncertain outcome, not an error, when create_routine throws", async () => {
+      const { calls, run } = setup({ createThrows: true });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toHaveLength(1);
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain("may or may not exist");
+      expect(res.content[0].text).toContain("do NOT call propose_routine");
+    });
+
+    // The key is this call's own, so a duplicate means its routine was saved.
+    it("treats an already-taken key as this call's routine, not a retry", async () => {
+      const { run } = setup({
+        createResult: {
+          status: "error",
+          error: 'a routine with key "chat-routine:turn-1:toolu_1" already exists (id r-1)',
+        },
+      });
+      const res = await run({ ...validInput, activate: true });
+      expect(res.isError).toBeUndefined();
+      expect(res.content[0].text).toContain("do NOT call propose_routine");
+    });
+
+    it("relays a create_routine rejection as an error without a card", async () => {
+      const { run } = setup({
+        createResult: { status: "error", error: "FREQ=WEEKLY requires BYDAY" },
+      });
+      const res = await run({ ...validSchedule, activate: true });
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toContain("FREQ=WEEKLY requires BYDAY");
+      expect(res.content[0].text).toContain("NOT created");
+    });
+
+    it("never creates on a detached session", async () => {
+      const { calls, run } = setup({ detached: true });
+      const res = await run({ ...validInput, activate: true });
+      expect(calls).toEqual([]);
+      expect(res.isError).toBe(true);
+    });
+
+    it("leaves the draft path unchanged without activate", async () => {
+      const { calls, run } = setup({});
+      const res = await run(validInput);
+      expect(calls).toEqual([]);
+      expect(res.content[0].text).toContain("routine draft card has been delivered");
+    });
+
+    // Exact forks rely on a byte-identical catalog, so wiring the gate must
+    // not change what the model sees.
+    it("advertises the same schema whether or not the gate is wired", () => {
+      const gated = setup({}).bundle.interactiveTools;
+      const ungated = setup({ withGate: false }).bundle.interactiveTools;
+      const strip = (tools: typeof gated) =>
+        tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }));
+      expect(strip(gated)).toEqual(strip(ungated));
+    });
+  });
 });

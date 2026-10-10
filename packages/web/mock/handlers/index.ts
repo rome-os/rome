@@ -579,6 +579,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-draft-1",
+          routineKey: "chat-routine:mock-chat-3-draft-1",
           draft: {
             sentence: "Every Monday at 9:00 AM, list anything that has stalled and nudge me.",
             name: "Weekly stall check",
@@ -593,6 +594,29 @@ const transcripts: Record<string, ChatMessage[]> = {
             },
             actionName: "daily_summary",
             args: { filter: "stalled" },
+          },
+        },
+        // An activated card: the agent created the routine on an explicit
+        // request (`propose_routine` with `activate: true`), so it opens saved
+        // with Pause / Delete / run history instead of "Turn it on".
+        {
+          type: "routine_draft_card",
+          toolUseId: "mock-chat-3-active-1",
+          routineKey: "chat-routine:mock-chat-3-active-1",
+          draft: {
+            sentence: "Every day at 7:00 AM, Rome will send you a morning brief.",
+            name: "Morning brief",
+            watchLabel: "Every day at 7:00 AM",
+            thenSummary: "send you your inbox and weather brief",
+            trigger: {
+              type: "schedule",
+              tzid: "America/Los_Angeles",
+              tzMode: "floating",
+              localTime: "07:00",
+              rrule: "FREQ=DAILY",
+            },
+            actionName: "daily_summary",
+            args: { sections: ["inbox", "weather"] },
           },
         },
       ],
