@@ -16,6 +16,7 @@ import {
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { adhocSessionKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-runner");
 
@@ -617,7 +618,7 @@ export class AgentRunner {
   async *run(params: RunParams): AsyncIterable<AgentMessage> {
     // Synthetic key for keyless invocations (e.g. ad-hoc envoy validation
     // runs). Real conversations always pass a `channelThreadKey`.
-    const requestedChannelThreadKey = params.channelThreadKey ?? `${params.agentName}:${uuidv4()}`;
+    const requestedChannelThreadKey = params.channelThreadKey ?? adhocSessionKey(params.agentName);
     const explicitSessionId = params.sessionId;
 
     log.info("agent run started", {

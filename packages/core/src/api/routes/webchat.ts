@@ -79,6 +79,7 @@ import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
+import { webchatSessionKey } from "../../core/agent-session-key.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -1167,9 +1168,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     modelSelection: WebchatLargeModelSelection | null,
   ): string => {
-    return modelSelection
-      ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-      : `webchat:${sessionId}`;
+    return webchatSessionKey(sessionId, modelSelection?.id);
   };
 
   const resolveSessionHandback = (
@@ -2683,7 +2682,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // cannot cancel the turn currently producing output.
     const agentSess = deps.agentSessionManager.peek({
       agentName: stream.agentName,
-      channelThreadKey: stream.channelThreadKey ?? `webchat:${stream.sessionId}`,
+      channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
     if (!agentSess || agentSess.currentTurnId !== turnId) {
       return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
