@@ -37,11 +37,6 @@ import PeoplePage, { PeopleIndexRedirect } from "./PeoplePage";
 beforeAll(async () => {
   await i18n.changeLanguage("en");
   // Radix Select and the chip rail drive pointer capture and scroll, neither of
-  // which jsdom implements.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {

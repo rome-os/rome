@@ -3,20 +3,12 @@
 // Standard renderers plus the optional custom presenting component.
 // Each state kind renders from its server-authored payload alone; a custom
 // component overrides rendering only for the presenting state.
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SetupRenderer, type SetupRenderProps } from "@/components/setup/setup-renderer";
 import type { SetupState } from "@/lib/setup-api";
-
-beforeAll(() => {
-  // Radix/jsdom polyfills for the pointer/scroll events Select relies on.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
-});
 
 afterEach(() => {
   cleanup();

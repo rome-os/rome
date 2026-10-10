@@ -20,10 +20,6 @@ function ToolContent({ id }: { id: string }) {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.scrollIntoView = () => {};
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
 });
 
 beforeEach(() => {

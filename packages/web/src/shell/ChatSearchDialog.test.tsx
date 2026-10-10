@@ -20,7 +20,6 @@ import {
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {

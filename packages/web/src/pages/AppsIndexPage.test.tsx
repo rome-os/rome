@@ -67,11 +67,6 @@ rs.mock("@/shell/AppGrid", () => ({
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix menu + dialog poke pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
   // Radix tooltip arrows measure themselves with ResizeObserver, also absent.
   class TestResizeObserver implements ResizeObserver {
     observe(): void {}
