@@ -2340,6 +2340,7 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
+        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);

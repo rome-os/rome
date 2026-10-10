@@ -5,20 +5,13 @@ UPDATE `sessions` SET `conversation_id` = `id`
 WHERE `conversation_id` IS NULL
   AND `channel_thread_key` LIKE '%:subagent:%'
   AND `id` IN (SELECT `id` FROM `rome_sessions`);--> statement-breakpoint
--- Webchat and persisted fork rows: `webchat:<id>`, read up to any later segment.
-UPDATE `sessions` SET `conversation_id` = CASE
-    WHEN instr(substr(`channel_thread_key`, 9), ':') > 0
-      THEN substr(`channel_thread_key`, 9, instr(substr(`channel_thread_key`, 9), ':') - 1)
-    ELSE substr(`channel_thread_key`, 9)
-  END
+-- Webchat and persisted fork rows: `webchat:<id>`. 0073 already stripped the
+-- model-choice segment, so any key with a later segment is not a bare chat.
+UPDATE `sessions` SET `conversation_id` = substr(`channel_thread_key`, 9)
 WHERE `conversation_id` IS NULL
   AND `channel_thread_key` LIKE 'webchat:%'
-  AND `channel_thread_key` NOT LIKE '%:subagent:%'
-  AND (CASE
-    WHEN instr(substr(`channel_thread_key`, 9), ':') > 0
-      THEN substr(`channel_thread_key`, 9, instr(substr(`channel_thread_key`, 9), ':') - 1)
-    ELSE substr(`channel_thread_key`, 9)
-  END) IN (SELECT `id` FROM `rome_sessions`);--> statement-breakpoint
+  AND `channel_thread_key` NOT LIKE 'webchat:%:%'
+  AND substr(`channel_thread_key`, 9) IN (SELECT `id` FROM `rome_sessions`);--> statement-breakpoint
 -- Channel rows: `<channel>:<thread>` serves `channel:<channel>:<thread>`.
 UPDATE `sessions` SET `conversation_id` = 'channel:' || `channel_thread_key`
 WHERE `conversation_id` IS NULL

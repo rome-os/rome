@@ -208,6 +208,7 @@ describe("SubagentExecutionService", () => {
       acquire: rs.fn(),
       acquireBySessionId: rs.fn(async () => resumed.session),
       peek: rs.fn(),
+      recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({

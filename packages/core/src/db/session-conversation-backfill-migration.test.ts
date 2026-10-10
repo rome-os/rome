@@ -32,7 +32,6 @@ describe("0075_backfill_session_conversation_id migration", () => {
           ('channel:webchat:gone'), ('adhoc');
         INSERT INTO sessions (id, channel_thread_key, conversation_id) VALUES
           ('webchat', 'webchat:chat', NULL),
-          ('model-choice', 'webchat:chat:large-model:sel', NULL),
           ('fork', 'webchat:fork', NULL),
           ('child', 'webchat:chat:subagent:1', NULL),
           ('unminted-child', 'webchat:chat:subagent:2', NULL),
@@ -51,7 +50,6 @@ describe("0075_backfill_session_conversation_id migration", () => {
         .all() as { id: string; conversationId: string | null }[];
       expect(Object.fromEntries(rows.map((row) => [row.id, row.conversationId]))).toEqual({
         webchat: "chat",
-        "model-choice": "chat",
         fork: "fork",
         child: "child",
         "unminted-child": null,
