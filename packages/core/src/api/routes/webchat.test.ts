@@ -1430,14 +1430,9 @@ describe("Webchat API", () => {
       await deps.sessionsRepo.setProviderInfo(otherAgentId, "claude", "thread-2", "other-model");
       expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
 
+      // A stored selection does not change the key the runtime session is under.
       await deps.webchatRepo.updateSessionLargeModelSelection(session.id, "gpt-5-6-sol");
-      expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
-      const selectedRuntimeId = await deps.sessionsRepo.create({
-        agentName: "main",
-        channelThreadKey: `webchat:${session.id}:large-model:gpt-5-6-sol`,
-      });
-      await deps.sessionsRepo.setProviderInfo(selectedRuntimeId, "codex", "thread-3", "gpt-6");
-      expect(await read()).toMatchObject({ model: "gpt-6" });
+      expect(await read()).toMatchObject({ model: "gpt-5.5", reasoningEffort: "xhigh" });
     });
   });
 

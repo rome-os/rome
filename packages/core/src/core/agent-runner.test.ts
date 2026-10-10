@@ -4663,13 +4663,20 @@ describe("AgentRunner", () => {
       });
 
       const repo = new SessionsRepository(testDb.db);
-      // A pre-cutover row (model NULL) whose webchat key pins a Claude selection,
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-mismatch",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
       const legacyId = await repo.create({
         agentName: "test-main",
-        channelThreadKey: "webchat:legacy-mismatch:large-model:claude-opus",
+        channelThreadKey: "webchat:legacy-mismatch",
         status: "active",
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
@@ -4677,7 +4684,16 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
       const messages = await collectMessages(
-        runner.run({ agentName: "test-main", sessionId: legacyId, prompt: "Continue" }),
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+          threadContext: {
+            channel: "webchat",
+            threadId: "legacy-mismatch",
+            romeSessionId: "legacy-mismatch",
+          },
+        }),
       );
 
       // The resume opens Claude Opus on a fresh provider thread (provider changed

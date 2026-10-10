@@ -738,7 +738,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
     const row = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(session.id, null),
+      buildWebchatChannelThreadKey(session.id),
       session.agentName ?? "main",
     );
     return !!row?.providerThreadId;
@@ -1172,14 +1172,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
   const generateShareToken = (): string => randomBytes(32).toString("base64url");
 
-  const buildWebchatChannelThreadKey = (
-    sessionId: string,
-    modelSelection: WebchatLargeModelSelection | null,
-  ): string => {
-    return modelSelection
-      ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-      : `webchat:${sessionId}`;
-  };
+  // The chat's model selection lives on its row and reaches the session at
+  // acquire, so the key names only the chat.
+  const buildWebchatChannelThreadKey = (sessionId: string): string => `webchat:${sessionId}`;
 
   const resolveSessionHandback = (
     session: StoredWebchatSession,
@@ -1234,7 +1229,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const agentName = input.session.agentName ?? "main";
     const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
-    const channelThreadKey = buildWebchatChannelThreadKey(input.session.id, modelSelection);
+    const channelThreadKey = buildWebchatChannelThreadKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
@@ -1337,11 +1332,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
-        // Keyed by the fork's own id with no model-selection suffix — exactly
-        // what `handleChatSend` will derive for it later, since a fork row
-        // carries no stored selection.
+        // Keyed by the fork's own id, exactly what `handleChatSend` will
+        // derive for it later.
         ...(input.continuable
-          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id, null) }
+          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id) }
           : {}),
       })
       [Symbol.asyncIterator]();
@@ -2224,10 +2218,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      buildWebchatChannelThreadKey(sessionId),
       session.agentName ?? "main",
     );
     return c.json({
@@ -2242,12 +2233,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
-    const modelSelection = resolveStoredModelSelection(session?.largeModelSelection);
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.peek({
       agentName: session?.agentName ?? "main",
-      channelThreadKey: buildWebchatChannelThreadKey(sessionId, modelSelection),
+      channelThreadKey: buildWebchatChannelThreadKey(sessionId),
     });
     if (sess) {
       await sess.close("user").catch(() => undefined);
@@ -3007,7 +2997,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionManager.findReusableSession(
-        buildWebchatChannelThreadKey(session.id, null),
+        buildWebchatChannelThreadKey(session.id),
         session.agentName ?? "main",
       );
       if (!branchThread?.providerThreadId) {
@@ -3147,10 +3137,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
-    // A branch resumes by recomputing its channel-thread key, and
-    // `persistForkThread` stored that key without a model-selection suffix. Pin
-    // the selection to null so the two derivations cannot drift: a suffix here
-    // would open a fresh provider thread and silently lose the branch history.
+    // A branch has no stored selection: it continues the provider thread
+    // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
       session.parentSessionId !== null
         ? null
@@ -3163,7 +3151,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             body.largeModelSelection,
           );
     const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
-    const channelThreadKey = buildWebchatChannelThreadKey(sessionId, modelSelection);
+    const channelThreadKey = buildWebchatChannelThreadKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
     // re-check here so a stale row from a removed app surfaces a clear error
@@ -3823,10 +3811,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stream = await createStream(
       sessionId,
       syntheticTurnId,
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      buildWebchatChannelThreadKey(sessionId),
       session.agentName ?? "main",
     );
     enqueueStream(sessionId, stream);

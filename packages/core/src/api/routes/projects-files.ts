@@ -28,7 +28,6 @@ import {
 } from "../../lib/file-browser-server.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { resolveWebchatLargeModelSelection } from "../../core/model-selector.js";
 import type { ApiDeps } from "../deps.js";
 
 // Directories that must never surface as project roots (top-level entries
@@ -162,11 +161,8 @@ function listTopLevelShadowProjectPaths(rootDir: string): string[] {
     .map((entry) => entry.name);
 }
 
-function buildWebchatChannelThreadKey(sessionId: string, largeModelSelection: unknown): string {
-  const modelSelection = resolveWebchatLargeModelSelection(largeModelSelection);
-  return modelSelection
-    ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-    : `webchat:${sessionId}`;
+function buildWebchatChannelThreadKey(sessionId: string): string {
+  return `webchat:${sessionId}`;
 }
 
 async function closeLiveProjectSessions(
@@ -181,7 +177,7 @@ async function closeLiveProjectSessions(
     sessions.map(async (session) => {
       const liveSession = agentSessionManager.peek({
         agentName: session.agentName ?? "main",
-        channelThreadKey: buildWebchatChannelThreadKey(session.id, session.largeModelSelection),
+        channelThreadKey: buildWebchatChannelThreadKey(session.id),
       });
       if (liveSession) {
         await liveSession.close("user").catch(() => undefined);

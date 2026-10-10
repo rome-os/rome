@@ -792,19 +792,6 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
-function resolveSelectionFromChannelThreadKey(
-  channelThreadKey: string,
-): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
-  const marker = ":large-model:";
-  const markerIndex = channelThreadKey.lastIndexOf(marker);
-  if (markerIndex < 0) return undefined;
-  return (
-    resolveWebchatLargeModelSelection(channelThreadKey.slice(markerIndex + marker.length)) ??
-    undefined
-  );
-}
-
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
 async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
@@ -908,12 +895,15 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  // The channel-thread-key selection restores a webchat thread's chosen model
+  // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
+  const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
   const persistedSelection =
-    init.resumeSessionId && !sessionPin
-      ? resolveSelectionFromChannelThreadKey(key.channelThreadKey)
+    init.resumeSessionId && !sessionPin && !init.selectionId && conversationId
+      ? resolveWebchatLargeModelSelection(
+          (await deps.webchatRepo?.getSession(conversationId))?.largeModelSelection,
+        )
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
