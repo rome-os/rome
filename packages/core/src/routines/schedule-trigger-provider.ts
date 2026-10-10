@@ -243,9 +243,20 @@ export function parseDateAndLocalTime(date: string, localTime: string, tzid: str
 /** The "YYYY-MM-DD" in `tzid` of the next time the wall clock there reads
  * `localTime`: today if that moment is still ahead of `now`, else tomorrow. */
 export function nextDateForLocalTime(localTime: string, tzid: string, now = new Date()): string {
-  // en-CA formats a date as YYYY-MM-DD.
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: tzid }).format(now);
+  const today = calendarDate(now, tzid);
   if (parseDateAndLocalTime(today, localTime, tzid).getTime() > now.getTime()) return today;
   const [year, month, day] = today.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+/** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
+function calendarDate(at: Date, tzid: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tzid,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
+  return `${read("year")}-${read("month")}-${read("day")}`;
 }

@@ -221,14 +221,25 @@ async function withOneOffDate(
 ): Promise<Trigger> {
   if (trigger.type !== "schedule" || trigger.date || trigger.rrule) return trigger;
   const tzid = trigger.tzMode === "floating" ? await guardianTimezone() : trigger.tzid;
-  // en-CA formats a date as YYYY-MM-DD.
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: tzid }).format(new Date());
+  const today = calendarDate(new Date(), tzid);
   let date = today;
   if (wallClockToUtc(today, trigger.localTime, tzid).getTime() <= Date.now()) {
     const [year, month, day] = today.split("-").map(Number);
     date = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
   }
   return { ...trigger, tzid, date, tzMode: "fixed" };
+}
+
+/** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
+function calendarDate(at: Date, tzid: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tzid,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
+  return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
 /** Validate trigger fields per type. Returns an error string (for the agent to

@@ -76,6 +76,14 @@ describe("ScheduleTriggerProvider", () => {
     expect(after!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
   });
 
+  it("refuses a schedule with neither date nor rrule", async () => {
+    const routine = buildRoutine({
+      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "12:00" },
+    });
+    await provider.activate(routine, async () => {});
+    expect(provider.isActive(routine.id)).toBe(false);
+  });
+
   it("recurring: firing updates nextRunAt to a strictly later scheduled time", async () => {
     // Cron.trigger() is a manual fire — it does NOT advance the cron's internal
     // clock, so job.nextRun() returns the same calendar match unless we move

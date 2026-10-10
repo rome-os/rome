@@ -24,14 +24,14 @@ UPDATE `routines`
 SET `trigger` = json_set(
   `trigger`,
   '$.tzid',
-  (SELECT json_extract(`value`, '$') FROM `settings` WHERE `key` = 'guardianTimezone')
+  (SELECT trim(json_extract(`value`, '$')) FROM `settings` WHERE `key` = 'guardianTimezone')
 )
 WHERE json_valid(`trigger`)
   AND json_extract(`trigger`, '$.type') = 'schedule'
   AND json_extract(`trigger`, '$.tzMode') = 'floating'
   AND coalesce(json_extract(`trigger`, '$.date'), '') = ''
   AND coalesce(json_extract(`trigger`, '$.rrule'), '') = ''
-  AND coalesce((SELECT json_extract(`value`, '$') FROM `settings` WHERE `key` = 'guardianTimezone'), '') != '';
+  AND coalesce((SELECT trim(json_extract(`value`, '$')) FROM `settings` WHERE `key` = 'guardianTimezone'), '') != '';
 --> statement-breakpoint
 UPDATE `routines`
 SET `trigger` = json_remove(json_set(
