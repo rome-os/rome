@@ -165,15 +165,7 @@ describe("AgentSessionBridge conversation", () => {
         params: {
           key: session.key,
           input: { prompt: "follow up" },
-          // A webchat parent's context still records the subagent's turn.
-          init: {
-            threadContext: {
-              channel: "webchat",
-              threadId: "parent-chat",
-              threadName: "Parent",
-              threadType: "private",
-            },
-          },
+          init: {},
         },
       });
 

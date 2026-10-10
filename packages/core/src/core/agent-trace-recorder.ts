@@ -109,9 +109,9 @@ export interface TurnConversationInput extends RomeSessionIdInput {
 
 // Conversations whose turns only the recorder writes. A webchat conversation
 // belongs to the webchat route, and a channel one to the inbox, which also
-// injects its pending context on a channel turn. A saved side chat is a fork
-// the webchat route serves, so a turn whose thread is that chat leaves it to
-// the route (see `addressedByThread`).
+// injects its pending context on a channel turn. A turn under a webchat
+// thread is shown, and its cards answered, in that chat, so it stays there
+// too (see `servedByThread`).
 const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set([
   "subagent",
   "fork",
@@ -124,8 +124,7 @@ const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set(
  * for a named or recorded conversation, which needs no creating.
  * `promptPersisted` is true only for a named one, whose caller owns the prompt.
  * `recorderOwned` is true for a recorded one, which only the recorder writes,
- * so it is recorded even under a webchat thread context, unless that thread
- * is the conversation itself.
+ * unless the turn's thread already serves it (see `servedByThread`).
  */
 export function resolveTurnConversation(input: TurnConversationInput): {
   romeSessionId: string;
@@ -138,7 +137,7 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   const ownedByRecorder =
     found !== undefined &&
     RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
-    !addressedByThread(input, found.id);
+    !servedByThread(input, found.id);
   const recorded = ownedByRecorder ? found : undefined;
   return {
     romeSessionId: resolveRomeSessionId({
@@ -152,13 +151,14 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   };
 }
 
-/** Whether the turn's thread context is the conversation itself, as for a
- *  backend turn on a saved side chat. That thread's route owns its transcript. */
-function addressedByThread(input: TurnConversationInput, conversationId: string): boolean {
+/** Whether the turn's thread serves it, so the recorded conversation would
+ *  only be a second copy. A webchat thread shows the turn's reply and cards in
+ *  its own chat, as for a backend or approval turn on a subagent or side chat,
+ *  and card answers look the turn up there. */
+function servedByThread(input: TurnConversationInput, conversationId: string): boolean {
   const thread = input.threadContext;
   if (!thread) return false;
-  if (thread.romeSessionId === conversationId) return true;
-  return thread.channel === "webchat" && thread.threadId === conversationId;
+  return thread.romeSessionId === conversationId || thread.channel === "webchat";
 }
 
 export function resolveRomeSessionType(

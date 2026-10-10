@@ -570,7 +570,7 @@ describe("AgentRunner", () => {
       }
     });
 
-    it("records a recorded subagent conversation under a webchat thread context", async () => {
+    it("leaves a turn under a webchat thread to that chat", async () => {
       const testDb = createTestDb();
       try {
         const repo = new WebChatRepository(testDb.db);
@@ -597,19 +597,19 @@ describe("AgentRunner", () => {
               threadId: "parent-chat",
               threadName: "Parent",
               threadType: "private",
+              romeSessionId: "parent-chat",
             },
           }),
         );
 
-        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
-        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
-        expect(roles).toContain("user");
+        expect(turns).toEqual([{ romeSessionId: "parent-chat", romeSessionType: "webchat" }]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
       } finally {
         testDb.close();
       }
     });
 
-    it("writes a recorded subagent transcript for a webchat backend turn", async () => {
+    it("writes a recorded subagent transcript when the caller keeps its own", async () => {
       const testDb = createTestDb();
       try {
         const repo = new WebChatRepository(testDb.db);
@@ -626,8 +626,8 @@ describe("AgentRunner", () => {
         });
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        // The flags a webchat backend turn passes: the chat keeps its own
-        // transcript, but not this conversation's.
+        // A caller that keeps its own transcript keeps it for its channel,
+        // not for this conversation.
         await collectMessages(
           runner.run({
             agentName: "main",
