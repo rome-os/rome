@@ -56,7 +56,7 @@ describe("0068_backfill_session_conversation_id migration", () => {
         child: "child",
         "unminted-child": null,
         channel: "channel:telegram:42",
-        sentinel: "channel:slack:C1:T9",
+        sentinel: null,
         "unknown-chat": null,
         adhoc: null,
         bound: "kept",

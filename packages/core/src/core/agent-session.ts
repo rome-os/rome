@@ -834,7 +834,8 @@ async function reachableRecordedWorkingDir(recorded: string): Promise<string | u
 
 /** A channel-thread key maps to one conversation, so a stored row that names
  *  another one than the caller means the stored value cannot be trusted yet.
- *  The stored value wins on reuse and on rotation. */
+ *  The live session records turns under the caller's conversation, and the
+ *  next rotation writes the caller's value onto the new row. */
 function warnOnConversationMismatch(
   key: AgentSessionKey,
   sessionId: string | undefined,
