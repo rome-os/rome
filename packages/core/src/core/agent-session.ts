@@ -14,6 +14,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
 import { getChannelFromThreadKey } from "./session-manager.js";
+import { findRecordedConversation, type RecordedConversation } from "./agent-trace-recorder.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
@@ -318,6 +319,14 @@ export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly romeSessionId?: string;
+  /** The conversation this session serves: the caller's, else the recorded one. */
+  readonly conversationId?: string;
+  /**
+   * The conversation the row recorded, looked up when no caller named one and
+   * only if it still exists. Kept on the session so a turn resolves where it
+   * records without an await between acquire and sendTurn.
+   */
+  readonly recordedConversation?: RecordedConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -493,7 +502,7 @@ export function createAgentSessionManager(
     span: Span,
     init?: AgentSessionInit,
     /** Set when the reset policy already ran for this acquire. */
-    resetChecked?: { preparedSessionId?: string },
+    resetChecked?: { preparedSessionId?: string; preparedConversationId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
@@ -534,6 +543,7 @@ export function createAgentSessionManager(
           }
         }
         let preparedSessionId: string | undefined;
+        let preparedConversationId: string | undefined;
         if (decision.due) {
           warnOnConversationMismatch(key, active?.id, active?.conversationId, init.romeSessionId);
           const replacement = await deps.sessionsRepo.rotateProviderGeneration({
@@ -543,6 +553,7 @@ export function createAgentSessionManager(
             conversationId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
+          preparedConversationId = replacement.conversationId ?? undefined;
           log.info("provider_session.rotated", {
             conversationId,
             agentName: key.agentName,
@@ -554,7 +565,10 @@ export function createAgentSessionManager(
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, init, { preparedSessionId });
+        return await acquireInner(key, span, init, {
+          preparedSessionId,
+          preparedConversationId,
+        });
       });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
@@ -629,6 +643,7 @@ export function createAgentSessionManager(
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
         preparedSessionId: resetChecked?.preparedSessionId,
+        preparedConversationId: resetChecked?.preparedConversationId,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -698,7 +713,16 @@ export function createAgentSessionManager(
       return undefined;
     },
     async recordConversation(sessionId, conversationId) {
-      await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
+      const filled = await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
+      if (!filled) return;
+      // A cached session reads the same value a cold reopen would.
+      for (const session of sessions.values()) {
+        if (session.sessionId !== sessionId || session.conversationId) continue;
+        session.recordedConversation = await findRecordedConversation(
+          deps.webchatRepo,
+          conversationId,
+        );
+      }
     },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
@@ -712,6 +736,8 @@ export function createAgentSessionManager(
 interface OpenOptions {
   /** Id of a generation the reset path already created transactionally. */
   preparedSessionId?: string;
+  /** The conversation that prepared generation recorded, if any. */
+  preparedConversationId?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -885,6 +911,7 @@ async function openSession(
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
   // was written unless the caller names a dir. Legacy rows record none.
   let preparedSessionId = opts.preparedSessionId;
+  let preparedConversationId = opts.preparedConversationId;
   let recordedWorkingDir: string | undefined;
   if (init.workingDir === undefined && resumeResult?.workingDir) {
     recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
@@ -917,6 +944,7 @@ async function openSession(
         conversationId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
+      preparedConversationId = replacement.conversationId ?? undefined;
       resumeResult = undefined;
     }
   }
@@ -925,6 +953,13 @@ async function openSession(
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
   const romeSessionId = requestedRomeSessionId;
+  // A caller that names no conversation still serves the one the row recorded.
+  const recordedConversation = requestedRomeSessionId
+    ? undefined
+    : await findRecordedConversation(
+        deps.webchatRepo,
+        resumeResult?.conversationId ?? preparedConversationId,
+      );
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -954,7 +989,7 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
-      conversationId: romeSessionId,
+      conversationId: requestedRomeSessionId,
       workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -963,10 +998,15 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
-  } else if (romeSessionId && !resumeResult?.conversationId) {
-    await deps.sessionsRepo.fillConversationId(sessionId, romeSessionId);
+  } else if (requestedRomeSessionId && !resumeResult?.conversationId) {
+    await deps.sessionsRepo.fillConversationId(sessionId, requestedRomeSessionId);
   } else {
-    warnOnConversationMismatch(key, sessionId, resumeResult?.conversationId, romeSessionId);
+    warnOnConversationMismatch(
+      key,
+      sessionId,
+      resumeResult?.conversationId,
+      requestedRomeSessionId,
+    );
   }
 
   if (config.outputSchema && init.handback) {
@@ -1724,6 +1764,7 @@ async function openSession(
     key,
     sessionId,
     romeSessionId,
+    recordedConversation,
     modelSession,
     deps,
     config,
@@ -1764,6 +1805,7 @@ interface ImplArgs {
   key: AgentSessionKey;
   sessionId: string;
   romeSessionId?: string;
+  recordedConversation?: RecordedConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
@@ -1979,6 +2021,7 @@ class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly romeSessionId?: string;
+  recordedConversation?: RecordedConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -2059,6 +2102,7 @@ class AgentSessionImpl implements AgentSession {
     this.key = args.key;
     this.sessionId = args.sessionId;
     this.romeSessionId = args.romeSessionId;
+    this.recordedConversation = args.recordedConversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
@@ -2077,6 +2121,11 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
+  }
+
+  /** The caller's conversation, else the recorded one that still exists. */
+  get conversationId(): string | undefined {
+    return this.romeSessionId ?? this.recordedConversation?.id;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind

@@ -10,9 +10,9 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
+  findRecordedConversation,
   recordAgentTraceBestEffort,
-  resolveRomeSessionId,
-  resolveRomeSessionType,
+  resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
@@ -515,14 +515,15 @@ export class AgentRunner {
     const channelThreadKey = session.key.channelThreadKey;
 
     const boundRomeSessionId = session.romeSessionId ?? params.romeSessionId;
-    const romeSessionId = resolveRomeSessionId({
+    const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
       romeSessionId: boundRomeSessionId,
+      recordedConversation: session.recordedConversation,
       channelThreadKey,
       threadContext,
     });
-    const romeSessionType = resolveRomeSessionType({ threadContext });
+    const { romeSessionId, romeSessionType } = conversation;
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
@@ -546,18 +547,18 @@ export class AgentRunner {
     }
 
     const recorder =
-      this.webchatRepo && shouldPersistAgentTrace(threadContext)
+      this.webchatRepo && (conversation.recorderOwned || shouldPersistAgentTrace(threadContext))
         ? new AgentTraceRecorder({
             webchatRepo: this.webchatRepo,
             agentName,
             agentSessionId: session.sessionId,
             romeSessionId,
-            existingSessionId: boundRomeSessionId ? romeSessionId : undefined,
+            existingSessionId: conversation.existing ? romeSessionId : undefined,
             channelThreadKey,
             turnId: handle.turnId,
             threadContext,
             persistTranscript: true,
-            persistUserTranscript: !boundRomeSessionId,
+            persistUserTranscript: !conversation.promptPersisted,
           })
         : null;
 
@@ -635,7 +636,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.romeSessionId);
+          recorder = await this.createForkTraceRecorder(params, message, source.conversationId);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -685,18 +686,20 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceRomeSessionId?: string,
+    sourceConversationId?: string,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     try {
       const thread = params.threadContext;
-      // Prefer the source's persisted conversation binding. The fallbacks
-      // cover older/non-conversation callers that did not acquire with one.
+      // Prefer the source's conversation while it exists. The fallbacks
+      // cover rows that recorded none, or one since deleted.
+      const recorded = await findRecordedConversation(this.webchatRepo, sourceConversationId);
       const parentSessionId =
-        sourceRomeSessionId ??
+        recorded?.id ??
         thread?.romeSessionId ??
         (thread ? `channel:${thread.channel}:${thread.threadId}` : null);
-      const parent = parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null;
+      const parent =
+        recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;
       const label = params.label ?? "fork";
       const trigger = { triggerKind: "fork", triggerName: label };

@@ -257,8 +257,8 @@ describe("SessionsRepository", () => {
       conversationId: "conv-2",
     });
 
-    await repo.fillConversationId(legacy, "conv-1");
-    await repo.fillConversationId(bound, "other");
+    expect(await repo.fillConversationId(legacy, "conv-1")).toBe(true);
+    expect(await repo.fillConversationId(bound, "other")).toBe(false);
 
     expect((await repo.findById(legacy))?.conversationId).toBe("conv-1");
     expect((await repo.findById(bound))?.conversationId).toBe("conv-2");
