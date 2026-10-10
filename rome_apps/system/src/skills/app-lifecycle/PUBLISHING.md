@@ -8,7 +8,7 @@ There is no review queue. If the store accepts the upload, the version is live a
 
 - **The app was developed on this Rome.** It was installed from its source workspace or from a local bundle. Apps installed from the Store and first-party apps cannot be published from here.
 - **This Rome is connected to a Rome account.** The upload uses the instance's credential, and the listing belongs to that account.
-- **The listing id is free or already yours.** The listing id is `id` in `app.yaml`. The first account that publishes an id owns it. Another account's id is refused with `403`.
+- **The account may publish under the id's handle.** The listing id is `id` in `app.yaml`: an unscoped name, which is its own handle, or `@<handle>/<slug>`. The first account that publishes under an unclaimed handle owns it. Later publishes under that handle need its owner or an authorized publisher, even for a new slug. The `rome` handle is reserved. Otherwise the store refuses with `403`.
 - **The version is new.** `version` in `app.yaml` must be strict SemVer and higher than every version already in the listing.
 
 ## Prepare the listing
@@ -31,7 +31,7 @@ Write both as product copy for users: what the app does, its main features, and 
    - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
 
      ```bash
-     curl -s -X POST "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/apps/<encoded appId>/publish"
+     curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/apps/<encoded appId>/publish"
      ```
 
      A `201` returns the listing id and the published version. On an error, read the `error` text before you act, and do not retry blindly:
@@ -40,10 +40,12 @@ Write both as product copy for users: what the app does, its main features, and 
      |---|---|---|
      | `404` | The app is not installed. | Install it from source first. |
      | `409` | The packed artifact is missing or was changed after the install. | Reinstall from source, then publish again. |
-     | `409` | The app was not developed here, or it is not in the `installed` state. | Stop. Tell the guardian. A reinstall does not fix this. |
+     | `409` "not developed on this instance" | The app came from the Store or ships with Rome. | Stop. Tell the guardian. A reinstall does not fix this. |
+     | `409` "is broken" | The app failed to load. | Reinstall from source, then publish again. |
+     | `409` "is installing" or "is uninstalling" | A lifecycle change is running. | Wait for it to finish, then publish again. |
      | `412` | This Rome is not connected to a Rome account. | Tell the guardian to connect it. |
      | `403` naming credentials | The store refuses this instance's credential. | Tell the guardian to reconnect the instance to its Rome account. |
-     | `400`, `403` | The store refused the version or the listing id. | Raise the version, or tell the guardian the id belongs to another account. |
+     | `400`, `403` | The store refused the version or the handle. | Raise the version, or tell the guardian that this account cannot publish under the handle. |
      | `501` | This Rome has no App Store origin configured. | Tell the guardian. |
      | `502` | The store was unreachable or failed. | Retry once after a short wait. If it fails again, tell the guardian. |
 4. Verify with `system:app_store_search` that the listing shows the new version. Report the listing id and version to the guardian.
