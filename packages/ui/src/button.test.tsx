@@ -19,6 +19,13 @@ describe("Button press feedback", () => {
     expect(pressScale(screen.getByRole("button"))).toHaveLength(1);
   });
 
+  it("keeps popup triggers and ButtonGroup segments out of the scale", () => {
+    render(<Button>Save</Button>);
+    const [token] = pressScale(screen.getByRole("button"));
+    expect(token).toContain("not-aria-[haspopup]");
+    expect(token).toContain("not-in-data-[slot=button-group]");
+  });
+
   it("drops the scale when press is none", () => {
     render(<Button press="none">Save</Button>);
     expect(pressScale(screen.getByRole("button"))).toEqual([]);
