@@ -191,7 +191,7 @@ export function describeSchedule(trigger: ScheduleTrigger): string {
     return `On a schedule at ${time}${suffix}`;
   }
 
-  // Legacy: localTime only, no rrule/date.
+  // A draft with no rrule/date: the server pins it to the next localTime.
   return `Once at ${time}${suffix}`;
 }
 

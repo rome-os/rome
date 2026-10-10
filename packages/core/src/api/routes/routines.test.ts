@@ -83,10 +83,12 @@ describe("Routines API", () => {
   let testDb: TestDb;
   let app: Hono;
   let routineEngine: RoutineEngine;
+  let settingsRepo: Awaited<ReturnType<typeof buildTestDeps>>["settingsRepo"];
 
   beforeEach(async () => {
     testDb = createTestDb();
     const baseDeps = await buildTestDeps(testDb.db);
+    settingsRepo = baseDeps.settingsRepo;
     // Wire a minimal RoutineEngine so route-level trigger validation
     // (hasProvider) succeeds for "schedule". CRUD tests don't fire routines.
     routineEngine = new RoutineEngine(
@@ -165,6 +167,20 @@ describe("Routines API", () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it("rejects a non-string rrule", async () => {
+    const res = await app.request("/routines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "bad-rrule",
+        actionName: "send_message",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "12:00", rrule: 5 },
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("schedule.rrule must be a string");
   });
 
   it("rejects args that violate the registered action's full JSON Schema", async () => {
@@ -515,6 +531,43 @@ describe("Routines API", () => {
       }),
     });
     expect(res.status).toBe(201);
+  });
+
+  it("dates a floating schedule with neither date nor rrule to the next localTime in the guardian's zone", async () => {
+    // At 16:00Z it is already 2026-06-24 01:00 in Tokyo, so 09:00 is still
+    // ahead today and 00:30 has passed until tomorrow. The UTC tzid is only a
+    // seed: a floating one-off follows the guardian.
+    await settingsRepo.set("guardianTimezone", "Asia/Tokyo");
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
+      const create = async (localTime: string, extra: Record<string, string> = {}) => {
+        const res = await app.request("/routines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: `next-${localTime}`,
+            trigger: {
+              type: "schedule",
+              tzid: "UTC",
+              tzMode: "floating",
+              localTime,
+              ...extra,
+            },
+            actionName: "anything",
+          }),
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { trigger: Trigger }).trigger;
+      };
+      const pinned = { tzid: "Asia/Tokyo", tzMode: "fixed" };
+      expect(await create("09:00")).toMatchObject({ date: "2026-06-24", ...pinned });
+      expect(await create("00:30")).toMatchObject({ date: "2026-06-25", ...pinned });
+      expect(await create("09:00", { rrule: "" })).not.toHaveProperty("rrule");
+      expect(await create("09:00", { rrule: " " })).not.toHaveProperty("rrule");
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("judges a dated one-off against its tzid, not UTC", async () => {
@@ -984,6 +1037,32 @@ describe("Routines fire path", () => {
     expect(harness.manualProvider.isActive(id)).toBe(true);
   });
 
+  it("PATCH enabled=true refuses a one-off whose date has passed", async () => {
+    registerStubAction(harness.actionRegistry, "noop_action");
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T08:00:00Z"));
+      const { id } = await createRoutineViaApi(harness.app, {
+        name: "spent-one-off",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" },
+        actionName: "noop_action",
+        enabled: false,
+      });
+
+      rs.setSystemTime(new Date("2026-06-24T08:00:00Z"));
+      const res = await harness.app.request(`/routines/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toMatch(/which has passed/);
+      expect(harness.manualProvider.isActive(id)).toBe(false);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("PATCH trigger re-activates the routine with the new trigger spec", async () => {
     registerStubAction(harness.actionRegistry, "noop_action");
     const { id } = await createRoutineViaApi(harness.app, {
@@ -999,6 +1078,7 @@ describe("Routines fire path", () => {
       tzid: "Asia/Shanghai",
       tzMode: "fixed",
       localTime: "23:00",
+      rrule: "FREQ=DAILY",
     };
     await harness.app.request(`/routines/${id}`, {
       method: "PATCH",

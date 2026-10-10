@@ -1,6 +1,6 @@
 import { Cron } from "croner";
 import type { TriggerProvider } from "./trigger-provider.js";
-import type { Routine, ScheduleTrigger } from "./types.js";
+import type { Routine, ScheduleTrigger, Trigger } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { withoutSessionActor } from "../lib/session-actor.js";
 import { createLogger } from "../logger.js";
@@ -74,32 +74,10 @@ export class ScheduleTriggerProvider implements TriggerProvider {
             error: err instanceof Error ? err.message : String(err),
           });
         }
-      } else if (!trigger.rrule) {
-        // Legacy one-off (no rrule, no date): "run once at the next HH:mm".
-        // Behavior preserved for back-compat — new callers should use `date`.
-        const cronPattern = this.localTimeToCron(trigger.localTime);
-        const job = withoutSessionActor(
-          () =>
-            new Cron(cronPattern, { timezone: tzid, maxRuns: 1 }, async () => {
-              try {
-                await fire({ scheduledTime: new Date().toISOString() });
-                // Mark the one-off routine as consumed: clear nextRunAt,
-                // disable it, and remove the in-memory job so a process
-                // restart won't re-fire it.
-                await this.routinesRepo.updateNextRun(routine.id, null);
-                await this.routinesRepo.update(routine.id, { enabled: false });
-                this.jobs.delete(routine.id);
-              } catch (err) {
-                log.error("one-off schedule trigger failed", {
-                  routineId: routine.id,
-                  name: routine.name,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }),
-        );
-        this.jobs.set(routine.id, job);
       } else {
+        // Every writer resolves a one-off to a `date`, so a schedule without
+        // one must recur.
+        if (!trigger.rrule) throw new Error("schedule trigger has neither date nor rrule");
         const cronPattern = this.rruleToCron(trigger.rrule, trigger.localTime);
         const job = withoutSessionActor(
           () =>
@@ -166,11 +144,6 @@ export class ScheduleTriggerProvider implements TriggerProvider {
       job.stop();
     }
     this.jobs.clear();
-  }
-
-  private localTimeToCron(localTime: string): string {
-    const [hour, minute] = localTime.split(":").map(Number);
-    return `${minute} ${hour} * * *`;
   }
 
   private rruleToCron(rrule: string, localTime: string): string {
@@ -265,4 +238,48 @@ export function parseDateAndLocalTime(date: string, localTime: string, tzid: str
   );
   const offsetMs = tzWallMs - guessUtcMs;
   return new Date(guessUtcMs - offsetMs);
+}
+
+/** The "YYYY-MM-DD" in `tzid` of the next time the wall clock there reads
+ * `localTime`: today if that moment is still ahead of `now`, else tomorrow. */
+export function nextDateForLocalTime(localTime: string, tzid: string, now = new Date()): string {
+  const today = calendarDate(now, tzid);
+  if (parseDateAndLocalTime(today, localTime, tzid).getTime() > now.getTime()) return today;
+  const [year, month, day] = today.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
+}
+
+/** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
+function calendarDate(at: Date, tzid: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tzid,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(at);
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
+/** Store "once at the next `localTime`" (a schedule with neither `date` nor
+ * `rrule`) as the dated one-off it is, pinned `fixed`. A `floating` request
+ * follows the guardian, so it is dated in, and pinned to, the guardian's zone.
+ * A blank `rrule` is dropped so a schedule never carries both fields. Every
+ * writer goes through this, so the scheduler only sees dated or recurring
+ * schedules. Expects a validated `localTime` and `tzid`. */
+export async function resolveOneOffDate(
+  trigger: Trigger,
+  guardianTimezone: () => Promise<string>,
+): Promise<Trigger> {
+  if (trigger.type !== "schedule") return trigger;
+  const { rrule, ...rest } = trigger;
+  const schedule: ScheduleTrigger = rrule?.trim() ? trigger : rest;
+  if (schedule.date || schedule.rrule) return schedule;
+  const tzid = schedule.tzMode === "floating" ? await guardianTimezone() : schedule.tzid;
+  return {
+    ...schedule,
+    tzid,
+    tzMode: "fixed",
+    date: nextDateForLocalTime(schedule.localTime, tzid),
+  };
 }

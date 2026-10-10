@@ -4,7 +4,11 @@ import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
-import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
+import {
+  parseDateAndLocalTime,
+  resolveOneOffDate,
+} from "../../routines/schedule-trigger-provider.js";
+import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
 import type { ApiDeps } from "../deps.js";
 import type { Trigger } from "../../routines/types.js";
 
@@ -81,6 +85,9 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
     const [h, m] = trigger.localTime.split(":").map(Number);
     if (h < 0 || h > 23 || m < 0 || m > 59) {
       return "schedule.localTime hour/minute out of range";
+    }
+    if (trigger.rrule !== undefined && typeof trigger.rrule !== "string") {
+      return "schedule.rrule must be a string";
     }
     if (trigger.date !== undefined) {
       if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
@@ -294,6 +301,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (triggerError) {
       return c.json({ error: triggerError }, 400);
     }
+    body.trigger = await resolveOneOffDate(body.trigger, () =>
+      resolveGuardianTimezone(deps.settingsRepo),
+    );
     if (body.trigger.type === "schedule" && body.trigger.date) {
       body.trigger.tzMode = "fixed";
       const datedError = datedOneOffError(body.trigger);
@@ -345,6 +355,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (triggerError) {
         return c.json({ error: triggerError }, 400);
       }
+      body.trigger = await resolveOneOffDate(body.trigger, () =>
+        resolveGuardianTimezone(deps.settingsRepo),
+      );
       // A dated one-off pins to a fixed absolute zone, same as POST,
       // and must not be re-pointed to an already-past instant.
       if (body.trigger.type === "schedule" && body.trigger.date) {
@@ -377,6 +390,27 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       );
       if (argsError) {
         return c.json({ error: argsError }, 400);
+      }
+    }
+
+    // Turning a one-off back on after its date has passed would leave it
+    // enabled with nothing left to fire.
+    if (body.enabled === true && body.trigger === undefined) {
+      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
+      const trigger = current ? toRoutine(current).trigger : undefined;
+      if (trigger?.type === "schedule" && trigger.date) {
+        const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+        if (Number.isNaN(fireAt.getTime())) {
+          return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
+        }
+        if (fireAt.getTime() < Date.now()) {
+          return c.json(
+            {
+              error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
+            },
+            400,
+          );
+        }
       }
     }
 

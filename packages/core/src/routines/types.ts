@@ -9,10 +9,9 @@ export interface ScheduleTrigger {
    * change it. `fixed` is the "absolute zone" choice: it pins the schedule to
    * the literal `tzid` forever. DST is handled either way by the cron layer. */
   tzMode: "fixed" | "floating";
-  /** Specific calendar date for a true one-off, "YYYY-MM-DD" interpreted in
-   * `tzid`. Mutually exclusive with `rrule`. When neither `date` nor `rrule`
-   * is set, the schedule fires once at the next matching `localTime`
-   * (back-compat). */
+  /** Calendar date for a one-off, "YYYY-MM-DD" interpreted in `tzid`.
+   * Mutually exclusive with `rrule`. A stored schedule has one or the other:
+   * writers resolve "once at the next `localTime`" to a date. */
   date?: string;
   rrule?: string; // iCal RRULE — recurring; mutually exclusive with `date`
 }

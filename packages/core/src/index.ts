@@ -128,7 +128,11 @@ import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { EventCatalog } from "./event-catalog.js";
-import { ScheduleTriggerProvider } from "./routines/schedule-trigger-provider.js";
+import {
+  resolveOneOffDate,
+  ScheduleTriggerProvider,
+} from "./routines/schedule-trigger-provider.js";
+import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
@@ -846,6 +850,8 @@ async function main() {
   });
   const appActionDeps = {
     agentRunner,
+    resolveOneOffDate: (trigger: Trigger) =>
+      resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
     channelsService,
     conversationSettings,
