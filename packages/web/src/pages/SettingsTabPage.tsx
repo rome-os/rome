@@ -207,33 +207,7 @@ function tabToSlug(tab: Tab): string {
 
 export function normalizeTab(value: string | null): Tab | null {
   if (!value) return null;
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[_\s]+/g, "-");
-  if (normalized === "session" || normalized === "tailscale") {
-    return "Advanced";
-  }
-  if (normalized === "integrations") {
-    return "Connections";
-  }
-  const match = TABS.find((tab) => tab.toLowerCase().replace(/\s+/g, "-") === normalized);
-  return match ?? null;
-}
-
-// Tabs whose controls were relocated to the Inbox page (/apps/inbox). Old
-// bookmarks/links to these slugs redirect there instead of silently rendering
-// an unrelated settings tab.
-const TABS_MOVED_TO_INBOX = new Set(["trust", "sentinel", "sentinel-log"]);
-
-function isMovedToInbox(value: string | null | undefined): boolean {
-  if (!value) return false;
-  return TABS_MOVED_TO_INBOX.has(
-    value
-      .trim()
-      .toLowerCase()
-      .replace(/[_\s]+/g, "-"),
-  );
+  return TABS.find((tab) => tabToSlug(tab) === value) ?? null;
 }
 
 // ── Component ──────────────────────────────────────────
@@ -241,7 +215,6 @@ function isMovedToInbox(value: string | null | undefined): boolean {
 export default function SettingsPage() {
   const { t } = useTranslation("settings");
   const params = useParams<{ tab?: string }>();
-  const redirectToInbox = isMovedToInbox(params.tab);
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
   useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
@@ -360,12 +333,6 @@ export default function SettingsPage() {
   }
 
   // ── Render ──
-
-  // Controls relocated to the Inbox page — send legacy /settings/{trust,sentinel,
-  // sentinel-log} links there rather than rendering an unrelated tab.
-  if (redirectToInbox) {
-    return <Navigate to="/apps/inbox" replace />;
-  }
 
   // Unknown settings slugs are not pages. Redirect them to the canonical
   // default instead of rendering Appearance under a stale URL.
@@ -2562,7 +2529,7 @@ function TailnetRestrictionSection() {
 
       let handoff: SessionHandoffPayload | null = null;
       if (needsCrossHostHandoff) {
-        handoff = await requestSessionHandoff(targetHost, "/settings/tailscale");
+        handoff = await requestSessionHandoff(targetHost, "/settings/advanced");
         if (!handoff) {
           throw new Error(t("publicAccess.handoffFailed"));
         }
