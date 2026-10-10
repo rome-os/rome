@@ -894,11 +894,15 @@ async function openSession(
   // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
-  // A subagent opens with its parent's thread context, so the conversation's
-  // selection is the parent's and never applies to it.
+  // Only the chat's own session reads it: subagents and app sessions open with
+  // the chat's thread context under keys of their own.
   const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
   const persistedSelection =
-    init.resumeSessionId && !sessionPin && !init.selectionId && !opts.isSubagent && conversationId
+    init.resumeSessionId &&
+    !sessionPin &&
+    !init.selectionId &&
+    conversationId &&
+    key.channelThreadKey === `webchat:${conversationId}`
       ? resolveWebchatLargeModelSelection(
           (await deps.webchatRepo?.getSession(conversationId))?.largeModelSelection,
         )

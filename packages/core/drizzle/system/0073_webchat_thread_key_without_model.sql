@@ -13,3 +13,22 @@ SET `channel_thread_key` =
     )
   END
 WHERE `channel_thread_key` LIKE 'webchat:%:large-model:%';
+--> statement-breakpoint
+-- A chat that had rows under both key shapes now has two active rows under
+-- one key. Keep the one the session lookup picks (newest created_at, then
+-- last_active_at) and complete the rest.
+UPDATE `sessions`
+SET `status` = 'completed'
+WHERE `status` = 'active'
+  AND `channel_thread_key` LIKE 'webchat:%'
+  AND EXISTS (
+    SELECT 1 FROM `sessions` AS `newer`
+    WHERE `newer`.`status` = 'active'
+      AND `newer`.`agent_name` = `sessions`.`agent_name`
+      AND `newer`.`channel_thread_key` = `sessions`.`channel_thread_key`
+      AND (
+        `newer`.`created_at` > `sessions`.`created_at`
+        OR (`newer`.`created_at` = `sessions`.`created_at` AND `newer`.`last_active_at` > `sessions`.`last_active_at`)
+        OR (`newer`.`created_at` = `sessions`.`created_at` AND `newer`.`last_active_at` = `sessions`.`last_active_at` AND `newer`.`id` > `sessions`.`id`)
+      )
+  );
