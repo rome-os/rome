@@ -400,6 +400,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       const trigger = current ? toRoutine(current).trigger : undefined;
       if (trigger?.type === "schedule" && trigger.date) {
         const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+        if (Number.isNaN(fireAt.getTime())) {
+          return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
+        }
         if (fireAt.getTime() < Date.now()) {
           return c.json(
             {
@@ -407,10 +410,6 @@ export function routinesRoutes(deps: ApiDeps): Hono {
             },
             400,
           );
-        }
-        const datedError = datedOneOffError(trigger);
-        if (datedError) {
-          return c.json({ error: datedError }, 400);
         }
       }
     }
