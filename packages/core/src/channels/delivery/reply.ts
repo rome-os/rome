@@ -123,12 +123,17 @@ type Plan =
 
 /** The most a reply waits out platform rate limits, in all. A guardian is not
  *  served by a reply that arrives after a flood wait of minutes. Past it, the
- *  reply fails `rate-limited`, which a caller can send whole instead. */
+ *  reply fails `rate-limited`. A caller can send the reply whole only when no
+ *  part was accepted, which is when the outcome is `failed`. */
 const MAX_RATE_LIMIT_WAIT_MS = 60_000;
 
 /** The least a rate limit counts for. A platform that names no wait, or none
  *  at all, would otherwise be tried again at once, for ever. */
 const MIN_RATE_LIMIT_WAIT_MS = 1000;
+
+/** How many times in a row a write that certainly did not arrive is tried
+ *  again, with a wait that doubles from a second, before the reply gives up. */
+const MAX_UNAVAILABLE_RETRIES = 3;
 
 /** Consecutive edits with an unknown result before the reply gives up. */
 const MAX_UNKNOWN_EDITS = 3;
@@ -217,6 +222,8 @@ export class ReplyDelivery {
   private failure?: ReplyOutcome["failure"];
   private unknownEdits = 0;
   private rateLimitedMs = 0;
+  /** Writes in a row that did not arrive and were tried again. */
+  private unavailableRetries = 0;
   /** When the pause for the reply's own rate limits ends. */
   private ownPausedUntil = 0;
   /** The transport call of the write that just timed out, still running. */
@@ -644,6 +651,7 @@ export class ReplyDelivery {
         );
         // Later messages follow the first wherever it landed.
         this.conversation = receipt.conversationId;
+        this.unavailableRetries = 0;
         const part: Part = {
           start: plan.start,
           end: plan.end,
@@ -686,6 +694,7 @@ export class ReplyDelivery {
       if (!part.settled) part.end = plan.end;
       if (plan.settle && !part.settled) this.settlePart(part, plan.end);
       this.unknownEdits = 0;
+      this.unavailableRetries = 0;
       report("accepted", partIndex);
     } catch (error) {
       const failure = asDeliveryFailure(error);
@@ -739,6 +748,14 @@ export class ReplyDelivery {
         return;
       }
       this.rateLimitedMs += wait;
+      return;
+    }
+    if (failure.kind === "unavailable" && this.unavailableRetries < MAX_UNAVAILABLE_RETRIES) {
+      // The write did not arrive, so doing it again cannot show anything twice.
+      // The connection is the account's, so the account waits a little, longer
+      // each time, instead of every conversation trying at once.
+      this.options.pacer.pause(1000 * 2 ** this.unavailableRetries);
+      this.unavailableRetries += 1;
       return;
     }
     this.fail({ kind: failure.kind, message: failure.message });

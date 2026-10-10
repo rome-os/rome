@@ -1043,15 +1043,54 @@ describe("ReplyDelivery", () => {
     });
   });
 
-  it("fails, and does not report unknown, when the platform could not be reached", async () => {
-    // A write that certainly did not arrive may be sent again, so a caller can send the reply whole.
-    platform.failures.push({
-      write: "create",
-      failure: new DeliveryFailure("unavailable", "getaddrinfo ENOTFOUND"),
+  describe("a write that certainly did not arrive", () => {
+    const unreachable = () => new DeliveryFailure("unavailable", "getaddrinfo EAI_AGAIN");
+
+    it("is tried again, so a brief outage in the middle of a reply does not cut it short", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello there my friend, nice day", "a"));
+      await advance(0);
+      // The edit that settles the first message meets an outage twice and then goes through.
+      platform.failures.push({ write: "edit", failure: unreachable() });
+      platform.failures.push({ write: "edit", failure: unreachable() });
+      delivery.accept(text("Hello there my friend, nice day and more", "a"));
+      const finished = delivery.finish();
+      await advance(10_000);
+
+      const outcome = await finished;
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown.join("")).toBe("Hello there my friend, nice day and more");
     });
+
+    it("is tried again a few times and then fails, so an outage that lasts cannot hold the reply", async () => {
+      for (let i = 0; i < 10; i++)
+        platform.failures.push({ write: "create", failure: unreachable() });
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(30_000);
+
+      const outcome = await finished;
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "unavailable" } });
+      // The first try and three more, and no write ever showed.
+      expect(platform.failures).toHaveLength(6);
+      expect(platform.messages).toHaveLength(0);
+    });
+  });
+
+  it("fails, and does not report unknown, when the platform could not be reached", async () => {
+    // The outage lasts through the first try and every try again. A write that certainly did
+    // not arrive may be sent again, so a caller can send the reply whole.
+    for (let i = 0; i < 4; i++)
+      platform.failures.push({
+        write: "create",
+        failure: new DeliveryFailure("unavailable", "getaddrinfo ENOTFOUND"),
+      });
     const delivery = reply({ editIntervalMs: 0 });
     delivery.accept(result("Hello"));
-    const outcome = await delivery.finish();
+    const finished = delivery.finish();
+    await advance(10_000);
+    const outcome = await finished;
 
     expect(outcome).toMatchObject({ status: "failed", failure: { kind: "unavailable" } });
     expect(outcome.parts).toEqual([]);

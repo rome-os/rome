@@ -124,7 +124,10 @@ export interface DeliveryTransport {
  *   allow).
  * - `unavailable`: the write certainly did not arrive, because the platform
  *   could not be reached or the write never left its queue. It may be sent
- *   again, and a caller can send the reply whole.
+ *   again, and a reply does so a few times before it gives up. A caller can
+ *   send the reply whole only when no part was accepted, which is when the
+ *   outcome is `failed`. When some part was, the outcome is `partial` and the
+ *   guardian already sees that part, so sending the whole would repeat it.
  * - `unknown`: the write may or may not have happened (a timeout, a lost
  *   answer). A create that ends this way is never repeated.
  */
