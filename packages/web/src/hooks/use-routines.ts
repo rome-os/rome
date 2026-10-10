@@ -25,6 +25,7 @@ export function useRoutines() {
     routines: query.data ?? null,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
+    isFetchedAfterMount: query.isFetchedAfterMount,
     error: query.error,
     refetch: query.refetch,
   };

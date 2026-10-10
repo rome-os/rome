@@ -572,8 +572,9 @@ export interface CreateRoutinePayload {
   trigger: unknown;
   actionName: string;
   args: Record<string, unknown>;
-  /** Unique routine key. A repeat create with the same key returns the
-   * routine that already holds it instead of a duplicate. */
+  /** Unique routine key; the route accepts only `chat-routine:<id>` keys
+   * (other prefixes belong to apps' managed routines). A repeat create with
+   * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
 }
 

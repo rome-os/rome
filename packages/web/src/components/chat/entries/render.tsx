@@ -169,7 +169,9 @@ export function renderSingleEntry(
         <RoutineDraftCard
           key={`routine-${block.toolUseId}`}
           draft={block.draft}
-          routineKey={block.routineKey}
+          // Parts can arrive unvalidated (e.g. via channels.send); a malformed
+          // key falls back to the keyless card rather than failing every create.
+          routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
         />
       );
     case "submission_card":
