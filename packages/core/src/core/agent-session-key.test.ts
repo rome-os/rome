@@ -2,7 +2,9 @@ import { describe, expect, it } from "@rstest/core";
 import {
   adhocSessionKey,
   forkSessionKey,
+  LARGE_MODEL_MARKER,
   subagentSessionKey,
+  WEBCHAT_KEY_PREFIX,
   webchatSessionKey,
 } from "./agent-session-key.js";
 
@@ -12,6 +14,8 @@ describe("agent session keys", () => {
   it("spells webchat keys as stored rows expect", () => {
     expect(webchatSessionKey("chat-1")).toBe("webchat:chat-1");
     expect(webchatSessionKey("chat-1", "sel-a")).toBe("webchat:chat-1:large-model:sel-a");
+    expect(webchatSessionKey("chat-1", "sel-a").startsWith(WEBCHAT_KEY_PREFIX)).toBe(true);
+    expect(webchatSessionKey("chat-1", "sel-a")).toContain(LARGE_MODEL_MARKER);
   });
 
   it("nests subagent and fork keys under their parent", () => {

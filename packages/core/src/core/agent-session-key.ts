@@ -4,12 +4,16 @@ import { v4 as uuidv4 } from "uuid";
 // a key carries and serializes to the exact string stored in
 // `sessions.channel_thread_key`, so existing rows keep resolving.
 
+/** Parsers that read a key back until callers use the stored conversation. */
+export const WEBCHAT_KEY_PREFIX = "webchat:";
+export const LARGE_MODEL_MARKER = ":large-model:";
+
 /** A webchat conversation's key. Each model choice keeps its own provider
  *  context, so a selected large model gets a key of its own. */
 export function webchatSessionKey(conversationId: string, modelSelectionId?: string): string {
   return modelSelectionId
-    ? `webchat:${conversationId}:large-model:${modelSelectionId}`
-    : `webchat:${conversationId}`;
+    ? `${WEBCHAT_KEY_PREFIX}${conversationId}${LARGE_MODEL_MARKER}${modelSelectionId}`
+    : `${WEBCHAT_KEY_PREFIX}${conversationId}`;
 }
 
 /** A fresh subagent's key, nested under its parent's so it never reuses the
