@@ -114,7 +114,7 @@ body`;
 });
 
 describe("listCompanionFiles", () => {
-  it("lists every file beside SKILL.md, sorted, with nested paths", async () => {
+  it("lists every visible file beside SKILL.md, sorted, with nested paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "skill-companions-"));
     try {
       await writeFile(join(dir, "SKILL.md"), "---\nname: a\ndescription: b\n---");
@@ -124,6 +124,9 @@ describe("listCompanionFiles", () => {
       await writeFile(join(dir, "music", "track.md"), "x");
       await mkdir(join(dir, "node_modules", "pkg"), { recursive: true });
       await writeFile(join(dir, "node_modules", "pkg", "index.js"), "x");
+      await writeFile(join(dir, ".env"), "SECRET=x");
+      await mkdir(join(dir, ".git"));
+      await writeFile(join(dir, ".git", "HEAD"), "x");
 
       expect(await listCompanionFiles(dir)).toEqual([
         "PUBLISHING.md",

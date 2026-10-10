@@ -121,7 +121,7 @@ export class SkillCatalog {
 }
 
 const MAX_COMPANION_FILES = 200;
-const SKIPPED_COMPANION_DIRS = new Set(["node_modules", ".git"]);
+const SKIPPED_COMPANION_DIRS = new Set(["node_modules"]);
 
 /**
  * Lists the files a skill ships beside its SKILL.md (reference docs, assets),
@@ -142,6 +142,8 @@ export async function listCompanionFiles(skillDir: string): Promise<string[]> {
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     for (const entry of entries) {
       if (files.length >= MAX_COMPANION_FILES) return;
+      // Hidden entries (.DS_Store, a stray .env) are never skill docs.
+      if (entry.name.startsWith(".")) continue;
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!SKIPPED_COMPANION_DIRS.has(entry.name)) await walk(path);

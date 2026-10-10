@@ -55,18 +55,9 @@ export interface ActionMcpDefinition {
   inputSchema: Record<string, unknown>;
 }
 
-export interface SkillMcpDefinition {
-  name: string;
-  description: string;
-  tools?: string[];
-  content: string;
-  /** Absolute skill directory; set only when the skill ships companion files. */
-  directory?: string;
-  /** Companion files relative to `directory`, returned by `read_skill`. */
-  files?: string[];
-  ownerType: "core" | "app";
-  ownerId: string;
-}
+// One definition, owned by the skill catalog that produces it.
+import type { SkillMcpDefinition } from "./skill-catalog.js";
+export type { SkillMcpDefinition };
 
 export interface HandbackSpec {
   /** JSON Schema describing a candidate shown for guardian approval. */
