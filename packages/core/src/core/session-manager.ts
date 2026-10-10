@@ -83,6 +83,7 @@ export class SessionManager {
       id: session.id,
       agentName: session.agentName,
       channelThreadKey: session.channelThreadKey,
+      conversationId: session.conversationId,
       status: session.status,
       workingDir: session.workingDir,
     });
