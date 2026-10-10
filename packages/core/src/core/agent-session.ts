@@ -587,17 +587,12 @@ export function createAgentSessionManager(
     }
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
-      const sess = await openSession(
-        deps,
-        key,
-        init ?? {},
-        {
-          preparedSessionId: resetChecked?.preparedSessionId,
-          keepAlive,
-          onClosed: onSessionClosed,
-          isSubagent,
-        },
-      );
+      const sess = await openSession(deps, key, init ?? {}, {
+        preparedSessionId: resetChecked?.preparedSessionId,
+        keepAlive,
+        onClosed: onSessionClosed,
+        isSubagent,
+      });
       sessions.set(k, sess);
       return sess;
     })();
