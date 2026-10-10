@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ApprovalsRepository } from "./approvals.js";
+import { ConversationSettingsRepository } from "../../conversation-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
 import {
@@ -80,6 +81,53 @@ describe("WebChatRepository", () => {
       ["later", "turn-2"],
       ["live", "live-turn"],
     ]);
+  });
+
+  // Every chat reader goes through the session kind, so a chat reads the same
+  // whichever type it is stored under, and a channel row that merely names a
+  // chat's address is never one.
+  it.each([
+    ["a webchat row", "webchat"],
+    ["a webchat channel row", "channel"],
+  ])("reads a chat stored as %s as a chat", async (_label, storedType) => {
+    await repo.createSession("chat-1", "Chat", undefined, "Rome", null, "/work/rome");
+    await repo.addMessage(
+      "m-1",
+      "chat-1",
+      "user",
+      JSON.stringify([{ type: "text", content: "find the needle" }]),
+    );
+    await testDb.db
+      .update(romeSessions)
+      .set({ type: storedType })
+      .where(eq(romeSessions.id, "chat-1"));
+    await repo.ensureChannelConversation({
+      channel: "webchat",
+      threadId: "chat-1",
+      agentName: "main",
+    });
+
+    const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);
+    expect((await repo.getSession("chat-1"))?.type).toBe("webchat");
+    expect(ids(await repo.listSessions())).toEqual(["chat-1"]);
+    expect(ids((await repo.listSessionsPage()).sessions)).toEqual(["chat-1"]);
+    expect(ids((await repo.listSessionsByProjectPath("/work/rome")).sessions)).toEqual(["chat-1"]);
+    expect((await repo.searchSessionMessages("needle")).map((hit) => hit.session.id)).toEqual([
+      "chat-1",
+    ]);
+    expect(
+      (await repo.getHistoryMessages(null, new Date(0))).map((message) => message.sessionId),
+    ).toEqual(["chat-1"]);
+
+    await repo.archiveSession("chat-1");
+    await repo.pinSession("chat-1");
+    const archived = await repo.getSession("chat-1");
+    expect(archived?.archivedAt).not.toBeNull();
+    expect(archived?.pinnedAt).not.toBeNull();
+    expect(ids(await repo.listSessions("archived"))).toEqual(["chat-1"]);
+
+    const settings = new ConversationSettingsRepository(testDb.db);
+    expect(settings.listKnown({})).toEqual([]);
   });
 
   it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {

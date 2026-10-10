@@ -139,11 +139,13 @@ export function createAction(
         sessionName = row?.name ?? null;
       } else {
         // rome_sessions also holds channel and background runs, including this
-        // review's own agent session; keep to the old webchat_sessions rows.
+        // review's own agent session; keep to guardian chats. A chat is stored
+        // either as a webchat row or as a webchat channel row addressed by its
+        // own id.
         const row = appContext.db.connection.get(
           sql`
             SELECT id, name FROM rome_sessions
-            WHERE type IN ('webchat', 'webchat_handoff')
+            WHERE (type IN ('webchat', 'webchat_handoff') OR (type = 'channel' AND source_channel = 'webchat' AND source_thread_id = id))
             ORDER BY created_at DESC
             LIMIT 1
           `,
