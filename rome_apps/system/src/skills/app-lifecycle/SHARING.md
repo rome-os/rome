@@ -1,6 +1,8 @@
 # Share an app through its URL
 
-Every Rome instance already has a public address, such as `https://<name>.romeos.cc`. To let other people use an installed app, change the app's **access mode**. The app keeps running on this Rome. It does not need a separate host, domain, or deployment.
+A hosted Rome instance already has a public address, such as `https://<name>.romeos.cc`. Your runtime context states it when one exists. To let other people use an installed app on such an instance, change the app's **access mode**. The app keeps running on this Rome. It does not need a separate host, domain, or deployment.
+
+A desktop or local self-hosted Rome may have no public address. On those instances, changing the access mode does not make the app reachable from outside. Check for a public address before you offer anyone a URL. If there is none, tell the guardian.
 
 ## Access modes
 
@@ -14,6 +16,8 @@ The access mode applies only to the public URL. The guardian's own dashboard acc
 
 The link to share is the standalone route `https://<public address>/full/apps/<appId>`. It opens the app without the dashboard around it.
 
+In every URL path, encode the app id as one segment with `encodeURIComponent(appId)`. A scoped id such as `@alice/notes` becomes `%40alice%2Fnotes`. JSON bodies, such as the access policy below, keep the plain id.
+
 ## Before you share
 
 The host checks the access mode before a request reaches the app. After that, every visitor reaches the same handlers as the guardian. Check these before a mode other than `private` goes on:
@@ -26,10 +30,10 @@ The host checks the access mode before a request reaches the app. After that, ev
 
 The guardian can do it: open **Apps**, select the app, select **Access**, choose the mode, and copy the link.
 
-When the guardian asks you to do it for a specific app and mode, use the loopback API. The policy for all apps is one document, so read it, change only this app, and write the whole document back:
+When the guardian asks you to do it for a specific app and mode, use the loopback API. Its port is `INTERNAL_API_PORT`, 4141 by default. The policy for all apps is one document, so read it, change only this app, and write the whole document back:
 
 ```bash
-curl -s http://127.0.0.1:4141/api/public-access
+curl -s "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/public-access"
 # {"enableAccessControl":false,"allowedApps":[...],"cloudEmailAccess":{...}}
 ```
 
@@ -40,7 +44,7 @@ curl -s http://127.0.0.1:4141/api/public-access
 Keep `enableAccessControl` and every other app's entry unchanged. Then send the document:
 
 ```bash
-curl -s -X PUT http://127.0.0.1:4141/api/public-access \
+curl -s -X PUT "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/public-access" \
   -H 'content-type: application/json' -d @policy.json
 ```
 
@@ -51,7 +55,9 @@ Use only this endpoint. A write to `publicAccess` through `/api/settings` is rej
 Test from outside, without the guardian's session, against the public address. The page shell loads for every app, so test the app's API, not the page:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://<public address>/api/apps/<appId>/<any route>
+curl -s -w '\n%{http_code}\n' https://<public address>/api/apps/<encoded appId>/<any route>
 ```
 
-A `private` app returns `401`. A `public` app reaches the handler (a missing route returns `404`). Owner-only routes must return `403` to a visitor.
+- A `private` app is refused before it reaches the handler. Usually this is `401`. When `enableAccessControl` is on, the proxy returns `403` with `"error":"not_public"` instead.
+- A `public` app reaches the handler. A missing route returns `404`.
+- An owner-only route returns `403` to a visitor from the app's own handler. Its body is the app's error, not `not_public`.
