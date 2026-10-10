@@ -13,10 +13,10 @@ There is no review queue. If the store accepts the upload, the version is live a
 
 ## Prepare the listing
 
-The listing copy lives beside the app's source. It is uploaded separately from the installable bundle:
+The listing copy lives beside the app's source in two places:
 
-- `.rome_store/rome_store.yaml`: `title`, `description`, `long_description`, `categories`, `keywords`, optional `image` and `media`, and `preview` / `noindex`.
-- `README.md` at the app root: the body of the store page.
+- `.rome_store/rome_store.yaml`: `title`, `description`, `long_description`, `categories`, `keywords`, optional `image` and `media`, and `preview` / `noindex`. The `.rome_store/` folder is read from the source at publish time and uploaded beside the bundle.
+- `README.md` at the app root: the body of the store page. It is packed into the bundle at install, so a README change needs a reinstall.
 
 Write both as product copy for users: what the app does, its main features, and when to use it. Do not include file paths, schemas, or action names. Put screenshots and videos under `.rome_store/assets/` and reference them from `media`. The store's count, format, and size limits are listed in the `.rome_store` section of `REFERENCE.md` in the `coding:app_creation` skill directory. If the listing has no `image`, Rome generates a share card from the app's icon, name, and `tagline`.
 
@@ -25,7 +25,7 @@ Write both as product copy for users: what the app does, its main features, and 
 ## Publish
 
 1. Bump `version` in `app.yaml` and commit.
-2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). Always do this before you publish. The publish ships the artifact that was packed at the last install. It does not include source edits made after that install, including the version bump, and it gives no warning about them. Edits under `.rome_store/` alone do not need a reinstall, because the listing is read from the source at publish time.
+2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). Always do this before you publish. The publish ships the artifact that was packed at the last install. It does not include source edits made after that install, including the version bump, and it gives no warning about them. Edits under `.rome_store/` alone do not need a reinstall. A `README.md` edit does.
 3. Publish:
    - The guardian can open **Apps**, select the app, and select **Publish**.
    - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
