@@ -48,7 +48,11 @@ describe("undated one-off routine migration", () => {
     insert.run("pending-early", JSON.stringify({ ...schedule, localTime: "0:00" }), null);
     const tokyo = { ...schedule, tzid: "Asia/Tokyo", localTime: "23:59" };
     insert.run("pending-tokyo", JSON.stringify(tokyo), null);
-    insert.run("blank-rrule", JSON.stringify({ ...schedule, localTime: "23:59", rrule: " " }), null);
+    insert.run(
+      "blank-rrule",
+      JSON.stringify({ ...schedule, localTime: "23:59", rrule: " " }),
+      null,
+    );
     const recurring = JSON.stringify({ ...schedule, localTime: "09:00", rrule: "FREQ=DAILY" });
     const dated = JSON.stringify({ ...schedule, localTime: "09:00", date: "2099-01-01" });
     const manual = JSON.stringify({ type: "manual" });
