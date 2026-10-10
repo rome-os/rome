@@ -319,7 +319,12 @@ export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly romeSessionId?: string;
-  /** The conversation this session serves: the caller's, else the recorded one. */
+  /**
+   * The conversation this session serves: the caller's, else the recorded one.
+   * For identity and fork lineage only. A turn picks where it records through
+   * `resolveTurnConversation`, which leaves channel and webchat ones to their
+   * owners.
+   */
   readonly conversationId?: string;
   /**
    * The conversation the row recorded, looked up when no caller named one and
@@ -363,7 +368,8 @@ export interface AgentSessionManager {
   /**
    * Record the conversation a session serves, for callers that learn it only
    * after acquire (a subagent's conversation is minted under its own id).
-   * Never overwrites a recorded conversation.
+   * Never overwrites a recorded conversation. Only sessions cached by this
+   * manager see the new value, so call it on the manager that acquired them.
    */
   recordConversation(sessionId: string, conversationId: string): Promise<void>;
   shutdown(): Promise<void>;

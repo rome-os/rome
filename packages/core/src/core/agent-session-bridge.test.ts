@@ -178,9 +178,7 @@ describe("AgentSessionBridge conversation", () => {
       });
 
       await rs.waitFor(() =>
-        expect(sent).toEqual([
-          { romeSessionId: "child-chat", romeSessionType: "subagent" },
-        ]),
+        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
       );
       await rs.waitFor(async () => {
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);

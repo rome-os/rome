@@ -547,7 +547,7 @@ export class AgentRunner {
     }
 
     const persistTrace =
-      conversation.recorderOwned || (params.persistTrace ?? shouldPersistAgentTrace(threadContext));
+      params.persistTrace ?? (conversation.recorderOwned || shouldPersistAgentTrace(threadContext));
     const recorder =
       this.webchatRepo && persistTrace
         ? new AgentTraceRecorder({
