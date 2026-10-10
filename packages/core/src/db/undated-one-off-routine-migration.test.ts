@@ -77,6 +77,7 @@ describe("undated one-off routine migration", () => {
     expect(pendingDate("23:59", 1)).toContain(parsed("pending-tokyo").date);
     expect(parsed("refired").date).toBe(parsed("pending-late").date);
     expect(parsed("blank-rrule").date).toBe(parsed("pending-late").date);
+    expect(parsed("blank-rrule")).not.toHaveProperty("rrule");
     expect(triggers.recurring).toBe(recurring);
     expect(triggers.dated).toBe(dated);
     expect(triggers.manual).toBe(manual);

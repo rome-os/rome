@@ -14,10 +14,11 @@
 --   * every row → `fixed`, like any dated one-off. A `floating` row now fires
 --     in its stored `tzid` rather than the guardian's current zone.
 --
+-- A blank `rrule` goes, so the row holds only its date.
 -- substr('0' || ..., -5) pads a one-digit hour ("9:00") so the times compare
 -- as strings.
 UPDATE `routines`
-SET `trigger` = json_set(
+SET `trigger` = json_remove(json_set(
   `trigger`,
   '$.tzMode',
   'fixed',
@@ -34,7 +35,7 @@ SET `trigger` = json_set(
       CASE WHEN json_extract(`trigger`, '$.tzid') = 'UTC' THEN '+0 days' ELSE '+1 day' END
     )
   END
-)
+), '$.rrule')
 WHERE json_valid(`trigger`)
   AND json_extract(`trigger`, '$.type') = 'schedule'
   AND coalesce(json_extract(`trigger`, '$.date'), '') = ''

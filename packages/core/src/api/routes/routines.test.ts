@@ -523,13 +523,19 @@ describe("Routines API", () => {
     rs.useFakeTimers({ shouldAdvanceTime: false });
     try {
       rs.setSystemTime(new Date("2026-06-23T16:00:00Z"));
-      const create = async (localTime: string) => {
+      const create = async (localTime: string, extra: Record<string, string> = {}) => {
         const res = await app.request("/routines", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: `next-${localTime}`,
-            trigger: { type: "schedule", tzid: "Asia/Tokyo", tzMode: "floating", localTime },
+            trigger: {
+              type: "schedule",
+              tzid: "Asia/Tokyo",
+              tzMode: "floating",
+              localTime,
+              ...extra,
+            },
             actionName: "anything",
           }),
         });
@@ -538,6 +544,7 @@ describe("Routines API", () => {
       };
       expect(await create("09:00")).toMatchObject({ date: "2026-06-24", tzMode: "fixed" });
       expect(await create("00:30")).toMatchObject({ date: "2026-06-25", tzMode: "fixed" });
+      expect(await create("09:00", { rrule: "" })).not.toHaveProperty("rrule");
     } finally {
       rs.useRealTimers();
     }

@@ -140,6 +140,7 @@ function datedOneOffError(trigger: {
 function resolveOneOffDate(trigger: Trigger): void {
   if (trigger.type === "schedule" && !trigger.date && !trigger.rrule) {
     trigger.date = nextDateForLocalTime(trigger.localTime, trigger.tzid);
+    delete trigger.rrule;
   }
 }
 
@@ -398,11 +399,13 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.enabled === true && body.trigger === undefined) {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
-      if (trigger?.type === "schedule") {
-        const datedError = datedOneOffError(trigger);
-        if (datedError) {
-          return c.json({ error: datedError }, 400);
-        }
+      if (trigger?.type === "schedule" && datedOneOffError(trigger)) {
+        return c.json(
+          {
+            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Edit its date to schedule it again.`,
+          },
+          400,
+        );
       }
     }
 
