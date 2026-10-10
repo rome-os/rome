@@ -4711,6 +4711,62 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("a legacy resume without a thread context reads the selection through its key", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const codexOpens: ModelSessionParams[] = [];
+      const claudeOpens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+
+      const repo = new SessionsRepository(testDb.db);
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
+      // while the stored provider thread is Codex. With the resume guard removed,
+      // the single precedence rule honors the persisted selection instead of
+      // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-no-context",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
+      const legacyId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-no-context",
+        status: "active",
+      });
+      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+
+      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader);
+      const messages = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+        }),
+      );
+
+      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // from Codex), never the stored-provider tier resolution.
+      expect(messages.find((message) => message.type === "result")).toMatchObject({
+        content: "claude-opus-4-8[1m]",
+      });
+      expect(claudeOpens).toHaveLength(1);
+      expect(claudeOpens[0]).toMatchObject({
+        model: "claude-opus-4-8[1m]",
+        isNewSession: true,
+      });
+      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(codexOpens).toHaveLength(0);
+      await manager.shutdown();
+    });
+
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
         codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
