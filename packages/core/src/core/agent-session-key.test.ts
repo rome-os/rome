@@ -3,7 +3,6 @@ import {
   adhocSessionKey,
   forkSessionKey,
   subagentSessionKey,
-  WEBCHAT_KEY_PREFIX,
   webchatSessionKey,
 } from "./agent-session-key.js";
 
@@ -12,7 +11,6 @@ import {
 describe("agent session keys", () => {
   it("spells webchat keys as stored rows expect", () => {
     expect(webchatSessionKey("chat-1")).toBe("webchat:chat-1");
-    expect(webchatSessionKey("chat-1").startsWith(WEBCHAT_KEY_PREFIX)).toBe(true);
   });
 
   it("nests subagent and fork keys under their parent", () => {

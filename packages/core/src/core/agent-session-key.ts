@@ -4,8 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 // a key carries and serializes to the exact string stored in
 // `sessions.channel_thread_key`, so existing rows keep resolving.
 
-// Read back by parsers until callers use the stored conversation.
-export const WEBCHAT_KEY_PREFIX = "webchat:";
+const WEBCHAT_KEY_PREFIX = "webchat:";
 
 /** A webchat conversation's key. */
 export function webchatSessionKey(conversationId: string): string {
