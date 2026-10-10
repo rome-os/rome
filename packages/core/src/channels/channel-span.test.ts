@@ -6,17 +6,71 @@ import {
   LoggerProvider,
   SimpleLogRecordProcessor,
 } from "@opentelemetry/sdk-logs";
-import type { ProviderAdapter } from "./adapter.js";
-import type { NormalizedMessage } from "./types.js";
-import { wrapProviderAdaptersWithSpans } from "../telemetry.js";
+import type { ChannelMessage, ConversationId, InboundEvent } from "@rome-os/app-runtime";
+import { withInboundSpans } from "../telemetry.js";
 import {
-  buildMessage,
+  createTestConnections,
+  createTestDb,
+  FakeTransport,
   installTestSpanHarness,
-  MockProviderAdapter,
+  noAccounts,
   type SpanHarness,
+  type TestDb,
 } from "../test/helpers.js";
+import { channelList } from "./channel-list.js";
 
-describe("channel:{name}.handle span (composition-root wrapping)", () => {
+// The inbound instrumentation the channel-message hook hears every channel
+// through, over the production channel list and fake transports.
+
+let testDb: TestDb | undefined;
+
+/**
+ * Subscribes `handler` to the instrumented `channel` and answers a delivery
+ * that resolves once the handler's spans have ended.
+ */
+function hear(
+  channel: string,
+  handler: (event: InboundEvent) => Promise<void> = async () => {},
+): (overrides?: Partial<ChannelMessage>) => Promise<void> {
+  testDb ??= createTestDb();
+  const transport = new FakeTransport(channel);
+  const channels = withInboundSpans(
+    channelList({
+      db: testDb.db,
+      whatsAppAccounts: noAccounts,
+      linkedInAccounts: noAccounts,
+      connections: { registry: createTestConnections(new Map([[channel, transport]])) },
+    }),
+    "channel-message",
+  );
+  const inbound = channels.find((each) => each.name === channel)?.inbound;
+  if (!inbound) throw new Error(`channel "${channel}" cannot receive`);
+  let settle: (() => void) | undefined;
+  inbound.subscribe(async (event) => {
+    try {
+      await handler(event);
+    } finally {
+      settle?.();
+    }
+  });
+  return async (overrides = {}) => {
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    await transport.receive(overrides);
+    await settled;
+    // The spans end in the microtasks after the handler settles, and a
+    // macrotask runs only once those have drained.
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+}
+
+afterEach(() => {
+  testDb?.close();
+  testDb = undefined;
+});
+
+describe("channel:{name}.handle span", () => {
   // `node` kind installs an AsyncHooks context manager so the
   // hook→channel parent-child link survives the await inside withRomeSpan.
   let harness: SpanHarness;
@@ -32,33 +86,26 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
     await harness.shutdown();
   });
 
-  async function findChannelSpans(channel: string): Promise<ReadableSpan[]> {
+  async function spansNamed(name: string): Promise<ReadableSpan[]> {
     const all = await harness.finishedSpans();
-    return all.filter((span) => span.name === `channel:${channel}.handle`);
+    return all.filter((span) => span.name === name);
   }
 
-  it("emits a channel:{name}.handle span per handler invocation with normalized-message attrs", async () => {
-    const adapter = new MockProviderAdapter("telegram");
-    const adapters = new Map<string, ProviderAdapter>([["telegram", adapter]]);
-    wrapProviderAdaptersWithSpans(adapters);
-
+  it("emits a channel:{name}.handle span per handled message with its attrs", async () => {
     const seen: string[] = [];
-    adapter.onMessage(async (msg: NormalizedMessage) => {
-      seen.push(msg.id);
+    const deliver = hear("telegram", async ({ message }) => {
+      seen.push(message.messageId);
     });
 
-    await adapter.simulateMessage(
-      buildMessage({
-        channel: "telegram",
-        threadId: "chat-42",
-        channelUserId: "user-7",
-        text: "hi",
-      }),
-    );
+    await deliver({
+      messageId: "msg-1",
+      conversationId: "chat-42" as ConversationId,
+      senderId: "user-7",
+      text: "hi",
+    });
 
-    expect(seen).toHaveLength(1);
-
-    const spans = await findChannelSpans("telegram");
+    expect(seen).toEqual(["msg-1"]);
+    const spans = await spansNamed("channel:telegram.handle");
     expect(spans).toHaveLength(1);
     const attrs = spans[0].attributes;
     expect(attrs["channel.name"]).toBe("telegram");
@@ -67,43 +114,69 @@ describe("channel:{name}.handle span (composition-root wrapping)", () => {
   });
 
   it("parents the hook:channel-message span under channel:{name}.handle", async () => {
-    const adapter = new MockProviderAdapter("webchat");
-    const adapters = new Map<string, ProviderAdapter>([["webchat", adapter]]);
-    wrapProviderAdaptersWithSpans(adapters);
+    const deliver = hear("discord");
+    await deliver();
 
-    adapter.onMessage(async () => {});
-    await adapter.simulateMessage(buildMessage({ channel: "webchat" }));
-
-    const all = await harness.finishedSpans();
-    const channelSpan = all.find((s) => s.name === "channel:webchat.handle");
-    const hookSpan = all.find((s) => s.name === "hook:channel-message");
+    const [channelSpan] = await spansNamed("channel:discord.handle");
+    const [hookSpan] = await spansNamed("hook:channel-message");
     expect(channelSpan).toBeDefined();
     expect(hookSpan).toBeDefined();
-    expect(hookSpan!.parentSpanContext?.spanId).toBe(channelSpan!.spanContext().spanId);
+    expect(hookSpan.parentSpanContext?.spanId).toBe(channelSpan.spanContext().spanId);
   });
 
-  it("records handler exceptions on the channel span (status=ERROR, exception event)", async () => {
-    const adapter = new MockProviderAdapter("discord");
-    const adapters = new Map<string, ProviderAdapter>([["discord", adapter]]);
-    wrapProviderAdaptersWithSpans(adapters);
+  it("emits one hook:channel-message span per message, labelled with its channel", async () => {
+    const telegram = hear("telegram");
+    const feishu = hear("feishu");
 
-    adapter.onMessage(async () => {
+    await telegram({ messageId: "msg-1", text: "hello" });
+    await telegram({ messageId: "msg-2", text: "world" });
+    await feishu({ messageId: "msg-3" });
+
+    const spans = await spansNamed("hook:channel-message");
+    expect(spans.map((span) => span.attributes["channel.name"])).toEqual([
+      "telegram",
+      "telegram",
+      "feishu",
+    ]);
+    for (const span of spans) expect(span.attributes["hook.name"]).toBe("channel-message");
+  });
+
+  it("records a handler's exception on both spans", async () => {
+    const deliver = hear("discord", async () => {
       throw new Error("boom");
     });
+    // The channel reports a handler's failure in its own log and goes on.
+    await deliver();
 
-    // MockProviderAdapter.simulateMessage rethrows whatever the handler throws.
-    await expect(adapter.simulateMessage(buildMessage({ channel: "discord" }))).rejects.toThrow(
-      "boom",
+    for (const name of ["channel:discord.handle", "hook:channel-message"]) {
+      const [span] = await spansNamed(name);
+      // SpanStatusCode.ERROR === 2
+      expect(span.status.code).toBe(2);
+      expect(span.events.some((event) => event.name === "exception")).toBe(true);
+    }
+  });
+
+  it("subscribes nothing until a handler subscribes", async () => {
+    testDb ??= createTestDb();
+    const transport = new FakeTransport("telegram");
+    withInboundSpans(
+      channelList({
+        db: testDb.db,
+        whatsAppAccounts: noAccounts,
+        linkedInAccounts: noAccounts,
+        connections: { registry: createTestConnections(new Map([["telegram", transport]])) },
+      }),
+      "channel-message",
     );
 
-    const [span] = await findChannelSpans("discord");
-    // SpanStatusCode.ERROR === 2
-    expect(span.status.code).toBe(2);
-    expect(span.events.some((e) => e.name === "exception")).toBe(true);
+    await transport.receive();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(await harness.finishedSpans()).toEqual([]);
   });
 });
 
-describe("inbound channel message log (composition-root wrapping)", () => {
+describe("inbound channel message log", () => {
   let harness: SpanHarness;
   let exporter: InMemoryLogRecordExporter;
   let provider: LoggerProvider;
@@ -126,26 +199,24 @@ describe("inbound channel message log (composition-root wrapping)", () => {
     await harness.shutdown();
   });
 
+  function inboundRecords() {
+    return exporter
+      .getFinishedLogRecords()
+      .filter((record) => record.body === "channel message received");
+  }
+
   it("emits one log record per inbound message carrying the message content", async () => {
-    const adapter = new MockProviderAdapter("whatsapp");
-    const adapters = new Map<string, ProviderAdapter>([["whatsapp", adapter]]);
-    wrapProviderAdaptersWithSpans(adapters);
+    const deliver = hear("whatsapp");
+    await deliver({
+      messageId: "msg-77",
+      conversationId: "chat-9" as ConversationId,
+      senderId: "user-3",
+      text: "dinner at 8?",
+    });
 
-    adapter.onMessage(async () => {});
-    await adapter.simulateMessage(
-      buildMessage({
-        id: "msg-77",
-        channel: "whatsapp",
-        threadId: "chat-9",
-        channelUserId: "user-3",
-        text: "dinner at 8?",
-      }),
-    );
-
-    const records = exporter.getFinishedLogRecords();
+    const records = inboundRecords();
     expect(records).toHaveLength(1);
     const [record] = records;
-    expect(record.body).toBe("channel message received");
     expect(record.severityText).toBe("info");
     expect(record.attributes.component).toBe("channels");
     expect(record.attributes.channel).toBe("whatsapp");
@@ -155,19 +226,15 @@ describe("inbound channel message log (composition-root wrapping)", () => {
     expect(record.attributes.text).toBe("dinner at 8?");
   });
 
-  it("links the log record to the channel:{name}.handle span's trace", async () => {
-    const adapter = new MockProviderAdapter("webchat");
-    const adapters = new Map<string, ProviderAdapter>([["webchat", adapter]]);
-    wrapProviderAdaptersWithSpans(adapters);
-
-    adapter.onMessage(async () => {});
-    await adapter.simulateMessage(buildMessage({ channel: "webchat" }));
+  it("links the log record to the channel:{name}.handle span", async () => {
+    const deliver = hear("telegram_user");
+    await deliver();
 
     const spans = await harness.finishedSpans();
-    const channelSpan = spans.find((s) => s.name === "channel:webchat.handle");
+    const channelSpan = spans.find((span) => span.name === "channel:telegram_user.handle");
     expect(channelSpan).toBeDefined();
 
-    const [record] = exporter.getFinishedLogRecords();
+    const [record] = inboundRecords();
     expect(record.spanContext?.traceId).toBe(channelSpan!.spanContext().traceId);
     expect(record.spanContext?.spanId).toBe(channelSpan!.spanContext().spanId);
   });

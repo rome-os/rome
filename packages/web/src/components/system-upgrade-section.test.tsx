@@ -8,11 +8,6 @@ import { SystemUpgradeSection } from "./system-upgrade-section";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix dialog pokes pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -235,7 +230,7 @@ describe("SystemUpgradeSection", () => {
     await user.click(await screen.findByRole("button", { name: "Upgrade to 1.2.0" }));
 
     // The confirmation states the consequences before anything is sent.
-    expect(await screen.findByText(/Rome will restart to apply the upgrade/)).toBeTruthy();
+    expect(await screen.findByText(/Rome restarts to apply the upgrade/)).toBeTruthy();
     expect(backend.upgradeRequests).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: "Upgrade and restart" }));

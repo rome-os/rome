@@ -3,20 +3,24 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ActionConfig, TalkRouter } from "@rome-os/app-runtime";
+import {
+  setCurrentActionContextResolver,
+  type ActionConfig,
+  type ChannelsService,
+} from "@rome-os/app-runtime";
 import { createSendMessageAction, executeSendMessage } from "./index.js";
-import type { SendMessageInput } from "./index.js";
+import type { AgentNamesService, SendMessageInput } from "./index.js";
 
 let tempDir = "";
 let projectsRoot = "";
 let outsideRoot = "";
 
-function makeAdapter(service = "discord"): TalkRouter {
+/** A channels service with one channel, `service`, backed by one Connection. */
+function makeAdapter(service = "discord"): ChannelsService {
   return {
-    list: async () => [{ connectionId: `test:${service}`, service }],
-    subscribe: () => () => {},
-    send: rs.fn(async (_connectionId, conversationId) => ({ conversationId })),
-    feature: () => null,
+    list: rs.fn(async () => [{ name: service, sendable: true }]),
+    send: rs.fn(async (_channel, conversationId) => ({ conversationId })),
+    query: async () => [],
   };
 }
 
@@ -50,7 +54,7 @@ describe("send_message attachments", () => {
       attachments: [{ type: "document", source, caption: "Report" }],
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:discord", "thread-1", {
+    expect(adapter.send).toHaveBeenCalledWith("discord", "thread-1", {
       text: undefined,
       attachments: [{ type: "document", source: safeSource, caption: "Report" }],
       replyToMessageId: undefined,
@@ -95,7 +99,7 @@ describe("send_message attachments", () => {
 });
 
 describe("send_message email union", () => {
-  function makeEmailAdapter(): TalkRouter {
+  function makeEmailAdapter(): ChannelsService {
     return makeAdapter("email");
   }
 
@@ -110,9 +114,8 @@ describe("send_message email union", () => {
     });
 
     expect(adapter.send).toHaveBeenCalledTimes(1);
-    const [connectionId, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock
-      .calls[0];
-    expect(connectionId).toBe("test:email");
+    const [channel, threadId, message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
+    expect(channel).toBe("email");
     expect(threadId).toBe("");
     expect(message.kind).toBe("email");
     expect(message.text).toBe("body");
@@ -173,7 +176,7 @@ describe("send_message chat recipient aliases", () => {
       turnId: "turn-1",
     });
 
-    expect(adapter.send).toHaveBeenCalledWith("test:webchat", "session-1", {
+    expect(adapter.send).toHaveBeenCalledWith("webchat", "session-1", {
       text: "Final answer",
       parts,
       attachments: undefined,
@@ -206,7 +209,7 @@ describe("send_message chat recipient aliases", () => {
     );
 
     expect(personMappingRepo.findByBondLevel).toHaveBeenCalledWith("guardian");
-    expect(adapter.send).toHaveBeenCalledWith("test:whatsapp", "15551234567@s.whatsapp.net", {
+    expect(adapter.send).toHaveBeenCalledWith("whatsapp", "15551234567@s.whatsapp.net", {
       text: "hello guardian",
       parts: undefined,
       attachments: undefined,
@@ -245,6 +248,34 @@ describe("send_message chat recipient aliases", () => {
         text: "hello",
       } as unknown as SendMessageInput),
     ).rejects.toThrow('Channel "whatsapp" only supports to: "guardian"');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("send_message connection choice", () => {
+  // A channel no Connection can send on is refused before anything else, so
+  // the error names the channel rather than an attachment or a recipient.
+  it("refuses an unconfigured channel before checking attachments or recipients", async () => {
+    const adapter = makeAdapter("telegram_user");
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [{ channelMappings: [] }]),
+    };
+
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "discord",
+        threadId: "thread-1",
+        attachments: [{ type: "document", source: "/outside/secret.txt" }],
+      }),
+    ).rejects.toThrow('No Talk connection registered for "discord"');
+    await expect(
+      executeSendMessage(
+        adapter,
+        { channel: "whatsapp", to: "guardian", text: "hello guardian" },
+        { personMappingRepo },
+      ),
+    ).rejects.toThrow('No Talk connection registered for "whatsapp"');
+    expect(personMappingRepo.findByBondLevel).not.toHaveBeenCalled();
     expect(adapter.send).not.toHaveBeenCalled();
   });
 });
@@ -358,5 +389,185 @@ describe("send_message preview", () => {
     const payload = action.preview!({ channel: "matrix", threadId: "t1", text: "hi" });
 
     expect(payload).toMatchObject({ fields: [{ label: "Channel", value: "matrix" }] });
+  });
+
+  it("names the agent a message goes to by name, but never shows an agent id", () => {
+    const action = createSendMessageAction(config, makeAdapter("agents"));
+    const id = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+
+    expect(action.preview!({ channel: "agents", to: "Atlas", text: "hi" })).toMatchObject({
+      fields: [
+        { label: "Channel", value: "Agents" },
+        { label: "To", value: "Atlas" },
+      ],
+    });
+    expect(action.preview!({ channel: "agents", to: id, text: "hi" })).toMatchObject({
+      fields: [{ label: "Channel", value: "Agents" }],
+    });
+    expect(
+      JSON.stringify(action.preview!({ channel: "agents", to: id, text: "hi" })),
+    ).not.toContain(id);
+  });
+});
+
+describe("send_message to an agent by name", () => {
+  const ATLAS = "0b6f6f8e-8a4c-4f3e-9c9d-2f1a3b4c5d6e";
+  const FRIEND_ATLAS = "1c7a7f9e-9b5d-4a4f-8d0e-3a2b4c5d6e7f";
+
+  function names(answer: Awaited<ReturnType<AgentNamesService["resolve"]>>) {
+    return { resolve: rs.fn<AgentNamesService["resolve"]>(async () => answer) };
+  }
+
+  beforeEach(() =>
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "main" })),
+  );
+  afterEach(() => setCurrentActionContextResolver(null));
+
+  it("sends to the agent the name resolves to", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    expect(agentNames.resolve).toHaveBeenCalledWith("Atlas");
+    expect(adapter.send).toHaveBeenCalledWith(
+      "agents",
+      ATLAS,
+      expect.objectContaining({ text: "hi" }),
+    );
+  });
+
+  it("refuses a name two agents share, naming each with its id", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({
+      status: "ambiguous",
+      matches: [
+        { label: "Atlas (dot)", agentId: ATLAS },
+        { label: "Atlas (@friend's dot)", agentId: FRIEND_ATLAS },
+      ],
+    });
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    await expect(sent).rejects.toThrow(`"Atlas (dot)" (threadId ${ATLAS})`);
+    await expect(sent).rejects.toThrow(`"Atlas (@friend's dot)" (threadId ${FRIEND_ATLAS})`);
+    await expect(sent).rejects.toThrow("full name as `to`");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("offers only the id when the agents share a whole label", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({
+      status: "ambiguous",
+      matches: [
+        { label: "Atlas (dot)", agentId: ATLAS },
+        { label: "Atlas (dot)", agentId: FRIEND_ATLAS },
+      ],
+    });
+
+    const sent = executeSendMessage(
+      adapter,
+      { channel: "agents", to: "Atlas", text: "hi" },
+      { agentNames },
+    );
+
+    await expect(sent).rejects.toThrow("Send again with the id as `threadId`.");
+    await expect(sent).rejects.not.toThrow("full name");
+  });
+
+  it("says when no agent has the name, or Agents is not connected", async () => {
+    const adapter = makeAdapter("agents");
+    const input = { channel: "agents" as const, to: "Atlas", text: "hi" };
+
+    await expect(
+      executeSendMessage(adapter, input, { agentNames: names({ status: "none" }) }),
+    ).rejects.toThrow('No agent named "Atlas"');
+    await expect(
+      executeSendMessage(adapter, input, { agentNames: names({ status: "not_connected" }) }),
+    ).rejects.toThrow('Channel "agents" is not connected');
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("sends to an id given as `to` in any case without looking it up", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "none" });
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: ATLAS.toUpperCase(), text: "hi" },
+      { agentNames },
+    );
+
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+  });
+
+  it("reads a padded guardian alias as the alias, as the approval card does", async () => {
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+    const personMappingRepo = {
+      findByBondLevel: rs.fn(async () => [
+        { channelMappings: [{ channel: "agents", channelUserId: ATLAS }] },
+      ]),
+    };
+
+    await executeSendMessage(
+      adapter,
+      { channel: "agents", to: " guardian", text: "hi" },
+      { agentNames, personMappingRepo },
+    );
+
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+    expect(adapter.send).toHaveBeenCalledWith("agents", ATLAS, expect.anything());
+  });
+
+  it("says what `to` takes on agents when it is empty", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: " ", text: "hi" }),
+    ).rejects.toThrow('Channel "agents" takes an agent\'s name or "guardian" as `to`');
+  });
+
+  it("refuses a name from any agent but main, without looking", async () => {
+    setCurrentActionContextResolver(() => ({ executionId: "e", agentName: "assistant:assistant" }));
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }, { agentNames }),
+    ).rejects.toThrow("Only Rome's main agent sends to an agent by name");
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+  });
+
+  it("refuses a name from an installed app calling through runAction", async () => {
+    setCurrentActionContextResolver(() => ({
+      executionId: "e",
+      agentName: "main",
+      callerAppId: "some-app",
+    }));
+    const adapter = makeAdapter("agents");
+    const agentNames = names({ status: "found", agentId: ATLAS });
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }, { agentNames }),
+    ).rejects.toThrow("Only Rome's main agent sends to an agent by name");
+    expect(agentNames.resolve).not.toHaveBeenCalled();
+  });
+
+  it("says names need the lookup when this Rome has none", async () => {
+    const adapter = makeAdapter("agents");
+
+    await expect(
+      executeSendMessage(adapter, { channel: "agents", to: "Atlas", text: "hi" }),
+    ).rejects.toThrow("Sending to an agent by name is not available");
   });
 });

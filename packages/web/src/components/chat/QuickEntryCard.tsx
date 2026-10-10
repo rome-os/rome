@@ -1,10 +1,10 @@
 import { NewsItemCard } from "@rome-os/rome-web-components/news-item";
-import type { QuickEntry } from "@/config/quick-entries";
+import type { ResolvedRomeNewsItem } from "@rome-os/rome-web-components/news-item/schema";
 import { RomeLogo } from "@/components/logo";
 
 export interface QuickEntryCardProps {
-  entry: QuickEntry;
-  onActivate: (entry: QuickEntry) => void;
+  entry: ResolvedRomeNewsItem;
+  onActivate: (entry: ResolvedRomeNewsItem) => void;
 }
 
 /**
@@ -18,7 +18,7 @@ export function QuickEntryCard({ entry, onActivate }: QuickEntryCardProps) {
       item={entry}
       onActivate={onActivate}
       placeholder={<RomeLogo className="h-6 w-6" aria-hidden />}
-      className="[&_.rome-news-item-subtitle]:!text-body"
+      className="[&_.rome-news-item-subtitle]:!text-ui"
     />
   );
 }

@@ -9,6 +9,10 @@
 //   POST   /api/people              -> PersonResource (201) | LinkConflict (409)
 //   POST   /api/people/:id/accounts -> PersonResource | LinkConflict (409)
 //   DELETE /api/people/:id/accounts/:channel/:channelUserId -> PersonResource
+//   GET    /api/people/:id/outbox   -> OutboxPage
+//   POST   /api/people/:id/messages -> OutboxMessage (202) | SendRefusal (409)
+//   POST   /api/people/:id/outbox/:messageId/retry -> OutboxMessage (202)
+//   DELETE /api/people/:id/outbox/:messageId       -> 204
 //
 // The rest are request types that lead, with the backend following (issues
 // #64, #65):
@@ -24,12 +28,16 @@
 // Rome contributes is which person it belongs to. So the writes here move a
 // link between people; none of them creates or destroys the account under it.
 //
-// The bond ladder, the merged timeline and the activity order both the person
-// listing and the account stream run on live here too. They are the pieces both
-// nouns share: a row's `latest` is the head of the timeline the same row opens,
-// and a cursor written against one activity listing has to name a position in
-// the other. A second definition of any of them is a page boundary the two ends
-// disagree about, so they are stated once, here.
+// The bond ladder, the activity order both the person listing and the account
+// stream run on, and a person's timeline paging (`TimelinePage`,
+// `latestDynamic`) live here. What that timeline holds — the message shape, its
+// order and its cursor — is the message module's (`./message.ts`), which this
+// file imports. They are the pieces the two nouns share: a row's `latest` is
+// the head of the timeline the same row opens, and a cursor written against one
+// activity listing has to name a position in the other. A second definition of
+// any of them is a page boundary the two ends disagree about, so each is stated
+// once — the activity order here, the message shape and its order in
+// `./message.ts`.
 //
 // The account read is two reads, because two surfaces ask two questions. The
 // directory is a contacts list: every account, ordered by name, carrying
@@ -39,6 +47,7 @@
 // on. Each has its own row shape and its own cursor, so neither pays for the
 // other's fields and neither order can be resumed with the other's position.
 
+import { compareCodePoints, type Message } from "./message.js";
 import { STRANGER_PERSON_ID } from "./persons.js";
 
 // ---------------------------------------------------------------------------
@@ -99,18 +108,12 @@ export function normalizeBondLevel(raw: string): PlacedBondLevel {
 // ---------------------------------------------------------------------------
 
 /**
- * Compare two strings by code point, returning zero only for exact equality.
- *
- * `localeCompare` answers zero for strings that are canonically equivalent but
- * distinct — "\u00e9" and "e\u0301" — and its result depends on the running
- * locale, so a server and a client can disagree on the same pair. Neither is
- * acceptable where an order has to be total and has to mean the same thing on
- * both ends of a cursor.
+ * The total string order the account and display-name orders settle their ties
+ * with. Re-exported from the message module ({@link compareCodePoints}), which
+ * owns it because the message cursor is written against it, so "how two strings
+ * order for a cursor" has one definition here rather than a second that drifts.
  */
-export function compareCodePoints(a: string, b: string): number {
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
+export { compareCodePoints };
 
 /**
  * Order two display names the same way in every runtime.
@@ -130,7 +133,7 @@ export function compareCodePoints(a: string, b: string): number {
 export function compareDisplayNames(a: string, b: string): number {
   const normalizedA = a.normalize("NFC");
   const normalizedB = b.normalize("NFC");
-  const byFolded = compareCodePoints(normalizedA.toLowerCase(), normalizedB.toLowerCase());
+  const byFolded = compareCodePoints(caseFold(normalizedA), caseFold(normalizedB));
   return byFolded !== 0 ? byFolded : compareCodePoints(normalizedA, normalizedB);
 }
 
@@ -145,9 +148,40 @@ export function compareDisplayNames(a: string, b: string): number {
  * should find a row that stored it decomposed, and the reverse.
  */
 export function matchesQuery(query: string, haystack: readonly string[]): boolean {
-  const q = query.normalize("NFC").trim().toLowerCase();
+  const q = caseFold(query.normalize("NFC").trim());
   if (!q) return true;
-  return haystack.join(" ").normalize("NFC").toLowerCase().includes(q);
+  return caseFold(haystack.join(" ").normalize("NFC")).includes(q);
+}
+
+/**
+ * Unicode case folding, which JavaScript has no built-in for, shared by the
+ * name orderings and search so they fold alike.
+ *
+ * Lowercasing alone misses the folds that expand or merge letters: "ß" and
+ * "ẞ" are "ss", "ſ" is "s", "ﬁ" is "fi". Going through uppercase picks those
+ * up, except for the dotless "ı", which folds to itself but would come back
+ * as "i", so it stays out of the round trip. Then final sigma becomes the
+ * medial one and Cherokee its uppercase, as folding does, and the result is
+ * normalized again, since the round trip can decompose a letter.
+ *
+ * A directory sort folds every name on each comparison, so text that folds
+ * exactly as it lowercases skips the round trip: printable ASCII, and the
+ * caseless CJK punctuation, kana, ideographs and Hangul syllables most names
+ * here are written in. That holds for NFC input, which both callers pass; a
+ * decomposed kana voicing mark would otherwise stay apart from its letter.
+ */
+function caseFold(value: string): string {
+  if (!/[^ -~\u3000-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(value)) {
+    return value.toLowerCase();
+  }
+  return value
+    .toLowerCase()
+    .split("ı")
+    .map((part) => part.toUpperCase().toLowerCase())
+    .join("ı")
+    .replaceAll("ς", "σ")
+    .replace(/[\u13f8-\u13fd\uab70-\uabbf]/g, (letter) => letter.toUpperCase())
+    .normalize("NFC");
 }
 
 /**
@@ -180,39 +214,18 @@ export function isChannelIdentifier(channel: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The merged timeline, and the cursor that resumes it
+// A person's merged timeline
 // ---------------------------------------------------------------------------
-
-/**
- * One entry on a person's merged timeline, whichever surface produced it.
- *
- * Deliberately generic: `source` names the producer, `ref` is that producer's
- * own id for the entry, and `body` is the line to render. A Rome App that
- * starts contributing dynamics fills the same five fields instead of
- * extending this shape.
- *
- * `ref` must be unique across everything one `source` can put on one person's
- * timeline, not merely within the conversation it came from. A person holds
- * several accounts, and a producer whose ids are per-conversation (WhatsApp
- * message ids are unique within a chat, not within an account) has to qualify
- * them — `<chat>:<messageId>` — before writing them here.
- * {@link compareTimelineEntries} settles ties on `(source, ref)`, so two
- * entries sharing one within the same second compare equal, serialize to the
- * same cursor, and lose one of the pair on resume.
- */
-export interface TimelineEntry {
-  source: string;
-  /** Epoch seconds. */
-  timestamp: number;
-  body: string | null;
-  direction: "inbound" | "outbound";
-  ref: string;
-}
+//
+// What the timeline holds is a {@link Message}, and the order it is read in and
+// the cursor that resumes it are the message module's ({@link compareMessages},
+// {@link messageCursor}). A person's timeline is still a timeline; its rows are
+// messages, and its paging is the People surface's own — stated below.
 
 /** One page of a person's timeline, newest first. `nextCursor` is opaque and
- *  null once the oldest entry has been sent. */
+ *  null once the oldest message has been sent. */
 export interface TimelinePage {
-  entries: TimelineEntry[];
+  entries: Message[];
   nextCursor: string | null;
 }
 
@@ -220,24 +233,7 @@ export const TIMELINE_PAGE_DEFAULT_LIMIT = 100;
 export const TIMELINE_PAGE_MAX_LIMIT = 300;
 
 /**
- * The timeline's order: newest first, and total.
- *
- * Producers share no key but the timestamp, and timestamps collide — whole
- * seconds from two stores, and a reply Rome sent recorded against the message
- * it answers. So the order is settled past the timestamp: a reply sits above
- * the line it answers, and `source`/`ref` break what remains. Totality is not
- * cosmetic — it is what lets a cursor name a position and resume there without
- * repeating or skipping an entry.
- */
-export function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): number {
-  if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
-  if (a.direction !== b.direction) return a.direction === "outbound" ? -1 : 1;
-  const bySource = compareCodePoints(a.source, b.source);
-  return bySource !== 0 ? bySource : compareCodePoints(a.ref, b.ref);
-}
-
-/**
- * The dynamic a row reports as `latest`: the newest entry of that row's own
+ * The dynamic a row reports as `latest`: the newest message of that row's own
  * timeline, projected.
  *
  * One definition rather than two. A separate "newest dynamic" comparison
@@ -246,56 +242,13 @@ export function compareTimelineEntries(a: TimelineEntry, b: TimelineEntry): numb
  * another, and neither would be wrong. Deriving the preview from the ordering
  * makes that disagreement unrepresentable.
  *
- * `entries` must already be in {@link compareTimelineEntries} order.
+ * `entries` must already be in {@link compareMessages} order.
  */
-export function latestDynamic(entries: readonly TimelineEntry[]): AccountDynamic | null {
+export function latestDynamic(entries: readonly Message[]): AccountDynamic | null {
   const newest = entries[0];
   return newest
     ? { source: newest.source, timestamp: newest.timestamp, preview: newest.body }
     : null;
-}
-
-/**
- * A cursor naming the exact entry a page ended on.
- *
- * Encoded rather than a bare timestamp: the timestamp alone cannot say *which*
- * of a second's entries was the last one sent, so resuming from it drops the
- * rest of that second.
- *
- * Every part is escaped. `source` is whatever a producer calls itself and a
- * Rome App names its own, so neither it nor `ref` can be trusted to leave the
- * separator alone — an unescaped one shifts the split and resumes the page at
- * a position no entry occupies.
- */
-export function timelineCursor(entry: TimelineEntry): string {
-  return [entry.timestamp, entry.direction, entry.source, entry.ref]
-    .map((part) => encodeURIComponent(String(part)))
-    .join("|");
-}
-
-/** Decode a {@link timelineCursor}, or null when it is not one. */
-export function parseTimelineCursor(raw: string | undefined | null): TimelineEntry | null {
-  if (!raw) return null;
-  const parts = raw.split("|");
-  if (parts.length !== 4) return null;
-  let decoded: string[];
-  try {
-    decoded = parts.map(decodeURIComponent);
-  } catch {
-    return null;
-  }
-  const [rawTimestamp, direction, source, ref] = decoded;
-  const timestamp = Number(rawTimestamp);
-  if (rawTimestamp === "" || !Number.isFinite(timestamp)) return null;
-  if (direction !== "inbound" && direction !== "outbound") return null;
-  if (!ref) return null;
-  return { timestamp, direction, source, ref, body: null };
-}
-
-/** Whether an entry falls after a cursor in {@link compareTimelineEntries}
- *  order — i.e. belongs on a later page than the one that cursor ended. */
-export function isAfterTimelineCursor(entry: TimelineEntry, cursor: TimelineEntry): boolean {
-  return compareTimelineEntries(cursor, entry) < 0;
 }
 
 /**
@@ -521,12 +474,20 @@ export function accountRef(account: { channel: string; channelUserId: string }):
 
 /** What `?q=` matches: the display name, the linked person's name, and every
  *  address — so a phone number finds an account the platform named something
- *  else, and a person's name finds the accounts they were placed on. */
-export function accountMatchesQuery(account: DirectoryAccount, query: string): boolean {
+ *  else, and a person's name finds the accounts they were placed on.
+ *
+ *  The channel's name too, unless the caller has already fixed the channel:
+ *  then every row shares it, and a term that happens to fall inside it
+ *  ("mail", "ai") would answer every row instead of the ones it names. */
+export function accountMatchesQuery(
+  account: DirectoryAccount,
+  query: string,
+  options: { matchChannel?: boolean } = {},
+): boolean {
   return matchesQuery(query, [
     account.displayName,
     account.personName ?? "",
-    account.channel,
+    ...(options.matchChannel === false ? [] : [account.channel]),
     ...account.addresses,
   ]);
 }
@@ -590,12 +551,7 @@ export function parseAccountCursor(raw: string | undefined | null): AccountCurso
   return { displayName, ref };
 }
 
-/** {@link compareAccountCursors} over the accounts themselves. */
-export function compareAccounts(a: DirectoryAccount, b: DirectoryAccount): number {
-  return compareAccountCursors(accountCursorOf(a), accountCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareAccounts} order —
+/** Whether an account falls after a cursor in {@link compareAccountCursors} order —
  *  i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterAccountCursor(account: DirectoryAccount, cursor: AccountCursor): boolean {
   return compareAccountCursors(cursor, accountCursorOf(account)) < 0;
@@ -686,13 +642,7 @@ export function streamCursorOf(account: StreamAccount): StreamCursor {
   return activityPosition(account, accountRef(account));
 }
 
-/** The stream's order: newest activity first, ties broken by name and then ref
- *  so the sequence is total. */
-export function compareStreamAccounts(a: StreamAccount, b: StreamAccount): number {
-  return compareStreamCursors(streamCursorOf(a), streamCursorOf(b));
-}
-
-/** Whether an account falls after a cursor in {@link compareStreamAccounts}
+/** Whether an account falls after a cursor in {@link compareStreamCursors}
  *  order — i.e. belongs on a later page than the one that cursor ended. */
 export function isAfterStreamCursor(account: StreamAccount, cursor: StreamCursor): boolean {
   return compareStreamCursors(cursor, streamCursorOf(account)) < 0;
@@ -716,7 +666,8 @@ export function accountPageLimit(raw: string | number | null | undefined): numbe
  * Takes every account there is, in any order: the order is this function's, so
  * a producer cannot page one order while a client renders another.
  *
- * `query` scopes everything, including the counts. `state` and the cursor scope
+ * `query` and `channel` scope everything, including the counts — a listing
+ * fixed to one channel is that channel's directory. `state` and the cursor scope
  * the page alone, so a client filtered to one chip still reads every chip's
  * number, and a client on page four reads the same numbers it read on page one.
  *
@@ -729,13 +680,18 @@ export function sliceAccountDirectory(
   directory: readonly DirectoryAccount[],
   options: {
     query?: string | null;
+    channel?: string | null;
     state?: AccountState | null;
     cursor?: AccountCursor | null;
     limit?: number | null;
   } = {},
 ): AccountDirectory {
   const query = options.query?.trim() ?? "";
-  const matching = query ? directory.filter((a) => accountMatchesQuery(a, query)) : directory;
+  const channel = options.channel || null;
+  const onChannel = channel ? directory.filter((a) => a.channel === channel) : directory;
+  const matching = query
+    ? onChannel.filter((a) => accountMatchesQuery(a, query, { matchChannel: !channel }))
+    : onChannel;
 
   const counts: AccountCounts = { unlinked: 0, linked: 0, dismissed: 0 };
   for (const account of matching) counts[account.state] += 1;
@@ -820,6 +776,62 @@ export interface LinkedAccount {
   channel: string;
   channelUserId: string;
   displayName: string;
+  /** Whether Rome can send here, and when it cannot, which of the reasons it
+   *  is. See {@link AccountSendState}. */
+  send: AccountSendState;
+  /**
+   * When this account itself was last active, in epoch seconds, or null when
+   * nothing has ever passed on it.
+   *
+   * Per account rather than per person, and that is the point: the person's
+   * own {@link PersonResource.latest} names a channel and not an address, so it
+   * cannot say which of two accounts on one channel was the recent one. This
+   * can, which is what lets a composer open on the account the guardian last
+   * heard from without inventing the answer.
+   */
+  latestAt: number | null;
+}
+
+/**
+ * Whether Rome can send a message to an account, and why not when it cannot.
+ *
+ * Four states rather than a boolean, because the three failures are different
+ * things to a reader and to a retry: one is fixed by connecting a channel, one
+ * is a permanent fact about the channel, and one clears on its own once a
+ * direct conversation exists.
+ *
+ * - `yes` — the channel is connected and can address this account directly.
+ * - `not-connected` — no live connection for the channel. The guardian fixes
+ *   this in Settings.
+ * - `unsupported` — the connection is live but does not do direct messaging.
+ * - `no-conversation` — the channel cannot identify a direct conversation for
+ *   this account. This includes missing or ambiguous threads.
+ */
+export type AccountSendState = "yes" | "not-connected" | "unsupported" | "no-conversation";
+
+export function canSend(account: Pick<LinkedAccount, "send">): boolean {
+  return account.send === "yes";
+}
+
+/**
+ * The account a composer opens on: the sendable one that was active most
+ * recently, ties broken by address so the answer is the same on every reload.
+ *
+ * A default, not an inference. Rome never picks a recipient on the guardian's
+ * behalf — {@link SendMessageRequest} names the account and has no form that
+ * omits it. This only decides which of the offered accounts is filled in
+ * first, and the surface showing it is expected to show it.
+ *
+ * Null when the person holds no account Rome can send to, which a caller must
+ * render as the reason rather than as an empty composer.
+ */
+export function defaultSendAccount(accounts: readonly LinkedAccount[]): LinkedAccount | null {
+  const sendable = accounts.filter(canSend);
+  if (sendable.length === 0) return null;
+  return [...sendable].sort(
+    (a, b) =>
+      (b.latestAt ?? 0) - (a.latestAt ?? 0) || compareCodePoints(a.channelUserId, b.channelUserId),
+  )[0]!;
 }
 
 /**
@@ -835,8 +847,13 @@ export interface LinkedAccount {
  * it and `messageCount` is how many entries it holds, so the line a row
  * previews is the line its dossier opens on, and the number beside it counts
  * what the dossier will show. A group conversation contributes to neither: a
- * timeline entry names no sender, so nothing said in a room of ten people is
+ * message names no sender, so nothing said in a room of ten people is
  * attributable to one of them.
+ *
+ * `memoryPath` is the profile Rome has written about them, as a path under the
+ * memory root — the same address the memory file browser reads. Null when no
+ * profile has been written: nothing writes one when a person is created, so a
+ * path here means a file a reader can actually open.
  */
 export interface PersonResource {
   id: string;
@@ -845,6 +862,7 @@ export interface PersonResource {
   accounts: LinkedAccount[];
   messageCount: number;
   latest: AccountDynamic | null;
+  memoryPath: string | null;
 }
 
 /**
@@ -874,11 +892,9 @@ export const PERSON_BOND_LEVELS: readonly PlacedBondLevel[] = [
   "other",
 ];
 
-export type PersonBondLevel = PlacedBondLevel;
-
 /** A level the listing can be filtered and counted by: a bond level, or "all"
  *  — every curated person whatever their level. */
-export type PersonFilterLevel = "all" | PersonBondLevel;
+export type PersonFilterLevel = "all" | PlacedBondLevel;
 
 /**
  * How many people sit at each level.
@@ -1212,3 +1228,169 @@ export function whatsAppDisplayName(contact: {
     formatWhatsAppPhone(contact.phoneNumber || contact.jid)
   );
 }
+
+// ---------------------------------------------------------------------------
+// Sending, and the outbox a send lives in until it lands
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /api/people/:id/messages` — say something to one of a person's
+ * accounts.
+ *
+ * The account is named, always. There is no shape of this request that omits
+ * it and no rule anywhere that fills it in, because every rule that could is a
+ * rule that decides who receives a message on evidence too thin to carry it:
+ * a message names its channel and not its address, so "reply where they
+ * last wrote" cannot separate two numbers on one channel, and "use another
+ * channel when this one is down" silently sends somewhere nobody chose.
+ * {@link defaultSendAccount} exists for surfaces that want a preselected
+ * account, and it is a default on screen rather than a decision off it.
+ */
+export interface SendMessageRequest {
+  /** Optional UUID v4 idempotency key. A client creates one for each composed
+   * message and reuses it only when repeating that request. The same id,
+   * account, and text returns its recorded response until 24 hours after
+   * outbox removal. */
+  id?: string;
+  channel: string;
+  channelUserId: string;
+  text: string;
+}
+
+export function parseSendMessageRequest(
+  body: unknown,
+): { request: SendMessageRequest } | { error: string } {
+  if (typeof body !== "object" || body === null) return { error: "body must be an object" };
+  const raw = body as Record<string, unknown>;
+  if (
+    raw.id !== undefined &&
+    (typeof raw.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(raw.id))
+  ) {
+    return { error: "id must be a UUID v4" };
+  }
+  const channel = typeof raw.channel === "string" ? raw.channel.trim() : "";
+  const channelUserId = typeof raw.channelUserId === "string" ? raw.channelUserId.trim() : "";
+  const text = typeof raw.text === "string" ? raw.text.trim() : "";
+  if (!channel) return { error: "channel is required" };
+  if (!isChannelIdentifier(channel)) return { error: "channel must not contain ':'" };
+  if (!channelUserId) return { error: "channelUserId is required" };
+  if (!text) return { error: "text is required" };
+  if (text.length > SEND_MESSAGE_MAX_LENGTH) {
+    return { error: `text must be at most ${SEND_MESSAGE_MAX_LENGTH} characters` };
+  }
+  return {
+    request: {
+      ...(raw.id === undefined ? {} : { id: raw.id as string }),
+      channel,
+      channelUserId,
+      text,
+    },
+  };
+}
+
+/** A repeated send id may only refer to its original account and text. */
+export function matchesSendRequest(message: OutboxMessage, request: SendMessageRequest): boolean {
+  return (
+    message.channel === request.channel &&
+    message.channelUserId === request.channelUserId &&
+    message.text === request.text
+  );
+}
+
+/** Receipt lifetime after delivery cleanup or explicit discard, in milliseconds. */
+export const SEND_IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+/** Long enough for anything a person types, short enough that no adapter has to
+ *  defend itself against a megabyte. Channels with tighter limits of their own
+ *  still chunk or refuse downstream. */
+export const SEND_MESSAGE_MAX_LENGTH = 8000;
+
+/**
+ * Where a send is between the guardian pressing Send and the message appearing
+ * on the timeline.
+ *
+ * - `sending` — handed to the channel, no answer yet.
+ * - `unconfirmed` — the channel accepted it and named it, but it has not
+ *   surfaced in the store the timeline reads. Normally under a second; a state
+ *   at all because "we sent it and cannot see it" is a thing that happens and
+ *   is worth saying rather than papering over.
+ * - `failed` — the channel refused. The only state a guardian can act on, and
+ *   the only one that persists without something else having gone wrong.
+ */
+export type OutboxState = "sending" | "unconfirmed" | "failed";
+
+/**
+ * One message Rome is still trying to deliver.
+ *
+ * Deliberately not a {@link Message} with a status on it. A message is
+ * something that happened; these have not, and some never will. Two nouns keep
+ * the message contract — its `ref` uniqueness and the ordering its cursor is
+ * written against — free of rows that may yet be withdrawn, and keep each
+ * account owned by exactly one store.
+ *
+ * `ref` is the entry this message would become at the address it was sent to.
+ * It is a hint and not a key: a channel that folds several addresses onto one
+ * account may deliver under another of them, and then the landed entry carries
+ * that address instead. Recognizing an arrival is the server's job, which is
+ * why it enumerates every folded address and why a client must not dedupe the
+ * timeline against this value — the row is gone from the outbox by the time
+ * there is anything to dedupe against.
+ */
+export interface OutboxMessage {
+  id: string;
+  channel: string;
+  channelUserId: string;
+  text: string;
+  /** Epoch seconds of the attempt, which is also the entry's timestamp once it
+   *  lands. */
+  timestamp: number;
+  state: OutboxState;
+  /** The entry this would become at the address it was sent to, or null while
+   *  the channel has not named the message yet. A hint — see above. */
+  ref: string | null;
+  /** Why the channel refused, for a `failed` row. Provider text, shown as
+   *  detail beneath copy the dashboard owns. */
+  error: string | null;
+}
+
+/** `GET /api/people/:id/outbox` — every send of this person's that has not
+ *  reached their timeline. Unpaged: an outbox with enough rows to page is an
+ *  incident, not a listing. */
+export interface OutboxPage {
+  messages: OutboxMessage[];
+}
+
+/**
+ * A send the server would not attempt, and which of the reasons it was.
+ *
+ * Carries the same {@link AccountSendState} the person read carries, so the
+ * refusal renders as the copy the composer would already have shown had the
+ * read been fresh. A client that raced a disconnect therefore says the same
+ * thing either way instead of surfacing a bare 409.
+ *
+ * `error` is a fallback line, not the copy: the dashboard keys off `send`.
+ */
+export interface SendRefusal {
+  error: string;
+  send: Exclude<AccountSendState, "yes">;
+}
+
+/** The {@link SendRefusal} `error` line for each reason. A fallback, not the
+ *  copy: the dashboard renders `send` through its own locale files. */
+export function sendRefusalMessage(send: Exclude<AccountSendState, "yes">): string {
+  switch (send) {
+    case "not-connected":
+      return "That channel is not connected";
+    case "unsupported":
+      return "Rome cannot send on that channel";
+    case "no-conversation":
+      return "Rome has no conversation open with that account";
+  }
+}
+
+/** The `error` the server writes on a send whose process died before the
+ *  channel answered. Not a provider message, and deliberately equivocal: Rome
+ *  does not know whether it went out. */
+export const STRANDED_SEND_ERROR =
+  "Rome stopped before the channel answered; this may or may not have been sent";

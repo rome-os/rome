@@ -1,20 +1,19 @@
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 
-// The pure model behind the question timeline rail. It never touches the DOM:
-// the rail hands it measured pixels and gets back fractions. jsdom reports zero
-// for every rect, so this split is what makes the layout rules testable at all.
+// The pure model behind the question timeline rail. It never touches the DOM,
+// so the compact sequence and overflow rules stay testable without layout.
 
 /** Below this many questions the rail is not worth its pixels. */
 export const MIN_TIMELINE_QUESTIONS = 4;
 
-/** Minimum on-track distance between two dots, in px. */
-export const MIN_NODE_GAP_PX = 8;
+/** Preferred distance between adjacent question markers, in px. */
+export const TIMELINE_NODE_STEP_PX = 8;
 
 const SUMMARY_MAX_CHARS = 60;
 
 /** Sub-pixel drift that must not trigger a re-render. */
-const FRACTION_EPSILON = 0.002;
+const POSITION_EPSILON_PX = 0.5;
 
 export interface TimelineQuestion {
   messageId: string;
@@ -22,16 +21,9 @@ export interface TimelineQuestion {
   text: string;
 }
 
-/** A question's measured offset from the top of the scrollable content. */
-export interface MeasuredAnchor {
-  messageId: string;
-  top: number;
-}
-
 export interface TimelineNode {
   messageId: string;
-  /** 0..1 position down the TRACK — used directly as a CSS percentage. */
-  fraction: number;
+  topPx: number;
 }
 
 /**
@@ -82,72 +74,38 @@ export function shouldShowTimeline(
 }
 
 /**
- * Project anchors onto the track, pushing any dot that would crowd its
- * predecessor further down.
+ * Lay questions out in transcript order at a stable, compact rhythm.
  *
- * Spreading, not merging. Merging crowded dots into one node makes the
- * swallowed questions unreachable by click while looking identical to a
- * lossless dot — the rail would lie, in exactly the long conversations it
- * exists for. Spreading trades local positional fidelity for the guarantee that
- * every question stays individually clickable.
- *
- * Two passes, because one is not enough. The forward pass pushes each crowded
- * dot below its predecessor. On its own that collapses at the bottom edge: a
- * run of questions near the end of the transcript is pushed past the track and
- * clamped, so several dots land on the same pixel and all but one become
- * unclickable — the exact failure spreading exists to avoid. The backward pass
- * pulls such a run back up, which the track has room for whenever the dots fit
- * at all.
- *
- * When they do not fit — more questions than `trackHeight / minGapPx`, which a
- * long chat in a short window reaches — the gap tightens so the whole set still
- * spans the track. Every dot keeps a distinct centre and a sliver of itself to
- * click. Holding the gap fixed instead would push the surplus off the top and
- * clamp it there, stacking those questions on one pixel and making all but the
- * last unreachable.
+ * Rendered message height is deliberately absent from this contract. A marker
+ * represents one question, so wrapping, code blocks, media, and streamed reply
+ * growth must not change the navigation structure. When the preferred rhythm
+ * cannot fit, the step tightens evenly so every question remains represented.
  */
 export function layoutTimelineNodes(
-  anchors: MeasuredAnchor[],
-  opts: { contentHeight: number; trackHeight: number; minGapPx: number },
+  messageIds: string[],
+  opts: { trackHeight: number; stepPx: number },
 ): TimelineNode[] {
-  const { contentHeight, trackHeight, minGapPx } = opts;
-  if (contentHeight <= 0 || trackHeight <= 0) return [];
+  const { trackHeight, stepPx } = opts;
+  if (messageIds.length === 0 || trackHeight <= 0) return [];
 
-  const gap =
-    anchors.length > 1 ? Math.min(minGapPx, trackHeight / (anchors.length - 1)) : minGapPx;
+  const step = messageIds.length > 1 ? Math.min(stepPx, trackHeight / (messageIds.length - 1)) : 0;
+  const span = step * (messageIds.length - 1);
+  const start = (trackHeight - span) / 2;
 
-  const ys: number[] = [];
-  let floor = 0;
-  for (const anchor of anchors) {
-    const natural = Math.min(Math.max(anchor.top / contentHeight, 0), 1) * trackHeight;
-    const y = Math.max(natural, floor);
-    ys.push(y);
-    floor = y + gap;
-  }
-
-  let ceiling = trackHeight;
-  for (let i = ys.length - 1; i >= 0; i--) {
-    if (ys[i] > ceiling) ys[i] = ceiling;
-    ceiling = ys[i] - gap;
-  }
-
-  return ys.map((y, i) => ({
-    messageId: anchors[i].messageId,
-    fraction: Math.max(y, 0) / trackHeight,
+  return messageIds.map((messageId, index) => ({
+    messageId,
+    topPx: start + index * step,
   }));
 }
 
 /**
- * Whether a fresh measurement is worth committing. The rail re-measures on
- * every content resize, which during a streamed reply means many times a
- * second; without this the rail would re-render (and re-render every Radix
- * tooltip root) on drift too small to see.
+ * Whether a fresh layout is worth committing. ResizeObserver can report
+ * sub-pixel track changes, which should not re-render every tooltip root.
  */
 export function sameNodes(a: TimelineNode[], b: TimelineNode[]): boolean {
   if (a.length !== b.length) return false;
   return a.every(
     (node, i) =>
-      node.messageId === b[i].messageId &&
-      Math.abs(node.fraction - b[i].fraction) < FRACTION_EPSILON,
+      node.messageId === b[i].messageId && Math.abs(node.topPx - b[i].topPx) < POSITION_EPSILON_PX,
   );
 }

@@ -1,0 +1,190 @@
+{
+  "platform": "telegram",
+  "recordedOn": "2026-09-18",
+  "client": "grammy 1.40.0",
+  "notes": "Private chat with a dedicated test bot: send, two edits, a reply, and an edit of a message that does not exist. IDs, profile fields and dates are synthetic.",
+  "volatile": ["date", "edit_date"],
+  "exchanges": [
+    {
+      "label": "send",
+      "request": {
+        "method": "POST",
+        "path": "/bot{token}/sendMessage",
+        "body": {
+          "chat_id": 123,
+          "text": "Rome fixture capture: preview 中文"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "result": {
+            "message_id": 1,
+            "from": {
+              "id": 123456,
+              "is_bot": true,
+              "first_name": "Rome",
+              "username": "rome_fixture_bot"
+            },
+            "chat": {
+              "id": 123,
+              "first_name": "Alice",
+              "username": "alice_fixture",
+              "type": "private"
+            },
+            "date": 1700000000,
+            "text": "Rome fixture capture: preview 中文"
+          }
+        }
+      }
+    },
+    {
+      "label": "edit",
+      "request": {
+        "method": "POST",
+        "path": "/bot{token}/editMessageText",
+        "body": {
+          "chat_id": 123,
+          "message_id": 1,
+          "text": "Rome fixture capture: incremental 中文"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "result": {
+            "message_id": 1,
+            "from": {
+              "id": 123456,
+              "is_bot": true,
+              "first_name": "Rome",
+              "username": "rome_fixture_bot"
+            },
+            "chat": {
+              "id": 123,
+              "first_name": "Alice",
+              "username": "alice_fixture",
+              "type": "private"
+            },
+            "date": 1700000000,
+            "edit_date": 1700000000,
+            "text": "Rome fixture capture: incremental 中文"
+          }
+        }
+      }
+    },
+    {
+      "label": "edit",
+      "request": {
+        "method": "POST",
+        "path": "/bot{token}/editMessageText",
+        "body": {
+          "chat_id": 123,
+          "message_id": 1,
+          "text": "Rome fixture capture: final 中文"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "result": {
+            "message_id": 1,
+            "from": {
+              "id": 123456,
+              "is_bot": true,
+              "first_name": "Rome",
+              "username": "rome_fixture_bot"
+            },
+            "chat": {
+              "id": 123,
+              "first_name": "Alice",
+              "username": "alice_fixture",
+              "type": "private"
+            },
+            "date": 1700000000,
+            "edit_date": 1700000000,
+            "text": "Rome fixture capture: final 中文"
+          }
+        }
+      }
+    },
+    {
+      "label": "reply",
+      "request": {
+        "method": "POST",
+        "path": "/bot{token}/sendMessage",
+        "body": {
+          "chat_id": 123,
+          "text": "Rome fixture capture: reply",
+          "reply_parameters": {
+            "message_id": 1
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "ok": true,
+          "result": {
+            "message_id": 2,
+            "from": {
+              "id": 123456,
+              "is_bot": true,
+              "first_name": "Rome",
+              "username": "rome_fixture_bot"
+            },
+            "chat": {
+              "id": 123,
+              "first_name": "Alice",
+              "username": "alice_fixture",
+              "type": "private"
+            },
+            "date": 1700000000,
+            "reply_to_message": {
+              "message_id": 1,
+              "from": {
+                "id": 123456,
+                "is_bot": true,
+                "first_name": "Rome",
+                "username": "rome_fixture_bot"
+              },
+              "chat": {
+                "id": 123,
+                "first_name": "Alice",
+                "username": "alice_fixture",
+                "type": "private"
+              },
+              "date": 1700000000,
+              "edit_date": 1700000000,
+              "text": "Rome fixture capture: final 中文"
+            },
+            "text": "Rome fixture capture: reply"
+          }
+        }
+      }
+    },
+    {
+      "label": "edit-missing",
+      "request": {
+        "method": "POST",
+        "path": "/bot{token}/editMessageText",
+        "body": {
+          "chat_id": 123,
+          "message_id": 2147483647,
+          "text": "Rome fixture capture: invalid"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "ok": false,
+          "error_code": 400,
+          "description": "Bad Request: message to edit not found"
+        }
+      }
+    }
+  ]
+}

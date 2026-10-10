@@ -2,7 +2,7 @@ import { createContext, useContext, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { slotCardCopy, slotHeadingKey } from "@/lib/connection-capability-copy";
+import { slotCardCopy } from "@/lib/connection-capability-copy";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 
 /**
@@ -140,8 +140,8 @@ export function ConnectionSlotCard({
       )}
 
       {copy.bullets.length > 0 && (
-        <div className="space-y-2 text-body text-foreground">
-          <p>{t(slotHeadingKey(headingRole))}</p>
+        <div className="space-y-2 text-ui text-foreground">
+          <p>{t(`connections.headings.${headingRole}`)}</p>
           <ul className="list-disc space-y-2 pl-5">
             {copy.bullets.map((bullet) => (
               <li key={bullet.key}>{t(bullet.key, bullet.params)}</li>

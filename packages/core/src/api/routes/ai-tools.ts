@@ -9,25 +9,21 @@ import {
 } from "../../lib/anthropic-login.js";
 import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
-  CUSTOM_ANTHROPIC_PROVIDER_ID,
   getStoredAnthropicCompatibleCredentials,
-  isAnthropicCompatibleProviderId,
-  listAnthropicCompatibleProviderSummaries,
   summarizeAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentialsForEditing,
-  validateCustomAnthropicEnv,
-  type StoredAnthropicCompatibleCredentials,
 } from "../../lib/anthropic-compatible-providers.js";
+import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
+import {
+  CUSTOM_ANTHROPIC_PROVIDER_ID,
+  isAnthropicCompatibleProviderId,
+  listAnthropicCompatibleProviderSummaries,
+  type StoredAnthropicCompatibleCredentials,
+} from "@rome/api-types/anthropic-compatible-providers";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
-
-// Re-exported for existing consumers (and the ai-tools route tests) that import
-// the usage parser from this module.
-export {
-  normalizeUsageStatus,
-  parseUsageText,
-  readLiveOrCachedUsage,
-} from "../../lib/provider-usage.js";
+import { fetchRomeCredits } from "../../lib/rome-credits.js";
+import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
 const log = createLogger("api:ai-tools");
 
@@ -67,6 +63,17 @@ export function aiToolsRoutes(
     });
   });
 
+  // Rome Cloud owns the balance; every instance of the account reads the same one.
+  app.get("/ai-tools/rome-credits", async (c) => {
+    try {
+      const body: RomeCreditsResponse = { credits: await fetchRomeCredits() };
+      return c.json(body);
+    } catch (err) {
+      log.warn("Rome credits unavailable", { error: getErrorMessage(err) });
+      return c.json({ error: getErrorMessage(err) }, 503);
+    }
+  });
+
   app.get("/ai-tools/usage", (c) => {
     const state = deps.aiToolState.get();
     return c.json({ claude: state.claude.usage ?? null, codex: state.codex.usage ?? null });
@@ -74,7 +81,15 @@ export function aiToolsRoutes(
 
   app.post("/ai-tools/refresh", async (c) => {
     try {
-      return c.json(await deps.aiToolState.refresh());
+      // Optional `provider` scopes the refresh to one tool. The login dialog
+      // polls `?provider=anthropic` so an unrelated slow Codex probe can never
+      // stall Claude login detection; no provider refreshes everything (the
+      // manual Refresh button). `refresh(provider)` is already ordered against
+      // revocation via the shared per-provider in-flight lock.
+      const providerParam = c.req.query("provider");
+      const provider =
+        providerParam === "anthropic" || providerParam === "openai" ? providerParam : undefined;
+      return c.json(await deps.aiToolState.refresh(provider));
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : "Refresh failed" }, 500);
     }

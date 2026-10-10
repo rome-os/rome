@@ -1,8 +1,8 @@
 /**
  * End-to-end coverage for the approval flow.
  *
- * Wires real DB-backed repos + ActionEngine + ApprovalHandler with mock
- * channel adapter + mock agent runner. Behaviors numbered 1-N below match the
+ * Wires real DB-backed repos + ActionEngine + ApprovalHandler with a fake
+ * channel transport + mock agent runner. Behaviors numbered 1-N below match the
  * historical BRS at d6807982:docs/specs/approval-flow-brs.md; unimplemented
  * cases (4, 5) are kept as it.skip so the gap stays visible without falsely
  * passing.
@@ -21,11 +21,13 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import {
   createTestDb,
   buildTestDeps,
-  MockProviderAdapter,
+  FakeTransport,
   createMockAgentRunner,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
+import { COOKIE_NAME, createSession } from "../lib/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
+import type { ConversationId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../types.js";
 import type { ThreadContext } from "../core/types.js";
 
@@ -69,53 +71,46 @@ function buildHarness() {
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 
-  const registry = new ActionRegistryImpl([]);
-  const channel = new MockProviderAdapter("webchat");
+  const registry = new ActionRegistryImpl();
+  const channel = new FakeTransport("webchat");
   const cardEmissions: ApprovalCreatedEvent[] = [];
 
-  const engine = new ActionEngine(registry, undefined, executionsRepo, approvalsRepo, journalRepo, {
-    // "worker" keeps everything in-process so the test's in-memory action
-    // registry is visible to root invocations (no child fork).
-    processRole: "worker",
-    onApprovalCreated: async (event) => {
-      cardEmissions.push(event);
-      if (!event.channelContext) return;
-      const msg: OutgoingMessage = {
-        parts: [
-          {
-            type: "approval_card",
-            approvalId: event.approvalId,
-            actionName: event.actionName,
-            preview: event.preview ?? {
-              kind: "generic",
-              title: event.actionName,
-              summary: "Awaiting guardian approval",
+  const engine = new ActionEngine(
+    registry,
+    { executions: executionsRepo, approvals: approvalsRepo, journal: journalRepo },
+    {
+      // "worker" keeps everything in-process so the test's in-memory action
+      // registry is visible to root invocations (no child fork).
+      processRole: "worker",
+      onApprovalCreated: async (event) => {
+        cardEmissions.push(event);
+        if (!event.channelContext) return;
+        const msg: OutgoingMessage = {
+          parts: [
+            {
+              type: "approval_card",
+              approvalId: event.approvalId,
+              actionName: event.actionName,
+              preview: event.preview ?? {
+                kind: "generic",
+                title: event.actionName,
+                summary: "Awaiting guardian approval",
+              },
+              status: "pending",
             },
-            status: "pending",
-          },
-        ],
-      };
-      await channel.sendMessage(
-        event.channelContext.channelUserId ?? event.channelContext.threadId,
-        event.channelContext.threadId,
-        msg,
-      );
+          ],
+        };
+        await channel.send(event.channelContext.threadId as ConversationId, msg);
+      },
     },
-  });
+  );
 
   const agentRunner = createMockAgentRunner();
   // No webchat runtime is wired here (BRS 7 exercises the degrade path), so the
   // orchestrator runs backend session tasks bare — same as the old no-streamHost.
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
-    talkRouter: {
-      list: async () => [],
-      subscribe: () => () => {},
-      send: async () => {
-        throw new Error("Talk is unavailable in this test");
-      },
-      feature: () => null,
-    },
+    channel: () => null,
   });
   const handler = new ApprovalHandler(
     approvalsRepo,
@@ -271,7 +266,7 @@ describe("Approval flow E2E — triggering an approval", () => {
     expect(r1.approval.approvalId).not.toBe(r2.approval.approvalId);
     const pending = await h.approvalsRepo.findPending();
     expect(pending.length).toBeGreaterThanOrEqual(2);
-    expect(h.channel.sentMessages.map((m) => m.threadId)).toEqual(["thread-A", "thread-B"]);
+    expect(h.channel.sentMessages.map((m) => m.conversationId)).toEqual(["thread-A", "thread-B"]);
 
     h.testDb.close();
   });
@@ -306,7 +301,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
 
     await h.handler.onApproved(approvalId);
 
@@ -341,13 +336,14 @@ describe("Approval flow E2E — resolving an approval", () => {
       // registry over the shared DB, a mocked agent), then hand it to buildApp.
       // We deliberately do NOT call setStreamHost here — buildApp does, and
       // that is the wiring under test.
-      const registry = new ActionRegistryImpl([]);
+      const registry = new ActionRegistryImpl();
       const engine = new ActionEngine(
         registry,
-        undefined,
-        deps.actionExecutionsRepo,
-        deps.approvalsRepo,
-        deps.executionJournalRepo,
+        {
+          executions: deps.actionExecutionsRepo,
+          approvals: deps.approvalsRepo,
+          journal: deps.executionJournalRepo,
+        },
         { processRole: "worker" },
       );
       const agentRunner = createMockAgentRunner([
@@ -365,6 +361,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       );
 
       const { app } = buildApp(deps, { port: 0, host: "127.0.0.1" });
+      const headers = { Cookie: `${COOKIE_NAME}=${createSession("approval-guardian")}` };
 
       const sessionId = "thread-webchat-delivery";
       await deps.webchatRepo.createSession(sessionId, "Delivery");
@@ -394,14 +391,14 @@ describe("Approval flow E2E — resolving an approval", () => {
 
       // Discover the pending approval the way the guardian's activity page does
       // — over HTTP — instead of peeking at the engine's in-process return.
-      const pendingRes = await app.request(`/api/approvals?status=pending`);
+      const pendingRes = await app.request(`/api/approvals?status=pending`, { headers });
       expect(pendingRes.status).toBe(200);
       const pending = (await pendingRes.json()) as Array<{ id: string; status: string }>;
       expect(pending).toHaveLength(1);
       const approvalId = pending[0]!.id;
 
       // The guardian's open session view subscribes to the live event stream.
-      const events = await app.request(`/api/chat/sessions/${sessionId}/events`);
+      const events = await app.request(`/api/chat/sessions/${sessionId}/events`, { headers });
       expect(events.status).toBe(200);
       const reader = events.body!.getReader();
       const pendingRead = reader.read();
@@ -409,6 +406,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       // Act: the guardian approves over HTTP.
       const approveRes = await app.request(`/api/approvals/${approvalId}/approve`, {
         method: "POST",
+        headers: { ...headers, "sec-fetch-site": "same-origin" },
       });
       expect(approveRes.status).toBe(202);
 
@@ -421,7 +419,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       await reader.cancel();
 
       // Observe (durable): the reply is in the session's message history.
-      const msgsRes = await app.request(`/api/chat/sessions/${sessionId}/messages`);
+      const msgsRes = await app.request(`/api/chat/sessions/${sessionId}/messages`, { headers });
       expect(msgsRes.status).toBe(200);
       const msgs = (await msgsRes.json()) as Array<{ role: string; content: string }>;
       const replies = msgs.filter(
@@ -458,7 +456,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.reject(approvalId);
+    await h.approvalsRepo.resolvePending(approvalId, "reject", "test-guardian");
 
     await expect(h.handler.onRejected(approvalId)).resolves.toBeUndefined();
 
@@ -492,7 +490,7 @@ describe("Approval flow E2E — resolving an approval", () => {
       throw new Error(`expected pending_approval, got ${r.status}`);
     }
     const approvalId = r.approval.approvalId;
-    await h.approvalsRepo.resolvePending(approvalId, "approve");
+    await h.approvalsRepo.resolvePending(approvalId, "approve", "test-guardian");
     await h.handler.onApproved(approvalId);
 
     // Second call should not re-execute — duplicate-execution guard kicks in.
@@ -526,19 +524,5 @@ describe("Approval flow E2E — persistence and time", () => {
     expect(pendingNow?.status).toBe("pending");
     expect(pendingNow?.resolvedAt ?? null).toBeNull();
     h.testDb.close();
-  });
-});
-
-// Unimplemented v1 behaviors — kept visible as skipped tests
-
-describe("Approval flow E2E — deferred (not implemented in v1)", () => {
-  it.skip("BRS 4: independent steps in the same session continue while one step is suspended", () => {
-    // No agent-side scheduler models per-step independence yet — the agent
-    // is told to keep working in the tool-result text but parallel branch
-    // semantics are not enforced by the runtime.
-  });
-
-  it.skip("BRS 5: a step depending on a suspended step waits for completion", () => {
-    // Same gap as BRS 4 — completion-dependency is not modeled in v1.
   });
 });

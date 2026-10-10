@@ -5,6 +5,7 @@ node_modules/
 dist/
 # rome-web mock-mode build output (dev tool; see packages/web/mock/)
 dist-mock/
+storybook-static/
 # UX audit report build output (see .claude/skills/ux-semantics-audit/report/)
 dist-report/
 .env
@@ -18,6 +19,8 @@ dist-report/
 .npmrc
 csc_link.txt
 data/
+# s6 reads a service's readiness check from its data/ directory.
+!scripts/docker/s6-rc.d/*/data/
 scratch/sessions/
 *.tsbuildinfo
 .next/
@@ -49,3 +52,6 @@ docker-compose.override.yaml
 AGENT_LOG.md
 
 .impeccable
+
+# Channel scenario traces (pnpm test:channels)
+.channel-traces/

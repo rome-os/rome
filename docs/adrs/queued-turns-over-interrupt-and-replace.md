@@ -8,7 +8,7 @@
 
 A [session](../concepts/sessions.md) is the one live object for a conversation, and several callers reach it. The WebChat route, the channel adapters, approval continuations, and scheduled resumptions all push turns into the same session. A second turn therefore arrives mid-turn in ordinary use. Two browser tabs sit on one chat, a guardian types again during generation, or an approval resolves at the moment a fresh message lands.
 
-The industry default for a chat product stops the running generation and starts over with the second input. That default holds when the discarded work is text. A Rome [turn](../concepts/sessions.md#agent-run) issues tool calls that leave the process: a message sent on a channel, a file written, an event scheduled, an approval shown to the guardian. Those effects have already landed when the second input arrives, and an interrupt retracts none of them.
+The industry default for a chat product stops the running generation and starts over with the second input. That default holds when the discarded work is text. A Rome [turn](../concepts/sessions.md#turn) issues tool calls that leave the process: a message sent on a channel, a file written, an event scheduled, an approval shown to the guardian. Those effects have already landed when the second input arrives, and an interrupt retracts none of them.
 
 The session is also the only place a rule like this holds for every caller. A rule that lives in one entry point covers the callers routed through that entry point, and new entry points keep arriving.
 

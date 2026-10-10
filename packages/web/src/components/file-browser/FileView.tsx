@@ -322,7 +322,7 @@ export function FileViewBody() {
         <div className="flex h-full items-center justify-center bg-surface p-6">
           <div className="max-w-md text-center">
             <h3 className="text-section text-foreground">{t("view.htmlPreviewFailedTitle")}</h3>
-            <p className="mt-2 text-body text-muted-foreground">
+            <p className="mt-2 text-ui text-muted-foreground">
               {t("view.htmlPreviewFailedDescription")}
             </p>
           </div>
@@ -431,7 +431,7 @@ export function FileViewBody() {
     <div className="flex h-full items-center justify-center bg-surface p-6">
       <div className="max-w-md text-center">
         <h3 className="text-section text-foreground">{t("view.unsupportedTitle")}</h3>
-        <p className="mt-2 text-body text-muted-foreground">{t("view.unsupportedDescription")}</p>
+        <p className="mt-2 text-ui text-muted-foreground">{t("view.unsupportedDescription")}</p>
       </div>
     </div>
   );

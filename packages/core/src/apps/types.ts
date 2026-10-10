@@ -1,6 +1,5 @@
 export type ArtifactOwnerType = "core" | "app";
 export type RomeAppArtifactKind = "agent" | "action" | "skill" | "hook";
-export type RomeAppRoutingMode = "client";
 
 export interface ArtifactOwnership {
   ownerType: ArtifactOwnerType;
@@ -69,7 +68,6 @@ export interface RomeAppBuildManifest {
   assetVersion: string;
   displayName: string;
   navLabel?: string;
-  routing: RomeAppRoutingMode;
 }
 
 export interface ResolvedRomeAppWebMetadata extends RomeAppBuildManifest {
@@ -125,6 +123,12 @@ export interface RomeAppManifest {
   id: string;
   version: string;
   description: string;
+  /**
+   * One-line, author-written hook for the app's social share card. When
+   * absent the card shows no description at all — there is no fallback to
+   * `description`.
+   */
+  tagline?: string;
   /** Human-readable App name. Consumed by both Rome Cloud and Rome. */
   name?: string;
   /** Path relative to appRoot to an icon asset (svg/png/webp). */

@@ -140,7 +140,7 @@ export function ShareBar({
       {/* Header */}
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="text-body text-foreground">
+          <h2 className="text-section text-foreground">
             {t("share.createTitle", "Create a share link")}
           </h2>
           <p className="text-ui text-muted-foreground">{t("share.selectedCount", { count })}</p>
@@ -210,7 +210,7 @@ export function ShareBar({
                         </span>
                       </div>
                     ) : (
-                      <div className="text-body text-muted-foreground">{desc}</div>
+                      <div className="text-ui text-muted-foreground">{desc}</div>
                     )}
                   </div>
                   <Switch
@@ -231,7 +231,7 @@ export function ShareBar({
         onClick={() => void handleCreate()}
         disabled={count === 0 || creating}
       >
-        <Link2 className="size-4" />
+        <Link2 data-icon="inline-start" className="size-4" />
         {creating ? t("share.creating", "Creating…") : t("share.create", "Create link")}
       </Button>
 
@@ -247,7 +247,11 @@ export function ShareBar({
             className="flex-1"
           />
           <Button variant="outline" onClick={() => handleCopy(createdUrl)}>
-            {copiedUrl === createdUrl ? <Check className="size-4" /> : <Copy className="size-4" />}
+            {copiedUrl === createdUrl ? (
+              <Check data-icon="inline-start" className="size-4" />
+            ) : (
+              <Copy data-icon="inline-start" className="size-4" />
+            )}
             {copiedUrl === createdUrl ? t("share.copied", "Copied") : t("share.copy", "Copy")}
           </Button>
         </div>

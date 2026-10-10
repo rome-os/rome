@@ -62,17 +62,33 @@ export function collectButtonViolations(): Violation[] {
     const em = Number.parseFloat(cs.fontSize) || 16;
     const padX = Math.max(Number.parseFloat(cs.paddingLeft), Number.parseFloat(cs.paddingRight));
 
+    // The layout box, not the painted one. `getBoundingClientRect` reports the
+    // box after transforms, and a spinning 16px glyph paints a 22px square
+    // midway through each turn, which would read as media on some frames
+    // and as a glyph on others. Transforms rotate about the center, so the
+    // center is taken from the painted box and the extent from the computed
+    // size; an element with no computed size keeps its painted box.
+    const layoutBox = (el: Element) => {
+      const painted = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const width = Number.parseFloat(cs.width);
+      const height = Number.parseFloat(cs.height);
+      if (!Number.isFinite(width) || !Number.isFinite(height)) return painted;
+      const cy = (painted.top + painted.bottom) / 2;
+      return { top: cy - height / 2, bottom: cy + height / 2, width, height };
+    };
+
     // Walk descendants, keeping elements that render as visual boxes.
     const descendants = [...btn.querySelectorAll("*")].filter(isVisible);
 
     for (const child of descendants) {
-      const c = child.getBoundingClientRect();
+      const c = layoutBox(child);
       const isMedia = c.height > 1.5 * em;
       if (!isMedia) continue;
       // Only flag leaf media: a wrapper whose height comes from a media
       // descendant would duplicate that descendant's finding.
       const hasMediaDescendant = [...child.children].some(
-        (grandchild) => grandchild.getBoundingClientRect().height > 1.5 * em,
+        (grandchild) => layoutBox(grandchild).height > 1.5 * em,
       );
       if (hasMediaDescendant) continue;
 

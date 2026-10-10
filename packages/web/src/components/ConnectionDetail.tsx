@@ -103,12 +103,12 @@ function SlotEntry({
   onFlash: (message: string) => void;
 }) {
   // Talk channels all render through the single generic ChannelConnectCard,
-  // driven by a per-service config. The telegram card carries two slots — the
-  // bot (primary) and the personal account (its `session` slot, keyed to the
-  // `telegram_user` config).
+  // driven by a per-service config. Telegram and WeChat each carry two slots —
+  // the bot (primary) and the guardian's own account (the `session` slot, keyed
+  // to that brand's personal-account config).
   const channelConfig =
-    card.service === "telegram" && slot.key === "session"
-      ? CHANNEL_CONFIGS.telegram_user
+    slot.key === "session" && CHANNEL_CONFIGS[`${card.service}_user`]
+      ? CHANNEL_CONFIGS[`${card.service}_user`]
       : CHANNEL_CONFIGS[card.service];
   if (channelConfig) {
     return (
@@ -165,15 +165,7 @@ export function ConnectionDetailDialog({
     <Dialog open={card !== null} onClose={onClose} size="lg">
       {card && (
         <>
-          <DialogHeader onClose={onClose}>
-            <div className="flex items-center gap-3">
-              <ConnectionBrandBadge connection={card.service} />
-              <div className="min-w-0 flex-1">
-                <DialogTitle className="text-body">{card.label}</DialogTitle>
-                <StatusIndicator card={card} className="mt-1" />
-              </div>
-            </div>
-          </DialogHeader>
+          <ConnectionDetailHeader card={card} onClose={onClose} />
           <DialogBody>
             <ConnectionDetailBody
               card={card}
@@ -185,5 +177,25 @@ export function ConnectionDetailDialog({
         </>
       )}
     </Dialog>
+  );
+}
+
+export function ConnectionDetailHeader({
+  card,
+  onClose,
+}: {
+  card: ConnectionCard;
+  onClose: () => void;
+}) {
+  return (
+    <DialogHeader onClose={onClose}>
+      <div className="flex items-center gap-3">
+        <ConnectionBrandBadge connection={card.service} />
+        <div className="min-w-0 flex-1">
+          <DialogTitle className="text-section">{card.label}</DialogTitle>
+          <StatusIndicator card={card} className="mt-1" />
+        </div>
+      </div>
+    </DialogHeader>
   );
 }

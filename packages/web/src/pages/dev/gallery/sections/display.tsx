@@ -35,6 +35,14 @@ import {
   AvatarGroupCount,
 } from "@/components/ui/avatar";
 import { Spinner } from "@rome-os/ui/spinner";
+import {
+  List,
+  ListRow,
+  ListRowContent,
+  ListRowDescription,
+  ListRowTitle,
+} from "@/components/ui/list-row";
+import { Timestamp, TimestampProvider } from "@rome-os/ui/timestamp";
 import { Markdown } from "@rome-os/ui/markdown";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -63,14 +71,35 @@ const BADGE_VARIANTS = [
   "outline",
 ] as const;
 
+// One instant for the layout and zone specimens: late enough in the UTC day
+// that Tokyo and New York disagree on the date.
+const SAMPLE_INSTANT = "2026-09-03T15:04:05Z";
+
+const RELATIVE_OFFSETS: ReadonlyArray<readonly [label: string, offsetMs: number]> = [
+  ["30 seconds ago", -30_000],
+  ["5 minutes ago", -5 * 60_000],
+  ["3 hours ago", -3 * 3_600_000],
+  ["30 hours ago", -30 * 3_600_000],
+  ["12 days ago", -12 * 86_400_000],
+  ["in 2 hours", 2 * 3_600_000],
+  ["in 400 days", 400 * 86_400_000],
+];
+
 const ROWS = [
   { id: "ses_01J9Z4", app: "Bookkeeper", status: "Done", duration: "1m 04s" },
   { id: "ses_01J9Z5", app: "Marketer", status: "Running", duration: "12s" },
   { id: "ses_01J9Z6", app: "Inbox", status: "Failed", duration: "3m 41s" },
 ];
 
+const PEOPLE = [
+  { name: "Ada Lovelace", handle: "@ada", when: "2m", selected: false },
+  { name: "Grace Hopper", handle: "@grace", when: "1h", selected: true },
+  { name: "Katherine Johnson", handle: "@katherine", when: "3d", selected: false },
+];
+
 export function DisplaySection() {
   const [selectedTile, setSelectedTile] = useState("private");
+  const [mountedAt] = useState(() => Date.now());
   // Prose paints from inherited tokens on its own; Mermaid is the one part that
   // needs handing an explicit sRGB palette, because its color parser can't read
   // the OKLCH primitives Slate and Ember dark are built on.
@@ -134,7 +163,7 @@ export function DisplaySection() {
           <div className="grid gap-4 sm:grid-cols-2">
             <section className="rounded-12 border border-border bg-surface p-4">
               <h3 className="text-section text-foreground">Allowed accounts</h3>
-              <p className="mt-1 text-body text-muted-foreground">
+              <p className="mt-1 text-ui text-muted-foreground">
                 Google accounts that may sign in from the cloud.
               </p>
               <p className="mt-4 text-ui text-muted-foreground">2 accounts</p>
@@ -362,6 +391,58 @@ export function DisplaySection() {
         </Specimen>
       </Component>
 
+      <Component id="list-row" name="ListRow" source="@rome-os/ui/list-row">
+        <Specimen
+          label="ListRow — md"
+          note="One record in a list. The row owns its inset, a 40px floor, and the gap between its parts through the --row-* tokens; List owns the hairline between rows. Each floor is its control step plus 8px. Table is for aligned columns under a header, Card for a bordered block of its own."
+        >
+          <List className="overflow-hidden rounded-8 border border-border">
+            {PEOPLE.map((person) => (
+              <ListRow key={person.name} asChild interactive selected={person.selected}>
+                <button type="button">
+                  <span
+                    className="size-8 shrink-0 rounded-full bg-surface-muted text-muted-foreground"
+                    aria-hidden
+                  />
+                  <ListRowContent>
+                    <ListRowTitle>{person.name}</ListRowTitle>
+                    <ListRowDescription>{person.handle}</ListRowDescription>
+                  </ListRowContent>
+                  <span className="font-mono text-aux tabular-nums text-subtle-foreground">
+                    {person.when}
+                  </span>
+                </button>
+              </ListRow>
+            ))}
+          </List>
+        </Specimen>
+
+        <Specimen label="ListRow — sm" note="The 36px floor, for a dense list of one-line records.">
+          <List className="overflow-hidden rounded-8 border border-border">
+            {ROWS.map((row) => (
+              <ListRow key={row.id} size="sm">
+                <span className="font-mono text-aux text-muted-foreground">{row.id}</span>
+                <ListRowContent>
+                  <ListRowTitle>{row.app}</ListRowTitle>
+                </ListRowContent>
+                <Badge
+                  variant={
+                    row.status === "Done"
+                      ? "success"
+                      : row.status === "Failed"
+                        ? "destructive"
+                        : "info"
+                  }
+                >
+                  {row.status}
+                </Badge>
+                <span className="text-aux text-muted-foreground">{row.duration}</span>
+              </ListRow>
+            ))}
+          </List>
+        </Specimen>
+      </Component>
+
       <Component id="separator" name="Separator" source="@rome-os/ui/separator">
         <Specimen label="Separator">
           <div className="space-y-3">
@@ -424,13 +505,13 @@ export function DisplaySection() {
           <Row>
             <Item label="sm — replacing the icon">
               <Button size="sm" disabled>
-                <Spinner size="sm" />
+                <Spinner data-icon="inline-start" size="sm" />
                 Installing
               </Button>
             </Item>
             <Item label="md — destructive tone">
               <Button variant="destructive" disabled>
-                <Spinner />
+                <Spinner data-icon="inline-start" />
                 Deleting
               </Button>
             </Item>
@@ -446,6 +527,68 @@ export function DisplaySection() {
               </Row>
             </Item>
           </Row>
+        </Specimen>
+      </Component>
+
+      <Component id="timestamp" name="Timestamp" source="@rome-os/ui/timestamp">
+        <Specimen
+          label="Timestamp — relative"
+          note="The default layout. Each label re-renders on its own at the moment its wording changes; hover for the exact instant. The offsets are from when this page mounted."
+        >
+          <Row>
+            {RELATIVE_OFFSETS.map(([label, offset]) => (
+              <Item key={label} label={label}>
+                <Timestamp value={mountedAt + offset} />
+              </Item>
+            ))}
+          </Row>
+        </Specimen>
+        <Specimen
+          label="Timestamp — layouts"
+          note="One instant in every preset, plus raw Intl options for anything the presets lack."
+        >
+          <Row>
+            <Item label="time">
+              <Timestamp value={SAMPLE_INSTANT} format="time" />
+            </Item>
+            <Item label="date">
+              <Timestamp value={SAMPLE_INSTANT} format="date" />
+            </Item>
+            <Item label="datetime">
+              <Timestamp value={SAMPLE_INSTANT} format="datetime" />
+            </Item>
+            <Item label="full">
+              <Timestamp value={SAMPLE_INSTANT} format="full" />
+            </Item>
+            <Item label="{ weekday, hour }">
+              <Timestamp value={SAMPLE_INSTANT} format={{ weekday: "short", hour: "numeric" }} />
+            </Item>
+            <Item label="null → fallback">
+              <Timestamp value={null} />
+            </Item>
+          </Row>
+        </Specimen>
+        <Specimen
+          label="Timestamp — zones"
+          note="The same instant under a provider set to Tokyo. A prop overrides the provider for one element; the last one shows the browser's own zone."
+        >
+          <TimestampProvider timeZone="Asia/Tokyo">
+            <Row>
+              <Item label="provider · Asia/Tokyo">
+                <Timestamp value={SAMPLE_INSTANT} format="datetime" />
+              </Item>
+              <Item label="prop · America/New_York">
+                <Timestamp value={SAMPLE_INSTANT} format="datetime" timeZone="America/New_York" />
+              </Item>
+              <Item label="prop · browser zone">
+                <Timestamp
+                  value={SAMPLE_INSTANT}
+                  format="datetime"
+                  timeZone={Intl.DateTimeFormat().resolvedOptions().timeZone}
+                />
+              </Item>
+            </Row>
+          </TimestampProvider>
         </Specimen>
       </Component>
 

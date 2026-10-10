@@ -177,7 +177,7 @@ export async function resolveYelpBusiness(page, business, location) {
 export async function navigateFreshYelpPage(page, url) {
   const currentUrl = await page.evaluate("window.location.href || ''").catch(() => "");
   if (/^https:\/\/(?:www\.)?yelp\.com\/(?:search|biz)\b/i.test(currentUrl)) {
-    await page.goto("about:blank", { waitUntil: "none" });
+    await page.goto(new URL("/", url).href, { waitUntil: "none" });
   }
   await page.goto(url);
 }

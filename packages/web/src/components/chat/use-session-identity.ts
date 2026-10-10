@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentMention } from "@/lib/chat-types";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
@@ -9,6 +9,9 @@ import { useSessionsChanged } from "@/lib/session-events";
 export interface SessionIdentity {
   /** The session's display name, or null while loading / unnamed. */
   sessionName: string | null;
+  model: string | null;
+  /** Provider-reported effort of the session's last successful turn, or null when unknown. */
+  reasoningEffort: string | null;
   /** The session's locked agent, resolved to its owning app's label + icon. */
   pinnedAgentMention: AgentMention | null;
   /** ISO timestamp when the session was archived, or null when not archived. */
@@ -31,19 +34,27 @@ export interface SessionIdentity {
  */
 export function useSessionIdentity(sessionId: string | null | undefined): SessionIdentity {
   const presentationMode = usePresentationMode();
+  const sessionGeneration = useRef(0);
+  const [model, setModel] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null>(null);
 
   useEffect(() => {
+    sessionGeneration.current += 1;
     if (!sessionId) {
       setPinnedAgentMention(null);
+      setModel(null);
+      setReasoningEffort(null);
       setSessionName(null);
       setArchivedAt(null);
       setPinnedAt(null);
       return;
     }
+    setModel(null);
+    setReasoningEffort(null);
     let cancelled = false;
     (async () => {
       try {
@@ -53,6 +64,8 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         ]);
         if (cancelled) return;
         setSessionName(session?.name ?? null);
+        setModel(session?.model ?? null);
+        setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
         const agentName = session?.agentName ?? null;
@@ -74,6 +87,8 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         }
       } catch {
         if (!cancelled) {
+          setModel(null);
+          setReasoningEffort(null);
           setSessionName(null);
           setPinnedAgentMention(null);
           setArchivedAt(null);
@@ -83,6 +98,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     })();
     return () => {
       cancelled = true;
+      sessionGeneration.current += 1;
     };
   }, [sessionId]);
 
@@ -94,10 +110,14 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   // which don't change on archive) to keep the listener cheap.
   useSessionsChanged(() => {
     if (!sessionId) return;
+    const generation = sessionGeneration.current;
     void (async () => {
       try {
         const session = await getSession(sessionId);
+        if (generation !== sessionGeneration.current) return;
         setSessionName(session?.name ?? null);
+        setModel(session?.model ?? null);
+        setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
       } catch {
@@ -108,6 +128,8 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
 
   return {
     sessionName,
+    model,
+    reasoningEffort,
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
     pinnedAt,

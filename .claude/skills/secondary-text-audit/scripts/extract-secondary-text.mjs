@@ -31,7 +31,7 @@
  * row. Only a row none of them reach is UNRENDERED — dead copy.
  *
  * Prescreen flags are ADVISORY. They mark rows worth reading first; the rules
- * in ../references/rules.md decide the verdict. Flags emitted per row:
+ * in docs/ui/secondary-text.md decide the verdict. Flags emitted per row:
  *
  *   forbidden:<id>   matches a forbidden opener/pattern (auto-delete in rules)
  *   generic-verb     the only verb is manage/configure/view/set/... on the
@@ -460,7 +460,7 @@ console.log(
   `${auto.length} match a forbidden pattern, ${scoped.filter((r) => r.flags.includes("no-signal")).length} carry no signal word, ` +
     `${unrendered.length} have no call site, ${srOnly.length} are sr-only (out of scope).\n`,
 );
-console.log("Flags are advisory. Apply references/rules.md to reach a verdict.\n");
+console.log("Flags are advisory. Apply docs/ui/secondary-text.md to reach a verdict.\n");
 console.log("| Location | Label | Secondary text | Flags |");
 console.log("|---|---|---|---|");
 for (const r of scoped) {

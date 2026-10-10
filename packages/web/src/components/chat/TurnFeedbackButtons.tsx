@@ -7,6 +7,7 @@ import {
   type TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { turnApiPath } from "@/components/agent-trace/turn-api";
+import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -84,7 +85,7 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
           setSubmitted(true);
           setDraftRating(null);
           if (body.processing) {
-            autoPlaceApp(body.processing.appId, body.processing.route);
+            autoPlaceApp(body.processing.appId, body.processing.route, undefined, true);
           }
         } else if (res.status === 409) {
           // Another surface beat us to it — adopt the server's record and lock.
@@ -157,7 +158,11 @@ export function TurnFeedbackButtons({ sessionId, turnId }: { sessionId: string; 
           )}
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-80">
+      <PopoverContent
+        align="start"
+        collisionPadding={CHAT_POPOVER_FIT.collisionPadding}
+        className={cn("w-80", CHAT_POPOVER_FIT.className)}
+      >
         <Textarea
           value={comment}
           onChange={(e) => setComment(e.target.value)}

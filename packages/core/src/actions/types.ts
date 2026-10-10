@@ -1,46 +1,11 @@
-import type { ActionExecutionContext, ActionResult, PreviewPayload } from "@rome-os/app-runtime";
+import type { Action } from "@rome-os/app-runtime";
 
-export interface ActionConfig {
-  name: string;
-  type: "system" | "custom";
-  description: string;
-  /** Optional relative module entry path from the action directory (default: ./index.ts or ./index.js). */
-  entry?: string;
-  complexity: "simple" | "moderate" | "complex";
-  speed: "fast" | "moderate" | "slow";
-  reliability: "high" | "medium" | "low";
-  sideEffects: "read-only" | "write";
-  requiresApproval?: boolean;
-  cancellable?: boolean;
-  webhook?: boolean;
-  favorRequirement?: FavorRequirementConfig;
-}
-
-export interface FavorRequirementConfig {
-  amount: number;
-  title: string;
-  summary?: string;
-  displayFields?: Array<{ label: string; from: string }>;
-}
-
-export interface Action {
-  config: ActionConfig;
-  /** Present = agent-callable action (tool). Absent = event-only action (workflow). */
-  inputSchema?: Record<string, unknown>;
-  execute(args: Record<string, unknown>, context?: ActionExecutionContext): Promise<ActionResult>;
-  /**
-   * Optional preview renderer. Returns a structured payload describing what
-   * the action would do, used to build approval cards shown to the guardian.
-   * Usually pure over args; may be async when the runtime lazily loads the
-   * action implementation before rendering the preview.
-   */
-  preview?(args: Record<string, unknown>): PreviewPayload | Promise<PreviewPayload | undefined>;
-}
-
-// Canonical envelope types live in @rome-os/app-runtime so apps and core
-// agree on the shape without two copies drifting. Re-exported here so
-// existing imports from "../actions/types.js" keep working.
+// Canonical action and envelope types live in @rome-os/app-runtime so apps and
+// core agree on the shape without two copies drifting.
 export type {
+  Action,
+  ActionConfig,
+  FavorRequirementConfig,
   PreviewPayload,
   ActionResult,
   PendingApproval,
@@ -55,6 +20,6 @@ export interface ActionRegistry {
   has(name: string): boolean;
   getCanonicalName?(name: string): string | undefined;
   list(): string[];
-  /** Return agent-callable actions matching the given names, or all when "*" is present. */
+  /** Return named agent-callable actions plus public actions when "*" is present. */
   getForAgent(names: string[]): Action[];
 }

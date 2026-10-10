@@ -6,6 +6,7 @@ import { AuthGate } from "./shell/AuthGate";
 import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
+import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
 import FreePage from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
@@ -25,9 +26,6 @@ const PeopleIndexRedirect = lazy(() =>
   import("./pages/PeoplePage").then((m) => ({ default: m.PeopleIndexRedirect })),
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
-const PersonLegacyRedirect = lazy(() =>
-  import("./pages/PersonDetailPage").then((m) => ({ default: m.PersonLegacyRedirect })),
-);
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
@@ -41,6 +39,10 @@ const AppRemixConfirmPage = lazy(() => import("./pages/AppRemixConfirmPage"));
 const AppEmbeddedPage = lazy(() => import("./pages/AppEmbeddedPage"));
 const AppFullPage = lazy(() => import("./pages/AppFullPage"));
 const DesktopPage = lazy(() => import("./pages/DesktopPage"));
+const WechatDesktopPage = lazy(() => import("./pages/WechatDesktopPage"));
+const NamedDesktopPage = lazy(() =>
+  import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
+);
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
@@ -60,8 +62,10 @@ export default function App() {
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
   const resumeRemix = useAppRemixResume();
+  const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
   if (resumeRemix) return <Navigate to={resumeRemix} replace />;
+  if (cloudLoginReturn) return <Navigate to={cloudLoginReturn} replace />;
 
   return (
     <SlotProvider>
@@ -145,13 +149,11 @@ export default function App() {
                 than sharing theirs: a person id is a slug of the display name
                 the guardian gave them, so `latest` and `directory` are ids they
                 can mint, and a static view route would leave such a person
-                unreachable. The bare `/people/:personId` forwards, so an
-                address a person was already reached by keeps working. */}
+                unreachable. */}
             <Route path="/people" element={<PeopleIndexRedirect />} />
             <Route path="/people/latest" element={<PeoplePage view="latest" />} />
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
             <Route path="/memory/*" element={<MemoryPage />} />
             <Route path="/projects/*" element={<ProjectsPage />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
@@ -176,6 +178,8 @@ export default function App() {
             <Route path="/app-details/:appId" element={<AppDetailPage />} />
             <Route path="/apps/:appId/*" element={<AppEmbeddedPage />} />
             <Route path="/desktop" element={<DesktopPage />} />
+            <Route path="/desktop/wechat" element={<WechatDesktopPage />} />
+            <Route path="/desktop/:name" element={<NamedDesktopPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
             <Route path="/settings" element={<SettingsPage />} />

@@ -1,68 +1,14 @@
-export interface ScheduleTrigger {
-  type: "schedule";
-  tzid: string; // IANA timezone
-  localTime: string; // HH:mm
-  /** How `tzid` is bound. Required — every schedule states its
-   * binding explicitly; existing rows were backfilled. `floating` ignores the
-   * stored `tzid` and resolves `localTime` against the guardian's *current*
-   * timezone at (re)activation, so the routine follows the guardian when they
-   * change it. `fixed` is the "absolute zone" choice: it pins the schedule to
-   * the literal `tzid` forever. DST is handled either way by the cron layer. */
-  tzMode: "fixed" | "floating";
-  /** Specific calendar date for a true one-off, "YYYY-MM-DD" interpreted in
-   * `tzid`. Mutually exclusive with `rrule`. When neither `date` nor `rrule`
-   * is set, the schedule fires once at the next matching `localTime`
-   * (back-compat). */
-  date?: string;
-  rrule?: string; // iCal RRULE — recurring; mutually exclusive with `date`
-}
+import type { EventBusTrigger, ManualTrigger, ScheduleTrigger } from "@rome-os/app-runtime";
 
-export interface WebhookTrigger {
-  type: "webhook";
-  path: string; // unique URL path segment
-  secret?: string;
-}
+export type {
+  DeleteRoutineResult,
+  EventBusTrigger,
+  EventFilterCondition,
+  ManualTrigger,
+  ScheduleTrigger,
+} from "@rome-os/app-runtime";
 
-/** One equality condition on an event's payload. `field` is a dot-path into the
- * payload object (e.g. "from.email"); the condition holds when the value at that
- * path, coerced with String(), equals `equals`. This is the narrowing a user
- * authors in plain language ("from Dana") — not a wildcard over the source. */
-export interface EventFilterCondition {
-  field: string;
-  equals: string;
-}
-
-export interface EventBusTrigger {
-  type: "event-bus";
-  eventName: string; // e.g., "action:completed", "message:received"
-  sourcePattern?: string; // e.g., "deploy_*" to match action names
-  /** Payload conditions, AND-ed together. Absent or empty means fire on every
-   * event of this name — a legitimate "watch all" routine, so optional. */
-  filter?: EventFilterCondition[];
-}
-
-export interface PollTrigger {
-  type: "poll";
-  source: string; // e.g., "gmail", "rss", "http"
-  interval: string; // RRULE or simple like "5m", "1h"
-  query?: Record<string, unknown>; // source-specific filter config
-}
-
-/** A routine with no automatic firing condition. Its only entry point is an
- * explicit, out-of-band invocation — the "run now" path (`RoutineEngine.runNow`
- * / `POST /routines/:id/run`). The provider registers the routine so admin
- * surfaces see it as active/ready, but never calls `fire` on its own. Useful
- * for saved playbooks a guardian runs by hand. Carries no config of its own. */
-export interface ManualTrigger {
-  type: "manual";
-}
-
-export type Trigger =
-  | ScheduleTrigger
-  | WebhookTrigger
-  | EventBusTrigger
-  | PollTrigger
-  | ManualTrigger;
+export type Trigger = ScheduleTrigger | EventBusTrigger | ManualTrigger;
 
 export type TriggerType = Trigger["type"];
 
@@ -88,7 +34,7 @@ export interface Routine {
 
   createdAt: Date;
   lastFiredAt?: Date;
-  nextRunAt?: Date; // meaningful for schedule/poll triggers only
+  nextRunAt?: Date; // meaningful for schedule triggers only
 }
 
 export type RoutineRunStatus = "success" | "error" | "running" | "pending_approval" | "cancelled";
@@ -99,17 +45,6 @@ export type RoutineRunStatus = "success" | "error" | "running" | "pending_approv
  * error, cancelled — are terminal. */
 export const ACTIVE_ROUTINE_RUN_STATUSES = ["running", "pending_approval"] as const;
 
-/** Outcome of an atomic delete-if-no-active-runs attempt. The active-run check
- * and the delete happen in one transaction, so this is the authoritative
- * result — there is no separate "exists?" race to lose. */
-export type DeleteRoutineResult =
-  | { status: "deleted"; name: string }
-  | { status: "active-runs"; activeRuns: number }
-  /** The routine is managed by an app and the caller isn't that app, so the
-   * delete was refused. `managedBy` is the owning app's id, for the message. */
-  | { status: "managed"; managedBy: string }
-  | { status: "not-found" };
-
 export interface RoutineRun {
   id: string;
   routineId: string;
@@ -119,13 +54,4 @@ export interface RoutineRun {
   firedAt: Date;
   durationMs?: number;
   error?: string;
-}
-
-export interface RoutineStats {
-  totalRuns: number;
-  successCount: number;
-  errorCount: number;
-  lastStatus: string | null;
-  lastFiredAt: Date | null;
-  avgDurationMs: number | null;
 }

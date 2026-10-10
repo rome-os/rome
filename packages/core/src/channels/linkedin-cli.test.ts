@@ -1,18 +1,59 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it } from "@rstest/core";
 import {
   OpencliAuthError,
   OpencliCommandError,
   parseInbox,
+  parseLinkedInReply,
   parseThreadParticipants,
   parseThreadSnapshot,
   parseWhoami,
-  readLinkedInThreadParticipants,
   type OpencliResult,
 } from "./linkedin-cli.js";
 
 function ok(stdout: string): OpencliResult {
   return { code: 0, stdout, stderr: "" };
 }
+
+describe("parseLinkedInReply", () => {
+  const receipt = {
+    status: "sent",
+    thread_id: "thread",
+    message_id: "provider-id",
+    sender_is_self: true,
+    sent_at: "2026-09-09T12:00:00Z",
+  };
+
+  it("requires a sent message with a provider id on the requested thread", () => {
+    expect(parseLinkedInReply(ok(JSON.stringify([receipt])), "thread")).toMatchObject({
+      messageId: "provider-id",
+      threadId: "thread",
+      senderIsSelf: true,
+    });
+    for (const row of [
+      { ...receipt, status: "verified_dry_run" },
+      { ...receipt, thread_id: "other" },
+      { ...receipt, message_id: "" },
+      { ...receipt, sender_is_self: false },
+      { ...receipt, sent_at: "invalid" },
+    ]) {
+      expect(() => parseLinkedInReply(ok(JSON.stringify([row])), "thread")).toThrow(
+        "outcome is unknown",
+      );
+    }
+  });
+
+  it("reports killed commands and malformed output as unknown, while preserving auth failures", () => {
+    expect(() =>
+      parseLinkedInReply({ code: null, stdout: "", stderr: "timeout" }, "thread"),
+    ).toThrow("Check LinkedIn before retrying");
+    expect(() => parseLinkedInReply(ok("invalid JSON"), "thread")).toThrow(
+      "Check LinkedIn before retrying",
+    );
+    expect(() =>
+      parseLinkedInReply({ code: 1, stdout: "", stderr: "auth_required" }, "thread"),
+    ).toThrow(OpencliAuthError);
+  });
+});
 
 describe("parseWhoami", () => {
   it("returns the account of a signed-in session", () => {
@@ -127,6 +168,7 @@ describe("parseThreadSnapshot", () => {
             returned_message_count: 2,
             message_id: "m1",
             sent_at: "2026-08-19T20:52:09.488Z",
+            sender_participant_id: "ACoAAAda0001",
             sender_name: "Ada Lovelace",
             sender_type: "member",
             sender_profile_url: "https://www.linkedin.com/in/ada/",
@@ -149,6 +191,7 @@ describe("parseThreadSnapshot", () => {
     );
     expect(messages).toHaveLength(2);
     expect(messages[0].sentAt?.toISOString()).toBe("2026-08-19T20:52:09.488Z");
+    expect(messages[0].senderParticipantId).toBe("ACoAAAda0001");
     expect(messages[0].reactionCount).toBe(1);
     expect(messages[1].sentAt).toBeNull();
     expect(messages[1].senderIsSelf).toBe(true);
@@ -286,44 +329,5 @@ describe("parseThreadParticipants", () => {
     // An empty read must never reach the store: the store treats an empty set
     // as "everyone left" and would wipe the thread's membership.
     expect(() => parseThreadParticipants(ok(JSON.stringify([])))).toThrow(OpencliCommandError);
-  });
-});
-
-describe("readLinkedInThreadParticipants", () => {
-  it("invokes the thread-participants command for the requested thread", async () => {
-    const run = rs.fn(async () =>
-      ok(
-        JSON.stringify([
-          {
-            thread_url: "https://www.linkedin.com/messaging/thread/2-abc==/",
-            thread_id: "2-abc==",
-            participant_index: 1,
-            participant_count: 1,
-            participant_id: "ACoAAAda0001",
-            name: "Ada Lovelace",
-            headline: "Engineer",
-            type: "member",
-            is_self: false,
-            profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
-          },
-        ]),
-      ),
-    );
-
-    const participants = await readLinkedInThreadParticipants(
-      { threadUrl: "https://www.linkedin.com/messaging/thread/2-abc==/" },
-      run,
-    );
-
-    expect(run).toHaveBeenCalledWith(
-      [
-        "linkedin",
-        "thread-participants",
-        "--thread-url",
-        "https://www.linkedin.com/messaging/thread/2-abc==/",
-      ],
-      {},
-    );
-    expect(participants.map((p) => p.participantId)).toEqual(["ACoAAAda0001"]);
   });
 });

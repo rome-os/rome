@@ -213,6 +213,180 @@ describe("App keys page", () => {
     expect(writes).toHaveLength(0);
   });
 
+  it("imports .env keys, preserves existing labels and refreshes the list", async () => {
+    let saved = false;
+    const writes = mockAppKeysFetch(
+      () =>
+        ok({
+          keys: saved
+            ? [storedKey, { ...storedKey, name: "OTHER_KEY", label: "OTHER_KEY" }]
+            : [storedKey],
+        }),
+      () => {
+        saved = true;
+        return ok({ ok: true, overridden: false });
+      },
+    );
+    renderAppKeysPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste('# credentials\nSHOP_DB_PASSWORD="new#secret"\nexport OTHER_KEY=value==');
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+
+    expect(await screen.findByText("OTHER_KEY")).toBeTruthy();
+    expect(writes.map(({ url, body }) => ({ url, body }))).toEqual([
+      {
+        url: "/api/app-keys/SHOP_DB_PASSWORD",
+        body: { label: storedKey.label, value: "new#secret" },
+      },
+      { url: "/api/app-keys/OTHER_KEY", body: { label: "OTHER_KEY", value: "value==" } },
+    ]);
+    expect(screen.queryByLabelText(".env content")).toBeNull();
+    expect(screen.queryByText("new#secret")).toBeNull();
+  });
+
+  it("validates the entire .env input before writing any keys", async () => {
+    const writes = mockAppKeysFetch(() => ok({ keys: [] }));
+    renderAppKeysPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste("GOOD_KEY=value\ninvalid line with secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Line 2: Expected KEY=value");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("waits for the pending key list before saving a replacement label", async () => {
+    const { promise, resolve } = Promise.withResolvers<Response>();
+    const writes = mockAppKeysFetch(async () => (await promise).clone());
+    renderAppKeysPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste("SHOP_DB_PASSWORD=new-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+
+    expect(screen.getByRole("button", { name: "Saving…" }).matches(":disabled")).toBe(true);
+    expect(writes).toHaveLength(0);
+    resolve(ok({ keys: [storedKey] }));
+    await screen.findByRole("button", { name: "Add key" });
+    expect(writes).toHaveLength(1);
+    expect(writes[0].body).toEqual({ label: storedKey.label, value: "new-secret" });
+  });
+
+  it.each([
+    false,
+    true,
+  ])("keeps the batch intact when fetching labels fails (cached list: %s)", async (hasCachedList) => {
+    let loadCount = 0;
+    let recovered = false;
+    const writes = mockAppKeysFetch(() => {
+      loadCount++;
+      if (recovered || (hasCachedList && loadCount === 1)) return ok({ keys: [storedKey] });
+      return new Response(JSON.stringify({ error: "Cannot load existing keys" }), { status: 503 });
+    });
+    renderAppKeysPage();
+    if (hasCachedList) await screen.findByText(storedKey.label);
+    else await screen.findByText("App keys couldn't be loaded");
+    await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    const content = "SHOP_DB_PASSWORD=new-secret\nNEW_KEY=another-secret";
+    await userEvent.paste(content);
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+
+    await rs.waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("alert")
+          .some((alert) => alert.textContent === "Cannot load existing keys"),
+      ).toBe(true),
+    );
+    expect(loadCount).toBe(2);
+    expect(writes).toHaveLength(0);
+    expect((screen.getByLabelText(".env content") as HTMLTextAreaElement).value).toBe(content);
+
+    recovered = true;
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+    await screen.findByRole("button", { name: "Add key" });
+    expect(writes.map(({ body }) => body)).toEqual([
+      { label: storedKey.label, value: "new-secret" },
+      { label: "NEW_KEY", value: "another-secret" },
+    ]);
+  });
+
+  it("retains only failed entries for retry and reports overridden saves", async () => {
+    let fail = true;
+    const writes = mockAppKeysFetch(
+      () => ok({ keys: [] }),
+      ({ url }) => {
+        if (url.endsWith("BAD_KEY") && fail) {
+          return new Response(JSON.stringify({ error: "Unavailable" }), { status: 503 });
+        }
+        return ok({ ok: true, overridden: true });
+      },
+    );
+    renderAppKeysPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste('GOOD_KEY=first\nBAD_KEY="second#value"');
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("1 saved, 1 failed");
+    expect((screen.getByLabelText(".env content") as HTMLTextAreaElement).value).toBe(
+      'BAD_KEY="second#value"',
+    );
+    const { toast } = await import("sonner");
+    expect(toast.warning).toHaveBeenCalledWith(
+      "Some saved keys are overridden by server settings. Their entered values are not in use.",
+    );
+    await rs.waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save for all apps" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+    await screen.findByRole("button", { name: "Add key" });
+    expect(writes.map(({ url }) => url)).toEqual([
+      "/api/app-keys/GOOD_KEY",
+      "/api/app-keys/BAD_KEY",
+      "/api/app-keys/BAD_KEY",
+    ]);
+    expect(writes[2].body).toEqual({ label: "BAD_KEY", value: "second#value" });
+  });
+
+  it("disables editing during a batch and clears pasted secrets on cancel", async () => {
+    let finish!: (response: Response) => void;
+    mockAppKeysFetch(
+      () => ok({ keys: [storedKey] }),
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderAppKeysPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste("NEW_KEY=secret");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+    await userEvent.click(screen.getByRole("tab", { name: "Paste .env" }));
+    expect((screen.getByLabelText(".env content") as HTMLTextAreaElement).value).toBe("");
+    await userEvent.click(screen.getByLabelText(".env content"));
+    await userEvent.paste("NEW_KEY=secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save for all apps" }));
+    expect(screen.getByLabelText(".env content").matches(":disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Close" }).matches(":disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Replace" }).matches(":disabled")).toBe(true);
+    finish(ok({ ok: true, overridden: false }));
+    await screen.findByRole("button", { name: "Add key" });
+  });
+
   it("removes a key after confirmation", async () => {
     const writes = mockAppKeysFetch(
       () => ok({ keys: [storedKey] }),

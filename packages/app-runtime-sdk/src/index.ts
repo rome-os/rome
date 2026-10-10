@@ -1,6 +1,7 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
+import type { ConversationSettingsControl } from "./conversation-settings.js";
 
 export { z };
 export type { JSONSchema };
@@ -124,6 +125,8 @@ export interface ActionConfig {
   type: "system" | "custom";
   description: string;
   entry?: string;
+  /** Defaults to public. Explicit actions require an exact agent allow-list entry. */
+  visibility?: "public" | "explicit";
   complexity: "simple" | "moderate" | "complex";
   speed: "fast" | "moderate" | "slow";
   reliability: "high" | "medium" | "low";
@@ -138,6 +141,9 @@ export interface FavorRequirementConfig {
   amount: number;
   title: string;
   summary?: string;
+  /** Fields shown on the payer's consent screen. `from` is a JSONPath into
+   * the action args, e.g. `{ label: "Report", from: "$.reportUrl" }`; a bare
+   * key like `"reportUrl"` is rejected. */
   displayFields?: Array<{ label: string; from: string }>;
 }
 
@@ -389,6 +395,8 @@ export type ActionResult<T = unknown> =
   | { status: "handoff"; handoff: Handoff }
   | { status: "place_widget"; placement: PlaceWidget };
 
+const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
+
 /**
  * Build an {@link Action} from a Zod input schema. The schema is the single
  * source of truth: it generates the model-facing JSON Schema (`inputSchema`),
@@ -420,13 +428,27 @@ export function defineAction<S extends z.ZodType>(spec: {
   const invalidInputMessage = (error: z.ZodError): string =>
     `Invalid input for ${spec.config.name}: ${z.prettifyError(error)}`;
 
+  // A routine adds `__triggerPayload` to every action's args. A schema that
+  // forbids unknown keys and does not declare it would reject every routine
+  // run, so drop the key for that schema alone. A loose schema still sees it.
+  const dropsTriggerPayload =
+    inputSchema.additionalProperties === false &&
+    !Object.hasOwn((inputSchema.properties as object | undefined) ?? {}, TRIGGER_PAYLOAD_KEY);
+  const parse = (args: Record<string, unknown>) => {
+    if (dropsTriggerPayload && Object.hasOwn(args, TRIGGER_PAYLOAD_KEY)) {
+      const { [TRIGGER_PAYLOAD_KEY]: _payload, ...rest } = args;
+      return spec.schema.safeParse(rest);
+    }
+    return spec.schema.safeParse(args);
+  };
+
   const previewFn = spec.preview;
 
   return {
     config: spec.config,
     inputSchema,
     execute: async (args, context) => {
-      const parsed = spec.schema.safeParse(args);
+      const parsed = parse(args);
       if (!parsed.success) {
         return { status: "error", error: invalidInputMessage(parsed.error) };
       }
@@ -434,7 +456,7 @@ export function defineAction<S extends z.ZodType>(spec: {
     },
     ...(previewFn && {
       preview: (args: Record<string, unknown>): PreviewPayload => {
-        const parsed = spec.schema.safeParse(args);
+        const parsed = parse(args);
         if (!parsed.success) {
           return {
             kind: "generic",
@@ -467,12 +489,49 @@ export interface AgentTokenUsage {
   cacheWriteTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * Output tokens the model spent on reasoning. A subset of `outputTokens`,
+   * never added to it. Absent when the provider reports no reasoning count.
+   *
+   * How each provider fills it:
+   * - `openai` (Codex): the provider's own `reasoning_output_tokens` count.
+   * - `anthropic` (Claude): an estimate. The Messages API computes it by
+   *   re-tokenizing the model's raw reasoning, so it can differ from the
+   *   billed count by a few tokens. It counts the full reasoning even when
+   *   the returned thinking text is a shorter summary.
+   */
+  reasoningTokens?: number;
 }
 
 export interface AgentContextUsage {
   usedTokens: number;
   windowTokens?: number;
   remainingTokens?: number;
+}
+
+/**
+ * Why a model run ended, in one vocabulary across providers.
+ *
+ * - `completed`: the model finished its answer.
+ * - `max_tokens`: the model's output was cut off at a token limit: its
+ *   output-token limit, or the context window filling up.
+ * - `refusal`: the model declined to answer.
+ * - `interrupted`: the run was stopped before it finished, usually by the user.
+ * - `error`: the run failed.
+ * - `other`: the provider reported a reason with no match above; read `raw`.
+ */
+export type AgentStopReason =
+  | "completed"
+  | "max_tokens"
+  | "refusal"
+  | "interrupted"
+  | "error"
+  | "other";
+
+export interface AgentStop {
+  reason: AgentStopReason;
+  /** The provider's own value, for logs and diagnostics. Do not branch on it. */
+  raw?: string;
 }
 
 export interface AgentAccounting {
@@ -482,6 +541,17 @@ export interface AgentAccounting {
   context?: AgentContextUsage;
   costUsd?: number;
   numTurns?: number;
+  /**
+   * How this provider model run ended, as the provider reported it. Read this
+   * instead of `stopReason`. For the outcome of the whole turn, read
+   * `AgentTurnOutput.stop`, which can differ (see there).
+   */
+  stop?: AgentStop;
+  /**
+   * @deprecated Read `stop.reason`. This is the provider's own value
+   * (Anthropic `stop_reason`, or `"end_turn"`/`"error"` for Codex), so it
+   * differs between providers.
+   */
   stopReason?: string;
   durationMs?: number;
   rawUsage?: Record<string, unknown>;
@@ -531,6 +601,17 @@ export interface AgentTurnOutput {
   structuredOutput?: unknown;
   state: "final" | "partial" | "none";
   terminalKind?: "result" | "error";
+  /**
+   * The turn's outcome, consistent with the turn's `status`: `interrupted`
+   * when the turn was interrupted, `error` when it ended with an error event,
+   * and never `error` when it ended with a result. It can therefore differ
+   * from `accounting.stop`, which reports how the provider's model run ended.
+   * For example, a run that completed but whose structured output Rome
+   * rejected has `accounting.stop.reason` `completed` and `stop.reason`
+   * `error`. Read this instead of `stopReason`.
+   */
+  stop?: AgentStop;
+  /** @deprecated Read `stop.reason`. Provider-specific; see `AgentAccounting.stopReason`. */
   stopReason?: string;
   error?: string;
   accounting?: AgentAccounting;
@@ -574,6 +655,43 @@ export interface AgentLifecycleHookDeps {
   agentRunner?: AgentRunnerInterface;
 }
 
+// App-started hook. Contract: docs/concepts/apps.md#hooks.
+
+export type AppStartedEventVersion = 1;
+
+/** One app start: an installed bundle of an enabled app becoming active in
+ *  the running daemon. */
+export interface AppStartedEvent {
+  type: "app-started";
+  version: AppStartedEventVersion;
+  appId: string;
+  /** The manifest `version` of the bundle that started. */
+  appVersion: string;
+}
+
+/**
+ * Declared as `hooks/app-started`. Rome calls `onAppStarted` once per app
+ * start: at boot for every enabled app, and after an install, upgrade, or
+ * re-enable. A re-install of identical content is not a new start. The call
+ * comes after boot finishes, so actions, routines, and agents are available.
+ * Neither boot nor the install waits for it. Rome logs a throw and does not
+ * retry until the next app start.
+ *
+ * Every boot is a new start, so Rome calls the hook again for state it
+ * already set up. Make it idempotent: check that the state exists before
+ * creating it.
+ */
+export interface AppStartedHook {
+  onAppStarted(event: AppStartedEvent): Promise<void> | void;
+}
+
+export interface AppStartedHookDeps {
+  appId: string;
+  logger: AppLogger;
+  appContext: RomeAppContext;
+  agentRunner?: AgentRunnerInterface;
+}
+
 // Awaited onion middleware around an agent turn. Agent model: docs/concepts/agents.md.
 
 /** Identifies the wrapped turn; middleware matching uses only `agentName`. */
@@ -601,7 +719,7 @@ export interface TurnMiddlewareContext {
   input: TurnMiddlewareInput;
   session: TurnMiddlewareSession;
   /** Emits model-shaped content. A terminal `result` produces the persisted assistant row. */
-  emit(event: AgentMessage): void;
+  emit(event: AgentEvent): void;
   /** Reserved for the self-loop guard when a future middleware re-injects a
    *  turn (e.g. replay). `welcome-to-rome` does not inject. */
   meta: { synthetic?: boolean };
@@ -616,7 +734,7 @@ export interface TurnMiddlewareHook {
   order: number;
   /** How the chain treats a throw from this middleware. `fail-open` (default)
    *  skips it and continues to `next()` so ordinary chat is never broken;
-   *  `fail-closed` aborts the turn with an error block. */
+   *  `fail-closed` aborts the turn with an error event. */
   onError?: "fail-open" | "fail-closed";
   handle(ctx: TurnMiddlewareContext, next: TurnMiddlewareNext): Promise<void>;
 }
@@ -629,9 +747,25 @@ export interface TurnMiddlewareHookDeps {
 }
 
 // Agent event stream contracts. Session model: docs/concepts/sessions.md.
+//
+// A turn's stream is a sequence of `AgentEvent`s in four groups:
+// - block events carry a completed block: text, thinking, a tool use, or a
+//   tool result;
+// - delta events carry an increment of a block still being produced, and are
+//   transient;
+// - lifecycle events mark the turn's edges and progress: session init, turn
+//   start and end, input status, and the terminal result or error;
+// - other events report subagent activity, structured output, and plan
+//   updates.
+//
+// A text or thinking block is identified by its `blockId`. A tool use is
+// identified by its tool-use id (`id` on `tool_use`), which its `tool_result`
+// and its deltas carry as `toolUseId`. A delta carries the identity of its
+// block whenever the block has one, so a consumer matches the two without
+// relying on event order.
 
 /** First event of a turn stream. Each stream contains exactly one. */
-export interface TurnStartMessage {
+export interface TurnStartEvent {
   type: "turn_start";
   turnId: string;
   /** Session the turn runs on — stable across turns of a conversation. */
@@ -640,67 +774,142 @@ export interface TurnStartMessage {
 }
 
 /** Turn bracketing: the last event of a turn's stream, emitted after the
- *  terminal `result`/`error` block. */
-export interface TurnEndMessage {
+ *  terminal `result` or `error` event when the turn has one. */
+export interface TurnEndEvent {
   type: "turn_end";
   turnId: string;
   /** Turn outcome. `interrupted` means the user stopped the turn mid-flight;
-   *  it takes precedence over `error` (an abort surfaced as an error block is
+   *  it takes precedence over `error` (an abort surfaced as an error event is
    *  still an interruption, not a failure). */
   status: "completed" | "interrupted" | "error";
   /** Turn wall-clock measured by the AgentSession. Distinct from
-   *  `accounting.durationMs` on the terminal block, which is the
+   *  `accounting.durationMs` on the terminal event, which is the
    *  provider's self-reported per-call duration. */
   durationMs: number;
 }
 
-export interface TextMessage {
+export interface TextBlockEvent {
   type: "text";
   content: string;
   /** Provider-agnostic role of this text within its turn. `commentary` =
    *  in-turn narration emitted between/before tool calls; `final` = the turn's
-   *  closing answer (also carried by the terminal `result` block). Sourced from
+   *  closing answer (also carried by the terminal `result` event). Sourced from
    *  the provider's native terminal signal (Anthropic `stop_reason`; Codex
    *  app-server `phase`). Optional: absence degrades to "unknown" (the text is
    *  not promoted into the answer flow). Borrows Codex's vocabulary by design;
    *  it is not Codex-specific. */
   turnPhase?: "commentary" | "final";
+  /**
+   * Block id: this block's identity within its turn. Its deltas carry the same
+   * value, so a consumer matches them without relying on event order. Opaque,
+   * and unique only within its turn. Absent when the provider gives the block
+   * no identity; Rome never borrows another block's id for it.
+   */
+  blockId?: string;
 }
 
 /**
- * Incremental preview of an in-flight `text` block (provider streaming).
- * Transient: the complete `text` block still follows, so consumers that
- * only care about whole blocks (trace, persistence, accounting) must
- * ignore this variant. Emitted only by providers that support partial
- * output; absence degrades to whole-block delivery.
+ * Delta of an in-flight `text` block (provider streaming). Transient: the
+ * complete `text` block still follows, so consumers that only care about whole
+ * blocks (trace, persistence, accounting) must ignore this event. Emitted only
+ * by providers that support partial output; absence degrades to whole-block
+ * delivery.
  */
-export interface TextDeltaMessage {
+export interface TextDeltaEvent {
   type: "text_delta";
   content: string;
+  /** The `blockId` of the `text` block this delta belongs to, when known. */
+  blockId?: string;
 }
 
-export interface ThinkingMessage {
+export interface ThinkingBlockEvent {
   type: "thinking";
+  content: string;
+  /**
+   * Block id: this block's identity within its turn. Its deltas carry the same
+   * value, so a consumer matches them without relying on event order. Opaque,
+   * and unique only within its turn. Absent when the provider gives the block
+   * no identity; Rome never borrows another block's id for it.
+   */
+  blockId?: string;
+}
+
+/**
+ * Delta of an in-flight `thinking` block. Transient, like `text_delta`:
+ * consumers that only care about whole blocks must ignore this event. The
+ * complete `thinking` block normally follows; a turn interrupted or failed
+ * mid-block may end without it, so a consumer that renders deltas discards any
+ * without a matching block when the turn ends. Emitted only when
+ * the provider streams reasoning text; a provider that keeps reasoning hidden
+ * sends none.
+ */
+export interface ThinkingDeltaEvent {
+  type: "thinking_delta";
+  /** The `blockId` of the `thinking` block this delta belongs to. */
+  blockId: string;
   content: string;
 }
 
-export interface ToolUseMessage {
+/**
+ * Delta of a tool call's input while the model is still writing it: a piece of
+ * the input's JSON text. Transient: consumers that only care about whole
+ * blocks must ignore this event. The `tool_use` with the complete `input`
+ * normally follows; a turn interrupted or failed while the model is writing
+ * the input may end without it, so a consumer that renders deltas discards any
+ * without a matching `tool_use` when the turn ends.
+ */
+export interface ToolInputDeltaEvent {
+  type: "tool_input_delta";
+  /** The `id` of the `tool_use` this input belongs to. */
+  toolUseId: string;
+  /** The tool's name, as on the `tool_use` this input belongs to. */
+  tool: string;
+  content: string;
+}
+
+/**
+ * Delta of a running tool call's output, for example a shell command's output
+ * as it is produced. Transient: consumers that only care about whole blocks
+ * must ignore this event. The `tool_result` with the complete output normally
+ * follows; a turn interrupted or failed while the tool runs may end without
+ * it, so a consumer that renders deltas discards any without a matching
+ * `tool_result` when the turn ends.
+ */
+export interface ToolOutputDeltaEvent {
+  type: "tool_output_delta";
+  /** The `id` of the `tool_use` producing this output. */
+  toolUseId: string;
+  content: string;
+}
+
+export interface ToolUseBlockEvent {
   type: "tool_use";
+  /** Tool-use id: this block's identity within its turn. The `tool_result`
+   *  that answers it, and the tool call's deltas, carry it as `toolUseId`. */
   id: string;
   tool: string;
   input: unknown;
   startedAt?: string;
 }
 
-export interface ToolResultMessage {
+export interface ToolResultBlockEvent {
   type: "tool_result";
   toolUseId: string;
   tool: string;
+  /** The provider's own result payload. Its shape differs by provider and tool. */
   output: unknown;
   endedAt?: string;
+  /**
+   * Whether the tool call failed, decided by the provider adapter from the
+   * provider's own failure signal: Claude's `is_error`, a failed status or
+   * non-zero exit code from Codex, or a Rome tool's error result. Read this
+   * instead of inspecting `output`. Absent when the producer cannot tell,
+   * including on results recorded before this field existed.
+   */
+  isError?: boolean;
 }
 
-export interface SubagentStartMessage {
+export interface SubagentStartEvent {
   type: "subagent_start";
   toolUseId: string;
   agentName: string;
@@ -710,7 +919,7 @@ export interface SubagentStartMessage {
   startedAt?: string;
 }
 
-export type SubagentResultMessage =
+export type SubagentResultEvent =
   | {
       type: "subagent_result";
       toolUseId: string;
@@ -732,26 +941,30 @@ export type SubagentResultMessage =
       endedAt?: string;
     };
 
-/** Terminal content block: the agent's final answer for its turn.
+/** Terminal event: the agent's final answer for its turn.
  *  The turn boundary itself is the `turn_end` event that follows. */
-export interface ResultMessage {
+export interface TurnResultEvent {
   type: "result";
   content: string;
   /** Provider-native structured result when the agent declares outputSchema.
    * `content` is the canonical JSON serialization of this value. */
   structuredOutput?: unknown;
-  /** Provider-reported usage for the agent that produced this block.
+  /** Provider-reported usage for the agent that produced this event.
    *  Sub-agent terminals carry their own accounting. */
   accounting?: AgentAccounting;
 }
 
-/** Terminal content block: the turn failed. `turn_end` still follows. */
+/** Machine-readable classification of a failed turn, carried as `TurnErrorEvent.code`. */
 export type AgentErrorCode =
   | "usage_limit"
+  | "credits_used_up"
   | "auth_revoked"
   | "model_provider_unavailable"
   | "model_unavailable"
-  | "no_model_provider_available";
+  | "no_model_provider_available"
+  | "context_window_exceeded"
+  | "transient"
+  | "invalid_request";
 
 export type AgentErrorProvider = "openai" | "anthropic";
 
@@ -761,25 +974,36 @@ export type AgentErrorReason =
   | "model_access_denied"
   | "no_available_provider";
 
-export interface ErrorMessage {
+/** Terminal event: the turn failed. `turn_end` still follows. */
+export interface TurnErrorEvent {
   type: "error";
   error: string;
   accounting?: AgentAccounting;
   /**
    * Optional machine-readable classification of the failure, set by providers
-   * that can categorize it. `"usage_limit"` marks a provider whose quota/rate
-   * limit is exhausted; `"auth_revoked"` marks a provider whose stored
-   * credentials are no longer valid server-side (e.g. Codex's refresh token was
-   * revoked) and need a re-login. Consumers use these instead of parsing the
+   * that can categorize it. Consumers use these instead of parsing the
    * human-readable `error`.
+   *
+   * - `usage_limit`: the provider's quota or rate limit is exhausted.
+   * - `credits_used_up`: the instance's Rome credits are used up. Retrying
+   *   fails until credits are added or ChatGPT is connected.
+   * - `auth_revoked`: the stored credentials are no longer valid server-side
+   *   (for example, Codex's refresh token was revoked) and need a re-login.
+   * - `context_window_exceeded`: the conversation no longer fits the model's
+   *   context window. Retrying the same turn fails the same way.
+   * - `transient`: a temporary provider or network failure, such as an
+   *   overloaded server or a dropped stream. Retrying later can succeed.
+   * - `invalid_request`: the provider rejected the request as malformed.
    */
   code?: AgentErrorCode;
+  /** HTTP status of the failed provider request, when the provider reports it. */
+  httpStatus?: number;
   /** Provider and cause used by interactive clients to offer recovery UI. */
   provider?: AgentErrorProvider;
   reason?: AgentErrorReason;
 }
 
-export interface SessionInitMessage {
+export interface SessionInitEvent {
   type: "session_init";
   sessionId: string;
   /** Durable Rome trace for the current invocation. Treat as opaque. */
@@ -795,7 +1019,7 @@ export interface SessionInitMessage {
  * Schema-validated structured output. Unlike the corresponding raw tool use,
  * this payload has been accepted and is authoritative.
  */
-export interface StructuredOutputMessage {
+export interface StructuredOutputEvent {
   type: "structured_output";
   payload: unknown;
 }
@@ -820,7 +1044,7 @@ export interface AgentPlan {
 }
 
 /** Complete replacement snapshot of the current provider-authored Plan. */
-export interface PlanUpdateMessage {
+export interface PlanUpdateEvent {
   type: "plan_update";
   plan: AgentPlan;
 }
@@ -834,31 +1058,92 @@ export type AgentInputState =
   | "cancelled"
   | "failed";
 
-export interface InputStatusMessage {
+export interface InputStatusEvent {
   type: "input_status";
   inputId: string;
   state: AgentInputState;
   turnId?: string;
 }
 
-export type AgentMessage =
-  | InputStatusMessage
-  | TurnStartMessage
-  | TurnEndMessage
-  | TextMessage
-  | TextDeltaMessage
-  | ThinkingMessage
-  | ToolUseMessage
-  | ToolResultMessage
-  | SubagentStartMessage
-  | SubagentResultMessage
-  | ResultMessage
-  | ErrorMessage
-  | SessionInitMessage
-  | StructuredOutputMessage
-  | PlanUpdateMessage;
+/** Block events: each carries one completed block of the turn. */
+export type AgentBlockEvent =
+  | TextBlockEvent
+  | ThinkingBlockEvent
+  | ToolUseBlockEvent
+  | ToolResultBlockEvent;
 
-export type StreamAgentMessage = AgentMessage & { agent?: string };
+/** Delta events: transient increments of a block still being produced. The
+ *  durable trace, persistence, and accounting never keep them. */
+export type AgentDeltaEvent =
+  | TextDeltaEvent
+  | ThinkingDeltaEvent
+  | ToolInputDeltaEvent
+  | ToolOutputDeltaEvent;
+
+/** Lifecycle events: the turn's edges and progress, including its terminal
+ *  `result` or `error`. */
+export type AgentLifecycleEvent =
+  | SessionInitEvent
+  | TurnStartEvent
+  | TurnEndEvent
+  | InputStatusEvent
+  | TurnResultEvent
+  | TurnErrorEvent;
+
+/** Events that are neither blocks, deltas, nor lifecycle: subagent activity,
+ *  structured output, and plan updates. */
+export type AgentOtherEvent =
+  | SubagentStartEvent
+  | SubagentResultEvent
+  | StructuredOutputEvent
+  | PlanUpdateEvent;
+
+/** One item of a turn's stream. */
+export type AgentEvent = AgentBlockEvent | AgentDeltaEvent | AgentLifecycleEvent | AgentOtherEvent;
+
+/** An event as a stream delivers it, stamped with the agent that produced it. */
+export type StreamAgentEvent = AgentEvent & { agent?: string };
+
+/** @deprecated Use {@link AgentEvent}. */
+export type AgentMessage = AgentEvent;
+/** @deprecated Use {@link StreamAgentEvent}. */
+export type StreamAgentMessage = StreamAgentEvent;
+/** @deprecated Use {@link TurnStartEvent}. */
+export type TurnStartMessage = TurnStartEvent;
+/** @deprecated Use {@link TurnEndEvent}. */
+export type TurnEndMessage = TurnEndEvent;
+/** @deprecated Use {@link TextBlockEvent}. */
+export type TextMessage = TextBlockEvent;
+/** @deprecated Use {@link TextDeltaEvent}. */
+export type TextDeltaMessage = TextDeltaEvent;
+/** @deprecated Use {@link ThinkingBlockEvent}. */
+export type ThinkingMessage = ThinkingBlockEvent;
+/** @deprecated Use {@link ThinkingDeltaEvent}. */
+export type ThinkingDeltaMessage = ThinkingDeltaEvent;
+/** @deprecated Use {@link ToolInputDeltaEvent}. */
+export type ToolInputDeltaMessage = ToolInputDeltaEvent;
+/** @deprecated Use {@link ToolOutputDeltaEvent}. */
+export type ToolOutputDeltaMessage = ToolOutputDeltaEvent;
+/** @deprecated Use {@link ToolUseBlockEvent}. */
+export type ToolUseMessage = ToolUseBlockEvent;
+/** @deprecated Use {@link ToolResultBlockEvent}. */
+export type ToolResultMessage = ToolResultBlockEvent;
+/** @deprecated Use {@link SubagentStartEvent}. */
+export type SubagentStartMessage = SubagentStartEvent;
+/** @deprecated Use {@link SubagentResultEvent}. */
+export type SubagentResultMessage = SubagentResultEvent;
+/** @deprecated Use {@link TurnResultEvent}. */
+export type ResultMessage = TurnResultEvent;
+/** @deprecated Use {@link TurnErrorEvent}. */
+export type ErrorMessage = TurnErrorEvent;
+/** @deprecated Use {@link SessionInitEvent}. */
+export type SessionInitMessage = SessionInitEvent;
+/** @deprecated Use {@link StructuredOutputEvent}. */
+export type StructuredOutputMessage = StructuredOutputEvent;
+/** @deprecated Use {@link PlanUpdateEvent}. */
+export type PlanUpdateMessage = PlanUpdateEvent;
+/** @deprecated Use {@link InputStatusEvent}. */
+export type InputStatusMessage = InputStatusEvent;
 
 export interface ThreadContext {
   channel: string;
@@ -958,8 +1243,8 @@ export interface ForkRunParams {
 }
 
 export interface AgentRunnerInterface {
-  run(params: RunParams): AsyncIterable<AgentMessage>;
-  runForked?(params: ForkRunParams): AsyncIterable<AgentMessage>;
+  run(params: RunParams): AsyncIterable<AgentEvent>;
+  runForked?(params: ForkRunParams): AsyncIterable<AgentEvent>;
   /**
    * Returns true when the agent with the given name is loaded in the catalog
    * and can be invoked via `run`. Used by callers (e.g. the inbox message
@@ -972,10 +1257,10 @@ export interface AgentRunnerInterface {
   hasAgent?(name: string): boolean | Promise<boolean>;
   /**
    * Returns true when the named agent is allowed to call the named action —
-   * i.e. the action resolves through the agent's allow-list (or `*`, or a
-   * globally-granted action), the same resolution the agent session uses to
-   * gate tool calls. Lets callers (e.g. the inbox message handler) tailor
-   * guidance to what the routed agent can actually do, instead of assuming.
+   * i.e. the action resolves through the agent's allow-list, a public-action
+   * wildcard, or a global grant. This is the same resolution the agent session
+   * uses to gate tool calls. Lets callers (e.g. the inbox message handler)
+   * tailor guidance to what the routed agent can actually do, instead of assuming.
    * Optional for backwards compatibility; implementations that don't provide
    * it are treated as "cannot" by callers. May be async — the worker-side
    * runner resolves the catalog over RPC, so callers must `await` the result.
@@ -1070,7 +1355,6 @@ export interface Attachment {
   mimeType?: string;
   fileName?: string;
   caption?: string;
-  data?: Buffer;
   /** Absolute local path after an inbound channel attachment has been saved. */
   localPath?: string;
 }
@@ -1147,7 +1431,7 @@ export interface OutgoingEmailMessage extends OutgoingMessageBase {
 
 /**
  * A `kind`-discriminated outbound message. Chat is the default branch; the
- * email branch carries the email-only fields. `Talk.send` receives this union;
+ * email branch carries the email-only fields. A channel's `send` receives this union;
  * non-email integrations read only the shared base fields.
  */
 export type OutgoingMessage = OutgoingChatMessage | OutgoingEmailMessage;
@@ -1172,10 +1456,18 @@ export type MessagePart =
        *  (Anthropic `stop_reason`; Codex app-server `phase`). Absent on legacy
        *  rows (and channels that don't split turns) → treated as `final`. */
       turnPhase?: "commentary" | "final";
-      /** Zero-based identity of this WebChat assistant text block within its turn.
-       *  Assigned by the WebChat projection and persisted so the live SSE
-       *  block and transcript block share the same `(turnId, blockIx)` key.
-       *  Absent on legacy rows and channels that do not stream text blocks. */
+      /** Block id of the block whose position this text part takes in the
+       *  producing turn's stream (`TextBlockEvent.blockId`). For the final
+       *  answer, it can differ from this part's content when the result carries
+       *  structured output. Unique only within that turn, so `(turnId, blockId)`
+       *  identifies the block. Prefer it when present. Absent when the provider
+       *  gave the block no id, and on rows written without it. */
+      blockId?: string;
+      /** Zero-based position of this WebChat assistant text block within its
+       *  turn, assigned by the WebChat projection and written on every text
+       *  part it persists. `(turnId, blockIx)` is the key WebChat's live
+       *  stream and transcript share, and the fallback when `blockId` is
+       *  absent. */
       blockIx?: number;
     }
   | {
@@ -1316,6 +1608,10 @@ export interface MessageRouting {
   agentName?: string;
 }
 
+/** How an inbound message was directed at the bot. Channel control messages
+ * use this provider-normalized signal instead of parsing provider payloads. */
+export type MessageAddressing = "direct" | "mention" | "reply" | "bot_thread" | "ambient";
+
 /** Provider-normalized reference attached to an ordinary inbound reply. */
 export interface MessageReplyReference {
   /** Provider/server id of the referenced message. */
@@ -1324,33 +1620,6 @@ export interface MessageReplyReference {
   content?: string;
   /** Display name supplied with the referenced-message event snapshot. */
   senderName?: string;
-}
-
-export interface NormalizedMessage {
-  id: string;
-  channel:
-    | "telegram"
-    | "telegram_user"
-    | "whatsapp"
-    | "wechat"
-    | "webchat"
-    | "discord"
-    | "email"
-    | "feishu"
-    | "linkedin";
-  channelUserId: string;
-  displayName: string;
-  threadId: string;
-  /** Parent chat id when threadId is a platform-native thread id. */
-  parentThreadId?: string;
-  threadName?: string;
-  threadType: "private" | "group";
-  timestamp: Date;
-  text: string;
-  attachments: Attachment[];
-  replyTo?: MessageReplyReference;
-  routing?: MessageRouting;
-  rawEvent: unknown;
 }
 
 /** Opaque provider-owned conversation address. Callers may persist and
@@ -1371,22 +1640,123 @@ export interface ConversationDescriptor {
   containerName?: string;
 }
 
-/** Provider-neutral message delivered by Talk. Provider-native data is an
- * opaque pass-through token reserved for a feature on the same provider. */
-export interface InboundMessage {
+/**
+ * One message as a channel carries it: what an inbound event delivers and what
+ * a channel read answers. It says which channel carried it and which way it
+ * went, so a read answers what Rome said as well as what it was told.
+ * Provider-native data (`raw`) is an opaque pass-through token reserved for a
+ * feature on the same provider.
+ *
+ * `senderDisplayName`, `thread` and `attachments` carry what the source holds:
+ * a store that never recorded a sender's name or a file's type leaves them
+ * out rather than guessing.
+ */
+export interface ChannelMessage {
+  /** The channel's name, as every stored row and link spells it. */
+  channel: string;
+  direction: "inbound" | "outbound";
   messageId: string;
   conversationId: ConversationId;
   /** Parent conversation when this message belongs to a native thread. */
   parentConversationId?: ConversationId;
+  /** Who said it, as the channel addresses them. Empty when the channel
+   *  recorded no sender for the line. */
   senderId: string;
   senderDisplayName?: string;
+  senderUsername?: string;
   text: string;
   attachments: Attachment[];
   timestamp: Date;
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  addressing?: MessageAddressing;
   raw?: unknown;
 }
+
+/** What {@link ChannelsService.query} asks for. Every field narrows it, and
+ *  none is required: a query naming nothing asks for the channel's newest
+ *  messages. A channel read live through its Connection reaches back a bounded
+ *  default (the last day) when no `since` is named. */
+export interface ChannelMessageQuery {
+  /** One conversation, by the platform's own id for it. Absent for every
+   *  conversation the channel can read. */
+  conversationId?: ConversationId;
+  /** Only messages said at or after this instant. */
+  since?: Date;
+  /** At most this many, newest first. Defaults to 100, capped at 1,000. */
+  limit?: number;
+}
+
+/** A channel as {@link ChannelsService.list} names it. */
+export interface ChannelSummary {
+  /** The channel's name, as every stored row and link spells it. */
+  name: string;
+  /** Whether a Connection backs the channel, so `send` has something to send
+   *  through. A send can still fail while that Connection is locked or
+   *  offline. */
+  sendable: boolean;
+}
+
+/**
+ * The channels this Rome has, by name: how an app action sends on a channel
+ * and reads what was said there. The same service in the main process and in
+ * an action worker, so an action never branches on where it runs.
+ *
+ * An action receives it as `deps.channelsService`. A hook's `channels`
+ * ({@link ChannelMessageHookDeps.channels}) is the channel list itself, which
+ * it subscribes through.
+ */
+export interface ChannelsService {
+  /** Every channel this Rome has, and whether a Connection backs each. */
+  list(): Promise<ChannelSummary[]>;
+  /** Send on a channel, through the Connection backing it. Rejects when no
+   *  Connection backs the channel. */
+  send(
+    channel: string,
+    conversationId: ConversationId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt>;
+  /**
+   * The channel's `messages.query`: its newest messages, newest first.
+   *
+   * A channel read live through its Connection shares one read for 30 seconds
+   * among the queries over the same window, so a message just sent through
+   * `send` may not appear until that read expires.
+   */
+  query(channel: string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+}
+
+/** Exact provider-neutral chat command recognized before an agent turn. */
+export function isStopCommand(text: string): boolean {
+  return text.trim().toLowerCase() === "/stop";
+}
+
+export type ChatStopStatus = "stop_requested" | "idle" | "forbidden";
+
+export interface ChatStopResult {
+  status: ChatStopStatus;
+  turnId?: string;
+}
+
+export function chatStopReceipt(status: ChatStopStatus): string {
+  switch (status) {
+    case "stop_requested":
+      return "Stopped.";
+    case "forbidden":
+      return "You can only stop a response that you started.";
+    case "idle":
+      return "There is no active response to stop.";
+  }
+}
+
+export interface ChatStopInput {
+  ref: ConversationRef;
+  service: string;
+  senderId: string;
+}
+
+/** Stops the active agent turn for a provider conversation. */
+export type ChatStopHandler = (input: ChatStopInput) => Promise<ChatStopResult>;
 
 export interface MessageReceipt {
   messageId?: string;
@@ -1394,92 +1764,149 @@ export interface MessageReceipt {
   parts?: Array<{ messageId: string; kind: string }>;
 }
 
-export interface TalkHistory {
-  query(input: {
-    conversationId?: ConversationId;
-    since?: Date;
-    limit?: number;
-  }): Promise<InboundMessage[]>;
+export interface ChannelInboundMedia {
+  materialize(message: ChannelMessage): Promise<Attachment[]>;
 }
 
-export interface TalkInboundMedia {
-  materialize(message: InboundMessage): Promise<Attachment[]>;
-}
-
-export interface TalkActivitySession {
+export interface ChannelActivitySession {
   update(state: "thinking" | "working"): Promise<void>;
   finish(result: "done" | "error"): Promise<void>;
 }
 
-export interface TalkActivity {
+export interface ChannelActivity {
   begin(input: {
     conversationId: ConversationId;
     messageId?: string;
-  }): Promise<TalkActivitySession | null>;
+  }): Promise<ChannelActivitySession | null>;
 }
 
-export interface TalkDirectory {
-  listConversations(input: {
-    query?: string;
-    cursor?: string;
-    limit: number;
-    includeTopics?: boolean;
-  }): Promise<{ conversations: ConversationDescriptor[]; nextCursor?: string }>;
+/**
+ * Reaching one account directly, rather than replying inside a conversation
+ * that already exists.
+ *
+ * A channel that offers this can be written to from a surface that knows only
+ * who it wants to talk to — the People page, which holds addresses and no
+ * thread ids. A channel that does not offer it can still be replied to, and
+ * still delivers inbound: offering no direct messaging is the
+ * whole declaration, which is why LinkedIn's read-only inbox needs no flag of
+ * its own and no exception anywhere else.
+ *
+ * Presence is the capability; the method is how the address becomes a thread.
+ * The two are separate answers because they fail differently — a channel that
+ * does not do direct messaging at all is a different thing from one that does
+ * but has no thread with this person yet.
+ *
+ * A talker offering this must return a `messageId` from `send`. Rome recognizes
+ * a sent message when it comes back — from the provider's own mirror, or from
+ * Rome's transcript of the exchange — and the provider's id is the only thing
+ * both spellings of that entry share. A send accepted anonymously cannot be
+ * followed, and is reported as delivered the moment the channel takes it.
+ */
+export interface ChannelDirectMessaging {
+  /**
+   * The conversation that reaches `channelUserId` directly, or null when the
+   * channel cannot produce one.
+   *
+   * On channels where a direct chat is addressed by the contact — WhatsApp,
+   * Telegram — this is the address itself and costs nothing. On channels that
+   * key a thread separately, it opens or looks up that thread, which is a
+   * provider call: callers pricing a listing should treat it as one.
+   */
+  conversationFor(channelUserId: string): Promise<ConversationId | null>;
 }
 
-export interface ConversationInteraction {
-  id: string;
-  conversationId: ConversationId;
-  actorId: string;
-  value: unknown;
-}
-
-export interface ConversationPresentation {
-  textFallback: string;
-  parts?: MessagePart[];
-}
-
-export interface TalkInteractions {
-  subscribe(handler: (event: ConversationInteraction) => Promise<void>): () => void;
-  update(input: {
-    messageId: string;
-    conversationId: ConversationId;
-    presentation: ConversationPresentation;
-  }): Promise<void>;
-}
-
-export interface TalkFeatureMap {
-  history: TalkHistory;
-  inboundMedia: TalkInboundMedia;
-  activity: TalkActivity;
-  directory: TalkDirectory;
-  interactions: TalkInteractions;
-}
-
-export type TalkFeatureName = keyof TalkFeatureMap;
-
-export interface Talk {
-  subscribe(handler: (message: InboundMessage) => Promise<void>): () => void;
+/** Sending on a channel. */
+export interface ChannelSend {
   send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null;
+  /** Showing the account that a reply is on its way (a typing indicator), or
+   *  null or absent where the channel cannot. Cosmetic: a caller never waits
+   *  on it to answer. */
+  readonly activity?: ChannelActivity | null;
 }
 
-/** Stable provider-neutral routing surface exposed to Core consumers and Apps. */
-export interface TalkRouter {
-  list(): Promise<Array<{ connectionId: string; service: string }>>;
-  subscribe(connectionId: string, handler: (message: InboundMessage) => Promise<void>): () => void;
-  send(
-    connectionId: string,
-    conversationId: ConversationId,
-    message: OutgoingMessage,
-  ): Promise<MessageReceipt>;
-  feature<K extends TalkFeatureName>(connectionId: string, name: K): TalkFeatureMap[K] | null;
+/**
+ * What a subscriber hears from a channel. One kind today; a new kind (an
+ * interaction, an edit) joins this union so it passes the same admission as a
+ * message, and a handler switching on `kind` keeps compiling.
+ *
+ * `ref` addresses the event's conversation for the APIs that take a
+ * {@link ConversationRef} (conversation settings, stop), resolved by the
+ * channel so a subscriber does not track what backs it.
+ */
+export type InboundEvent = { kind: "message"; message: ChannelMessage; ref: ConversationRef };
+
+/**
+ * Hearing what arrives on a channel. Every implementation owes all five:
+ *
+ * - **R1 Admitted only.** The channel's admission runs before any subscriber
+ *   hears an event. On a channel that pairs accounts (Telegram, Discord,
+ *   Feishu), an account the guardian has not approved never reaches a
+ *   subscriber, and neither does a pairing code. Any other channel delivers
+ *   every sender, and a subscriber decides what a stranger gets. An admission
+ *   that has not decided within fifteen seconds fails closed: that message is
+ *   not delivered, and the conversation's next message is admitted in order.
+ * - **R2 Answerable only.** An event is something a subscriber may answer: not
+ *   Rome's own sends, not the guardian's own messages from another device, not
+ *   reactions, edits or frames with no text and no attachments. The complete
+ *   record is the channel's stored messages.
+ * - **R3 Live, at most once.** Nothing is acknowledged or replayed. An event
+ *   that arrives with no subscriber, or while the channel is not receiving, is
+ *   not delivered later.
+ * - **R4 Fan-out, ordered per conversation.** Every subscriber hears every
+ *   event. A subscriber hears one conversation's events one at a time, in
+ *   arrival order: its handler for an event starts after its handler for the
+ *   previous event in that conversation settles. Different conversations and
+ *   different subscribers never wait on each other, so one slow or failing
+ *   handler holds up only its own conversation for its own subscriber. A
+ *   handler that never settles stops that conversation for that subscriber for
+ *   good, so a subscriber settles every event it takes; one still running
+ *   after ten minutes is logged, and so is a conversation with twenty events
+ *   waiting. A conversation holds at most a hundred waiting events per
+ *   subscriber, and the oldest is dropped and logged past that (R3). Events
+ *   still waiting when a subscription ends are dropped (R3); a handler already
+ *   running keeps running.
+ * - **R5 Durable subscription.** A subscription outlives a reconnect of
+ *   whatever backs the channel.
+ */
+export interface ChannelInbound {
+  subscribe(handler: (event: InboundEvent) => Promise<void>): () => void;
+  /** Materializes a message's attachments, or null when the channel cannot
+   *  now. A consumer without it uses the attachments as delivered. */
+  readonly media: ChannelInboundMedia | null;
+}
+
+/**
+ * A channel as an app reaches one: its name, as every stored row spells it,
+ * and the ports that move messages. Either port is null where the channel
+ * cannot send, or where nothing ever arrives on it. A present port is what the
+ * channel can do, not a promise that it is doing it now.
+ */
+export interface Channel {
+  readonly name: string;
+  readonly send: ChannelSend | null;
+  readonly inbound: ChannelInbound | null;
+}
+
+/**
+ * What the host hands a `channel-message` hook's `createHook(deps)`. A hook
+ * hears inbound messages through `channels`, one subscription per channel that
+ * can receive.
+ */
+export interface ChannelMessageHookDeps {
+  actionEngine: ActionEngineLike;
+  conversationSettings: ConversationSettingsControl;
+  chatStop: ChatStopHandler;
+  channels: readonly Channel[];
 }
 
 export interface ChannelMessageHook {
+  /** Subscribe to every channel in the deps' `channels` that can receive. The
+   *  host calls this once per activation, and again only after `unregister()`,
+   *  so a hook handles `register → unregister → register`. A channel's
+   *  subscription follows whatever backs it, so the host never calls the hook
+   *  per Connection. */
   register(): Promise<void>;
-  registerConnection(connectionId: string, service: string): void;
-  /** Detach every subscription `register`/`registerConnection` took out, so
+  /** Detach every subscription `register` took out, so
    * the host can swap in a replacement instance (e.g. after an app-keys
    * environment change) without double-handling inbound messages. A hook
    * without this method cannot be hot-swapped and stays live until restart. */
@@ -1669,6 +2096,23 @@ export interface AppRuntimeRepositories {
   settings: AppSettingsRepository;
   webchatRecaps?: WebChatRecapRepository;
   conversations?: ConversationRepository;
+  guardianProfile?: GuardianProfileRepository;
+}
+
+/** The guardian and agent names an app may set on the guardian's behalf. */
+export interface GuardianProfileWrite {
+  guardianName?: string;
+  agentName?: string;
+}
+
+/**
+ * Writes the guardian profile through the host's single setup path: the
+ * guardian person row, the profile notes in memory, and the profile settings.
+ * A field left out keeps its stored value. Rejects a blank guardian name when
+ * none is stored yet.
+ */
+export interface GuardianProfileRepository {
+  write(input: GuardianProfileWrite): Promise<{ ok: boolean }>;
 }
 
 export interface AppSettingsRepository {
@@ -2268,8 +2712,6 @@ export interface BackendTurnParams {
   agentName: string;
   /** Exact runtime session resume handle. */
   sessionId: string;
-  /** Connection that owns the provider conversation. Required for non-webchat delivery. */
-  connectionId?: string;
   channel: string;
   threadId: string;
   /** Recipient id on the channel, used as the reply target where the channel

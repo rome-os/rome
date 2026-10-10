@@ -1,4 +1,4 @@
-// Vendored from packages/web/src/components/chat/blocks/TracePayload.tsx —
+// Vendored from packages/web/src/components/chat/entries/TracePayload.tsx —
 // only the image helpers `TraceJsonView` depends on. Import seams: none needed
 // here (self-contained). Deviation from upstream: `TraceImageView` drops the
 // `react-medium-image-zoom` wrapper (not an app dependency) and renders a plain

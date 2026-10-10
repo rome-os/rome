@@ -4,9 +4,25 @@ Rome ships two kinds of release artifacts: the **runtime Docker image** (the pro
 
 ## Rome runtime image (Docker Hub)
 
-The runtime image is released by pushing a git tag — there is no manual image publish path. [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml) triggers on `v*` tags, builds multi-arch (amd64 + arm64) images, and publishes to the repository named by `IMAGE_NAME` in that workflow. A stable release uses `vMAJOR.MINOR.PATCH`, and a prerelease appends `-rc.N`.
+The runtime image is released through [`.github/workflows/docker-publish.yml`](../.github/workflows/docker-publish.yml), on a `v*` tag push, a weekday schedule, or a manual run. It builds multi-arch (amd64 + arm64) images and publishes to the repository named by `IMAGE_NAME` in that workflow. A stable release uses `vMAJOR.MINOR.PATCH`, and a prerelease appends `-rc.N`.
 
-The steps for cutting a release — preflight, version choice, the confirmed push, and verification — live in the [`release-rome-image`](../.claude/skills/release-rome-image/SKILL.md) skill. Follow it rather than running the helper directly.
+### Scheduled patch releases
+
+The workflow starts every Monday through Friday at 08:30 in `America/Los_Angeles`, including during daylight saving time. GitHub can delay scheduled runs when its runners are busy.
+
+Each scheduled run increments the patch component of the highest stable git tag, even when `main` has no new commits. For example, `v1.1.9` becomes `v1.1.10`. Prerelease and package tags do not affect that choice.
+
+The release uses the `main` commit that triggered the schedule. Its latest push CI run must have succeeded before the workflow creates a tag. Missing, failed, cancelled, or unfinished CI stops the release without creating a tag.
+
+The scheduled run creates an annotated tag with `GITHUB_TOKEN` and publishes it in the same run. No additional token or repository secret is required. All production Docker publish runs share one concurrency group, so version allocation and `latest` updates run serially.
+
+Rerunning a scheduled run reuses its original tag. To retry a failed build or publish, rerun the failed jobs. The [tagging contract](#tagging-contract) rejects any attempt to overwrite an image version that already exists.
+
+A manual run follows the same rules. Start it from the workflow's **Run workflow** button on `main`. It bumps the patch version of the latest `main` commit after that commit's CI passes. A run started from any other branch fails without creating a tag.
+
+### Manual releases
+
+To cut a patch release, start a manual run as described above. For a minor, major, or prerelease version, push the tag yourself. The steps for cutting a manual release — preflight, version choice, the confirmed push, and verification — live in the [`release-rome-image`](../.claude/skills/release-rome-image/SKILL.md) skill. Follow it rather than running the helper directly.
 
 `scripts/dev/create-patch-release-tag.sh` is a planning aid the skill calls with `--dry-run` to compute the next patch version, not a release command. It accepts `--remote`, `--branch`, `--prefix`, and the matching `ROME_RELEASE_*` environment variables. **A bare invocation creates the annotated tag and pushes it**, which starts the publish with nothing between it and Docker Hub. Pass `--dry-run` to see the version and target commit without releasing.
 
@@ -32,17 +48,19 @@ The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to t
 
 ### Rehearsing the pipeline
 
-`.github/workflows/docker-publish-test.yml` is a manually-dispatched mirror that publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets, so the full multi-arch flow can be exercised without touching the production repository. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
 
 ## npm packages (via release-please)
 
-Five workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
+Seven workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
 
 - `@rome-os/app-runtime` (`packages/app-runtime-sdk/`)
 - `@rome-os/app-web-sdk` (`packages/app-web-sdk/`)
 - `@rome-os/ui` (`packages/ui/`) — the shared component kit
 - `@rome-os/libs` (`packages/lib/`) — internal runtime primitives shared by Rome services
 - `@rome-os/rome-web-components` (`packages/web-content/`) — internal web content components shared by Rome surfaces
+- `@rome-os/node` (`packages/rome-node-cli/`) — the standalone device CLI
+- `@rome-os/node-core` (`packages/rome-node-core/`) — the device library and shared caller daemon
 
 The SDKs and `@rome-os/ui` are supported public packages. `@rome-os/libs` and
 `@rome-os/rome-web-components` will be published so Rome and Rome Cloud can
@@ -61,7 +79,9 @@ Releases are driven by **Conventional Commits**, not by hand-authored changeset 
   "packages/app-web-sdk":     { "package-name": "@rome-os/app-web-sdk" },
   "packages/ui":              { "package-name": "@rome-os/ui" },
   "packages/lib":             { "package-name": "@rome-os/libs" },
-  "packages/web-content":     { "package-name": "@rome-os/rome-web-components" }
+  "packages/web-content":     { "package-name": "@rome-os/rome-web-components" },
+  "packages/rome-node-cli":       { "package-name": "@rome-os/node" },
+  "packages/rome-node-core":      { "package-name": "@rome-os/node-core" }
 }
 ```
 
@@ -83,7 +103,7 @@ Commit messages drive both the changelog and the version bump. The release workf
 
 The pre-1.0 column reflects our config (`bump-minor-pre-major: true`, `bump-patch-for-minor-pre-major: true`). Once a package cuts `1.0.0`, drop those flags for that entry to get standard semver.
 
-All five packages are still under `0.x.y` today, so the practical rules are:
+All seven packages are still under `0.x.y` today, so the practical rules are:
 
 - Removed export, changed signature, behavior change consumers must adapt to → `feat!:` or include `BREAKING CHANGE:` in the body → minor bump.
 - New API or backwards-compatible additive change → `feat:` → patch bump.

@@ -1,9 +1,9 @@
 import {
   accountRef,
+  ASSIGNABLE_BOND_LEVELS,
   BOND_LADDER,
   compareAccountCursors,
   compareStreamCursors,
-  formatWhatsAppPhone,
   matchesQuery,
   normalizeBondLevel,
   type AccountCounts,
@@ -14,6 +14,7 @@ import {
   type PersonResource,
   type StreamAccount,
 } from "@rome/api-types/people";
+import { accountHandle } from "./send-model";
 
 // The People page's derivations, kept out of the components so the stream, the
 // directory groups and the counts can be exercised without rendering. Every one
@@ -41,18 +42,22 @@ export type PeopleFilter = "all" | RowLevel;
 /**
  * The chips, in rail order.
  *
- * Guardian has none: it is the guardian's own row, which the directory always
- * shows and the stream never does. "All" holds back Stranger, so the dismissed
- * end of the ladder is entered on purpose rather than sitting in the default
- * view.
+ * Guardian has none: it is the guardian's own row, which neither view shows
+ * under a chip — a search is the way to it. "All" holds back both unplaced
+ * ends of the ladder too, so a queue and a dismissal are each entered on
+ * purpose rather than sitting in the default view.
+ *
+ * Unknown comes last and the rail pushes it to the far end, because it is not
+ * a peer of the chips before it: those name a bond the guardian has already
+ * given, and Unknown is the queue of accounts still waiting for one.
  */
 export const FILTER_ORDER: PeopleFilter[] = [
   "all",
-  "unknown",
   "inner-circle",
   "acquaintance",
   "other",
   "stranger",
+  "unknown",
 ];
 
 /**
@@ -124,6 +129,20 @@ export const GROUP_ORDER: RowLevel[] = [...BOND_LADDER];
  * `channel:channelUserId` ref otherwise — never mixed, so nothing has to guess
  * which read a row came from.
  */
+/**
+ * A person a link can land on, as the picker needs them.
+ *
+ * Not a `PersonResource`: the picker names an option and ranks it by bond, and
+ * knows nothing about how the person is reachable. Rebuilding the full resource
+ * from a listing row meant inventing the fields the row does not carry, which
+ * is how a picker ends up asserting a person cannot be written to.
+ */
+export interface LinkTarget {
+  id: string;
+  displayName: string;
+  bondLevel: string;
+}
+
 export interface PeopleRow {
   kind: "person" | "account";
   id: string;
@@ -222,14 +241,14 @@ export function isRowFixed(row: PeopleRow): boolean {
   return row.level === "guardian";
 }
 
-/** The identifier a row is recognized by when its name is not enough: a phone
- *  number where the channel has one, otherwise the raw handle. */
+/** The identifier a row is recognized by when its name is not enough, by the
+ *  same rule as the person page's {@link accountHandle}. Null when that is the
+ *  name itself, as for an agent the row names by its label. */
 export function rowHandle(row: PeopleRow): string | null {
   const account = row.accounts[0];
   if (!account) return null;
-  return account.channel === "whatsapp"
-    ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
-    : account.channelUserId;
+  const handle = accountHandle(account);
+  return handle === row.displayName ? null : handle;
 }
 
 /** What the search box matches over the rows already loaded: the name, and
@@ -275,9 +294,11 @@ export function compareRowsByName(a: PeopleRow, b: PeopleRow): number {
   );
 }
 
-/** Whether a row belongs to a chip's view. "all" is the placed levels: the two
- *  unplaced ends of the ladder are both entered on purpose, so neither an
- *  account waiting on a decision nor one already dismissed is the default. */
+/** Whether a row belongs to a chip's view, in the stream. "all" holds back the
+ *  two unplaced ends of the ladder, so neither an account waiting on a decision
+ *  nor one already dismissed is the default. It says nothing about the
+ *  guardian, whose row the stream drops through `isRowFixed` whatever the chip
+ *  says — `directoryGroups` states the directory's narrower rule itself. */
 export function rowMatchesFilter(row: PeopleRow, filter: PeopleFilter): boolean {
   return filter === "all"
     ? row.level !== "unknown" && row.level !== "stranger"
@@ -327,13 +348,17 @@ export interface PeopleGroup {
  * The directory's groups, in ladder order, after the chip and the search box
  * have each had their say.
  *
- * Every contact Rome holds is in here: a contacts app hides nobody, and a
- * roster that held the address book back would answer "no such contact" for
- * someone the mirror has.
+ * "All" is the people the guardian has placed, and only those: the three
+ * assignable levels. The ladder's other positions each answer a different
+ * question — Unknown is the accounts still waiting on a decision, Stranger is
+ * what was decided against, Guardian is the reader themselves — so each is
+ * entered on purpose rather than padding the list somebody scrolls to look a
+ * contact up in.
  *
- * Guardian survives every filter: a roster that hid it would read as "you are
- * not in your own people list". Empty groups are dropped rather than rendered
- * as headings with nothing under them.
+ * A search still reaches every one of them, held-back positions included: a
+ * roster that filtered the address book would answer "no such contact" for
+ * someone the mirror has. Empty groups are dropped rather than rendered as
+ * headings with nothing under them.
  */
 export function directoryGroups(
   rows: readonly PeopleRow[],
@@ -347,8 +372,10 @@ export function directoryGroups(
     rows: matching.filter((row) => row.level === level).sort(compareRowsByName),
   })).filter((group) => {
     if (group.rows.length === 0) return false;
-    if (searching || group.level === "guardian") return true;
-    return options.filter === "all" ? group.level !== "stranger" : group.level === options.filter;
+    if (searching) return true;
+    return options.filter === "all"
+      ? (ASSIGNABLE_BOND_LEVELS as readonly RowLevel[]).includes(group.level)
+      : group.level === options.filter;
   });
 }
 

@@ -3,6 +3,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 
 import { cn } from "./cn.js";
+import { InputGlyph, inputVariants } from "./input.js";
 
 // shadcn Command (cmdk) rewired to the semantic token set. The Dialog variant
 // is intentionally omitted — Rome composes Command inside Popover (combobox)
@@ -37,28 +38,58 @@ export function stopEnterPropagation(event: React.KeyboardEvent): void {
 type CommandInputProps = React.ComponentProps<typeof CommandPrimitive.Input> & {
   /** Classes for the actual text field inside the Control wrapper. */
   inputClassName?: string;
+  /**
+   * Content pinned between the search glyph and the text, such as a token the
+   * query is scoped to. It takes the glyph reserve the field would otherwise
+   * pad itself with, so the text starts one control gap past it.
+   */
+  leading?: React.ReactNode;
 };
 
 function CommandInput({
   className,
   inputClassName,
+  leading,
   children,
   onKeyDown,
   ...props
 }: CommandInputProps) {
+  const hasLeading = leading != null && leading !== false;
   return (
     <div
+      // A `plain` Input in a header row; the row's bottom rule reads the
+      // header against the list. No focus edge, for two independent reasons:
+      // the row is a full-bleed header inside Command's `overflow-hidden`,
+      // which clips an edge on three sides, and cmdk holds focus here for the
+      // life of the surface, so an edge keyed to it stays lit and marks
+      // nothing. Role and divergence: docs/ui/component-roles.md.
       data-slot="command-input-wrapper"
-      className={cn(
-        "flex h-[var(--control-h-md)] w-full items-center gap-[var(--control-gap)] rounded-[var(--control-r-md)] border border-transparent border-b-border px-[var(--control-px-start-md)] has-[input:focus-visible]:outline-solid has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-0 has-[input:focus-visible]:outline-ring has-[input[aria-invalid=true]]:outline-solid has-[input[aria-invalid=true]]:outline-2 has-[input[aria-invalid=true]]:outline-offset-0 has-[input[aria-invalid=true]]:outline-destructive has-[input[aria-invalid=true]:focus-visible]:outline-destructive",
-        className,
-      )}
+      className={cn("relative flex items-center border-b border-border", className)}
     >
-      <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <InputGlyph size="md">
+        <Search aria-hidden />
+      </InputGlyph>
+      {hasLeading ? (
+        <div
+          data-slot="command-input-leading"
+          // Starts where the field's text would have, past the glyph and one
+          // control gap. The same reserve as `inputVariants`' `hasIcon` pad.
+          className="flex shrink-0 items-center gap-2 pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]"
+          // A remove control on the pinned token keeps its own Enter, as in
+          // the trailing slot.
+          onKeyDown={stopEnterPropagation}
+        >
+          {leading}
+        </div>
+      ) : null}
       <CommandPrimitive.Input
         data-slot="command-input"
+        data-size="md"
+        data-variant="plain"
         className={cn(
-          "flex h-full w-full bg-transparent text-body outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
+          inputVariants({ size: "md", variant: "plain", hasIcon: !hasLeading }),
+          "focus-visible:outline-transparent",
+          hasLeading && "pl-[var(--control-gap)]",
           inputClassName,
         )}
         onKeyDown={(event) => {
@@ -78,7 +109,9 @@ function CommandInput({
         // which the list would take instead.
         <div
           data-slot="command-input-trailing"
-          className="flex shrink-0 items-center gap-2"
+          // The field pads itself, so the trailing slot takes the start-group
+          // step on its outer side to sit at the row's inset.
+          className="mr-[var(--control-px-start-md)] flex shrink-0 items-center gap-2"
           onKeyDown={stopEnterPropagation}
         >
           {children}
@@ -142,7 +175,7 @@ function CommandItem({ className, ...props }: React.ComponentProps<typeof Comman
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-8 px-2 py-1 text-ui outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "relative flex cursor-default items-center gap-2 rounded-8 px-2 py-1 text-ui min-h-[var(--control-min-h)] outline-hidden select-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className,
       )}
       {...props}

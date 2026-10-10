@@ -32,8 +32,7 @@ export function buildFullAppPath(
 
 /**
  * The full-screen href for a placement, from its persisted state. `null` when
- * the widget has no standalone page (chat is the base surface, an app tile
- * without a target is unaddressable).
+ * the widget has no standalone page (a tile without a target is unaddressable).
  */
 export function getWidgetFullHref(widget: WidgetPlacement): string | null {
   switch (widget.type) {
@@ -45,6 +44,8 @@ export function getWidgetFullHref(widget: WidgetPlacement): string | null {
       return widget.targetId
         ? buildFullAppPath(widget.targetId, widget.route, widget.params)
         : null;
+    case "chat":
+      return widget.targetId ? `/chat/${encodeURIComponent(widget.targetId)}` : null;
     default:
       return null;
   }

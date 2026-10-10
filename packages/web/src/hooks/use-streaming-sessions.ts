@@ -12,6 +12,8 @@ export type SessionStreamState = {
   // block streams.
   assistantText: string;
   assistantBlockIx: number;
+  /** Trace activity at or before this ordinal was superseded by text. */
+  textThroughOrdinal: number;
 };
 
 export type StreamingSessionMap = ReadonlyMap<string, SessionStreamState>;
@@ -23,7 +25,13 @@ export function startStream(
 ): StreamingSessionMap {
   if (prev.get(sessionId)?.turnId === turnId) return prev;
   const next = new Map(prev);
-  next.set(sessionId, { turnId, snapshot: null, assistantText: "", assistantBlockIx: 0 });
+  next.set(sessionId, {
+    turnId,
+    snapshot: null,
+    assistantText: "",
+    assistantBlockIx: 0,
+    textThroughOrdinal: -1,
+  });
   return next;
 }
 
@@ -62,7 +70,16 @@ export function updateAssistantText(
     return prev;
   }
   const next = new Map(prev);
-  next.set(sessionId, { ...existing, assistantText, assistantBlockIx: blockIx });
+  next.set(sessionId, {
+    ...existing,
+    assistantText,
+    assistantBlockIx: blockIx,
+    // Empty block-boundary events must not erase newer thinking. Retain the
+    // watermark after text commits so summary updates cannot revive it.
+    textThroughOrdinal: assistantText.trim()
+      ? Math.max(existing.textThroughOrdinal, existing.snapshot?.segments.at(-1)?.ordinal ?? -1)
+      : existing.textThroughOrdinal,
+  });
   return next;
 }
 

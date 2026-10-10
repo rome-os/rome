@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
-import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
   AccountDirectory,
   AccountState,
   AccountStream,
+  OutboxPage,
   PeopleList,
   PersonResource,
   TimelinePage,
@@ -45,8 +51,15 @@ import { peopleRows, type PeopleRow, type PeopleView } from "./people-model";
 export const PEOPLE_KEY = "people";
 export const ACCOUNTS_KEY = "accounts";
 export const TIMELINE_KEY = "person-timeline";
+export const OUTBOX_KEY = "person-outbox";
 
 const ROSTER_POLL_MS = 30_000;
+
+// How often the outbox is re-read while Rome is still trying to deliver
+// something. Only while: a row that has failed is waiting on the guardian, not
+// on the server, and an outbox with nothing in flight is a read that would
+// answer the same thing forever.
+const OUTBOX_POLL_MS = 1_000;
 
 // How long the search box settles before its term reaches the wire. Long enough
 // that a typed word is one request rather than one per letter, short enough
@@ -200,19 +213,23 @@ export type PeopleRoster = ReturnType<typeof usePeopleRoster>;
  *
  * Server-side, because the directory is an address book rather than a curated
  * listing: a filter over the page that happened to load would answer "no such
- * account" for a contact the mirror holds.
+ * account" for a contact the mirror holds. For the same reason a picker that
+ * only offers one channel's accounts names the channel here, rather than
+ * filtering a page other channels may have filled.
  */
-export function useAccountSearch(search: string, options: { enabled: boolean }) {
+export function useAccountSearch(search: string, options: { enabled: boolean; channel?: string }) {
   const { t } = useTranslation("people");
   const fallback = t("errors.loadFailedFallback");
   const term = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS);
+  const channel = options.channel ?? null;
   return useQuery<AccountDirectory>({
-    queryKey: [ACCOUNTS_KEY, "picker", term],
+    queryKey: [ACCOUNTS_KEY, "picker", channel, term],
     enabled: options.enabled,
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
       const query = new URLSearchParams();
       if (term) query.set("q", term);
+      if (channel) query.set("channel", channel);
       const suffix = query.toString();
       return fetchJson<AccountDirectory>(`/api/accounts${suffix ? `?${suffix}` : ""}`, {
         signal,
@@ -286,4 +303,58 @@ export function usePersonTimeline(id: string | undefined) {
     },
   });
   return { ...query, entries: query.data?.pages.flatMap((page) => page.entries) ?? [] };
+}
+
+/**
+ * One person's outbox: every send of theirs that has not reached their
+ * timeline.
+ *
+ * A row leaves this read by arriving, and the read is what notices — the server
+ * derives the listing by comparing its sends against the timeline, so there is
+ * no delivery to track here and nothing for a client to mark. That is why this
+ * polls rather than settling once: the send returns before the message lands,
+ * and the landing is a later answer to the same question.
+ *
+ * Only while something is in flight. A `failed` row waits on the guardian, and
+ * an outbox with nothing being attempted would answer the same thing forever.
+ *
+ * The timeline is invalidated when a row disappears, because that is the same
+ * event: a send Rome has stopped waiting on is a message the timeline now
+ * holds, and the person's own `latest` and count moved with it.
+ */
+export function usePersonOutbox(id: string | undefined) {
+  const { t } = useTranslation("people");
+  const queryClient = useQueryClient();
+  const query = useQuery<OutboxPage>({
+    queryKey: [OUTBOX_KEY, id],
+    enabled: id != null,
+    refetchInterval: ({ state }) =>
+      (state.data?.messages ?? []).some((message) => message.state !== "failed")
+        ? OUTBOX_POLL_MS
+        : false,
+    queryFn: ({ signal }) =>
+      fetchJson<OutboxPage>(`/api/people/${encodeURIComponent(id!)}/outbox`, {
+        signal,
+        fallback: t("errors.loadFailedFallback"),
+      }),
+  });
+
+  // Which rows this reader last saw Rome still trying to deliver. A discard
+  // takes a row out too, and settles the reads itself; this only has to catch
+  // the rows that left because they arrived.
+  const inFlight = useRef<string[]>([]);
+  const messages = query.data?.messages;
+  useEffect(() => {
+    if (messages === undefined) return;
+    const present = new Set(messages.map((message) => message.id));
+    const landed = inFlight.current.some((messageId) => !present.has(messageId));
+    inFlight.current = messages
+      .filter((message) => message.state !== "failed")
+      .map((message) => message.id);
+    if (!landed) return;
+    void queryClient.invalidateQueries({ queryKey: [TIMELINE_KEY, id] });
+    void queryClient.invalidateQueries({ queryKey: [PEOPLE_KEY] });
+  }, [messages, queryClient, id]);
+
+  return { ...query, messages: messages ?? [] };
 }

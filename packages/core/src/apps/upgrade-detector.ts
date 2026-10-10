@@ -21,7 +21,7 @@ import type { AppCatalog } from "./catalog.js";
 import { readManifestIdAndVersion } from "./packaging/index.js";
 import type { RomeCloudListingClient } from "./rome-cloud-listing-client.js";
 import type { SpecSource } from "./lockfile.js";
-import type { ResolvedApp } from "./state.js";
+import { isResolvedApp, type ResolvedApp } from "./state.js";
 
 const log = createLogger("apps-upgrade-detector");
 
@@ -57,7 +57,7 @@ export async function findUpgradeCandidates(
   const listings = opts.romeCloudListings;
 
   const probes = catalog.list().map(async (view) => {
-    if (!isResolved(view)) return null;
+    if (!isResolvedApp(view)) return null;
     // First-party apps upgrade at boot and reject user installs, so an
     // advertised candidate would be a control that can never succeed.
     if (view.firstParty) return null;
@@ -131,8 +131,4 @@ async function readManifestVersion(workspaceRoot: string): Promise<string | null
 function isUpgrade(installed: string, candidate: string): boolean {
   if (!semverValid(installed) || !semverValid(candidate)) return false;
   return semverGt(candidate, installed);
-}
-
-function isResolved(view: unknown): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }

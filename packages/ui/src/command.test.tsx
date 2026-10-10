@@ -33,13 +33,39 @@ describe("Command control geometry", () => {
     const input = screen.getByPlaceholderText("Search…");
     const wrapper = input.closest('[data-slot="command-input-wrapper"]');
 
-    expect(wrapper?.classList).toContain("h-[var(--control-h-md)]");
-    expect(wrapper?.classList).toContain("rounded-[var(--control-r-md)]");
-    expect(wrapper?.classList).toContain("px-[var(--control-px-start-md)]");
-    expect(wrapper?.classList).toContain("has-[input:focus-visible]:outline-ring");
-    expect(wrapper?.classList).toContain("has-[input[aria-invalid=true]]:outline-destructive");
-    expect(wrapper?.classList).not.toContain("focus-within:outline-ring");
+    // A `plain` Input carries the md height, inset and glyph reserve and no
+    // radius, border or fill; the wrapper is the header row with its rule.
+    expect(input.classList).toContain("h-[var(--control-h-md)]");
+    expect(input.classList).toContain("px-[var(--control-px-start-md)]");
+    expect(input.classList).toContain("rounded-none");
+    expect(input.classList).toContain("border-transparent");
+    expect(input.dataset.variant).toBe("plain");
+    expect(wrapper?.classList).toContain("border-b");
+    expect(wrapper?.classList).not.toContain("h-[var(--control-h-md)]");
     expect(input.classList).not.toContain("py-3");
+  });
+
+  // The row is a full-bleed header inside Command's `overflow-hidden`, so an
+  // edge at `outline-offset: 0` renders clipped on three sides, and cmdk holds
+  // focus here for the whole life of the surface, so one would never turn off.
+  // Asserting the absence keeps a future "every Control gets the focus edge"
+  // pass from reinstating it silently. See docs/ui/component-roles.md.
+  it("paints no focus edge on the input row", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" />
+      </Command>,
+    );
+
+    const input = screen.getByPlaceholderText("Search…");
+    const wrapper = input.closest('[data-slot="command-input-wrapper"]');
+
+    // cmdk never marks its field invalid, so the inherited invalid edge never
+    // fires; only the focus edge is asserted absent.
+    for (const cls of [...Array.from(wrapper?.classList ?? []), ...Array.from(input.classList)]) {
+      expect(cls).not.toContain("outline-ring");
+    }
+    expect(input.classList).toContain("focus-visible:outline-transparent");
   });
 
   it("lets caller classes override the outer Control geometry", () => {
@@ -115,5 +141,75 @@ describe("Command trailing input content", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onClear).not.toHaveBeenCalled();
+  });
+});
+
+describe("Command leading input content", () => {
+  it("seats leading content in the glyph reserve and starts the text one gap past it", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" leading={<span>Scope</span>} />
+      </Command>,
+    );
+
+    const input = screen.getByPlaceholderText("Search…");
+    const leading = screen.getByText("Scope").closest('[data-slot="command-input-leading"]');
+
+    expect(leading).not.toBeNull();
+    expect(leading?.classList).toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+    // The leading slot now owns the glyph reserve, so the field drops it.
+    expect(input.classList).toContain("pl-[var(--control-gap)]");
+    expect(input.classList).not.toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+  });
+
+  it("keeps the glyph reserve on the field when there is no leading content", () => {
+    render(
+      <Command>
+        <CommandInput placeholder="Search…" />
+      </Command>,
+    );
+
+    const input = screen.getByPlaceholderText("Search…");
+    expect(
+      input
+        .closest('[data-slot="command-input-wrapper"]')
+        ?.querySelector('[data-slot="command-input-leading"]'),
+    ).toBeNull();
+    expect(input.classList).toContain(
+      "pl-[calc(var(--control-px-start-md)+1rem+var(--control-gap))]",
+    );
+  });
+
+  it("activates a focused leading button on Enter rather than the highlighted item", async () => {
+    const onSelect = rs.fn();
+    const onRemove = rs.fn();
+    const user = userEvent.setup();
+    render(
+      <Command shouldFilter={false}>
+        <CommandInput
+          placeholder="Search…"
+          leading={
+            <button type="button" onClick={onRemove}>
+              Remove
+            </button>
+          }
+        />
+        <CommandList>
+          <CommandItem value="only-item" onSelect={onSelect}>
+            Only item
+          </CommandItem>
+        </CommandList>
+      </Command>,
+    );
+
+    screen.getByRole("button", { name: "Remove" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

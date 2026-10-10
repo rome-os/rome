@@ -31,7 +31,7 @@ describe("Dialog", () => {
 
     expect(dialog).toBeTruthy();
     expect(title.className).toContain("text-title");
-    expect(description.className).toContain("text-body");
+    expect(description.className).toContain("text-ui");
   });
 
   it("keeps that name when rendered inside an app's shadow root", () => {

@@ -3,7 +3,7 @@
 // Adapted seams (see ../VENDOR.md):
 //   - dropped the `"use client"` directive (not a Next.js app)
 //   - "react-router-dom" Link -> plain <a> (the static viewer has no SPA router)
-//   - "@/components/chat/blocks/MermaidBlock" -> ./MermaidBlock (vendored)
+//   - "@/components/chat/entries/MermaidBlock" -> ./MermaidBlock (vendored)
 // Everything else (GFM, Mermaid, prose classes, code/link/table styling) is
 // unchanged.
 import {

@@ -1,14 +1,100 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
-import { Markdown } from "./markdown.js";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { Suspense } from "react";
+import { Markdown, type MarkdownTheme, readMarkdownMermaidTheme } from "./markdown.js";
 
-afterEach(cleanup);
+beforeEach(() => {
+  rs.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    },
+  );
+});
+
+afterEach(() => {
+  cleanup();
+  rs.restoreAllMocks();
+  rs.unstubAllGlobals();
+  document.documentElement.className = "";
+});
 
 function renderMd(md: string, props: { compact?: boolean; className?: string } = {}) {
   return render(<Markdown {...props}>{md}</Markdown>);
 }
 
 describe("Markdown", () => {
+  it("does not observe ordinary Markdown while its content streams", () => {
+    const observe = rs.spyOn(MutationObserver.prototype, "observe");
+    const { container, rerender } = renderMd("Hello");
+    const root = container.firstElementChild;
+
+    for (const content of [
+      "Hello, world.",
+      "Hello, world.\n\nThe mermaid diagram comes later.",
+      "Hello, world.\n\n```typescript\nconst diagram = 'mermaid';\n```",
+    ]) {
+      rerender(<Markdown>{content}</Markdown>);
+      expect(observe.mock.calls.filter(([target]) => target === root)).toHaveLength(0);
+      expect(container.children).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    "```mermaid",
+    "~~~mermaid",
+    "````mermaid",
+    "  ``` mermaid",
+    "> ```mermaid",
+    "- ```mermaid",
+  ])("observes a Mermaid opening fence without waiting for its closing fence: %s", (fence) => {
+    const observe = rs.spyOn(MutationObserver.prototype, "observe");
+    const { container } = renderMd(`${fence}\ngraph TD; A-->B;`);
+
+    expect(observe.mock.calls).toContainEqual([
+      container.firstElementChild,
+      { childList: true, subtree: true },
+    ]);
+  });
+
+  it("starts observing when a streamed fence arrives and stops when Mermaid content is removed", async () => {
+    const { container, rerender } = renderMd("A reply\n\n```mer");
+    const root = container.querySelector(".rome-markdown")!;
+    const scan = rs.spyOn(root, "querySelectorAll");
+
+    rerender(<Markdown>{"A reply\n\n```mermaid\ngraph TD; A-->B;"}</Markdown>);
+    expect(scan).toHaveBeenCalledWith('[data-streamdown="mermaid-block-actions"]');
+
+    rerender(<Markdown>A plain reply</Markdown>);
+    scan.mockClear();
+    await act(async () => {
+      root.append(document.createElement("p"));
+    });
+
+    expect(scan).not.toHaveBeenCalledWith('[data-streamdown="mermaid-block-actions"]');
+    expect(container.children).toHaveLength(1);
+  });
+
+  it("passes a host URL transform through without changing the image renderer", () => {
+    render(
+      <Markdown urlTransform={(url, key) => (key === "src" ? `/assets${url}` : url)}>
+        {"![Preview](/preview.png)\n\n[Open file](/preview.png)"}
+      </Markdown>,
+    );
+
+    expect(screen.getByRole("img", { name: "Preview" }).getAttribute("src")).toBe(
+      "/assets/preview.png",
+    );
+    expect(screen.getByRole("link", { name: "Open file" }).getAttribute("href")).toBe(
+      "/preview.png",
+    );
+  });
+
   it("tags the root with rome-markdown, the hook hosts style prose through", () => {
     const { container } = renderMd("hello");
     const root = container.querySelector(".rome-markdown");
@@ -83,22 +169,58 @@ describe("Markdown", () => {
     expect(container.textContent ?? "").not.toContain("graph TD");
   });
 
-  it("renders inline and block math with KaTeX", () => {
+  it("renders inline and block math with KaTeX once the math plugin loads", async () => {
     const { container } = renderMd(
       "Euler's identity is $$e^{i\\pi} + 1 = 0$$.\n\n$$\nE = mc^2\n$$",
     );
 
-    expect(container.querySelectorAll(".katex")).toHaveLength(2);
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2));
     expect(container.querySelectorAll(".katex-mathml")).toHaveLength(2);
     expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
   });
 
-  it("does not interpret single dollar signs as math", () => {
-    const { container } = renderMd("The first item costs $5 and the second costs $10.");
+  it("does not interpret single dollar signs as math", async () => {
+    // The $$ loads the math plugin, so the single dollars are parsed with it.
+    const { container } = renderMd(
+      "The first item costs $5 and the second costs $10, unlike $$x$$.",
+    );
 
-    expect(container.querySelector(".katex")).toBeNull();
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(1));
     expect(container.textContent).toContain("$5");
     expect(container.textContent).toContain("$10");
+  });
+
+  it("drops an empty item that ends a list, which would render a bare bullet", () => {
+    for (const md of ["- a\n- b\n-\n", "* a\n* b\n* ", "1. a\n2. b\n3. "]) {
+      const { container, unmount } = renderMd(md);
+      const items = [...container.querySelectorAll("li")].map((li) => li.textContent);
+      expect(items).toEqual(["a", "b"]);
+      unmount();
+    }
+  });
+
+  it("drops a nested list's trailing empty item, and a list left with none", () => {
+    const { container } = renderMd("- a\n  - b\n  -\n\ntext\n\n-\n");
+    // One outer list holding one nested list; the bare `-` after the text
+    // leaves no list of its own.
+    expect(container.querySelectorAll("ul")).toHaveLength(2);
+    expect(container.querySelectorAll("li")).toHaveLength(2);
+    expect(container.querySelector("li li")?.textContent).toBe("b");
+  });
+
+  it("keeps an empty item inside a list", () => {
+    const { container } = renderMd("- a\n-\n- b");
+
+    expect(container.querySelectorAll("li")).toHaveLength(3);
+  });
+
+  it("lets a table grow to its full height instead of scrolling inside a cap", () => {
+    const rows = Array.from({ length: 20 }, (_, i) => `| row ${i} | value ${i} |`).join("\n");
+    const { container } = renderMd(`| Key | Value |\n| --- | --- |\n${rows}`);
+    const scroller = container.querySelector('[data-streamdown="table"]')?.parentElement;
+
+    expect(scroller).not.toBeNull();
+    expect(scroller?.style.maxHeight).toBe("");
   });
 
   it("marks compact mode without changing semantic element roles", () => {
@@ -113,5 +235,101 @@ describe("Markdown", () => {
     expect(screen.getByRole("heading", { level: 1 }).getAttribute("data-streamdown")).toBe(
       "heading-1",
     );
+  });
+});
+
+describe("Markdown Mermaid theme", () => {
+  function countThemeReads(ui: React.ReactElement): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    render(ui);
+    const reads = spy.mock.calls.length;
+    cleanup();
+    spy.mockRestore();
+    return reads;
+  }
+
+  function readsPerResolve(): number {
+    const spy = rs.spyOn(window, "getComputedStyle");
+    readMarkdownMermaidTheme();
+    const reads = spy.mock.calls.length;
+    spy.mockRestore();
+    return reads;
+  }
+
+  it("resolves the theme once however many instances are mounted", () => {
+    const single = countThemeReads(<Markdown>one</Markdown>);
+    const many = countThemeReads(
+      <>
+        {Array.from({ length: 20 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+
+    expect(single).toBeGreaterThan(0);
+    expect(many).toBe(single);
+  });
+
+  it("resolves the theme again once when the theme root changes", async () => {
+    const single = readsPerResolve();
+    render(
+      <>
+        {Array.from({ length: 5 }, (_, index) => (
+          <Markdown key={index}>{`message ${index}`}</Markdown>
+        ))}
+      </>,
+    );
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    await act(async () => {
+      document.documentElement.classList.add("dark");
+    });
+
+    expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("re-validates a theme resolved by a render that never committed", async () => {
+    const single = readsPerResolve();
+    // The sibling suspends, so React discards the Markdown render after it
+    // resolved the theme, and no instance ever watches the root.
+    const never = new Promise<never>(() => {});
+    function Suspends(): never {
+      throw never;
+    }
+    render(
+      <Suspense fallback={null}>
+        <Markdown>discarded</Markdown>
+        <Suspends />
+      </Suspense>,
+    );
+    cleanup();
+    document.documentElement.classList.add("dark");
+    const spy = rs.spyOn(window, "getComputedStyle");
+
+    render(<Markdown>mounted</Markdown>);
+
+    expect(spy.mock.calls.length).toBe(single);
+  });
+
+  it("does not re-render new instances when they replace the old ones in one commit", () => {
+    // Every Markdown render reads `theme.mermaid`, so the getter counts renders.
+    let renders = 0;
+    const theme: MarkdownTheme = {
+      get mermaid() {
+        renders++;
+        return undefined;
+      },
+    };
+    const transcript = (id: string) =>
+      Array.from({ length: 3 }, (_, index) => (
+        <Markdown key={`${id}-${index}`} theme={theme}>{`${id} message ${index}`}</Markdown>
+      ));
+    const { rerender } = render(<>{transcript("a")}</>);
+    const mountRenders = renders;
+    renders = 0;
+
+    rerender(<>{transcript("b")}</>);
+
+    expect(renders).toBe(mountRenders);
   });
 });

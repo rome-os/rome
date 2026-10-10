@@ -131,7 +131,7 @@ function hasReadablePhotos(pageData) {
 export async function loadRedfinListingPage(page, url, { timeoutMs = 20000 } = {}) {
   const currentUrl = await page.evaluate("window.location.href || ''").catch(() => "");
   if (isRedfinUrl(currentUrl)) {
-    await page.goto("about:blank", { waitUntil: "none" });
+    await page.goto(new URL("/", url).href, { waitUntil: "none" });
   }
   await page.goto(url);
 

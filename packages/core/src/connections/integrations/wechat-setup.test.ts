@@ -4,7 +4,7 @@
 //
 // Seams under test: makeWechatSetup's coroutine — QR show (data-url payload +
 // open link) → `scan-confirmed` poll wait → terminal conferral whose material
-// mirrors WECHAT_SETTINGS_IMPORT_ROW (token, baseUrl, accountId duplicated)
+// is built by wechatAccountMaterial (token, baseUrl, accountId duplicated)
 // — observed via the session's poll-able state and the single
 // commit call. QR refresh loops via repeated `show`; cancel genuinely
 // interrupts the in-flight poll wait.
@@ -96,7 +96,7 @@ describe("makeWechatSetup", () => {
     await rs.waitFor(() => expect(session.state.status).toBe("done"));
     expect(commit).toHaveBeenCalledTimes(1);
     const conferral = commit.mock.calls[0][0];
-    // Material parity with WECHAT_SETTINGS_IMPORT_ROW: token + coordinates,
+    // Material shape: token + coordinates,
     // accountId duplicated into material; connectedAt stays out.
     expect(conferral.credential).toEqual({
       material: {

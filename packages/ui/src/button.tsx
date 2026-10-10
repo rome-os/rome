@@ -26,7 +26,7 @@ const SIZE_ICON_MD = "size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
 // it and the reservation shows up as a canvas-colored ring on every filled
 // variant.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-all outline-none select-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-[color,background-color,border-color,outline-color,opacity,scale] outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // `outline` and `ghost` name their resting foreground, which the page
@@ -37,33 +37,37 @@ const buttonVariants = cva(
       // `text-muted-foreground`, which lands in a different tailwind-merge group
       // than the prefixed ones, so the promotion still fires.
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        // The label competes with its own fill rather than with the page, so
+        // it carries 500 on top of the UI role.
+        default: "bg-primary text-primary-foreground font-medium hover:bg-primary/80",
+        // Paints its border, so the focus edge sits on that border. The filled
+        // and ghost variants keep the edge outside, where it separates from
+        // the canvas rather than vanishing into the fill.
         outline:
-          "border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "-outline-offset-1 border-border bg-background text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
           "text-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:outline-destructive dark:bg-destructive/20 dark:hover:bg-destructive/30",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:outline-destructive/50 dark:bg-destructive/20 dark:hover:bg-destructive/30",
         link: "text-primary underline-offset-4 hover:underline",
       },
       // Height, radius, gap and padding all come from the --control-* scale in
       // globals.css so a Button and an Input on the same row match exactly:
-      // `sm` is 28px, `md` 36px and `lg` 44px on every control that names them.
+      // `sm` is 28px, `md` 32px and `lg` 44px on every control that names them.
       // A centred label reads the `center` group; `align` below swaps in the
       // `start` group when the label becomes an alignment edge. `xs` is
-      // deliberately below the scale — a 24px chip-sized button for dense
-      // toolbars, with no field counterpart to line up with — so it pads from a
-      // spacing step, neither group carrying a step that low.
+      // outside the shared two-step vocabulary. Its own height and centered
+      // inset tokens follow the selected platform scale.
       size: {
-        xs: "h-6 gap-1 rounded-[var(--control-r-sm)] px-2 in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+        xs: "h-[var(--control-h-xs)] gap-1 rounded-[var(--control-r-sm)] px-[var(--control-px-center-xs)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-[var(--control-h-sm)] gap-[var(--control-gap)] rounded-[var(--control-r-sm)] px-[var(--control-px-center-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         md: SIZE_MD,
         /** @deprecated Spelling of `md` that predates the shared vocabulary. */
         default: SIZE_MD,
         "icon-xs":
-          "size-6 rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
+          "size-[var(--control-h-xs)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm":
           "size-[var(--control-h-sm)] rounded-[var(--control-r-sm)] in-data-[slot=button-group]:rounded-8 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-md": SIZE_ICON_MD,
@@ -106,8 +110,44 @@ const buttonVariants = cva(
         start: "justify-start",
         between: "justify-between",
       },
+      /**
+       * Press feedback. `scale` shrinks the control to 0.96 while held, which
+       * reads as a press, and skips it under `prefers-reduced-motion`. Two
+       * boxes never scale, whatever the caller passes: a popup trigger, whose
+       * popup is its feedback, and a ButtonGroup segment, which would pull
+       * away from the neighbours it shares an edge with.
+       * `none` is for any other box a shrink would break, such as a calendar
+       * day inside a range band.
+       */
+      press: {
+        scale:
+          "motion-safe:active:not-aria-[haspopup]:not-in-data-[slot=button-group]:scale-[0.96]",
+        none: "",
+      },
     },
     compoundVariants: [
+      // A glyph at the edge of a centred label carries less visual weight
+      // than the word at the other edge, so equal padding reads as the glyph
+      // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
+      // label's, which reads as centred. The glyph names its side with
+      // `data-icon`, because a bare-text label leaves a lone glyph both first
+      // and last element child. These variants outrank a caller's `px-*`, so
+      // a button that sets its own padding leaves its glyph unmarked. Square
+      // members hold no padding, `xs` keeps symmetric padding, and a
+      // start-aligned glyph sits on the alignment edge, so none of those take
+      // it.
+      {
+        align: "center",
+        size: "sm",
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
+      },
+      {
+        align: "center",
+        size: ["md", "default"],
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
+      },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
       { align: "between", size: "sm", className: "px-[var(--control-px-start-sm)]" },
@@ -118,6 +158,7 @@ const buttonVariants = cva(
       size: "md",
       shape: "square",
       align: "center",
+      press: "scale",
     },
   },
 );
@@ -128,6 +169,7 @@ function Button({
   size = "md",
   shape = "square",
   align = "center",
+  press = "scale",
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
@@ -143,7 +185,7 @@ function Button({
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(buttonVariants({ variant, size, shape, align, className }))}
+      className={cn(buttonVariants({ variant, size, shape, align, press, className }))}
       {...props}
     />
   );

@@ -58,7 +58,7 @@ const SPACING_CLASS = /^-?(?:(?:scroll-)?[pm][trblxyse]?|gap(?:-[xy])?|space-[xy
 const ROME_SPACING_TOKEN = /^--rome-space-(\d+)$/;
 const ROME_BOX_SIZE_TOKEN = /^--rome-size-\d+$/;
 const KEYWORD_LENGTH = /^(?:auto|inherit|initial|unset|revert)$/i;
-const SANCTIONED_SPACING_TOKEN = /^--(?:control|field|badge)-/;
+const SANCTIONED_SPACING_TOKEN = /^--(?:control|field|badge|row)-/;
 const SAFE_AREA_PADDING_TOKEN = /^--rome-(?:safe-area-(?:top|bottom)|mobile-header-height)$/;
 const PADDING_PROPERTY = /^padding/;
 

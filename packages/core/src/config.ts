@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
+import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 
 /**
@@ -31,17 +32,30 @@ const configSchema = z.object({
   // closed to local auth) plus any `FEATURE_GATE_*` env override.
   statsigServerSecretKey: z.string().optional(),
 
-  // Sentinel
-  sentinelReviewIntervalMinutes: z.coerce.number().int().positive().default(120),
-
   // LinkedIn inbox poll cadence. Every tick draws a fresh uniform delay in
   // [min, max] so the sync traffic never looks like a metronome to LinkedIn.
   linkedinPollMinMinutes: z.coerce.number().int().positive().default(15),
   linkedinPollMaxMinutes: z.coerce.number().int().positive().default(30),
 
+  // Personal WeChat is opt-in and runs as the Rome service user.
+  wechatUserEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
+
+  hostExecutionSocket: z.string().startsWith("/").optional(),
+  hostExecutionEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  cdpAutomationEnabled: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 
   // Every root, delegated, and warm action worker counts against this bound.
   // A bounded default keeps burst traffic from forking unbounded workers;
@@ -129,17 +143,26 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
 
   // Scalars
-  if (env.SENTINEL_REVIEW_INTERVAL_MINUTES) {
-    raw.sentinelReviewIntervalMinutes = env.SENTINEL_REVIEW_INTERVAL_MINUTES;
-  }
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
+  }
+  if (env.ROME_HOST_EXECUTION_SOCKET) {
+    raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;
+  }
+  if (env.ROME_HOST_EXECUTION_ENABLED !== undefined) {
+    raw.hostExecutionEnabled = env.ROME_HOST_EXECUTION_ENABLED;
+  }
+  if (env.ROME_ENABLE_CDP_AUTOMATION !== undefined) {
+    raw.cdpAutomationEnabled = env.ROME_ENABLE_CDP_AUTOMATION;
   }
   if (env.LINKEDIN_POLL_MIN_MINUTES) {
     raw.linkedinPollMinMinutes = env.LINKEDIN_POLL_MIN_MINUTES;
   }
   if (env.LINKEDIN_POLL_MAX_MINUTES) {
     raw.linkedinPollMaxMinutes = env.LINKEDIN_POLL_MAX_MINUTES;
+  }
+  if (env.WECHAT_USER_ENABLED !== undefined) {
+    raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;
   }
   if (env.ROME_ACTION_MAX_WORKERS) {
     raw.actionWorkerMaxProcesses = env.ROME_ACTION_MAX_WORKERS;
@@ -209,6 +232,25 @@ export function loadConfig(): Config {
   if (!result.success) {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
+  }
+  // WeChat's own desktop has one rule, shared with the runtime and the desktop
+  // proxy; a bad value fails boot here rather than when WeChat first starts.
+  // Without this, the runtime would read a missing row as "no own desktop" and
+  // quietly run the client beside Chrome.
+  try {
+    wechatUserDisplay(process.env);
+  } catch (error) {
+    throw new Error(`Invalid configuration:\n${(error as Error).message}`);
+  }
+  if (process.env.WECHAT_USER_ENABLED === "true" && !desktopSlot("wechat")) {
+    const shared = process.env.DISPLAY || ":99";
+    // wechatUserDisplay has already rejected a WECHAT_USER_DISPLAY equal to
+    // DISPLAY, so a clash here is the default display.
+    throw new Error(
+      !process.env.WECHAT_USER_DISPLAY && shared === WECHAT_DEFAULT_DISPLAY
+        ? `Invalid configuration:\nWeChat's desktop defaults to ${WECHAT_DEFAULT_DISPLAY}, which is the shared desktop. Set WECHAT_USER_DISPLAY to a display other than DISPLAY (${shared}).`
+        : "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535",
+    );
   }
 
   return result.data;

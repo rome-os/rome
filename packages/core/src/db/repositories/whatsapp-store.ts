@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { waContacts, waChats, waMessages } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import type {
@@ -9,10 +9,6 @@ import type {
   WhatsAppSyncSink,
 } from "../../channels/whatsapp-sync.js";
 
-// Cap on a single address-book read. A WhatsApp account can carry thousands of
-// contacts; the People-tab viewer paginates client-side, so the API hands back
-// a generous-but-bounded slice rather than the entire table in one payload.
-const CONTACTS_READ_LIMIT = 10000;
 const UPSERT_CHUNK = 200;
 const HISTORY_READ_LIMIT = 1000;
 
@@ -131,26 +127,10 @@ export interface WhatsAppContactRow {
 /** One address-book JID as the query reads it, before grouping folds aliases. */
 type WhatsAppContactAliasRow = Omit<WhatsAppContactRow, "aliases">;
 
-export interface WhatsAppMessageRow {
-  id: string;
-  senderJid: string | null;
-  senderName: string | null;
-  senderPhoneNumber: string | null;
-  fromMe: boolean;
-  /** Unix seconds. */
-  timestamp: number;
-  type: string | null;
-  text: string | null;
-  hasMedia: boolean;
-  pushName: string | null;
-  /** For a reaction (`type === "reaction"`), the id of the message it reacts to. */
-  reactsToId: string | null;
-}
-
 /**
  * Durable store for the WhatsApp address-book mirror (contacts, chats, recent
  * message history). Writes are fed by the adapter as a {@link WhatsAppSyncSink};
- * reads back the People-tab contact list + per-contact history.
+ * reads back the contact list and recent history.
  */
 export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   constructor(private db: DrizzleDb) {}
@@ -263,15 +243,9 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
   /**
    * The synced address book, newest-conversation-first then alphabetical,
    * each row annotated with whether it has been promoted to a `persons` entry.
-   *
-   * `limit` bounds the address-book rows read before grouping folds aliases,
-   * so the returned card count can be smaller. It defaults to a generous cap
-   * that suits a single-payload endpoint. Pass `null` to read the table whole,
-   * which is what a caller that paginates the result itself wants.
+   * Reads the table whole; callers paginate the result themselves.
    */
-  async listContacts(opts: { limit?: number | null } = {}): Promise<WhatsAppContactRow[]> {
-    const limitClause =
-      opts.limit === null ? sql`` : sql`LIMIT ${opts.limit ?? CONTACTS_READ_LIMIT}`;
+  async listContacts(): Promise<WhatsAppContactRow[]> {
     const rows = (await this.db.all(sql`
       WITH wa_threads AS (
         SELECT jid FROM wa_contacts
@@ -313,7 +287,6 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
       )
       ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC,
         lower(coalesce(c.name, c.notify, c.verified_name, ch.name, c.phone_number, t.jid)) ASC
-      ${limitClause}
     `)) as Array<Record<string, unknown>>;
 
     const mapped = rows.map((r) => ({
@@ -335,97 +308,97 @@ export class WhatsAppStoreRepository implements WhatsAppSyncSink {
     return consolidateByAccount(mapped);
   }
 
-  /** Recent messages for one chat, oldest→newest (newest at the bottom). */
-  async getMessages(
-    chatJid: string,
-    opts: { limit?: number; before?: number } = {},
-  ): Promise<WhatsAppMessageRow[]> {
-    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
-    const beforeClause = opts.before != null ? sql`AND timestamp < ${opts.before}` : sql``;
-    const rows = (await this.db.all(sql`
-      SELECT m.id AS id, m.sender_jid AS senderJid,
-        coalesce(sc.name, sc.notify, sc.verified_name) AS senderName,
-        sc.phone_number AS senderPhoneNumber,
-        m.from_me AS fromMe, m.timestamp AS timestamp,
-        m.type AS type, m.text AS text, m.has_media AS hasMedia, m.push_name AS pushName,
-        reacts_to_id AS reactsToId
-      FROM wa_messages m
-      LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
-      WHERE m.chat_jid = ${chatJid} ${beforeClause}
-      ORDER BY m.timestamp DESC, m.rowid DESC
-      LIMIT ${limit}
-    `)) as Array<Record<string, unknown>>;
-
-    return rows
-      .map((r) => ({
-        id: String(r.id),
-        senderJid: (r.senderJid as string | null) ?? null,
-        senderName: (r.senderName as string | null) ?? null,
-        senderPhoneNumber: (r.senderPhoneNumber as string | null) ?? null,
-        fromMe: Boolean(r.fromMe),
-        timestamp: Number(r.timestamp),
-        type: (r.type as string | null) ?? null,
-        text: (r.text as string | null) ?? null,
-        hasMedia: Boolean(r.hasMedia),
-        pushName: (r.pushName as string | null) ?? null,
-        reactsToId: (r.reactsToId as string | null) ?? null,
-      }))
-      .reverse();
-  }
-
   /**
    * Recent mirrored messages for the channel-level history action. Returns a
-   * bounded chronological slice, enriched with chat and sender display fields.
+   * bounded chronological slice, enriched with chat and sender display fields:
+   * the newest `limit` at or after `since`, oldest first.
    */
-  async fetchHistory(threadJid: string | null, since: Date): Promise<WaHistoryMessage[]> {
+  async fetchHistory(
+    threadJid: string | null,
+    since: Date,
+    limit: number = HISTORY_READ_LIMIT,
+  ): Promise<WaHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadJid != null ? sql`AND m.chat_jid = ${threadJid}` : sql``;
     const rows = (await this.db.all(sql`
-      SELECT
-        m.id AS id,
-        m.chat_jid AS chatJid,
-        coalesce(ch.name, cc.name, cc.notify, cc.verified_name) AS chatName,
-        cc.phone_number AS chatPhoneNumber,
-        coalesce(ch.is_group, m.chat_jid LIKE '%@g.us') AS isGroup,
-        m.sender_jid AS senderJid,
-        coalesce(sc.name, sc.notify, sc.verified_name) AS senderName,
-        sc.phone_number AS senderPhoneNumber,
-        m.from_me AS fromMe,
-        m.timestamp AS timestamp,
-        m.type AS type,
-        m.text AS text,
-        m.has_media AS hasMedia,
-        m.push_name AS pushName,
-        m.reacts_to_id AS reactsToId
+      SELECT ${waHistoryColumns()}
       FROM wa_messages m
-      LEFT JOIN wa_chats ch ON ch.jid = m.chat_jid
-      LEFT JOIN wa_contacts cc ON cc.jid = m.chat_jid
-      LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid
+      ${WA_HISTORY_JOINS}
       WHERE m.timestamp >= ${sinceSeconds} ${threadClause}
       ORDER BY m.timestamp DESC, m.rowid DESC
-      LIMIT ${HISTORY_READ_LIMIT}
+      LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;
 
-    return rows
-      .map((r) => ({
-        id: String(r.id),
-        chatJid: String(r.chatJid),
-        chatName: (r.chatName as string | null) ?? null,
-        chatPhoneNumber: (r.chatPhoneNumber as string | null) ?? null,
-        isGroup: Boolean(r.isGroup),
-        senderJid: (r.senderJid as string | null) ?? null,
-        senderName: (r.senderName as string | null) ?? null,
-        senderPhoneNumber: (r.senderPhoneNumber as string | null) ?? null,
-        fromMe: Boolean(r.fromMe),
-        timestamp: new Date(Number(r.timestamp) * 1000),
-        type: (r.type as string | null) ?? null,
-        text: (r.text as string | null) ?? null,
-        hasMedia: Boolean(r.hasMedia),
-        pushName: (r.pushName as string | null) ?? null,
-        reactsToId: (r.reactsToId as string | null) ?? null,
-      }))
-      .reverse();
+    return rows.map(waHistoryRow).reverse();
   }
+}
+
+/**
+ * The fields a mirrored message is read with, each an alias and the expression
+ * over `wa_messages m` and {@link WA_HISTORY_JOINS} that answers it. One list,
+ * so the history read and the channel's per-account view read a row the same
+ * way and {@link waHistoryRow} parses either.
+ */
+const WA_HISTORY_FIELDS: ReadonlyArray<readonly [string, SQL]> = [
+  ["id", sql`m.id`],
+  ["chatJid", sql`m.chat_jid`],
+  ["chatName", sql`coalesce(ch.name, cc.name, cc.notify, cc.verified_name)`],
+  ["chatPhoneNumber", sql`cc.phone_number`],
+  ["isGroup", sql`coalesce(ch.is_group, m.chat_jid LIKE '%@g.us')`],
+  ["senderJid", sql`m.sender_jid`],
+  ["senderName", sql`coalesce(sc.name, sc.notify, sc.verified_name)`],
+  ["senderPhoneNumber", sql`sc.phone_number`],
+  ["fromMe", sql`m.from_me`],
+  ["timestamp", sql`m.timestamp`],
+  ["type", sql`m.type`],
+  ["text", sql`m.text`],
+  ["hasMedia", sql`m.has_media`],
+  ["pushName", sql`m.push_name`],
+  ["reactsToId", sql`m.reacts_to_id`],
+];
+
+/** The joins {@link WA_HISTORY_FIELDS} read through, after `FROM wa_messages m`. */
+export const WA_HISTORY_JOINS = sql`
+  LEFT JOIN wa_chats ch ON ch.jid = m.chat_jid
+  LEFT JOIN wa_contacts cc ON cc.jid = m.chat_jid
+  LEFT JOIN wa_contacts sc ON sc.jid = m.sender_jid`;
+
+function waHistoryColumns(): SQL {
+  return sql.join(
+    WA_HISTORY_FIELDS.map(([alias, expression]) => sql`${expression} AS ${sql.raw(alias)}`),
+    sql`, `,
+  );
+}
+
+/** Every field of a mirrored message as one JSON object, for a query that
+ *  carries the row through columns of its own. {@link waHistoryRow} parses it. */
+export function waHistoryJson(): SQL {
+  return sql`json_object(${sql.join(
+    WA_HISTORY_FIELDS.map(([alias, expression]) => sql`${sql.raw(`'${alias}'`)}, ${expression}`),
+    sql`, `,
+  )})`;
+}
+
+/** A row read with {@link WA_HISTORY_FIELDS}, as a column set or as the JSON
+ *  object {@link waHistoryJson} builds. */
+export function waHistoryRow(r: Record<string, unknown>): WaHistoryMessage {
+  return {
+    id: String(r.id),
+    chatJid: String(r.chatJid),
+    chatName: (r.chatName as string | null) ?? null,
+    chatPhoneNumber: (r.chatPhoneNumber as string | null) ?? null,
+    isGroup: Boolean(r.isGroup),
+    senderJid: (r.senderJid as string | null) ?? null,
+    senderName: (r.senderName as string | null) ?? null,
+    senderPhoneNumber: (r.senderPhoneNumber as string | null) ?? null,
+    fromMe: Boolean(r.fromMe),
+    timestamp: new Date(Number(r.timestamp) * 1000),
+    type: (r.type as string | null) ?? null,
+    text: (r.text as string | null) ?? null,
+    hasMedia: Boolean(r.hasMedia),
+    pushName: (r.pushName as string | null) ?? null,
+    reactsToId: (r.reactsToId as string | null) ?? null,
+  };
 }
 
 export function createWhatsAppStoreRepository(db: DrizzleDb): WhatsAppStoreRepository {

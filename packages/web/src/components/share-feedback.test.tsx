@@ -9,11 +9,6 @@ import { ShareFeedbackDialog } from "./share-feedback";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix/jsdom polyfills for pointer/scroll events used by Dialog.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {

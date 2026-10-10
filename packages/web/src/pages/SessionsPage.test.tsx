@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
+import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
   getRomeSession,
   getSession,
@@ -13,17 +14,16 @@ import {
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
-import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
-import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
+import SessionsPage from "./SessionsPage";
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
   traceDrawerContentInsetClass: () => "",
 }));
 
-rs.mock("@/components/chat/blocks", () => ({
-  renderFlatBlocks: () => null,
-  renderSingleBlock: () => null,
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
 }));
 
 rs.mock("@/components/chat/ChatComposer", () => ({
@@ -67,6 +67,12 @@ rs.mock("@/lib/chat-api", () => {
     postSessionTurn: rs.fn(),
   };
 });
+
+const emitSessionsChanged = rs.hoisted(() => rs.fn());
+rs.mock("@/lib/session-events", () => ({
+  ...sessionEventsModule,
+  emitSessionsChanged,
+}));
 
 const FORK_SESSION = {
   id: "feedback-fork-session",
@@ -144,6 +150,17 @@ function renderIndex(initialEntry = "/sessions") {
   );
 }
 
+/** The shell-less mount: /full/apps/sessions/* routes outside RomeShellLayout. */
+function renderFullMode(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   setRouterHistoryIndex(0);
   rs.mocked(getRomeSession).mockResolvedValue(FORK_SESSION);
@@ -176,15 +193,46 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
-describe("sessionsViewportClass", () => {
-  it("keeps the standard mobile shell surface edge-to-edge", () => {
-    expect(sessionsViewportClass(false)).toContain("h-[var(--rome-mobile-content-height)]");
-    expect(sessionsViewportClass(false)).not.toContain("pb-safe");
+describe("SessionsPage landmarks", () => {
+  // The shell owns the one `main` on /sessions/*. /full/apps/sessions/* mounts
+  // outside it, so there the page owns it — on every view, or a reader crossing
+  // overview -> all -> detail passes through a page with no landmark.
+  it("gives each full-mode view one main with the safe-area frame", async () => {
+    rs.mocked(getSessionMetrics).mockResolvedValue({
+      scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
+      totals: {
+        sessionCount: 0,
+        runCount: 0,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 0,
+          costUsd: null,
+          costedRunCount: 0,
+        },
+        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
+      },
+      projections: [],
+    });
+
+    for (const entry of ["/full/apps/sessions", "/full/apps/sessions/all"]) {
+      const view = renderFullMode(entry);
+      await waitFor(() => {
+        const mains = view.container.querySelectorAll("main");
+        expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
+        expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
+      });
+      cleanup();
+    }
   });
 
-  it("protects the top edge in full mode without shrinking its bottom surface", () => {
-    expect(sessionsViewportClass(true)).toContain("pt-safe");
-    expect(sessionsViewportClass(true)).not.toContain("pb-safe");
+  it("leaves the landmark to the shell on the in-shell mount", async () => {
+    const view = renderIndex("/sessions/all");
+    await waitFor(() => {
+      expect(view.container.querySelectorAll("main").length).toBe(0);
+    });
   });
 });
 
@@ -288,201 +336,20 @@ describe("SessionsPage live fork details", () => {
     expect(screen.getAllByText("original-chat").length).toBeGreaterThan(0);
   });
 
-  // The default openTurnStream mock resolves to undefined, so the live-turn
-  // effect bails before its completion branch. Anything that needs the turn to
-  // *finish* has to hand it a real stream.
-  function mockFinishableTurnStream() {
-    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
-    rs.mocked(openTurnStream).mockImplementation(async () => {
-      const body = new ReadableStream<Uint8Array>({
-        start(c) {
-          controller = c;
-        },
-      });
-      return new Response(body);
-    });
-    return () =>
-      act(() => {
-        controller?.enqueue(new TextEncoder().encode('event: done\ndata: {"success":true}\n\n'));
-        controller?.close();
-      });
-  }
-
-  it("shows no composer on a fork the backend will not continue", async () => {
+  it("renders a branch read-only: no composer, no sidebar signal", async () => {
+    // The Sessions explorer carries no input surface — a branch continues in
+    // its chat card, and legacy fork rows are read-only trajectories.
     rs.mocked(listSessionTurns).mockResolvedValue([]);
 
     renderDetail();
 
     await screen.findByTestId("session-messages");
     expect(screen.queryByTestId("side-chat-composer")).toBeNull();
-  });
-
-  it("re-probes continuability once the first branch answer lands", async () => {
-    // The view opens while the fork is still running, so the first probe
-    // legitimately 404s. The composer must appear when the turn ends.
-    rs.mocked(getSession)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue({ id: "feedback-fork-session" } as never);
-    const finish = mockFinishableTurnStream();
-
-    renderDetail();
-    await screen.findByTestId("session-messages");
-    expect(screen.queryByTestId("side-chat-composer")).toBeNull();
-
-    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
-    finish();
-
-    expect(await screen.findByTestId("side-chat-composer")).toBeTruthy();
-  });
-
-  it("sends a follow-up, refreshes the transcript, and re-attaches the live turn", async () => {
-    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    rs.mocked(listSessionTurns).mockResolvedValue([]);
-
-    renderDetail();
-
-    const composer = await screen.findByTestId("side-chat-composer");
-    const reloads = rs.mocked(listRomeSessionMessages).mock.calls.length;
-    const turnLookups = rs.mocked(listSessionTurns).mock.calls.length;
-    await act(async () => {
-      fireEvent.click(composer);
-    });
-
-    await waitFor(() => {
-      expect(postSessionTurn).toHaveBeenCalledWith("feedback-fork-session", expect.any(FormData));
-    });
-    const form = rs.mocked(postSessionTurn).mock.calls[0][1];
-    expect(form.get("text")).toBe("And the failure case?");
-    // The guardian's own message shows before the reply does.
-    await waitFor(() => {
-      expect(rs.mocked(listRomeSessionMessages).mock.calls.length).toBeGreaterThan(reloads);
-    });
-    await waitFor(() => {
-      expect(rs.mocked(listSessionTurns).mock.calls.length).toBeGreaterThan(turnLookups);
-    });
-  });
-
-  it("attaches to an accepted follow-up that is still queued", async () => {
-    // The turns endpoint reports a turn as `queued` until it becomes the
-    // session's current turn. Skipping those loses the reply: the turn runs
-    // server-side and nothing ever opens its stream.
-    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    rs.mocked(listSessionTurns).mockResolvedValue([
-      {
-        turnId: "queued-follow-up",
-        streamId: "queued-follow-up",
-        startedAt: "2026-09-01T00:00:00.000Z",
-        status: "queued",
-      },
-    ]);
-    mockFinishableTurnStream();
-
-    renderDetail();
-
-    await waitFor(() => {
-      expect(openTurnStream).toHaveBeenCalledWith("queued-follow-up", expect.any(AbortSignal));
-    });
-  });
-
-  it("keeps the composer through a transient probe failure", async () => {
-    // `getSession` returns null only on 404. Anything else — a 500, a network
-    // blip — throws, and treating that as "not continuable" would drop the
-    // composer off a live branch until the next probe.
-    rs.mocked(listSessionTurns).mockResolvedValue([]);
-    rs.mocked(getSession)
-      .mockResolvedValueOnce({ id: "feedback-fork-session" } as never)
-      .mockRejectedValue(new Error("boom"));
-
-    renderDetail();
-
-    const composer = await screen.findByTestId("side-chat-composer");
-    await act(async () => {
-      fireEvent.click(composer);
-    });
-
-    expect(screen.getByTestId("side-chat-composer")).toBeTruthy();
-  });
-
-  it("releases the composer when the live-turn stream cannot be attached", async () => {
-    // The turn is accepted and running; only the attach failed. Leaving the
-    // composer disabled would strand the branch until the view remounts.
-    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    rs.mocked(openTurnStream).mockResolvedValue(new Response(null, { status: 502 }));
-
-    renderDetail();
-
-    const composer = await screen.findByTestId("side-chat-composer");
-    await waitFor(() => expect(openTurnStream).toHaveBeenCalled());
-    await waitFor(() => expect((composer as HTMLButtonElement).disabled).toBe(false));
-  });
-
-  it("refuses a second send while the first is still in flight", async () => {
-    // This view follows only the first running turn, so a queued second turn
-    // would run server-side and never render.
-    rs.mocked(getSession).mockResolvedValue({ id: "feedback-fork-session" } as never);
-    rs.mocked(listSessionTurns).mockResolvedValue([]);
-    let release: (() => void) | undefined;
-    rs.mocked(postSessionTurn).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          release = () =>
-            resolve({
-              ok: true,
-              data: { turnId: "follow-up-turn", sessionId: "feedback-fork-session", startedAt: "" },
-            });
-        }),
-    );
-
-    renderDetail();
-
-    const composer = await screen.findByTestId("side-chat-composer");
-    fireEvent.click(composer);
-    await waitFor(() => expect((composer as HTMLButtonElement).disabled).toBe(true));
-    fireEvent.click(composer);
-
-    expect(postSessionTurn).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      release?.();
-    });
+    expect(emitSessionsChanged).not.toHaveBeenCalled();
   });
 });
 
 describe("SessionsPage explorer", () => {
-  it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
-    expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    rs.mocked(getSessionMetrics).mockResolvedValue({
-      scope: {
-        from: "2026-07-08T00:00:00.000Z",
-        to: "2026-07-15T00:00:00.000Z",
-        timeZone: "UTC",
-      },
-      totals: {
-        sessionCount: 0,
-        runCount: 0,
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          totalTokens: 0,
-          costUsd: null,
-          costedRunCount: 0,
-        },
-        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
-      },
-      projections: [],
-    });
-
-    renderIndex("/sessions?groupBy=source&range=all");
-
-    await waitFor(() =>
-      expect(getSessionMetrics).toHaveBeenCalledWith(
-        expect.objectContaining({ groupBy: "app", range: "7d" }),
-      ),
-    );
-    expect(screen.getByRole("combobox", { name: "Group by" }).textContent).toContain("Apps");
-  });
-
   it("shows usage overview and switches to the human-readable inventory", async () => {
     rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },
@@ -644,5 +511,66 @@ describe("SessionsPage explorer", () => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     fireEvent.click(screen.getAllByText("Review pull request 42")[0]);
     expect(await screen.findByRole("button", { name: "Back to sessions" })).toBeTruthy();
+  });
+
+  it("filters from the popover, shows what is set as a chip, and sorts from a column header", async () => {
+    rs.mocked(listRomeSessions).mockResolvedValue({
+      sessions: [
+        {
+          ...FORK_SESSION,
+          id: "review-session",
+          displayTitle: "Review pull request 42",
+          type: "action",
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 50,
+      nextOffset: null,
+      facets: {
+        types: [{ value: "action", count: 1 }],
+        sourceChannels: [{ value: null, count: 1 }],
+      },
+    });
+
+    renderIndex("/sessions/all");
+    expect((await screen.findAllByText("Review pull request 42")).length).toBeGreaterThan(0);
+
+    // Type and Source live behind one control, so neither is on the row until
+    // the popover opens.
+    expect(screen.queryByRole("combobox", { name: "Type" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
+    const typeField = await screen.findByRole("combobox", { name: "Type" });
+    fireEvent.keyDown(typeField, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: /Automation/ }));
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: "action" })),
+    );
+
+    // What is set shows as a removable chip under the toolbar.
+    const chip = await screen.findByRole("button", { name: "Clear Type: Automation" });
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(expect.objectContaining({ type: undefined })),
+    );
+    expect(screen.queryByRole("button", { name: "Clear Type: Automation" })).toBeNull();
+
+    // The table header carries the order: first click takes the field at its
+    // useful end, a second reverses it.
+    const runs = screen.getByRole("button", { name: "Runs" });
+    fireEvent.click(runs);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: "runs", sortDirection: "desc" }),
+      ),
+    );
+    expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("descending");
+    fireEvent.click(runs);
+    await waitFor(() =>
+      expect(listRomeSessions).toHaveBeenCalledWith(
+        expect.objectContaining({ sort: "runs", sortDirection: "asc" }),
+      ),
+    );
+    expect(runs.closest("th")?.getAttribute("aria-sort")).toBe("ascending");
   });
 });

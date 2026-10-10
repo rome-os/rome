@@ -4,6 +4,7 @@ name: Browser Automation
 icon: assets/icon.svg
 version: 0.2.1
 description: Operate the agent's browser to visit and act on websites via predefined automation actions/scripts exposed by the `opencli` tool. You can get the supported commands by running shell command `opencli <site_name> --help`, where site_name can be amazon, google, instagram, linkedin, producthunt, substack, twitter, wikipedia, xiaohongshu, youtube or more. To know all available commands, run `opencli list`. Also drives ChatGPT through the logged-in browser session — `chatgpt_chat` sends a prompt and returns the markdown response, and `chatgpt_image` generates a ChatGPT image and saves it to disk.
+tagline: "Hand any website task to an agent that drives the browser for you."
 appRoot: dist
 
 web:

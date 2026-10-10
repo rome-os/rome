@@ -3,11 +3,12 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Lock, Paperclip, Sparkles } from "lucide-react";
+import { ArrowUp, Paperclip, Sparkles, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { ButtonGroup, ButtonGroupText } from "@/components/ui/button-group";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
+import { discardSendOrigin, recordSendOrigin } from "@/lib/send-flight";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import {
   ChatApiError,
@@ -31,7 +33,7 @@ import {
   DEFAULT_REASONING_EFFORT,
   LARGE_MODEL_OPTIONS,
 } from "@/lib/chat-constants";
-import { formatProjectLabel, isReasoningEffort } from "@/lib/chat-helpers";
+import { getProjectDisplayName, isReasoningEffort } from "@/lib/chat-helpers";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import type {
   AgentMention,
@@ -41,7 +43,7 @@ import type {
   ReasoningEffort,
   ChatErrorNotice,
 } from "@/lib/chat-types";
-import { ErrorBlock } from "./blocks/ErrorBlock";
+import { ErrorEventView } from "./entries/ErrorEventView";
 import { AgentMentionChip } from "./composer/AgentMentionChip";
 import { AgentMentionMenu, type AgentMentionMenuHandle } from "./composer/AgentMentionMenu";
 import { ImpersonationMenu } from "./composer/ImpersonationMenu";
@@ -51,6 +53,7 @@ import { ReasoningEffortMenu } from "./composer/ReasoningEffortMenu";
 import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandChip";
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
+import { useHorizontalScrollRail } from "./HorizontalScrollRail";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -66,12 +69,26 @@ export interface ChatComposerSnapshot {
   // The structured skill selection (the `/` chip) is sent as the
   // turn's `skillName` field; `text` carries only the task.
   skillName?: string;
+  // Sent as the turn's `inputId`, which the server records once per session.
+  // Resending an unchanged draft after a failure reuses it, so a turn the server
+  // accepted before the failure is returned rather than recorded twice.
+  inputId?: string;
+}
+
+export interface ChatComposerSendControls {
+  /** `null` means the browser cannot determine the multipart body size. */
+  onUploadProgress: (progress: number | null) => void;
+  /**
+   * Aborted when the user cancels an attachment upload. Hosts must forward it
+   * to `postSessionTurn` so the request actually stops, rather than leaving it
+   * to run while the composer pretends it was cancelled.
+   */
+  signal: AbortSignal;
 }
 
 export interface ChatComposerHandle {
   focus: () => void;
-  insertText: (text: string) => void;
-  setAgentMention: (mention: AgentMention | null) => void;
+  insertText: (text: string, options?: { focus?: boolean }) => void;
   setSkillSelection: (skill: SkillSelection | null) => void;
   addFiles: (files: File[]) => void;
   /**
@@ -114,8 +131,6 @@ export interface ChatComposerProps {
   // defaulted to `main` (no `pinnedAgentMention`) — the agent is still fixed
   // for the session's lifetime, so the `@` menu must stay suppressed.
   lockAgentMention?: boolean;
-  // Disable the entire composer (e.g., while the host is initializing).
-  disabled?: boolean;
   // Streaming-aware affordances. When `isStreaming` is true and `onStop` is
   // provided, a Stop button shows next to Send.
   isStreaming?: boolean;
@@ -134,23 +149,21 @@ export interface ChatComposerProps {
     onApprove?: () => void;
     onCancel?: () => void;
   } | null;
-  // When set, the composer is read-only and shows this hint instead of
-  // accepting input. Used while a design interaction holds the floor: the
-  // guardian is suspended, so its "main" view can be read but not typed into
-  // until the design resolves.
-  disabledHint?: string | null;
   // Styling for the input box itself (border, surface, padding, blur). The
   // composer owns the box so the pre-send chip row can sit *outside* it; each
   // mount passes its own box look (the floating composer adds backdrop-blur).
   boxClassName?: string;
-  // Called when the user submits. The composer optimistically clears its
-  // input + uploads before invoking; if `onSend` throws, the inputs are
-  // restored.
-  onSend: (snapshot: ChatComposerSnapshot) => void | Promise<void>;
+  // Called when the user submits. The composer clears text immediately but
+  // keeps uploading attachments visible until this promise settles. If it
+  // rejects, the submitted inputs remain available for a retry.
+  onSend: (
+    snapshot: ChatComposerSnapshot,
+    controls: ChatComposerSendControls,
+  ) => void | Promise<void>;
 }
 
 // The empty input is one line box tall, expressed as `1lh` so it resolves
-// against whatever `text-body` currently is rather than restating the role's
+// against whatever `text-composer` currently is rather than restating the role's
 // px here. The textarea carries no vertical padding, so that leaves the box's
 // own `p-4` as the only inset above the text and the empty composer reads
 // symmetric top to bottom. `min-height` outranks the height the resize below
@@ -163,10 +176,10 @@ export interface ChatComposerProps {
 const TEXTAREA_MIN_HEIGHT = "1lh";
 const TEXTAREA_MAX_HEIGHT = 240;
 
-function clampTextareaHeight(el: HTMLTextAreaElement) {
+function clampTextareaHeight(el: HTMLTextAreaElement, maxHeight: number) {
   el.style.height = "auto";
-  el.style.height = Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT) + "px";
-  el.style.overflowY = el.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden";
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + "px";
+  el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
@@ -177,12 +190,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     pinnedAgentMention = null,
     initialAgentMention = null,
     lockAgentMention = false,
-    disabled = false,
     isStreaming = false,
     onStop,
     streamError,
     designingInteraction = null,
-    disabledHint = null,
     boxClassName,
     onSend,
   },
@@ -192,6 +203,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const [inputText, setInputText] = useState("");
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+  const [uploadInFlight, setUploadInFlight] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // When `pinnedAgentMention` is set, the session is already bound to an
   // agent — the `@` menu and the local draftAgentMention are inert.
@@ -232,6 +245,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const people = peopleData ?? [];
   const modelSelectorEnabled = settings?.enableModelSelector === true;
   const impersonationEnabled = settings?.enableImpersonation === true;
+  const toolbarRail = useHorizontalScrollRail(
+    `${showProjectSelector}:${impersonationEnabled}:${showModelSelector && modelSelectorEnabled}`,
+  );
   const guardianName = (settings?.guardianName as string | undefined) ?? "";
   // Persisted preferences are seeded from settings on first load, then owned
   // locally so the picker reflects the user's in-session choice immediately
@@ -277,8 +293,36 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentTrayRef = useRef<HTMLDivElement>(null);
+  const [textareaMaxHeight, setTextareaMaxHeight] = useState(TEXTAREA_MAX_HEIGHT);
+
+  useLayoutEffect(() => {
+    const tray = attachmentTrayRef.current;
+    if (!tray) return;
+    // Attachments share the text area's height budget so previews cannot push
+    // the toolbar below the viewport when the draft already fills the input.
+    const measure = () => {
+      setTextareaMaxHeight(Math.max(0, TEXTAREA_MAX_HEIGHT - tray.getBoundingClientRect().height));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(tray);
+    return () => observer.disconnect();
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+  // State drives the UI, while the ref closes the same-event gap before React
+  // commits that state (for example, two rapid Enter keydown events).
+  const uploadInFlightRef = useRef(false);
+  // Live for exactly one upload; `cancelUpload` aborts through it.
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  // The last failed send, kept until a send succeeds.
+  const failedSendRef = useRef<{
+    inputId: string;
+    text: string;
+    uploads: PendingUpload[];
+    skill: SkillSelection | null;
+  } | null>(null);
 
   // Resize the textarea to fit its content. The `onInput` handler below also
   // runs this math, but only on user typing — programmatic clears (e.g. the
@@ -286,11 +330,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   // box would otherwise stay at its previous (potentially maxed-out) height
   // and not shrink back to a single line. We mirror the onInput math here
   // and let React re-apply it after every value change.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    clampTextareaHeight(el);
-  }, [inputText]);
+    clampTextareaHeight(el, textareaMaxHeight);
+  }, [inputText, textareaMaxHeight]);
 
   //      draft seed via location.state), update the chip — but only while we
   //      still have the default-or-stale value so we don't trample on a
@@ -318,6 +362,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateLargeModelSelection = useCallback(
     async (next: string) => {
+      if (uploadInFlightRef.current) return;
       setLargeModelSelection(next);
       setComposerError(null);
       const ok = await saveSetting("webchatLargeModel", next).catch(() => false);
@@ -331,6 +376,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const updateReasoningEffort = useCallback(
     async (next: ReasoningEffort) => {
+      if (uploadInFlightRef.current) return;
       setReasoningEffort(next);
       setComposerError(null);
       const ok = await saveSetting("webchatReasoningEffort", next).catch(() => false);
@@ -389,45 +435,84 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   }, [newProjectName, t, connectOnCreate]);
 
   const addPendingFiles = useCallback((files: File[]) => {
-    if (files.length === 0) return;
+    // The visible file picker is disabled during an upload, but paste and the
+    // parent drop zones enter through this callback directly. Guard the shared
+    // boundary so a file cannot be added to the tray without belonging to the
+    // multipart request whose progress it displays.
+    if (files.length === 0 || uploadInFlightRef.current) return;
     setPendingUploads((prev) => [
       ...prev,
       ...files.map((file) => ({ id: crypto.randomUUID(), file })),
     ]);
   }, []);
 
+  const invokeOnSend = useCallback(
+    async (snapshot: ChatComposerSnapshot) => {
+      const tracksUpload = snapshot.uploads.length > 0;
+      const controller = new AbortController();
+      if (tracksUpload) {
+        uploadInFlightRef.current = true;
+        uploadAbortRef.current = controller;
+        setUploadInFlight(true);
+        setUploadProgress(0);
+      }
+      try {
+        await onSend(snapshot, {
+          onUploadProgress: (progress) => {
+            if (!tracksUpload) return;
+            setUploadProgress(progress === null ? null : Math.max(0, Math.min(1, progress)));
+          },
+          signal: controller.signal,
+        });
+      } finally {
+        if (tracksUpload) {
+          uploadInFlightRef.current = false;
+          uploadAbortRef.current = null;
+          setUploadInFlight(false);
+          setUploadProgress(null);
+        }
+      }
+    },
+    [onSend],
+  );
+
+  // Unmounting mid-upload must not leave the request running behind a composer
+  // that no longer exists.
+  useEffect(
+    () => () => {
+      uploadAbortRef.current?.abort();
+    },
+    [],
+  );
+
+  const cancelUpload = useCallback(() => {
+    uploadAbortRef.current?.abort();
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
       focus: () => textareaRef.current?.focus(),
-      insertText: (text: string) => {
+      insertText: (text: string, options?: { focus?: boolean }) => {
+        if (uploadInFlightRef.current) return;
         setInputText(text);
         requestAnimationFrame(() => {
           const el = textareaRef.current;
           if (!el) return;
-          clampTextareaHeight(el);
-          el.focus();
+          clampTextareaHeight(el, textareaMaxHeight);
+          if (options?.focus !== false) el.focus();
           el.setSelectionRange(text.length, text.length);
         });
       },
-      setAgentMention: (mention: AgentMention | null) => {
-        if (agentMentionLocked) return;
-        // Mirror acceptMention's cleanup: scoping the draft programmatically
-        // must also dismiss any open `@` menu, or its stale anchor/query keeps
-        // intercepting Enter/arrow keys against the wrong token.
-        setDraftAgentMention(mention);
-        setMentionMenuOpen(false);
-        setMentionAnchorIndex(null);
-        setMentionQuery("");
-      },
       setSkillSelection: (skill: SkillSelection | null) => {
+        if (uploadInFlightRef.current) return;
         setDraftSkill(skill);
         setSlashMenuOpen(false);
         setSlashQuery("");
       },
       addFiles: addPendingFiles,
       submit: (text: string, opts?: { skillName?: string }) => {
-        if (disabled || disabledHint != null) return;
+        if (uploadInFlightRef.current) return;
         const trimmed = text.trim();
         const skillName = opts?.skillName ?? draftSkill?.name;
         if (!trimmed && pendingUploads.length === 0 && !skillName) return;
@@ -442,7 +527,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           agentMention: draftAgentMention ?? undefined,
           skillName,
         };
-        void onSend(snapshot);
+        void invokeOnSend(snapshot)
+          .then(() => {
+            const sentIds = new Set(snapshot.uploads.map((upload) => upload.id));
+            setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+          })
+          .catch(() => {
+            // The imperative submit path leaves its inputs in place, so the
+            // parent error banner is sufficient and the turn remains retryable.
+          });
       },
       getMetadataSnapshot: () => ({
         personaId: impersonationEnabled && selectedPersonId ? selectedPersonId : undefined,
@@ -451,12 +544,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }),
     [
       addPendingFiles,
+      textareaMaxHeight,
       impersonationEnabled,
       selectedPersonId,
       reasoningEffort,
-      agentMentionLocked,
-      disabled,
-      disabledHint,
       draftSkill,
       pendingUploads,
       showModelSelector,
@@ -465,10 +556,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       draftProjectName,
       draftAgentMention,
       onSend,
+      invokeOnSend,
     ],
   );
 
   const removePendingUpload = useCallback((id: string) => {
+    if (uploadInFlightRef.current) return;
     setPendingUploads((prev) => prev.filter((upload) => upload.id !== id));
   }, []);
 
@@ -479,27 +572,32 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      if (disabled) return;
       const files = extractFilesFromClipboard(event.clipboardData);
       if (files.length > 0) {
         event.preventDefault();
         addPendingFiles(files);
       }
     },
-    [addPendingFiles, disabled],
+    [addPendingFiles],
   );
 
-  const isComposerBusy = disabled || disabledHint != null;
-
   const runSend = useCallback(async () => {
-    if (isComposerBusy) return;
+    if (uploadInFlight || uploadInFlightRef.current) return;
     // A skill chip alone is a sendable turn — the server-expanded prompt asks
     // the agent to read the skill and ask what to do with it.
     if (!inputText.trim() && pendingUploads.length === 0 && !draftSkill) return;
 
     const text = inputText.trim();
+    // The textarea holds the untrimmed value; compare against that when
+    // deciding whether the user edited the box during an upload.
+    const rawText = inputText;
     const uploads = pendingUploads;
     const skill = draftSkill;
+    const failed = failedSendRef.current;
+    const inputId =
+      failed && failed.text === text && failed.uploads === uploads && failed.skill === skill
+        ? failed.inputId
+        : crypto.randomUUID();
     const snapshot: ChatComposerSnapshot = {
       text,
       uploads,
@@ -512,20 +610,43 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       // session to the picked agent.
       agentMention: draftAgentMention ?? undefined,
       skillName: skill?.name,
+      inputId,
     };
 
-    // Optimistically clear so the user sees the input wipe immediately. If
-    // onSend rejects, restore the snapshot so they can retry without
-    // re-typing.
-    setInputText("");
-    setPendingUploads([]);
-    setDraftSkill(null);
+    // A text-only turn clears optimistically — it is accepted or rejected in
+    // one round trip, so the input wipes immediately and is restored on
+    // failure. A turn carrying attachments keeps its text on screen for the
+    // whole upload instead: the request is long enough to cancel, and wiping
+    // text the user may still be reading (or about to cancel) reads as loss.
+    // It clears only once the server has accepted the turn.
+    const clearsOptimistically = uploads.length === 0;
+    if (textareaRef.current && text) recordSendOrigin(inputId, textareaRef.current);
+    if (clearsOptimistically) {
+      setInputText("");
+      setPendingUploads([]);
+      setDraftSkill(null);
+    }
     try {
-      await onSend(snapshot);
+      await invokeOnSend(snapshot);
+      failedSendRef.current = null;
+      if (!clearsOptimistically) {
+        const sentIds = new Set(uploads.map((upload) => upload.id));
+        setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
+        setDraftSkill((current) => (current === skill ? null : current));
+        // Anything typed during the upload is newer than what was sent, so it
+        // survives; only the exact text that went out is cleared.
+        setInputText((current) => (current === rawText ? "" : current));
+      }
     } catch {
-      setInputText(text);
-      setPendingUploads(uploads);
-      setDraftSkill(skill);
+      discardSendOrigin(inputId);
+      failedSendRef.current = { inputId, text, uploads, skill };
+      if (clearsOptimistically) {
+        setInputText(text);
+        setPendingUploads(uploads);
+        setDraftSkill(skill);
+      }
+      // Nothing to restore otherwise — a cancelled or failed upload never
+      // cleared the text or the attachment tray in the first place.
     }
   }, [
     inputText,
@@ -539,8 +660,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     reasoningEffort,
     draftProjectName,
     draftAgentMention,
-    isComposerBusy,
-    onSend,
+    uploadInFlight,
+    invokeOnSend,
   ]);
 
   // Re-evaluates whether the cursor sits inside an active mention token
@@ -602,6 +723,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   );
 
   const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (uploadInFlightRef.current) return;
     const value = event.target.value;
     setInputText(value);
     const cursor = event.target.selectionEnd ?? value.length;
@@ -618,6 +740,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptMention = useCallback(
     (mention: AgentMention) => {
+      if (uploadInFlightRef.current) return;
       // Splice out the `@<query>` token that triggered the menu so the chip
       // becomes the single source of truth for "which agent."
       if (mentionAnchorIndex !== null) {
@@ -650,6 +773,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const acceptSlashSkill = useCallback(
     (skill: SkillSelection) => {
+      if (uploadInFlightRef.current) return;
       // Mirror acceptMention: splice out the leading `/<query>` token so the
       // chip becomes the single source of truth for "which skill" — whatever
       // the user already typed after the cursor stays as the task text.
@@ -796,14 +920,21 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   const draftProject = projectCatalog?.projects.find((p) => p.name === draftProjectName);
   const draftProjectLabel = draftProject
-    ? (draftProject.displayName ?? formatProjectLabel(draftProject.name))
-    : formatProjectLabel(draftProjectName);
+    ? (draftProject.displayName ?? getProjectDisplayName(draftProject.name))
+    : getProjectDisplayName(draftProjectName);
 
   // Live handoff (not the approve moment, which keeps its own banner). When set,
   // it's the active chip in the row and supersedes the @agent chip — both would
   // name the same specialist.
   const collaborating =
     designingInteraction && !designingInteraction.onApprove ? designingInteraction : null;
+  // An in-flight upload renders the cancel control in this slot instead, so the
+  // send label never has to describe one.
+  const sendActionLabel = isStreaming
+    ? t("composer.sendWhileRunningTitle")
+    : t("composer.sendTitle");
+  const showCancelUpload = uploadInFlight;
+  const cancelUploadLabel = t("composer.cancelUpload");
 
   return (
     <>
@@ -830,7 +961,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </ButtonGroup>
       )}
       {streamError && (
-        <ErrorBlock
+        <ErrorEventView
           presentation="status"
           className="mb-2"
           error={typeof streamError === "string" ? streamError : streamError.message}
@@ -852,25 +983,26 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             mention={effectiveMention}
             pinned={pinnedAgentMention !== null}
             onRemove={
-              collaborating
-                ? collaborating.onCancel
-                : pinnedAgentMention
-                  ? undefined
-                  : () => setDraftAgentMention(null)
+              uploadInFlight
+                ? undefined
+                : collaborating
+                  ? collaborating.onCancel
+                  : pinnedAgentMention
+                    ? undefined
+                    : () => setDraftAgentMention(null)
             }
             removeLabel={collaborating ? "Cancel collaboration" : undefined}
           />
         )}
-        {draftSkill && <SkillCommandChip skill={draftSkill} onRemove={() => setDraftSkill(null)} />}
+        {draftSkill && (
+          <SkillCommandChip
+            skill={draftSkill}
+            onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
+          />
+        )}
         <WorkspaceContextChips />
       </div>
-      <div data-chat-composer-box className={cn("relative z-10", boxClassName)}>
-        {disabledHint && (
-          <div className="mb-3 flex items-center gap-2 rounded-8 border border-border bg-surface-muted px-3 py-2 text-ui text-muted-foreground">
-            <Lock className="size-4 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{disabledHint}</span>
-          </div>
-        )}
+      <div data-chat-composer-box className={cn("@container/composer relative z-10", boxClassName)}>
         {composerError && (
           <Alert variant="destructive" className="mb-3 px-3 py-2">
             <AlertDescription>{composerError}</AlertDescription>
@@ -883,155 +1015,182 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           className="hidden"
           onChange={handleFileSelection}
         />
-        <PendingUploadsList
-          uploads={pendingUploads}
-          onRemove={removePendingUpload}
-          disabled={isComposerBusy}
-        />
-        <SlashSkillMenu
-          ref={slashMenuRef}
-          open={slashMenuOpen && !isComposerBusy}
-          onOpenChange={(next) => {
-            setSlashMenuOpen(next);
-            if (!next) setSlashQuery("");
-          }}
-          query={slashQuery}
-          onSelect={acceptSlashSkill}
-          anchor={
-            <div>
-              <AgentMentionMenu
-                ref={mentionMenuRef}
-                open={mentionMenuOpen && !agentMentionLocked}
-                onOpenChange={(next) => {
-                  setMentionMenuOpen(next);
-                  if (!next) {
-                    setMentionAnchorIndex(null);
-                    setMentionQuery("");
+        {/* flow-root keeps the tray's bottom margin inside this box, so the
+            measured height is the full space the tray takes from the input. */}
+        <div ref={attachmentTrayRef} data-attachment-tray className="flow-root">
+          <PendingUploadsList
+            uploads={pendingUploads}
+            onRemove={removePendingUpload}
+            disabled={uploadInFlight}
+            uploadProgress={uploadInFlight ? uploadProgress : undefined}
+          />
+        </div>
+        {/* A wide composer keeps Send at the end of the toolbar row. A narrow
+            one moves Send up beside the input and gives the toolbar a whole
+            row that scrolls sideways, so no control wraps onto a row of its
+            own. */}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 [grid-template-areas:'input_input'_'tools_send'] @max-[28rem]/composer:[grid-template-areas:'input_send'_'tools_tools']">
+          <div className="[grid-area:input] @max-[28rem]/composer:self-center">
+            <SlashSkillMenu
+              ref={slashMenuRef}
+              open={slashMenuOpen && !uploadInFlight}
+              onOpenChange={(next) => {
+                if (uploadInFlightRef.current) return;
+                setSlashMenuOpen(next);
+                if (!next) setSlashQuery("");
+              }}
+              query={slashQuery}
+              onSelect={acceptSlashSkill}
+              anchor={
+                <div>
+                  <AgentMentionMenu
+                    ref={mentionMenuRef}
+                    open={mentionMenuOpen && !agentMentionLocked && !uploadInFlight}
+                    onOpenChange={(next) => {
+                      if (uploadInFlightRef.current) return;
+                      setMentionMenuOpen(next);
+                      if (!next) {
+                        setMentionAnchorIndex(null);
+                        setMentionQuery("");
+                      }
+                    }}
+                    query={mentionQuery}
+                    onSelect={acceptMention}
+                    anchor={
+                      <textarea
+                        ref={textareaRef}
+                        value={inputText}
+                        onChange={handleTextareaChange}
+                        onSelect={handleTextareaSelect}
+                        onKeyDown={handleKeyDown}
+                        onPaste={handlePaste}
+                        placeholder={
+                          pendingUploads.length > 0
+                            ? t("composer.placeholderWithUploads")
+                            : t("composer.placeholderDefault")
+                        }
+                        rows={1}
+                        className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
+                        style={{
+                          minHeight: TEXTAREA_MIN_HEIGHT,
+                          maxHeight: `${textareaMaxHeight}px`,
+                        }}
+                        onInput={(e) =>
+                          clampTextareaHeight(e.target as HTMLTextAreaElement, textareaMaxHeight)
+                        }
+                        disabled={uploadInFlight}
+                      />
+                    }
+                  />
+                </div>
+              }
+            />
+          </div>
+          <div
+            {...toolbarRail.props}
+            data-chat-composer-toolbar
+            className="flex min-w-0 flex-wrap items-center gap-2 [grid-area:tools] [mask-image:var(--scroll-fade-mask)] [-webkit-mask-image:var(--scroll-fade-mask)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden @max-[28rem]/composer:-m-1 @max-[28rem]/composer:flex-nowrap @max-[28rem]/composer:overflow-x-auto @max-[28rem]/composer:overscroll-x-contain @max-[28rem]/composer:p-1"
+          >
+            {showProjectSelector && (
+              <ProjectSelector
+                ref={projectMenuRef}
+                disabled={uploadInFlight}
+                t={t}
+                projectCatalog={projectCatalog}
+                projectsLoading={projectsLoading}
+                projectsError={projectsError}
+                draftProjectName={draftProjectName}
+                draftProjectLabel={draftProjectLabel}
+                defaultProjectName={DEFAULT_PROJECT_NAME}
+                menuOpen={draftProjectMenuOpen}
+                searchQuery={projectSearchQuery}
+                setSearchQuery={setProjectSearchQuery}
+                createFormOpen={createProjectFormOpen}
+                setCreateFormOpen={setCreateProjectFormOpen}
+                newProjectName={newProjectName}
+                setNewProjectName={setNewProjectName}
+                creatingProject={creatingProject}
+                connectOnCreate={connectOnCreate}
+                setConnectOnCreate={setConnectOnCreate}
+                onToggleMenu={async () => {
+                  if (uploadInFlightRef.current) return;
+                  const nextOpen = !draftProjectMenuOpen;
+                  setDraftProjectMenuOpen(nextOpen);
+                  setProjectsError(null);
+                  if (!nextOpen) {
+                    setProjectSearchQuery("");
+                    setCreateProjectFormOpen(false);
+                  } else if (!projectCatalog) {
+                    await loadProjects();
                   }
                 }}
-                query={mentionQuery}
-                onSelect={acceptMention}
-                anchor={
-                  <textarea
-                    ref={textareaRef}
-                    value={inputText}
-                    onChange={handleTextareaChange}
-                    onSelect={handleTextareaSelect}
-                    onKeyDown={handleKeyDown}
-                    onPaste={handlePaste}
-                    placeholder={
-                      pendingUploads.length > 0
-                        ? t("composer.placeholderWithUploads")
-                        : t("composer.placeholderDefault")
-                    }
-                    rows={1}
-                    className="block w-full resize-none border-0 bg-transparent text-body text-foreground placeholder:text-subtle-foreground focus:outline-none focus:ring-0"
-                    style={{
-                      minHeight: TEXTAREA_MIN_HEIGHT,
-                      maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
-                    }}
-                    onInput={(e) => clampTextareaHeight(e.target as HTMLTextAreaElement)}
-                    disabled={isComposerBusy}
-                  />
-                }
-              />
-            </div>
-          }
-        />
-        <div
-          data-chat-composer-toolbar
-          className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-2"
-        >
-          {showProjectSelector && (
-            <ProjectSelector
-              ref={projectMenuRef}
-              t={t}
-              projectCatalog={projectCatalog}
-              projectsLoading={projectsLoading}
-              projectsError={projectsError}
-              draftProjectName={draftProjectName}
-              draftProjectLabel={draftProjectLabel}
-              defaultProjectName={DEFAULT_PROJECT_NAME}
-              menuOpen={draftProjectMenuOpen}
-              searchQuery={projectSearchQuery}
-              setSearchQuery={setProjectSearchQuery}
-              createFormOpen={createProjectFormOpen}
-              setCreateFormOpen={setCreateProjectFormOpen}
-              newProjectName={newProjectName}
-              setNewProjectName={setNewProjectName}
-              creatingProject={creatingProject}
-              connectOnCreate={connectOnCreate}
-              setConnectOnCreate={setConnectOnCreate}
-              onToggleMenu={async () => {
-                const nextOpen = !draftProjectMenuOpen;
-                setDraftProjectMenuOpen(nextOpen);
-                setProjectsError(null);
-                if (!nextOpen) {
+                onPickProject={(name) => {
+                  if (uploadInFlightRef.current) return;
+                  setDraftProjectName(name);
+                  setDraftProjectMenuOpen(false);
                   setProjectSearchQuery("");
                   setCreateProjectFormOpen(false);
-                } else if (!projectCatalog) {
-                  await loadProjects();
-                }
-              }}
-              onPickProject={(name) => {
-                setDraftProjectName(name);
-                setDraftProjectMenuOpen(false);
-                setProjectSearchQuery("");
-                setCreateProjectFormOpen(false);
-              }}
-              onCreateProject={() => createProjectAndSelect()}
+                }}
+                onCreateProject={() => {
+                  if (!uploadInFlightRef.current) void createProjectAndSelect();
+                }}
+              />
+            )}
+            {pendingConnectPath ? (
+              <SourceConnect
+                projectPath={pendingConnectPath}
+                open={!!pendingConnectPath}
+                onClose={() => setPendingConnectPath(null)}
+              />
+            ) : null}
+            {impersonationEnabled && (
+              <ImpersonationMenu
+                disabled={uploadInFlight}
+                open={impersonationMenuOpen}
+                onOpenChange={(next) => {
+                  if (!uploadInFlightRef.current) setImpersonationMenuOpen(next);
+                }}
+                selectedPersonId={selectedPersonId}
+                onSelectPersonId={(id) => {
+                  if (!uploadInFlightRef.current) setSelectedPersonId(id);
+                }}
+                options={impersonationOptions}
+                selectedPerson={selectedPerson}
+                selectedPersonLabel={selectedPersonLabel}
+                guardianLabel={guardianLabel}
+              />
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadInFlight}
+              aria-label={t("composer.uploadFiles")}
+              title={t("composer.uploadFiles")}
+              className="touch-target"
+            >
+              <Paperclip aria-hidden />
+            </Button>
+            {showModelSelector && modelSelectorEnabled && (
+              <ModelSelectorMenu
+                open={modelMenuOpen}
+                onOpenChange={setModelMenuOpen}
+                value={largeModelSelection}
+                onChange={(next) => void updateLargeModelSelection(next)}
+                disabled={uploadInFlight}
+              />
+            )}
+            <ReasoningEffortMenu
+              open={reasoningMenuOpen}
+              onOpenChange={setReasoningMenuOpen}
+              value={reasoningEffort}
+              onChange={(next) => void updateReasoningEffort(next)}
+              disabled={uploadInFlight}
             />
-          )}
-          {pendingConnectPath ? (
-            <SourceConnect
-              mode="link"
-              projectPath={pendingConnectPath}
-              open={!!pendingConnectPath}
-              onClose={() => setPendingConnectPath(null)}
-            />
-          ) : null}
-          {impersonationEnabled && (
-            <ImpersonationMenu
-              open={impersonationMenuOpen}
-              onOpenChange={setImpersonationMenuOpen}
-              selectedPersonId={selectedPersonId}
-              onSelectPersonId={setSelectedPersonId}
-              options={impersonationOptions}
-              selectedPerson={selectedPerson}
-              selectedPersonLabel={selectedPersonLabel}
-              guardianLabel={guardianLabel}
-            />
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isComposerBusy}
-            aria-label={t("composer.uploadFiles")}
-            title={t("composer.uploadFiles")}
-            className="touch-target"
-          >
-            <Paperclip aria-hidden />
-          </Button>
-          {showModelSelector && modelSelectorEnabled && (
-            <ModelSelectorMenu
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
-              value={largeModelSelection}
-              onChange={(next) => void updateLargeModelSelection(next)}
-              disabled={isComposerBusy}
-            />
-          )}
-          <ReasoningEffortMenu
-            open={reasoningMenuOpen}
-            onOpenChange={setReasoningMenuOpen}
-            value={reasoningEffort}
-            onChange={(next) => void updateReasoningEffort(next)}
-            disabled={isComposerBusy}
-          />
-          {/* Stop + Send cluster on the right; Stop sits just left of Send. */}
-          <div className="ml-auto flex items-center gap-2">
+          </div>
+          {/* Stop sits just left of Send. */}
+          <div className="flex items-center gap-2 self-end [grid-area:send]">
             {isStreaming && onStop && (
               <Button
                 type="button"
@@ -1045,25 +1204,37 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
               </Button>
             )}
-            <Button
-              variant={
-                !inputText.trim() && pendingUploads.length === 0 && !draftSkill
-                  ? "secondary"
-                  : "default"
-              }
-              size="icon-sm"
-              onClick={() => void runSend()}
-              disabled={
-                isComposerBusy || (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
-              }
-              title={isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")}
-              aria-label={
-                isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle")
-              }
-              className="touch-target"
-            >
-              <ArrowUp aria-hidden />
-            </Button>
+            {showCancelUpload ? (
+              <Button
+                variant="secondary"
+                size="icon-sm"
+                onClick={cancelUpload}
+                title={cancelUploadLabel}
+                aria-label={cancelUploadLabel}
+                className="touch-target"
+              >
+                <X aria-hidden />
+              </Button>
+            ) : (
+              <Button
+                variant={
+                  !inputText.trim() && pendingUploads.length === 0 && !draftSkill
+                    ? "secondary"
+                    : "default"
+                }
+                size="icon-sm"
+                onClick={() => void runSend()}
+                disabled={
+                  uploadInFlight ||
+                  (!inputText.trim() && pendingUploads.length === 0 && !draftSkill)
+                }
+                title={sendActionLabel}
+                aria-label={sendActionLabel}
+                className="touch-target"
+              >
+                <ArrowUp aria-hidden />
+              </Button>
+            )}
           </div>
         </div>
       </div>

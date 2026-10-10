@@ -178,7 +178,7 @@ export function ChangedFilesDialog({
             >
               <ArrowLeft aria-hidden />
             </Button>
-            <DialogTitle className="truncate text-body" title={selectedFile.path}>
+            <DialogTitle className="truncate text-section" title={selectedFile.path}>
               {selectedFile.path}
             </DialogTitle>
           </div>
@@ -241,7 +241,7 @@ export function ChangedFilesDialog({
                 <span className="flex size-9 items-center justify-center rounded-full bg-success-bg">
                   <Check className="size-5 text-success-fg" aria-hidden />
                 </span>
-                <p className="text-body text-muted-foreground">
+                <p className="text-ui text-muted-foreground">
                   No local changes — everything is in sync.
                 </p>
               </div>

@@ -29,6 +29,7 @@ afterEach(() => {
 function mockCeremonyFetch(routes: Record<string, unknown> = {}) {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
+    if (url === "/api/approvals") return new Response("[]", { status: 200 });
     for (const [needle, payload] of Object.entries(routes)) {
       if (url.includes(needle)) {
         return new Response(JSON.stringify(payload), { status: 200 });
@@ -56,6 +57,7 @@ function connection(
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
     ...overrides,
   };
 }
@@ -99,7 +101,7 @@ describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
     // already names the service) and no setup subtitle (the ceremony below
     // carries the how-to).
     expect(screen.queryByText("Your Telegram bot")).toBeNull();
-    expect(screen.queryByText("Add a bot from @BotFather")).toBeNull();
+    expect(screen.queryByText("Add a bot from @BotFather.")).toBeNull();
     // Unconnected heading + `+` bullets (identity fallback).
     expect(screen.getByText("This connection will let your agent")).toBeTruthy();
     expect(screen.getByText("Reply when people message your bot")).toBeTruthy();
@@ -190,7 +192,7 @@ describe("ConnectionDetailBody — Telegram reference (personal-account slot)", 
     expect(screen.getByText("Available to add")).toBeTruthy();
     // Static title + subtitle.
     expect(screen.getByText("Your account")).toBeTruthy();
-    expect(screen.getByText("Sign in with your phone number")).toBeTruthy();
+    expect(screen.getByText("Sign in with your phone number.")).toBeTruthy();
     // Secondary heading (it's an add-on to the already-connected bot).
     expect(screen.getByText("Adding it lets your agent also")).toBeTruthy();
     expect(

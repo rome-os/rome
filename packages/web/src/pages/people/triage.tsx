@@ -32,7 +32,7 @@ import { DirectoryRow, UnknownRow } from "./rows";
 import { levelLabelKey } from "./rows";
 import { TransferConfirm } from "./transfer";
 import { usePeopleWrites } from "./use-writes";
-import type { PeopleRow, PeopleView } from "./people-model";
+import type { LinkTarget, PeopleRow, PeopleView } from "./people-model";
 
 // Placing an account that nobody has decided about, and taking one back.
 //
@@ -187,7 +187,7 @@ function LinkForm({
   onSubmit,
   onCancel,
 }: {
-  people: PersonResource[];
+  people: LinkTarget[];
   error: string | null;
   onSubmit: (personId: string) => Promise<void>;
   onCancel: () => void;
@@ -284,7 +284,7 @@ export function UnknownEntry({
 }: {
   row: PeopleRow;
   /** The people a link can land on — the listing's own rows. */
-  people: PersonResource[];
+  people: LinkTarget[];
   /** Which view this row is in — see {@link entryRow}. */
   variant: PeopleView;
 }) {
@@ -445,7 +445,7 @@ export function UnknownEntry({
       {/* With no form open the failure belongs to the dismissal, whose button
           sits on the row above. */}
       {!action && error && (
-        <div className="flex justify-end px-2 pb-2">
+        <div className="flex justify-end px-3 pb-2">
           <MutationError message={error} />
         </div>
       )}
@@ -544,7 +544,7 @@ export function DismissedEntry({ row, variant }: { row: PeopleRow; variant: Peop
         }
       />
       {error && (
-        <div className="flex justify-end px-2 pb-2">
+        <div className="flex justify-end px-3 pb-2">
           <MutationError message={error} />
         </div>
       )}

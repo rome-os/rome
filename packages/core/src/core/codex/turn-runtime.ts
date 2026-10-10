@@ -17,7 +17,9 @@ export interface CodexTurnRuntime {
   /**
    * Optional provider operation that must finish after the model turn but
    * before Rome exposes its terminal event. The borrowed exact-fork adapter
-   * uses this seam to restore source history with thread/rollback.
+   * uses this seam to restore source history with thread/revert.
    */
   beforeTerminal?: (turn: { threadId: string; turnId: string }) => Promise<void>;
+  /** Called once a turn on this runtime has a Codex turn id. */
+  onProviderTurn?: (turnId: string) => void;
 }

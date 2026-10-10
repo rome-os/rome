@@ -1,10 +1,10 @@
 {
   "page": {
-    "subtitle": "有新动态的人，最新的排在前面。搜索可覆盖 Rome 认识的所有人。",
     "loading": "加载中…",
     "emptyTitle": "暂无新动态",
-    "emptyHint": "任何给你发消息的人都会出现在这里，等待你安置。",
+    "emptyHint": "给你发过消息的人会出现在这里。",
     "emptyForSearch": "没有符合搜索条件的人",
+    "emptyDirectory": "这里还没有人",
     "loadMore": "显示更多"
   },
   "header": {
@@ -28,18 +28,16 @@
     "other": "其他",
     "stranger": "陌生人"
   },
-  "levelHints": {
-    "innerCircle": "Rome 畅所欲言，及时转达",
-    "acquaintance": "Rome 会回应，但行动前会先确认",
-    "other": "认识，但保持距离",
-    "stranger": "Rome 不予理会 — 随时可以撤回"
-  },
   "channels": {
     "telegram": "Telegram",
     "whatsapp": "WhatsApp",
     "discord": "Discord",
     "webchat": "网页聊天",
-    "linkedin": "领英"
+    "linkedin": "领英",
+    "wechat": "微信",
+    "email": "邮件",
+    "agents": "Agents",
+    "feishu": "飞书"
   },
   "filters": {
     "groupLabel": "按亲密度筛选人物",
@@ -108,14 +106,12 @@
     "latest": "最新",
     "directory": "名录"
   },
-  "stream": {
-    "hint": "每人一行 · 最新在前",
-    "searchHint": "正在搜索 Rome 认识的所有人，包括从未联系过的联系人"
-  },
   "detail": {
     "back": "人物",
     "bond": "亲密度",
     "linkAccount": "关联账号…",
+    "changeBond": "更改亲密度",
+    "memoryProfile": "记忆档案",
     "timeline": "时间线",
     "timelineEmpty": "各个渠道都还没有任何往来。",
     "loadOlder": "加载更早",
@@ -128,6 +124,32 @@
     "missingBody": "该人物可能已被合并到其他人名下。返回人物页面即可找到他们。",
     "linkDescription": "你选择的账号将归属到此人名下，其历史记录也会并入这条时间线。",
     "noAccounts": "暂无账号"
+  },
+  "send": {
+    "to": "发送至",
+    "segments": {
+      "label": "账号",
+      "all": "全部",
+      "empty": "这个 {{channel}} 账号还没有往来。"
+    },
+    "submit": "发送",
+    "retry": "重试",
+    "discard": "放弃这条消息",
+    "outbox": {
+      "label": "发件箱"
+    },
+    "state": {
+      "sending": "发送中",
+      "unconfirmed": "已发出，尚未确认",
+      "stopped": "Rome 已停止尝试发送这条消息"
+    },
+    "refusal": {
+      "notConnected": "{{channel}} 未连接，Rome 无法从这里发送。请在设置中连接。",
+      "noConversation": "Rome 无法确定此账号的 {{channel}} 私聊会话。请打开 {{channel}} 回复。",
+      "unsupported": {
+        "default": "Rome 还不支持在 {{channel}} 上发送。"
+      }
+    }
   },
   "timeline": {
     "today": "今天",
@@ -155,7 +177,7 @@
   },
   "strangerConfirm": {
     "title": "将 {{name}} 视为陌生人？",
-    "description": "Rome 将把来自 {{name}} 的消息视为陌生人发送，他们也不再出现在{{section}}中。你可以在“陌生人”视图中恢复。"
+    "description": "{{name}} 将不再出现在{{section}}中。随时可在“陌生人”视图中恢复。"
   },
   "transfer": {
     "title": "移动这个账号？",

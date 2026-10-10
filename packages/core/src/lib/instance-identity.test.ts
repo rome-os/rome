@@ -3,6 +3,7 @@ import { createFetchRecorder } from "../test/kit/index.js";
 import {
   getInstanceToken,
   hydrateInstanceToken,
+  onInstanceTokenChanged,
   proveIdentity,
   seedInstanceTokenFromEnv,
   setInstanceTokenInMemory,
@@ -45,6 +46,34 @@ describe("getInstanceToken", () => {
   it("returns null for a non-instance token (e.g. an account rome_ token)", () => {
     setInstanceTokenInMemory("rome_accounttoken");
     expect(getInstanceToken()).toBeNull();
+  });
+
+  it("notifies subscribers when an instance token is minted or revoked", () => {
+    let changes = 0;
+    const unsubscribe = onInstanceTokenChanged(() => changes++);
+    setInstanceTokenInMemory(TOKEN);
+    setInstanceTokenInMemory(TOKEN);
+    setInstanceTokenInMemory(null);
+    unsubscribe();
+    setInstanceTokenInMemory(TOKEN);
+    expect(changes).toBe(2);
+  });
+
+  it("keeps notifying and updates the token when a subscriber throws", () => {
+    let changes = 0;
+    const unsubscribeThrowing = onInstanceTokenChanged(() => {
+      throw new Error("manager closed");
+    });
+    const unsubscribe = onInstanceTokenChanged(() => changes++);
+    try {
+      expect(() => setInstanceTokenInMemory(TOKEN)).not.toThrow();
+      expect(getInstanceToken()).toBe(TOKEN);
+      expect(changes).toBe(1);
+    } finally {
+      unsubscribeThrowing();
+      unsubscribe();
+      setInstanceTokenInMemory(null);
+    }
   });
 });
 

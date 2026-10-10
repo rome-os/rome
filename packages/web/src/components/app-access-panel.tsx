@@ -45,7 +45,7 @@ export function AppAccessPanel({
       <h1 className="mt-4 text-title text-foreground">
         {t("accessGate.title", { name: appName })}
       </h1>
-      <p className="mt-2 text-body text-muted-foreground">
+      <p className="mt-2 text-ui text-muted-foreground">
         {visitorEmail
           ? t("accessGate.deniedDescription", { email: visitorEmail })
           : t("accessGate.description")}
@@ -53,7 +53,7 @@ export function AppAccessPanel({
       {error ? <p className="mt-3 text-ui text-destructive-fg">{error}</p> : null}
       {!visitorEmail ? (
         <Button type="button" className="mt-5" disabled={starting} onClick={() => void start()}>
-          <LogIn className="h-4 w-4" aria-hidden />
+          <LogIn data-icon="inline-start" className="h-4 w-4" aria-hidden />
           {starting ? t("accessGate.signingIn") : t("accessGate.signIn")}
         </Button>
       ) : null}

@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql, type SQL } from "drizzle-orm";
 import {
   linkedinMessages,
   linkedinParticipants,
@@ -11,10 +11,13 @@ import type {
   LinkedInHistoryMessage,
   LinkedInMessageInput,
   LinkedInParticipantInput,
+  LinkedInParticipantProfileSyncState,
   LinkedInParticipantRow,
+  LinkedInReplyTarget,
   LinkedInSyncSink,
   LinkedInThreadCursor,
   LinkedInThreadInput,
+  LinkedInThreadParticipantInput,
 } from "../../channels/linkedin-sync.js";
 
 // The member-id form lives with the poller/store contract, not here: it is the
@@ -121,15 +124,32 @@ function chunked<T>(items: T[], size: number): T[][] {
  * reads serve the poller's watermarks, the address book's fold over mirrored
  * accounts, and the history talk feature.
  *
- * Nothing here hands a thread or its messages to a reader as a thread. The
- * dashboard reads LinkedIn through the person contract like every other
- * channel, so every read out of this mirror is addressed by account —
- * {@link LinkedInStoreRepository.listParticipants}, scoped by
- * {@link DIRECT_THREADS}. A thread-shaped read here would have no caller but a
- * thread-shaped surface, and there is none.
+ * Reply targets require complete membership and an explicit direct-conversation verdict.
  */
 export class LinkedInStoreRepository implements LinkedInSyncSink {
   constructor(private db: DrizzleDb) {}
+
+  async findReplyTarget(
+    by: { participantId: string } | { threadId: string },
+  ): Promise<LinkedInReplyTarget | null> {
+    const scope =
+      "participantId" in by
+        ? sql`p.participant_id = ${by.participantId}`
+        : sql`t.thread_id = ${by.threadId}`;
+    const rows = await this.db.all<LinkedInReplyTarget>(sql`
+      SELECT t.thread_id AS threadId, t.thread_url AS threadUrl,
+        p.participant_id AS participantId, owner.participant_id AS selfParticipantId
+      FROM linkedin_threads t
+      JOIN linkedin_thread_participants tp ON tp.thread_id = t.thread_id
+      JOIN linkedin_participants p ON p.participant_id = tp.participant_id AND p.is_self = 0
+      JOIN linkedin_thread_participants self ON self.thread_id = t.thread_id
+      JOIN linkedin_participants owner ON owner.participant_id = self.participant_id AND owner.is_self = 1
+      WHERE ${scope} AND t.is_group = 0 AND t.participants_last_read_at IS NOT NULL
+        AND p.type = 'member' AND owner.type = 'member'
+        AND (SELECT count(*) FROM linkedin_thread_participants members WHERE members.thread_id = t.thread_id) = 2
+      LIMIT 2`);
+    return rows.length === 1 ? rows[0]! : null;
+  }
 
   async upsertThreads(threads: LinkedInThreadInput[]): Promise<void> {
     if (threads.length === 0) return;
@@ -216,6 +236,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
           lastMessageAt: linkedinThreads.lastMessageAt,
           lastMessagePreview: linkedinThreads.lastMessagePreview,
           lastSyncedAt: linkedinThreads.lastSyncedAt,
+          participantsLastReadAt: linkedinThreads.participantsLastReadAt,
         })
         .from(linkedinThreads)
         .where(inArray(linkedinThreads.threadId, chunk));
@@ -272,59 +293,98 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
     threadId: string,
     participants: LinkedInParticipantInput[],
   ): Promise<void> {
+    await this.replaceThreadParticipants(threadId, participants, true);
+  }
+
+  /**
+   * Replace thread membership without treating the attached profile fields as
+   * freshly synchronized. The poller uses this path because relationship and
+   * profile freshness have separate clocks even though LinkedIn returns both
+   * in one conversation response.
+   */
+  async replaceThreadParticipantMembership(
+    threadId: string,
+    participants: LinkedInThreadParticipantInput[],
+  ): Promise<void> {
+    await this.replaceThreadParticipants(threadId, participants, false);
+  }
+
+  private async replaceThreadParticipants(
+    threadId: string,
+    participants: LinkedInThreadParticipantInput[],
+    refreshProfiles: boolean,
+  ): Promise<void> {
     const now = new Date();
-    // Snapshots have been seen to repeat an id; keep the last entry per id so
-    // the insert never conflicts with itself inside one statement.
     const unique = new Map(participants.map((p) => [p.participantId, p]));
     const ids = [...unique.keys()];
 
     await this.db.transaction((tx) => {
       for (const chunk of chunked([...unique.values()], UPSERT_CHUNK)) {
-        tx.insert(linkedinParticipants)
-          .values(
-            chunk.map((p) => ({
-              participantId: p.participantId,
-              name: p.name ?? null,
-              headline: p.headline ?? null,
-              type: p.type ?? null,
-              isSelf: p.isSelf,
-              firstSyncedAt: now,
-              updatedAt: now,
-            })),
-          )
-          // coalesce(excluded, existing) for the same reason as threads: a
-          // snapshot that omits a field never wipes one an earlier snapshot
-          // learned. `is_self` takes the new value verbatim because it
-          // describes the viewer rather than the snapshot, which is why the
-          // input type makes it required.
-          .onConflictDoUpdate({
-            target: linkedinParticipants.participantId,
-            set: {
-              name: sql`coalesce(excluded.name, name)`,
-              headline: sql`coalesce(excluded.headline, headline)`,
-              type: sql`coalesce(excluded.type, type)`,
-              isSelf: sql`excluded.is_self`,
-              updatedAt: sql`excluded.updated_at`,
-            },
-          })
-          .run();
+        if (refreshProfiles) {
+          const profiles = chunk as LinkedInParticipantInput[];
+          tx.insert(linkedinParticipants)
+            .values(
+              profiles.map((participant) => ({
+                participantId: participant.participantId,
+                name: participant.name ?? null,
+                headline: participant.headline ?? null,
+                profileUrl: participant.profileUrl ?? null,
+                type: participant.type ?? null,
+                isSelf: participant.isSelf,
+                lastSuccessfulSyncAt: now,
+                profileSyncFailureCount: 0,
+                profileSyncRetryAt: null,
+                firstSyncedAt: now,
+                updatedAt: now,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: linkedinParticipants.participantId,
+              set: {
+                name: sql`coalesce(excluded.name, name)`,
+                headline: sql`coalesce(excluded.headline, headline)`,
+                profileUrl: sql`coalesce(excluded.profile_url, profile_url)`,
+                type: sql`coalesce(excluded.type, type)`,
+                isSelf: sql`excluded.is_self`,
+                lastSuccessfulSyncAt: sql`excluded.last_successful_sync_at`,
+                profileSyncFailureCount: 0,
+                profileSyncRetryAt: null,
+                updatedAt: sql`excluded.updated_at`,
+              },
+            })
+            .run();
+        } else {
+          tx.insert(linkedinParticipants)
+            .values(
+              chunk.map((participant) => ({
+                participantId: participant.participantId,
+                isSelf: participant.isSelf,
+                firstSyncedAt: now,
+                updatedAt: now,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: linkedinParticipants.participantId,
+              set: {
+                isSelf: sql`excluded.is_self`,
+                updatedAt: sql`excluded.updated_at`,
+              },
+            })
+            .run();
+        }
 
         tx.insert(linkedinThreadParticipants)
           .values(
-            chunk.map((p) => ({
+            chunk.map((participant) => ({
               threadId,
-              participantId: p.participantId,
+              participantId: participant.participantId,
               firstSyncedAt: now,
             })),
           )
-          // Membership carries no mutable facts, so a re-snapshot is a no-op
-          // that preserves the original first-seen time.
           .onConflictDoNothing()
           .run();
       }
 
-      // Drop whoever left the thread. Deleting by "not in the new set" rather
-      // than clearing first keeps `first_synced_at` intact for those who stayed.
       tx.delete(linkedinThreadParticipants)
         .where(
           ids.length === 0
@@ -336,14 +396,92 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         )
         .run();
 
-      // The membership is only as good as the read it came from, so the age of
-      // that read is stored with it. A no-op when the listing has not created
-      // the thread row yet — the next listing will.
       tx.update(linkedinThreads)
         .set({ participantsLastReadAt: now, updatedAt: now })
         .where(eq(linkedinThreads.threadId, threadId))
         .run();
     });
+  }
+
+  async getParticipantProfileSyncStates(
+    participantIds: string[],
+  ): Promise<Map<string, LinkedInParticipantProfileSyncState>> {
+    const states = new Map<string, LinkedInParticipantProfileSyncState>();
+    for (const chunk of chunked([...new Set(participantIds)], UPSERT_CHUNK)) {
+      const rows = await this.db
+        .select({
+          participantId: linkedinParticipants.participantId,
+          lastSuccessfulSyncAt: linkedinParticipants.lastSuccessfulSyncAt,
+          profileSyncFailureCount: linkedinParticipants.profileSyncFailureCount,
+          profileSyncRetryAt: linkedinParticipants.profileSyncRetryAt,
+        })
+        .from(linkedinParticipants)
+        .where(inArray(linkedinParticipants.participantId, chunk));
+      for (const row of rows) states.set(row.participantId, row);
+    }
+    return states;
+  }
+
+  /** A successful profile write advances freshness and clears its backoff. */
+  async upsertParticipantProfile(participant: LinkedInParticipantInput): Promise<void> {
+    const now = new Date();
+    await this.db
+      .insert(linkedinParticipants)
+      .values({
+        participantId: participant.participantId,
+        name: participant.name ?? null,
+        headline: participant.headline ?? null,
+        profileUrl: participant.profileUrl ?? null,
+        type: participant.type ?? null,
+        isSelf: participant.isSelf,
+        lastSuccessfulSyncAt: now,
+        profileSyncFailureCount: 0,
+        profileSyncRetryAt: null,
+        firstSyncedAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: linkedinParticipants.participantId,
+        set: {
+          name: sql`coalesce(excluded.name, name)`,
+          headline: sql`coalesce(excluded.headline, headline)`,
+          profileUrl: sql`coalesce(excluded.profile_url, profile_url)`,
+          type: sql`coalesce(excluded.type, type)`,
+          isSelf: sql`excluded.is_self`,
+          lastSuccessfulSyncAt: sql`excluded.last_successful_sync_at`,
+          profileSyncFailureCount: 0,
+          profileSyncRetryAt: null,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
+  }
+
+  /** A failed profile write preserves the previous success timestamp. */
+  async recordParticipantProfileSyncFailure(
+    participant: LinkedInThreadParticipantInput,
+    failureCount: number,
+    retryAt: Date,
+  ): Promise<void> {
+    const now = new Date();
+    await this.db
+      .insert(linkedinParticipants)
+      .values({
+        participantId: participant.participantId,
+        isSelf: participant.isSelf,
+        profileSyncFailureCount: failureCount,
+        profileSyncRetryAt: retryAt,
+        firstSyncedAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: linkedinParticipants.participantId,
+        set: {
+          isSelf: sql`excluded.is_self`,
+          profileSyncFailureCount: failureCount,
+          profileSyncRetryAt: retryAt,
+          updatedAt: sql`excluded.updated_at`,
+        },
+      });
   }
 
   /**
@@ -405,6 +543,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
         participantId,
         name: (row.senderName as string | null) ?? null,
         headline: (row.senderHeadline as string | null) ?? null,
+        profileUrl: (row.senderProfileUrl as string | null) ?? null,
         type: (row.senderType as string | null) ?? null,
         isSelf: Boolean(row.senderIsSelf),
       });
@@ -420,6 +559,7 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
               participantId: p.participantId,
               name: p.name ?? null,
               headline: p.headline ?? null,
+              profileUrl: p.profileUrl ?? null,
               type: p.type ?? null,
               isSelf: p.isSelf,
               firstSyncedAt: now,
@@ -552,43 +692,81 @@ export class LinkedInStoreRepository implements LinkedInSyncSink {
 
   /**
    * Recent mirrored messages for the history talk feature: a bounded
-   * chronological slice (newest `HISTORY_READ_LIMIT` kept, returned oldest
-   * first). `threadId: null` spans every thread. Rows without a LinkedIn
-   * delivery time order (and filter) by the mirror's first-seen time.
+   * chronological slice (newest `limit` kept, at most `HISTORY_READ_LIMIT`,
+   * returned oldest first). `threadId: null` spans every thread. Rows without a
+   * LinkedIn delivery time order (and filter) by the mirror's first-seen time.
    */
-  async fetchHistory(threadId: string | null, since: Date): Promise<LinkedInHistoryMessage[]> {
+  async fetchHistory(
+    threadId: string | null,
+    since: Date,
+    limit: number = HISTORY_READ_LIMIT,
+  ): Promise<LinkedInHistoryMessage[]> {
     const sinceSeconds = Math.floor(since.getTime() / 1000);
     const threadClause = threadId != null ? sql`AND m.thread_id = ${threadId}` : sql``;
     const rows = (await this.db.all(sql`
-      SELECT
-        m.message_id AS messageId,
-        m.thread_id AS threadId,
-        coalesce(t.conversation_name, t.person_name) AS threadName,
-        coalesce(m.sent_at, m.created_at) AS sentAt,
-        m.sender_name AS senderName,
-        m.sender_profile_url AS senderProfileUrl,
-        m.sender_is_self AS senderIsSelf,
-        m.text AS text,
-        m.subject AS subject
+      SELECT ${linkedInHistoryColumns()}
       FROM linkedin_messages m
       LEFT JOIN linkedin_threads t ON t.thread_id = m.thread_id
       WHERE coalesce(m.sent_at, m.created_at) >= ${sinceSeconds} ${threadClause}
       ORDER BY coalesce(m.sent_at, m.created_at) DESC, m.rowid DESC
-      LIMIT ${HISTORY_READ_LIMIT}
+      LIMIT ${Math.min(limit, HISTORY_READ_LIMIT)}
     `)) as Array<Record<string, unknown>>;
 
-    return rows
-      .map((r) => ({
-        messageId: String(r.messageId),
-        threadId: String(r.threadId),
-        threadName: (r.threadName as string | null) ?? null,
-        sentAt: new Date(Number(r.sentAt) * 1000),
-        senderName: (r.senderName as string | null) ?? null,
-        senderProfileUrl: (r.senderProfileUrl as string | null) ?? null,
-        senderIsSelf: Boolean(r.senderIsSelf),
-        text: (r.text as string | null) ?? null,
-        subject: (r.subject as string | null) ?? null,
-      }))
-      .reverse();
+    return rows.map(linkedInHistoryRow).reverse();
   }
+}
+
+/**
+ * The fields a mirrored message is read with, each an alias and the expression
+ * over `linkedin_messages m` and its thread `linkedin_threads t` that answers
+ * it. One list, so the history read and the channel's per-account view read a
+ * row the same way and {@link linkedInHistoryRow} parses either.
+ */
+const LINKEDIN_HISTORY_FIELDS: ReadonlyArray<readonly [string, SQL]> = [
+  ["messageId", sql`m.message_id`],
+  ["threadId", sql`m.thread_id`],
+  ["threadName", sql`coalesce(t.conversation_name, t.person_name)`],
+  ["isGroup", sql`t.is_group`],
+  ["sentAt", sql`coalesce(m.sent_at, m.created_at)`],
+  ["senderName", sql`m.sender_name`],
+  ["senderProfileUrl", sql`m.sender_profile_url`],
+  ["senderIsSelf", sql`m.sender_is_self`],
+  ["text", sql`m.text`],
+  ["subject", sql`m.subject`],
+];
+
+function linkedInHistoryColumns(): SQL {
+  return sql.join(
+    LINKEDIN_HISTORY_FIELDS.map(([alias, expression]) => sql`${expression} AS ${sql.raw(alias)}`),
+    sql`, `,
+  );
+}
+
+/** Every field of a mirrored message as one JSON object, for a query that
+ *  carries the row through columns of its own. {@link linkedInHistoryRow}
+ *  parses it. */
+export function linkedInHistoryJson(): SQL {
+  return sql`json_object(${sql.join(
+    LINKEDIN_HISTORY_FIELDS.map(
+      ([alias, expression]) => sql`${sql.raw(`'${alias}'`)}, ${expression}`,
+    ),
+    sql`, `,
+  )})`;
+}
+
+/** A row read with {@link LINKEDIN_HISTORY_FIELDS}, as a column set or as the
+ *  JSON object {@link linkedInHistoryJson} builds. */
+export function linkedInHistoryRow(r: Record<string, unknown>): LinkedInHistoryMessage {
+  return {
+    messageId: String(r.messageId),
+    threadId: String(r.threadId),
+    threadName: (r.threadName as string | null) ?? null,
+    isGroup: r.isGroup === null || r.isGroup === undefined ? null : Boolean(r.isGroup),
+    sentAt: new Date(Number(r.sentAt) * 1000),
+    senderName: (r.senderName as string | null) ?? null,
+    senderProfileUrl: (r.senderProfileUrl as string | null) ?? null,
+    senderIsSelf: Boolean(r.senderIsSelf),
+    text: (r.text as string | null) ?? null,
+    subject: (r.subject as string | null) ?? null,
+  };
 }

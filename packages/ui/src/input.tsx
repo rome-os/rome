@@ -2,6 +2,7 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "./cn.js";
+import { useUiScale } from "./ui-scale.js";
 import { canonicalControlSize } from "./control-size.js";
 
 // The 36px step, held in a const because two names resolve to it — `md`, the
@@ -37,9 +38,11 @@ const iconSizeClass = {
 } as const;
 
 const inputVariants = cva(
-  // Body is 16px at every breakpoint, which keeps focused fields above iOS
-  // Safari's viewport-zoom threshold without a responsive exception.
-  "w-full min-w-0 border border-input bg-transparent text-body transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-ui file:text-foreground placeholder:text-muted-foreground focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive dark:bg-input/30 dark:disabled:bg-input/80",
+  // The role stays in the base rather than moving onto each size, because
+  // `size` admits `null` and cva emits no variant class for it. A null-size
+  // field would otherwise declare no role at all and fall back to the document
+  // size.
+  "w-full min-w-0 border border-input bg-transparent text-ui data-[ui-field-scale=large]:text-ui transition-colors enabled:hover:border-border-strong outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-ui file:text-foreground placeholder:text-muted-foreground outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive dark:bg-input/30 dark:disabled:bg-input/80",
   {
     variants: {
       // Geometry comes from the --control-* scale, and the names match
@@ -66,6 +69,18 @@ const inputVariants = cva(
        * tracks a size change instead of needing a second edit.
        */
       hasIcon: { true: "", false: "" },
+      /**
+       * `plain` is a field inside a surface that already frames it — a command
+       * palette's search row, a panel header. It paints no border, radius,
+       * fill, or hover; the surface's edge is the frame. It keeps the step's
+       * height, inset, glyph reserve, and focus edge. A caller whose surface
+       * holds focus for its whole life suppresses the edge itself.
+       */
+      variant: {
+        outlined: "",
+        plain:
+          "rounded-none border-transparent bg-transparent enabled:hover:border-transparent disabled:bg-transparent dark:bg-transparent dark:disabled:bg-transparent",
+      },
     },
     compoundVariants: [
       {
@@ -81,7 +96,7 @@ const inputVariants = cva(
         className: "pl-[calc(var(--control-px-start-lg)+1rem+var(--control-gap))]",
       },
     ],
-    defaultVariants: { size: "md", hasIcon: false },
+    defaultVariants: { size: "md", hasIcon: false, variant: "outlined" },
   },
 );
 
@@ -96,18 +111,53 @@ const iconInsetClass = {
 // name has to displace it rather than sit beside it.
 export interface InputProps
   extends Omit<React.ComponentProps<"input">, "size">,
-    Pick<VariantProps<typeof inputVariants>, "size"> {
+    Pick<VariantProps<typeof inputVariants>, "size" | "variant"> {
   /** Leading glyph rendered inside the field, sized and inset from the size step. */
   icon?: React.ReactNode;
 }
 
-function Input({ className, type, size = "md", icon, ...props }: InputProps) {
+/**
+ * The leading glyph's seat, absolutely positioned against a `relative` parent
+ * at the size step's inset. Exported for a composite that renders the
+ * `<input>` itself, such as `CommandInput`, so its glyph sits where `Input`
+ * seats one.
+ */
+function InputGlyph({
+  size = "md",
+  children,
+}: {
+  size?: VariantProps<typeof inputVariants>["size"];
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="input-icon"
+      data-size={canonicalControlSize(size)}
+      className={cn(
+        // `inset-y-0` plus `items-center` centers the glyph against the
+        // field's own box, so it needs no transform and no height of its own.
+        //
+        // The step sets the glyph size, unconditionally — see `iconSizeClass`.
+        "pointer-events-none absolute inset-y-0 flex items-center text-muted-foreground",
+        iconSizeClass[size ?? "md"],
+        iconInsetClass[size ?? "md"],
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Input({ className, type, size = "md", variant = "outlined", icon, ...props }: InputProps) {
   const field = (
     <input
       type={type}
       data-slot="input"
+      data-ui-field-scale={useUiScale()}
       data-size={canonicalControlSize(size)}
-      className={cn(inputVariants({ size, hasIcon: Boolean(icon) }), className)}
+      data-variant={variant}
+      className={cn(inputVariants({ size, variant, hasIcon: Boolean(icon) }), className)}
       {...props}
     />
   );
@@ -116,25 +166,10 @@ function Input({ className, type, size = "md", icon, ...props }: InputProps) {
 
   return (
     <div className="relative w-full">
-      <span
-        aria-hidden="true"
-        data-slot="input-icon"
-        data-size={canonicalControlSize(size)}
-        className={cn(
-          // `inset-y-0` plus `items-center` centers the glyph against the
-          // field's own box, so it needs no transform and no height of its own.
-          //
-          // The step sets the glyph size, unconditionally — see `iconSizeClass`.
-          "pointer-events-none absolute inset-y-0 flex items-center text-muted-foreground",
-          iconSizeClass[size ?? "md"],
-          iconInsetClass[size ?? "md"],
-        )}
-      >
-        {icon}
-      </span>
+      <InputGlyph size={size}>{icon}</InputGlyph>
       {field}
     </div>
   );
 }
 
-export { Input, inputVariants };
+export { Input, InputGlyph, inputVariants };

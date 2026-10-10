@@ -37,8 +37,22 @@ const api = {
       ipcRenderer.invoke("rome-image:setAutoUpdateEnabled", enabled),
   },
 
+  // One-way on purpose: the pill never needs an answer, and the main process
+  // owns all window geometry — the page only reports gestures.
+  pill: {
+    ready: (): void => ipcRenderer.send("pill:ready"),
+    setSize: (width: number, height: number): void =>
+      ipcRenderer.send("pill:setSize", width, height),
+    click: (): void => ipcRenderer.send("pill:click"),
+    dragStart: (grabX: number, grabY: number): void =>
+      ipcRenderer.send("pill:dragStart", grabX, grabY),
+    dragMove: (): void => ipcRenderer.send("pill:dragMove"),
+    dragEnd: (): void => ipcRenderer.send("pill:dragEnd"),
+    contextMenu: (): void => ipcRenderer.send("pill:contextMenu"),
+  },
+
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const validChannels = ["updater:status", "runtime:status", "rome-image:status"];
+    const validChannels = ["updater:status", "runtime:status", "rome-image:status", "pill:name"];
     if (validChannels.includes(channel)) {
       const listener = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
       ipcRenderer.on(channel, listener);

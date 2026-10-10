@@ -13,8 +13,14 @@ const CONFIG_ENV_KEYS = [
   "SQLITE_PATH",
   "SQLITE_ENCRYPTION_KEY",
   "POSTGRES_CONNECTION_STRING",
-  "SENTINEL_REVIEW_INTERVAL_MINUTES",
   "ROME_ACTION_MAX_WORKERS",
+  "ROME_HOST_EXECUTION_SOCKET",
+  "ROME_HOST_EXECUTION_ENABLED",
+  "WECHAT_USER_ENABLED",
+  "WECHAT_USER_DISPLAY",
+  "ROME_WECHAT_VNC_PORT",
+  "ROME_WECHAT_NOVNC_PORT",
+  "ROME_ENABLE_CDP_AUTOMATION",
   "WEB_PORT",
   "WEB_HOST",
   "INTERNAL_API_PORT",
@@ -33,6 +39,98 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
+  it("disables personal WeChat by default", () => {
+    expect(loadConfig().wechatUserEnabled).toBe(false);
+  });
+  it.each([
+    ["true", true],
+    ["false", false],
+  ] as const)("parses WECHAT_USER_ENABLED=%s", (value, enabled) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", value);
+    expect(loadConfig().wechatUserEnabled).toBe(enabled);
+  });
+  it.each(["0", "1", "no", "yes", ""])("rejects an ambiguous WeChat flag: %s", (value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+  it("accepts WeChat's own display", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", ":100");
+    expect(() => loadConfig()).not.toThrow();
+  });
+  it.each([
+    "100",
+    "localhost:100",
+    ":1a",
+    ":99",
+  ])("rejects WECHAT_USER_DISPLAY=%s at boot", (value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv("WECHAT_USER_DISPLAY", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+  it.each([
+    ["ROME_WECHAT_VNC_PORT", "abc"],
+    ["ROME_WECHAT_NOVNC_PORT", "65536"],
+  ])("rejects %s=%s at boot while WeChat is enabled", (key, value) => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":99");
+    rs.stubEnv(key, value);
+    expect(() => loadConfig()).toThrow("WeChat's desktop");
+  });
+  it("names the fix when the shared DISPLAY is WeChat's default display", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "true");
+    rs.stubEnv("DISPLAY", ":100");
+    expect(() => loadConfig()).toThrow(
+      "Set WECHAT_USER_DISPLAY to a display other than DISPLAY (:100)",
+    );
+  });
+  it("ignores WeChat's desktop ports while WeChat is disabled", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("ROME_WECHAT_VNC_PORT", "abc");
+    expect(() => loadConfig()).not.toThrow();
+  });
+  it("ignores WECHAT_USER_DISPLAY while WeChat is disabled", () => {
+    rs.stubEnv("WECHAT_USER_ENABLED", "false");
+    rs.stubEnv("WECHAT_USER_DISPLAY", "not-a-display");
+    expect(() => loadConfig()).not.toThrow();
+  });
+  it("disables CDP automation by default", () => {
+    expect(loadConfig().cdpAutomationEnabled).toBe(false);
+  });
+
+  it.each([
+    ["true", true],
+    ["false", false],
+  ] as const)("parses ROME_ENABLE_CDP_AUTOMATION=%s", (value, enabled) => {
+    rs.stubEnv("ROME_ENABLE_CDP_AUTOMATION", value);
+    expect(loadConfig().cdpAutomationEnabled).toBe(enabled);
+  });
+
+  it.each(["1", "yes", "", "invalid"])("rejects an invalid CDP automation flag: %s", (value) => {
+    rs.stubEnv("ROME_ENABLE_CDP_AUTOMATION", value);
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
+
+  it("disables host execution and leaves its socket unset by default", () => {
+    expect(loadConfig()).toMatchObject({ hostExecutionEnabled: false });
+    expect(loadConfig().hostExecutionSocket).toBeUndefined();
+  });
+
+  it("requires explicit host execution enablement and an absolute socket path", () => {
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "true");
+    rs.stubEnv("ROME_HOST_EXECUTION_SOCKET", "/run/rome-host/control.sock");
+    expect(loadConfig()).toMatchObject({
+      hostExecutionEnabled: true,
+      hostExecutionSocket: "/run/rome-host/control.sock",
+    });
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "yes");
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+    rs.stubEnv("ROME_HOST_EXECUTION_ENABLED", "false");
+    rs.stubEnv("ROME_HOST_EXECUTION_SOCKET", "https://host.example");
+    expect(() => loadConfig()).toThrow("Invalid configuration");
+  });
   it("parses valid env and returns typed config", () => {
     rs.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test-key");
 
@@ -40,7 +138,6 @@ describe("loadConfig()", () => {
 
     expect(config.anthropicApiKey).toBe("sk-ant-test-key");
     expect(config.database.type).toBe("sqlite");
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
     expect(config.webServer).toEqual({ port: 3000, host: "localhost" });
   });
 
@@ -52,11 +149,6 @@ describe("loadConfig()", () => {
   it("defaults DATABASE_TYPE to 'sqlite'", () => {
     const config = loadConfig();
     expect(config.database.type).toBe("sqlite");
-  });
-
-  it("defaults sentinel review interval to 120 minutes", () => {
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(120);
   });
 
   it("defaults SQLITE_PATH when DATABASE_TYPE=sqlite", () => {
@@ -116,13 +208,6 @@ describe("loadConfig()", () => {
     expect(() => loadConfig()).toThrow(/Invalid configuration/);
   });
 
-  it("overrides sentinel interval via SENTINEL_REVIEW_INTERVAL_MINUTES", () => {
-    rs.stubEnv("SENTINEL_REVIEW_INTERVAL_MINUTES", "60");
-
-    const config = loadConfig();
-    expect(config.sentinelReviewIntervalMinutes).toBe(60);
-  });
-
   it("defaults and overrides the action-worker process cap", () => {
     expect(loadConfig().actionWorkerMaxProcesses).toBe(8);
 
@@ -133,20 +218,13 @@ describe("loadConfig()", () => {
   it("accepts custom SQLITE_PATH", () => {
     rs.stubEnv("SQLITE_PATH", "/tmp/test.db");
 
-    const config = loadConfig();
-    expect(config.database.type).toBe("sqlite");
-    if (config.database.type === "sqlite") {
-      expect(config.database.sqlitePath).toBe("/tmp/test.db");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", sqlitePath: "/tmp/test.db" });
   });
 
   it("passes through SQLITE_ENCRYPTION_KEY", () => {
     rs.stubEnv("SQLITE_ENCRYPTION_KEY", "secret123");
 
-    const config = loadConfig();
-    if (config.database.type === "sqlite") {
-      expect(config.database.encryptionKey).toBe("secret123");
-    }
+    expect(loadConfig().database).toMatchObject({ type: "sqlite", encryptionKey: "secret123" });
   });
 
   it("surfaces PANTHEON_SLUG as the instance slug", () => {

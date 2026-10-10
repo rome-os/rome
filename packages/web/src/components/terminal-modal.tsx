@@ -39,8 +39,8 @@ function getTerminalWebSocketUrl(preset: string): string {
  * Native dialog for the PTY-backed Claude login flow. The terminal itself is
  * never shown: the modal opens the WebSocket that runs `claude /login`, shows
  * instructions with a button to open the parsed sign-in page, and takes the
- * pasted callback link or code. Completion is detected by polling
- * `/api/ai-tools/status`. (Logout is non-interactive and handled inline on the
+ * pasted callback link or code. Completion is detected by re-probing
+ * `/api/ai-tools/refresh`. (Logout is non-interactive and handled inline on the
  * Settings button, so it never opens this dialog.)
  */
 export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
@@ -61,10 +61,21 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
   // One auth-status probe; flips authComplete when the desired state is reached.
   // Reused by the poll and by the PTY-exit handler — the process can exit the
   // instant login persists, before the next poll tick, so we re-check on exit.
+  //
+  // Re-probes live via POST /ai-tools/refresh scoped to this provider, rather
+  // than reading GET /ai-tools/status. The cached status only refreshes when the
+  // PTY process exits or on the hourly timer, but `claude /login` on CLI 2.1.251
+  // does not exit after a successful login, so a cached read would keep the
+  // dialog spinning on a login that already succeeded. Scoping to the provider
+  // keeps an unrelated slow probe from stalling detection.
   const checkAuthOnce = useCallback(
     async (signal?: AbortSignal) => {
       try {
-        const res = await fetch("/api/ai-tools/status", { signal });
+        const refreshProvider = providerKey === "claude" ? "anthropic" : "openai";
+        const res = await fetch(`/api/ai-tools/refresh?provider=${refreshProvider}`, {
+          method: "POST",
+          signal,
+        });
         const data = await res.json();
         const toolStatus = data[providerKey] as AIToolStatus | undefined;
         if (toolStatus?.loggedIn === true) setAuthComplete(true);
@@ -75,14 +86,22 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
     [providerKey],
   );
 
-  // Poll auth status while the session is live.
+  // Poll auth status while the session is live. Each tick is scheduled only
+  // after the previous probe settles, so a slow probe cannot pile requests up.
   useEffect(() => {
     if (status !== "connected") return;
     const controller = new AbortController();
-    const interval = setInterval(() => checkAuthOnce(controller.signal), POLL_INTERVAL_MS);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+    const tick = async () => {
+      await checkAuthOnce(controller.signal);
+      if (!cancelled) timer = setTimeout(tick, POLL_INTERVAL_MS);
+    };
+    timer = setTimeout(tick, POLL_INTERVAL_MS);
     return () => {
+      cancelled = true;
       controller.abort();
-      clearInterval(interval);
+      if (timer) clearTimeout(timer);
     };
   }, [status, checkAuthOnce]);
 
@@ -228,7 +247,7 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
           </div>
         ) : isLogin ? (
           <>
-            <ol className="flex list-decimal flex-col gap-1 pl-5 text-body text-muted-foreground">
+            <ol className="flex list-decimal flex-col gap-1 pl-5 text-ui text-muted-foreground">
               <li>{t("terminal.claudeLogin.step1")}</li>
               <li>{t("terminal.claudeLogin.step2")}</li>
               <li>{t("terminal.claudeLogin.step3")}</li>
@@ -243,9 +262,9 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
               aria-label={!authUrl ? t("terminal.claudeLogin.preparingUrl") : undefined}
             >
               {authUrl ? (
-                <ExternalLink />
+                <ExternalLink data-icon="inline-start" />
               ) : (
-                <Spinner label={t("terminal.claudeLogin.preparingUrl")} />
+                <Spinner data-icon="inline-start" label={t("terminal.claudeLogin.preparingUrl")} />
               )}
               {t("terminal.claudeLogin.openButton")}
             </Button>

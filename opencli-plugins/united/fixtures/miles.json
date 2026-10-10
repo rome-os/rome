@@ -1,0 +1,177 @@
+{
+  "url": "https://www.united.com/en/us/fsr/choose-flights?f=SFO&t=IAH&d=2026-11-13&r=2026-11-15&at=1&sc=7%2C7&px=1&pst=9Y8%3D-Y-Y&taxng=1&newHP=True&clm=7&st=bestmatches&tqp=A",
+  "language": "en",
+  "currency": "USD",
+  "price_mode": "miles",
+  "traveler_text": "1 Adult",
+  "date_heading": "Depart on: November 13",
+  "fare_note": "Fares are one-way, per person, and include taxes and fees. Additional bag charges may apply. Fare attributes apply to flights operated by United and United Express\u00ae.",
+  "loading": false,
+  "login_required": false,
+  "challenge": false,
+  "no_results": false,
+  "show_all": false,
+  "displayed": [],
+  "rows": [
+    {
+      "departure": "11:59 PM",
+      "arrival": "5:46 AM",
+      "departure_note": "",
+      "arrival_note": "Arrives Nov 14",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 47MDuration 3 hours and 47 minutes",
+      "flight_text": "Flight Information\nNONSTOP\n\u00a0\n11:59 PM\nDeparting at 11:59 PM\nArrives Nov 14\n5:46 AM\nArriving at 5:46 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 47M\nDuration 3 hours and 47 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 505 (Boeing 787-9 Dreamliner)\nFlight Number UA 505. Aircraft Boeing 787-9 Dreamliner\nDetails\nSeats\n175 kg CO2\nCarbon emissions estimate: 175 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "MIN-ECONOMY-SURP-OR-DISP",
+          "product": "Economy",
+          "miles_text": "13.5k",
+          "money_text": "$5.60",
+          "cabin": "United Economy (XN)",
+          "award_type": "Saver Award",
+          "discount": "cardmembers save 10%",
+          "text": "CARDMEMBERS SAVE 10%\nWas\n15k miles\n+$5.60\nNow\n13.5k\nmiles\n+\n$5.60\nSaver Award\nUnited Economy (XN)\nSelect fare for Economy"
+        },
+        {
+          "product_id": "MIN-BUSINESS-SURP-OR-DISP",
+          "product": "First(lowest)",
+          "miles_text": "59.6k",
+          "money_text": "$5.60",
+          "cabin": "United First (JN)",
+          "award_type": "",
+          "discount": "cardmembers save 10%",
+          "text": "CARDMEMBERS SAVE 10%\nWas\n66.3k miles\n+$5.60\nNow\n59.6k\nmiles\n+\n$5.60\nUnited First (JN)\nSelect fare for First (lowest)"
+        }
+      ]
+    },
+    {
+      "departure": "4:40 PM",
+      "arrival": "10:28 PM",
+      "departure_note": "",
+      "arrival_note": "",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 48MDuration 3 hours and 48 minutes",
+      "flight_text": "Flight Information\nNONSTOP\n4:40 PM\nDeparting at 4:40 PM\n10:28 PM\nArriving at 10:28 PM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 48M\nDuration 3 hours and 48 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 2305 (Boeing 737 MAX 9)\nFlight Number UA 2305. Aircraft Boeing 737 MAX 9\nDetails\nSeats\n139 kg CO2\nCarbon emissions estimate: 139 kilograms. This is a lower emissions flight.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "MIN-ECONOMY-SURP-OR-DISP",
+          "product": "Economy",
+          "miles_text": "13.5k",
+          "money_text": "$5.60",
+          "cabin": "United Economy (XN)",
+          "award_type": "Saver Award",
+          "discount": "cardmembers save 10%",
+          "text": "CARDMEMBERS SAVE 10%\nWas\n15k miles\n+$5.60\nNow\n13.5k\nmiles\n+\n$5.60\nSaver Award\nUnited Economy (XN)\nSelect fare for Economy"
+        },
+        {
+          "product_id": "MIN-BUSINESS-SURP-OR-DISP",
+          "product": "First(lowest)",
+          "miles_text": "65.4k",
+          "money_text": "$5.60",
+          "cabin": "United First (JN)",
+          "award_type": "",
+          "discount": "cardmembers save 10%",
+          "text": "CARDMEMBERS SAVE 10%\nWas\n72.7k miles\n+$5.60\nNow\n65.4k\nmiles\n+\n$5.60\nUnited First (JN)\nSelect fare for First (lowest)"
+        }
+      ]
+    },
+    {
+      "departure": "10:50 PM",
+      "arrival": "6:10 AM",
+      "departure_note": "",
+      "arrival_note": "Arrives Nov 14",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "5H, 20MDuration 5 hours and 20 minutes",
+      "flight_text": "Flight Information\n1 STOP\n\u00a0\n10:50 PM\nDeparting at 10:50 PM\nArrives Nov 14\n6:10 AM\nArriving at 6:10 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n5H, 20M\nDuration 5 hours and 20 minutes\nIAH\nDestination Los Angeles, CA, US (LAX)\nLAX\nLos Angeles, CA, US (LAX)\n\u2014\nto\n36M\n36 minutes\nDetails\nSeats\n180 kg CO2\nCarbon emissions estimate: 180 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "MIN-ECONOMY-SURP-OR-DISP",
+          "product": "Economy",
+          "miles_text": "13.5k",
+          "money_text": "$5.60",
+          "cabin": "United Economy (XN)",
+          "award_type": "Saver Award",
+          "discount": "cardmembers save 66%",
+          "text": "CARDMEMBERS SAVE 66%\nWas\n39.8k miles\n+$5.60\nNow\n13.5k\nmiles\n+\n$5.60\nSaver Award\nUnited Economy (XN)\nSelect fare for Economy"
+        },
+        {
+          "product_id": "MIN-BUSINESS-SURP-OR-DISP",
+          "product": "First(lowest)",
+          "miles_text": "67.9k",
+          "money_text": "$5.60",
+          "cabin": "United First (JN)",
+          "award_type": "",
+          "discount": "cardmembers save 10%",
+          "text": "CARDMEMBERS SAVE 10%\nWas\n75.5k miles\n+$5.60\nNow\n67.9k\nmiles\n+\n$5.60\nUnited First (JN)\nSelect fare for First (lowest)"
+        }
+      ]
+    },
+    {
+      "departure": "9:20 PM",
+      "arrival": "6:10 AM",
+      "departure_note": "",
+      "arrival_note": "Arrives Nov 14",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "6H, 50MDuration 6 hours and 50 minutes",
+      "flight_text": "Flight Information\n1 STOP\n\u00a0\n9:20 PM\nDeparting at 9:20 PM\nArrives Nov 14\n6:10 AM\nArriving at 6:10 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n6H, 50M\nDuration 6 hours and 50 minutes\nIAH\nDestination Los Angeles, CA, US (LAX)\nLAX\nLos Angeles, CA, US (LAX)\n\u2014\nto\n2H, 2M\n2 hours and 2 minutes\nDetails\nSeats\n195 kg CO2\nCarbon emissions estimate: 195 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "MIN-ECONOMY-SURP-OR-DISP",
+          "product": "Economy",
+          "miles_text": "13.5k",
+          "money_text": "$5.60",
+          "cabin": "United Economy (XN)",
+          "award_type": "Saver Award",
+          "discount": "cardmembers save 66%",
+          "text": "CARDMEMBERS SAVE 66%\nWas\n39.8k miles\n+$5.60\nNow\n13.5k\nmiles\n+\n$5.60\nSaver Award\nUnited Economy (XN)\nSelect fare for Economy"
+        },
+        {
+          "product_id": "MIN-BUSINESS-SURP-OR-DISP",
+          "product": "First(lowest)",
+          "miles_text": "27k",
+          "money_text": "$5.60",
+          "cabin": "Mixed cabin",
+          "award_type": "",
+          "discount": "cardmembers save 64%",
+          "text": "CARDMEMBERS SAVE 64%\nWas\n75.5k miles\n+$5.60\nNow\n27k\nmiles\n+\n$5.60\nMixed cabin\nSelect fare for First (lowest)"
+        }
+      ]
+    },
+    {
+      "departure": "7:00 AM",
+      "arrival": "7:08 PM",
+      "departure_note": "",
+      "arrival_note": "",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "10H, 8MDuration 10 hours and 8 minutes",
+      "flight_text": "Flight Information\n1 STOP\n7:00 AM\nDeparting at 7:00 AM\n7:08 PM\nArriving at 7:08 PM\nSFO\nOrigin San Francisco, CA, US (SFO)\n10H, 8M\nDuration 10 hours and 8 minutes\nIAH\nDestination Miami, FL, US (MIA)\nMIA\nMiami, FL, US (MIA)\n\u2014\nto\n1H, 24M\n1 hours and 24 minutes\nDetails\nSeats\n346 kg CO2\nCarbon emissions estimate: 346 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "MIN-ECONOMY-SURP-OR-DISP",
+          "product": "Economy",
+          "miles_text": "13.5k",
+          "money_text": "$5.60",
+          "cabin": "United Economy (XN)",
+          "award_type": "Saver Award",
+          "discount": "cardmembers save 72%",
+          "text": "CARDMEMBERS SAVE 72%\nWas\n47.4k miles\n+$5.60\nNow\n13.5k\nmiles\n+\n$5.60\nSaver Award\nUnited Economy (XN)\nSelect fare for Economy"
+        },
+        {
+          "product_id": "MIN-BUSINESS-SURP-OR-DISP",
+          "product": "First(lowest)",
+          "miles_text": "0",
+          "money_text": "",
+          "cabin": "",
+          "award_type": "",
+          "discount": "",
+          "text": "Not available"
+        }
+      ]
+    }
+  ]
+}

@@ -135,7 +135,7 @@ test("reads the sanctioned rosters out of the canon", async () => {
   assert.deepEqual([...roles].sort(), [
     "aux",
     "badge",
-    "body",
+    "composer",
     "display",
     "section",
     "title",

@@ -1,25 +1,6 @@
 {
   "page": {
-    "title": "Rome",
-    "tagline": "给智能体起个名字,挑一个大脑。就这样。",
-    "enter": "进入 Rome",
-    "entering": "进入中...",
-    "enterRequiresAiHint": "登录 Claude 或 ChatGPT 后即可进入 Rome。",
-    "errors": {
-      "profileSaveFailed": "保存个人资料失败。",
-      "networkError": "网络错误,请重试。",
-      "completeFailed": "完成设置失败。"
-    }
-  },
-  "steps": {
-    "account": "账号",
-    "profile": "资料"
-  },
-  "done": {
-    "title": "全部就绪",
-    "tagline": "Rome 可以帮你管理项目、记住重要的事、自动执行例程、连接你常用的服务，还有更多。",
-    "guideButton": "看看能做什么",
-    "chatButton": "进入对话"
+    "title": "Rome"
   },
   "account": {
     "tagline": "设置用于解锁这台 Rome 的账号。一台 Rome，一个守护者。",
@@ -34,22 +15,6 @@
     "errorUsernameRequired": "请填写用户名。",
     "errorPasswordTooShort": "密码至少 8 个字符。",
     "networkError": "网络错误,请重试。"
-  },
-  "guardian": {
-    "nameLabel": "你的名字",
-    "namePlaceholder": "例如:Alex",
-    "nameHint": "智能体对你的称呼。之后可以在「设置」里修改。"
-  },
-  "agent": {
-    "nameLabel": "智能体名称",
-    "namePlaceholder": "例如:Atlas、Friday",
-    "nameHint": "你之后可以在「设置」里随时重新命名。",
-    "reroll": "随机",
-    "rerollTitle": "换一个名字"
-  },
-  "ai": {
-    "title": "连接一个大脑",
-    "pickOneHint": "选一个即可"
   },
   "codexDeviceLogin": {
     "title": "用设备码登录",

@@ -602,12 +602,10 @@ describe("DrainConnection reconnect discipline", () => {
 
   it("honors Retry-After on a 429 handshake rejection", async () => {
     let attempts = 0;
-    const server = createServer();
-    server.on("upgrade", (_req, socket) => {
+    const server = createServer((_req, res) => {
       attempts++;
-      socket.end(
-        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-      );
+      res.writeHead(429, { "Retry-After": "1", "Content-Length": "0", Connection: "close" });
+      res.end();
     });
     await new Promise<void>((r) => server.listen(0, r));
     const port = (server.address() as AddressInfo).port;
@@ -641,12 +639,10 @@ describe("DrainConnection reconnect discipline", () => {
 
   it("treats Retry-After as a floor: it never shortens an escalated backoff", async () => {
     let attempts = 0;
-    const server = createServer();
-    server.on("upgrade", (_req, socket) => {
+    const server = createServer((_req, res) => {
       attempts++;
-      socket.end(
-        "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-      );
+      res.writeHead(429, { "Retry-After": "1", "Content-Length": "0", Connection: "close" });
+      res.end();
     });
     await new Promise<void>((r) => server.listen(0, r));
     const port = (server.address() as AddressInfo).port;

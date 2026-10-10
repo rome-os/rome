@@ -1,0 +1,330 @@
+{
+  "url": "https://www.southwest.com/air/booking/select-depart.html?adultPassengersCount=1&adultsCount=1&departureDate=2026-11-13&departureTimeOfDay=ALL_DAY&destinationAirportCode=HOU&fareType=USD&originationAirportCode=OAK&passengerType=ADULT&returnDate=2026-11-20&returnTimeOfDay=ALL_DAY&tripType=roundtrip",
+  "language": "en",
+  "ready": true,
+  "loading": false,
+  "expected_count": 4,
+  "available_count": 4,
+  "search": {
+    "adultPassengersCount": "1",
+    "adultsCount": "1",
+    "departureDate": "2026-11-13",
+    "departureTimeOfDay": "ALL_DAY",
+    "destinationAirportCode": "HOU",
+    "fareType": "USD",
+    "originationAirportCode": "OAK",
+    "passengerType": "ADULT",
+    "promoCode": null,
+    "returnDate": "2026-11-20",
+    "returnTimeOfDay": "ALL_DAY",
+    "tripType": "roundtrip",
+    "lapInfantPassengersCount": null
+  },
+  "route_text": "OAKHOU",
+  "selected_date": "2026-11-13",
+  "price_mode": "usd",
+  "fare_note": "All fares and fare ranges are subject to change until purchased and are per person for each way of travel.",
+  "rounding_note": "$Points$ + PointsGovernment taxes & fees included Opens flyout.All fares are rounded up to the nearest dollar.",
+  "error": "",
+  "challenge": false,
+  "login_required": false,
+  "no_results": false,
+  "rows": [
+    {
+      "id": "air-booking-select-detail--row-0-1",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T11:55:00.000-08:00",
+      "arrival_at": "2026-11-13T17:30:00.000-06:00",
+      "duration_minutes": 215,
+      "flight_numbers": ["1166"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T11:55:00.000-08:00",
+          "arrival_at": "2026-11-13T17:30:00.000-06:00",
+          "flight_number": "1166",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 215,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 11:55AM",
+      "arrival_text": "Arrives 5:30PM",
+      "stops_text": "Nonstop",
+      "duration_text": "3h 35m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare $200, earn 343 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "200 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare $250, earn 1307 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "250 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare $330, earn 2921 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "330 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare $390, earn 4871 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "390 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-2",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T09:25:00.000-08:00",
+      "arrival_at": "2026-11-13T16:35:00.000-06:00",
+      "duration_minutes": 310,
+      "flight_numbers": ["1496"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "LAS",
+          "departure_at": "2026-11-13T09:25:00.000-08:00",
+          "arrival_at": "2026-11-13T11:00:00.000-08:00",
+          "flight_number": "1496",
+          "change_planes": false,
+          "stop_minutes": 40,
+          "duration_minutes": 95,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "LAS",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T11:40:00.000-08:00",
+          "arrival_at": "2026-11-13T16:35:00.000-06:00",
+          "flight_number": "1496",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 175,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 9:25AM",
+      "arrival_text": "Arrives 4:35PM",
+      "stops_text": "1 stop",
+      "duration_text": "5h 10m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare $290, earn 501 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "290 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare $340, earn 1781 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "340 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare $420, earn 3712 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "420 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": "2 seats left"
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare $480, earn 5978 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.2 seats left",
+          "unavailable": false,
+          "amount_text": "480 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": "2 seats left"
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-11",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T10:45:00.000-08:00",
+      "arrival_at": "2026-11-13T18:40:00.000-06:00",
+      "duration_minutes": 355,
+      "flight_numbers": ["4596", "45"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "DAL",
+          "departure_at": "2026-11-13T10:45:00.000-08:00",
+          "arrival_at": "2026-11-13T16:05:00.000-06:00",
+          "flight_number": "4596",
+          "change_planes": true,
+          "stop_minutes": 85,
+          "duration_minutes": 200,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "DAL",
+          "destination": "HOU",
+          "departure_at": "2026-11-13T17:30:00.000-06:00",
+          "arrival_at": "2026-11-13T18:40:00.000-06:00",
+          "flight_number": "45",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 70,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 10:45AM",
+      "arrival_text": "Arrives 6:40PM",
+      "stops_text": "1 stop",
+      "duration_text": "5h 55m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": " Basic Unavailable",
+          "unavailable": true,
+          "amount_text": "",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare $654, earn 3506 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "654 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare $734, earn 6586 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "734 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare $794, earn 10002 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "794 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        }
+      ]
+    },
+    {
+      "id": "air-booking-select-detail--row-0-22",
+      "origin": "OAK",
+      "destination": "HOU",
+      "departure_at": "2026-11-13T21:30:00.000-08:00",
+      "arrival_at": "2026-11-14T06:05:00.000-06:00",
+      "duration_minutes": 395,
+      "flight_numbers": ["3214", "4992"],
+      "segments": [
+        {
+          "origin": "OAK",
+          "destination": "LAS",
+          "departure_at": "2026-11-13T21:30:00.000-08:00",
+          "arrival_at": "2026-11-13T23:10:00.000-08:00",
+          "flight_number": "3214",
+          "change_planes": true,
+          "stop_minutes": 125,
+          "duration_minutes": 100,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        },
+        {
+          "origin": "LAS",
+          "destination": "HOU",
+          "departure_at": "2026-11-14T01:15:00.000-08:00",
+          "arrival_at": "2026-11-14T06:05:00.000-06:00",
+          "flight_number": "4992",
+          "change_planes": false,
+          "stop_minutes": 0,
+          "duration_minutes": 170,
+          "operating_carrier": "WN",
+          "marketing_carrier": "WN"
+        }
+      ],
+      "departure_text": "Departs 9:30PM",
+      "arrival_text": "Arrives 6:05AM",
+      "stops_text": "1 stop",
+      "duration_text": "6h 35m",
+      "fares": [
+        {
+          "product": "basic",
+          "label": "Basic fare $249, earn 415 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "249 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice",
+          "label": "Choice fare $299, earn 1524 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "299 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-preferred",
+          "label": "Choice Preferred fare $379, earn 3284 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "379 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        },
+        {
+          "product": "choice-extra",
+          "label": "Choice Extra fare $439, earn 5379 points with this purchase. Navigate to the content below to learn more about the fare benefits. Select to add item to cart.",
+          "unavailable": false,
+          "amount_text": "439 Dollars",
+          "points": false,
+          "taxes_text": "",
+          "seats_text": ""
+        }
+      ]
+    }
+  ]
+}

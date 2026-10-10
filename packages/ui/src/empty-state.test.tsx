@@ -64,8 +64,8 @@ describe("EmptyState", () => {
     const title = screen.getByRole("heading", { name: "No apps found" });
     const description = screen.getByText("Try changing your search.");
 
-    expect(classesOf(title)).toContain("text-title");
-    expect(classesOf(description)).toContain("text-body");
+    expect(classesOf(title)).toContain("text-section");
+    expect(classesOf(description)).toContain("text-ui");
     expect(state.getAttribute("aria-labelledby")).toBe(title.id);
     expect(state.getAttribute("aria-describedby")).toBe(description.id);
   });

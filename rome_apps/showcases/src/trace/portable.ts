@@ -1,4 +1,4 @@
-import type { TraceBlockDto, TraceSnapshot } from "./types.js";
+import type { TraceEventDto, TraceSnapshot } from "./types.js";
 
 export const SHOWCASE_BUNDLE_SCHEMA = "rome.showcases.bundle";
 export const SHOWCASE_BUNDLE_VERSION = 1;
@@ -8,7 +8,7 @@ export interface ShowcaseBundleTrace {
   title: string;
   description?: string | null;
   capturedAt: string;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   snapshot?: TraceSnapshot;
   summary?: TraceSnapshot["summary"];
   metadata?: Record<string, unknown>;

@@ -1,6 +1,7 @@
 // Shared Codex helpers — model catalog, env/auth wiring, and OpenAI-shaped
 // accounting. Consumed by CodexAppServerProvider (the only Codex provider).
 
+import type { AgentStop } from "../../types.js";
 import { buildAgentAccounting, calculateImpliedCostUsd } from "../provider-accounting.js";
 import {
   modelTokenMetricAttributes,
@@ -13,11 +14,12 @@ import {
 export type Usage = {
   input_tokens: number;
   cached_input_tokens: number;
+  cache_write_input_tokens: number;
   output_tokens: number;
   reasoning_output_tokens: number;
 };
 
-// Env vars the codex Rust binary actually needs. Everything else stays in
+// Env vars Codex and its child commands need. Everything else stays in
 // Rome's process so we don't leak secrets into the subprocess.
 export const CODEX_ENV_ALLOWLIST = [
   "HOME",
@@ -47,6 +49,7 @@ interface BuildOpenAiAccountingArgs {
   agentName?: string;
   appStoreListingId?: string;
   reportedCostUsd?: number;
+  stop?: AgentStop;
   stopReason?: string;
   durationMs?: number;
 }
@@ -54,9 +57,11 @@ interface BuildOpenAiAccountingArgs {
 function normalizeOpenAiUsage(usage: Usage | undefined) {
   const sdkInputTokens = usage?.input_tokens ?? 0;
   const cacheReadTokens = usage?.cached_input_tokens ?? 0;
-  const inputTokens = Math.max(0, sdkInputTokens - cacheReadTokens);
+  const cacheWriteTokens = usage?.cache_write_input_tokens ?? 0;
+  const inputTokens = Math.max(0, sdkInputTokens - cacheReadTokens - cacheWriteTokens);
   const outputTokens = usage?.output_tokens ?? 0;
-  const reasoningTokens = usage?.reasoning_output_tokens ?? 0;
+  const reportedReasoningTokens = usage?.reasoning_output_tokens;
+  const reasoningTokens = reportedReasoningTokens ?? 0;
   return {
     sdkInputTokens,
     outputTokens,
@@ -64,7 +69,10 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
       inputTokens,
       outputTokens,
       cacheReadTokens,
-      cacheWriteTokens: 0,
+      cacheWriteTokens,
+      ...(typeof reportedReasoningTokens === "number" && Number.isFinite(reportedReasoningTokens)
+        ? { reasoningTokens: reportedReasoningTokens }
+        : {}),
     },
     rawUsage: usage
       ? {
@@ -72,6 +80,7 @@ function normalizeOpenAiUsage(usage: Usage | undefined) {
           uncached_input_tokens: inputTokens,
           output_tokens: outputTokens,
           cached_tokens: cacheReadTokens,
+          cache_write_tokens: cacheWriteTokens,
           reasoning_tokens: reasoningTokens,
         }
       : undefined,
@@ -98,6 +107,7 @@ export function buildOpenAiAccounting(args: BuildOpenAiAccountingArgs) {
     model: stripLegacyReasoningSuffix(args.model),
     usage: normalized.agentUsage,
     reportedCostUsd: args.reportedCostUsd,
+    stop: args.stop,
     stopReason: args.stopReason,
     durationMs: args.durationMs,
     rawUsage: normalized.rawUsage,

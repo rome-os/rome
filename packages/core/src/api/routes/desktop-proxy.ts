@@ -1,9 +1,8 @@
 import { Hono } from "hono";
-import { proxyDesktopHttp } from "../../desktop-proxy-server.js";
 
 export function desktopProxyRoutes(): Hono {
   const app = new Hono();
-  app.all("/desktop-proxy", (c) => proxyDesktopHttp(c.req.raw));
-  app.all("/desktop-proxy/*", (c) => proxyDesktopHttp(c.req.raw));
+  app.all("/desktop-proxy", (c) => c.text("Not Found", 404));
+  app.all("/desktop-proxy/*", (c) => c.text("Not Found", 404));
   return app;
 }

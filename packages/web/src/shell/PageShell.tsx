@@ -1,10 +1,21 @@
 import type { ReactNode } from "react";
+import { PageTitle } from "@rome-os/ui/page";
 import { cn } from "@/lib/utils";
 
 /** Padding every routed page shares. Lives here so no page can drift off it.
  *  Uniform on both axes at every step, so the gap above a page's h1 matches the
  *  gap to its left. */
 const PAGE_PADDING = "p-4 sm:p-6 lg:p-8";
+
+/**
+ * For a block that sticks to the bottom of the viewport: it takes over the
+ * page's bottom padding as its own, so it sits the same distance from the
+ * viewport's edge while stuck as it does at rest at the end of the page. A
+ * floor without this jumps by the page padding the moment the page's end
+ * scrolls into view. Kept beside `PAGE_PADDING` because the two have to agree
+ * step for step.
+ */
+export const PAGE_FLOOR = "-mb-4 pb-4 sm:-mb-6 sm:pb-6 lg:-mb-8 lg:pb-8";
 
 /**
  * The frame every routed page renders into.
@@ -30,4 +41,50 @@ export function PageShell({ children, className }: { children: ReactNode; classN
  */
 export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("space-y-6", className)}>{children}</div>;
+}
+
+/**
+ * The heading every routed page opens with: the page's one `h1`, whatever
+ * sits on the title line, a caption under it, and the page's actions at the
+ * trailing end. Lives beside `PageShell` so the three parts hold one relation
+ * on every route.
+ *
+ * `title` is text, and it is the only text inside the `h1` — the type is what
+ * holds that, not this paragraph. A badge or a status beside it goes in
+ * `titleAside`, so the heading a screen reader announces is the name alone.
+ * `description` is a caption in the Auxiliary role — counts, the live state,
+ * the trigger phrase — and not a sentence that repeats the title.
+ */
+export function PageHeader({
+  title,
+  titleAside,
+  description,
+  actions,
+  className,
+}: {
+  title: string;
+  titleAside?: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <header
+      data-slot="page-header"
+      className={cn("flex flex-wrap items-center justify-between gap-x-6 gap-y-3", className)}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <PageTitle>{title}</PageTitle>
+            {titleAside}
+          </div>
+          {description != null && (
+            <div className="mt-1 text-aux text-muted-foreground">{description}</div>
+          )}
+        </div>
+      </div>
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
+  );
 }

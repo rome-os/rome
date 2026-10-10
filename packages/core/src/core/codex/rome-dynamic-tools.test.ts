@@ -1,6 +1,9 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { RomeMcpGroup, RomeMcpServer } from "../mcp/server.js";
-import { createRomeDynamicToolsFromServer } from "./rome-dynamic-tools.js";
+import {
+  alignRomeDynamicToolsToInheritedCatalog,
+  createRomeDynamicToolsFromServer,
+} from "./rome-dynamic-tools.js";
 
 function fakeServer(definitions: Partial<Record<RomeMcpGroup, readonly string[]>>): RomeMcpServer {
   return {
@@ -80,5 +83,38 @@ describe("Rome dynamic tools", () => {
       response: { success: false },
       traceOutput: { isError: true },
     });
+  });
+
+  it("keeps a native fork aligned with its inherited catalog but fails closed for disabled tools", async () => {
+    const sourceTools = createRomeDynamicToolsFromServer(
+      fakeServer({ subagents: ["source_researcher"] }),
+    );
+    const forkServer = fakeServer({ actions: ["fork_action"] });
+    const forkTools = alignRomeDynamicToolsToInheritedCatalog(
+      createRomeDynamicToolsFromServer(forkServer),
+      sourceTools.definitions,
+    );
+
+    expect(forkTools.definitions).toEqual(sourceTools.definitions);
+    expect(forkTools.hasTool("source_researcher")).toBe(true);
+    expect(forkTools.hasTool("fork_action")).toBe(false);
+    await expect(forkTools.callTool("source_researcher", { prompt: "inspect" })).resolves.toEqual({
+      response: {
+        contentItems: [
+          {
+            type: "inputText",
+            text: "Dynamic tool is disabled in this fork: source_researcher",
+          },
+        ],
+        success: false,
+      },
+      traceOutput: {
+        content: [
+          { type: "text", text: "Dynamic tool is disabled in this fork: source_researcher" },
+        ],
+        isError: true,
+      },
+    });
+    expect(forkServer.callTool).not.toHaveBeenCalled();
   });
 });

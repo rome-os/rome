@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en-US"><body>
+<div role="dialog" aria-label="cookieconsent"><span role="button" aria-label="Close banner"></span></div>
+<form id="bookFlightForm">
+  <input id="radiofield-item-id-flightType-0" type="radio" name="flightType" value="roundTrip" checked>
+  <input id="radiofield-item-id-flightType-1" type="radio" name="flightType" value="oneWay">
+  <input id="award" type="checkbox" checked>
+  <input id="flexibleDates" type="checkbox" checked>
+  <input id="includeBasicFares" type="checkbox">
+  <input id="bookFlightOriginInput" role="combobox" value="Hong Kong HKG">
+  <ul id="bookFlightOriginInput-menu" role="listbox" hidden></ul>
+  <input id="bookFlightDestinationInput" role="combobox" value="San Francisco SFO">
+  <ul id="bookFlightDestinationInput-menu" role="listbox" hidden></ul>
+  <input id="DepartDate" aria-label="Departure" value="Oct 1">
+  <input id="ReturnDate" aria-label="Return" value="Oct 9">
+  <input type="button" aria-describedby="uaPaxSelectorMainButtonAriaDescription" value="3 Adults, 1 Child">
+  <div id="passengers" hidden>
+    <p data-saved-traveler>Private saved traveler</p>
+    <button type="button">Decrease number of Adults (18+) by 1</button>
+    <button type="button">Increase number of Adults (18+) by 1</button>
+    <p role="status">Total: 3 Adults, 1 Child</p>
+    <button type="button">Reset</button>
+    <button type="button">Close dialog</button>
+  </div>
+  <select id="cabinType"><option value="0">Economy</option><option value="1" selected>Premium economy</option><option value="2">Business or First</option></select>
+  <button type="submit" aria-label="Find flights">Find flights</button>
+</form>
+<div role="dialog" aria-label="Choose dates" hidden>
+  <button type="button" aria-label="Previous month"></button>
+  <table role="grid"><tbody><tr></tr></tbody></table>
+  <button type="button" aria-label="Next month"></button>
+  <button type="button" class="atm-c-datepicker__close-btn"><span>Close</span></button>
+</div>
+</body></html>

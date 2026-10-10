@@ -3,22 +3,25 @@
 // re-exported from here exists in the SDK; types unique to core (sessions,
 // configs, policies, etc.) stay defined locally.
 
-import type { ReasoningEffort } from "@rome-os/app-runtime";
+import type { PolicyRule, ReasoningEffort } from "@rome-os/app-runtime";
 
 export type {
   Attachment,
-  ChannelSendResult,
+  PolicyRule,
   OutgoingAttachment,
   OutgoingMessage,
   ApprovalCardStatus,
   MessagePart,
   MessageReplyReference,
-  NormalizedMessage,
+  AgentEvent,
+  /** @deprecated Use AgentEvent from @rome-os/app-runtime. */
   AgentMessage,
   AgentPlan,
   AgentPlanStep,
   AgentPlanStepStatus,
   AgentAccounting,
+  AgentStop,
+  AgentStopReason,
   AgentContextUsage,
   AgentTokenUsage,
   ReasoningEffort,
@@ -33,22 +36,22 @@ export interface AgentConfig {
   name: string;
   description: string;
   /**
-   * Provider-agnostic capability tier. ModelResolver maps this to a provider
-   * and concrete model. The legacy `model:
-   * opus|sonnet|haiku` YAML field is accepted by the loader and normalized to
-   * `large|medium|small` for back-compat.
+   * Provider-agnostic capability tier. Required unless modelId is set.
+   * The loader normalizes legacy model: opus|sonnet|haiku to this field.
    */
-  tier: "large" | "medium" | "small";
+  tier?: "large" | "medium" | "small";
+  /**
+   * Exact provider model ID. Requires providerId and excludes tier.
+   * Resolution uses this ID without tier mapping or automatic substitution.
+   */
+  modelId?: string;
   /** Provider-agnostic reasoning effort. Defaults to `high` when omitted in YAML. */
   reasoningEffort: ReasoningEffort;
   /**
-   * Optional provider pin (yaml `provider: anthropic|openai`). When set,
-   * ModelResolver only considers this provider for the agent's sessions —
-   * `tier` still picks the concrete model within it — and resolution fails
-   * with ModelResolutionError instead of falling back to another provider
-   * when the pinned one is disconnected or out of quota. For agents whose
-   * behavior depends on a provider-specific capability (e.g. Codex's
-   * embedded image generation).
+   * Optional provider pin (yaml `provider: anthropic|openai`). Required for
+   * modelId. With tier, restricts model resolution to this provider.
+   * An unavailable pinned provider fails with ModelResolutionError instead
+   * of falling back to another provider.
    */
   providerId?: "anthropic" | "openai";
   systemPromptPrefix: string;
@@ -72,7 +75,10 @@ export interface AgentSession {
   id: string;
   agentName: string;
   channelThreadKey: string;
+  /** The Rome conversation this session serves, when the caller named one. */
+  conversationId?: string;
   providerThreadId?: string;
+  workingDir?: string;
   createdAt: Date;
   lastActiveAt: Date;
   status: "active" | "completed" | "error";
@@ -113,13 +119,7 @@ export type PolicyScope =
   | { type: "thread"; threadName: string; threadType: string }
   | { type: "global" };
 
-export interface PolicyRule {
-  action: "allow" | "block" | "require_approval" | "sentinel_review";
-  conditions?: Record<string, unknown>;
-}
-
 export interface Settings {
-  sentinelReviewIntervalMinutes: number;
   trustedBondLevels: string[];
   replyToBondLevels: string[];
   database: {

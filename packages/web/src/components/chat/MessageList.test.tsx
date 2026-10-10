@@ -351,6 +351,20 @@ function expectBefore(earlier: HTMLElement, later: HTMLElement) {
 }
 
 describe("MessageList streaming input", () => {
+  it("keeps a code fence collapsed when its live block becomes persisted", () => {
+    const text = "```\nlong code\n```";
+    const { rerender } = render(streamingList([], text));
+    const liveToggle = screen.getByRole("button", { name: "Code" });
+    fireEvent.click(liveToggle);
+    expect(liveToggle.getAttribute("aria-expanded")).toBe("false");
+
+    rerender(streamingList([commentary(text)], text));
+
+    expect(screen.getByRole("button", { name: "Code" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
   it("does not repeat persisted commentary after a follow-up input", () => {
     const original = commentary("I am checking the implementation.");
     const followup = humanReply("Please include pseudocode.");
@@ -513,7 +527,9 @@ describe("MessageList Plan placement", () => {
         sessionId: "s-1",
         role: "assistant",
         turnId: "turn-plan",
-        content: JSON.stringify([{ type: "turn_recap", content: "Concise recap" }]),
+        content: JSON.stringify([
+          { type: "turn_recap", turnId: "turn-plan", content: "Concise recap" },
+        ]),
         createdAt: "2026-06-13T00:00:03.000Z",
       },
     ];
@@ -634,7 +650,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("still addressable", "u-share", "turn-9");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},
@@ -653,7 +668,6 @@ describe("timeline anchors", () => {
     const question = questionTurn("no turn id", "u-dimmed");
     const { container } = render(
       settledList([question], {
-        active: true,
         selectedTurns: new Set<string>(),
         selectableSessionId: "s-1",
         onToggleTurn: () => {},

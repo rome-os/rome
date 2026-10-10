@@ -43,11 +43,25 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./TypographyPage")),
       },
       {
+        path: "/dev/markdown-rhythm",
+        title: "Markdown rhythm",
+        description:
+          "The chat Markdown rhythm as a specimen: one long reply through ChatMarkdown at standard and compact density, with every block gap and type size read back from the rendered DOM.",
+        Component: lazy(() => import("./MarkdownRhythmPage")),
+      },
+      {
         path: "/dev/gallery",
         title: "Component gallery",
         description:
           "Live specimens of every ui/ and @rome-os/ui primitive — variants, sizes, and states, with theme and mode switches.",
         Component: lazy(() => import("./gallery/ComponentGalleryPage")),
+      },
+      {
+        path: "/dev/layouts",
+        title: "Page layouts",
+        description:
+          "The page layouts in @rome-os/ui, one at a time against fake content, with the usage statement and the theme and mode switches.",
+        Component: lazy(() => import("./LayoutsPage")),
       },
       {
         path: "/dev/connections",
@@ -56,11 +70,11 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         Component: lazy(() => import("./ConnectionGalleryPage")),
       },
       {
-        path: "/dev/chat-blocks",
-        title: "Transcript blocks",
+        path: "/dev/chat-entries",
+        title: "Chat entries",
         description:
-          "Every component renderSingleBlock dispatches to, rendered from a literal StreamBlock — the blocks an agent state gates, which no product route renders on load.",
-        Component: lazy(() => import("./ChatBlocksPage")),
+          "Every component renderSingleEntry dispatches to, rendered from a literal ChatEntry — the entries an agent state gates, which no product route renders on load.",
+        Component: lazy(() => import("./ChatEntriesPage")),
       },
       {
         path: "/dev/mdx",
@@ -80,7 +94,7 @@ export const DEV_ROUTES: DevRoute[] = import.meta.env.DEV
         path: "/dev/onboard",
         title: "Onboarding page",
         description:
-          "The real OnboardPage on its profile step. Reachable without an un-onboarded backend, which the route under AuthGate needs.",
+          "The real OnboardPage on its create-account step. Reachable without an un-onboarded backend, which the route under AuthGate needs.",
         Component: lazy(() => import("./OnboardPreviewPage")),
       },
     ]

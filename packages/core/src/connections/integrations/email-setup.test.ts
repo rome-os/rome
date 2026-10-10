@@ -14,6 +14,7 @@
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
@@ -244,7 +245,7 @@ function makeSetupApp() {
   const personMappingRepo = {
     findByChannelUser: async () => null,
     findByBondLevel: async () => [],
-    deleteGuardianChannelMappings: rs.fn(),
+    writeDeleteGuardianChannelMappings: rs.fn(),
   } as unknown as ApiDeps["personMappingRepo"];
   registry.register(
     makeEmailDescriptor({
@@ -260,6 +261,7 @@ function makeSetupApp() {
     connectionRegistry: registry,
     setupManager,
     db: testDb,
+    approvalsRepo: new ApprovalsRepository(testDb),
     personMappingRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
@@ -301,7 +303,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 
     const conn = registry.find("email")[0];
     expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
 
     // The provisioned address renders from the grant profile.
     const list = await app.request("/connections");
@@ -316,7 +318,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
 
     // Hello mail: a signed inbound deposit dispatches through the live Talk.
     const received: unknown[] = [];
-    conn.talk!.subscribe(async (m) => {
+    conn.hearTalker(async (m) => {
       received.push(m);
       return;
     });
@@ -345,7 +347,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     });
     expect(del.status).toBe(200);
     expect(conn.auth.grants().inbox).toBe("unauthorized");
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     // guardianEmail rides the settings row, which the teardown never touches.
     expect(await settingsRepo.get("email")).toEqual({
       enabled: true,
@@ -358,7 +360,7 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(provisionMock).toHaveBeenCalledTimes(2);
     expect(registry.find("email")).toHaveLength(1);
     expect(conn.auth.grants().inbox).toBe("authorized");
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
   });
 
   it("a failed conferral fails the setup (grant stays unauthorized); a retry converges", async () => {
@@ -369,13 +371,13 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     expect(failed.state.status).toBe("failed");
     const conn = registry.find("email")[0];
     expect(conn?.auth.grants().inbox ?? "unauthorized").toBe("unauthorized");
-    expect(conn?.talk ?? null).toBeNull();
+    expect(conn?.isUnlocked("talk") ?? false).toBe(false);
 
     // The failed setup is terminal, so the next start begins fresh and lands.
     const retried = await runSetup(app);
     expect(retried.state.status).toBe("done");
     const after = registry.find("email")[0];
     expect(after.auth.grants().inbox).toBe("authorized");
-    expect(after.talk).not.toBeNull();
+    expect(after.isUnlocked("talk")).toBe(true);
   });
 });

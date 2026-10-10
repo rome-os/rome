@@ -6,8 +6,8 @@ import type { PersonMappingRepository } from "../../db/repositories/person-mappi
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { WebChatRepository } from "../../db/repositories/webchat.js";
 import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { WechatUserRuntime } from "../../channels/wechat-user.js";
 import type { WhatsAppSyncSink } from "../../channels/whatsapp-sync.js";
-import type { InboundDedup } from "../../channels/inbound-dedup.js";
 import type { MailProvider } from "../../lib/rome-cloud-mail.js";
 import { OAUTH_PROVIDERS } from "../../lib/oauth-providers.js";
 import {
@@ -17,6 +17,8 @@ import {
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ConversationSettingsService } from "../../conversation-settings/service.js";
+import type { ChatStopHandler } from "@rome-os/app-runtime";
+import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
 import { createFeishuDescriptor } from "./feishu.js";
@@ -25,6 +27,7 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { createWechatDescriptor } from "./wechat.js";
+import { createWechatUserDescriptor } from "./wechat-user.js";
 import { makeWebchatDescriptor } from "./webchat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
 
@@ -32,8 +35,10 @@ export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
+export { createWechatUserDescriptor, WECHAT_USER_SERVICE } from "./wechat-user.js";
 export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
+export { makeAgentsDescriptor } from "./agents.js";
 export { makeWebchatDescriptor } from "./webchat.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { createLinkedInDescriptor } from "./linkedin.js";
@@ -47,6 +52,7 @@ export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-prov
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
   conversationSettings: ConversationSettingsService;
+  chatStop: ChatStopHandler;
   personMappingRepo: PersonMappingRepository;
   webchatRepo: WebChatRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
@@ -60,9 +66,8 @@ export interface BuiltinConnectionDeps {
   onWhatsAppGuardianConnected: (selfJid: string) => void;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
-  /** Optional email deps mirrored from index.ts (whoami resolver, dedup LRU). */
+  /** Optional email dep mirrored from index.ts (whoami resolver). */
   emailOwnerEmailResolver?: () => Promise<string | undefined>;
-  emailInboundDedup?: InboundDedup;
   /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
@@ -70,6 +75,11 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
+  /** The personal WeChat client runtime, present only when config
+   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
+   *  the channel list's reader shares it, so the account is read through one
+   *  client. */
+  wechatUserRuntime?: WechatUserRuntime;
 }
 
 /**
@@ -81,16 +91,25 @@ export function registerBuiltinConnections(
   registry: ConnectionRegistry,
   deps: BuiltinConnectionDeps,
 ): void {
-  registry.register(makeTelegramDescriptor({ personMappingRepo: deps.personMappingRepo }));
+  registry.register(makeTelegramDescriptor());
   registry.register(
     makeDiscordDescriptor({
       conversationSettings: deps.conversationSettings,
+      chatStop: deps.chatStop,
       personMappingRepo: deps.personMappingRepo,
       listAgents: deps.listAgents,
     }),
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(createWechatDescriptor());
+  // The personal WeChat connection is opt-in: boot passes its runtime only when
+  // config `wechatUserEnabled` is on.
+  // It runs the client in this container and recovers its store key with a
+  // local debugger, so it needs no host execution — only the container's own
+  // capability to ptrace the client it launches.
+  if (deps.wechatUserRuntime) {
+    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
+  }
   registry.register(
     createFeishuDescriptor({
       conversationSettings: deps.conversationSettings,
@@ -104,11 +123,13 @@ export function registerBuiltinConnections(
       settingsRepo: deps.settingsRepo,
       personMappingRepo: deps.personMappingRepo,
       ownerEmailResolver: deps.emailOwnerEmailResolver,
-      inboundDedup: deps.emailInboundDedup,
       onAdapterBuilt: deps.onEmailAdapterBuilt,
     }),
   );
   registry.register(makeWebchatDescriptor({ webchatRepo: deps.webchatRepo }));
+  // Messages with other agents in the Rome Cloud account (dots). Offered on
+  // every instance; it does nothing until the guardian connects it.
+  registry.register(makeAgentsDescriptor());
   registry.register(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
@@ -128,8 +149,8 @@ export function registerBuiltinConnections(
   // surface: begin-redirect → guardian consents on the broker → the return leg
   // resumes the coroutine → redeem → terminal confer (which re-materializes the
   // tmpfs token file + gh/git shell auth via custody). Registration is NOT gated
-  // on the connect-UI provider list (google is env-gated there): state for an
-  // existing providerAccounts row must import regardless. A `reconnect` hint is
+  // on the connect-UI provider list (google is env-gated there), so an existing
+  // grant still loads. A `reconnect` hint is
   // always sent — every setup run is an explicit re-authorization, so it forces
   // fresh consent (correct for a degraded grant; a no-op-shaped extra on first
   // connect, where consent is shown anyway). This subsumes the legacy

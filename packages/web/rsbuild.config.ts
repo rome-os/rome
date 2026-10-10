@@ -1,15 +1,16 @@
 import { defineConfig, loadEnv } from "@rsbuild/core";
 import { pluginReact } from "@rsbuild/plugin-react";
 import { pluginSvgr } from "@rsbuild/plugin-svgr";
-import remarkGfm from "remark-gfm";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { createMdxRspackRule } from "./mdx-rspack-rule.js";
 
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const srcDir = fileURLToPath(new URL("./src", import.meta.url));
 const internalApiPort = process.env.INTERNAL_API_PORT ?? "4141";
 const internalApiTarget = `http://127.0.0.1:${internalApiPort}`;
 const emitSourceMaps = process.env.ROME_DOCKER_APP_CODE_MODE !== "compiled";
+const isDevelopment = process.env.NODE_ENV === "development";
 const packageDir = fileURLToPath(new URL("./", import.meta.url));
 
 // Mirror Vite's envPrefix semantics: only env vars matching these prefixes (or
@@ -60,21 +61,22 @@ export default defineConfig({
   // downstream has to transform it. Dev-only surface: the docs are reachable
   // from /dev, which drops out of production builds.
   tools: {
+    htmlPlugin(config, { entryName }) {
+      if (entryName === "desktop-vnc") {
+        config.template = resolve(packageDir, "desktop-vnc.html");
+      }
+    },
     rspack: {
       module: {
-        rules: [
-          {
-            test: /\.mdx$/,
-            // remark-gfm buys the table syntax a design doc needs for its
-            // rule/reason columns; plain MDX would render the pipes as text.
-            use: [{ loader: "@mdx-js/loader", options: { remarkPlugins: [remarkGfm] } }],
-          },
-        ],
+        rules: [createMdxRspackRule()],
       },
     },
   },
   source: {
-    entry: { index: resolve(srcDir, "main.tsx") },
+    entry: {
+      index: resolve(srcDir, "entry.tsx"),
+      "desktop-vnc": resolve(srcDir, "desktop-vnc.ts"),
+    },
     define: {
       ...publicVars,
       "import.meta.env.ROME_CLOUD_ORIGIN": JSON.stringify(romeCloudOrigin),
@@ -92,19 +94,18 @@ export default defineConfig({
       "/api": { target: internalApiTarget, changeOrigin: true },
       "/webhooks": { target: internalApiTarget, changeOrigin: true },
       "/app-assets": { target: internalApiTarget, changeOrigin: true },
-      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true },
-      // Route /desktop-proxy through the backend. The backend's
-      // desktopProxyRoutes forwards to noVNC using its own ROME_NOVNC_PORT;
-      // a containerized dev server can't reach the host's noVNC directly.
-      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true },
+      "/ws/terminal": { target: internalApiTarget, ws: true, changeOrigin: true, xfwd: true },
+      // Route /desktop-proxy through the backend so its WebSocket upgrade
+      // handler can authorize the connection before reaching noVNC.
+      "/desktop-proxy": { target: internalApiTarget, changeOrigin: true, ws: true, xfwd: true },
     },
   },
   output: {
     target: "web",
     distPath: { root: "dist" },
     sourceMap: {
-      js: emitSourceMaps ? "source-map" : false,
-      css: emitSourceMaps,
+      js: emitSourceMaps ? (isDevelopment ? "cheap-module-source-map" : "source-map") : false,
+      css: emitSourceMaps && !isDevelopment,
     },
   },
 });

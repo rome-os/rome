@@ -1,0 +1,40 @@
+cases:
+  - name: RAPP-01 Inspect recent Issue Triage activity
+    tags:
+      - apps
+      - shard-6
+    steps:
+      - app.open:
+          path: /apps/issue-triage
+      - aiAct: >-
+          Scroll downward once inside the Issue Triage dashboard, then stop.
+      - aiAssert: >-
+          Recent triage activity shows issue "#363" for "rome-os/rome" with its feature-request
+          label and P2 priority badge.
+  - name: RAPP-02 Inspect a completed Code Review record
+    tags:
+      - apps
+      - shard-6
+    steps:
+      - app.open:
+          path: /apps/code-review
+      - aiAct: >-
+          Scroll through the Code Review records until the "PR #301" review item is visible,
+          then open that item once. Stop when its review detail is open.
+      - aiAssert: >-
+          The PR #301 review detail is open and shows its completed review timeline rather than an
+          error state.
+  - name: RAPP-03 Inspect a completed Stock Daily report
+    tags:
+      - apps
+      - shard-6
+    steps:
+      - app.open:
+          path: /apps/stock-daily
+      - aiAct: >-
+          Scroll through the Stock Daily reports until the completed report dated 2026-09-11 is
+          visible. Open that report and stop when its detail view is shown.
+      - aiAssert: >-
+          The report view has a "Back to list" control, is marked "Completed", and is titled "US
+          Stock Market Daily Close Report | 2026-09-11". Its body begins with the data cutoff note
+          and a "0. One-sentence Executive Summary" section.

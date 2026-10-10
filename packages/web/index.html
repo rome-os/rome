@@ -3,25 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <!-- maximum-scale=1 + user-scalable=no locks zoom so mobile browsers stop
-         auto-zooming when a sub-16px input gains focus (and disables pinch-zoom
-         on this guardian-only app). -->
+    <!-- interactive-widget=resizes-content makes Chrome on Android shrink the
+         page above the keyboard rather than slide the keyboard over it. iOS
+         ignores the key, and lib/visual-viewport.ts covers iOS. Do not restrict
+         user zoom here: the control scale keeps focusable fields at 16px or
+         larger on touch devices, which prevents iOS focus zoom. -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <!-- Add-to-Home-Screen / installable PWA. iOS ignores the SVG favicon and
          the manifest for the Home Screen icon — it uses apple-touch-icon.png —
          so both are declared. apple-mobile-web-app-capable launches it as a
          standalone app (no Safari chrome); the standard mobile-web-app-capable
-         covers Android/Chrome. -->
+         covers Android/Chrome.
+
+         For `/apps/<id>` and `/full/apps/<id>` document requests the server
+         swaps the block between the rome:app-identity markers for the app's
+         own manifest, icon and name, so a shortcut saved from an app page
+         opens that app (packages/core/src/lib/social-meta.ts). Keep the
+         markers, and keep each tag on one line. -->
+    <!-- rome:app-identity:start -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Rome" />
+    <meta name="application-name" content="Rome" />
+    <!-- rome:app-identity:end -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Rome" />
-    <meta name="application-name" content="Rome" />
     <meta name="theme-color" content="#f4f3ef" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -55,33 +65,39 @@
          chat app or a timeline is a link to `<slug>.romeos.cc`, which without
          these renders as bare text.
 
-         Static, and identical on every instance: crawlers do not run the SPA, so
-         nothing React sets here would ever be seen, and per-chat titles would
-         have to be rendered server-side. The card carries Rome's own name and
-         nothing about the instance or its contents. The host is not repeated in
-         the title because every platform already renders it beside the card.
+         Static defaults for every route. For `/apps/<id>` and `/full/apps/<id>`
+         document requests the server swaps the block between the two
+         rome:social markers below, and the <title> above, for the routed app
+         (packages/core/src/lib/social-meta.ts; Caddy proxies those paths to
+         Hono for exactly this reason). Keep the markers: the replacer looks
+         for them. The host is not repeated in the title because every
+         platform already renders it beside the card.
 
          The image is the marketing site's, by absolute URL — instances have no
          1200x630 asset of their own and copying one here would be a second
          place to forget. It is datestamped, and rome-cloud renames it on every
          swap so caches refetch, which makes this a link that a swap over there
-         breaks. A dead image costs the picture, not the card.
+         breaks. A dead image costs the picture, not the card. This is the
+         only place the URL lives; social-meta.ts reads it back out of this
+         block when a card has no image of its own.
 
          Each tag stays on ONE line even where that runs long. Rsbuild drops a
          `<meta>` split across lines from the emitted HTML — the two description
          tags vanished from dist/index.html that way, and nothing failed. Biome
          ignores this file, so no formatter will rewrap them; a person might. -->
+    <!-- rome:social:start -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Rome" />
     <meta property="og:title" content="Rome OS - Enjoy your life with Rome" />
-    <meta property="og:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta property="og:description" content="Enjoy your life, work, business, and creativity with Rome OS, a compounding agent OS for recursive agents." />
     <meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Rome OS - Enjoy your life with Rome" />
-    <meta name="twitter:description" content="Enjoy your life, work, business, and creativity with Rome OS, the private agentic operating system." />
+    <meta name="twitter:description" content="Enjoy your life, work, business, and creativity with Rome OS, a compounding agent OS for recursive agents." />
     <meta name="twitter:image" content="https://romeos.cc/public-og-20260825.jpg" />
+    <!-- rome:social:end -->
     <!-- Per-deployment browser config. Referenced unconditionally:
          the committed public/ copy is an empty stub for dev servers and host
          runs; the container-boot script overwrites it in the web root, which is
@@ -114,7 +130,7 @@
           // lib/theme.ts). An entry written by an older build has an incompatible
           // shape, so a superseded key is ignored rather than replayed.
           // theme.test.ts fails if the two drift.
-          var css = localStorage.getItem("rome-theme-css-4");
+          var css = localStorage.getItem("rome-theme-css-5");
           if (css && css.length < 65536 && !/@import|url\(/i.test(css)) {
             var style = document.createElement("style");
             style.id = "rome-theme-tokens";
@@ -125,7 +141,7 @@
       })();
     </script>
   </head>
-  <body class="bg-background text-foreground antialiased">
+  <body class="bg-background text-foreground">
     <div id="root"></div>
   </body>
 </html>

@@ -1,0 +1,125 @@
+.tour-apps-guide {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  outline: none;
+  animation: tour-apps-appear 350ms ease both;
+}
+.tour-apps-mask {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tour-apps-copy {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(660px, calc(100% - 48px));
+  color: #fff;
+  text-align: center;
+}
+.tour-apps-copy h2 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 42px);
+  font-weight: 500;
+  line-height: 1.16;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.tour-apps-copy p {
+  margin: 18px 0 10px;
+  font-size: 15px;
+  color: #ffffffc7;
+}
+.tour-apps-copy button {
+  color: #ffffffb3;
+  font-size: 12px;
+  padding: 8px;
+  cursor: pointer;
+}
+.tour-apps-copy button:hover {
+  color: white;
+}
+.tour-apps-copy button:focus-visible {
+  outline: 2px solid white;
+  border-radius: 5px;
+}
+.tour-apps-group {
+  position: absolute;
+  border: 1px solid #ffffffc4;
+  border-radius: 18px;
+  background: transparent;
+  box-shadow:
+    0 0 0 5px #ffffff0d,
+    0 8px 30px #0000001a;
+  pointer-events: none;
+  animation: tour-apps-glow 3.6s ease-in-out infinite;
+  transition: box-shadow 180ms;
+}
+.tour-apps-target {
+  position: absolute;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+.tour-apps-target:hover {
+  background: #00000005;
+}
+.tour-apps-target:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -4px;
+}
+[data-tour-highlight="true"] > div.relative {
+  animation: tour-apps-wiggle 4s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+@keyframes tour-apps-wiggle {
+  0%,
+  8%,
+  24%,
+  100% {
+    transform: rotate(0);
+  }
+  12%,
+  20% {
+    transform: rotate(-5deg);
+  }
+  16% {
+    transform: rotate(5deg);
+  }
+}
+@keyframes tour-apps-glow {
+  0%,
+  100% {
+    border-color: #ffffff91;
+  }
+  50% {
+    border-color: white;
+  }
+}
+@keyframes tour-apps-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (max-width: 600px) {
+  .tour-apps-copy h2 {
+    font-size: 26px;
+  }
+  .tour-apps-copy p {
+    margin-top: 12px;
+    font-size: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-apps-guide,
+  .tour-apps-group,
+  [data-tour-highlight="true"] > div.relative {
+    animation: none;
+  }
+}

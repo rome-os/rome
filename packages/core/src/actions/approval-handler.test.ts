@@ -85,7 +85,11 @@ describe("ApprovalHandler", () => {
       expect(childA.calls).toEqual([{ id: 1 }]);
       expect(childB.calls).toEqual([]);
 
-      const resolved = await rome.repos.approvals.resolvePending(approvalId, "approve");
+      const resolved = await rome.repos.approvals.resolvePending(
+        approvalId,
+        "approve",
+        "test-guardian",
+      );
       expect(resolved.outcome).toBe("resolved");
       childA.calls.length = 0;
 
@@ -136,7 +140,7 @@ describe("ApprovalHandler", () => {
         string,
         unknown
       >;
-      await rome.repos.approvals.resolvePending(approvalId, "approve");
+      await rome.repos.approvals.resolvePending(approvalId, "approve", "test-guardian");
 
       await rome.approvalHandler.onApproved(approvalId);
 
@@ -167,7 +171,7 @@ describe("ApprovalHandler", () => {
 
   // onApproved — direct execution + agent session resumption
   describe("onApproved — agent-level session resumption", () => {
-    it("executes the action directly when no replayJournal and marks it executed", async () => {
+    it("executes the approved action and marks it executed", async () => {
       const { sendMessage } = await setup();
       const approvalId = await rome.seed.approvedActionApproval({
         actionName: "send_message",
@@ -267,7 +271,7 @@ describe("ApprovalHandler", () => {
       await rome.approvalHandler.onApproved(approvalId);
 
       expect(rome.model.sessions).toHaveLength(1);
-      expect(rome.model.sessions[0].agentName).toBe("main");
+      expect(rome.model.sessions[0].agentName).toBe("core:main");
     });
 
     it("skips session resumption when payload has no sessionId", async () => {
@@ -348,6 +352,25 @@ describe("ApprovalHandler", () => {
       expect(row!.executionState).toBe("failed");
       expect(row!.executionError).toBe("approval payload missing required field: actionName");
     });
+
+    it("marks execution failed when the payload has no recorded root call", async () => {
+      const { sendMessage } = await setup();
+      const approvalId = await rome.seed.approvedActionApproval({
+        actionName: "send_message",
+        args: { to: "user-1", text: "hello" },
+        rootActionName: undefined,
+        replayJournal: undefined,
+      });
+
+      await rome.approvalHandler.onApproved(approvalId);
+
+      expect(sendMessage.calls).toEqual([]);
+      const row = await rome.repos.approvals.findById(approvalId);
+      expect(row!.executionState).toBe("failed");
+      expect(row!.executionError).toBe(
+        "approval payload missing required fields: rootActionName, replayJournal",
+      );
+    });
   });
 
   // onRejected
@@ -369,7 +392,7 @@ describe("ApprovalHandler", () => {
       expect(rome.model.lastPrompt()).toContain('"send_message"');
       expect(rome.model.lastPrompt()).toContain("rejected by the guardian");
       expect(rome.model.lastPrompt()).not.toContain("feedback");
-      expect(rome.model.sessions[0].agentName).toBe("assistant");
+      expect(rome.model.sessions[0].agentName).toBe("core:assistant");
     });
 
     it("preserves the journal for the audit trail", async () => {

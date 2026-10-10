@@ -3,11 +3,21 @@ import type { ActionRegistryImpl } from "./registry.js";
 import type { ActionEngine } from "./engine.js";
 import type { Action, ActionConfig } from "./types.js";
 import type { ChannelMessageHook } from "../hooks/types.js";
+import { createLogger, type Logger } from "../logger.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { ActionExecutionContext, AppRuntimeRepositories } from "@rome-os/app-runtime";
+import type {
+  ActionExecutionContext,
+  AppRuntimeRepositories,
+  ChannelMessageHookDeps,
+} from "@rome-os/app-runtime";
 import type { AppCatalog } from "../apps/catalog.js";
-import type { CatalogEvent, ResolvedApp, SubscriberHandler } from "../apps/state.js";
+import {
+  type CatalogEvent,
+  isResolvedApp,
+  type ResolvedApp,
+  type SubscriberHandler,
+} from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import { createRomeAppContext, type RomeAppContext } from "../apps/context.js";
 import {
@@ -16,6 +26,10 @@ import {
   resolveModuleEntryPath,
 } from "./module-loader.js";
 import type { FavorService } from "../favors/types.js";
+import type { HostExecutionService } from "../host-execution/service.js";
+import type { FeedbackService } from "../lib/feedback-client.js";
+import type { AgentNamesService } from "../channels/agent-names.js";
+import { withRemovedMembers } from "../lib/removed-members.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -42,29 +56,9 @@ export function assertNoAppActionLoadFailures(
   );
 }
 
-export function assertRequiredActionRegistered(
-  registry: { has(name: string): boolean },
-  actionName: string,
-): void {
-  if (registry.has(actionName)) {
-    return;
-  }
-
-  throw new Error(`Required action "${actionName}" is not registered`);
-}
-
-export function assertRequiredHookPresent<T>(hook: T | null, hookName: string): T {
-  if (hook) {
-    return hook;
-  }
-
-  throw new Error(`Required hook "${hookName}" is not registered`);
-}
-
 export function createNoopChannelMessageHook(): ChannelMessageHook {
   return {
     async register() {},
-    registerConnection() {},
     unregister() {},
   };
 }
@@ -85,6 +79,12 @@ interface AppActionServices {
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
   favorService?: FavorService;
+  hostExecution?: HostExecutionService;
+  /** System-only: reporter provenance must come from system:send_feedback. */
+  feedback?: FeedbackService;
+  /** System-only: lists the guardian's agents and linked accounts', so only
+   *  system:send_message resolves a name in it. */
+  agentNames?: AgentNamesService;
 }
 
 interface AppLookup {
@@ -94,11 +94,25 @@ interface AppLookup {
 function makeAppLookup(catalog: AppCatalog): AppLookup {
   return (appId: string) => {
     const view = catalog.get(appId);
-    if (!view) return null;
-    if ((view as ResolvedApp).manifest === undefined) return null;
-    return view as ResolvedApp;
+    return isResolvedApp(view) ? view : null;
   };
 }
+
+/**
+ * Deps that @rome-os/app-runtime 0.7 removed, answered with the migration
+ * ({@link withRemovedMembers}).
+ *
+ * TODO(0.8): remove, with REMOVED_HOOK_DEPS.
+ */
+const REMOVED_ACTION_DEPS: Record<string, string> = {
+  talkRouter:
+    "deps.talkRouter was removed in @rome-os/app-runtime 0.7: send and read on channels through deps.channelsService",
+};
+// TODO(0.8): remove, with REMOVED_ACTION_DEPS.
+const REMOVED_HOOK_DEPS: Record<string, string> = {
+  talkRouter:
+    "deps.talkRouter was removed in @rome-os/app-runtime 0.7: a hook hears through deps.channels (channel.inbound.subscribe) and answers through channel.send",
+};
 
 function createAppActionRuntimeDeps(
   record: AppActionRecord,
@@ -111,17 +125,29 @@ function createAppActionRuntimeDeps(
     throw new Error(`App "${record.metadata.ownerId}" is not resolved in the catalog`);
   }
 
-  return {
-    ...deps,
-    appContext: createRomeAppContext(app, {
-      catalog,
-      db: services.db,
-      actionEngine: services.actionEngine,
-      routinesRepo: services.routinesRepo,
-      repositories: services.repositories,
-      favorService: services.favorService,
-    }),
-  } satisfies AppActionRuntimeDeps<Record<string, unknown>>;
+  return withRemovedMembers(
+    {
+      ...deps,
+      ...(record.metadata.ownerId === "system" && services.hostExecution
+        ? { hostExecution: services.hostExecution }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.feedback
+        ? { feedback: services.feedback }
+        : {}),
+      ...(record.metadata.ownerId === "system" && services.agentNames
+        ? { agentNames: services.agentNames }
+        : {}),
+      appContext: createRomeAppContext(app, {
+        catalog,
+        db: services.db,
+        actionEngine: services.actionEngine,
+        routinesRepo: services.routinesRepo,
+        repositories: services.repositories,
+        favorService: services.favorService,
+      }),
+    } satisfies AppActionRuntimeDeps<Record<string, unknown>>,
+    REMOVED_ACTION_DEPS,
+  );
 }
 
 function createLazyAppAction(
@@ -179,9 +205,11 @@ export async function registerAppActions(
     }
 
     try {
-      const action = await instantiateActionFromDirectory(record.config, record.directory, {
-        ...createAppActionRuntimeDeps(record, catalog, deps, services),
-      });
+      const action = await instantiateActionFromDirectory(
+        record.config,
+        record.directory,
+        createAppActionRuntimeDeps(record, catalog, deps, services),
+      );
       actionRegistry.register(action, record.metadata);
       loaded.push(name);
     } catch (err) {
@@ -202,16 +230,11 @@ export function registerLazyAppActions(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
-  options: { onlyAppId?: string } = {},
-): { loaded: string[]; failed: AppActionLoadFailure[] } {
+): { loaded: string[] } {
   const loaded: string[] = [];
-  const failed: AppActionLoadFailure[] = [];
 
   for (const [name, record] of actionLoader.getAllRecords()) {
     if (record.metadata.ownerType !== "app") {
-      continue;
-    }
-    if (options.onlyAppId !== undefined && record.metadata.ownerId !== options.onlyAppId) {
       continue;
     }
 
@@ -219,7 +242,7 @@ export function registerLazyAppActions(
     loaded.push(name);
   }
 
-  return { loaded, failed };
+  return { loaded };
 }
 
 /**
@@ -231,29 +254,24 @@ export function createAppActionsSubscriber(
   actionRegistry: ActionRegistryImpl,
   catalog: AppCatalog,
   deps: Record<string, unknown>,
-  services: {
-    db: DrizzleDb;
-    actionEngine: ActionEngine;
-    routinesRepo?: RoutinesRepository;
-    repositories: AppRuntimeRepositories;
-    favorService?: FavorService;
-  },
+  services: AppActionServices,
 ): SubscriberHandler {
   return async function appActionsSubscriber(event: CatalogEvent) {
     actionRegistry.unregisterOwnedBy("app", event.appId);
     if (event.change === "removed") return;
-    const current = event.current;
-    if (current == null) return;
-    if ((current as ResolvedApp).manifest === undefined) return;
+    if (!isResolvedApp(event.current)) return;
     await registerAppActions(actionLoader, actionRegistry, catalog, deps, services, {
       onlyAppId: event.appId,
     });
   };
 }
 
+const hookLog = createLogger("channel-message-hook-loader");
+
 export async function createChannelMessageHookFromCatalog(
   catalog: AppCatalog,
-  deps: unknown,
+  deps: ChannelMessageHookDeps,
+  log: Pick<Logger, "warn"> = hookLog,
 ): Promise<ChannelMessageHook | null> {
   const hooks = catalog.listArtifacts("hook");
   const hookRef = hooks.find((artifact) => artifact.publicName === "channel-message");
@@ -265,7 +283,19 @@ export async function createChannelMessageHookFromCatalog(
   const module = await importModuleWithCacheBuster(entryPath);
 
   if (typeof module.createHook === "function") {
-    return module.createHook(deps) as ChannelMessageHook;
+    const hook = module.createHook(
+      withRemovedMembers({ ...deps }, REMOVED_HOOK_DEPS),
+    ) as ChannelMessageHook;
+    // A hook built against @rome-os/app-runtime 0.6 may subscribe only in the
+    // removed registerConnection, which the host no longer calls: it would hear
+    // nothing and say nothing. Name the migration instead.
+    if (typeof (hook as { registerConnection?: unknown }).registerConnection === "function") {
+      log.warn(
+        "channel-message hook defines the removed registerConnection; subscribe through deps.channels in register()",
+        { owner: hookRef.ownerId },
+      );
+    }
+    return hook;
   }
 
   throw new Error(
@@ -286,7 +316,7 @@ export async function createChannelMessageHookFromCatalog(
  */
 export function createChannelMessageHookReloader(options: {
   catalog: AppCatalog;
-  deps: unknown;
+  deps: ChannelMessageHookDeps;
   getCurrent: () => ChannelMessageHook;
   setCurrent: (hook: ChannelMessageHook) => void;
   onSkip?: (reason: string) => void;

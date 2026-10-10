@@ -4,7 +4,10 @@ import type {
   DirectoryAccount,
   LinkAccountRequest,
   LinkConflict,
+  OutboxMessage,
   PersonResource,
+  SendMessageRequest,
+  SendRefusal,
   UpdatePersonRequest,
 } from "@rome/api-types/people";
 
@@ -30,18 +33,45 @@ export interface AccountRef {
  * What a write answers.
  *
  * A conflict is its own outcome rather than an error string: the caller has to
- * name the person who holds the account and offer an explicit transfer, and a
- * sentence it would have to parse is not a person's id.
+ * act on what the refusal named — the person who holds the account, or which of
+ * the ways a channel cannot be written to — and a sentence it would have to
+ * parse is neither a person's id nor a send state.
+ *
+ * `C` is which 409 this verb can earn. It defaults to {@link LinkConflict},
+ * which is every verb that moves a link; a send earns a {@link SendRefusal}
+ * instead, and typing the pair together would leave each caller narrowing away
+ * a refusal its route cannot answer with.
  */
-export type WriteOutcome<T> =
+export type WriteOutcome<T, C = LinkConflict> =
   | { ok: true; value: T }
-  | { ok: false; conflict: LinkConflict }
-  | { ok: false; message: string };
+  | { ok: false; conflict: C }
+  | {
+      ok: false;
+      message: string;
+      /**
+       * What the server answered, absent when nothing was reached.
+       *
+       * Beside the message rather than instead of it: every caller has a line
+       * to render and most have nothing to say about the code. It is here for
+       * the ones that do — a 404 on an outbox gesture means the row is not
+       * this reader's to act on, which is a different thing from a write that
+       * failed, and only the status tells the two apart.
+       */
+      status?: number;
+    };
 
 function isLinkConflict(payload: unknown): payload is LinkConflict {
   if (typeof payload !== "object" || payload === null) return false;
   const body = payload as Record<string, unknown>;
   return typeof body.channel === "string" && typeof body.channelUserId === "string";
+}
+
+/** A 409 from the send route: which of the three ways the channel could not be
+ *  written to. `error` is a fallback line; the dashboard renders `send`. */
+function isSendRefusal(payload: unknown): payload is SendRefusal {
+  if (typeof payload !== "object" || payload === null) return false;
+  const send = (payload as Record<string, unknown>).send;
+  return send === "not-connected" || send === "unsupported" || send === "no-conversation";
 }
 
 /**
@@ -67,11 +97,15 @@ function accountPath(account: AccountRef): string {
  * error handler serializes an unhandled exception as `{ error: err.message }`,
  * so trusting it would put a raw SQLite or repository message on screen.
  */
-async function send<T>(
+async function send<T, C = LinkConflict>(
   url: string,
   init: { method: string; json?: unknown },
   t: TFunction<"people">,
-): Promise<WriteOutcome<T>> {
+  /** Read a 409 body as this verb's conflict, or null when it is not one.
+   *  Defaults to the link conflict every account-moving verb answers with. */
+  readConflict: (payload: unknown) => C | null = (payload) =>
+    isLinkConflict(payload) ? (payload as C) : null,
+): Promise<WriteOutcome<T, C>> {
   const response = await fetch(url, {
     method: init.method,
     credentials: "include",
@@ -84,12 +118,17 @@ async function send<T>(
   if (!response) return { ok: false, message: t("errors.network") };
   const payload: unknown = await response.json().catch(() => null);
   if (response.ok) return { ok: true, value: payload as T };
-  if (response.status === 409 && isLinkConflict(payload)) return { ok: false, conflict: payload };
-  if (response.status >= 500) return { ok: false, message: t("errors.requestFailed") };
+  if (response.status === 409) {
+    const conflict = readConflict(payload);
+    if (conflict !== null) return { ok: false, conflict };
+  }
+  const status = response.status;
+  if (status >= 500) return { ok: false, message: t("errors.requestFailed"), status };
   const error = (payload as { error?: unknown } | null)?.error;
   return {
     ok: false,
     message: typeof error === "string" && error !== "" ? error : t("errors.requestFailed"),
+    status,
   };
 }
 
@@ -114,26 +153,6 @@ export function linkAccount(
   return send(
     `/api/people/${encodeURIComponent(personId)}/accounts`,
     { method: "POST", json: request },
-    t,
-  );
-}
-
-/**
- * `DELETE /api/people/:id/accounts/:channel/:channelUserId`.
- *
- * No gesture calls this yet — the row menu that would is still ahead. It sits
- * here because this module is the contract's verbs and a wire missing one reads
- * as a verb that does not exist; `./use-writes.ts` carries only the gestures the
- * page has.
- */
-export function unlinkAccount(
-  personId: string,
-  account: AccountRef,
-  t: TFunction<"people">,
-): Promise<WriteOutcome<PersonResource>> {
-  return send(
-    `/api/people/${encodeURIComponent(personId)}/accounts/${accountPath(account)}`,
-    { method: "DELETE" },
     t,
   );
 }
@@ -179,4 +198,53 @@ export function updatePerson(
   t: TFunction<"people">,
 ): Promise<WriteOutcome<PersonResource>> {
   return send(`/api/people/${encodeURIComponent(personId)}`, { method: "PATCH", json: update }, t);
+}
+
+/**
+ * `POST /api/people/:id/messages`. The account is in the body, always — the
+ * contract has no shape of this request that omits it.
+ *
+ * Answers the outbox row the send became, never a delivered message: the
+ * channel taking a message is not the message arriving, and only a later read
+ * of the outbox can see the second one.
+ */
+export function sendMessage(
+  personId: string,
+  request: SendMessageRequest,
+  t: TFunction<"people">,
+): Promise<WriteOutcome<OutboxMessage, SendRefusal>> {
+  return send(
+    `/api/people/${encodeURIComponent(personId)}/messages`,
+    { method: "POST", json: request },
+    t,
+    (payload) => (isSendRefusal(payload) ? payload : null),
+  );
+}
+
+/** `POST /api/people/:id/outbox/:messageId/retry`. Under the failed row's own
+ *  id, so a retry never reads as a second message the guardian did not write. */
+export function retrySend(
+  personId: string,
+  messageId: string,
+  t: TFunction<"people">,
+): Promise<WriteOutcome<OutboxMessage>> {
+  return send(
+    `/api/people/${encodeURIComponent(personId)}/outbox/${encodeURIComponent(messageId)}/retry`,
+    { method: "POST" },
+    t,
+  );
+}
+
+/** `DELETE /api/people/:id/outbox/:messageId`. The only way a row leaves the
+ *  outbox without having been delivered. */
+export function discardSend(
+  personId: string,
+  messageId: string,
+  t: TFunction<"people">,
+): Promise<WriteOutcome<void>> {
+  return send(
+    `/api/people/${encodeURIComponent(personId)}/outbox/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" },
+    t,
+  );
 }

@@ -1,7 +1,6 @@
 {
   "header": {
     "title": "Routines",
-    "subtitle": "Automations that fire actions when their trigger condition is met.",
     "createButton": "Create Routine"
   },
   "loading": "Loading routines...",
@@ -9,8 +8,6 @@
     "total": "Total",
     "active": "Active",
     "paused": "Paused",
-    "failingCount": "{{n}} failing",
-    "failingAria": "Show {{n}} failing routines",
     "nextUp": "Next up",
     "noUpcoming": "No upcoming runs",
     "etaOverdue": "due now"
@@ -130,13 +127,13 @@
     "placeholders": {
       "name": "Daily standup reminder",
       "startDate": "Pick a date",
-      "eventName": "action:completed",
+      "eventName": "order.created",
       "sourcePattern": "deploy_*",
       "actionName": "send_reminder",
       "argsJson": "{\"message\": \"Time for standup!\"}"
     },
     "hints": {
-      "eventName": "Well-known events include action:completed, action:failed, message:received, approval:resolved, routine:fired.",
+      "eventName": "The event type an app or connector publishes.",
       "sourcePattern": "Optional wildcard matched against the event's source (e.g. action name) — leave blank to match all.",
       "manual": "This routine has no automatic trigger. It runs only when you use \"Run now\"."
     },
@@ -207,20 +204,17 @@
   },
   "sections": {
     "schedule": {
-      "title": "On a schedule",
-      "subtitle": "these run at a set time"
+      "title": "On a schedule"
     },
     "event": {
-      "title": "When something happens",
-      "subtitle": "no set time — these wait, then run"
+      "title": "When something happens"
     },
     "manual": {
-      "title": "On demand",
-      "subtitle": "no trigger — these run only when you press Run now"
+      "title": "On demand"
     },
     "done": {
       "title": "Done",
-      "subtitle": "one-time tasks that already ran"
+      "subtitle": "One-time routines that already ran."
     }
   },
   "done": {

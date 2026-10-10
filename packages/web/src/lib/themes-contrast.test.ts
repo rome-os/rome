@@ -117,6 +117,8 @@ const PAIRINGS: Pairing[] = [
   // Neutral ink on the fills it is painted on. `foreground` is the page and
   // dialog ink; `surface-foreground` is Card's root.
   { fg: "foreground", bg: "background", min: AA_TEXT, why: "page canvas ink" },
+  { fg: "foreground", bg: "chat-canvas", min: AA_TEXT, why: "chat canvas ink" },
+  { fg: "foreground", bg: "app-canvas", min: AA_TEXT, why: "app canvas ink" },
   { fg: "foreground", bg: "surface", min: AA_TEXT, why: "Dialog/Sheet body ink" },
   { fg: "foreground", bg: "surface-elevated", min: AA_TEXT, why: "popover ink" },
   { fg: "foreground", bg: "surface-muted", min: AA_TEXT, why: "Badge default label" },
@@ -127,6 +129,8 @@ const PAIRINGS: Pairing[] = [
   // The secondary text tier. CardDescription and DialogDescription read it at
   // 14px, and FieldDescription puts the same role at 12px.
   { fg: "muted-foreground", bg: "background", min: AA_TEXT, why: "muted text on the canvas" },
+  { fg: "muted-foreground", bg: "chat-canvas", min: AA_TEXT, why: "chat metadata" },
+  { fg: "muted-foreground", bg: "app-canvas", min: AA_TEXT, why: "compact app metadata" },
   { fg: "muted-foreground", bg: "surface", min: AA_TEXT, why: "Card/DialogDescription" },
   { fg: "muted-foreground", bg: "surface-elevated", min: AA_TEXT, why: "menu section labels" },
   { fg: "muted-foreground", bg: "surface-muted", min: AA_TEXT, why: "Badge muted label" },
@@ -196,6 +200,8 @@ const PAIRINGS: Pairing[] = [
   // track). Transparent and alpha fills are out of scope for the reason given
   // above.
   { fg: "ring", bg: "background", min: AA_NON_TEXT, why: "outer edge on the canvas" },
+  { fg: "ring", bg: "chat-canvas", min: AA_NON_TEXT, why: "outer edge in chat" },
+  { fg: "ring", bg: "app-canvas", min: AA_NON_TEXT, why: "outer edge in an app" },
   { fg: "ring", bg: "surface", min: AA_NON_TEXT, why: "outer edge on a card" },
   { fg: "ring", bg: "primary", min: AA_NON_TEXT, why: "inner edge on a Button" },
   { fg: "ring", bg: "secondary", min: AA_NON_TEXT, why: "inner edge on a secondary Button" },
@@ -208,6 +214,8 @@ const PAIRINGS: Pairing[] = [
  *  or not at all. */
 const PAIRING_IDS = [
   "foreground/background",
+  "foreground/chat-canvas",
+  "foreground/app-canvas",
   "foreground/surface",
   "foreground/surface-elevated",
   "foreground/surface-muted",
@@ -215,6 +223,8 @@ const PAIRING_IDS = [
   "surface-foreground/surface",
   "surface-foreground/surface-elevated",
   "muted-foreground/background",
+  "muted-foreground/chat-canvas",
+  "muted-foreground/app-canvas",
   "muted-foreground/surface",
   "muted-foreground/surface-elevated",
   "muted-foreground/surface-muted",
@@ -246,6 +256,8 @@ const PAIRING_IDS = [
   "info-fg/surface",
   "success-fg/success-border",
   "ring/background",
+  "ring/chat-canvas",
+  "ring/app-canvas",
   "ring/surface",
   "ring/primary",
   "ring/secondary",

@@ -4,40 +4,55 @@ import {
   accountPresentation,
   comparePeople,
   countPeople,
-  isAfterTimelineCursor,
   isAssignableBondLevel,
   latestDynamic,
+  matchesSendRequest,
+  SEND_IDEMPOTENCY_RETENTION_MS,
   parseAccountCursor,
   parseAccountState,
   parseStreamCursor,
   parseMergeRequest,
   parsePersonFilterLevel,
-  parseTimelineCursor,
+  parseSendMessageRequest,
   parseUpdatePersonRequest,
   personMatchesLevel,
   personMatchesQuery,
+  sendRefusalMessage,
   sliceAccountDirectory,
   sliceAccountStream,
-  timelineCursor,
+  STRANDED_SEND_ERROR,
   timelinePageLimit,
   type CreatePersonRequest,
   type DirectoryAccount,
   type LinkAccountRequest,
   type LinkConflict,
+  type AccountSendState,
   type AccountState,
+  type OutboxMessage,
+  type OutboxPage,
   type PeopleList,
   type PersonResource,
+  type SendRefusal,
   type StreamAccount,
-  type TimelineEntry,
   type TimelinePage,
 } from "@rome/api-types/people";
 import {
+  isAfterMessageCursor,
+  messageCursor,
+  parseMessageCursor,
+  type Message,
+} from "@rome/api-types/message";
+import { talkConnections } from "./connections-store";
+import { memoryProfilePath } from "./memory-files";
+import {
+  LI_ARVIND_MEMBER,
   accountTimeline,
   nameForAccount,
   nextPersonId,
   ownerOf,
   personTimeline,
   persons,
+  recordDelivered,
   sentinelSenders,
   whatsappContacts,
   type AccountRef,
@@ -59,6 +74,12 @@ import {
  * `accountPresentation`, and no /api/people route addresses the sentinel.
  */
 
+function sendState({ channel, channelUserId }: AccountRef): AccountSendState {
+  if (talkConnections(channel).length === 0) return "not-connected";
+  if (channel === "linkedin") return channelUserId === LI_ARVIND_MEMBER ? "yes" : "no-conversation";
+  return channel === "whatsapp" || channel === "telegram" ? "yes" : "unsupported";
+}
+
 type PersonFixture = (typeof persons)[number];
 
 function personResource(person: PersonFixture): PersonResource {
@@ -71,11 +92,21 @@ function personResource(person: PersonFixture): PersonResource {
       channel: a.channel,
       channelUserId: a.channelUserId,
       displayName: nameForAccount(a.channel, a.channelUserId),
+      send: sendState(a),
+      // The account's own head, not the person's: the person's newest entry
+      // names a channel and not an address, so it cannot say which of two
+      // accounts on one channel was the recent one.
+      latestAt: accountTimeline(a)[0]?.timestamp ?? null,
     })),
     // Timeline entries, not records: the contract pins a person's count to the
     // history GET /api/people/:id/messages pages.
     messageCount: entries.length,
     latest: latestDynamic(entries),
+    // Read off the memory tree (./memory-files.ts) rather than a list here, so
+    // the dossier only offers the link for a profile the Memory page can open.
+    // Not everyone has one, because nothing writes a profile when a person is
+    // created: both states the dossier's menu handles are on the fixtures.
+    memoryPath: memoryProfilePath(person.id),
   };
 }
 
@@ -135,6 +166,13 @@ const strangerRow = () => persons.find((p) => p.id === STRANGER_PERSON_ID);
 
 const notFound = (what: string) => HttpResponse.json({ error: `Unknown ${what}` }, { status: 404 });
 
+/** What both outbox mutations answer for a row that is not this person's failed
+ *  row. One reply for "no such row", "not yours" and "already claimed": the
+ *  caller re-reads the outbox either way, and telling them apart would be
+ *  telling a caller about somebody else's rows. */
+const notTheirs = () =>
+  HttpResponse.json({ error: "No failed message of theirs with that id" }, { status: 404 });
+
 const linkConflict = (ref: AccountRef, owner: { id: string; displayName: string }) =>
   ({
     error: "account is already linked to another person",
@@ -183,6 +221,206 @@ const refFromParams = (params: Record<string, unknown>): AccountRef => ({
   channelUserId: decodeURIComponent(String(params.channelUserId)),
 });
 
+// ---------------------------------------------------------------------------
+// The outbox
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends Rome has been asked to make and has not seen arrive.
+ *
+ * Nothing here clears a row. A row is gone once its message is on the timeline,
+ * and {@link readOutbox} is what notices — the same derivation the route runs,
+ * so a dashboard built against this cannot come to depend on a delivery
+ * callback production does not send.
+ *
+ * A real channel answers on its own schedule; this one answers on the clock,
+ * because a mock with no provider behind it has nothing else to wait for. The
+ * two waits are what make `sending` and `unconfirmed` visible states rather
+ * than a flicker nobody can look at.
+ */
+interface OutboxRow extends OutboxMessage {
+  /** When the current attempt started, in ms. A retry resets it, so the row
+   *  walks the same two stages again. */
+  attemptedAt: number;
+  attempts: number;
+}
+
+const outbox: OutboxRow[] = [];
+const sendReceipts = new Map<string, { response: OutboxMessage; expiresAt: number }>();
+
+function pruneSendReceipts(now: number) {
+  for (const [id, receipt] of sendReceipts) {
+    if (receipt.expiresAt <= now) sendReceipts.delete(id);
+  }
+}
+
+function retireRow(row: OutboxRow, now: number) {
+  pruneSendReceipts(now);
+  sendReceipts.set(row.id, {
+    response: outboxMessage(row),
+    expiresAt: now + SEND_IDEMPOTENCY_RETENTION_MS,
+  });
+  outbox.splice(outbox.indexOf(row), 1);
+}
+
+/** How long the channel takes to accept a message, and how long after that it
+ *  surfaces in the store the timeline reads. */
+const ACCEPTED_AFTER_MS = 700;
+const LANDS_AFTER_MS = 1_400;
+
+/** How long a row may sit unconfirmed before it counts as stuck. The route's
+ *  five minutes; a mock row lands in under two seconds, so anything still here
+ *  after this has been deliberately wedged. */
+const STRANDED_AFTER_MS = 5 * 60_000;
+
+/**
+ * Why this attempt stops, or null when it goes through.
+ *
+ * Text-triggered, because nothing else in mock mode can go wrong: there is no
+ * provider to be down and no process to die. `fail` stops only the first
+ * attempt, so Retry has something to succeed at — the gesture is the point of
+ * the state. `stranded` keeps answering the same way, because it stands in for
+ * a row nothing will ever move.
+ */
+function stops(row: OutboxRow): string | null {
+  const text = row.text.toLowerCase();
+  if (text.startsWith("stranded")) return STRANDED_SEND_ERROR;
+  if (text.startsWith("fail") && row.attempts === 1) return "the channel rejected this message";
+  return null;
+}
+
+/**
+ * A send the channel took and whose message never reaches the timeline.
+ *
+ * The phantom Discard exists for: on a channel with no mirror of its own,
+ * Rome's transcript write is how a sent message lands, so a write that failed
+ * leaves a row nothing will ever move. Text-triggered, because a mock has no
+ * transcript to fail. Its row is backdated past the landing window on the way
+ * to `unconfirmed`, since nobody is going to sit here for five minutes to watch
+ * a button appear.
+ */
+function wedges(row: OutboxRow): boolean {
+  return row.text.toLowerCase().startsWith("wedged");
+}
+
+/**
+ * This person's row with that id, or null.
+ *
+ * Both outbox mutations resolve their row through this, because both are scoped
+ * the same way: a message id is not a capability, and the person in the path is
+ * whose outbox it is. Which states each verb then accepts is its own question,
+ * and the two answers differ.
+ */
+function rowOf(person: PersonFixture, messageId: string): OutboxRow | null {
+  const row = outbox.find((candidate) => candidate.id === messageId);
+  if (!row) return null;
+  const held = person.channelMappings.some(
+    (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
+  );
+  return held ? row : null;
+}
+
+/**
+ * Whether a row can be given up on: the route's rule, kept here so the mock and
+ * production never disagree about whether a button works.
+ *
+ * A row is dismissable once nothing is going to happen to it on its own. A
+ * `failed` one is finished. An `unconfirmed` one inside the landing window is
+ * ordinary and about to clear itself, so dropping it would race the clearing;
+ * past the window it was delivered and will never be seen, and on a channel
+ * with no mirror of its own that is the only way out it has. A `sending` one
+ * has not been answered yet.
+ */
+function isDismissableRow(row: OutboxRow, now: number): boolean {
+  if (row.state === "failed") return true;
+  return row.state === "unconfirmed" && now - row.attemptedAt >= STRANDED_AFTER_MS;
+}
+
+function openRow(account: AccountRef, text: string, id: string = crypto.randomUUID()): OutboxRow {
+  const row: OutboxRow = {
+    id,
+    channel: account.channel,
+    channelUserId: account.channelUserId,
+    text,
+    timestamp: Math.floor(Date.now() / 1000),
+    state: "sending",
+    ref: null,
+    error: null,
+    attemptedAt: Date.now(),
+    attempts: 1,
+  };
+  outbox.push(row);
+  return row;
+}
+
+/** The wire shape: the row minus the bookkeeping that drives the mock's clock,
+ *  which is not on the contract. */
+function outboxMessage(row: OutboxRow): OutboxMessage {
+  const { attemptedAt: _at, attempts: _n, ...message } = row;
+  return message;
+}
+
+/**
+ * This person's outbox, after moving every row as far as its clock allows.
+ *
+ * Two steps, in the order the real one takes them. First each attempt resolves:
+ * accepted and named, or refused. Then a message that has surfaced clears its
+ * row — by looking its `ref` up on the timeline, never by a flag, because that
+ * comparison is what the contract says an outbox row *is*.
+ */
+function readOutbox(person: PersonFixture): OutboxMessage[] {
+  const now = Date.now();
+  const held = (row: OutboxRow) =>
+    person.channelMappings.some(
+      (m) => m.channel === row.channel && m.channelUserId === row.channelUserId,
+    );
+
+  for (const row of outbox.filter(held)) {
+    const elapsed = now - row.attemptedAt;
+    if (row.state === "sending" && elapsed >= ACCEPTED_AFTER_MS) {
+      const stopped = stops(row);
+      if (stopped !== null) {
+        row.state = "failed";
+        row.error = stopped;
+      } else {
+        row.state = "unconfirmed";
+        // The id the channel gives back. A hint at the entry this would become
+        // at the address it was sent to, not a key: the server recognizes an
+        // arrival across every address the account folds, and this is the mock
+        // playing server rather than anything a client may rely on.
+        row.ref = `${row.channelUserId}:${row.id}`;
+        if (wedges(row)) {
+          // Backdated on the wire as well as in the bookkeeping. The row stands
+          // in for one accepted five minutes ago, and a reader decides whether
+          // to offer Discard from `timestamp` — the only age the contract
+          // carries. A row old to the route and fresh to the client would be a
+          // button that looks wrong rather than a state worth looking at.
+          row.attemptedAt = now - STRANDED_AFTER_MS;
+          row.timestamp = Math.floor((now - STRANDED_AFTER_MS) / 1000);
+        }
+      }
+    }
+    if (
+      row.state === "unconfirmed" &&
+      elapsed >= LANDS_AFTER_MS &&
+      row.ref !== null &&
+      !wedges(row)
+    ) {
+      recordDelivered(row, { timestamp: row.timestamp, body: row.text, ref: row.ref });
+    }
+  }
+
+  const arrived = new Set((personTimeline(person.id) ?? []).map((entry) => entry.ref));
+  for (let i = outbox.length - 1; i >= 0; i -= 1) {
+    const row = outbox[i]!;
+    if (held(row) && row.state === "unconfirmed" && row.ref !== null && arrived.has(row.ref)) {
+      retireRow(row, now);
+    }
+  }
+
+  return outbox.filter(held).map(outboxMessage);
+}
+
 export const peopleHandlers = [
   // Curated people only — the sentinel's holdings surface on /api/accounts as
   // dismissed rows, never as a person.
@@ -226,6 +464,7 @@ export const peopleHandlers = [
     return HttpResponse.json(
       sliceAccountDirectory(observedAccounts().map(directoryRow), {
         query: params.get("q"),
+        channel: params.get("channel"),
         state: state.state,
         cursor,
         limit: params.get("limit") ? Number(params.get("limit")) : null,
@@ -330,20 +569,119 @@ export const peopleHandlers = [
       (entry) => !channel || entry.source === channel,
     );
     const rawCursor = search.get("cursor");
-    const cursor = parseTimelineCursor(rawCursor);
+    const cursor = parseMessageCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
       return HttpResponse.json({ error: "cursor is not a timeline cursor" }, { status: 400 });
     }
     const limit = timelinePageLimit(search.get("limit"));
-    const remaining: TimelineEntry[] = cursor
-      ? all.filter((entry) => isAfterTimelineCursor(entry, cursor))
+    const remaining: Message[] = cursor
+      ? all.filter((entry) => isAfterMessageCursor(entry, cursor))
       : all;
     const page = remaining.slice(0, limit);
     const oldest = page.at(-1);
     return HttpResponse.json({
       entries: page,
-      nextCursor: remaining.length > page.length && oldest ? timelineCursor(oldest) : null,
+      nextCursor: remaining.length > page.length && oldest ? messageCursor(oldest) : null,
     } satisfies TimelinePage);
+  }),
+
+  /**
+   * Say something to one of this person's accounts.
+   *
+   * 202 rather than 200, and an outbox row rather than a timeline entry: the
+   * channel taking a message is not the message arriving, and the body says
+   * which of those has happened.
+   */
+  http.post("/api/people/:id/messages", async ({ params, request }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+
+    const parsed = parseSendMessageRequest(await request.json().catch(() => null));
+    if ("error" in parsed) return HttpResponse.json({ error: parsed.error }, { status: 400 });
+
+    // The account has to be one of theirs. A request naming somebody else's
+    // address is not one this person's page can answer, and sending anyway
+    // would deliver a message the guardian addressed to someone else.
+    const held = person.channelMappings.some(
+      (m) =>
+        m.channel === parsed.request.channel && m.channelUserId === parsed.request.channelUserId,
+    );
+    if (!held) {
+      return HttpResponse.json(
+        { error: "That account is not linked to this person" },
+        { status: 400 },
+      );
+    }
+
+    pruneSendReceipts(Date.now());
+    const active = outbox.find((row) => row.id === parsed.request.id);
+    const existing = active
+      ? outboxMessage(active)
+      : sendReceipts.get(parsed.request.id ?? "")?.response;
+    if (existing) {
+      return matchesSendRequest(existing, parsed.request)
+        ? HttpResponse.json(existing, { status: 202 })
+        : HttpResponse.json(
+            { error: "That send id belongs to a different message" },
+            { status: 409 },
+          );
+    }
+
+    // The same state the person read answered with, so a client that raced a
+    // disconnect renders the reason it would already have shown.
+    const send = sendState(parsed.request);
+    if (send !== "yes") {
+      return HttpResponse.json({ error: sendRefusalMessage(send), send } satisfies SendRefusal, {
+        status: 409,
+      });
+    }
+
+    return HttpResponse.json(
+      outboxMessage(openRow(parsed.request, parsed.request.text, parsed.request.id)),
+      {
+        status: 202,
+      },
+    );
+  }),
+
+  /** Every send of this person's still in flight. Unpaged — an outbox long
+   *  enough to page is an incident rather than a listing. */
+  http.get("/api/people/:id/outbox", ({ params }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+    return HttpResponse.json({ messages: readOutbox(person) } satisfies OutboxPage);
+  }),
+
+  /** Try a failed send again. Under its own id, so a retry never reads as a
+   *  second message the guardian did not write. */
+  http.post("/api/people/:id/outbox/:messageId/retry", ({ params }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+    // The row is claimed by the state it is in: a second retry of one already
+    // reopened finds nothing, which is what stops a double-clicked Retry
+    // delivering the guardian's message twice.
+    // Retry accepts a failed row and nothing else, and the state is what claims
+    // it: the second of two retries finds a row that is no longer theirs to
+    // send.
+    const row = rowOf(person, String(params.messageId));
+    if (!row || row.state !== "failed") return notTheirs();
+    row.state = "sending";
+    row.error = null;
+    row.ref = null;
+    row.attempts += 1;
+    row.attemptedAt = Date.now();
+    return HttpResponse.json(outboxMessage(row), { status: 202 });
+  }),
+
+  /** Give up on a failed send. The only way a row leaves the outbox without
+   *  having been delivered. */
+  http.delete("/api/people/:id/outbox/:messageId", ({ params }) => {
+    const person = findVisiblePerson(String(params.id));
+    if (!person) return notFound("person");
+    const row = rowOf(person, String(params.messageId));
+    if (!row || !isDismissableRow(row, Date.now())) return notTheirs();
+    retireRow(row, Date.now());
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get("/api/people/:id", ({ params }) => {

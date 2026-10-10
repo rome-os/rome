@@ -9,6 +9,9 @@
    overrides). Kept out of the canon above so app bundles that render no prose
    don't carry it — the dashboard does, so it opts in here. */
 @import "@rome-os/ui/markdown.css";
+/* Recorded apps ship their own Shadow DOM styles. Their compiled bundles
+   must not contribute utility classes to the dashboard stylesheet. */
+@source not "../mock/public/recorded-apps";
 @plugin "@tailwindcss/typography";
 
 /* ════════════════════════ THEME CONTRACT ════════════════════════
@@ -62,6 +65,47 @@
   --tw-prose-pre-bg: var(--surface-muted);
   --tw-prose-th-borders: var(--border);
   --tw-prose-td-borders: var(--border);
+}
+
+/* Chat wraps the shared Markdown cards in its own collapsible card. The
+   wrapper keeps the prose rhythm; the nested Streamdown card hands its frame
+   to the wrapper and goes flush inside it, and its language label, which the
+   wrapper's header already says, goes away. */
+.rome-markdown [data-chat-code-block="code"] {
+  margin-block: var(--markdown-code-block-space-block);
+}
+
+.rome-markdown [data-chat-code-block="mermaid"] {
+  margin-block: var(--markdown-media-space-block);
+}
+
+.rome-markdown
+  [data-chat-code-block]
+  :is([data-streamdown="code-block"], [data-streamdown="mermaid-block"]) {
+  margin-block: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+/* The canvas keeps its own `--background`, for the reason markdown.css gives,
+   and reaches the wrapper's edges, which clip it to their corners. */
+.rome-markdown [data-chat-code-block] [data-streamdown="mermaid-block"] > :last-child {
+  border: 0;
+  border-radius: 0;
+}
+
+.rome-markdown > [data-chat-code-block] + :not([data-streamdown^="heading-"]) {
+  margin-block-start: 0;
+}
+
+.rome-markdown
+  [data-chat-code-block]
+  :is(
+    [data-streamdown="code-block-header"],
+    [data-streamdown="mermaid-block"] > :first-child
+  ) {
+  display: none;
 }
 
 @keyframes rome-activity-pulse {
@@ -195,22 +239,96 @@
   }
 }
 
-/* Standalone live-activity dot: the same breathing dot as the caret, but a real
-   element instead of a tail pseudo-element. Shown when the turn is streaming yet
-   has no text to ride on — between text blocks, during a tool call, or before
-   the first token — so "the turn is still working" never goes dark. */
-.rome-live-activity-dot {
-  display: inline-block;
-  width: 0.45em;
-  height: 0.45em;
-  border-radius: var(--rome-radius-full);
-  background: var(--info);
-  animation: rome-activity-breathe 1.6s ease-in-out infinite;
+/* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
+   color tokens markdown reads are re-mapped onto the primary foreground for
+   the bubble's children. The bubble itself keeps the real `--primary` for its
+   own fill. */
+.rome-bubble-on-primary > * {
+  --foreground: var(--primary-foreground);
+  --muted-foreground: color-mix(in oklab, var(--primary-foreground) 75%, transparent);
+  --primary: var(--primary-foreground);
+  --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
+  --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+  --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* Typing bubble (chat TypingBubble): three dots rising in turn while the agent
+   works and has no text to show. Under reduced motion the dots rest. */
+.rome-typing-dot {
+  animation: rome-typing-dot 1.2s ease-in-out infinite;
+}
+
+.rome-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.rome-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes rome-typing-dot {
+
+  0%,
+  60%,
+  100% {
+    opacity: 0.4;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* The status line in the typing bubble fades in each time it changes. */
+.rome-status-fade {
+  animation: rome-status-fade 0.2s ease-out;
+}
+
+@keyframes rome-status-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rome-live-activity-dot {
+
+  .rome-typing-dot,
+  .rome-status-fade {
     animation: none;
+  }
+}
+
+/* Pending user bubble (chat UserMessage): the normal bubble, breathing while
+   the agent has not taken the input in yet. The delay keeps an input the agent
+   picks up at once from blinking. Under reduced motion it rests dimmed, so the
+   state still reads. */
+.rome-bubble-pending {
+  animation: rome-bubble-breathe 1.8s ease-in-out 0.6s infinite;
+}
+
+@keyframes rome-bubble-breathe {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .rome-bubble-pending {
+    animation: none;
+    opacity: 0.7;
   }
 }
 
@@ -350,9 +468,23 @@
        example inside the Expo WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
-    --rome-safe-area-bottom: env(safe-area-inset-bottom);
+    --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
+    /* An open keyboard covers the home indicator, but iOS keeps reporting its
+       inset. lib/visual-viewport.ts publishes the covered height inline on
+       <html>, and only the inset still showing above it pads the page. */
+    --rome-keyboard-height: 0px;
+    --rome-safe-area-bottom: max(
+      0px,
+      var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
+    );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
-    --rome-mobile-content-height: calc(100dvh - var(--rome-mobile-header-height));
+    /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
+       overrides this inline on <html>; the fallback serves browsers without
+       `visualViewport`. */
+    --rome-viewport-height: 100dvh;
+    --rome-mobile-content-height: calc(
+      var(--rome-viewport-height) - var(--rome-mobile-header-height)
+    );
   }
 
   html,
@@ -381,9 +513,19 @@
     scrollbar-gutter: stable;
   }
 
+  /* react-remove-scroll, under every Radix overlay, hides the body's overflow
+     and adds the scrollbar's width as a body margin so content does not widen
+     when the track disappears. The gutter reserved above keeps the track, so
+     that margin is pure shift. Both declarations are `!important`; this one
+     wins because a layered important declaration beats an unlayered one, and
+     the library injects its rule unlayered. */
+  body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+
   /* Default routes use normal document flow and document scrolling. */
   body {
-    min-height: 100dvh;
+    min-height: var(--rome-viewport-height);
   }
 }
 
@@ -393,6 +535,28 @@
 
 @utility pt-safe {
   padding-top: var(--rome-safe-area-top);
+}
+
+/* Overlay-style scrollbar for inner panes. The track keeps its width at all
+   times, so revealing the thumb never reflows the content beside it: only the
+   thumb's color changes, and only while the pointer or keyboard focus is
+   inside the scroller. macOS and iOS already hide idle scrollbars this way —
+   this makes Windows and Linux match instead of parking a permanent bar down
+   the edge of a pane nobody is scrolling.
+
+   Standard properties only, no `::-webkit-scrollbar` rules: styling that
+   pseudo-element opts Chrome out of overlay scrollbars entirely, which would
+   hand macOS a permanent 8px gutter it does not have today. Browsers too old
+   for `scrollbar-color` are the ones with auto-hiding overlay scrollbars
+   already, so the fallback is the behavior we are asking for. */
+@utility scrollbar-idle-hidden {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover,
+  &:focus-within {
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
 }
 
 /* Opt-in utilities for dashboard list rows on touch devices: reveal an action
@@ -441,6 +605,10 @@
 }
 
 @theme inline {
+  /* Status colour for a running chat (the sidebar spinner). Only the host
+     gets the utility: `--running` is not in the app token contract. */
+  --color-running: var(--running);
+
   @keyframes tw-shimmer {
     from {
       background-position: 100% 0;
@@ -493,41 +661,11 @@
   }
 }
 
-@keyframes rome-trace-ripple {
-  0% {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-
-  100% {
-    transform: scale(1.7);
-    opacity: 0;
-  }
-}
-
-.rome-trace-icon-ripple {
-  position: relative;
-}
-
-.rome-trace-icon-ripple::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  border: 1.5px solid var(--color-border-strong);
-  animation: rome-trace-ripple 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
-  pointer-events: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .shimmer {
     animation: none;
     background-image: none;
     -webkit-text-fill-color: currentColor;
-  }
-
-  .rome-trace-icon-ripple::before {
-    display: none;
   }
 }
 

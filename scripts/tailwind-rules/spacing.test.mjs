@@ -103,6 +103,7 @@ test("allows roster steps, geometry tokens, and safe-area padding", async () => 
         ".p-4{padding:var(--rome-space-4)}",
         ".px-token{padding-inline:var(--badge-px)}",
         ".pr-token{padding-right:calc(var(--field-px-md) - 4px)}",
+        ".py-row{padding-block:var(--row-py-sm)}",
         ".pb-safe{padding-bottom:calc(1rem + var(--rome-safe-area-bottom))}",
         ".mx-auto{margin-inline:auto}",
       ].join(""),

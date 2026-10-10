@@ -5,7 +5,7 @@ import type { RomeAppApiHandler, RomeAppApiRequest, RomeAppContext } from "@rome
 // Mocks ship alongside the compiled API module: `dist/api/index.js` and
 // `dist/mocks/`. Resolve against import.meta.url so it works wherever the app
 // is installed.
-const MOCKS_DIR = new URL("../mocks/", import.meta.url);
+const MOCKS_DIR = new URL(/* rspackIgnore: true */ "../mocks/", import.meta.url);
 
 const SLUG = /^[a-z0-9][a-z0-9-]*$/i;
 
@@ -51,13 +51,7 @@ class CodingApiHandler implements RomeAppApiHandler {
         appId: this.ctx.app.id,
         version: this.ctx.app.version,
         status: "ok",
-        capabilities: [
-          "planning",
-          "coding",
-          "app_creation",
-          "app_verification",
-          "frontend-gallery",
-        ],
+        capabilities: ["coding", "app_creation", "app_verification", "frontend-gallery"],
         routeExamples: {
           appHome: `/apps/${this.ctx.app.id}`,
           appApi: `/api/apps/${this.ctx.app.id}/status`,

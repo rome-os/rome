@@ -1,0 +1,185 @@
+{
+  "url": "https://www.united.com/en/us/fsr/choose-flights?f=SFO&t=IAH&d=2026-11-13&r=2026-11-15&at=0&sc=7%2C7&px=2&taxng=1&newHP=True&clm=7&st=bestmatches&tqp=",
+  "language": "en",
+  "currency": "USD",
+  "price_mode": "money",
+  "traveler_text": "2 Adults",
+  "date_heading": "Depart on: November 13",
+  "fare_note": "All fares shown are the total price roundtrip, per person. Additional bag charges may apply. Fare attributes apply to flights operated by United and United Express®. United flights may be listed first.",
+  "loading": false,
+  "login_required": false,
+  "challenge": false,
+  "no_results": false,
+  "show_all": false,
+  "displayed": [],
+  "rows": [
+    {
+      "departure": "12:45 AM",
+      "arrival": "6:32 AM",
+      "departure_note": "",
+      "arrival_note": "",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 47MDuration 3 hours and 47 minutes",
+      "flight_text": "NONSTOP\n12:45 AM\nDeparting at 12:45 AM\n6:32 AM\nArriving at 6:32 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 47M\nDuration 3 hours and 47 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 604 (Boeing 737 MAX 9)\nFlight Number UA 604. Aircraft Boeing 737 MAX 9\nDetails\nSeats\n275 kg CO2\nCarbon emissions estimate: 275 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "ECO-BASIC",
+          "product": "United Economy®(Main cabin)",
+          "miles_text": "",
+          "money_text": "$454",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$454\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "ECONOMY-MERCH-EPLUS",
+          "product": "Economy Plus®(Extra legroom)",
+          "miles_text": "",
+          "money_text": "$823",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$823\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "MIN-BUSINESS-OR-FIRST",
+          "product": "United First®(Extra-spacious seat)",
+          "miles_text": "",
+          "money_text": "$1,784",
+          "cabin": "United First",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$1,784\nUnited First\ncabin select to view fare options"
+        }
+      ]
+    },
+    {
+      "departure": "5:00 AM",
+      "arrival": "10:49 AM",
+      "departure_note": "",
+      "arrival_note": "",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 49MDuration 3 hours and 49 minutes",
+      "flight_text": "NONSTOP\n5:00 AM\nDeparting at 5:00 AM\n10:49 AM\nArriving at 10:49 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 49M\nDuration 3 hours and 49 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 2168 (Boeing 737 MAX 9)\nFlight Number UA 2168. Aircraft Boeing 737 MAX 9\nDetails\nSeats\n278 kg CO2\nCarbon emissions estimate: 278 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "ECO-BASIC",
+          "product": "United Economy®(Main cabin)",
+          "miles_text": "",
+          "money_text": "$386",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$386\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "ECONOMY-MERCH-EPLUS",
+          "product": "Economy Plus®(Extra legroom)",
+          "miles_text": "",
+          "money_text": "$755",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$755\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "MIN-BUSINESS-OR-FIRST",
+          "product": "United First®(Extra-spacious seat)",
+          "miles_text": "",
+          "money_text": "$1,408",
+          "cabin": "United First",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$1,408\nUnited First\ncabin select to view fare options"
+        }
+      ]
+    },
+    {
+      "departure": "11:59 PM",
+      "arrival": "5:46 AM",
+      "departure_note": "",
+      "arrival_note": "Arrives Nov 14",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 47MDuration 3 hours and 47 minutes",
+      "flight_text": "NONSTOP\n \n11:59 PM\nDeparting at 11:59 PM\nArrives Nov 14\n5:46 AM\nArriving at 5:46 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 47M\nDuration 3 hours and 47 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 505 (Boeing 787-9 Dreamliner)\nFlight Number UA 505. Aircraft Boeing 787-9 Dreamliner\nDetails\nSeats\n349 kg CO2\nCarbon emissions estimate: 349 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "ECO-BASIC",
+          "product": "United Economy®(Main cabin)",
+          "miles_text": "",
+          "money_text": "$386",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$386\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "ECONOMY-MERCH-EPLUS",
+          "product": "Economy Plus®(Extra legroom)",
+          "miles_text": "",
+          "money_text": "$755",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$755\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "MIN-BUSINESS-OR-FIRST",
+          "product": "United First®(Extra-spacious seat)",
+          "miles_text": "",
+          "money_text": "$1,346",
+          "cabin": "United First",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$1,346\nUnited First\ncabin select to view fare options"
+        }
+      ]
+    },
+    {
+      "departure": "12:45 AM",
+      "arrival": "6:32 AM",
+      "departure_note": "Departs Nov 14",
+      "arrival_note": "Arrives Nov 14",
+      "origin": "SFO",
+      "destination": "IAH",
+      "duration_text": "3H, 47MDuration 3 hours and 47 minutes",
+      "flight_text": "NONSTOP\nDeparts Nov 14\n12:45 AM\nDeparting at 12:45 AM\nArrives Nov 14\n6:32 AM\nArriving at 6:32 AM\nSFO\nOrigin San Francisco, CA, US (SFO)\n3H, 47M\nDuration 3 hours and 47 minutes\nIAH\nDestination Houston, TX, US (IAH)\nUA 604 (Boeing 737 MAX 9)\nFlight Number UA 604. Aircraft Boeing 737 MAX 9\nDetails\nSeats\n275 kg CO2\nCarbon emissions estimate: 275 kilograms.\nLearn more about carbon emissions",
+      "fares": [
+        {
+          "product_id": "ECO-BASIC",
+          "product": "United Economy®(Main cabin)",
+          "miles_text": "",
+          "money_text": "$454",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$454\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "ECONOMY-MERCH-EPLUS",
+          "product": "Economy Plus®(Extra legroom)",
+          "miles_text": "",
+          "money_text": "$823",
+          "cabin": "United Economy",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$823\nUnited Economy\ncabin select to view fare options"
+        },
+        {
+          "product_id": "MIN-BUSINESS-OR-FIRST",
+          "product": "United First®(Extra-spacious seat)",
+          "miles_text": "",
+          "money_text": "$1,784",
+          "cabin": "United First",
+          "award_type": "",
+          "discount": "",
+          "text": "From\n$1,784\nUnited First\ncabin select to view fare options"
+        }
+      ]
+    }
+  ]
+}

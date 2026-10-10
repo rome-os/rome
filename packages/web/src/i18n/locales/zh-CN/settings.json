@@ -14,7 +14,8 @@
     "Trust": "信任",
     "Channels": "渠道",
     "AI Tools": "AI 工具",
-    "Advanced": "高级"
+    "Advanced": "高级",
+    "Devices": "设备"
   },
   "appearance": {
     "title": "外观",
@@ -73,7 +74,7 @@
       "telegram": {
         "bot": {
           "titleFallback": "你的 Telegram 机器人",
-          "subtitle": "通过 @BotFather 添加一个机器人",
+          "subtitle": "通过 @BotFather 添加一个机器人。",
           "bullets": {
             "reply": "有人给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -85,7 +86,7 @@
         },
         "session": {
           "title": "你的账号",
-          "subtitle": "用手机号登录",
+          "subtitle": "用手机号登录。",
           "bullets": {
             "send": "以你的身份从你的账号发消息——像你本人一样联系供应商和客户",
             "read": "阅读并总结你的聊天和群组",
@@ -97,7 +98,6 @@
       "whatsapp": {
         "bot": {
           "title": "你的 WhatsApp",
-          "subtitle": "使用配对码配对设备",
           "bullets": {
             "reply": "有人在 WhatsApp 上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -107,17 +107,24 @@
       "wechat": {
         "bot": {
           "title": "你的微信",
-          "subtitle": "扫描二维码关联账号",
           "bullets": {
             "reply": "有人在微信上给你发消息时自动回复",
             "start": "收到新消息时启动任务"
           }
+        },
+        "session": {
+          "title": "你的微信账号",
+          "bullets": {
+            "read": "读取你自己的微信聊天、群聊和历史消息",
+            "recap": "回顾你不在时错过的内容",
+            "search": "直接找到别人说过的话，不用翻聊天记录"
+          },
+          "privacyNote": "只读——Rome 永远不会替你发送微信消息。微信运行在你自己的实例上，聊天记录在那里读取，不会离开该实例。随时可以断开连接。"
         }
       },
       "linkedin": {
         "bot": {
           "title": "你的领英",
-          "subtitle": "通过 Rome 的浏览器登录",
           "bullets": {
             "read": "保持同步你的领英收件箱副本",
             "recap": "阅读并总结你的领英对话"
@@ -127,7 +134,6 @@
       "discord": {
         "bot": {
           "titleFallback": "你的 Discord 机器人",
-          "subtitle": "在 Discord 开发者门户添加一个机器人",
           "bullets": {
             "reply": "有人在你的服务器里给 {{identity}} 发消息时自动回复",
             "start": "收到新消息时启动任务"
@@ -153,6 +159,15 @@
           "bullets": {
             "reply": "给你的 agent 发邮件，它会回复",
             "start": "收到新邮件时启动任务"
+          }
+        }
+      },
+      "agents": {
+        "bot": {
+          "title": "与你的其他 agent 互发消息",
+          "bullets": {
+            "reply": "你的 dot 通过 Rome Cloud 给你的 agent 发消息",
+            "start": "有事需要处理时，你的 agent 给 dot 发消息"
           }
         }
       },
@@ -205,7 +220,6 @@
   },
   "appKeys": {
     "title": "应用密钥",
-    "subtitle": "供你 Rome 上的应用使用的密码和 API 密钥。",
     "back": "连接",
     "openLabel": "打开应用密钥",
     "keyCount_one": "{{count}} 个密钥",
@@ -238,16 +252,35 @@
       "namePlaceholder": "例如：SHOP_DB_PASSWORD",
       "nameHint": "大写字母、数字和下划线。",
       "valueField": "秘密值",
-      "valueHint": "保存后 Rome 会一直隐藏它。以后修改时需要重新输入。",
+      "valueHint": "Rome 不会再次显示该值。若要修改，请重新输入。",
       "valueRequired": "请输入秘密值。",
       "consent": "安装在你 Rome 上的任何应用都能读取它。",
       "save": "对所有应用保存",
       "saving": "保存中…",
-      "cancel": "取消"
+      "cancel": "取消",
+      "inputMethod": "添加密钥的方式",
+      "singleKey": "单个密钥",
+      "pasteEnv": "粘贴 .env",
+      "envContent": ".env 内容",
+      "envHint": "粘贴 KEY=value 格式的内容，支持注释和带引号的值。同名密钥会被替换，变量引用会按原文保存。",
+      "envEmpty": "请粘贴至少一条 KEY=value 内容",
+      "envError": "第 {{line}} 行：{{reason}}",
+      "envErrors": {
+        "assignment": "应使用 KEY=value 格式",
+        "quote": "引号未闭合，或引号后存在多余内容",
+        "duplicate": "密钥名称重复",
+        "emptyValue": "值不能为空",
+        "longValue": "值超过 32,768 个字符",
+        "name": "密钥名称无效"
+      },
+      "batchFailed": "已保存 {{saved}} 个，{{count}} 个失败。表单中仅保留失败的条目，请重试保存。"
     },
     "saved": "已保存。应用现在可以读取 {{name}}。",
     "savedOverridden": "已保存，但存在同名的服务器设置并优先生效——你输入的值不会被使用。",
-    "removed": "已移除 {{name}}。"
+    "removed": "已移除 {{name}}。",
+    "batchSaved_one": "已为所有应用保存 {{count}} 个密钥。",
+    "batchSaved_other": "已为所有应用保存 {{count}} 个密钥。",
+    "batchOverridden": "部分已保存的密钥被服务器设置覆盖，输入的值未被使用。"
   },
   "trust": {
     "title": "关系层级规则",
@@ -309,12 +342,6 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "enabled": "关闭后 Rome 将完全不再在此处响应",
-        "respond": "Rome 何时参与该会话",
-        "botMessages": "Rome 如何处理其他机器人的消息",
-        "whenOthersMentioned": "被提及的是其他人，而非 Rome",
-        "replies": "Rome 的回复发布在哪里",
-        "agent": "由哪个智能体处理该会话",
         "sessionReset": "清除提供商侧的会话记忆"
       },
       "source": {
@@ -417,6 +444,10 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
+    },
+    "wechatUser": {
+      "fallbackName": "微信账号",
+      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {
@@ -453,9 +484,9 @@
     "noPeers": "未在 tailnet 中找到对端节点。",
     "exitNode": {
       "title": "出口节点",
-      "description": "允许 tailnet 中的其他设备通过此 Rome 服务器转发互联网流量。",
       "updating": "正在更新出口节点设置…",
-      "updateFailed": "更新出口节点设置失败。"
+      "updateFailed": "更新出口节点设置失败。",
+      "termTooltip": "出口节点会将其他设备的互联网流量通过此服务器转发。"
     },
     "downloadBannerPrefix": "在 Docker 之外运行。请下载",
     "downloadBannerLink": "Tailscale 桌面应用",
@@ -483,7 +514,7 @@
   },
   "publicAccess": {
     "title": "访问控制",
-    "description": "控制谁可以访问仪表盘。守护者认证始终会保护仪表盘：你可以允许特定 Rome Cloud 账号登录，或将访问限制在你的 Tailscale 网络内。标记为公开或限制为 Rome Cloud 邮箱列表的应用仍可从公开主机访问。",
+    "description": "在此处的所有设置下，仪表盘都仍需登录。",
     "savedFlash": "公开访问设置已保存",
     "saveFailedFallback": "保存公开访问设置失败。",
     "openFirst": "请先在本设备上打开 Rome 的 Tailscale URL，然后再开启访问控制。",
@@ -497,7 +528,7 @@
     "publicEnabledNote": "已启用公网主机访问。仪表盘仍需登录，但公开应用和 Rome Cloud 邮箱访问应用除外。",
     "dashboardEmails": {
       "title": "允许的邮箱",
-      "description": "这些账号可以登录完整 Web 仪表盘。",
+      "description": "授予的是完整仪表盘权限，而不只是单个应用。",
       "accountCount_one": "{{count}} 个账号",
       "accountCount_other": "{{count}} 个账号",
       "inputLabel": "添加邮箱地址",
@@ -513,10 +544,22 @@
   },
   "aiTools": {
     "title": "AI 工具",
-    "description": "使用你现有的订阅来驱动智能体。",
     "refresh": "刷新",
     "refreshing": "正在刷新…",
     "refreshFailed": "无法刷新 AI 工具，请重试。",
+    "romeCredits": {
+      "name": "Rome 额度",
+      "status": {
+        "inUse": "使用中",
+        "ready": "就绪",
+        "standby": "待用",
+        "usedUp": "已用完",
+        "usedUpWithClaude": "已用完",
+        "paused": "已暂停"
+      },
+      "ofGranted": "共 {{amount}}",
+      "meterLabel": "Rome 剩余额度"
+    },
     "providers": {
       "claudeCode": {
         "name": "Claude"
@@ -555,12 +598,12 @@
     "loggingOut": "正在退出…",
     "codexLogout": {
       "title": "退出 ChatGPT 登录？",
-      "description": "Rome 将在此服务器上退出你的 ChatGPT 账户。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。",
       "failed": "退出 ChatGPT 登录失败，请重试。"
     },
     "claudeLogout": {
       "title": "退出 Claude 登录？",
-      "description": "Rome 将在此服务器上退出你的 Claude 账户。你可以随时重新登录。",
+      "description": "只在此服务器上退出登录。",
       "failed": "退出 Claude 登录失败，请重试。"
     },
     "methods": {
@@ -588,7 +631,7 @@
       "removeFailedFallback": "移除提供方密钥失败。",
       "removeConfirm": {
         "title": "移除 {{providerName}} API 密钥？",
-        "description": "Rome 将永久删除已保存的 API 密钥。Claude 会话将停止使用 {{providerName}}。若要再次使用，你需要添加新密钥。"
+        "description": "Claude 会话会停止使用 {{providerName}}。若要恢复，需要提供新的密钥。"
       },
       "custom": {
         "providerName": "自定义",
@@ -629,7 +672,7 @@
     "title": "高级设置",
     "presentationMode": {
       "title": "演示模式",
-      "description": "所有聊天均以主助手身份呈现——隐藏固定代理的名称、头像和输入框标签，让录屏和演示看起来与普通对话无异。仅影响显示，且仅对当前浏览器生效。",
+      "description": "隐藏固定代理的名称、头像和输入框标签。仅对当前浏览器生效。",
       "toggleLabel": "在聊天中隐藏代理身份"
     },
     "developerSettings": {
@@ -637,8 +680,24 @@
     },
     "fable": {
       "title": "Fable",
-      "description": "Claude 可用时，优先使用 Fable 处理 large 模型请求。",
+      "description": "仅在 Claude 可用时生效。",
       "toggleLabel": "将 large 模型路由到 Fable"
+    },
+    "tierModelMappings": {
+      "title": "模型 ID 映射",
+      "description": "设置每个提供商中各层级使用的模型 ID。将 ID 留空可保留默认值。",
+      "openai": {
+        "large": "Codex large 模型 ID",
+        "medium": "Codex medium 模型 ID",
+        "small": "Codex small 模型 ID"
+      },
+      "anthropic": {
+        "large": "Claude large 模型 ID",
+        "medium": "Claude medium 模型 ID",
+        "small": "Claude small 模型 ID"
+      },
+      "fableNote": "Claude large 映射会替换 Fable 的模型 ID，但 Fable 仍会优先为 large 层级选择 Claude。",
+      "save": "保存映射"
     },
     "modelSelector": {
       "title": "模型选择器",
@@ -650,7 +709,7 @@
     },
     "aiToolUsage": {
       "title": "AI 工具用量",
-      "description": "在 AI 工具设置页显示 Claude 和 ChatGPT 的用量窗口。",
+      "description": "用量窗口会显示在 AI 工具标签页。",
       "toggleLabel": "显示 Claude 和 ChatGPT 用量"
     },
     "relayHealth": {
@@ -665,7 +724,7 @@
         "retrying": "正在重试投递",
         "blocked": "投递已阻塞"
       },
-      "notConfiguredHint": "未存储中继凭据，Webhook 不会被排空到本实例。",
+      "notConfiguredHint": "未存储中继凭据，因此传入的 Webhook 不会送达本实例。",
       "depositUrl": "投递 URL",
       "drainUrl": "排空 URL",
       "targetApp": "目标应用",
@@ -721,7 +780,39 @@
       "appsUnhealthy": "已加载 {{count}} 个；失败：{{ids}}"
     },
     "uptimePrefix": "已运行 {{uptime}}",
-    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}"
+    "buildPrefix": "版本 {{sha}} · 构建于 {{builtAt}}",
+    "computerUse": {
+      "title": "计算机操作",
+      "description": "通过 OpenCLI 连接的浏览器。上次在线时间记录最近一次确认连接的时间。",
+      "refresh": "刷新",
+      "loadFailed": "无法刷新浏览器连接",
+      "loading": "正在检查浏览器连接…",
+      "daemon": {
+        "running": "运行中",
+        "unavailable": "不可用"
+      },
+      "daemonUnavailable": "无法访问 OpenCLI。浏览器连接状态无法确认。",
+      "empty": "尚未发现浏览器连接。安装 OpenCLI 扩展并将其连接到此实例。",
+      "browser": "浏览器 {{id}}",
+      "profile": "配置文件 {{id}}",
+      "extensionVersion": "扩展 v{{version}}",
+      "status": {
+        "connected": "已连接",
+        "disconnected": "已断开",
+        "unknown": "未知"
+      },
+      "lastSeen": "上次在线",
+      "notReported": "未提供",
+      "installExtension": "安装 OpenCLI 扩展"
+    },
+    "feedback": {
+      "title": "反馈",
+      "agentReports": {
+        "title": "智能体平台问题报告",
+        "description": "将智能体对 Rome 平台问题的描述发送给 Rome 团队，并附带与反馈对话框相同的实例诊断信息。不影响你主动发送的反馈。",
+        "toggleLabel": "允许智能体发送报告"
+      }
+    }
   },
   "system": {
     "title": "系统",
@@ -753,16 +844,64 @@
     "restartTimeoutBody": "Rome 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。"
   },
-  "sentinel": {
-    "title": "哨兵设置",
-    "intervalLabel": "审阅间隔（分钟）",
-    "intervalHelp": "提醒守护者审阅哨兵日志条目的频率。"
-  },
   "easterEgg": {
     "closeLabel": "关闭高级彩蛋",
     "console": "控制台",
     "artLabel": "高级彩蛋",
     "estLine": "Est · MMXXVI",
     "tagline": "Svmmvs · Civitatis"
+  },
+  "devices": {
+    "title": "设备",
+    "description": "Rome 账户关联的设备。每 15 秒刷新一次连接检查。",
+    "refresh": "刷新",
+    "loading": "正在检查设备连接…",
+    "loadFailed": "设备加载失败",
+    "connectionLabel": "Rome 连接",
+    "checkedAt": "上次检查：{{time}}。",
+    "empty": "此账户尚未关联电脑。",
+    "connection": {
+      "not_running": "服务未运行",
+      "online": "已连接",
+      "stopped": "空闲",
+      "connecting": "正在连接",
+      "retrying": "正在重连",
+      "revoked": "授权已撤销",
+      "superseded": "连接已被替换",
+      "not_configured": "未配置",
+      "unavailable": "不可用",
+      "incompatible": "需要重启"
+    },
+    "help": {
+      "not_running": "启动此 Rome 实例上的服务后，即可检查已关联的电脑。刷新只检查状态，不会启动服务。",
+      "unavailable": "暂时无法获取设备状态，请刷新重试。",
+      "not_configured": "尚未配置设备访问。将此 Rome 实例关联到 Rome Cloud 后即可准备访问。",
+      "incompatible": "在 Rome 实例上先运行 rome-node daemon stop，再运行 rome-node daemon start。这会重启共享服务，并中断正在进行的设备请求。",
+      "stopped": "设备服务正在运行。在需要检查或使用已关联的电脑之前，连接会保持空闲。"
+    },
+    "status": {
+      "connected": "已连接",
+      "not_connected": "未连接",
+      "unknown": "未知",
+      "revoked": "授权已撤销"
+    },
+    "connectedCount_one": "{{count}} 台设备已连接",
+    "connectedCount_other": "{{count}} 台设备已连接",
+    "connectedAtLeast_one": "至少 {{count}} 台设备已连接",
+    "connectedAtLeast_other": "至少 {{count}} 台设备已连接",
+    "totalCount_one": "共 {{count}} 台已授权设备",
+    "totalCount_other": "共 {{count}} 台已授权设备",
+    "unknownCount_one": "无法确认 {{count}} 台设备的连接状态。",
+    "unknownCount_other": "无法确认 {{count}} 台设备的连接状态。",
+    "start": "启动服务",
+    "starting": "正在启动…",
+    "startFailed": "设备服务启动失败",
+    "setup": {
+      "title": "连接电脑",
+      "description": "设备服务运行在 Rome 实例上。每台需要使用的电脑都要单独建立连接。",
+      "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
+      "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
+      "instructions": "安装与连接指南"
+    }
   }
 }

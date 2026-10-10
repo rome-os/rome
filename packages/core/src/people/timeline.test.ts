@@ -1,13 +1,14 @@
 import { describe, it, expect } from "@rstest/core";
-import { latestDynamic, parseTimelineCursor, type TimelineEntry } from "@rome/api-types/people";
+import { latestDynamic } from "@rome/api-types/people";
+import { parseMessageCursor, type Message } from "@rome/api-types/message";
 import { memoryMessages } from "../channels/messages-memory.js";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { readPersonTimeline } from "./timeline.js";
-import { readPeopleActivity } from "./activity.js";
+import { readActivity } from "./activity.js";
 
 // The merge above the stores: what a page is, how it resumes, and which store
 // owns an account. Every store here is in-memory, so nothing below is about
-// SQL — a store that answers the `Messages` contract is a store this merge can
+// SQL — a store that answers the `AccountMessages` contract is a store this merge can
 // page.
 
 const account = (channel: string, ...addresses: string[]): MessageAccount => ({
@@ -20,17 +21,17 @@ const entry = (
   timestamp: number,
   ref: string,
   direction: "inbound" | "outbound" = "inbound",
-): TimelineEntry => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
+): Message => ({ source, timestamp, ref, direction, body: `${ref}@${timestamp}` });
 
 /**
  * A store holding `held`, keyed by the address each entry arrived at — the
- * reference `Messages` implementation, which is what makes these fakes prove
+ * reference `AccountMessages` implementation, which is what makes these fakes prove
  * something: they answer the contract every real adapter is enrolled in.
  *
  * An entry's `source` is the channel it belongs to, so an address on one
  * channel never answers for an account on another.
  */
-function store(held: Record<string, TimelineEntry[]>): Messages {
+function store(held: Record<string, Message[]>): AccountMessages {
   return memoryMessages(
     Object.entries(held).flatMap(([address, entries]) =>
       entries.map((held) => ({ channel: held.source, address, entry: held })),
@@ -39,13 +40,13 @@ function store(held: Record<string, TimelineEntry[]>): Messages {
 }
 
 /** One store, with every verb the merge reaches for written down. The property
- *  name rather than only the call, so a merge that asked for a verb `Messages`
+ *  name rather than only the call, so a merge that asked for a verb `AccountMessages`
  *  does not have is caught here rather than by the type checker alone. */
 function watched(
   name: string,
-  messages: Messages,
+  messages: AccountMessages,
   asked: Array<{ store: string; verb: string }>,
-): Messages {
+): AccountMessages {
   return new Proxy(messages, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver);
@@ -74,13 +75,13 @@ describe("readPersonTimeline", () => {
   it("pages by nextCursor with no duplicate and no missing entry", async () => {
     const whole = (await readPersonTimeline([whatsapp, telegram], accounts, { limit: 10 })).entries;
 
-    const walked: TimelineEntry[] = [];
-    let cursor: TimelineEntry | null = null;
+    const walked: Message[] = [];
+    let cursor: Message | null = null;
     for (let page = 0; page < 10; page += 1) {
       const next = await readPersonTimeline([whatsapp, telegram], accounts, { cursor, limit: 1 });
       walked.push(...next.entries);
       if (next.nextCursor === null) break;
-      cursor = parseTimelineCursor(next.nextCursor);
+      cursor = parseMessageCursor(next.nextCursor);
       expect(cursor).not.toBeNull();
     }
     expect(walked).toEqual(whole);
@@ -100,7 +101,7 @@ describe("readPersonTimeline", () => {
     const one = [account("whatsapp", "c-1")];
     const first = await readPersonTimeline([crowded], one, { limit: 2 });
     const rest = await readPersonTimeline([crowded], one, {
-      cursor: parseTimelineCursor(first.nextCursor),
+      cursor: parseMessageCursor(first.nextCursor),
       limit: 10,
     });
     expect([...first.entries, ...rest.entries].map((e) => e.ref)).toEqual(["b", "a", "c", "d"]);
@@ -167,7 +168,7 @@ describe("readPersonTimeline", () => {
   });
 
   it("asks a store for nothing but read, count and latest", async () => {
-    // The seam is `Messages` and only `Messages`: `holds` and `digest` were how
+    // The seam is `AccountMessages` and only `AccountMessages`: `holds` and `digest` were how
     // the old interface asked a store who it answered for, and a merge still
     // reaching for either would be reading a store two ways at once.
     const asked: Array<{ store: string; verb: string }> = [];
@@ -181,7 +182,9 @@ describe("readPersonTimeline", () => {
 
 // The same precedence, read as a summary instead of a page: what a directory
 // row shows for a person without opening their dossier.
-describe("readPeopleActivity", () => {
+describe("readActivity", () => {
+  const perPerson = async (...args: Parameters<typeof readActivity>) =>
+    (await readActivity(...args)).perPerson;
   const waAccount = account("whatsapp", "wa-1");
   const tgAccount = account("telegram", "tg-1");
 
@@ -194,10 +197,7 @@ describe("readPeopleActivity", () => {
       "tg-1": [entry("telegram", 400, "typed")],
     });
 
-    const [whatsapp, telegram] = await readPeopleActivity(
-      [mirror, transcript],
-      [[waAccount], [tgAccount]],
-    );
+    const [whatsapp, telegram] = await perPerson([mirror, transcript], [[waAccount], [tgAccount]]);
     expect(whatsapp).toEqual({
       messageCount: 1,
       latest: { source: "whatsapp", timestamp: 500, preview: "mirrored@500" },
@@ -211,7 +211,7 @@ describe("readPeopleActivity", () => {
       "tg-1": [entry("telegram", 400, "tg:d")],
     });
 
-    const [both] = await readPeopleActivity([held], [[waAccount, tgAccount]]);
+    const [both] = await perPerson([held], [[waAccount, tgAccount]]);
     expect(both).toEqual({
       messageCount: 3,
       // The head of the merged timeline, not of whichever account came first.
@@ -221,7 +221,7 @@ describe("readPeopleActivity", () => {
 
   it("answers one activity per group, in the order given", async () => {
     const held = store({ "tg-1": [entry("telegram", 400, "tg:d")] });
-    expect(await readPeopleActivity([held], [[waAccount], [], [tgAccount]])).toEqual([
+    expect(await perPerson([held], [[waAccount], [], [tgAccount]])).toEqual([
       { latest: null, messageCount: 0 },
       { latest: null, messageCount: 0 },
       { latest: { source: "telegram", timestamp: 400, preview: "tg:d@400" }, messageCount: 1 },
@@ -246,7 +246,7 @@ describe("readPeopleActivity", () => {
     const stores = [mirror, transcript];
     const accounts = [waAccount, tgAccount];
 
-    const [activity] = await readPeopleActivity(stores, [accounts]);
+    const [activity] = await perPerson(stores, [accounts]);
     const timeline = await readPersonTimeline(stores, accounts, { limit: 100 });
 
     expect(timeline.entries.map((e) => e.ref)).toEqual([
@@ -262,7 +262,7 @@ describe("readPeopleActivity", () => {
   it("asks a store for nothing but read, count and latest", async () => {
     const asked: Array<{ store: string; verb: string }> = [];
     const only = watched("only", store({ "wa-1": [entry("whatsapp", 500, "mirrored")] }), asked);
-    await readPeopleActivity([only], [[waAccount]]);
+    await perPerson([only], [[waAccount]]);
 
     expect(asked.length).toBeGreaterThan(0);
     expect(new Set(asked.map((call) => call.verb))).toEqual(new Set(["count", "latest"]));

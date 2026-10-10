@@ -215,15 +215,22 @@ Each app gets a persistent data directory for files outside the database, plus d
 
 Hooks are event handlers that trigger behavior in response to system events. An app declares its hooks in its manifest.
 
-The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives on any [channel](messaging.md#channels) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing.
+The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives on any [channel](messaging.md#channels) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
 Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available.
 
+An app sets up the state it depends on, such as a routine it must always have, with the **app-started** hook. An *app start* is one installed bundle of one enabled app becoming active in the daemon. Boot starts every enabled app, and an install, an upgrade, or a re-enable starts that app again. A re-install of identical content is not a new start. Rome calls the hook's `onAppStarted(event)` once per app start, and `event` carries the app id and its manifest version.
+
 **Contracts:**
 
+- A channel-message hook subscribes in `register`, through `deps.channels`. The host calls `register` once per activation, and again only after `unregister`, so a hook handles `register`, `unregister`, then `register` again. It never calls the hook per Connection, because a channel's subscription follows whatever backs it. A hook written against the removed `registerConnection` hears nothing until it subscribes this way. Its deps carry no `talkRouter`: a hook hears through `channel.inbound` and answers through `channel.send`. Through the 0.7 release, reading `deps.talkRouter` throws an error that says so.
 - Lifecycle hooks are best-effort and non-blocking: Rome schedules every loaded app hook for the event, logs failures, and does not delay or fail the agent turn when a hook throws.
 - Lifecycle payloads never include the prompt text (start metrics carry only its length).
 - Lifecycle hooks fire for root agent turns and subagent turns. Subagent events carry a parent reference (parent session, turn, and agent). Apps that only care about root turns filter for events without one.
+- An app-started hook runs after boot finishes, so the actions, routines, and agents of every app are available to it. Its deps always carry `appContext`.
+- An app-started hook is best-effort and non-blocking. Neither boot nor the install waits for it. Rome logs a throw and does not call the hook again until the next app start.
+- Every boot is a new app start, so an app-started hook must be idempotent. It checks that its state exists before it creates the state.
+- An app-started module that does not export `createHook`, or whose hook has no `onAppStarted`, marks the app failed in its runtime status.
 
 **Not to be confused with:**
 

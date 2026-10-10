@@ -1,0 +1,148 @@
+// Per-route social card for the SPA shell. Pure string work: the caller
+// decides whether a request maps to an app (api/app-social-card.ts) and
+// whether the response reaches a browser (Caddy proxies /apps/* documents to
+// Hono precisely so this replacement is visible outside the container). The
+// fallback image lives only in packages/web/index.html; a card without one
+// keeps whatever og:image the shell already has.
+
+// The document title carries the site name; og:title does not. Every platform
+// renders the site beside the card, so repeating it there reads twice, while a
+// tab tooltip that omits it names no instance. Mirrors SITE_NAME and SEPARATOR
+// in packages/web/src/lib/page-title.ts, which composes the same title once the
+// SPA takes over — social-meta.test.ts fails if the two drift.
+const SITE_NAME = "Rome";
+const TITLE_SEPARATOR = " · ";
+
+const START_MARKER = "<!-- rome:social:start -->";
+const END_MARKER = "<!-- rome:social:end -->";
+const TITLE_RE = /<title>[^<]*<\/title>/;
+const SHELL_OG_IMAGE_RE = /<meta property="og:image" content="([^"]*)"/;
+
+export interface SocialCard {
+  title: string;
+  /** Omitted → no og:description / twitter:description tags. */
+  description?: string;
+  /** Absolute URL of the page being shared. */
+  url: string;
+  /** Absolute URL of a 1200x630 image; omitted → the shell's own og:image is kept. */
+  imageUrl?: string;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The og:image/twitter:image attribute value to emit, or null to omit those
+ * tags entirely. `card.imageUrl` wins when present (freshly escaped); else
+ * the shell's own og:image, read out of its existing marked block, is
+ * reused as-is — it is already an escaped HTML attribute value.
+ */
+function resolveImageValue(card: SocialCard, existingBlock: string): string | null {
+  if (card.imageUrl !== undefined) return escapeHtml(card.imageUrl);
+  const match = existingBlock.match(SHELL_OG_IMAGE_RE);
+  return match ? match[1] : null;
+}
+
+function socialTags(card: SocialCard, imageValue: string | null): string {
+  const t = escapeHtml(card.title);
+  const u = escapeHtml(card.url);
+  const lines = [
+    '<meta property="og:type" content="website" />',
+    '<meta property="og:site_name" content="Rome" />',
+    `<meta property="og:title" content="${t}" />`,
+  ];
+  if (card.description !== undefined) {
+    lines.push(`<meta property="og:description" content="${escapeHtml(card.description)}" />`);
+  }
+  lines.push(`<meta property="og:url" content="${u}" />`);
+  if (imageValue !== null) {
+    lines.push(
+      `<meta property="og:image" content="${imageValue}" />`,
+      '<meta property="og:image:width" content="1200" />',
+      '<meta property="og:image:height" content="630" />',
+    );
+  }
+  lines.push(
+    '<meta name="twitter:card" content="summary_large_image" />',
+    `<meta name="twitter:title" content="${t}" />`,
+  );
+  if (card.description !== undefined) {
+    lines.push(`<meta name="twitter:description" content="${escapeHtml(card.description)}" />`);
+  }
+  if (imageValue !== null) {
+    lines.push(`<meta name="twitter:image" content="${imageValue}" />`);
+  }
+  // One tag per line, never wrapped: Rsbuild drops multi-line <meta> tags.
+  return lines.map((line) => `    ${line}`).join("\n");
+}
+
+/**
+ * Swap the shell's `<title>` and the marked social block for `card`. The
+ * document title gains the site name; `og:title` keeps `card.title` alone.
+ * Returns the input unchanged when there is no card or the markers are absent,
+ * so a shell built without them still serves.
+ */
+export function renderSocialMeta(indexHtml: string, card: SocialCard | null): string {
+  if (card === null) return indexHtml;
+  const start = indexHtml.indexOf(START_MARKER);
+  const end = indexHtml.indexOf(END_MARKER);
+  if (start === -1 || end === -1 || end < start) return indexHtml;
+
+  const existingBlock = indexHtml.slice(start + START_MARKER.length, end);
+  const imageValue = resolveImageValue(card, existingBlock);
+
+  const before = indexHtml.slice(0, start + START_MARKER.length);
+  const after = indexHtml.slice(end);
+  const withBlock = `${before}\n${socialTags(card, imageValue)}\n    ${after}`;
+  const documentTitle = `${card.title}${TITLE_SEPARATOR}${SITE_NAME}`;
+  return withBlock.replace(TITLE_RE, () => `<title>${escapeHtml(documentTitle)}</title>`);
+}
+
+// Home-screen identity: the manifest, iOS icon and name tags, marked as their
+// own block in packages/web/index.html. Every tag is replaced rather than
+// added to, since iOS reads the first apple-mobile-web-app-title it finds.
+const IDENTITY_START_MARKER = "<!-- rome:app-identity:start -->";
+const IDENTITY_END_MARKER = "<!-- rome:app-identity:end -->";
+const SHELL_TOUCH_ICON_RE = /<link rel="apple-touch-icon" href="([^"]*)"/;
+
+export interface AppIdentity {
+  name: string;
+  /** Same-origin path of the app's web manifest. */
+  manifestUrl: string;
+  /** Same-origin path of the app's PNG icon; omitted → the shell's own icon is kept. */
+  iconUrl?: string;
+}
+
+/**
+ * Swap the marked home-screen block for `identity`. Returns the input
+ * unchanged when there is no identity or the markers are absent.
+ */
+export function renderAppIdentity(indexHtml: string, identity: AppIdentity | null): string {
+  if (identity === null) return indexHtml;
+  const start = indexHtml.indexOf(IDENTITY_START_MARKER);
+  const end = indexHtml.indexOf(IDENTITY_END_MARKER);
+  if (start === -1 || end === -1 || end < start) return indexHtml;
+
+  const existingBlock = indexHtml.slice(start + IDENTITY_START_MARKER.length, end);
+  const iconValue =
+    identity.iconUrl !== undefined
+      ? escapeHtml(identity.iconUrl)
+      : (existingBlock.match(SHELL_TOUCH_ICON_RE)?.[1] ?? null);
+  const name = escapeHtml(identity.name);
+  const lines = [`<link rel="manifest" href="${escapeHtml(identity.manifestUrl)}" />`];
+  if (iconValue !== null) lines.push(`<link rel="apple-touch-icon" href="${iconValue}" />`);
+  lines.push(
+    `<meta name="apple-mobile-web-app-title" content="${name}" />`,
+    `<meta name="application-name" content="${name}" />`,
+  );
+
+  const before = indexHtml.slice(0, start + IDENTITY_START_MARKER.length);
+  const after = indexHtml.slice(end);
+  const block = lines.map((line) => `    ${line}`).join("\n");
+  return `${before}\n${block}\n    ${after}`;
+}

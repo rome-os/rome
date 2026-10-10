@@ -12,7 +12,7 @@ import "sonner/dist/styles.css";
 import { cn } from "./cn.js";
 
 const toastClassName =
-  "group toast flex w-[var(--width)] items-center gap-2 rounded-8 border border-border bg-surface-elevated p-4 text-foreground shadow-4 outline-none focus-visible:shadow-4! focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring data-[expanded=false]:data-[front=false]:[&>*]:opacity-0";
+  "group toast flex w-[var(--width)] items-center gap-2 rounded-8 border border-border bg-surface-elevated p-4 text-foreground shadow-4 outline-none focus-visible:shadow-4! outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 data-[expanded=false]:data-[front=false]:[&>*]:opacity-0";
 const titleClassName = "text-badge";
 const descriptionClassName = "text-aux text-muted-foreground";
 const contentClassName = "flex flex-col gap-1";
@@ -23,11 +23,11 @@ const contentClassName = "flex flex-col gap-1";
 const iconClassName =
   "flex shrink-0 items-center justify-start [&_svg:not([class*='size-'])]:size-4";
 const controlClassName =
-  "inline-flex h-6 shrink-0 items-center justify-center rounded-[var(--control-r-sm)] border border-transparent px-2 text-badge outline-none transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-6 shrink-0 items-center justify-center rounded-[var(--control-r-sm)] border border-transparent px-2 text-badge outline-none transition-colors outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 const actionButtonClassName = `ms-auto bg-primary text-primary-foreground hover:bg-primary/80 ${controlClassName}`;
 const cancelButtonClassName = `ms-auto bg-surface-muted text-muted-foreground hover:bg-surface-hover hover:text-foreground ${controlClassName}`;
 const closeButtonClassName =
-  "absolute top-0 start-[var(--toast-close-button-start)] end-[var(--toast-close-button-end)] z-1 flex size-5 items-center justify-center rounded-full border border-border bg-surface-elevated p-0 text-foreground [transform:var(--toast-close-button-transform)] transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50";
+  "absolute top-0 start-[var(--toast-close-button-start)] end-[var(--toast-close-button-end)] z-1 flex size-5 items-center justify-center rounded-full border border-border bg-surface-elevated p-0 text-foreground [transform:var(--toast-close-button-transform)] transition-colors hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50";
 
 export type ToasterProps = Omit<SonnerToasterProps, "theme" | "richColors">;
 

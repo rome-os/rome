@@ -43,7 +43,7 @@ Reach for `coding:app_creation` instead of this skill only when the thing needs 
 | Per-workflow (you edit) | Shell (template ships it; don't touch) |
 | --- | --- |
 | `src/workflow/definition.ts` — the `runWorkflow(input, ctx)` function | `src/workflow/context.ts` — the `WorkflowContext`/`Json` types the app owns |
-| `app.yaml` `description` + web nav labels | `src/actions/run/` — the run action (calls `runWorkflow`) |
+| `app.yaml` `description`, `tagline`, web nav labels | `src/actions/run/` — the run action (calls `runWorkflow`) |
 | `.rome_store/rome_store.yaml` + `README.md` store listing copy | `src/api/index.ts` — the `POST /run` trigger + `GET /runs` history feed |
 | `src/web/App.tsx` `COPY` block (title + run-button copy) | `src/web/App.tsx` body (incl. "Recent runs") + `styles.css` |
 | `src/assets/icon.svg` — replace the placeholder | `src/db/` — the `runs` history table, migrations, and repository |
@@ -192,7 +192,7 @@ Build the workflow first; sort out connections after. Connection *status* (wheth
 
 A workflow is a real Rome app, so its UI follows app_creation's [`AUTHORING.md`](../app_creation/AUTHORING.md), not a workflow-only standard. The template owns the whole page (run button, "Recent runs", `styles.css`), so you author only three surfaces:
 
-- `app.yaml` — a one-line `description` plus `web.navLabel`/`displayName`.
+- `app.yaml` — a one-line `description`, `web.navLabel`/`displayName`, and a `tagline` (uncomment the scaffold line and write one sentence, ≤ 80 chars / 40 CJK, benefit-first — it is the share card's only description, see [`app_creation/REFERENCE.md`](../app_creation/REFERENCE.md)).
 - the `COPY` block (title, what-it-does, run-button verb, `needsInput`) in `src/web/App.tsx`.
 - `src/assets/icon.svg` — replace the template placeholder; never ship the generic glyph.
 
@@ -209,9 +209,10 @@ Hand back to **app_creation** for the tail: commit, then call `system:app_manage
 File edits alone are never a complete task — prove it works:
 
 1. **It builds and installs.** `pnpm build` succeeds and emits `dist/actions/run`, `dist/api`, and `dist/web`, and the install lands. This is the bar for "built" — it does not depend on any toolkit being connected.
-2. **A run returns a result.** `POST /api/apps/<appId>/run` with `{ "input": … }` (or `{}`) returns `{ "result": … }` — `runWorkflow`'s return value; the dashboard's "Run now" button shows the same. Run this once the workflow's toolkits are connected. If it needs a toolkit the guardian hasn't connected yet, `connector:connector_proxy` fails closed, so this smoke run is expected to fail until they connect — that's not a code bug; finish the connect step first, then run it.
+2. **The installed manifest has a tagline.** `grep -n '^tagline:' .rome/artifact/app.yaml` prints a real sentence, not the scaffold's commented line or its placeholder — a workflow is a shareable app and its card has no description without one.
+3. **A run returns a result.** `POST /api/apps/<appId>/run` with `{ "input": … }` (or `{}`) returns `{ "result": … }` — `runWorkflow`'s return value; the dashboard's "Run now" button shows the same. Run this once the workflow's toolkits are connected. If it needs a toolkit the guardian hasn't connected yet, `connector:connector_proxy` fails closed, so this smoke run is expected to fail until they connect — that's not a code bug; finish the connect step first, then run it.
 
-Unlike a full app, a workflow does not need the separate `coding:app_verification` pass — skip it. A workflow is one run action behind a template-shipped shell, so the two checks above are sufficient proof. Confirm them yourself, then report what you built; don't summon a verifier agent.
+Unlike a full app, a workflow does not need the separate `coding:app_verification` pass — skip it. A workflow is one run action behind a template-shipped shell, so the three checks above are sufficient proof. Confirm them yourself, then report what you built; don't summon a verifier agent.
 
 If the request implied a recurring trigger ("every morning", "weekly"), say so when you hand off — the workflow runs on demand now; scheduling it is a separate follow-up.
 

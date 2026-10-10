@@ -2,6 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { getRoutedAppId, resolveAuthRouting } from "../lib/auth-routing";
 import { BACKEND_RETRY_INTERVAL_MS, hasSession, useAuthState } from "../lib/auth-state";
+import { reportDetectedTimezoneOnce } from "../lib/guardian-timezone";
+import { rememberLoginReturn } from "../lib/login-return";
 import { BackendUnreachableScreen } from "../components/backend-unreachable";
 
 interface PublicAppProbe {
@@ -23,6 +25,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // invalidation by login/logout/onboard mutations, and on a polling interval
   // only while the backend is unreachable.
   const state = useAuthState();
+
+  // A signed-in, onboarded guardian reports the browser timezone once per page
+  // load. The server adopts it only while no zone is stored.
+  const ready = state.bootstrap?.phase === "ready";
+  useEffect(() => {
+    if (ready) void reportDetectedTimezoneOnce();
+  }, [ready]);
 
   useEffect(() => {
     const appId = getRoutedAppId(location.pathname);
@@ -82,6 +91,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return null;
   }
   if (routeAppId && currentPublicAppProbe?.isPublic) {
+    // A visitor gets the app standalone. The embedded route sits in the
+    // guardian's shell, whose sidebar means nothing to them, and a guardian
+    // copying the address bar shares that route.
+    if (!hasSession(state.bootstrap) && location.pathname.startsWith("/apps/")) {
+      return (
+        <Navigate to={`/full${location.pathname}${location.search}${location.hash}`} replace />
+      );
+    }
     return <>{children}</>;
   }
 
@@ -91,6 +108,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   });
 
   if (decision.action === "redirect" && decision.location !== location.pathname) {
+    // Sign-in sends the guardian back here (LoginPage, CallbackPage).
+    if (decision.location === "/login") {
+      rememberLoginReturn(`${location.pathname}${location.search}`);
+    }
     return <Navigate to={decision.location} replace />;
   }
 

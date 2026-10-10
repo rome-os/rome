@@ -1,5 +1,5 @@
 // Which stores a person's history comes from, and the order they claim an
-// account in. The stores themselves are the channels' — one `Messages` adapter
+// account in. The stores themselves are the channels' — one `AccountMessages` adapter
 // each, in channels/ — and the merge over them is timeline.ts's.
 //
 // Also the fold from a person's links to the accounts those stores are read
@@ -19,7 +19,7 @@ import {
   type StoredAddress,
 } from "../channels/account-fold.js";
 import { addressBooks, messageStores, type Channels } from "../channels/channel.js";
-import type { MessageAccount, Messages } from "../channels/messages.js";
+import type { AccountMessages, MessageAccount } from "../channels/messages.js";
 import { agentMessages } from "../channels/messages-agent.js";
 import { sentinelLogMessages } from "../channels/messages-sentinel.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -43,7 +43,10 @@ import type { DrizzleDb } from "../db/index.js";
  * (channel-list.ts). Rome's own two stores belong to no channel and answer for
  * every one, which is why they are named here and sit behind all of them.
  */
-export function personMessageStores(deps: { db: DrizzleDb; channels: Channels }): Messages[] {
+export function personMessageStores(deps: {
+  db: DrizzleDb;
+  channels: Channels;
+}): AccountMessages[] {
   return [...messageStores(deps.channels), agentMessages(deps.db), sentinelLogMessages(deps.db)];
 }
 

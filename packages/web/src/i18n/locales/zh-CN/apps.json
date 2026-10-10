@@ -2,15 +2,7 @@
   "builtinApps": "内置应用",
   "header": {
     "title": "应用",
-    "appStore": "应用商店",
-    "myAppsCount_one": "自建 {{count}}",
-    "myAppsCount_other": "自建 {{count}}",
-    "installedCount_one": "已安装 {{count}}",
-    "installedCount_other": "已安装 {{count}}",
-    "builtinCount_one": "内置 {{count}}",
-    "builtinCount_other": "内置 {{count}}",
-    "updatesCount_one": "{{count}} 项更新",
-    "updatesCount_other": "{{count}} 项更新"
+    "appStore": "应用商店"
   },
   "sections": {
     "my": {
@@ -30,6 +22,7 @@
   "search": {
     "placeholder": "搜索应用",
     "ariaLabel": "搜索应用",
+    "toolbarLabel": "筛选应用",
     "clear": "清除搜索",
     "resultsCount_one": "{{count}} 个结果",
     "resultsCount_other": "{{count}} 个结果",
@@ -93,18 +86,21 @@
     "update": "更新",
     "updateBanner": "有新版本 v{{version}} 可用。",
     "enabledTitle": "已启用",
-    "enabledHint": "关闭后将隐藏此应用,并停用其智能体、动作和钩子。",
-    "chatTitle": "通过对话更新",
-    "chatHint": "在此应用的源码项目中打开对话进行修改。",
+    "enabledHint": "关闭后，此应用会被隐藏，其智能体、动作和钩子也会停止运行。",
+    "chatHint": "在此应用的源码项目中打开对话。",
     "publishTitle": "发布到应用商店",
-    "publishHint": "将已安装的应用包(v{{version}})上传到 Rome 应用商店。",
-    "uninstallHint": "移除应用,数据会保留以便日后重装。",
-    "uninstallPurgeHint": "移除应用并清除其数据。此操作不可撤销。"
+    "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
+    "publishHintListed": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
+    "publishHintUnlisted": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。尚未发布到商店。",
+    "uninstallHint": "移除应用，数据会保留以便日后重装。",
+    "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
   "installed": {
     "loading": "正在加载应用...",
     "openLabelAria": "在完整视图中打开 {{name}}",
     "openFullTitle": "打开完整视图",
+    "chatWithApp": "与应用对话",
+    "openNewTabTitle": "在新标签页中打开",
     "openButton": "打开",
     "upgradeButton": "升级 → v{{version}}",
     "upgradeTitle": "将 {{name}} 升级到 v{{version}}",
@@ -141,7 +137,7 @@
     "publishSuccess": "已将 {{name}} v{{version}} 发布到应用商店。",
     "publishDialog": {
       "title": "将 {{name}} 发布到应用商店?",
-      "description": "将把已安装的应用包(v{{version}})上传到 Rome 应用商店,并公开供安装。",
+      "description": "任何人都可以在 Rome 应用商店中找到并安装 v{{version}}。",
       "confirm": "发布"
     },
     "uninstallDialog": {
@@ -159,21 +155,27 @@
     "accessPrivate": "仅限自己访问",
     "accessDialog": {
       "title": "{{name}} 的访问权限",
-      "description": "选择谁可以从公开的 Rome URL 打开此应用。",
+      "description": "此设置只作用于公开的 Rome URL，不影响你自己的仪表盘访问。",
       "privateTitle": "私有",
-      "privateDescription": "只有守护者仪表盘会话可以使用此应用。",
+      "privateDescription": "只有你可以打开此应用。",
       "publicTitle": "公开",
       "publicDescription": "任何拥有应用 URL 的人都可以打开并使用它。",
       "cloudEmailTitle": "Rome Cloud 邮箱列表",
-      "cloudEmailDescription": "访客先用 Rome Cloud 登录，Rome 会在加载应用前检查邮箱。",
+      "cloudEmailDescription": "访客需使用 Rome Cloud 登录，且只有你列出的邮箱可以打开此应用。",
       "emailLabel": "允许的 Rome Cloud 邮箱",
       "emailPlaceholder": "ada@example.com",
-      "emailHelp": "按回车添加。粘贴列表时会按逗号、空格或换行自动拆分。",
+      "emailHelp": "输入姓名或邮箱可从联系人中选择，或按回车直接添加。粘贴列表时会按逗号、空格或换行自动拆分。",
+      "contactSuggestions": "匹配的联系人",
       "addEmail": "添加",
       "removeEmail": "移除 {{email}}",
       "emptyEmails": "请至少添加一个 Rome Cloud 邮箱。",
       "invalidEmails": "这些邮箱格式不正确：{{emails}}",
+      "linkLabel": "分享链接",
+      "copyLink": "复制链接",
+      "linkCopied": "已复制",
+      "linkSaveFirst": "保存访问权限后再分享此链接。",
       "cancel": "取消",
+      "done": "完成",
       "save": "保存访问权限",
       "saving": "保存中..."
     },
@@ -184,7 +186,6 @@
     "skillLoadFailed": "加载失败",
     "chatWithAgentTitle": "与 {{agent}} 对话",
     "chatWithAgentAria": "与 {{agent}} 对话",
-    "chatToUpdate": "通过对话更新",
     "noCapabilities": "未声明{{label}}。",
     "undoDisabled": "{{name}} 已禁用。",
     "undo": "撤销",

@@ -2,15 +2,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "@rstest/core";
 
-const stylesheet = readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
-);
+import { splitLargeScale } from "./test/scale-block.js";
+
+/** The sheet without its comments and without the large scale, which
+ * re-declares some of these tokens and is pinned in `phone-scale.test.ts`.
+ * This file checks the medium defaults. */
+const stylesheet = splitLargeScale(
+  readFileSync(join(import.meta.dirname, "styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
+).rest;
 
 function readRootHostDeclarations(): Map<string, string> {
   const declarations = new Map<string, string>();
 
-  for (const match of stylesheet.matchAll(/:root\s*,\s*:host\s*\{([^}]+)\}/g)) {
+  for (const match of stylesheet.matchAll(
+    /:root\s*,\s*:host\s*(?:,\s*\[data-ui-scale="medium"\])?\s*\{([^}]+)\}/g,
+  )) {
     for (const declaration of match[1].matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
       declarations.set(declaration[1], declaration[2].trim().replace(/\s+/g, " "));
     }
@@ -20,6 +26,28 @@ function readRootHostDeclarations(): Map<string, string> {
 }
 
 const declarations = readRootHostDeclarations();
+
+/**
+ * Resolves a token to a pixel count by following its `var()` chain and folding
+ * the one `calc()` shape these declarations use. Enough to check a relation
+ * between two tokens without a browser.
+ */
+function resolvePx(name: string): number {
+  const value = declarations.get(name);
+  if (value === undefined) throw new Error(`no declaration for ${name}`);
+
+  const sum = value.matchAll(/var\((--[a-z0-9-]+)\)/g);
+  const terms = [...sum].map((match) => resolvePx(match[1]));
+  if (terms.length > 0) return terms.reduce((total, term) => total + term, 0);
+
+  const rem = value.match(/^([\d.]+)rem$/);
+  if (rem) return Number(rem[1]) * 16;
+
+  const px = value.match(/^([\d.]+)px$/);
+  if (px) return Number(px[1]);
+
+  throw new Error(`cannot resolve ${name}: ${value}`);
+}
 
 function declarationsWithPrefix(prefix: string): Record<string, string> {
   return Object.fromEntries([...declarations].filter(([name]) => name.startsWith(prefix)));
@@ -94,6 +122,10 @@ describe("kit-owned constant tokens", () => {
           "--radius-md",
           "--radius-lg",
           "--radius-xl",
+          "--control-h-xs",
+          "--control-min-h",
+          "--control-filter-px",
+          "--control-px-center-xs",
           "--control-h-sm",
           "--control-h-md",
           "--control-h-lg",
@@ -110,12 +142,20 @@ describe("kit-owned constant tokens", () => {
           "--control-px-center-sm",
           "--control-px-center-md",
           "--control-px-center-lg",
+          "--control-px-icon-sm",
+          "--control-px-icon-md",
           "--field-px-sm",
           "--field-px-md",
           "--field-px-lg",
           "--badge-h",
           "--badge-px",
           "--badge-gap",
+          "--row-h-sm",
+          "--row-h-md",
+          "--row-px-sm",
+          "--row-px-md",
+          "--row-py-sm",
+          "--row-py-md",
         ].map((name) => [name, declarations.get(name)]),
       ),
     ).toEqual({
@@ -131,10 +171,14 @@ describe("kit-owned constant tokens", () => {
       "--radius-md": "calc(var(--radius) - 2px)",
       "--radius-lg": "var(--radius)",
       "--radius-xl": "calc(var(--radius) + 4px)",
+      "--control-h-xs": "var(--rome-size-24)",
+      "--control-min-h": "0px",
+      "--control-filter-px": "var(--rome-space-3)",
+      "--control-px-center-xs": "var(--rome-space-2)",
       "--control-h-sm": "var(--rome-size-28)",
-      "--control-h-md": "var(--rome-size-36)",
+      "--control-h-md": "var(--rome-size-32)",
       "--control-h-lg": "var(--rome-size-44)",
-      "--control-gap": "var(--rome-space-2)",
+      "--control-gap": "6px",
       "--control-gap-sm": "var(--control-gap)",
       "--control-gap-md": "var(--control-gap)",
       "--control-gap-lg": "var(--control-gap)",
@@ -144,15 +188,36 @@ describe("kit-owned constant tokens", () => {
       "--control-px-start-sm": "10px",
       "--control-px-start-md": "12px",
       "--control-px-start-lg": "16px",
-      "--control-px-center-sm": "8px",
-      "--control-px-center-md": "12px",
-      "--control-px-center-lg": "16px",
+      "--control-px-center-sm": "10px",
+      "--control-px-center-md": "14px",
+      "--control-px-center-lg": "18px",
+      "--control-px-icon-sm": "calc(var(--control-px-center-sm) - 2px)",
+      "--control-px-icon-md": "calc(var(--control-px-center-md) - 2px)",
       "--field-px-sm": "var(--control-px-start-sm)",
       "--field-px-md": "var(--control-px-start-md)",
       "--field-px-lg": "var(--control-px-start-lg)",
       "--badge-h": "22px",
       "--badge-px": "9px",
       "--badge-gap": "6px",
+      "--row-h-sm": "calc(var(--control-h-sm) + var(--rome-space-2))",
+      "--row-h-md": "calc(var(--control-h-md) + var(--rome-space-2))",
+      "--row-px-sm": "var(--rome-space-2)",
+      "--row-px-md": "var(--rome-space-3)",
+      "--row-py-sm": "var(--rome-space-1)",
+      "--row-py-md": "var(--rome-space-2)",
     });
+  });
+
+  // The row scale exists to stop rows drifting from the controls they hold, so
+  // the relation is checked rather than left to the shape of the declaration.
+  // A floor repointed at whichever `--rome-size-*` step it equals today reads
+  // the same until the control scale moves, and then it strands.
+  it("floors each row step 8px above the control step of the same name", () => {
+    for (const step of ["sm", "md"] as const) {
+      expect(resolvePx(`--row-h-${step}`) - resolvePx(`--control-h-${step}`)).toBe(8);
+    }
+
+    expect(resolvePx("--row-h-sm")).toBe(36);
+    expect(resolvePx("--row-h-md")).toBe(40);
   });
 });

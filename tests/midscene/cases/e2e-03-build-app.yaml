@@ -1,0 +1,23 @@
+cases:
+  - name: E2E-03 Open a built app from Chat
+    tags:
+      - poc
+      - story
+      - apps
+      - shard-2
+    steps:
+      - app.open:
+          path: /chat/mock-chat-build-app
+      - aiAct: >-
+          Scroll upward within the final assistant reply until its first sentence, "Done. The Issue
+          Triage app is built, installed, and verified", is visible. Stop with the inline "Issue
+          Triage" link in that sentence on screen.
+      - aiAct: >-
+          Click the inline "Issue Triage" link in the assistant's final reply, not the recent-app
+          item in the sidebar. Stop when its workspace tile opens beside the conversation.
+      - aiAct: >-
+          In the Issue Triage workspace tile beside the conversation, click Refresh once and wait
+          for the dashboard totals and repository list to load again.
+      - aiAssert: >-
+          The Issue Triage app is open in a workspace tile beside the still-visible conversation.
+          Its dashboard shows repository or triage content, not an error or page-not-found state.

@@ -323,84 +323,6 @@ async function resolveRequestedAgent(
 }
 
 // ---------------------------------------------------------------------------
-// Discord: auto-map the first message sender as guardian
-// ---------------------------------------------------------------------------
-
-async function tryAutoMapDiscordGuardian(
-  deps: MessageHandlerDeps,
-  channelUserId: string,
-  displayName: string,
-): Promise<PersonRecord | null> {
-  const guardians = await deps.personMappingRepo.findByBondLevel("guardian");
-  if (guardians.length === 0) return null;
-
-  const guardian = guardians[0];
-  const alreadyMapped = guardian.channelMappings.some((m) => m.channel === "discord");
-  if (alreadyMapped) return null;
-
-  await deps.personMappingRepo.addChannelMapping(
-    guardian.id,
-    "discord",
-    channelUserId,
-    displayName,
-  );
-  log.info("auto-mapped first Discord user as guardian", {
-    channelUserId,
-    displayName,
-    personId: guardian.id,
-  });
-
-  return deps.personMappingRepo.findByChannelUser(
-    "discord",
-    channelUserId,
-  ) as Promise<PersonRecord | null>;
-}
-
-// ---------------------------------------------------------------------------
-// Auto-map unknown sender by display name
-// ---------------------------------------------------------------------------
-
-async function autoMapUnknownSender(
-  deps: MessageHandlerDeps,
-  channel: string,
-  channelUserId: string,
-  displayName: string,
-) {
-  if (!displayName) return null;
-
-  const candidate = await deps.personMappingRepo.findByNameFuzzy(displayName);
-  if (!candidate) return null;
-
-  if (candidate.id === deps.strangerPersonId) return null;
-
-  await deps.personMappingRepo.addChannelMapping(candidate.id, channel, channelUserId, displayName);
-
-  await deps.approvalsRepo.create({
-    type: "person_mapping",
-    requestedBy: "system",
-    description: `Auto-mapped ${displayName} (${channel}:${channelUserId}) to existing person "${candidate.displayName}"`,
-    payload: {
-      action: "auto_mapped_existing",
-      personId: candidate.id,
-      personDisplayName: candidate.displayName,
-      channel,
-      channelUserId,
-      senderDisplayName: displayName,
-    },
-  });
-
-  log.info("auto-mapped unknown sender to existing person", {
-    channel,
-    channelUserId,
-    displayName,
-    personId: candidate.id,
-    personDisplayName: candidate.displayName,
-  });
-
-  return deps.personMappingRepo.findByChannelUser(channel, channelUserId);
-}
-
-// ---------------------------------------------------------------------------
 // Trusted path: main agent -> envoy check -> send / approval gate
 // ---------------------------------------------------------------------------
 
@@ -479,7 +401,6 @@ async function handleTrustedMessage(
   if (bondLevel === "guardian") {
     log.info("skipping envoy (guardian)", { channel, channelUserId });
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
@@ -506,7 +427,6 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "approve") {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: response,
@@ -562,8 +482,10 @@ async function handleUntrustedMessage(
   conversationId: string,
   targetAgent: string,
 ): Promise<ActionResult> {
-  const { connectionId, channel, channelUserId, threadId, text, messageId, displayName } =
-    args as Record<string, string>;
+  const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
+    string,
+    string
+  >;
   const bondLevel = (args.bondLevel as string) ?? "other";
   const workingDir =
     typeof args.workingDir === "string" && args.workingDir.trim() ? args.workingDir : undefined;
@@ -616,7 +538,6 @@ async function handleUntrustedMessage(
 
   if (decision.action === "replied" && decision.response) {
     await deps.appContext.runAction("send_message", {
-      connectionId,
       channel,
       threadId,
       text: decision.response,
@@ -677,27 +598,15 @@ export function createMessageHandlerAction(
       try {
         log.info("message received", { channel, channelUserId, displayName });
 
-        let person = (personOverride ?? null) as PersonRecord | null;
-        if (!personOverride) {
-          person = (await deps.personMappingRepo.findByChannelUser(
+        // Only a link resolves a sender (docs/concepts/people.md#link). The
+        // display name is whatever the sender typed, so an unlinked account
+        // stays a stranger until the guardian links or pairs it, even when
+        // its name matches the guardian's or a known person's.
+        const person = (personOverride ??
+          (await deps.personMappingRepo.findByChannelUser(
             channel,
             channelUserId,
-          )) as PersonRecord | null;
-
-          if (!person) {
-            person = (await autoMapUnknownSender(
-              deps,
-              channel,
-              channelUserId,
-              displayName,
-            )) as PersonRecord | null;
-          }
-
-          // Discord: auto-map the first sender as guardian (no verification code needed)
-          if (!person && channel === "discord") {
-            person = await tryAutoMapDiscordGuardian(deps, channelUserId, displayName);
-          }
-        }
+          ))) as PersonRecord | null;
 
         const bondLevel = (person?.bondLevel as string) ?? "other";
 

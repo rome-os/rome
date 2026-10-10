@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AppDbContext } from "@rome-os/app-runtime";
 import { collections, traces } from "../schema.js";
-import type { TraceBlockDto, TraceSnapshot, TraceSummary } from "../../trace/types.js";
+import type { TraceEventDto, TraceSnapshot, TraceSummary } from "../../trace/types.js";
 
 export type CollectionSource = "local-import" | "sample" | "bundle" | "remote-preset";
 
@@ -27,7 +27,7 @@ export interface TraceListItem {
 }
 
 export interface TraceDetail extends TraceListItem {
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   snapshot: TraceSnapshot;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -42,7 +42,7 @@ export interface TraceInsert {
   title: string;
   description?: string | null;
   capturedAt: Date;
-  blocks: TraceBlockDto[];
+  blocks: TraceEventDto[];
   snapshot: TraceSnapshot;
   metadata?: Record<string, unknown>;
   inputTokens?: number | null;

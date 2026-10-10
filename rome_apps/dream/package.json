@@ -3,18 +3,28 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "rome dev",
     "build": "rome build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@rome-os/app-runtime": "^0.6.0",
     "@rome-os/app-web-sdk": "^0.3.0",
+    "@rome-os/ui": "^0.3.2",
+    "@tanstack/react-query": "^5.62.0",
     "drizzle-orm": "^0.45.1",
+    "lucide-react": "^0.468.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
-    "@types/react-dom": "^19.1.0"
+    "@types/react-dom": "^19.1.0",
+    "drizzle-kit": "^0.31.9",
+    "typescript": "^5.9.3"
   }
 }

@@ -41,7 +41,27 @@ directory is its own standalone plugin rather than one plugin holding `<site>/<c
 
 ## Install points (all idempotent)
 
-- **Production image**: `docker-entrypoint.sh` installs every `/app/opencli-plugins/*/` dir for
+OpenCLI uses the Browser Bridge extension by default. The container starts the local
+OpenCLI daemon, and the browser image installs the extension through a managed policy.
+The extension download requires access to the Chrome Web Store on first startup.
+The dev browser sidecar shares the Rome container's network namespace and reaches the same daemon.
+
+`opencli profile list` lists connected browsers. Pass `--profile <name-or-id>` to choose
+one explicitly. An unavailable explicit profile fails instead of selecting another browser.
+For manual CDP debugging, pass `--cdp-endpoint http://127.0.0.1:9222`.
+Rome does not inject a CDP endpoint into agent processes.
+
+Settings > Advanced > Computer Use lists OpenCLI browser connections and their last seen times.
+Rome checks the daemon every five seconds and retains observed connections across backend restarts.
+Connection and metadata changes are saved immediately. Timestamp-only changes stay in memory and
+are checkpointed every ten minutes, with a final save during graceful shutdown.
+An unexpected exit can lose timestamp updates since the last checkpoint.
+Last seen records when Rome last observed a live connection. OpenCLI detects lost browser heartbeats,
+so disconnection detection includes its heartbeat timeout and the next Rome check.
+An unreachable daemon makes browser status unknown and preserves the last seen time.
+Remote browsers can reach the daemon through a private SSH tunnel.
+
+- **Production image**: `scripts/docker/rome-init.sh` installs every `/app/opencli-plugins/*/` dir for
   the `rome` user after the `/app` sync. The symlinks survive image upgrades; rsync updates the
   plugin source in place.
 - **Dev stack**: `scripts/dev-up.sh` (step 4c) installs every `/workspace/opencli-plugins/*/`
@@ -52,6 +72,22 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 `opencli <site> --help` before use, and plugin commands appear there like any built-in.
 
 ## Rome-owned commands
+
+- `opencli aa flights FROM TO DEPART [--return DATE] [--miles]` — searches American Airlines cash fares
+  or AAdvantage awards, with separate award taxes, fare and stop filters, and explicit per-passenger price scope.
+  See the [American Airlines command reference](aa/README.md) for examples and browser requirements.
+
+- `opencli southwest flights FROM TO DEPART [--return DATE] [--miles]` — searches Southwest cash fares
+  or Rapid Rewards points, with separate award taxes, fare-product and stop filters, and per-person, each-way prices.
+  `--points` also selects award pricing. See the [Southwest command reference](southwest/README.md) for examples and browser requirements.
+
+- `opencli delta flights FROM TO DEPART [--return DATE] [--miles]` — searches Delta cash fares or
+  SkyMiles awards, with separate taxes and card-member offers, cabin and stop filters, and per-passenger prices.
+  See the [Delta command reference](delta/README.md) for examples and browser requirements.
+
+- `opencli united flights FROM TO DEPART [--return DATE] [--miles]` — searches United cash fares or
+  MileagePlus awards with separate taxes, cabin and stop filters, and per-person price scope.
+  See the [United command reference](united/README.md) for examples and browser requirements.
 
 - `opencli chatgpt memory` — opens Personalization > Memory summary in the signed-in ChatGPT
   browser session and returns each learned-memory section with its last-updated label.
@@ -72,6 +108,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
   metadata.
 - `opencli linkedin thread-participants --thread-url URL` — returns one row per participant of an
   exact LinkedIn thread, including participants who have never sent a message.
+- `opencli linkedin reply --thread-url URL --expected-recipient MEMBER_ID --expected-self MEMBER_ID --message TEXT [--send]` — verifies an existing direct conversation against both member ids.
+  With `--send`, it sends the text and returns the provider message id used by the inbox mirror.
+  Without `--send`, it only verifies the destination.
 - `opencli craigslist locations [QUERY]` — discovers site codes from Craigslist's worldwide
   directory; `categories --site SITE` lists the category codes available at that site.
 - `opencli craigslist search [QUERY] --site SITE [options]` — searches public listings across
@@ -96,6 +135,9 @@ Agents pick up new/changed commands automatically: the `browser-automation` skil
 - `opencli redfin download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
   photo of a public Redfin listing into one folder per listing, in gallery order, with captions and
   room tags in the result rows. `photos URL` lists the same gallery without writing anything.
+- `opencli zillow download URL [--output DIR] [--size SIZE] [--limit N]` — downloads every gallery
+  photo of a public Zillow listing into one folder per listing, in gallery order, at the widest
+  original-ratio size Zillow serves. `photos URL` lists the same gallery without writing anything.
 
 ## Overriding a built-in command: caveats
 
@@ -243,6 +285,20 @@ The Google plugin adds a browser-backed, read-only flight search command. It acc
 codes, cities, or airport names, supports one-way and round-trip dates, cabin/passenger settings,
 and can filter or sort the returned flight choices without clicking into a booking flow.
 
+The command uses a persistent Google browser session. Results stay open after a search instead of resetting the tab to `about:blank`.
+Later searches reuse that session and navigate directly to the requested Flights search.
+Use `--site-session ephemeral` for an isolated search with automatic tab cleanup.
+
+For multiple airports, pass comma-separated airport codes on either side, such as `SFO,OAK` and
+`IAH,HOU`. Lists accept up to seven distinct codes per side, ignore case and whitespace, and remove duplicates.
+A comma-separated argument that starts with a three-letter airport code uses list syntax. All entries must be airport codes.
+Single city and airport names remain supported, including city names with commas such as `Paris, France`.
+
+The command selects each airport through the Google Flights multi-airport picker and verifies the committed search after a reload.
+It fails if Google cannot select or retain an airport, rather than returning results for only part of the requested route.
+Google ranks the combined search. Filters, `--sort`, and `--limit` apply across the displayed choices, not separately to each airport pair.
+Each row retains its actual airport pair in `leg_route`. Google may show only a subset of available flights.
+
 One-way searches return complete one-way itinerary choices. For a round-trip search, Google first
 shows **outbound options only** and does not reveal the return choices until an outbound flight is
 selected. Accordingly, each row is labeled `result_type=outbound_option`: every `leg_*` field and
@@ -254,6 +310,9 @@ finalized round-trip itinerary; follow the returned Google Flights URL to select
 opencli google flights SFO LAX 2026-08-10 --return 2026-08-17 --limit 5
 opencli google flights "San Francisco" Tokyo 2026-09-08 --cabin business --sort price -f json
 opencli google flights JFK LHR 2026-10-01 --stops nonstop --max-price 900 --airline "Delta,Virgin"
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --sort price -f json
+opencli google flights SFO,OAK IAH,HOU 2026-10-15 --return 2026-10-20 --stops nonstop
+opencli google flights SFO IAH,HOU 2026-10-15 --limit 5
 ```
 
 ### Google Shopping
@@ -398,4 +457,42 @@ result.
 opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461
 opencli redfin download https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 --output ~/Pictures --size large --limit 10 -f json
 opencli redfin photos https://www.redfin.com/CA/Atherton/349-Walsh-Rd-94027/home/1061461 -f json
+```
+
+### Zillow
+
+The Zillow plugin reads a public home details page and works from the Next.js page state Zillow
+server-renders into `<script id="__NEXT_DATA__">`. The `gdpClientCache` entry there holds the
+listing's `responsivePhotosOriginalRatio` list: every photo in display order with the CDN URL of
+each width bucket, plus a caption and subject type when the listing has them. The commands need no
+Zillow account and call no private API. When that state is absent, the commands fall back to the
+CDN URLs present in the HTML.
+
+- `download` saves the gallery to `<output>/<address slug>-<zpid>/`, one file per photo named
+  `<gallery position>-<photo key>.jpg` (for example `01-40a2df03a9e1e7ce67de59c614683f5f.jpg`) so
+  a folder listing matches the order on Zillow. Each result row carries the saved path, byte size,
+  caption, subject type, served width, and source URL. A photo that fails to download gets a failed
+  row with the error, and the run continues with the next photo.
+- `photos` returns the same gallery as rows without touching the disk.
+- `--size` picks the width bucket. `full` (default) is the widest original-ratio bucket, up to
+  1536px wide, which Zillow scales down from the source photo and never scales up. `large` (1344),
+  `medium` (1024), and `small` (800) are the narrower original-ratio buckets. `thumb` is Zillow's
+  384px crop. A bucket the listing does not publish falls back to the nearest one it does. Files
+  for a non-default size carry the size in their name, so variants never overwrite each other.
+- `--limit` caps the number of photos taken from the front of the gallery.
+
+Both a canonical `/homedetails/<address>/<zpid>_zpid/` URL and a `/homes/<address>_rb/` address
+URL work. The address form resolves through a Zillow redirect, so the canonical form is faster.
+
+Zillow's PerimeterX sensor scores each page load and stores its verdict in the `_px*` and `pxcts`
+cookies. A verdict written during an automated load blocks the next load with a "Press & Hold"
+wall or a bare HTTP 5xx. When a command hits either, it deletes only those PerimeterX cookies from
+the browser, which resets the verdict, and loads the page once more. Every other Zillow cookie,
+including a signed-in session, stays in place. A wall that survives the retry fails with a typed
+error, as does a missing listing.
+
+```bash
+opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/
+opencli zillow download https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ --output ~/Pictures --size large --limit 10 -f json
+opencli zillow photos https://www.zillow.com/homedetails/349-Walsh-Rd-Atherton-CA-94027/15598337_zpid/ -f json
 ```

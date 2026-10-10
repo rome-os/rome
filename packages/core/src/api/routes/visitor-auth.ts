@@ -259,7 +259,11 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
       }
 
       if (entry.scope === "dashboard" && !deps.dashboardAccessState.isCloudEmailAllowed(email)) {
-        return c.redirect(dashboardErrorRedirect("forbidden"));
+        // The fragment keeps the rejected email out of request URLs and referrers.
+        c.header("Cache-Control", "no-store");
+        return c.redirect(
+          `${dashboardErrorRedirect("forbidden")}#email=${encodeURIComponent(email)}`,
+        );
       }
 
       issueVisitorSession(c, accountId, email, favorViewerToken, avatarUrl);

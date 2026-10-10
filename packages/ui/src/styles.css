@@ -22,6 +22,7 @@
 @source "./button-group.tsx";
 @source "./calendar.tsx";
 @source "./card.tsx";
+@source "./checkbox.tsx";
 @source "./command.tsx";
 @source "./context-menu.tsx";
 @source "./dialog.tsx";
@@ -31,8 +32,15 @@
 @source "./filter-chip-group.tsx";
 @source "./icon-button.tsx";
 @source "./input.tsx";
+@source "./layout-form.tsx";
+@source "./layout-list.tsx";
+@source "./list-row.tsx";
 @source "./markdown.tsx";
+@source "./mermaid-download-menu.tsx";
+@source "./page.tsx";
 @source "./popover.tsx";
+@source "./radio-group.tsx";
+@source "./scroll-edges.tsx";
 @source "./segmented-control.tsx";
 @source "./select.tsx";
 @source "./separator.tsx";
@@ -44,7 +52,9 @@
 @source "./table.tsx";
 @source "./tabs.tsx";
 @source "./textarea.tsx";
+@source "./timestamp.tsx";
 @source "./toggle.tsx";
+@source "./toolbar.tsx";
 @source "./tooltip.tsx";
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -140,11 +150,9 @@
   --popover: var(--surface-elevated);
   --popover-foreground: var(--surface-foreground);
 
-  --control-h-sm: var(--rome-size-28);
-  --control-h-md: var(--rome-size-36);
   --control-h-lg: var(--rome-size-44);
 
-  --control-gap: var(--rome-space-2);
+  --control-gap: 6px;
   --control-gap-sm: var(--control-gap);
   --control-gap-md: var(--control-gap);
   --control-gap-lg: var(--control-gap);
@@ -153,22 +161,18 @@
   --control-r-md: 10px;
   --control-r-lg: 12px;
 
-  --control-px-start-sm: 10px;
-  --control-px-start-md: 12px;
   --control-px-start-lg: 16px;
 
-  --control-px-center-sm: 8px;
-  --control-px-center-md: 12px;
-  --control-px-center-lg: 16px;
-
-  /* Compatibility aliases for app artifacts built against the field names. */
-  --field-px-sm: var(--control-px-start-sm);
-  --field-px-md: var(--control-px-start-md);
-  --field-px-lg: var(--control-px-start-lg);
+  --control-px-center-lg: 18px;
 
   --badge-h: 22px;
   --badge-px: 9px;
   --badge-gap: 6px;
+
+  --row-px-sm: var(--rome-space-2);
+  --row-px-md: var(--rome-space-3);
+  --row-py-sm: var(--rome-space-1);
+  --row-py-md: var(--rome-space-2);
 }
 
 /* ───────────────────────── TYPOGRAPHY PRIMITIVES ───────────────────────────
@@ -189,17 +193,20 @@
   --rome-font-size-14: 0.875rem;
   --rome-font-size-15: 0.9375rem;
   --rome-font-size-16: 1rem;
+  --rome-font-size-17: 1.0625rem;
   --rome-font-size-18: 1.125rem;
   --rome-font-size-20: 1.25rem;
   --rome-font-size-22: 1.375rem;
   --rome-font-size-24: 1.5rem;
+  --rome-font-size-28: 1.75rem;
   --rome-font-size-30: 1.875rem;
 
   /* Every step composes its size step to a line box on the 4px spacing grid, so
      a line of text occupies whole spacing units and stacked text lands on the
      same rhythm as the boxes around it. A step is therefore chosen by the box
      it produces, not by how loose it looks: 13→16, 14→20, 15→20, 16→20,
-     18→24, 20→24, 22→28, 24→32, 30→36.
+     18→24, 20→24, 22→28, 24→32, 30→36. Markdown prose reads at length and
+     in CJK, so it opens one line further: 16→24 and its h3 20→28.
 
      Each holds the exact ratio as a division of the two rem values rather than
      its rounded decimal, which would miss the grid by hundredths of a pixel —
@@ -209,8 +216,12 @@
   --rome-line-height-123: calc(1 / 0.8125);
   --rome-line-height-125: 1.25;
   --rome-line-height-127: calc(1.75 / 1.375);
+  --rome-line-height-129: calc(2.25 / 1.75);
   --rome-line-height-133: calc(4 / 3);
+  --rome-line-height-140: calc(1.75 / 1.25);
+  --rome-line-height-141: calc(1.5 / 1.0625);
   --rome-line-height-143: calc(1.25 / 0.875);
+  --rome-line-height-150: 1.5;
 }
 
 /* ──────────────────────────── TYPOGRAPHY ROLES ─────────────────────────────
@@ -222,9 +233,15 @@
    letter spacing are held directly, having too few distinct values across the
    roster to earn a scale.
 
-   Section and Badge carry the roster's only non-400 weight. A CJK system
-   fallback ships no 500 face, so CSS weight matching resolves both back to
-   Regular there and the emphasis is Latin-only. Hierarchy on a bilingual
+   The roster is the interface — headings, controls, labels, annotations. Prose
+   is not in it: content read at length is Markdown, sized by the
+   `--markdown-*` tokens below, which carry their own heading ladder and
+   density. Composer is the one 16px member, and it belongs to the chat input
+   alone, whose size matches the Markdown body the sent message renders at.
+
+   Title, Section and Badge carry 500; every other role is 400. A CJK system
+   fallback ships no 500 face, so CSS weight matching resolves all three back
+   to Regular there and the emphasis is Latin-only. Hierarchy on a bilingual
    surface must also come from size, ink, position, or container geometry.
 
    This block is not `inline`: Tailwind must emit the variables on `:root,
@@ -242,20 +259,21 @@
   --text-display--letter-spacing: 0;
   --text-display--font-weight: 400;
 
-  --text-title: var(--rome-font-size-20);
-  --text-title--line-height: var(--rome-line-height-120);
+  --text-title: var(--rome-font-size-18);
+  --text-title--line-height: var(--rome-line-height-133);
   --text-title--letter-spacing: 0;
-  --text-title--font-weight: 400;
+  --text-title--font-weight: 500;
 
   --text-section: var(--rome-font-size-15);
   --text-section--line-height: var(--rome-line-height-133);
   --text-section--letter-spacing: 0;
   --text-section--font-weight: 500;
 
-  --text-body: var(--rome-font-size-16);
-  --text-body--line-height: var(--rome-line-height-125);
-  --text-body--letter-spacing: 0;
-  --text-body--font-weight: 400;
+  /* The chat composer's input only — see the roster note above. */
+  --text-composer: var(--rome-font-size-16);
+  --text-composer--line-height: var(--rome-line-height-125);
+  --text-composer--letter-spacing: 0;
+  --text-composer--font-weight: 400;
 
   --text-ui: var(--rome-font-size-14);
   --text-ui--line-height: var(--rome-line-height-143);
@@ -273,49 +291,188 @@
   --text-aux--font-weight: 400;
 }
 
+/* Platform scales. UiScaleProvider selects a scope; components only read
+   these variables. Medium is the standalone default. Both sets redeclare
+   derived aliases so nested providers and shadow hosts resolve them locally. */
+:root,
+:host,
+[data-ui-scale="medium"] {
+  --control-h-sm: var(--rome-size-28);
+  --control-h-md: var(--rome-size-32);
+  --control-px-start-sm: 10px;
+  --control-px-start-md: 12px;
+  --control-px-center-sm: 10px;
+  --control-px-center-md: 14px;
+  /* A glyph at a centred edge reads lighter than a word there, so its side
+     takes 2px less than the label's to look centred. */
+  --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
+  --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
+  /* Compatibility aliases resolve at the current scope. */
+  --field-px-sm: var(--control-px-start-sm);
+  --field-px-md: var(--control-px-start-md);
+  --field-px-lg: var(--control-px-start-lg);
+  /* Rows clear their controls by the same inset at either scale. */
+  --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
+  --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
+  --text-ui: var(--rome-font-size-14);
+  --text-ui--line-height: var(--rome-line-height-143);
+  --text-ui--font-weight: 400;
+  --text-composer: var(--rome-font-size-16);
+  --text-composer--line-height: var(--rome-line-height-125);
+  --text-composer--font-weight: 400;
+  --text-section: var(--rome-font-size-15);
+  --text-section--line-height: var(--rome-line-height-133);
+  --text-section--font-weight: 500;
+  --text-aux: var(--rome-font-size-13);
+  --text-aux--line-height: var(--rome-line-height-123);
+  --text-aux--font-weight: 400;
+  --text-badge: var(--rome-font-size-13);
+  --text-badge--line-height: var(--rome-line-height-123);
+  --text-badge--font-weight: 500;
+  --control-h-xs: var(--rome-size-24);
+  --control-px-center-xs: var(--rome-space-2);
+  --control-min-h: 0px;
+  --control-filter-px: var(--rome-space-3);
+  --calendar-cell: var(--rome-size-28);
+  --control-calendar-px: var(--rome-space-2);
+  --tabs-h: var(--rome-size-32);
+  --segment-min-w: 0px;
+  --segment-hit-inset: 0px;
+  --switch-thumb-md: var(--rome-size-16);
+  --switch-thumb-sm: var(--rome-size-12);
+  --switch-width-md: var(--rome-size-32);
+  --switch-width-sm: var(--rome-size-24);
+  --switch-hit-inset-x: var(--rome-space-3);
+  --field-min-font-size: 0px;
+  --control-action-offset: var(--rome-space-2);
+  --control-action-offset-sm: var(--rome-space-1);
+  --markdown-action-py: var(--rome-space-1);
+  --markdown-zoom-direction: column;
+  --markdown-band-height: var(--rome-space-8);
+}
+
+[data-ui-scale="large"],
+:host([data-ui-scale="large"]) {
+  --text-ui: var(--rome-font-size-17);
+  --text-ui--line-height: var(--rome-line-height-141);
+
+  --text-composer: var(--rome-font-size-17);
+  --text-composer--line-height: var(--rome-line-height-141);
+
+  --text-section: var(--rome-font-size-17);
+  --text-section--line-height: var(--rome-line-height-141);
+  --text-section--font-weight: 600;
+
+  --text-aux: var(--rome-font-size-15);
+  --text-aux--line-height: var(--rome-line-height-133);
+
+  --text-badge: var(--rome-font-size-15);
+  --text-badge--line-height: var(--rome-line-height-133);
+
+  --control-h-sm: var(--rome-size-44);
+  --control-h-md: var(--rome-size-44);
+  --control-px-start-sm: 14px;
+  --control-px-start-md: 16px;
+  --control-px-center-sm: 16px;
+  --control-px-center-md: 18px;
+  --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
+  --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
+  --control-h-xs: var(--rome-size-44);
+  --control-px-center-xs: var(--rome-space-4);
+  --control-min-h: var(--rome-size-44);
+  --control-filter-px: var(--rome-space-4);
+  --calendar-cell: var(--rome-size-44);
+  --control-calendar-px: 0px;
+  --tabs-h: calc(var(--rome-size-44) + var(--rome-space-2) + 1px);
+  --segment-min-w: var(--rome-size-44);
+  --segment-hit-inset: 5px;
+  --switch-thumb-md: calc(var(--rome-size-28) - 2px);
+  --switch-thumb-sm: var(--switch-thumb-md);
+  --switch-width-md: var(--rome-size-48);
+  --switch-width-sm: var(--switch-width-md);
+  --switch-hit-inset-x: 0px;
+  --field-min-font-size: var(--rome-font-size-16);
+  --control-action-offset: var(--rome-space-4);
+  --control-action-offset-sm: var(--rome-space-3);
+  --markdown-action-py: 0px;
+  --markdown-zoom-direction: row;
+  --markdown-band-height: auto;
+  --field-px-sm: var(--control-px-start-sm);
+  --field-px-md: var(--control-px-start-md);
+  --field-px-lg: var(--control-px-start-lg);
+  --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
+  --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
+}
+
+@layer base {
+  :is(input, textarea, select) {
+    font-size: max(var(--field-min-font-size), var(--text-ui));
+  }
+}
+
 /* ─────────────────────────── MARKDOWN TOKENS ──────────────────────────────
    Markdown has a document grammar that is separate from dashboard typography
    roles. These fixed semantic tokens expose its standard typography and
    rhythm to every host. The opt-in Markdown stylesheet binds them to rendered
-   elements and rebinds them for compact density. */
+   elements and rebinds them for compact density.
+
+   Four rules set the values. Leading is the unit: prose is read at length,
+   often in CJK, so the body opens to 1.5 and every gap is a multiple of the
+   4px grid that line box sits on. A heading belongs to what follows it: its
+   space-before is at least 1.5× the paragraph gap and at least 2.5× its own
+   space-after, at every level. Hierarchy comes from size and space, not from
+   weight: the ladder climbs 16 → 18 → 20 → 24 and tops out at 1.5× the body,
+   because prose here is a turn in a conversation, not a page with a title;
+   headings carry the same 600 that inline emphasis does, so a bold label
+   never outweighs the heading above it. A block with a visible edge — a
+   fence's tint, a quote's bar, a table's rules — has no half-leading of its
+   own, so it sits one grid step further from its neighbours than text does. */
 :root,
 :host {
   --markdown-body-font-size: var(--rome-font-size-16);
-  --markdown-body-line-height: var(--rome-line-height-125);
+  --markdown-body-line-height: var(--rome-line-height-150);
   --markdown-body-font-weight: 400;
   --markdown-body-letter-spacing: 0;
 
+  /* Inline code is monospace inside prose, so it is sized against the line box
+     rather than the body size: IBM Plex Mono paints its tint over a 1.3em
+     content area, so a span that fills the line merges with the span on the
+     line above. Standard's 24px line holds a 14px face's 18.2px tint with
+     room to spare; compact's 20px line does not, and rebinds one step down. */
+  --markdown-inline-code-font-size: var(--rome-font-size-14);
+
   --markdown-heading-1-font-size: var(--rome-font-size-24);
   --markdown-heading-1-line-height: var(--rome-line-height-133);
-  --markdown-heading-2-font-size: var(--rome-font-size-22);
-  --markdown-heading-2-line-height: var(--rome-line-height-127);
-  --markdown-heading-3-font-size: var(--rome-font-size-20);
-  --markdown-heading-3-line-height: var(--rome-line-height-120);
-  --markdown-heading-4-font-size: var(--rome-font-size-18);
-  --markdown-heading-4-line-height: var(--rome-line-height-133);
+  --markdown-heading-2-font-size: var(--rome-font-size-20);
+  --markdown-heading-2-line-height: var(--rome-line-height-140);
+  --markdown-heading-3-font-size: var(--rome-font-size-18);
+  --markdown-heading-3-line-height: var(--rome-line-height-133);
+  --markdown-heading-4-font-size: var(--rome-font-size-16);
+  --markdown-heading-4-line-height: var(--rome-line-height-150);
   --markdown-heading-floor-font-size: var(--rome-font-size-16);
-  --markdown-heading-floor-line-height: var(--rome-line-height-125);
-  --markdown-heading-font-weight: 500;
+  --markdown-heading-floor-line-height: var(--rome-line-height-150);
+  --markdown-heading-font-weight: 600;
   --markdown-heading-letter-spacing: 0;
 
   --markdown-block-space-between: var(--rome-space-4);
-  --markdown-heading-1-space-before: var(--rome-space-6);
+  --markdown-heading-1-space-before: var(--rome-space-8);
   --markdown-heading-1-space-after: var(--rome-space-2);
-  --markdown-heading-2-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-before: var(--rome-space-7);
   --markdown-heading-2-space-after: var(--rome-space-2);
-  --markdown-heading-3-space-before: var(--rome-space-4);
-  --markdown-heading-3-space-after: var(--rome-space-1);
-  --markdown-heading-4-space-before: var(--rome-space-4);
-  --markdown-heading-4-space-after: var(--rome-space-1);
-  --markdown-heading-floor-space-before: var(--rome-space-4);
+  --markdown-heading-3-space-before: var(--rome-space-6);
+  --markdown-heading-3-space-after: var(--rome-space-2);
+  --markdown-heading-4-space-before: var(--rome-space-6);
+  --markdown-heading-4-space-after: var(--rome-space-2);
+  --markdown-heading-floor-space-before: var(--rome-space-6);
   --markdown-heading-floor-space-after: var(--rome-space-1);
-  --markdown-list-space-block: var(--rome-space-2);
+  /* A list item carries its own padding, so 12 + 4 meets the paragraph gap. */
+  --markdown-list-space-block: var(--rome-space-3);
   --markdown-list-item-space-block: var(--rome-space-1);
-  --markdown-code-block-space-block: var(--rome-space-4);
-  --markdown-blockquote-space-block: var(--rome-space-4);
-  --markdown-table-space-block: var(--rome-space-4);
+  --markdown-code-block-space-block: var(--rome-space-5);
+  --markdown-blockquote-space-block: var(--rome-space-5);
+  --markdown-table-space-block: var(--rome-space-5);
   --markdown-rule-space-block: var(--rome-space-6);
-  --markdown-media-space-block: var(--rome-space-4);
+  --markdown-media-space-block: var(--rome-space-5);
 }
 
 /* ─────────────────────────── DESIGN TOKEN REFERENCE ───────────────────────────
@@ -354,11 +511,15 @@
   /* Monospace family — code, tabular numbers, IDs. */
   --font-mono: var(--rome-font-mono);
 
-  /* ── Surface (figure-ground). `--background` is the page canvas (NOT white);
-     `--surface` is the raised card/panel that floats above it. ──────────────── */
+  /* ── Surface (figure-ground). Chat and app routes have separate canvases;
+     `--surface` is the raised card/panel that floats above them. ────────────── */
 
-  /* Page canvas — NOT white; raised surfaces float above it. */
+  /* Generic dashboard canvas and compatibility token. */
   --color-background: var(--background);
+  /* Conversation canvas behind a chat transcript and composer. */
+  --color-chat-canvas: var(--chat-canvas);
+  /* App canvas — a lighter reading plane for compact product UI. */
+  --color-app-canvas: var(--app-canvas);
   /* Default body text on the canvas. */
   --color-foreground: var(--foreground);
   /* Raised card/panel fill above the canvas (`card` aliases this). */
@@ -572,14 +733,18 @@
    Button has no `lg` — every step carries one typography role, so a taller box
    around one line of text buys air rather than emphasis.
 
-     --control-h-{sm,md,lg}    28 / 36 / 44px   explicit control height
-     --control-gap                        8px   icon/label gap, every size
+     --control-h-{sm,md,lg}    28 / 32 / 44px   explicit control height
+     --control-gap                        6px   glyph gap to its label, every
+                                                size
+     --control-px-icon-{sm,md}         8 / 12px   a glyph's side of centred
+                                                content: the centred inset
+                                                less 2px
      --control-r-{sm,md,lg}     8 / 10 / 12px   corner radius
      --control-px-start-{sm,md,lg}
                                10 / 12 / 16px   horizontal padding for content
                                                 that starts at an alignment edge
      --control-px-center-{sm,md,lg}
-                                8 / 12 / 16px   horizontal padding for centred
+                              10 / 14 / 18px   horizontal padding for centred
                                                 content
      --badge-{h,px,gap}        22 / 9 / 6px      chips sit below the scale
 
@@ -588,8 +753,10 @@
    SelectTrigger, CommandInput and a start-aligned Button take `start`, the
    inset every control stacked in one column lines up on. A centred Button
    label, a SegmentedControl segment and a TabsTrigger take `center`, which has
-   no such edge to hold and sits tighter at `sm`. Both groups set symmetric
-   padding — the words name the content's alignment, not a side.
+   no such edge to hold: its inset is wider than the air above and below the
+   line box at every step, so a label reads as sitting in a button rather than
+   a square tile. Both groups set symmetric padding — the words name the
+   content's alignment, not a side.
 
    Components read the tokens in bracket form — `h-[var(--control-h-md)]`,
    `px-[var(--control-px-start-md)]` — never Tailwind v4's parenthesis shorthand:
@@ -606,9 +773,13 @@
     border-color: var(--border);
   }
 
+  /* macOS renders subpixel text heavier than the type scale intends. Set once
+     at the root so every host gets the same weight; other platforms ignore it. */
   body {
     background-color: var(--background);
     color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   /* Kill image-drag ghosts everywhere. */

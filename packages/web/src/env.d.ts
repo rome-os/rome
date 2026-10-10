@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   // PANTHEON_DOMAIN. Used as the base for the external "Browse App Store"
   // link. Guaranteed to be present (build fails otherwise).
   readonly ROME_CLOUD_ORIGIN: string;
+  readonly ROME_MOCK_STRICT_E2E: boolean;
 }
 
 interface ImportMeta {

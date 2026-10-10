@@ -12,6 +12,9 @@
 //   - stream_close { channelId, reason?, error? }
 
 import { randomUUID } from "node:crypto";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("ipc");
 
 export interface IpcRequestMessage {
   type: "rpc_request";
@@ -56,9 +59,6 @@ export type IpcMessage =
 export function isIpcMessage(message: unknown): message is IpcMessage {
   if (typeof message !== "object" || message === null) return false;
   const m = message as { type?: unknown; reqId?: unknown; channelId?: unknown };
-  // Distinguish from legacy worker-rpc messages (which use `clientId`/`id`,
-  // not `reqId`/`channelId`). A message qualifies as IPC only if it uses
-  // the new field names.
   switch (m.type) {
     case "rpc_request":
     case "rpc_response":
@@ -135,7 +135,7 @@ export interface IpcTransport {
   readonly connected: boolean;
 }
 
-const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 
 /**
  * Bidirectional RPC + streams over a Node IPC channel. Both sides construct
@@ -203,10 +203,6 @@ export class IpcRpc {
     handler: (req: Req, ctx: IpcCallContext) => Promise<Res>,
   ): void {
     this.handlers.set(method, handler as (p: unknown, c: IpcCallContext) => Promise<unknown>);
-  }
-
-  unhandle(method: string): void {
-    this.handlers.delete(method);
   }
 
   async call<Req = unknown, Res = unknown>(
@@ -471,6 +467,14 @@ export class IpcRpc {
 
 // Convenience transports
 
+// A failed write is followed by `disconnect`, which rejects pending calls. The
+// callback keeps the failure from surfacing as an unhandled `error` event.
+function logSendFailure(message: IpcMessage): (err: Error | null) => void {
+  return (err) => {
+    if (err) log.warn("IPC send failed", { type: message.type, error: err.message });
+  };
+}
+
 /** Build an IpcTransport over `process.send` / `process.on("message")` (worker side). */
 export function createWorkerProcessTransport(): IpcTransport {
   return {
@@ -481,7 +485,7 @@ export function createWorkerProcessTransport(): IpcTransport {
       if (!process.send) {
         throw new Error("createWorkerProcessTransport: not running in a Node child process");
       }
-      process.send(message);
+      process.send(message, logSendFailure(message));
     },
     onMessage(listener) {
       const handler = (message: unknown) => {
@@ -508,7 +512,7 @@ export function createChildProcessTransport(
     },
     send(message: IpcMessage): void {
       if (!child.connected) return;
-      child.send(message);
+      child.send(message, logSendFailure(message));
     },
     onMessage(listener) {
       const handler = (message: unknown) => {

@@ -1,11 +1,13 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
+import { SharedCodexAccountService } from "./account-service.js";
 import {
   CodexAppServerManager,
   type CodexAppServerConnection,
   type CodexThreadBinding,
 } from "./app-server-manager.js";
-import type { ThreadStartParams } from "./app-server-protocol.js";
+import { Method, ServerRequestMethod, type ThreadStartParams } from "./app-server-protocol.js";
 
 interface FakeRequest {
   method: string;
@@ -15,6 +17,10 @@ interface FakeRequest {
 class FakeConnection implements CodexAppServerConnection {
   readonly requests: FakeRequest[] = [];
   readonly notifications: FakeRequest[] = [];
+  private readonly deferredResponses = new Map<
+    string,
+    { promise: Promise<unknown>; resolve: (value: unknown) => void }
+  >();
   started = 0;
   closed = 0;
 
@@ -27,13 +33,43 @@ class FakeConnection implements CodexAppServerConnection {
     this.started += 1;
   }
 
+  defer(method: string): (value: unknown) => void {
+    let resolve!: (value: unknown) => void;
+    const promise = new Promise<unknown>((resolvePromise) => {
+      resolve = resolvePromise;
+    });
+    this.deferredResponses.set(method, { promise, resolve });
+    return (value) => {
+      this.deferredResponses.delete(method);
+      resolve(value);
+    };
+  }
+
   async request(method: string, params?: unknown): Promise<unknown> {
     this.requests.push({ method, params });
-    if (method === "thread/start") return { thread: { id: this.nextThreadId() } };
+    const deferred = this.deferredResponses.get(method);
+    if (deferred) return await deferred.promise;
+    if (method === "thread/start") {
+      return {
+        thread: {
+          id: this.nextThreadId(),
+          historyMode: (params as ThreadStartParams).historyMode ?? "legacy",
+        },
+      };
+    }
     if (method === "thread/resume") {
-      return { thread: { id: (params as { threadId: string }).threadId } };
+      return {
+        thread: { id: (params as { threadId: string }).threadId, historyMode: "paginated" },
+      };
     }
     if (method === "thread/unsubscribe") return { status: "unsubscribed" };
+    if (method === "account/login/start") {
+      return {
+        loginId: "device-credits",
+        userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.openai.com/codex/device",
+      };
+    }
     return {};
   }
 
@@ -50,6 +86,7 @@ function config(toolName: string): ThreadStartParams {
   return {
     model: "gpt-5.4-mini",
     cwd: "/workspace",
+    historyMode: "paginated",
     dynamicTools: [
       {
         type: "function",
@@ -86,6 +123,35 @@ function binding(label: string): CodexThreadBinding & {
 }
 
 describe("CodexAppServerManager", () => {
+  it.each([
+    "http://127.0.0.1:9222",
+    "http://chrome:9333",
+    undefined,
+  ])("keeps browser transport out of the shared agent environment (%s)", async (endpoint) => {
+    rs.stubEnv("OPENCLI_CDP_ENDPOINT", endpoint as string);
+    rs.stubEnv("ROME_TEST_UNLISTED_ENV", "not-for-child-processes");
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-env");
+        clients.push(client);
+        return client;
+      },
+    });
+
+    try {
+      await manager.warmup();
+
+      expect(clients).toHaveLength(1);
+      const env = clients[0].options.env;
+      expect(env).not.toHaveProperty("OPENCLI_CDP_ENDPOINT");
+      expect(env).not.toHaveProperty("ROME_TEST_UNLISTED_ENV");
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
   it("initializes once and isolates concurrent thread notifications and dynamic calls", async () => {
     const clients: FakeConnection[] = [];
     let threadSequence = 0;
@@ -99,11 +165,13 @@ describe("CodexAppServerManager", () => {
     const alpha = binding("alpha");
     const beta = binding("beta");
 
-    const [threadA, threadB] = await Promise.all([
+    const [openedA, openedB] = await Promise.all([
       manager.openThread(config("rome_alpha"), alpha),
       manager.openThread(config("rome_beta"), beta),
       manager.warmup(),
     ]).then(([a, b]) => [a, b]);
+    const threadA = openedA.threadId;
+    const threadB = openedB.threadId;
 
     expect(clients).toHaveLength(1);
     expect(clients[0].started).toBe(1);
@@ -111,6 +179,8 @@ describe("CodexAppServerManager", () => {
       1,
     );
     expect(threadA).not.toBe(threadB);
+    expect(openedA.historyMode).toBe("paginated");
+    expect(openedB.historyMode).toBe("paginated");
 
     clients[0].options.onNotification("item/agentMessage/delta", {
       threadId: threadA,
@@ -227,7 +297,8 @@ describe("CodexAppServerManager", () => {
     const callbacks = binding("source");
     const globalExit = rs.fn();
     manager.onExit(globalExit);
-    const threadId = await manager.openThread(config("rome_source"), callbacks);
+    const opened = await manager.openThread(config("rome_source"), callbacks);
+    const threadId = opened.threadId;
 
     clients[0].options.onExit?.(137);
     expect(callbacks.exits).toHaveLength(1);
@@ -242,10 +313,9 @@ describe("CodexAppServerManager", () => {
       "thread/resume",
       "turn/start",
     ]);
-    expect(clients[1].requests[1].params).toMatchObject({
-      threadId,
-      dynamicTools: [expect.objectContaining({ name: "rome_source" })],
-    });
+    expect(clients[1].requests[1].params).toMatchObject({ threadId, excludeTurns: true });
+    expect(clients[1].requests[1].params).not.toHaveProperty("dynamicTools");
+    expect(clients[1].requests[1].params).not.toHaveProperty("historyMode");
     manager.close();
   });
 
@@ -268,5 +338,180 @@ describe("CodexAppServerManager", () => {
     });
     expect(result).toMatchObject({ success: false });
     manager.close();
+  });
+});
+
+describe("CodexAppServerManager Rome credits wiring", () => {
+  const capture = () => {
+    const clients: FakeConnection[] = [];
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-credits");
+        clients.push(client);
+        return client;
+      },
+    });
+    return { clients, manager };
+  };
+
+  it("passes the instance credential and credits provider definition to the app-server", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    setInstanceTokenInMemory("romeinst_wiring_test");
+    const { clients, manager } = capture();
+    try {
+      await manager.warmup();
+      expect(clients[0].options.env.ROME_CREDITS_TOKEN).toBe("romeinst_wiring_test");
+      const args = clients[0].options.configArgs ?? [];
+      expect(args.some((arg) => arg.includes('base_url="https://cloud.example/v1"'))).toBe(true);
+      expect(args.join(" ")).not.toContain("romeinst_wiring_test");
+    } finally {
+      manager.close();
+      setInstanceTokenInMemory(null);
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("does not route buffered callbacks after replacing the payer", async () => {
+    const { clients, manager } = capture();
+    const callbacks = binding("credits");
+    const dynamicToolCall = rs.fn(callbacks.onDynamicToolCall);
+    callbacks.onDynamicToolCall = dynamicToolCall;
+    try {
+      const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
+
+      manager.setDefaultProvider("rome_credits");
+      const result = await clients[0].options.onServerRequest(ServerRequestMethod.dynamicToolCall, {
+        threadId,
+        turnId: "turn-credits",
+        callId: "call-credits",
+        namespace: null,
+        tool: "rome_credits",
+        arguments: {},
+      });
+      clients[0].options.onNotification("item/agentMessage/delta", {
+        threadId,
+        turnId: "turn-credits",
+        delta: "late",
+      });
+
+      expect(result).toEqual({});
+      expect(dynamicToolCall).not.toHaveBeenCalled();
+      expect(callbacks.notifications).toEqual([]);
+    } finally {
+      manager.close();
+    }
+  });
+
+  it("does not publish a client invalidated by successive payer switches during initialize", async () => {
+    const clients: FakeConnection[] = [];
+    let resolveInitialize!: (value: unknown) => void;
+    const manager = new CodexAppServerManager({
+      createClient: (options) => {
+        const client = new FakeConnection(options, () => "thread-credits");
+        if (clients.length === 0) resolveInitialize = client.defer(Method.initialize);
+        clients.push(client);
+        return client;
+      },
+    });
+    try {
+      const initializing = manager.warmup();
+      resolveInitialize({});
+      manager.setDefaultProvider("rome_credits");
+      manager.setDefaultProvider(null);
+
+      await expect(initializing).rejects.toThrow(
+        "codex app-server was replaced during initialization",
+      );
+      await manager.warmup();
+
+      expect(clients).toHaveLength(2);
+      expect(clients[0].closed).toBeGreaterThan(0);
+    } finally {
+      manager.close();
+    }
+  });
+
+  it("treats a payer change like an exit and lazily resumes idle threads", async () => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+    const { clients, manager } = capture();
+    const callbacks = binding("credits");
+    const exited = rs.fn();
+    manager.onExit(exited);
+    try {
+      const { threadId } = await manager.openThread(config("rome_credits"), callbacks);
+
+      manager.setDefaultProvider("rome_credits");
+
+      expect(clients).toHaveLength(1);
+      expect(clients[0].closed).toBe(1);
+      expect(callbacks.exits).toEqual([
+        expect.objectContaining({ message: "codex app-server exited (code null)" }),
+      ]);
+      expect(exited).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "codex app-server exited (code null)" }),
+      );
+
+      await manager.requestForThread(threadId, Method.turnStart, { threadId });
+
+      expect(clients).toHaveLength(2);
+      expect(clients[1].options.configArgs).toContain('model_provider="rome_credits"');
+      expect(clients[1].requests.map((request) => request.method)).toEqual([
+        "initialize",
+        "thread/resume",
+        "turn/start",
+      ]);
+    } finally {
+      manager.close();
+      rs.unstubAllEnvs();
+    }
+  });
+
+  it("cancels an active sign-in when the payer replaces Codex", async () => {
+    const { manager } = capture();
+    const accountService = new SharedCodexAccountService(manager);
+    try {
+      await accountService.startDeviceLogin();
+
+      manager.setDefaultProvider("rome_credits");
+
+      expect(accountService.getLoginState()).toMatchObject({
+        running: false,
+        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
+      });
+    } finally {
+      accountService.close();
+      manager.close();
+    }
+  });
+
+  it("does not restore a sign-in whose start response raced with a payer switch", async () => {
+    const { clients, manager } = capture();
+    const accountService = new SharedCodexAccountService(manager);
+    try {
+      await manager.warmup();
+      const resolveLoginStart = clients[0].defer(Method.accountLoginStart);
+      const starting = accountService.startDeviceLogin();
+      await rs.waitFor(() => {
+        expect(
+          clients[0].requests.some((request) => request.method === Method.accountLoginStart),
+        ).toBe(true);
+      });
+
+      resolveLoginStart({
+        loginId: "device-credits",
+        userCode: "ABCD-EFGH",
+        verificationUrl: "https://auth.openai.com/codex/device",
+      });
+      manager.setDefaultProvider("rome_credits");
+
+      await expect(starting).rejects.toThrow("Codex login was canceled");
+      expect(accountService.getLoginState()).toMatchObject({
+        running: false,
+        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
+      });
+    } finally {
+      accountService.close();
+      manager.close();
+    }
   });
 });

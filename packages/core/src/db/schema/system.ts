@@ -8,7 +8,9 @@ import {
   primaryKey,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
+import type { OutboxMessage } from "@rome/api-types/people";
+import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
   APPROVAL_EXECUTION_STATES,
@@ -18,44 +20,43 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
-// Superseded by `routines`. No code reads or writes this table; kept only
-// pending a removal + drop migration. Do not add new readers/writers.
-export const events = sqliteTable("events", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  type: text("type", { enum: ["one-off", "recurring"] }).notNull(),
-  tzid: text("tzid").notNull(),
-  localTime: text("local_time").notNull(),
-  rrule: text("rrule"),
-  startTime: integer("start_time", { mode: "timestamp" }).notNull(),
-  endTime: integer("end_time", { mode: "timestamp" }),
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastRunAt: integer("last_run_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
-
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  agentName: text("agent_name").notNull(),
-  channelThreadKey: text("channel_thread_key"),
-  /** Which provider produced this conversation's thread, so a resumed session
-   *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
-   *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
-  provider: text("provider"),
-  providerThreadId: text("provider_thread_id"),
-  /** The concrete model that produced the session's last successful turn,
-   *  written by the same after-turn provider-info write. Null for legacy
-   *  rows and sessions that never completed a turn. Nothing reads it yet. */
-  model: text("model"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
-  status: text("status", {
-    enum: ["active", "completed", "error"],
-  }).notNull(),
-});
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    agentName: text("agent_name").notNull(),
+    channelThreadKey: text("channel_thread_key"),
+    /** The Rome conversation (`rome_sessions.id`) this session serves. Null for
+     *  rows written before the column existed and for sessions whose caller
+     *  named no conversation. No foreign key: channel, action and subagent
+     *  conversations are recorded after their first session is created. */
+    conversationId: text("conversation_id"),
+    /** Which provider produced this conversation's thread, so a resumed session
+     *  routes back to the SAME model (e.g. a Codex→Claude fallback continues on
+     *  Claude instead of reverting to Codex). Null for legacy/undecided rows. */
+    provider: text("provider"),
+    providerThreadId: text("provider_thread_id"),
+    /** The concrete model that produced the session's last successful turn,
+     *  written by the same after-turn provider-info write. Null for legacy
+     *  rows and sessions that never completed a turn. Nothing reads it yet. */
+    model: text("model"),
+    /** The reasoning effort the session's last successful model turn ran with,
+     *  as the provider reported it in its own terms (for example `xhigh`).
+     *  Display only: it never seeds the next turn's effort. Null for
+     *  legacy rows and sessions that never completed a model turn. */
+    reasoningEffort: text("reasoning_effort"),
+    /** The cwd the session's provider ran in, so an explicit resume reopens the
+     *  provider where its transcript lives. Null for legacy rows, which resume
+     *  in the default project. */
+    workingDir: text("working_dir"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
+    status: text("status", {
+      enum: ["active", "completed", "error"],
+    }).notNull(),
+  },
+  (table) => [index("idx_sessions_conversation").on(table.conversationId)],
+);
 
 // Provider-native history anchor for one successfully completed Rome turn.
 // The checkpoint id is intentionally opaque to core persistence: Codex stores
@@ -142,6 +143,59 @@ export const waContacts = sqliteTable("wa_contacts", {
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
+
+/**
+ * Messages Rome is still trying to deliver — the
+ * [outbox](docs/concepts/people.md).
+ *
+ * Not a message store, and deliberately not part of the timeline. A row here
+ * is a send that has not happened yet and may never; a timeline entry is one
+ * that did. Keeping them apart is what lets `Message`'s `ref` stay unique
+ * and its ordering stay total — a cursor cannot be written across rows that may
+ * still be withdrawn — and what keeps each account owned by exactly one message
+ * store rather than two that disagree.
+ *
+ * A row leaves by being delivered: once `provider_message_id` names a message
+ * the channel's own store holds, the entry is on the timeline and the row is
+ * redundant. Nothing has to remember to clear it, because the read derives
+ * that (`src/people/outbox.ts`).
+ *
+ * Addressed by the account rather than by the person, because that is what a
+ * send names. A merge moves the link, and this row keeps pointing at the
+ * address it was sent to, which stays true whoever ends up holding it.
+ */
+export const outboundMessages = sqliteTable(
+  "outbound_messages",
+  {
+    id: text("id").primaryKey(),
+    channel: text("channel").notNull(),
+    channelUserId: text("channel_user_id").notNull(),
+    /** The conversation the channel resolved the address to, kept so a retry
+     *  does not have to ask again. */
+    conversationId: text("conversation_id").notNull(),
+    text: text("text").notNull(),
+    state: text("state", { enum: ["sending", "unconfirmed", "failed"] }).notNull(),
+    /** The channel's own id for the message, once it has taken it. Null while
+     *  sending and after a failure. Half of the ref the delivered entry
+     *  carries, which is how the read knows the row has landed. */
+    providerMessageId: text("provider_message_id"),
+    error: text("error"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [index("idx_outbound_account").on(table.channel, table.channelUserId)],
+);
+
+/** Outbox removal retains the response for the retry window in docs/concepts/people.md#outbox. */
+export const outboundSendReceipts = sqliteTable(
+  "outbound_send_receipts",
+  {
+    id: text("id").primaryKey(),
+    response: text("response", { mode: "json" }).$type<OutboxMessage>().notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_outbound_send_receipts_expiry").on(table.expiresAt)],
+);
 
 export const waChats = sqliteTable("wa_chats", {
   jid: text("jid").primaryKey(),
@@ -261,10 +315,16 @@ export const linkedinParticipants = sqliteTable("linkedin_participants", {
   participantId: text("participant_id").primaryKey(),
   name: text("name"),
   headline: text("headline"),
+  profileUrl: text("profile_url"),
   // 'member' | 'organization' | 'agent' | 'custom', as the snapshot reports it.
   type: text("type"),
   // True for the account owner's own row in a thread's participant list.
   isSelf: integer("is_self", { mode: "boolean" }).notNull().default(false),
+  // Profile freshness is account-scoped rather than thread-scoped: the same
+  // LinkedIn account can appear in many conversations.
+  lastSuccessfulSyncAt: integer("last_successful_sync_at", { mode: "timestamp" }),
+  profileSyncFailureCount: integer("profile_sync_failure_count").notNull().default(0),
+  profileSyncRetryAt: integer("profile_sync_retry_at", { mode: "timestamp" }),
   firstSyncedAt: integer("first_synced_at", { mode: "timestamp" }).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
@@ -366,24 +426,6 @@ export const guardianAuth = sqliteTable("guardian_auth", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const providerAccounts = sqliteTable("provider_accounts", {
-  id: text("id").primaryKey(),
-  provider: text("provider").notNull().unique(),
-  providerAccountId: text("provider_account_id"),
-  displayName: text("display_name"),
-  email: text("email"),
-  login: text("login"),
-  avatarUrl: text("avatar_url"),
-  scopes: text("scopes", { mode: "json" }),
-  tokenCiphertext: text("token_ciphertext").notNull(),
-  tokenVersion: integer("token_version").notNull().default(1),
-  tokenExpiresAt: integer("token_expires_at", { mode: "timestamp" }),
-  metadata: text("metadata", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-  lastSyncedAt: integer("last_synced_at", { mode: "timestamp" }).notNull(),
-});
-
 export const oauthPendingAttempts = sqliteTable(
   "oauth_pending_attempts",
   {
@@ -444,7 +486,7 @@ export const romeSessions = sqliteTable(
     sourceThreadType: text("source_thread_type"),
     // Versioned policy overrides for channel conversations. Agent routing is
     // intentionally not duplicated here; agentName is its canonical column.
-    channelSettings: text("channel_settings", { mode: "json" }),
+    channelSettings: text("channel_settings", { mode: "json" }).$type<StoredConversationSettings>(),
     triggerKind: text("trigger_kind"),
     triggerName: text("trigger_name"),
     triggerActionName: text("trigger_action_name"),
@@ -544,32 +586,55 @@ export const sharedChats = sqliteTable(
   (table) => [index("idx_shared_chats_session_id").on(table.sessionId)],
 );
 
-export const actionExecutions = sqliteTable("action_executions", {
-  id: text("id").primaryKey(),
-  rootExecutionId: text("root_execution_id").notNull(),
-  actionName: text("action_name").notNull(),
-  actionType: text("action_type"), // "system" | "custom"
-  status: text("status", {
-    enum: ["running", "success", "error", "pending_approval", "cancelled"],
-  }).notNull(),
-  args: text("args", { mode: "json" }),
-  error: text("error"),
-  durationMs: integer("duration_ms"),
-  initiator: text("initiator"),
-  // Authenticated session identity accountable for this execution (a
-  // `SessionActor` — guardian / visitor / anonymous), resolved host-side at the
-  // HTTP/WS boundary and inherited down the execution chain. NULL = no
-  // accountable session anywhere in the chain (agent-autonomous, routine,
-  // webhook, startup). Orthogonal to `initiator`, which names the triggering
-  // mechanism.
-  actor: text("actor", { mode: "json" }),
-  parentId: text("parent_id"),
-  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  finishedAt: integer("finished_at", { mode: "timestamp" }),
-  cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
-  cancellationReason: text("cancellation_reason"),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-});
+export const actionExecutions = sqliteTable(
+  "action_executions",
+  {
+    id: text("id").primaryKey(),
+    rootExecutionId: text("root_execution_id").notNull(),
+    actionName: text("action_name").notNull(),
+    actionType: text("action_type"), // "system" | "custom"
+    status: text("status", {
+      enum: ["running", "success", "error", "pending_approval", "cancelled"],
+    }).notNull(),
+    args: text("args", { mode: "json" }),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    initiator: text("initiator"),
+    // Authenticated session identity accountable for this execution (a
+    // `SessionActor` — guardian / visitor / anonymous), resolved host-side at the
+    // HTTP/WS boundary and inherited down the execution chain. NULL = no
+    // accountable session anywhere in the chain (agent-autonomous, routine,
+    // webhook, startup). Orthogonal to `initiator`, which names the triggering
+    // mechanism.
+    actor: text("actor", { mode: "json" }),
+    parentId: text("parent_id"),
+    startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
+    finishedAt: integer("finished_at", { mode: "timestamp" }),
+    cancelRequestedAt: integer("cancel_requested_at", { mode: "timestamp" }),
+    cancellationReason: text("cancellation_reason"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    // The usage reporter pages through finished root executions in this order.
+    index("idx_action_executions_finished").on(table.finishedAt, table.id),
+  ],
+);
+
+// Usage events waiting for delivery to Rome Cloud. A row leaves once Rome
+// Cloud answers for it. Contract: docs/concepts/rome-cloud.md#usage-reporting.
+export const usageOutbox = sqliteTable(
+  "usage_outbox",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    type: text("type").$type<UsageEvent["type"]>().notNull(),
+    eventId: text("event_id").notNull(),
+    payload: text("payload", { mode: "json" }).$type<UsageEvent>().notNull(),
+    /** Fingerprint of the instance credential the event was recorded under. */
+    credential: text("credential").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("idx_usage_outbox_event").on(table.type, table.eventId)],
+);
 
 export const webhookInvocations = sqliteTable(
   "webhook_invocations",
@@ -638,6 +703,11 @@ export const romeAgentMessages = sqliteTable(
     index("idx_rome_agent_messages_session_id").on(table.sessionId),
     index("idx_rome_agent_messages_turn_id").on(table.turnId),
     index("idx_rome_agent_messages_role_created_at").on(table.role, table.createdAt),
+    // A session's newest trace, for the sidebar's lastTurnFailed. Without it
+    // SQLite walks the role index across every session's traces.
+    index("idx_rome_agent_messages_session_trace")
+      .on(table.sessionId, table.createdAt)
+      .where(sql`${table.role} = 'trace'`),
     index("idx_rome_agent_messages_platform_message")
       .on(table.sessionId, table.platformMessageId)
       .where(sql`${table.platformMessageId} IS NOT NULL`),
@@ -746,6 +816,9 @@ export const routineRuns = sqliteTable(
       enum: ["success", "error", "running", "pending_approval", "cancelled"],
     }).notNull(),
     payload: text("payload", { mode: "json" }),
+    // The routine's trigger type when it fired, or `run_now` for a manual run.
+    // Null on runs recorded before this column existed.
+    firedBy: text("fired_by"),
     firedAt: integer("fired_at", { mode: "timestamp" }).notNull(),
     durationMs: integer("duration_ms"),
     error: text("error"),
@@ -754,6 +827,7 @@ export const routineRuns = sqliteTable(
     index("idx_routine_runs_routine_id").on(table.routineId),
     index("idx_routine_runs_fired_at").on(table.firedAt),
     index("idx_routine_runs_status").on(table.status),
+    index("idx_routine_runs_execution_id").on(table.executionId),
   ],
 );
 
@@ -795,9 +869,8 @@ export const connections = sqliteTable(
 
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
-// stored as plain JSON (repo precedent: encryption deliberately dropped, see
-// `packages/core/src/lib/provider-accounts.ts`); the envelope shape is kept so
-// encryption can return later. A grant row is present in "unauthorized" from
+// stored as plain JSON (encryption was deliberately dropped); the envelope
+// shape is kept so encryption can return later. A grant row is present in "unauthorized" from
 // connection creation; conferral fills it. One grant = one credential row.
 export const connectionGrants = sqliteTable(
   "connection_grants",

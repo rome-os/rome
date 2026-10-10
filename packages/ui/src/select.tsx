@@ -66,7 +66,7 @@ function SelectTrigger({
         // field and a submit button on one row share a height. The value reads
         // from the start edge, so the padding is the `start` group's, symmetric
         // whether or not the chevron is drawn.
-        "flex w-fit items-center justify-between gap-[var(--control-gap)] border border-input bg-transparent text-ui whitespace-nowrap transition-colors outline-none select-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive data-placeholder:text-muted-foreground data-[size=md]:h-[var(--control-h-md)] data-[size=md]:rounded-[var(--control-r-md)] data-[size=md]:px-[var(--control-px-start-md)] data-[size=sm]:h-[var(--control-h-sm)] data-[size=sm]:rounded-[var(--control-r-sm)] data-[size=sm]:px-[var(--control-px-start-sm)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 data-[size=md]:[&_svg:not([class*='size-'])]:size-4 data-[size=sm]:[&_svg:not([class*='size-'])]:size-3.5",
+        "flex w-fit items-center justify-between gap-[var(--control-gap)] border border-input bg-transparent text-ui whitespace-nowrap transition-colors enabled:hover:border-border-strong outline-none select-none outline-1 -outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive data-placeholder:text-muted-foreground data-[size=md]:h-[var(--control-h-md)] data-[size=md]:rounded-[var(--control-r-md)] data-[size=md]:px-[var(--control-px-start-md)] data-[size=sm]:h-[var(--control-h-sm)] data-[size=sm]:rounded-[var(--control-r-sm)] data-[size=sm]:px-[var(--control-px-start-sm)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 data-[size=md]:[&_svg:not([class*='size-'])]:size-4 data-[size=sm]:[&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}
@@ -138,7 +138,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-8 py-1 pr-8 pl-2 text-ui outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        "relative flex w-full cursor-default items-center gap-2 rounded-8 py-1 pr-8 pl-2 text-ui min-h-[var(--control-min-h)] outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className,
       )}
       {...props}

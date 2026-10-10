@@ -100,6 +100,7 @@ describe("Alert", () => {
 
     expect(classes("title")).toContain("col-start-2");
     expect(classes("title")).toContain("text-ui");
+    expect(classes("title")).toContain("font-semibold");
     expect(classes("description")).toContain(
       "text-[color:var(--alert-description-color,var(--muted-foreground))]",
     );

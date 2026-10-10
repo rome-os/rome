@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   CircleCheck,
@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   GitFork,
+  ListFilter,
   RefreshCw,
   Search,
   SquareActivity,
@@ -17,6 +18,9 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { IconButton } from "@/components/ui/icon-button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Separator } from "@/components/ui/separator";
@@ -30,34 +34,34 @@ import {
 } from "@/components/ui/select";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
+import { ListCollection, ListFooter, ListToolbar } from "@rome-os/ui/layout-list";
 import { Spinner } from "@rome-os/ui/spinner";
+import { Page, PageActions, PageHeader, PageHeading, PageTitle } from "@rome-os/ui/page";
+import { ToolbarButton } from "@rome-os/ui/toolbar";
+import { Timestamp } from "@rome-os/ui/timestamp";
 import {
   TraceDrawer,
   traceDrawerContentInsetClass,
   type TraceDrawerTarget,
 } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks, renderSingleBlock } from "@/components/chat/blocks";
+import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import { ChatComposer, type ChatComposerSnapshot } from "@/components/chat/ChatComposer";
 import {
-  getSession,
   getSessionMetrics,
   getRomeSession,
   listSessionTurns,
   listRomeSessionMessages,
   listRomeSessions,
   openTurnStream,
-  postSessionTurn,
   type ListRomeSessionsOptions,
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
 import type {
   ChatMessage,
-  RomeSessionRecord,
+  RomeSessionExplorerRecord,
   RomeSessionsPageResult,
-  StreamBlock,
 } from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
@@ -79,7 +83,6 @@ import {
   formatCost,
   formatDate,
   formatOutcome,
-  formatRelativeDate,
   SESSION_TYPE_LABELS,
   sourceLabel,
 } from "./sessions-format";
@@ -93,7 +96,9 @@ function sessionAgentLabel(agentName: string | null | undefined): string {
   return artifactLocalName(agentName ?? "main");
 }
 
-function sessionTriggerLabel(session: RomeSessionRecord | RomeSessionDetail): string | null {
+function sessionTriggerLabel(
+  session: RomeSessionExplorerRecord | RomeSessionDetail,
+): string | null {
   return (
     session.triggerName ??
     (session.triggerActionName ? artifactLocalName(session.triggerActionName) : null)
@@ -182,6 +187,7 @@ function useSessionsExplorerState() {
   const [trendBy, setTrendBy] = useState<"app" | "model">("model");
   const [groupBy, setGroupBy] = useState<SessionOverviewGroupDimension>("app");
   const [sort, setSort] = useState<SessionsSort>("activity");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [query, setQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [type, setType] = useState<RomeSessionType>();
@@ -211,10 +217,12 @@ function useSessionsExplorerState() {
     setQuery,
     setRange,
     setSort,
+    setSortDirection,
     setSource,
     setTrendBy,
     setType,
     sort,
+    sortDirection,
     source,
     trendBy,
     type,
@@ -223,7 +231,31 @@ function useSessionsExplorerState() {
 
 type SessionsExplorerState = ReturnType<typeof useSessionsExplorerState>;
 
-export function sessionsViewportClass(fullMode: boolean): string {
+/**
+ * The landmark and safe-area frame the shell-less mount needs.
+ *
+ * `/sessions/*` renders inside `RomeShellLayout`, which owns the one `main`, so
+ * a layout that added its own would nest a second one. `/full/apps/sessions/*`
+ * routes outside that shell, so there the page owns the landmark, the top inset,
+ * and the bounded height — the same frame this page's overview and detail views
+ * carry. Without it the inventory is the one full-mode view with no landmark,
+ * and its content sits under the notch.
+ */
+function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children: ReactNode }) {
+  if (!fullMode) return children;
+  return (
+    <main
+      data-safe-area-bounded
+      className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
+    >
+      <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
+        {children}
+      </div>
+    </main>
+  );
+}
+
+function sessionsViewportClass(fullMode: boolean): string {
   return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
 }
 
@@ -257,15 +289,20 @@ function SessionsIndexPage({
     setQuery,
     setRange,
     setSort,
+    setSortDirection,
     setSource,
     setTrendBy,
     setType,
     sort,
+    sortDirection,
     source,
     trendBy,
     type,
   } = state;
   const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const typeFieldId = useId();
+  const sourceFieldId = useId();
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const options = useMemo<ListRomeSessionsOptions>(
@@ -282,8 +319,22 @@ function SessionsIndexPage({
       model,
       projectPathPrefix: project?.path,
       sort,
+      sortDirection,
     }),
-    [agentName, debouncedQuery, model, offset, owner, project, range, sort, source, timeZone, type],
+    [
+      agentName,
+      debouncedQuery,
+      model,
+      offset,
+      owner,
+      project,
+      range,
+      sort,
+      sortDirection,
+      source,
+      timeZone,
+      type,
+    ],
   );
   const metricsOptions = useMemo(
     () => ({
@@ -322,7 +373,7 @@ function SessionsIndexPage({
   const recentInventory = useRomeSessions(recentOptions, view === "overview");
   const { data, loading, error } = inventory;
   const sessions = data?.sessions ?? [];
-  const columns = useMemo<DataTableColumn<RomeSessionRecord>[]>(
+  const columns = useMemo<DataTableColumn<RomeSessionExplorerRecord>[]>(
     () => [
       {
         id: "session",
@@ -369,6 +420,7 @@ function SessionsIndexPage({
       {
         id: "runs",
         header: "Runs",
+        sortKey: "runs",
         className: "w-16 text-right tabular-nums",
         headerClassName: "w-16 text-right",
         cell: (session) => formatCompactNumber(session.stats.runCount),
@@ -376,6 +428,9 @@ function SessionsIndexPage({
       {
         id: "usage",
         header: "Usage",
+        // Tokens, not cost: the API sorts by either, and this column has one
+        // header for two lines. Cost stays reachable from the card list's sort.
+        sortKey: "tokens",
         className: "w-36 text-right tabular-nums",
         headerClassName: "w-36 text-right",
         cell: (session) => (
@@ -397,6 +452,7 @@ function SessionsIndexPage({
       {
         id: "outcome",
         header: "Outcome",
+        sortKey: "errors",
         className: "w-44 max-w-44",
         headerClassName: "w-44",
         cell: (session) => (
@@ -422,16 +478,10 @@ function SessionsIndexPage({
       {
         id: "activity",
         header: "Last activity",
+        sortKey: "activity",
         className: "w-28 whitespace-nowrap",
         headerClassName: "w-28",
-        cell: (session) => (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>{formatRelativeDate(session.activityAt ?? session.createdAt)}</span>
-            </TooltipTrigger>
-            <TooltipContent>{formatDate(session.activityAt ?? session.createdAt)}</TooltipContent>
-          </Tooltip>
-        ),
+        cell: (session) => <Timestamp value={session.activityAt ?? session.createdAt} />,
       },
     ],
     [],
@@ -483,15 +533,26 @@ function SessionsIndexPage({
 
   useEffect(() => {
     setOffset(0);
-  }, [agentName, model, owner, project, query, range, setOffset, sort, source, type]);
+  }, [
+    agentName,
+    model,
+    owner,
+    project,
+    query,
+    range,
+    setOffset,
+    sort,
+    sortDirection,
+    source,
+    type,
+  ]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setDebouncedQuery(query), 250);
     return () => window.clearTimeout(timeout);
   }, [query]);
 
-  const refreshing =
-    view === "overview" ? metrics.loading || recentInventory.loading : inventory.loading;
+  const overviewRefreshing = metrics.loading || recentInventory.loading;
   const activeFilters = [
     owner
       ? {
@@ -536,8 +597,11 @@ function SessionsIndexPage({
         }
       : null,
   ].filter((value): value is { key: string; label: string; clear: () => void } => value !== null);
+  // The Filter popover holds Type and Source, so its badge counts those two and
+  // not the drill-in filters the overview hands over, which the chip row shows.
+  const popoverFilterCount = (type ? 1 : 0) + (source ? 1 : 0);
   const openSession = useCallback(
-    (session: RomeSessionRecord) => {
+    (session: RomeSessionExplorerRecord) => {
       navigate(
         view === "overview"
           ? encodeURIComponent(session.id)
@@ -551,159 +615,268 @@ function SessionsIndexPage({
     [navigate, view],
   );
 
-  return (
-    <TooltipProvider delayDuration={150}>
-      <main
-        data-safe-area-bounded
-        className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
-      >
-        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <SegmentedControl
-                aria-label="Sessions view"
-                value={view}
-                onValueChange={(value) => {
-                  if (value === view) return;
-                  navigate(value === "sessions" ? "all" : "..", { relative: "path" });
-                }}
-                options={[
-                  { value: "overview", label: "Overview" },
-                  { value: "sessions", label: "Sessions" },
-                ]}
-              />
-              {activeFilters.length > 0 ? (
-                <Separator className="h-5" orientation="vertical" />
-              ) : null}
-              {activeFilters.map((filter) => (
-                <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
-                  {filter.label}
-                  <span aria-hidden>×</span>
-                </Button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <Select value={range} onValueChange={(value) => setRange(value as SessionsRange)}>
-                <SelectTrigger aria-label="Time range" className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="24h">24 hours</SelectItem>
-                  <SelectItem value="7d">7 days</SelectItem>
-                  <SelectItem value="30d">30 days</SelectItem>
-                  <SelectItem value="all">All time</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (view === "overview") {
-                    metrics.refresh();
-                    recentInventory.refresh();
-                  } else inventory.refresh();
-                }}
-                disabled={refreshing}
-              >
-                <RefreshCw className={refreshing ? "animate-spin" : ""} />
-                Refresh
-              </Button>
-            </div>
-          </div>
-        </header>
+  const viewSwitch = (
+    <SegmentedControl
+      aria-label="Sessions view"
+      value={view}
+      onValueChange={(value) => {
+        if (value === view) return;
+        navigate(value === "sessions" ? "all" : "..", { relative: "path" });
+      }}
+      options={[
+        { value: "overview", label: "Overview" },
+        { value: "sessions", label: "Sessions" },
+      ]}
+    />
+  );
+  const rangeItems = (
+    <>
+      <SelectItem value="24h">24 hours</SelectItem>
+      <SelectItem value="7d">7 days</SelectItem>
+      <SelectItem value="30d">30 days</SelectItem>
+      <SelectItem value="all">All time</SelectItem>
+    </>
+  );
+  const rangeSelect = (
+    <Select value={range} onValueChange={(value) => setRange(value as SessionsRange)}>
+      <SelectTrigger aria-label="Time range" className="w-32">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>{rangeItems}</SelectContent>
+    </Select>
+  );
+  // The overview's Refresh. The list view has its own, in the toolbar beside the
+  // rest of the controls that act on the collection.
+  const refreshButton = (
+    <Button
+      variant="outline"
+      onClick={() => {
+        metrics.refresh();
+        recentInventory.refresh();
+      }}
+      disabled={overviewRefreshing}
+    >
+      <RefreshCw data-icon="inline-start" className={overviewRefreshing ? "animate-spin" : ""} />
+      Refresh
+    </Button>
+  );
 
-        <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
-          {view === "overview" ? (
-            <SessionsOverview
-              data={metrics.data}
-              error={metrics.error}
-              loading={metrics.loading}
-              metric={metric}
-              trendBy={trendBy}
-              groupBy={groupBy}
-              recentSessions={recentInventory.data?.sessions ?? []}
-              recentSessionsError={recentInventory.error}
-              recentSessionsLoading={recentInventory.loading}
-              onMetricChange={setMetric}
-              onTrendByChange={setTrendBy}
-              onGroupByChange={setGroupBy}
-              onGroupSelect={groupSelect}
-              onRecentSessionOpen={openSession}
-              onSeriesSelect={seriesSelect}
-              onViewAllSessions={() => {
-                setSort("activity");
-                setOffset(0);
-                navigate("all", { relative: "path" });
-              }}
-            />
-          ) : (
-            <div className="px-5 py-5">
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <div className="relative min-w-64 flex-1 sm:max-w-sm">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search title, App, Agent, context, or ID"
-                    className="pl-8"
-                  />
+  // The inventory is a List: the guardian searches it for one session and
+  // leaves. The header carries what the page is — its title and the switch
+  // between this view and the overview — and the toolbar carries what the
+  // reader does to the collection, which is the view switch rule in
+  // docs/ui/layouts.md.
+  if (view === "sessions") {
+    return (
+      <TooltipProvider delayDuration={150}>
+        <SessionsListFrame fullMode={fullMode}>
+          <Page>
+            <PageHeader align="end">
+              <PageHeading>
+                <PageTitle>Sessions</PageTitle>
+              </PageHeading>
+              <PageActions>{viewSwitch}</PageActions>
+            </PageHeader>
+            <ListToolbar aria-label="Filter sessions">
+              {/* Search leads and grows: it is the only text control here, and the
+                one the reader reaches for first. */}
+              <div className="relative min-w-48 flex-1 sm:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search title, App, Agent, context, or ID"
+                  className="pl-8"
+                />
+              </div>
+              {/* The range narrows the collection like any other filter, and it
+                is the one the reader reaches for most, so it stays inline
+                rather than joining the two behind the Filter control. */}
+              <Select value={range} onValueChange={(value) => setRange(value as SessionsRange)}>
+                <ToolbarButton asChild>
+                  <SelectTrigger aria-label="Time range" className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                </ToolbarButton>
+                <SelectContent>{rangeItems}</SelectContent>
+              </Select>
+              {/* Type and Source collapse into one control rather than spending
+                two slots of the row apiece. What is set shows up in the chip
+                row under the toolbar, so the popover stays closed by default
+                without hiding the state. */}
+              <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                <ToolbarButton asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline">
+                      <ListFilter data-icon="inline-start" aria-hidden />
+                      Filter
+                      {popoverFilterCount > 0 ? (
+                        <Badge variant="muted" shape="pill">
+                          {popoverFilterCount}
+                        </Badge>
+                      ) : null}
+                    </Button>
+                  </PopoverTrigger>
+                </ToolbarButton>
+                <PopoverContent align="start">
+                  <Field>
+                    <FieldLabel htmlFor={typeFieldId}>Type</FieldLabel>
+                    <Select
+                      value={type ?? ALL}
+                      onValueChange={(value) =>
+                        setType(value === ALL ? undefined : (value as RomeSessionType))
+                      }
+                    >
+                      <SelectTrigger id={typeFieldId} className="w-full">
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All types</SelectItem>
+                        {(data?.facets.types ?? []).map((facet) =>
+                          facet.value ? (
+                            <SelectItem key={facet.value} value={facet.value}>
+                              {SESSION_TYPE_LABELS[
+                                facet.value as keyof typeof SESSION_TYPE_LABELS
+                              ] ?? facet.value}{" "}
+                              ({facet.count})
+                            </SelectItem>
+                          ) : null,
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor={sourceFieldId}>Source</FieldLabel>
+                    <Select
+                      value={
+                        source?.kind === "internal"
+                          ? INTERNAL_SOURCE
+                          : source?.kind === "channel"
+                            ? source.channel
+                            : ALL
+                      }
+                      onValueChange={(value) =>
+                        setSource(
+                          value === ALL
+                            ? undefined
+                            : value === INTERNAL_SOURCE
+                              ? { kind: "internal" }
+                              : { kind: "channel", channel: value },
+                        )
+                      }
+                    >
+                      <SelectTrigger id={sourceFieldId} className="w-full">
+                        <SelectValue placeholder="Source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={ALL}>All sources</SelectItem>
+                        {(data?.facets.sourceChannels ?? []).map((facet) => (
+                          <SelectItem
+                            key={facet.value ?? INTERNAL_SOURCE}
+                            value={facet.value ?? INTERNAL_SOURCE}
+                          >
+                            {sourceLabel(facet.value)} ({facet.count})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="self-start"
+                    disabled={activeFilters.length === 0}
+                    onClick={() => {
+                      for (const filter of activeFilters) filter.clear();
+                      setFilterOpen(false);
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                </PopoverContent>
+              </Popover>
+              {/* Refresh does not narrow the collection, so it sits at the
+                trailing end as a glyph rather than competing with the filters
+                for the row's reading order. */}
+              <div className="ml-auto flex items-center gap-2">
+                <Tooltip>
+                  <ToolbarButton asChild>
+                    <TooltipTrigger asChild>
+                      <IconButton
+                        label="Refresh"
+                        // The kit's own `title` and a Radix tooltip would both
+                        // fire on hover; the page already carries a tooltip
+                        // provider, so the native one stands down.
+                        title=""
+                        icon={<RefreshCw className={inventory.loading ? "animate-spin" : ""} />}
+                        onClick={() => inventory.refresh()}
+                        disabled={inventory.loading}
+                      />
+                    </TooltipTrigger>
+                  </ToolbarButton>
+                  <TooltipContent>Refresh</TooltipContent>
+                </Tooltip>
+              </div>
+            </ListToolbar>
+            {/* The filters that are set, including the ones a drill-in from the
+              overview brought here. The row exists only while something is
+              set. */}
+            {activeFilters.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {activeFilters.map((filter) => (
+                  <Button
+                    key={filter.key}
+                    variant="secondary"
+                    size="sm"
+                    onClick={filter.clear}
+                    aria-label={`Clear ${filter.label}`}
+                  >
+                    {filter.label}
+                    <span aria-hidden>×</span>
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+            {/* The collection takes a second form below `md`: a table that scrolls
+              sideways is a table a phone cannot read, so each row becomes a
+              card. Which form renders is a decision about the content, which is
+              why it sits at the call site rather than in the layout. */}
+            <ListCollection className="flex flex-col gap-3">
+              {error ? (
+                <div className="rounded-12 border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui text-destructive">
+                  {error}
                 </div>
+              ) : null}
+              {/* Order lives on the column headers here, so the toolbar carries no
+                sort control of its own. */}
+              <div className="hidden md:block">
+                <DataTable
+                  columns={columns}
+                  data={sessions}
+                  emptyMessage="No sessions found"
+                  getRowKey={(session) => session.id}
+                  loading={loading && sessions.length === 0}
+                  loadingMessage="Loading sessions"
+                  onRowClick={openSession}
+                  sort={{ key: sort, direction: sortDirection }}
+                  onSortChange={(next) => {
+                    setSort(next.key as SessionsSort);
+                    setSortDirection(next.direction);
+                  }}
+                />
+              </div>
+              {/* Cards carry no headers, so the narrow form needs the control the
+                table does without. It sets the field at its useful end, which is
+                the order the table's first click on a header gives too. */}
+              <div className="flex items-center gap-2 md:hidden">
                 <Select
-                  value={type ?? ALL}
-                  onValueChange={(value) =>
-                    setType(value === ALL ? undefined : (value as RomeSessionType))
-                  }
+                  value={sort}
+                  onValueChange={(value) => {
+                    setSort(value as SessionsSort);
+                    setSortDirection("desc");
+                  }}
                 >
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All types</SelectItem>
-                    {(data?.facets.types ?? []).map((facet) =>
-                      facet.value ? (
-                        <SelectItem key={facet.value} value={facet.value}>
-                          {SESSION_TYPE_LABELS[facet.value as keyof typeof SESSION_TYPE_LABELS] ??
-                            facet.value}{" "}
-                          ({facet.count})
-                        </SelectItem>
-                      ) : null,
-                    )}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={
-                    source?.kind === "internal"
-                      ? INTERNAL_SOURCE
-                      : source?.kind === "channel"
-                        ? source.channel
-                        : ALL
-                  }
-                  onValueChange={(value) =>
-                    setSource(
-                      value === ALL
-                        ? undefined
-                        : value === INTERNAL_SOURCE
-                          ? { kind: "internal" }
-                          : { kind: "channel", channel: value },
-                    )
-                  }
-                >
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Source" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All sources</SelectItem>
-                    {(data?.facets.sourceChannels ?? []).map((facet) => (
-                      <SelectItem
-                        key={facet.value ?? INTERNAL_SOURCE}
-                        value={facet.value ?? INTERNAL_SOURCE}
-                      >
-                        {sourceLabel(facet.value)} ({facet.count})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={sort} onValueChange={(value) => setSort(value as SessionsSort)}>
-                  <SelectTrigger className="w-44">
+                  <SelectTrigger aria-label="Sort sessions" className="w-full">
                     <SelectValue placeholder="Sort" />
                   </SelectTrigger>
                   <SelectContent>
@@ -714,22 +887,6 @@ function SessionsIndexPage({
                     <SelectItem value="errors">Most errors</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              {error ? (
-                <div className="mb-4 rounded-12 border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui text-destructive">
-                  {error}
-                </div>
-              ) : null}
-              <div className="hidden md:block">
-                <DataTable
-                  columns={columns}
-                  data={sessions}
-                  emptyMessage="No sessions found"
-                  getRowKey={(session) => session.id}
-                  loading={loading && sessions.length === 0}
-                  loadingMessage="Loading sessions"
-                  onRowClick={openSession}
-                />
               </div>
               <div className="divide-y divide-border-subtle rounded-12 border border-border md:hidden">
                 {sessions.length === 0 ? (
@@ -748,7 +905,7 @@ function SessionsIndexPage({
                     <button
                       key={session.id}
                       type="button"
-                      className="block w-full px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      className="block w-full px-4 py-4 text-left transition-colors hover:bg-muted/50 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring"
                       onClick={() => openSession(session)}
                     >
                       <div className="flex min-w-0 items-center gap-3">
@@ -795,39 +952,96 @@ function SessionsIndexPage({
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-4 text-aux text-muted-foreground">
                         <span className="truncate">{formatOutcome(session.stats.outcomes)}</span>
-                        <span className="shrink-0">
-                          {formatRelativeDate(session.activityAt ?? session.createdAt)}
-                        </span>
+                        <Timestamp
+                          value={session.activityAt ?? session.createdAt}
+                          className="shrink-0"
+                        />
                       </div>
                     </button>
                   ))
                 )}
               </div>
-              <div className="mt-3 flex items-center justify-between gap-3 text-ui text-muted-foreground">
-                <span>
-                  {data
-                    ? `Showing ${data.total === 0 ? 0 : data.offset + 1}-${data.offset + sessions.length} of ${data.total}`
-                    : "Showing sessions"}
-                </span>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={loading || offset === 0}
-                    onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={loading || !data || data.nextOffset === null}
-                    onClick={() => setOffset(data?.nextOffset ?? offset)}
-                  >
-                    Next
-                  </Button>
-                </div>
+            </ListCollection>
+            <ListFooter>
+              <span className="text-aux text-muted-foreground">
+                {data
+                  ? `Showing ${data.total === 0 ? 0 : data.offset + 1}-${data.offset + sessions.length} of ${data.total}`
+                  : "Showing sessions"}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  disabled={loading || offset === 0}
+                  onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={loading || !data || data.nextOffset === null}
+                  onClick={() => setOffset(data?.nextOffset ?? offset)}
+                >
+                  Next
+                </Button>
               </div>
+            </ListFooter>
+          </Page>
+        </SessionsListFrame>
+      </TooltipProvider>
+    );
+  }
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <main
+        data-safe-area-bounded
+        className={`flex min-h-0 flex-col overflow-hidden ${sessionsViewportClass(fullMode)}`}
+      >
+        <header className="shrink-0 border-b border-border bg-background px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {viewSwitch}
+              {activeFilters.length > 0 ? (
+                <Separator className="h-5" orientation="vertical" />
+              ) : null}
+              {activeFilters.map((filter) => (
+                <Button key={filter.key} variant="secondary" size="sm" onClick={filter.clear}>
+                  {filter.label}
+                  <span aria-hidden>×</span>
+                </Button>
+              ))}
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              {rangeSelect}
+              {refreshButton}
+            </div>
+          </div>
+        </header>
+
+        <div data-safe-area-scroll className="min-h-0 flex-1 overflow-auto pb-safe">
+          <SessionsOverview
+            data={metrics.data}
+            error={metrics.error}
+            loading={metrics.loading}
+            metric={metric}
+            trendBy={trendBy}
+            groupBy={groupBy}
+            recentSessions={recentInventory.data?.sessions ?? []}
+            recentSessionsError={recentInventory.error}
+            recentSessionsLoading={recentInventory.loading}
+            onMetricChange={setMetric}
+            onTrendByChange={setTrendBy}
+            onGroupByChange={setGroupBy}
+            onGroupSelect={groupSelect}
+            onRecentSessionOpen={openSession}
+            onSeriesSelect={seriesSelect}
+            onViewAllSessions={() => {
+              setSort("activity");
+              setSortDirection("desc");
+              setOffset(0);
+              navigate("all", { relative: "path" });
+            }}
+          />
         </div>
       </main>
     </TooltipProvider>
@@ -839,7 +1053,7 @@ function ReadOnlySessionChat({
   messages,
   liveTurn,
 }: {
-  session: RomeSessionRecord;
+  session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
 }) {
@@ -954,13 +1168,13 @@ function ReadOnlySessionChat({
           allowSubagentUsage
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleBlock(block as StreamBlock, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatBlocks(blocks as StreamBlock[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,
@@ -1013,7 +1227,7 @@ function SessionDetailsSheet({
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div className="min-w-0">
           <SheetTitle className="truncate">Session details</SheetTitle>
-          <SheetDescription className="mt-1 truncate text-body text-muted-foreground">
+          <SheetDescription className="mt-1 truncate text-ui text-muted-foreground">
             {session.displayTitle}
           </SheetDescription>
         </div>
@@ -1054,7 +1268,7 @@ function SessionDetailsSheet({
               {coverage ? <p className="mt-1 text-aux text-muted-foreground">{coverage}</p> : null}
             </div>
           </dl>
-          <p className="mt-4 text-body text-muted-foreground">
+          <p className="mt-4 text-ui text-muted-foreground">
             {formatOutcome(session.stats.outcomes)}
           </p>
         </section>
@@ -1133,16 +1347,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     snapshot: TraceSnapshot;
     text: string;
   } | null>(null);
-  // A fork is continuable exactly when the chat API will serve it — that route
-  // 404s for a read-only trajectory and 200s for a branch with a resumable
-  // provider thread, so one probe answers it with no new field on the DTO.
-  const [continuable, setContinuable] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  // Held from the POST until the live-turn effect has settled, so the composer
-  // cannot accept a second turn this view would never render.
-  const [sending, setSending] = useState(false);
-  // Bumped after each send so the live-turn effect re-runs and attaches.
-  const [liveTurnNonce, setLiveTurnNonce] = useState(0);
 
   const handleBack = useCallback(() => {
     // BrowserRouter starts its own history index at zero, so an index above
@@ -1160,83 +1364,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     if (result) setMessages(result);
   }, [sessionId]);
 
-  const probeContinuable = useCallback(
-    async (sessionType: string | undefined) => {
-      if (sessionType !== "fork") {
-        setContinuable(false);
-        return;
-      }
-      try {
-        setContinuable((await getSession(sessionId)) !== null);
-      } catch {
-        // `getSession` returns null only on 404 — the definitive "this branch
-        // is read-only". Anything else is transient, and collapsing to
-        // read-only here would drop the composer off a live branch until the
-        // next probe. Leave the current answer standing.
-      }
-    },
-    [sessionId],
-  );
-
-  const handleSideChatSend = useCallback(
-    async (snapshot: ChatComposerSnapshot) => {
-      const text = snapshot.text.trim();
-      if (!text && snapshot.uploads.length === 0) return;
-      setSendError(null);
-      setSending(true);
-      // FormData rather than JSON so an attachment, a `/skill` chip, or an
-      // impersonated persona the composer accepted is actually sent instead of
-      // being dropped silently. Mirrors Chat.tsx's send.
-      const form = new FormData();
-      form.set("text", snapshot.text);
-      form.set("reasoningEffort", snapshot.reasoningEffort);
-      if (snapshot.skillName) form.set("skillName", snapshot.skillName);
-      if (snapshot.personaId) form.set("personaId", snapshot.personaId);
-      for (const upload of snapshot.uploads) form.append("files", upload.file);
-
-      let result: Awaited<ReturnType<typeof postSessionTurn>>;
-      try {
-        result = await postSessionTurn(sessionId, form);
-      } catch (err) {
-        // `postSessionTurn` wraps `fetch`, which rejects outright on a network
-        // failure rather than resolving to `{ ok: false }`. Without this the
-        // composer would stay closed until the view is remounted.
-        setSending(false);
-        setSendError(err instanceof Error ? err.message : "Couldn't continue this side chat");
-        throw err;
-      }
-      if (!result.ok) {
-        setSending(false);
-        setSendError(result.message || "Couldn't continue this side chat");
-        // The composer restores its input when onSend throws.
-        throw new Error(result.message);
-      }
-      // Wake the live-turn effect FIRST. The turn is already accepted, so it,
-      // not this transcript refresh, is what must not be lost: the POST creates
-      // the turn's stream before it responds, so the effect always finds it
-      // running, and that effect is also what clears `sending`.
-      setLiveTurnNonce((n) => n + 1);
-      // Then show the guardian's own message, best-effort. `reloadMessages`
-      // throws on any non-404 failure, and throwing here would both strand the
-      // composer and restore an input that was in fact accepted — the user
-      // would resend and get a duplicate turn.
-      try {
-        await reloadMessages();
-      } catch {
-        // Non-fatal: the accepted turn remains authoritative.
-      }
-    },
-    [reloadMessages, sessionId],
-  );
-
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    // Reset before the fetches: navigating between two side chats must not
-    // briefly show the previous one's composer, nor its send error.
-    setContinuable(false);
-    setSendError(null);
     Promise.all([getRomeSession(sessionId), listRomeSessionMessages(sessionId)])
       .then(([sessionResult, messageResult]) => {
         if (cancelled) return;
@@ -1248,7 +1379,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         }
         setSession(sessionResult);
         setMessages(messageResult);
-        void probeContinuable(sessionResult.type);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load session");
@@ -1259,7 +1389,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId, probeContinuable]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!session) {
@@ -1282,12 +1412,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         // leaving the detail view stale until a full page reload.
         if (!cancelled) {
           await reloadMessages();
-          setSending(false);
-          // Probe here too, not only on the completion branch: a short branch
-          // answer can finish between the mount probe (which 404s while it is
-          // still running) and this lookup, and a failed listSessionTurns lands
-          // here as well. Without it the composer would never appear.
-          void probeContinuable(session?.type);
         }
         return;
       }
@@ -1311,13 +1435,10 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       publish();
       const response = await openTurnStream(active.turnId, controller.signal);
       if (!response.ok || !response.body) {
-        // The turn is accepted and running; only the attach failed. Release the
-        // composer rather than leaving it disabled until the view remounts, and
-        // refresh so the reply still lands once the turn finishes.
+        // The turn is accepted and running; only the attach failed. Refresh so
+        // the reply still lands once the turn finishes.
         if (!cancelled) {
           setLiveTurn(null);
-          setSending(false);
-          setSendError("Lost the live connection to this turn. Reload to see its reply.");
           await reloadMessages();
         }
         return;
@@ -1361,14 +1482,9 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       if (!cancelled) {
         await reloadMessages();
         setLiveTurn(null);
-        setSending(false);
-        // The branch's own first answer only writes its resumable row on
-        // completion, and this view opened while that turn was still running.
-        void probeContinuable(session?.type);
       }
     })().catch((err) => {
       if (!cancelled && (err as { name?: string }).name !== "AbortError") {
-        setSending(false);
         setError(err instanceof Error ? err.message : "Failed to attach to live turn");
       }
     });
@@ -1376,7 +1492,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       cancelled = true;
       controller.abort();
     };
-  }, [reloadMessages, session?.id, session?.type, sessionId, liveTurnNonce, probeContinuable]);
+  }, [reloadMessages, session?.id, session?.type, sessionId]);
 
   return (
     <main
@@ -1389,7 +1505,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         </Button>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-body text-foreground">
+            <h1 className="truncate text-section text-foreground">
               {session?.displayTitle ?? sessionId}
             </h1>
             {session ? (
@@ -1432,7 +1548,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
               relative="path"
               state={location.state}
             >
-              <GitFork />
+              <GitFork data-icon="inline-start" />
               {session.type === "subagent" ? "Parent" : "Forked from"}
             </Link>
           </Button>
@@ -1440,7 +1556,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         {session?.type === "webchat" ? (
           <Button asChild variant="outline">
             <Link to={`/chat/${session.id}`}>
-              <ExternalLink />
+              <ExternalLink data-icon="inline-start" />
               Open chat
             </Link>
           </Button>
@@ -1462,22 +1578,6 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
       ) : (
         <>
           <ReadOnlySessionChat session={session} messages={messages} liveTurn={liveTurn} />
-          {continuable ? (
-            <div className="shrink-0 border-t border-border px-4 py-3">
-              <ChatComposer
-                lockAgentMention
-                // `isStreaming` alone does NOT block sending — the composer
-                // deliberately allows it in the main chat. This view follows
-                // only the first running turn, so `disabled` is what actually
-                // keeps a second turn from being accepted and never rendered.
-                disabled={sending || liveTurn !== null}
-                isStreaming={liveTurn !== null}
-                streamError={sendError}
-                boxClassName="rounded-16 border border-border bg-surface p-3"
-                onSend={handleSideChatSend}
-              />
-            </div>
-          ) : null}
         </>
       )}
       {session ? (

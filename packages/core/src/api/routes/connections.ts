@@ -13,7 +13,6 @@ import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
 import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
-import { removeProviderAccount } from "../../lib/provider-accounts.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantRecord } from "../../connections/ledger.js";
 import type { DrizzleTx } from "../../db/index.js";
@@ -278,37 +277,19 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     });
   });
 
-  /** Transitional: the boot reconciler re-imports a retained legacy
-   *  `provider_accounts` row over an unauthorized grant, so a teardown that
-   *  only touches the ledger would resurrect it on the next boot. Tearing
-   *  down an OAuth provider must also drop its legacy row until that table
-   *  is retired. */
-  const removeLegacyProviderRow = async (service: string): Promise<void> => {
-    if (isOAuthProvider(service)) await removeProviderAccount(deps.db, service);
-  };
-
-  const clearGuardianMapping = async (
-    registry: ConnectionRegistry,
-    conn: Connection,
-    grant?: string,
-  ): Promise<void> => {
-    const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return;
-    await deps.personMappingRepo.deleteGuardianChannelMappings(conn.service);
-  };
-
-  /** The connection-level guardian-mapping teardown, expressed as a transaction
-   *  participant so it commits atomically with the connection/grant deletes in
-   *  `registry.remove` — a failed cleanup cannot strand the mapping after the
-   *  connection is already deleted. Returns undefined when the service has no
-   *  talker — nothing to clear — leaving `remove` on its plain delete path. */
+  /** Enlist pairing and mapping cleanup in connection deletion or Talk-grant
+   *  revocation. Unrelated grants have no cleanup participant. */
   const guardianMappingTeardown = (
     registry: ConnectionRegistry,
     conn: Connection,
+    grant?: string,
   ): ((tx: DrizzleTx) => void) | undefined => {
     const talker = registry.getDescriptor(conn.service)?.capabilities.talker;
-    if (!talker) return undefined;
-    return (tx) => deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
+    return (tx) => {
+      deps.approvalsRepo.supersedePairings(conn.id, tx);
+      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+    };
   };
 
   app.delete("/connections/:id/grants/:name", async (c) => {
@@ -329,11 +310,9 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     // per-(service, grant) critical section the setup's terminal write uses, so
     // the two can never interleave.
     await deps.setupManager?.cancelActive(conn.id, name);
-    await registry.withGrantSection(conn.service, name, async () => {
-      await removeLegacyProviderRow(conn.service);
-      await conn.auth.revoke(name);
-      await clearGuardianMapping(registry, conn, name);
-    });
+    await registry.withGrantSection(conn.service, name, () =>
+      registry.revoke(conn.id, name, { inTx: guardianMappingTeardown(registry, conn, name) }),
+    );
     c.header("Cache-Control", "no-store");
     return c.json({
       ok: true,
@@ -348,7 +327,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
-    await removeLegacyProviderRow(conn.service);
     await registry.remove(conn.id, { inTx: guardianMappingTeardown(registry, conn) });
     return c.json({ ok: true });
   });

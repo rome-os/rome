@@ -45,7 +45,11 @@ describe("getWidgetFullHref", () => {
     ).toBe("/full/apps/shop/orders?orderId=7");
   });
 
-  it("returns null for widgets with no standalone page", () => {
+  it("addresses the pinned chat session", () => {
+    expect(getWidgetFullHref(placement({ type: "chat", targetId: "s 1" }))).toBe("/chat/s%201");
+  });
+
+  it("returns null for tiles without a target", () => {
     expect(getWidgetFullHref(placement({ type: "chat" }))).toBeNull();
     expect(getWidgetFullHref(placement({ type: "app" }))).toBeNull();
   });

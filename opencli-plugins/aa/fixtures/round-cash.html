@@ -1,0 +1,968 @@
+<html lang="en">
+<head>
+</head>
+<body>
+<app-modify-search>
+<app-modify-search-header>
+<span class="origin">JFK</span>
+<span class="destination"> LHR,</span>
+<span class="passenger-count">2</span>
+</app-modify-search-header>
+<mat-select role="combobox" aria-haspopup="listbox" name="tripType" class="mat-mdc-select ng-untouched ng-pristine ng-valid" aria-labelledby="mat-select-value-0" id="mat-select-0" tabindex="0" aria-expanded="false" aria-required="false" aria-disabled="false" aria-invalid="false">
+<div cdk-overlay-origin="" class="mat-mdc-select-trigger">
+<div class="mat-mdc-select-value" id="mat-select-value-0">
+<span class="mat-mdc-select-value-text">
+<span class="mat-mdc-select-min-line">Round trip</span>
+</span>
+</div>
+<div class="mat-mdc-select-arrow-wrapper">
+<div class="mat-mdc-select-arrow">
+</div>
+</div>
+</div>
+</mat-select>
+<input type="checkbox" id="redeem-miles" name="redeemMiles" class="ng-untouched ng-pristine ng-valid" value="on">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Departure airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matOriginAirport" name="orig" aria-invalid="false" aria-required="false" value="JFK">
+<input matinput="" type="text" class="mat-mdc-autocomplete-trigger mat-mdc-input-element ng-untouched ng-pristine ng-valid mat-mdc-form-field-input-control mdc-text-field__input cdk-text-field-autofill-monitored" aria-label="Arrival airport" placeholder="City / airport" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" id="matDestinationAirport" name="dest" aria-invalid="false" aria-required="false" value="LHR">
+<input autocomplete="off" type="text" class="auto-growing-input agc-date-input-range-display agc-date-input-full-date" spellcheck="false" placeholder="mm/dd/yy" id="date-input-first-agc-date-input-0" aria-labelledby="date-accessible-label-first-agc-date-input-0" aria-label="Depart date, press Enter to open calendar" aria-describedby="date-input-describedby-agc-date-input-0" aria-invalid="false" maxlength="8" style="width: 69px;" value="11/13/26">
+<input autocomplete="off" type="text" class="auto-growing-input agc-date-input-range-display agc-date-input-full-date" spellcheck="false" placeholder="mm/dd/yy" id="date-input-second-agc-date-input-0" aria-labelledby="date-accessible-label-second-agc-date-input-0" aria-label="Return date, press Enter to open calendar" aria-describedby="date-input-describedby-agc-date-input-0" aria-invalid="false" maxlength="8" style="width: 69px;" value="11/20/26">
+<div data-passengers="[{&quot;type&quot;:&quot;adult&quot;,&quot;count&quot;:2}]">
+</div>
+</app-modify-search>
+<app-depart-return-header-desktop>
+<div class="pad-top-xs hide-for-small-only desktop-only">
+<h2>
+<em>
+<app-depart-return-multicity-text>
+<span id="flight-direction-text">DEPART</span>
+</app-depart-return-multicity-text>
+</em>
+<div class="city-pair"> New York, NY to London, United Kingdom </div>
+</h2>
+<h3 class="date">Friday, November 13, 2026</h3>
+<div class="aa-flight-info">
+<span aria-hidden="true" class="icon-error icon-small">
+</span> American Airlines flights may be listed first. </div>
+</div>
+</app-depart-return-header-desktop>
+<app-results-matrix>
+<div tabindex="-1" class="results-matrix">
+<app-filter-container id="filter-container" tabindex="-1">
+<div class="filter-container">
+<h2 id="flights-by-heading" class="show-for-sr">
+<span>Filter flights by </span>
+<span class="filter-flights-by-stops">Stops, </span>
+<span class="filter-flights-by-airlines">Airlines, </span>
+</h2>
+<div class="filters-row">
+<div aria-hidden="true" class="filter-by">Filter by:</div>
+<div class="pills">
+<app-filter-stops>
+<div class="pill-container">
+<button type="button" id="btn-stops-filter" class="pill active" aria-haspopup="dialog">
+<div aria-hidden="true" class="pill-text">Stops</div>
+<span class="show-for-sr pill-text">Filter flights by Stops</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-stops>
+<app-filter-airlines>
+<div class="pill-container">
+<button type="button" id="btn-airlines-filter" class="pill active" aria-haspopup="dialog">
+<div aria-hidden="true" class="pill-text"> Airlines </div>
+<span class="show-for-sr pill-text">Filter flights by Airlines</span>
+<div class="pill-arrow">
+</div>
+</button>
+</div>
+</app-filter-airlines>
+</div>
+<div class="result-clear">
+<span role="status" aria-live="polite" aria-atomic="true" class="result-count">5 results</span>
+</div>
+<div class="clearfix">
+</div>
+</div>
+</div>
+</app-filter-container>
+<div class="matrix-header">
+<div role="group" aria-label="Sorting options" class="header-row">
+<span id="sort-screen-reader-text" role="status" aria-live="polite" aria-atomic="true" class="show-for-sr">
+</span>
+<div id="sort-by">
+<div id="sort-by-departure">
+<button type="button" id="btn-sort-by-departure">
+<span id="screen-reader-departure" class="show-for-sr"> Sort by depart, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text">Depart</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-arrival">
+<button type="button" id="btn-sort-by-arrival">
+<span id="screen-reader-arrival" class="show-for-sr"> Sort by arrive, not sorted, press to sort early to late </span>
+<div aria-hidden="true" class="sort-text">Arrive</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+<div id="sort-by-duration">
+<button type="button" id="btn-sort-by-duration">
+<span id="screen-reader-duration" class="show-for-sr"> Sort by duration, not sorted, press to sort short to long </span>
+<div aria-hidden="true" class="sort-text">Duration</div>
+<div class="sort-arrows">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</button>
+</div>
+</div>
+<div class="groups new-product-line">
+<button type="button" class="group-header group-main" id="sort-by-MAIN">
+<span class="show-for-sr" id="screen-reader-MAIN"> Sort by Main Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Main</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-MAIN">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+<button type="button" class="group-header group-main_extra" id="sort-by-MAIN_EXTRA">
+<span class="show-for-sr" id="screen-reader-MAIN_EXTRA"> Sort by Main Extra Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Main Extra</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-MAIN_EXTRA">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+<button type="button" class="group-header group-premium_economy" id="sort-by-PREMIUM_ECONOMY">
+<span class="show-for-sr" id="screen-reader-PREMIUM_ECONOMY"> Sort by Premium Economy Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Premium Economy</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-PREMIUM_ECONOMY">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+<button type="button" class="group-header group-premium" id="sort-by-PREMIUM">
+<span class="show-for-sr" id="screen-reader-PREMIUM"> Sort by Premium Fare Products, not sorted, press to sort prices low to high </span>
+<div class="group-sort">
+<div class="group-name">Premium</div>
+<div class="group-arrows">
+<div class="group-sort-arrows" id="btn-sort-by-PREMIUM">
+<div class="two-arrows up">
+</div>
+<div class="two-arrows down">
+</div>
+<div class="one-arrow down">
+</div>
+<div class="one-arrow up">
+</div>
+</div>
+</div>
+</div>
+</button>
+</div>
+</div>
+</div>
+<div class="results-grid-container">
+<app-slice-details id="slice-details-0">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="time"> 8:05  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="time"> 8:00  <span class="meridiem">PM</span>
+</div>
+</div>
+<div class="duration">6h 55m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for JFK to LHR, departing at 8:05 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 6939 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 777-Boeing 777 </span>
+<p class="operational-disclosure">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by British Airways </div>
+<p>
+</p>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 8:05 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-0-product-groups">
+<button type="button" id="flight-0-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$697</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $697 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<div class="btn-not-available">Not available</div>
+<button type="button" id="flight-0-product-group-PREMIUM_ECONOMY" aria-expanded="false" class="btn-flight PREMIUM_ECONOMY">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium Economy</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$2,391</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-0-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$6,416</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $6,416 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-1">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="time"> 10:10  <span class="meridiem">AM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="time"> 10:10  <span class="meridiem">PM</span>
+</div>
+</div>
+<div class="duration">7h 0m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for JFK to LHR, departing at 10:10 AM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 142 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 772-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 10:10 AM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-1-product-groups">
+<button type="button" id="flight-1-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$697</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $697 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-1-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$1,182</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $1,182 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-1-product-group-PREMIUM_ECONOMY" aria-expanded="false" class="btn-flight PREMIUM_ECONOMY">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium Economy</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$2,053</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium Economy fare list starts at $2,053 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-1-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$5,666</span>
+</app-choose-flights-price-desktop>
+</div>
+<div class="flagship">
+<strong>Flagship®</strong> available</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $5,666 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-2">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="time"> 5:50  <span class="meridiem">PM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="time"> 5:50  <span class="meridiem">AM</span>
+<span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration">7h 0m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for JFK to LHR, departing at 5:50 PM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 6881 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 777-Boeing 777 </span>
+<p class="operational-disclosure">
+<app-operated-by>
+</app-operated-by>
+</p>
+<div class="operated-by"> Operated by British Airways </div>
+<p>
+</p>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 5:50 PM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+<div class="alerts">
+<span aria-hidden="true" class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel</span>
+</div>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-2-product-groups">
+<button type="button" id="flight-2-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$697</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $697 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<div class="btn-not-available">Not available</div>
+<button type="button" id="flight-2-product-group-PREMIUM_ECONOMY" aria-expanded="false" class="btn-flight PREMIUM_ECONOMY">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium Economy</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$2,391</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-2-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$4,816</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $4,816 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-4">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="time"> 6:25  <span class="meridiem">PM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="time"> 6:20  <span class="meridiem">AM</span>
+<span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration">6h 55m</div>
+<div class="stops">
+<app-stops-tooltip>
+<span class="nonstop">Nonstop</span>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens Nonstop details for JFK to LHR, departing at 6:25 PM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="flight-number"> AA 100 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 77W-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 6:25 PM Nonstop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+<div class="alerts">
+<span aria-hidden="true" class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel</span>
+</div>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-4-product-groups">
+<button type="button" id="flight-4-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$697</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $697 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-4-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$1,182</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $1,182 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-4-product-group-PREMIUM_ECONOMY" aria-expanded="false" class="btn-flight PREMIUM_ECONOMY">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium Economy</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$2,391</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium Economy fare list starts at $2,391 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-4-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$5,666</span>
+</app-choose-flights-price-desktop>
+</div>
+<div class="flagship">
+<strong>Flagship®</strong> available</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $5,666 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+<app-slice-details id="slice-details-12">
+<div class="slice-details row">
+<div tabindex="-1" class="col-5">
+<app-matrix-flight-card>
+<div class="matrix-flight-card">
+<div class="origin">
+<div class="city-code">JFK</div>
+<div class="time"> 12:30  <span class="meridiem">PM</span>
+</div>
+</div>
+<div aria-hidden="true" class="arrow-icon">
+<span class="icon-arrow-right">
+</span>
+</div>
+<div class="destination">
+<div class="city-code">LHR</div>
+<div class="time"> 7:20  <span class="meridiem">AM</span>
+<span class="next-day">
+<app-next-day-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-next-day">+1 <span class="show-for-sr">, Arrives on November 14</span>
+</button>
+</app-next-day-tooltip>
+</span>
+</div>
+</div>
+<div class="duration">13h 50m</div>
+<div class="stops">
+<app-stops-tooltip>
+<button type="button" apptooltip="" class="btn-link btn-stops">1 stop<span class="show-for-sr">, CLT, Charlotte Douglas International Airport</span>
+</button>
+</app-stops-tooltip>
+<span class="hidden-accessible">Opens 1 stop details for JFK to LHR, departing at 12:30 PM</span>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">JFK - CLT</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 2680 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 738-Boeing 737 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+<span>Free Wi-Fi for AAdvantage® members</span>
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="segment-info">
+<div class="leg-info">
+<div class="transportation-type">
+<span aria-hidden="true" class="plane">
+</span>
+</div>
+<div class="flight-details">
+<span class="cities">CLT - LHR</span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="flight-number"> AA 730 </span>
+<span aria-hidden="true" class="bullet">
+</span>
+<span class="aircraft"> 77W-Boeing 777 </span>
+<app-amenities-tooltip>
+<div class="amenities">
+<div class="amenities-wrapper">
+<button type="button" aria-haspopup="dialog" aria-label="Onboard amenities">
+</button>
+</div>
+</div>
+</app-amenities-tooltip>
+</div>
+</div>
+</div>
+<div class="actions">
+<button type="button" aria-haspopup="dialog" class="btn-link details">
+<span class="detailsDialogText">Details</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 12:30 PM 1 stop</span>
+</button>
+<span aria-hidden="true" class="icon-pipe">
+</span>
+<button type="button" aria-haspopup="dialog" class="btn-link seats">
+<span class="seatsDialogText">Seats (view only)</span>
+<span class="hidden-accessible">, for JFK to LHR, departing at 12:30 PM 1 stop</span>
+</button>
+</div>
+</div>
+</app-matrix-flight-card>
+<app-matrix-slice-alerts>
+<div class="alerts">
+<span aria-hidden="true" class="icon-warning">
+</span>
+<span class="warning-text"> Overnight travel<span>,</span> Extended layover<span>,</span> The class of service you searched may not be available on one or more flights</span>
+</div>
+</app-matrix-slice-alerts>
+</div>
+<div class="col-7">
+<app-product-groups>
+<div class="product-groups" id="slice-12-product-groups">
+<button type="button" id="flight-12-product-group-MAIN" aria-expanded="false" class="btn-flight MAIN">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$701</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main fare list starts at $701 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-12-product-group-MAIN_EXTRA" aria-expanded="false" class="btn-flight MAIN_EXTRA">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Main Extra</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$1,186</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Main Extra fare list starts at $1,186 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-12-product-group-PREMIUM_ECONOMY" aria-expanded="false" class="btn-flight PREMIUM_ECONOMY">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium Economy</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$2,396</span>
+</app-choose-flights-price-desktop>
+</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium Economy fare list starts at $2,396 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+<button type="button" id="flight-12-product-group-PREMIUM" aria-expanded="false" class="btn-flight PREMIUM">
+<div class="btn-contents">
+<span class="show-for-sr hidden-product-group">Premium</span>
+<div class="trip-type-row">
+<div class="trip-type">Round trip from</div>
+<div class="chevron">
+</div>
+</div>
+<div class="price">
+<app-choose-flights-price-desktop>
+<span class="per-pax-amount">$4,820</span>
+</app-choose-flights-price-desktop>
+</div>
+<div class="flagship">
+<strong>Flagship®</strong> available</div>
+</div>
+<span class="show-for-sr a11y-drawer-button-text">The lowest fare in the Premium fare list starts at $4,820 Round trip, per person.</span>
+<span class="show-for-sr a11y-dynamic-button-text"> Click here for more fare options </span>
+</button>
+</div>
+</app-product-groups>
+</div>
+</div>
+</app-slice-details>
+</div>
+</div>
+</app-results-matrix>
+</body>
+</html>

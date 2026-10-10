@@ -4,10 +4,11 @@ import { Link } from "react-router-dom";
 import { getApiErrorMessage } from "@/lib/api-error";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { FieldDescription, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { FieldLabel } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { Timestamp } from "@rome-os/ui/timestamp";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 
 // ── Types ──────────────────────────────────────────────
 // The Inbox page reads the same host endpoints the Settings page used before
@@ -15,7 +16,6 @@ import { PageShell, PageBody } from "@/shell/PageShell";
 // /api/sentinel-log (triage activity), /api/connections (source overview).
 
 interface InboxSettings {
-  sentinelReviewIntervalMinutes?: number;
   trustedBondLevels?: string[];
   replyToBondLevels?: string[];
 }
@@ -61,6 +61,7 @@ export default function InboxPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  useDocumentTitle(t("page.title"));
 
   const flash = useCallback((msg: string) => {
     setToast(msg);
@@ -79,10 +80,7 @@ export default function InboxPage() {
       // body (e.g. `{ error }`), so never feed it straight into state — that
       // would crash the sentinel-log `.map` and the settings reads.
       if (sRes.ok) setSettings((await sRes.json()) as InboxSettings);
-      if (slRes.ok) {
-        const log = await slRes.json();
-        setSentinelLog(Array.isArray(log) ? (log as SentinelEntry[]) : []);
-      }
+      if (slRes.ok) setSentinelLog((await slRes.json()) as SentinelEntry[]);
       if (cRes.ok) {
         const payload = (await cRes.json()) as {
           connections?: ConnectionLite[];
@@ -132,10 +130,7 @@ export default function InboxPage() {
       <PageBody>
         {/* Header renders above the load switch so a slow read leaves the page
             identity in place instead of blanking the route. */}
-        <div>
-          <h1 className="text-title text-foreground">{t("page.title")}</h1>
-          <p className="mt-1 text-body text-muted-foreground">{t("page.description")}</p>
-        </div>
+        <PageHeader title={t("page.title")} description={t("page.description")} />
 
         {toast && (
           <div className="fixed right-4 top-4 z-50 rounded-8 border border-success-border bg-success-bg px-4 py-2 text-ui text-success-fg shadow-10">
@@ -181,7 +176,7 @@ function TriageActivitySection({
   return (
     <section>
       <h2 className="text-section text-foreground">{t("triage.title")}</h2>
-      <p className="mb-4 mt-1 text-body text-muted-foreground">{t("triage.description")}</p>
+      <p className="mb-4 mt-1 text-ui text-muted-foreground">{t("triage.description")}</p>
       {entries.length === 0 ? (
         <p className="text-ui text-muted-foreground">{ts("sentinelLog.empty")}</p>
       ) : (
@@ -215,14 +210,16 @@ function TriageActivitySection({
                     {entry.action}
                   </span>
                 </div>
-                <span className="text-aux text-subtle-foreground">
-                  {new Date(entry.createdAt).toLocaleString()}
-                </span>
+                <Timestamp
+                  value={entry.createdAt}
+                  format="datetime"
+                  className="text-aux text-subtle-foreground"
+                />
               </div>
 
-              {entry.text && <p className="mb-1 text-body text-foreground">{entry.text}</p>}
+              {entry.text && <p className="mb-1 text-ui text-foreground">{entry.text}</p>}
               {entry.response && (
-                <p className="text-body italic text-muted-foreground">
+                <p className="text-ui italic text-muted-foreground">
                   {ts("sentinelLog.responsePrefix", {
                     response: entry.response,
                   })}
@@ -264,17 +261,7 @@ function TriagePolicySection({
 }) {
   const { t } = useTranslation("inbox");
   const { t: ts } = useTranslation("settings");
-  // Keep the interval as a raw string so clearing the field doesn't coerce to 0
-  // and decimals don't silently persist; only a positive integer is saveable.
-  const savedInterval = settings.sentinelReviewIntervalMinutes ?? 60;
-  const [reviewInterval, setReviewInterval] = useState(String(savedInterval));
-  useEffect(() => {
-    setReviewInterval(String(savedInterval));
-  }, [savedInterval]);
-  const parsedInterval = Number(reviewInterval);
-  const intervalValid = Number.isInteger(parsedInterval) && parsedInterval >= 1;
-  const intervalDirty = parsedInterval !== savedInterval;
-  // Like the interval, the toggle arrays resync whenever `settings` refreshes
+  // The toggle arrays resync whenever `settings` refreshes
   // (loadAll runs again after e.g. mark-reviewed), so the policy UI can't keep
   // showing stale local state over newer server truth.
   const savedTrusted = settings.trustedBondLevels ?? DEFAULT_TRUSTED_LEVELS;
@@ -316,42 +303,13 @@ function TriagePolicySection({
   return (
     <section>
       <h2 className="text-section text-foreground">{t("policy.title")}</h2>
-      <p className="mb-6 mt-1 text-body text-muted-foreground">{t("policy.description")}</p>
+      <p className="mb-6 mt-1 text-ui text-muted-foreground">{t("policy.description")}</p>
 
       <div className="space-y-8">
-        {/* Review interval */}
-        <div>
-          <h3 className="mb-2 text-section text-foreground">{ts("sentinel.title")}</h3>
-          <div className="flex items-center gap-2">
-            <FieldLabel htmlFor="sentinel-review-interval">
-              {ts("sentinel.intervalLabel")}
-            </FieldLabel>
-            <Input
-              id="sentinel-review-interval"
-              type="number"
-              min={1}
-              step={1}
-              value={reviewInterval}
-              disabled={saving}
-              onChange={(e) => setReviewInterval(e.target.value)}
-              aria-invalid={!intervalValid}
-              className="w-24"
-            />
-            <Button
-              disabled={saving || !intervalValid || !intervalDirty}
-              onClick={() => onSave({ sentinelReviewIntervalMinutes: parsedInterval })}
-              className="ml-3"
-            >
-              {saving ? ts("common.saving") : ts("common.save")}
-            </Button>
-          </div>
-          <FieldDescription className="mt-1">{ts("sentinel.intervalHelp")}</FieldDescription>
-        </div>
-
         {/* Trusted levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.trustedLevels.title")}</h3>
-          <p className="mb-4 text-body text-muted-foreground">
+          <p className="mb-4 text-ui text-muted-foreground">
             {ts("trust.trustedLevels.description")}
           </p>
           <div className="space-y-3">
@@ -370,7 +328,7 @@ function TriagePolicySection({
         {/* Reply-to levels */}
         <div>
           <h3 className="mb-2 text-section text-foreground">{ts("trust.replyToLevels.title")}</h3>
-          <p className="mb-4 text-body text-muted-foreground">
+          <p className="mb-4 text-ui text-muted-foreground">
             {ts("trust.replyToLevels.description")}
           </p>
           <div className="space-y-3">
@@ -404,7 +362,7 @@ function BondLevelToggle({
   return (
     <FieldLabel
       className={cn(
-        "flex items-center gap-3 text-left",
+        "flex items-center gap-3 text-left min-h-[var(--control-min-h)]",
         disabled && "cursor-not-allowed opacity-50",
       )}
     >
@@ -453,7 +411,7 @@ function MessageSourcesSection({ connections }: { connections: ConnectionLite[] 
   return (
     <section>
       <h2 className="text-section text-foreground">{t("sources.title")}</h2>
-      <p className="mb-4 mt-1 text-body text-muted-foreground">
+      <p className="mb-4 mt-1 text-ui text-muted-foreground">
         <Trans
           i18nKey="sources.description"
           ns="inbox"

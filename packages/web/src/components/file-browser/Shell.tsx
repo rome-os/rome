@@ -229,7 +229,6 @@ export function Shell({
           />
         ) : (
           <Sidebar
-            embedded={embedded}
             rootLabel={rootLabel}
             rootPanelTrigger={rootPanelTrigger}
             sidebarHeading={sidebarHeading}

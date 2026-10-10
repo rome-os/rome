@@ -1,6 +1,6 @@
 ---
 name: respond-to-review
-description: Triage and answer automated code-review findings on a PR without growing its scope. Use when the user asks to "handle / address / respond to review feedback", "go through the bot comments", or after the RomeOS review bots (zoolsher, Jessie-QingYu) post findings on a PR. Classify every finding before writing any code — most findings deserve a reply, not a diff. NOT for requesting a review (that is /code-review) and NOT for reviewing someone else's PR.
+description: Address pull request review feedback, make focused changes, and summarize the outcome in one short reply. Use when the user asks to handle, address, or respond to review comments. Not for requesting or performing a code review.
 ---
 
 # Respond to review feedback
@@ -12,7 +12,7 @@ Classification precedes code. Never start implementing a finding before classify
 ## Phase 1 — Gather and dedupe
 
 1. Pull every review body and inline comment on the PR. Drop reviews marked "This review has been superseded."
-2. Merge duplicate findings — same file, same defect — into one item. Post the answer once and cross-link it from the other thread.
+2. Merge duplicate findings — same file, same defect — into one item for classification.
 3. Discard the bots' severity labels and verdicts. Phase 2 re-derives priority.
 
 ## Phase 2 — Classify every finding
@@ -21,7 +21,7 @@ Run each finding through these tests in order. The first test that matches decid
 
 ### Test 1 — the bot hedged
 
-If the bot itself presents the finding as optional or non-blocking — "no action required", "consider", "worth noting": **decline**, with a one-line acknowledgment.
+If the bot itself presents the finding as optional or non-blocking — "no action required", "consider", "worth noting": **decline**.
 
 ### Test 2 — the PR already disclosed it
 
@@ -56,22 +56,10 @@ For each finding in the **fix** bucket:
 3. Check that reverting the fix fails exactly the new test.
 4. When the accumulated response diff nears a third of the PR's own diff, stop. Shrink a claim or move the rest to a follow-up issue.
 
-## Phase 4 — Answer every thread
+## Phase 4 — Write one short summary reply
 
-No finding is skipped silently.
+Post exactly one short reply in the PR conversation thread after handling the review. Do not reply to individual comments or inline threads. Do not post cross-links or acknowledgments on each finding.
 
-Accepting:
+Summarize the fixes and validation, any corrected PR claims, and follow-up issues with links. Group declined findings by reason and mention only what the reviewer needs to understand the outcome. Keep the reply to a short paragraph or a few brief bullets. Do not enumerate findings one by one.
 
-- Confirm it plainly: "Confirmed and fixed in `<commit>` — this was real."
-- State the reproduction: what the failing test asserts and how it failed before the fix.
-- Add what the bot's analysis missed, if anything.
-
-Declining:
-
-- Disclosed tradeoff: one sentence pointing at the PR section that covers it.
-- Unreachable scenario: name the caller or input that would have to exist first.
-- Intended behavior: "This is intended" plus the reason.
-
-Routing: link the follow-up issue in the reply, with one line on why it is separate work.
-
-A "Not in this PR" line or a stated tradeoff in the PR description turns a finding into a one-sentence decline. Write those sections before requesting review.
+A "Not in this PR" line or a stated tradeoff in the PR description supports declining a finding. Write those sections before requesting review.

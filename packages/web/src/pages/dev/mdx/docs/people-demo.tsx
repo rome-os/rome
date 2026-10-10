@@ -24,6 +24,7 @@ import { Avatar } from "@/pages/people/avatar";
 import { CHANNEL_META, ChannelGlyph, channelLabel } from "@/pages/people/channel-meta";
 import { FILTER_ORDER, type PeopleRow, type RowLevel } from "@/pages/people/people-model";
 import { DirectoryRow, StreamRow, UnknownRow, levelLabelKey } from "@/pages/people/rows";
+import { List } from "@/components/ui/list-row";
 
 // Live specimens for the People-page design note (people-page.mdx).
 //
@@ -70,14 +71,23 @@ const dynamic = (source: string, ago: number, preview: string | null) => ({
 
 /* ---------------------------------------------------------------- channels */
 
-/** Every glyph the page can draw, side by side, at muted foreground. The last
- *  entry is a channel `CHANNEL_META` has no icon for — a Rome App's — which is
- *  the branch every channel added after this page was written lands in. */
+/** Every glyph the page can draw, side by side, at muted foreground. One entry
+ *  per name — a personal-account channel draws its network's glyph and answers
+ *  to its network's name, so it is the same entry — and the last is a channel
+ *  `CHANNEL_META` has no entry for, a Rome App's, which is the branch every
+ *  channel added after this page was written lands in. */
 export function ChannelGlyphSet() {
   const { t } = useTranslation("people");
+  const named = new Set<string>();
+  const channels: string[] = [];
+  for (const [channel, meta] of Object.entries(CHANNEL_META)) {
+    if (named.has(meta.labelKey)) continue;
+    named.add(meta.labelKey);
+    channels.push(channel);
+  }
   return (
     <div className="flex flex-wrap items-center gap-4 rounded-12 border border-border bg-surface p-4">
-      {[...Object.keys(CHANNEL_META), "rome-app"].map((channel) => (
+      {[...channels, "rome-app"].map((channel) => (
         <span key={channel} className="flex items-center gap-2 text-aux text-muted-foreground">
           <ChannelGlyph channel={channel} />
           {channelLabel(t, channel)}
@@ -131,7 +141,23 @@ function RowMenu({ row: subject }: { row: PeopleRow }) {
   );
 }
 
-function Frame({ children, label }: { children: React.ReactNode; label?: string }) {
+/**
+ * The chrome around one specimen. The padding sits on the frame rather than on
+ * the `List`, which owns the hairline between rows and nothing else.
+ *
+ * `grouped` is for a specimen whose children are sections rather than rows: it
+ * leaves the `List` to the caller, so each group separates its own rows the way
+ * the live page does.
+ */
+function Frame({
+  children,
+  label,
+  grouped = false,
+}: {
+  children: React.ReactNode;
+  label?: string;
+  grouped?: boolean;
+}) {
   return (
     <div className="overflow-hidden rounded-12 border border-border bg-background">
       {label && (
@@ -139,7 +165,7 @@ function Frame({ children, label }: { children: React.ReactNode; label?: string 
           {label}
         </div>
       )}
-      <div className="p-2">{children}</div>
+      <div className="p-2">{grouped ? children : <List>{children}</List>}</div>
     </div>
   );
 }
@@ -308,7 +334,7 @@ export function DirectoryDemo() {
   const { t } = useTranslation("people");
   const [selected, setSelected] = useState<string[]>([]);
   return (
-    <Frame label="Directory">
+    <Frame label="Directory" grouped>
       {DIRECTORY.map((group) => (
         <div key={group.level} className="mb-2 last:mb-0">
           <div className="flex items-baseline gap-2 px-2 py-1">
@@ -317,22 +343,24 @@ export function DirectoryDemo() {
               {group.total}
             </span>
           </div>
-          {group.rows.map((subject) => (
-            <DirectoryRow
-              key={subject.id}
-              row={subject}
-              selected={selected.includes(subject.id)}
-              onOpen={() => {}}
-              onToggleSelect={() =>
-                setSelected((prev) =>
-                  prev.includes(subject.id)
-                    ? prev.filter((id) => id !== subject.id)
-                    : [...prev, subject.id],
-                )
-              }
-              actions={<RowMenu row={subject} />}
-            />
-          ))}
+          <List>
+            {group.rows.map((subject) => (
+              <DirectoryRow
+                key={subject.id}
+                row={subject}
+                selected={selected.includes(subject.id)}
+                onOpen={() => {}}
+                onToggleSelect={() =>
+                  setSelected((prev) =>
+                    prev.includes(subject.id)
+                      ? prev.filter((id) => id !== subject.id)
+                      : [...prev, subject.id],
+                  )
+                }
+                actions={<RowMenu row={subject} />}
+              />
+            ))}
+          </List>
         </div>
       ))}
       {/* The bulk bar is still ahead: one choice applied to every selected
@@ -444,7 +472,7 @@ export function PersonPageDemo() {
             { text: "perfect — dinner at 7?", at: "09:16", out: true },
             { text: "yes, book it", at: "09:31", out: false },
           ].map((msg) => (
-            <div key={msg.at} className="flex gap-2 text-body">
+            <div key={msg.at} className="flex gap-2 text-ui">
               <span className="w-12 shrink-0 font-mono text-badge tabular-nums text-subtle-foreground">
                 {msg.at}
               </span>

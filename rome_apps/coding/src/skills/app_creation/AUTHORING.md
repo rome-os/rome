@@ -6,8 +6,9 @@ This document is the **workflow guide** for Rome app development: when to commit
 >
 > - [`REFERENCE.md`](./REFERENCE.md) — **file-level API lookup**. On-disk layout; meaning of `app.yaml` / `action.yaml` / agent yaml fields; the `@rome-os/app-runtime` + `@rome-os/app-web-sdk` surfaces; the `rome` CLI; shared-SQLite + `tablePrefix` storage; Tailwind / component-kit / shadow-DOM rules; mobile patterns.
 > - [`GAMES.md`](./GAMES.md) — **game-specific authoring guidance**. Read it when the user wants to create a game: how to choose between raw canvas, Three.js, and a real game engine; how to source and ship game assets.
+> - [`PAID_APPS.md`](./PAID_APPS.md) — **shared/public apps with visitor accounts**. Read it when visitors sign in with Rome Cloud, own private data, get free allowances, or pay in favors.
 >
-> AUTHORING.md is *workflow and what to build*. REFERENCE.md is *how to type each piece*. GAMES.md is *how to make game-specific technical and asset choices*.
+> AUTHORING.md is *workflow and what to build*. REFERENCE.md is *how to type each piece*. GAMES.md is *how to make game-specific technical and asset choices*. PAID_APPS.md is *how to scope, cap, and charge visitors*.
 
 **Scope assumption.** Every step below operates on a directory called `<app-root>` — the absolute path to the app's source tree, with a git repo at its root. `coding:app_creation` produces `<app-root>` (via `op: "create"` + `git init`) and points `spec.source` at it.
 
@@ -15,7 +16,7 @@ This document is the **workflow guide** for Rome app development: when to commit
 
 The harness already provides much of what an app needs — messaging, scheduling, agent invocation, other apps' actions. Before designing a feature, look up what exists instead of reimplementing it. Your session exposes a **live catalog**:
 
-- **Actions** — `search_actions { query }` finds registered actions by name, description, or argument text; `read_action { action_name }` returns a per-argument summary (name, type, required, enums, description) plus metadata (`sideEffects`, `requiresApproval`). Nested argument shapes are **not** expanded — confirm complex inputs against the owning app's docs or source. The catalog is live, so actions from an app you just applied show up immediately.
+- **Actions** — `search_actions { query }` finds actions granted to the agent by name, description, or argument text; `read_action { action_name }` returns a per-argument summary (name, type, required, enums, description) plus metadata (`sideEffects`, `requiresApproval`). Nested argument shapes are **not** expanded — confirm complex inputs against the owning app's docs or source. The catalog is live, so granted actions from an app you just applied show up immediately.
 - **Skills** — `search_skills { query }` / `read_skill { skill_name }` surface procedure docs shipped by installed apps.
 - **Events** — the `system:search_event_catalog` action finds emittable event types, for features that should react to something happening (routine triggers). Each result carries a `payloadSchema` (JSON Schema for the event payload — the fields a routine `trigger.filter` dot-path can match); `schemaOrigin: "observed"` means it was inferred from a recent emission, so treat it as a guide rather than a contract.
 
@@ -67,8 +68,8 @@ Use a durable backend pattern instead:
   React component, fetch request, or open dashboard tab to remain alive for the
   work to finish.
 - Update the persisted record as the task progresses and when it completes or
-  fails. The UI should render from that record, with an explicit refresh or
-  status view, so the guardian can come back later and see what happened.
+  fails. The UI should render from that record and pick up its progress on
+  its own, so the guardian can come back later and see what happened.
 
 ## Frontend Design Guideline
 
@@ -78,7 +79,7 @@ This section is intentionally principle-first. It does **not** dictate component
 
 Use the host's semantic tokens for color, surface, and radius — the vocabulary the kit's canon registers (`@rome-os/ui/styles.css`, imported by the SDK stylesheet). Do not paint the UI with raw Tailwind color scales.
 
-- ✅ `bg-background`, `text-foreground`, `bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, `text-primary-foreground`, `bg-accent`, `border-input`, `border-border`, `bg-destructive`, `text-destructive`, `ring-ring`.
+- ✅ `bg-[var(--app-canvas)]`, `text-foreground`, `bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, `text-primary-foreground`, `bg-accent`, `border-input`, `border-border`, `bg-destructive`, `text-destructive`, `ring-ring`.
 - ❌ `bg-emerald-700`, `text-slate-900`, `border-slate-200`, `bg-rose-50`, `text-emerald-800`, `bg-white/70`.
 
 Why this matters: tokens carry dark-mode pairs and propagate brand changes from a single source. The moment a component hardcodes `emerald-700`, dark mode breaks and the design system fractures.
@@ -104,7 +105,7 @@ The default Rome aesthetic is calm, neutral, and information-dense. Decoration m
 
 Principles:
 
-- **Surface flatly.** A page is `bg-background`; sections are `<Card>`s. Avoid gradients on page chrome, glassmorphism (`backdrop-blur` + translucent fills), and colored shadows. Reserve heavy visual treatment for genuinely modal contexts.
+- **Surface flatly.** A full app page is `bg-[var(--app-canvas)]`; this semantic arbitrary form works across the scaffold's published UI dependency range. An inline chat component leaves its root canvas transparent because the host supplies the chat context. Put readable text, lists, and tables directly on the page canvas, using spacing and dividers for structure. Use `<Card>` only when a region has an independent boundary or interaction state. Never add a card only to make its text readable. Avoid gradients on page chrome, glassmorphism (`backdrop-blur` + translucent fills), and colored shadows. Reserve heavy visual treatment for genuinely modal contexts.
 - **Borders, not auras.** Separation should come from `border` and spacing first, shadow second.
 - **Radii stay quiet.** Inputs and buttons are small radii; cards a touch larger; modals slightly more again. Avoid pillow-soft `rounded-2xl`/`rounded-3xl` on every surface — when everything is rounded heavily, hierarchy disappears.
 - **Density over drama.** Prefer compact spacing, small icons inside text, and short copy. Heroes, oversize titles, and marketing pills do not belong in an internal tool.
@@ -123,13 +124,20 @@ A clean stylesheet is the strongest signal that the design system is intact.
 
 ### 5. Typography and copy
 
-- Page title is a single restrained heading; supporting text is muted and short.
+- Use one restrained page title. Omit subtitles, decorative subheaders, and explanatory footnotes by default. Keep section headings when they help navigation or accessibility.
+- Write copy alongside the app's layout and interactions, using its actual objects and actions rather than generic template descriptions.
+- Keep secondary text only when it adds a fact needed to act: a consequence, limit, state cause, option difference, or first step. Delete text that repeats a label or a fact already visible on screen. Put surviving text beside the relevant control, not in a page-wide footer.
+- Remove filler and promotional adjectives. Prefer "Import photos" to "Easily import your beautiful memories" and "Save trip" to "Save your amazing adventure".
+- Keep required warnings, privacy disclosures, attribution, source citations, validation messages, and accessible descriptions. This rule trims interface copy, not user content or the app's requested output.
+- Necessary 13–14px secondary text uses `text-muted-foreground`. Reserve `text-subtle-foreground` for nonessential chrome, and never reduce readable text further with an opacity utility.
 - Use sentence case. Avoid slogans, marketing prose, or jokey punchlines in product UI.
 - **No emoji in titles or nav labels.** The page title, `app.yaml` `web.navLabel`/`displayName`, and any heading are plain words — no leading 📋/✨/🚀 decoration. Emoji as iconography reads as consumer-app whimsy; a custom SVG icon is how an app gets its glyph.
 - **The app's name is Title Case words, never its `appId`.** `app.yaml` `name` / `web.displayName` / `web.navLabel` and the page title read as natural capitalized words — "Morning Brief", "Browser Automation", "Ticket Triage" — *not* the lowercase-hyphenated id (`morning-brief`). The `appId` is the machine identifier (it appears in paths, URLs, and the DB table prefix, so it stays lowercase-hyphenated); the display name is what the guardian sees, so capitalize it. Kebab-case in a heading or nav label is a bug.
 - Counts and metadata read more naturally inline ("· 4 repos · 21 reviews") than as separate decorative tiles.
 
 The voice should be the voice of a competent tool: brief, literal, low-temperature.
+
+Example for a travel app: keep the title "Trips" and the button "Add trip". Omit a subtitle such as "Your personal travel companion" and a footer such as "Start making unforgettable memories". Keep an upload limit such as "JPEG or PNG, up to 10 MB" beside the upload control if that limit is enforced.
 
 ### 6. State surfaces
 
@@ -146,7 +154,9 @@ Reuse the same patterns across an app so the user learns them once.
 
 - Destructive actions live in the destructive variant or use `text-destructive` — never just a red className.
 - Selection state is signaled with token-based emphasis (e.g. `border-primary bg-accent`), not colored shadows or glowing rings.
-- Asynchronous actions disable their trigger and reflect progress (label change, spinning icon). Avoid `alert()` and avoid implicit background polling loops — prefer an explicit refresh affordance.
+- Asynchronous actions disable their trigger and reflect progress (label change, spinning icon). Avoid `alert()`.
+- When success feedback is needed, use one short sentence naming the result, such as "Saved your trip." Do not add a success heading, repeat the result in a subtitle, or append a generic next-step tip. Report success only after the operation succeeds, and omit duplicate feedback when the updated UI already confirms the result.
+- Data on screen stays current without the guardian asking. Refetch on an interval while the page is visible and when it regains focus, as the app template does. Do not add a Refresh button. When an update fails, keep the last good data on screen and show a warning. Show an error only when there is no data to show.
 - Modal surfaces are the one place where a backdrop is acceptable; keep them narrow and focused on a single task.
 
 ### 8. Dark mode is a first-class requirement
@@ -248,7 +258,7 @@ Write both as product copy, not technical documentation:
 - **Do not** include schemas, file paths, build commands, action/API names, or implementation details. That all belongs in source comments or commit messages, not in the listing.
 - Keep it short — a few headings is enough.
 
-The packed artifact picks the top-level `README.md` up automatically (it does **not** go under `dist/` or `src/`). The publish flow uploads `.rome_store` separately and excludes it from installed app bundles, so store screenshots and videos should live under `.rome_store/assets/`, not `src/assets/`.
+The packed artifact picks the top-level `README.md` up automatically (it does **not** go under `dist/` or `src/`). The publish flow uploads `.rome_store` separately and excludes it from installed app bundles, so store screenshots and videos should live under `.rome_store/assets/`, not `src/assets/`. The publish procedure itself is in `system:app-lifecycle`.
 
 ## Recurring runs
 
@@ -305,6 +315,7 @@ claim the app works solely from the creator's own smoke test.
 - Invoke `system:app_management { op: "install", source: { mode: "source", path: "<app-root>" } }` after every change — one call rebuilds, repacks, and installs; `source` is required on every install, the daemon does not infer it from the lockfile
 - Refresh `/apps` to confirm the dashboard lists the app, and refresh `/apps/<appId>` to confirm the mounted UI loads
 - Verify the action, API route, or UI path you added actually runs
+- Review rendered copy with its controls: remove redundant subtitles, decorative subheaders, footnotes, and filler. Confirm essential warnings, instructions, citations, and accessible descriptions remain, and success feedback follows §7.
 - Use `system:summon` with `assistant:assistant` to run `coding:app_verification` against the installed app and include its verdict, runtime evidence, gaps, and suggested extra checks in the final handoff
 - Add or update tests close to the code you changed
 - Keep system-level runtime primitives in core and product behavior inside apps

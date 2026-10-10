@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -28,6 +28,7 @@ import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
   buildWorkspaceContextSection,
+  PROJECT_SUMMARY_CHAR_LIMIT,
   PromptBuilder,
   WORKSPACE_CONTEXT_BLOCK_CHAR_LIMIT,
 } from "./prompt-builder.js";
@@ -119,6 +120,7 @@ describe("PromptBuilder", () => {
       "# Alpha\n\nAlpha project first paragraph.\n\nDetails stay available on demand.",
     );
     writeFileSync(join(projectMemoryDir, "SUMMARY.md"), "Legacy summary should not load.");
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
 
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 
@@ -129,6 +131,96 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).not.toContain("Legacy summary should not load.");
   });
 
+  it.each([
+    {
+      name: "wrapped prose with CRLF and heading-only blocks",
+      content:
+        "# Alpha\r\n\r\n## Summary\r\n\r\nA short\r\nproject introduction.\r\n\r\nPrivate implementation details.",
+      expected: "A short project introduction.",
+    },
+    {
+      name: "an exact-limit paragraph",
+      content: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT),
+      expected: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT),
+    },
+    {
+      name: "an oversized prose paragraph",
+      content: "a".repeat(PROJECT_SUMMARY_CHAR_LIMIT + 1),
+      expected: `${"a".repeat(PROJECT_SUMMARY_CHAR_LIMIT - 1)}…`,
+    },
+    {
+      name: "consecutive bullets without blank lines",
+      content: `# Alpha\n\n${"- Release details\n".repeat(100)}\nPrivate implementation details.`,
+      expected: `${Array(100)
+        .fill("- Release details")
+        .join(" ")
+        .slice(0, PROJECT_SUMMARY_CHAR_LIMIT - 1)
+        .trimEnd()}…`,
+    },
+    {
+      name: "non-BMP characters at the truncation boundary",
+      content: "🌸".repeat(PROJECT_SUMMARY_CHAR_LIMIT + 1),
+      expected: `${"🌸".repeat(PROJECT_SUMMARY_CHAR_LIMIT - 1)}…`,
+    },
+  ])("bounds project context for $name without changing the file", ({ content, expected }) => {
+    const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
+    mkdirSync(projectMemoryDir, { recursive: true });
+    const filePath = join(projectMemoryDir, "PROJECT.md");
+    writeFileSync(filePath, content);
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
+
+    const prompt = new PromptBuilder().build(mainConfig, corePromptOptions);
+    const projectSection = prompt.split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): ${expected}`,
+    );
+    expect(Array.from(expected).length).toBeLessThanOrEqual(PROJECT_SUMMARY_CHAR_LIMIT);
+    expect(readFileSync(filePath, "utf8")).toBe(content);
+  });
+
+  it("points each project at a directory that exists, or at none", () => {
+    for (const name of ["alpha", "beta", "gamma"]) {
+      const dir = join(mockPaths.profileMemoryDir, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "PROJECT.md"), `${name} introduction.`);
+    }
+    mkdirSync(join(mockPaths.projectsRoot, "alpha"), { recursive: true });
+    mkdirSync(join(mockPaths.customAppAuthoringRoot, "beta"), { recursive: true });
+
+    const projectSection = new PromptBuilder()
+      .build(mainConfig, corePromptOptions)
+      .split("# Projects\n\n")[1];
+
+    expect(projectSection).toBe(
+      [
+        `- \`alpha\` (\`${join(mockPaths.projectsRoot, "alpha")}\`): alpha introduction.`,
+        `- \`beta\` (\`${join(mockPaths.customAppAuthoringRoot, "beta")}\`): beta introduction.`,
+        "- `gamma`: gamma introduction.",
+      ].join("\n"),
+    );
+  });
+
+  it("refreshes project introductions without injecting detailed notes", () => {
+    const projectMemoryDir = join(mockPaths.profileMemoryDir, "projects", "alpha");
+    mkdirSync(projectMemoryDir, { recursive: true });
+    const filePath = join(projectMemoryDir, "PROJECT.md");
+    writeFileSync(filePath, "# Alpha\n\nOriginal introduction.\n\n- Detailed history.");
+    const builder = new PromptBuilder();
+    expect(builder.build(mainConfig, corePromptOptions)).toContain("Original introduction.");
+
+    writeFileSync(filePath, "# Alpha\n\nUpdated introduction.\n\n- Detailed history.");
+    const refreshed = builder.build(mainConfig, corePromptOptions);
+
+    expect(refreshed).toContain("Updated introduction.");
+    expect(refreshed).not.toContain("Original introduction.");
+    expect(refreshed).not.toContain("Detailed history.");
+    expect(builder.build({ ...mainConfig, name: "envoy" }, corePromptOptions)).not.toContain(
+      "# Projects",
+    );
+    expect(builder.build(mainConfig, { ownerType: "app" })).not.toContain("# Projects");
+  });
+
   it("includes local dashboard and app URLs in the agent browser guidance", () => {
     const systemPrompt = new PromptBuilder().build(mainConfig, corePromptOptions);
 
@@ -136,6 +228,25 @@ describe("PromptBuilder", () => {
     expect(systemPrompt).toContain("Agent browser:");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141` to open the Rome dashboard");
     expect(systemPrompt).toContain("`http://127.0.0.1:4141/apps/<appId>` to use a specific app");
+  });
+
+  it("asks guardian-facing agents to state a short plan before long-running work", () => {
+    const prompt = new PromptBuilder().build({ ...mainConfig, actions: ["*"] }, corePromptOptions);
+    // Cut at the next top-level heading so the checks stay inside this section.
+    const section = prompt.split("# Asking The Guardian For Input\n\n")[1]?.split("\n# ")[0] ?? "";
+    const planIndex = section.indexOf("Before you start a long-running task");
+
+    expect(planIndex).toBeGreaterThan(-1);
+    expect(section).toContain("state your plan, then start without waiting for approval");
+    expect(section).toContain("ASD-STE100 Simplified Technical English");
+    expect(section).toContain(
+      "If you already show the plan as a todo list, do not repeat it in prose.",
+    );
+    // The plan paragraph sits before the "use the ask_question tool" rule.
+    expect(planIndex).toBeLessThan(section.indexOf("When you do need to ask"));
+
+    const withoutAskTool = new PromptBuilder().build(mainConfig, corePromptOptions);
+    expect(withoutAskTool).not.toContain("Before you start a long-running task");
   });
 
   it("advertises the globally available Discord CLI to every agent", () => {

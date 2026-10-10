@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
-import type { ApprovalCardStatus, ApprovalPreviewPayload } from "@/lib/chat-types";
+import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
+import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { useApprovalCard } from "./use-approval-card";
@@ -23,7 +24,7 @@ export function ApprovalCard({
 }: {
   approvalId: string;
   actionName?: string;
-  preview: ApprovalPreviewPayload;
+  preview: PreviewPayload;
   status: ApprovalCardStatus;
   onResolved: () => void;
 }) {
@@ -33,6 +34,9 @@ export function ApprovalCard({
     initialStatus,
     onResolved,
   });
+  // The transcript stores every card as pending, so only the server's answer
+  // counts: an approval resolved long ago must not flash Needs you on load.
+  useTabStatus(record && status === "pending" ? "needs-you" : "idle");
   const resolvedActionName = actionName
     ? artifactLocalName(actionName)
     : t("approvals.fallbackActionName");
@@ -58,7 +62,7 @@ export function ApprovalCard({
           {statusLabel}
         </span>
       </div>
-      <div className="space-y-2 px-4 py-3 text-body text-foreground">
+      <div className="space-y-2 px-4 py-3 text-ui text-foreground">
         <div className="text-aux text-subtle-foreground">{resolvedActionName}</div>
         <ApprovalPreviewBody preview={preview} />
       </div>

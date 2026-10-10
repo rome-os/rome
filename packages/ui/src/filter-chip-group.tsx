@@ -2,6 +2,7 @@ import * as React from "react";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 
 import { cn } from "./cn.js";
+import { ScrollEdgeButtons, useScrollEdges } from "./scroll-edges.js";
 
 export type FilterChipOption<T extends string = string> = {
   value: T;
@@ -14,6 +15,14 @@ export type FilterChipOption<T extends string = string> = {
    * the `--primary` fill.
    */
   count?: number;
+  /**
+   * Pushes this chip, and any after it, to the far end of the rail. For an
+   * option the rest are not peers of — a queue waiting on a decision beside a
+   * set of settled categories — so the gap carries that. Once the row is wide
+   * enough to scroll there is no slack left to push into, and the chip sits
+   * against its neighbor like any other.
+   */
+  alignEnd?: boolean;
   disabled?: boolean;
 };
 
@@ -25,6 +34,7 @@ export interface FilterChipGroupProps<T extends string = string> {
   disabled?: boolean;
   /** Required: a radiogroup with no accessible name is unusable by screen reader. */
   "aria-label": string;
+  /** Lands on the row's frame, so layout classes (`flex-1`, margins) place the whole row. */
   className?: string;
 }
 
@@ -55,56 +65,64 @@ export function FilterChipGroup<T extends string = string>({
   "aria-label": ariaLabel,
   className,
 }: FilterChipGroupProps<T>) {
+  const rowRef = React.useRef<HTMLDivElement>(null);
+  // Marks a clipped end with a chevron, so the row reads as scrollable on a phone.
+  const edges = useScrollEdges(rowRef);
   return (
-    <RadioGroupPrimitive.Root
-      data-slot="filter-chip-group"
-      aria-label={ariaLabel}
-      value={value}
-      // Radix types its callback against the DOM's bare string; the only
-      // values it can hand back are the option values we rendered, which are
-      // `T` by construction.
-      onValueChange={(next) => onValueChange(next as T)}
-      disabled={disabled}
-      orientation="horizontal"
-      // The row scrolls, so it insets by one step and pulls the same step back
-      // out: without the inset a focused chip's outline is clipped at the
-      // scroll edge, and without the negative margin that inset would shift
-      // the row off the column its heading sits on.
-      className={cn("-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1", className)}
-    >
-      {options.map((option) => {
-        const checked = option.value === value;
-        return (
-          <RadioGroupPrimitive.Item
-            key={option.value}
-            data-slot="filter-chip"
-            value={option.value}
-            disabled={option.disabled}
-            // The border width is unconditional and only its color changes:
-            // toggling a width would resize the chip on selection and shunt
-            // every chip after it sideways.
-            className={cn(
-              "shrink-0 rounded-full border px-3 py-1 text-badge transition-colors outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50",
-              checked
-                ? "border-transparent bg-primary text-primary-foreground"
-                : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",
-            )}
-          >
-            {option.label}
-            {option.count !== undefined && (
-              <span
-                data-slot="filter-chip-count"
-                className={cn(
-                  "ml-2 tabular-nums",
-                  checked ? "text-primary-foreground" : "text-subtle-foreground",
-                )}
-              >
-                {option.count}
-              </span>
-            )}
-          </RadioGroupPrimitive.Item>
-        );
-      })}
-    </RadioGroupPrimitive.Root>
+    <div data-slot="filter-chip-frame" className={cn("relative min-w-0", className)}>
+      <RadioGroupPrimitive.Root
+        ref={rowRef}
+        data-slot="filter-chip-group"
+        aria-label={ariaLabel}
+        value={value}
+        // Radix types its callback against the DOM's bare string; the only
+        // values it can hand back are the option values we rendered, which are
+        // `T` by construction.
+        onValueChange={(next) => onValueChange(next as T)}
+        disabled={disabled}
+        orientation="horizontal"
+        // The row scrolls, so it insets by one step and pulls the same step back
+        // out: without the inset a focused chip's outline is clipped at the
+        // scroll edge, and without the negative margin that inset would shift
+        // the row off the column its heading sits on.
+        className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1"
+      >
+        {options.map((option) => {
+          const checked = option.value === value;
+          return (
+            <RadioGroupPrimitive.Item
+              key={option.value}
+              data-slot="filter-chip"
+              value={option.value}
+              disabled={option.disabled}
+              // The border width is unconditional and only its color changes:
+              // toggling a width would resize the chip on selection and shunt
+              // every chip after it sideways.
+              className={cn(
+                "shrink-0 rounded-full border px-[var(--control-filter-px)] py-1 text-badge min-h-[var(--control-min-h)] transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50",
+                option.alignEnd && "ml-auto",
+                checked
+                  ? "border-transparent bg-primary text-primary-foreground"
+                  : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",
+              )}
+            >
+              {option.label}
+              {option.count !== undefined && (
+                <span
+                  data-slot="filter-chip-count"
+                  className={cn(
+                    "ml-2 tabular-nums",
+                    checked ? "text-primary-foreground" : "text-subtle-foreground",
+                  )}
+                >
+                  {option.count}
+                </span>
+              )}
+            </RadioGroupPrimitive.Item>
+          );
+        })}
+      </RadioGroupPrimitive.Root>
+      <ScrollEdgeButtons edges={edges} rowRef={rowRef} outset />
+    </div>
   );
 }

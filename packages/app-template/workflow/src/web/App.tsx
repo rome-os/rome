@@ -230,7 +230,7 @@ export default function App({ bootstrap }: { bootstrap: RomeAppBootstrap }) {
   return (
     <main
       data-theme={bootstrap.shell.theme}
-      className="min-h-screen bg-background px-6 py-6 font-sans text-foreground"
+      className="min-h-screen bg-[var(--app-canvas)] px-6 py-6 font-sans text-foreground"
     >
       <div className="mx-auto max-w-[640px]">
         <h1 className="mb-1 text-xl font-semibold">{COPY.title}</h1>

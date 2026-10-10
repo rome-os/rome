@@ -23,7 +23,6 @@ import {
   appMigrationsTableName,
   ArtifactEntrySchema,
   formatZodIssues,
-  hashWorkspace,
   parseAppManifest,
   resolvePathWithinBase,
   safeIsFile,
@@ -117,7 +116,6 @@ const BuildManifestSchema = z.object({
   assetVersion: z.string().regex(/^[0-9a-f]{12}$/),
   displayName: z.string().min(1),
   navLabel: z.string().min(1).optional(),
-  routing: z.literal("client"),
 });
 
 function normalizeArtifactEntry(entry: z.infer<typeof ArtifactEntrySchema>): RomeAppArtifactEntry {
@@ -338,11 +336,6 @@ export class AppInstaller {
     return { ok: true, root };
   }
 
-  /** Convenience for testing and migration scripts. */
-  computeWorkspaceHash(workspaceRoot: string): Promise<string> {
-    return hashWorkspace(workspaceRoot);
-  }
-
   /**
    * Read the manifest at `installed/<appId>/active/app.yaml` and assemble the
    * resolved artifact list + web/api/db metadata. Manifest lookup and parsing
@@ -486,6 +479,7 @@ export class AppInstaller {
       id: data.id,
       version: data.version,
       description: data.description,
+      tagline: data.tagline,
       name: data.name,
       icon: data.icon,
       appRoot: data.appRoot,

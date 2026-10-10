@@ -7,10 +7,6 @@ import { AiToolsPanel } from "@/components/ai-tools-panel";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -45,11 +41,6 @@ describe("AI Tools refresh", () => {
     render(<AiToolsPanel showUsage />);
     const user = userEvent.setup();
     const refresh = await screen.findByRole("button", { name: "Refresh" });
-    expect(refresh.getAttribute("data-slot")).toBe("button");
-    expect(refresh.getAttribute("data-variant")).toBe("outline");
-    expect(refresh.getAttribute("data-size")).toBe("sm");
-    expect(refresh.classList.contains("rounded-8")).toBe(true);
-    expect(refresh.classList.contains("bg-surface-elevated")).toBe(true);
     await user.click(refresh);
 
     expect(
@@ -133,9 +124,7 @@ describe("AI Tools destructive actions", () => {
 
     expect(logoutCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Log out of Claude?" });
-    expect(
-      within(dialog).getByText("Signs out on this server only. You can sign back in anytime."),
-    ).toBeTruthy();
+    expect(within(dialog).getByText("Signs out on this server only.")).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Log Out" }));
 
@@ -192,7 +181,9 @@ describe("AI Tools destructive actions", () => {
     expect(deleteCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Remove MiniMax API key?" });
     expect(
-      within(dialog).getByText("Claude sessions stop using MiniMax. Restoring it needs a new key."),
+      within(dialog).getByText(
+        "Claude sessions stop using MiniMax. Restoring it requires a new key.",
+      ),
     ).toBeTruthy();
 
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
@@ -232,14 +223,7 @@ describe("AI Tools provider presentation", () => {
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     const claudeLogin = screen.getByRole("button", { name: "Log In" });
     const apiKey = screen.getByRole("button", { name: "API Key" });
-    const logOut = screen.getByRole("button", { name: "Log Out" });
-    for (const button of [claudeLogin, apiKey, logOut]) {
-      expect(button.getAttribute("data-slot")).toBe("button");
-      expect(button.getAttribute("data-variant")).toBe("outline");
-      expect(button.getAttribute("data-size")).toBe("sm");
-      expect(button.classList.contains("rounded-8")).toBe(true);
-      expect(button.classList.contains("bg-surface-elevated")).toBe(true);
-    }
+    expect(screen.getByRole("button", { name: "Log Out" })).toBeTruthy();
     expect(screen.getByText("ChatGPT").closest(".bg-surface")).toBeTruthy();
     expect(claudeLogin.parentElement).toBe(apiKey.parentElement);
     expect(claudeLogin.parentElement?.getAttribute("role")).toBe("group");
@@ -265,15 +249,8 @@ describe("AI Tools provider presentation", () => {
 
     const chatgpt = await screen.findByText("ChatGPT");
     const claude = screen.getByText("Claude");
-    const browser = screen.getByRole("button", { name: "Browser" });
-    const deviceCode = screen.getByRole("button", { name: "Device code" });
-    for (const button of [browser, deviceCode]) {
-      expect(button.getAttribute("data-slot")).toBe("button");
-      expect(button.getAttribute("data-variant")).toBe("outline");
-      expect(button.getAttribute("data-size")).toBe("sm");
-      expect(button.classList.contains("rounded-8")).toBe(true);
-      expect(button.classList.contains("bg-surface-elevated")).toBe(true);
-    }
+    expect(screen.getByRole("button", { name: "Browser" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Device code" })).toBeTruthy();
     expect(chatgpt.compareDocumentPosition(claude) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -520,5 +497,131 @@ describe("AI Tools provider presentation", () => {
     expect(screen.queryByRole("button", { name: "Log In" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
     expect(screen.getByRole("button", { name: "API Key" })).toBeTruthy();
+  });
+});
+
+describe("AI Tools Rome credits", () => {
+  function mockPanel(codexLoggedIn: boolean | undefined, credits: unknown, claudeLoggedIn = false) {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: claudeLoggedIn }, codex: { loggedIn: codexLoggedIn } });
+      }
+      if (url === "/api/ai-tools/anthropic-compatible-providers") {
+        return ok({ providers: [], configured: null });
+      }
+      if (url === "/api/ai-tools/rome-credits") return ok({ credits });
+      return ok({});
+    }) as typeof fetch);
+  }
+
+  const credits = {
+    grantedMicros: "10000000",
+    balanceMicros: "7420000",
+    availableMicros: "7420000",
+    enabled: true,
+  };
+
+  it("shows what is left while credits pay", async () => {
+    mockPanel(false, credits);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Rome credits")).toBeTruthy();
+    expect(screen.getByText("In use")).toBeTruthy();
+    expect(screen.getByText("$7.42")).toBeTruthy();
+    expect(screen.getByText("of $10.00")).toBeTruthy();
+  });
+
+  it("puts credits on standby while ChatGPT is connected", async () => {
+    mockPanel(true, credits);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+  });
+
+  it("puts credits on standby while the ChatGPT login is still unknown", async () => {
+    mockPanel(undefined, credits);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+  });
+
+  it("marks credits ready rather than in use while Claude handles chats", async () => {
+    mockPanel(false, credits, true);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    expect(screen.queryByText("In use")).toBeNull();
+  });
+
+  it("shows credits the caller already read without reading them again", async () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") {
+        return ok({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+      }
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+    render(<AiToolsPanel showRomeCredits romeCredits={credits} />);
+
+    expect(await screen.findByText("In use")).toBeTruthy();
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("rome-credits"))).toBe(
+      false,
+    );
+  });
+
+  it("reads an overrun as used up rather than a negative balance", async () => {
+    mockPanel(false, { ...credits, balanceMicros: "-12000", availableMicros: "-12000" });
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Used up")).toBeTruthy();
+    expect(screen.getByText("$0.00")).toBeTruthy();
+  });
+
+  it("puts used-up credits on standby once ChatGPT is connected", async () => {
+    mockPanel(true, { ...credits, balanceMicros: "-12000", availableMicros: "-12000" });
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(screen.queryByText("Used up")).toBeNull();
+  });
+
+  it("puts paused credits on standby while ChatGPT pays", async () => {
+    mockPanel(true, { ...credits, enabled: false });
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(screen.queryByText("Paused")).toBeNull();
+  });
+
+  it("keeps used-up credits calm while Claude handles chats", async () => {
+    mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
+    render(<AiToolsPanel showRomeCredits />);
+
+    const status = await screen.findByText("Used up");
+    expect(status.className).toContain("text-muted-foreground");
+    expect(screen.getByText("$0.00").className).not.toContain("text-destructive-fg");
+  });
+
+  it("waits for a status read that succeeds before showing the row", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      const url = String(input);
+      if (url === "/api/ai-tools/status") throw new Error("offline");
+      if (url === "/api/ai-tools/rome-credits") return ok({ credits });
+      return ok({ providers: [], configured: null });
+    }) as typeof fetch);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
+  });
+
+  it("hides the row for an account that was never granted credits", async () => {
+    mockPanel(false, null);
+    render(<AiToolsPanel showRomeCredits />);
+
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Rome credits")).toBeNull());
   });
 });

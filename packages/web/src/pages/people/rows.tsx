@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { ListRow } from "@/components/ui/list-row";
 import { Avatar, AVATAR_TONE, GUARDIAN_TONE } from "./avatar";
 import { ChannelGlyph, ChannelPill } from "./channel-meta";
 import { timeAgo } from "./format";
@@ -23,8 +24,12 @@ export function levelLabelKey(level: RowLevel): string {
   return LEVEL_LABEL_KEY[level];
 }
 
-export const ROW_BASE =
-  "grid w-full items-center gap-3 border-b border-border-subtle px-2 py-2 text-left last:border-b-0";
+/**
+ * Every row on the page is a grid rather than the kit's flex row, so the
+ * avatar column and the trailing column line up down the whole list. The
+ * inset, the height floor, and the hover paint are `ListRow`'s.
+ */
+const ROW_GRID = "grid grid-cols-[2rem_minmax(0,1fr)_auto]";
 
 /**
  * A stream row carries only what routing needs: who, what they said, where it
@@ -43,7 +48,7 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
         <span className="truncate text-ui text-foreground">{row.displayName}</span>
         <span className="flex min-w-0 items-center gap-2 text-aux text-muted-foreground">
           {row.latest && (
-            <span className="text-subtle-foreground" title={row.latest.source}>
+            <span className="shrink-0 text-subtle-foreground" title={row.latest.source}>
               <ChannelGlyph channel={row.latest.source} />
             </span>
           )}
@@ -56,18 +61,19 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
           )}
         </span>
       </span>
-      <span className="justify-self-end font-mono text-badge tabular-nums text-subtle-foreground">
+      <span className="justify-self-end whitespace-nowrap text-right font-mono text-badge tabular-nums text-subtle-foreground sm:w-20">
         {timeAgo(t, row.latest?.timestamp ?? null)}
       </span>
     </>
   );
 
-  const className = cn(ROW_BASE, "grid-cols-[2rem_minmax(0,1fr)_auto]");
-  if (!onOpen) return <div className={className}>{body}</div>;
+  if (!onOpen) return <ListRow className={ROW_GRID}>{body}</ListRow>;
   return (
-    <button type="button" onClick={onOpen} className={cn(className, "hover:bg-surface")}>
-      {body}
-    </button>
+    <ListRow asChild interactive className={ROW_GRID}>
+      <button type="button" onClick={onOpen}>
+        {body}
+      </button>
+    </ListRow>
   );
 }
 
@@ -78,17 +84,24 @@ export function StreamRow({ row, onOpen }: { row: PeopleRow; onOpen?: () => void
  *
  * `actions` is whatever gesture the page offers for the position it is in:
  * placing it, or taking a dismissal back. The gestures themselves are
- * `people/triage.tsx`; the row only says where they go.
+ * `people/triage.tsx`; the row only says where they go. They show on the row
+ * under the pointer, or holding focus, so a screen of rows reads as evidence
+ * rather than as a wall of buttons. Hover is not a thing on touch screens, so
+ * there they stay put.
  */
 export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.ReactNode }) {
   const { t } = useTranslation("people");
   const handle = rowHandle(row);
   const channel = row.accounts[0]?.channel;
   return (
-    <div
+    // The hover fill is hand-rolled rather than `interactive` on purpose: the
+    // row is not a click target, and the fill is the cue that goes with
+    // revealing the actions below on `group-hover`. `interactive` would add a
+    // focus edge and a pointer cursor for a click that does nothing.
+    <ListRow
       className={cn(
-        ROW_BASE,
-        "grid-cols-[2rem_minmax(0,1fr)_auto] sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
+        ROW_GRID,
+        "group hover:bg-surface-hover sm:grid-cols-[2rem_minmax(10rem,1.1fr)_minmax(0,1.6fr)_auto]",
       )}
     >
       <Avatar name={row.displayName} />
@@ -114,9 +127,13 @@ export function UnknownRow({ row, actions }: { row: PeopleRow; actions?: React.R
         <span className="font-mono text-badge tabular-nums text-subtle-foreground">
           {timeAgo(t, row.latest?.timestamp ?? null)}
         </span>
-        {actions}
+        {actions && (
+          <span className="touch-show flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+            {actions}
+          </span>
+        )}
       </span>
-    </div>
+    </ListRow>
   );
 }
 
@@ -166,13 +183,13 @@ export function DirectoryRow({
   );
 
   return (
-    <div
-      className={cn(
-        ROW_BASE,
-        "grid-cols-[2rem_minmax(0,1fr)_auto]",
-        fixed ? "cursor-default" : "hover:bg-surface",
-        selected && "bg-primary/10 hover:bg-primary/15",
-      )}
+    // Hand-rolled hover again, and again not `interactive`: the row holds three
+    // separate targets — select, open, and the menu — so the row itself is none
+    // of them. The fill marks the row the pointer is over, and predates the
+    // move onto `ListRow`.
+    <ListRow
+      selected={selected}
+      className={cn(ROW_GRID, fixed ? "cursor-default" : !selected && "hover:bg-surface-hover")}
     >
       {fixed || !onToggleSelect ? (
         <Avatar name={row.displayName} tone={fixed ? GUARDIAN_TONE : AVATAR_TONE} />
@@ -185,7 +202,7 @@ export function DirectoryRow({
           onClick={onToggleSelect}
           aria-pressed={selected}
           aria-label={t("actions.select", { name: row.displayName })}
-          className="rounded-full outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-ring"
+          className="rounded-full outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
         >
           <Avatar name={row.displayName} />
         </button>
@@ -198,6 +215,6 @@ export function DirectoryRow({
         <span className="min-w-0">{who}</span>
       )}
       <span className="flex items-center justify-end gap-2">{actions}</span>
-    </div>
+    </ListRow>
   );
 }

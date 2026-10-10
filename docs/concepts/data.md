@@ -22,7 +22,11 @@ Projects are working directories where the agent does its work — writing code,
 
 **Contracts:**
 
-- A project can have a memory summary. The first paragraph of the summary always loads into agent context as a brief description. The rest is available for deeper reference (repo structure, commands, conventions).
+- Every project can have a one-line memory summary describing what it is. The main agent receives all project summaries, not just the selected project's summary.
+- The first paragraph supplies the summary, capped at 160 Unicode code points including a trailing ellipsis when truncated. Separate this short introduction from detailed notes with a blank line. Consecutive list items without blank lines count as one paragraph.
+- Detailed notes remain available on demand and stay out of the automatic project context.
+- A blocking `summon` starts its agent in the project of the session that called it. The summon can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts. Agents that other actions run start in the default project unless the action names a directory.
+- A resumed agent session reopens in the directory it last ran in, because the model provider keeps its transcript per directory. A caller that names another directory moves the session there. When the recorded directory is missing, resuming that session by id fails, and a thread that reuses its session implicitly starts a fresh session in the default project.
 
 **Not to be confused with:**
 
@@ -30,7 +34,7 @@ Projects are working directories where the agent does its work — writing code,
 
 ## Routines
 
-A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, webhook, event-bus, poll, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
+A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
 
 *Deprecated alias:* **Events** — surfaces that still say "events" for scheduled automation mean routines.
 
@@ -45,6 +49,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 
 - **[Hook](apps.md#hooks)** — a hook is app-owned code declared in a manifest. A routine is guardian- or agent-authored data managed at runtime.
 - **Event-bus event** — an event is a thing that happens. A routine is a standing binding that may use one as its trigger.
+- **[Event](sessions.md#event)** — one item of a turn's stream. The deprecated alias "events" above means routines, never turn events.
 
 ## Database
 

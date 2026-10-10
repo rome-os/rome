@@ -240,7 +240,10 @@ describe("Event catalog", () => {
 
       catalog.register({ eventType: "connector:GMAIL_NEW_MESSAGE", appId: "connector" });
 
-      expect(catalog.get("connector:GMAIL_NEW_MESSAGE")).toBeDefined();
+      expect(catalog.get("connector:GMAIL_NEW_MESSAGE")).toEqual({
+        eventType: "connector:GMAIL_NEW_MESSAGE",
+        appId: "connector",
+      });
     });
 
     it("withdrawing a type that was never registered changes nothing", () => {

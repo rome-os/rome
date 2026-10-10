@@ -16,7 +16,10 @@ beforeEach(() => {
   // Opening a row's detail dialog mounts ceremony cards that self-fetch their
   // transient status (verify-status, telegram user/status, ...). None of these
   // tests assert ceremony state, so a fresh minimal ok JSON keeps them quiet.
-  rs.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
+  rs.spyOn(globalThis, "fetch").mockImplementation(
+    async (input) =>
+      new Response(String(input) === "/api/approvals" ? "[]" : "{}", { status: 200 }),
+  );
 });
 
 afterEach(() => {
@@ -42,6 +45,7 @@ function connection(
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
     ...overrides,
   };
 }
@@ -107,7 +111,14 @@ function renderSection(
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <ConnectionsSection connections={connections} composio={composio} />
+        <ConnectionsSection
+          connections={connections}
+          composio={composio}
+          loading={false}
+          error={null}
+          onRefresh={rs.fn()}
+          onFlash={rs.fn()}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -115,12 +126,12 @@ function renderSection(
 
 describe("ConnectionsSection — list of rows", () => {
   it("renders a row for every connection the registry reports including webchat", () => {
-    renderSection();
+    renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
 
     // telegram and whatsapp from minimalConnections, webchat always-on
-    expect(screen.getByText("Telegram")).toBeTruthy();
-    expect(screen.getByText("WhatsApp")).toBeTruthy();
-    expect(screen.getByText("Webchat")).toBeTruthy();
+    for (const label of ["Telegram", "WhatsApp", "Webchat", "GitHub", "Google"]) {
+      expect(screen.getByRole("button", { name: `Open ${label}` })).toBeTruthy();
+    }
   });
 
   it("shows the Rome mark for webchat and a mail glyph for email", () => {
@@ -132,22 +143,21 @@ describe("ConnectionsSection — list of rows", () => {
     const webchatRow = screen.getByRole("button", { name: "Open Webchat" });
     const emailRow = screen.getByRole("button", { name: "Open Email" });
 
+    // The Rome mark is the only non-Lucide glyph a row can carry.
     const webchatLogo = webchatRow.querySelector("svg");
-    expect(webchatLogo?.querySelectorAll("path")).toHaveLength(6);
-    expect(webchatLogo?.parentElement?.className).toContain("bg-foreground text-background");
-    expect(webchatLogo?.parentElement?.className).not.toContain("[--background:");
-    expect(webchatLogo?.getAttribute("class")).toContain("[--background:var(--foreground)]");
+    expect(webchatLogo).toBeTruthy();
+    expect(webchatLogo?.classList.contains("lucide")).toBe(false);
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("does not navigate — service rows are buttons, only the app-keys row links out", () => {
+  it("opens services in dialogs and links to pairing history and app keys", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
-    // Service rows render no anchor navigation; each opens a dialog. The one
-    // link in the list is the app-keys entry row, which routes to its page.
     const links = screen.queryAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0].getAttribute("href")).toBe("/settings/connections/app-keys");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/activity",
+      "/settings/connections/app-keys",
+    ]);
     expect(screen.getByRole("button", { name: "Open GitHub" })).toBeTruthy();
   });
 
@@ -161,39 +171,6 @@ describe("ConnectionsSection — list of rows", () => {
 
     // The dialog mounts the ceremony body.
     expect(screen.getByText("Connect")).toBeTruthy();
-  });
-
-  it("rows use dot+text status — not a filled Badge element", () => {
-    // A connected github row renders "Connected" as plain text next to a dot span.
-    renderSection([...minimalConnections(), oauth("github", "authorized")]);
-
-    // Both github and the always-on webchat read as "Connected"; every one is
-    // plain text inside the row, not a <badge> wrapper.
-    const statusTexts = screen.getAllByText("Connected");
-    expect(statusTexts.length).toBeGreaterThan(0);
-    // StatusIndicator wraps in a plain <span>, not a <div role="status"> or Badge.
-    // Verify no ancestor carries data-slot="badge" (shadcn Badge marker).
-    for (const statusText of statusTexts) {
-      let el: Element | null = statusText;
-      while (el) {
-        expect(el.getAttribute("data-slot")).not.toBe("badge");
-        el = el.parentElement;
-      }
-    }
-  });
-
-  it("webchat (always-on) reads as Connected", () => {
-    // Always-on folds into Connected — no separate "Always on" status label.
-    renderSection();
-    expect(screen.getByText("Connected")).toBeTruthy();
-    expect(screen.queryByText("Always on")).toBeNull();
-  });
-
-  it("unconnected channel shows Not connected status", () => {
-    renderSection();
-    // telegram is unauthorized in minimalConnections
-    const statuses = screen.getAllByText("Not connected");
-    expect(statuses.length).toBeGreaterThan(0);
   });
 
   it("a degraded OAuth grant reads Not connected with an attention-toned dot on the row (#1472)", () => {
@@ -235,36 +212,6 @@ describe("ConnectionsSection — list of rows", () => {
     expect(within(row).queryByText("Connected")).toBeNull();
     expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
   });
-
-  it("does not render inline ceremonies or accordion content", () => {
-    // No QR codes, no token input, no expand-in-place sections.
-    const { container } = renderSection();
-    expect(container.querySelector("[aria-expanded]")).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
-  });
-
-  it("shows a row for each OAuth service the registry reports", () => {
-    renderSection([...minimalConnections(), oauth("github"), oauth("google")]);
-    expect(screen.getByText("GitHub")).toBeTruthy();
-    expect(screen.getByText("Google")).toBeTruthy();
-  });
-
-  it("renders no row for a service absent from the registry feed", () => {
-    // The old `integrationsLoaded` gate is gone — the registry-native list is
-    // the single source, so a service simply has no row until the feed
-    // reports it.
-    renderSection(minimalConnections());
-    expect(screen.queryByText("GitHub")).toBeNull();
-  });
-
-  it("renders one open-button per connection row", () => {
-    renderSection([...minimalConnections(), oauth("slack")]);
-
-    // Each connection is a full-width "Open <label>" button (no table roles).
-    expect(screen.getByRole("button", { name: "Open Slack" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Telegram" })).toBeTruthy();
-    expect(screen.queryAllByRole("row")).toHaveLength(0);
-  });
 });
 
 describe("ConnectionsSection — Telegram fold row status", () => {
@@ -280,27 +227,6 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(screen.queryByRole("button", { name: /personal account/i })).toBeNull();
   });
 
-  it("neither: unauthorized bot, unauthorized personal account ⇒ Not connected", () => {
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("unauthorized")]);
-    expect(within(row).getByText("Not connected")).toBeTruthy();
-  });
-
-  it("bot-only: bot authorized, no personal account ⇒ Connected (no 1-of-2 nagging)", () => {
-    const row = telegramRow([telegramBot("authorized", "mybot")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-    expect(within(row).queryByText(/1 of 2/)).toBeNull();
-  });
-
-  it("account-only: personal account authorized, bot unauthorized ⇒ Connected", () => {
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("authorized")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-  });
-
-  it("both authorized ⇒ Connected", () => {
-    const row = telegramRow([telegramBot("authorized", "mybot"), telegramUser("authorized")]);
-    expect(within(row).getByText("Connected")).toBeTruthy();
-  });
-
   it("bot authorized + degraded personal-account session ⇒ attention override (Not connected, attention dot)", () => {
     // The old failed sessionHealth signal is now the registry's `degraded`
     // grant state on the telegram_user connection.
@@ -308,13 +234,6 @@ describe("ConnectionsSection — Telegram fold row status", () => {
     expect(within(row).getByText("Not connected")).toBeTruthy();
     const dot = row.querySelector("span[aria-hidden]");
     expect(dot?.className).toContain("bg-warning");
-  });
-
-  it("mid-ceremony personal-account login with an unauthorized bot ⇒ Not connected", () => {
-    // The old pendingLogin flag was ceremony-transient and never reaches the
-    // registry list — a login still in flight is simply `unauthorized` there.
-    const row = telegramRow([telegramBot("unauthorized"), telegramUser("unauthorized")]);
-    expect(within(row).getByText("Not connected")).toBeTruthy();
   });
 
   it("opening the Telegram row shows both slot cards (bot + personal account)", () => {

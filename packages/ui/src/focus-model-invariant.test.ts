@@ -13,7 +13,7 @@ import { describe, expect, it } from "@rstest/core";
  *
  * The recipe has three parts and needs all three. Components carry a base
  * `outline-none`, which sets `--tw-outline-style: none`, and Tailwind's
- * `outline-2` emits `outline-style: var(--tw-outline-style)`. A focus state
+ * `outline-1` emits `outline-style: var(--tw-outline-style)`. A focus state
  * that names a width but no style therefore computes to no outline at all —
  * the control simply stops showing focus, and nothing reports it.
  *

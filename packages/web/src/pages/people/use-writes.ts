@@ -1,14 +1,23 @@
 import { useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import type { AssignableBondLevel, DirectoryAccount, PersonResource } from "@rome/api-types/people";
-import { ACCOUNTS_KEY, PEOPLE_KEY, TIMELINE_KEY } from "./use-roster";
+import type {
+  AssignableBondLevel,
+  DirectoryAccount,
+  OutboxMessage,
+  PersonResource,
+  SendRefusal,
+} from "@rome/api-types/people";
+import { ACCOUNTS_KEY, OUTBOX_KEY, PEOPLE_KEY, TIMELINE_KEY } from "./use-roster";
 import {
   createPerson,
+  discardSend,
   dismissAccount,
   linkAccount,
   mergePeople,
   restoreAccount,
+  retrySend,
+  sendMessage,
   updatePerson,
   type AccountRef,
   type WriteOutcome,
@@ -51,6 +60,33 @@ export interface PeopleWrites {
   /** `into` absorbs `from`, and `from` is gone. */
   merge(into: string, from: string): Promise<WriteOutcome<PersonResource>>;
   setBond(personId: string, bondLevel: AssignableBondLevel): Promise<WriteOutcome<PersonResource>>;
+  /**
+   * Say something to one of a person's accounts. The account is named, always —
+   * the caller shows which one it picked and the request carries it.
+   *
+   * Answers the outbox row the send became, not a delivered message. A 409
+   * carries which of the ways the channel could not be written to, so a send
+   * that raced a disconnect renders the reason the composer would already have
+   * shown.
+   * `onAccepted` receives the server row before the refreshed reads settle.
+   */
+  say(
+    personId: string,
+    account: AccountRef,
+    text: string,
+    options: { id: string; onAccepted: (message: OutboxMessage) => void },
+  ): Promise<WriteOutcome<OutboxMessage, SendRefusal>>;
+  /**
+   * Try a failed send again, under its own outbox id.
+   *
+   * Refuses with a 404 for a row that is not this person's failed row — one
+   * already discarded, or one a concurrent retry has claimed. Both re-read the
+   * outbox, so a caller has nothing to report and nothing to undo.
+   */
+  retry(personId: string, messageId: string): Promise<WriteOutcome<OutboxMessage>>;
+  /** Give up on a failed send. Refuses the same way {@link retry} does, and a
+   *  send still in flight is not discardable — it may yet arrive. */
+  discard(personId: string, messageId: string): Promise<WriteOutcome<void>>;
 }
 
 export function usePeopleWrites(): PeopleWrites {
@@ -59,12 +95,17 @@ export function usePeopleWrites(): PeopleWrites {
 
   // By prefix, so one call covers the roster's people query, the dossier's
   // single-person read, the composer's shared mention cache and every cached
-  // chip, term and page of the directory. The three roots are the whole of what
+  // chip, term and page of the directory. The four roots are the whole of what
   // a people write can have changed.
+  //
+  // A send settles the same way, and settles both the outbox and the timeline:
+  // a row is on exactly one of the two and the server decides which, so a
+  // client that refreshed only the outbox would leave the message it just sent
+  // showing as in flight until something else happened on the page.
   const settle = useCallback(
     () =>
       Promise.all(
-        [PEOPLE_KEY, ACCOUNTS_KEY, TIMELINE_KEY].map((key) =>
+        [PEOPLE_KEY, ACCOUNTS_KEY, TIMELINE_KEY, OUTBOX_KEY].map((key) =>
           queryClient.invalidateQueries({ queryKey: [key] }),
         ),
       ),
@@ -72,9 +113,26 @@ export function usePeopleWrites(): PeopleWrites {
   );
 
   return useMemo(() => {
-    const settling = async <T>(write: () => Promise<WriteOutcome<T>>) => {
+    const settling = async <T, C>(write: () => Promise<WriteOutcome<T, C>>) => {
       const outcome = await write();
       if (outcome.ok) await settle();
+      return outcome;
+    };
+
+    // The two outbox gestures settle whichever way they went.
+    //
+    // Every other verb here refuses by naming something the caller must then do
+    // — the person who holds an account, the channel that cannot be written to
+    // — so its refusal is worth surfacing and there is nothing to re-read. A
+    // refused outbox gesture says only that the row is not what this page
+    // thought it was: somebody else's, already discarded, or claimed by a retry
+    // that won. Every one of those is answered by reading the outbox again, and
+    // none of them is the guardian's to fix. Settling anyway is what keeps a
+    // double-clicked Retry quiet — the loser re-reads and finds the row the
+    // winner is already sending.
+    const resettling = async <T, C>(write: () => Promise<WriteOutcome<T, C>>) => {
+      const outcome = await write();
+      await settle();
       return outcome;
     };
 
@@ -97,6 +155,14 @@ export function usePeopleWrites(): PeopleWrites {
       restore: (account) => settling(() => restoreAccount(ref(account), t)),
       merge: (into, from) => settling(() => mergePeople(into, from, t)),
       setBond: (personId, bondLevel) => settling(() => updatePerson(personId, { bondLevel }, t)),
+      say: (personId, account, text, options) =>
+        settling(async () => {
+          const outcome = await sendMessage(personId, { ...ref(account), text, id: options.id }, t);
+          if (outcome.ok) options.onAccepted(outcome.value);
+          return outcome;
+        }),
+      retry: (personId, messageId) => resettling(() => retrySend(personId, messageId, t)),
+      discard: (personId, messageId) => resettling(() => discardSend(personId, messageId, t)),
     };
   }, [settle, t]);
 }

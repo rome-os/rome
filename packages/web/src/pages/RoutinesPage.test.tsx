@@ -17,10 +17,6 @@ import type { Routine, RoutineRun } from "@/lib/routine-language";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -33,7 +29,13 @@ afterEach(() => {
 function scheduleRoutine(overrides: Partial<Routine> & Pick<Routine, "id" | "name">): Routine {
   return {
     enabled: true,
-    trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", rrule: "FREQ=DAILY" },
+    trigger: {
+      type: "schedule",
+      tzid: "UTC",
+      tzMode: "floating",
+      localTime: "09:00",
+      rrule: "FREQ=DAILY",
+    },
     actionName: "send_message",
     args: {},
     createdAt: new Date("2026-06-01T00:00:00Z").toISOString(),
@@ -76,6 +78,9 @@ function mockBackend(initial: {
   // Holds the action catalog response until resolved, so the in-flight window is
   // observable instead of instantaneous.
   actionsGate?: Promise<unknown>;
+  // Holds the POST /run response until resolved. The real endpoint answers only
+  // once the run finishes.
+  runGate?: Promise<unknown>;
 }) {
   const routines = initial.routines.map((r) => ({ ...r }));
   const runs = initial.runs ?? {};
@@ -120,6 +125,7 @@ function mockBackend(initial: {
     const runNowMatch = url.match(/^\/api\/routines\/([^/]+)\/run$/);
     if (runNowMatch && method === "POST") {
       if (unreachable.run) throw new TypeError("Failed to fetch");
+      if (initial.runGate) await initial.runGate;
       // Mirror the real backend: the run is recorded, so the next GET reflects
       // it as the routine's latest run (drives the status badge).
       const id = decodeURIComponent(runNowMatch[1]);
@@ -183,9 +189,7 @@ describe("RoutinesPage", () => {
     renderPage();
 
     expect(await screen.findByText("On a schedule")).toBeTruthy();
-    expect(screen.getByText("these run at a set time")).toBeTruthy();
     expect(screen.getByText("When something happens")).toBeTruthy();
-    expect(screen.getByText("no set time — these wait, then run")).toBeTruthy();
   });
 
   it("renders a derived behavior sentence for a weekday-9am routine", async () => {
@@ -198,6 +202,7 @@ describe("RoutinesPage", () => {
           trigger: {
             type: "schedule",
             tzid: browserTzid,
+            tzMode: "floating",
             localTime: "09:00",
             rrule: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
           },
@@ -221,7 +226,13 @@ describe("RoutinesPage", () => {
           actionName: "summon",
           args: { prompt: "scrape trending and email me" },
           enabled: false,
-          trigger: { type: "schedule", tzid: browserTzid, localTime: "08:00", rrule: "FREQ=DAILY" },
+          trigger: {
+            type: "schedule",
+            tzid: browserTzid,
+            tzMode: "floating",
+            localTime: "08:00",
+            rrule: "FREQ=DAILY",
+          },
         }),
       ],
     });
@@ -246,6 +257,7 @@ describe("RoutinesPage", () => {
           trigger: {
             type: "schedule",
             tzid: browserTzid,
+            tzMode: "floating",
             localTime: "00:00",
             rrule: "FREQ=HOURLY;INTERVAL=2",
           },
@@ -272,7 +284,7 @@ describe("RoutinesPage", () => {
     });
     renderPage();
 
-    expect(await screen.findByText("Whenever a new order comes in")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
   });
 
   it("keeps run state off the event card and navigates to its detail view on click", async () => {
@@ -283,7 +295,7 @@ describe("RoutinesPage", () => {
     renderPage();
 
     // The card itself carries no waiting/last-ran/run-count line.
-    expect(await screen.findByText("Whenever a new order comes in")).toBeTruthy();
+    expect(await screen.findByText("Whenever the order created event happens")).toBeTruthy();
     expect(screen.queryByText(/Waiting/)).toBeNull();
     expect(screen.queryByText(/hasn't run yet/)).toBeNull();
 
@@ -353,6 +365,38 @@ describe("RoutinesPage", () => {
     });
   });
 
+  it("shows a run started from the menu and blocks a second one while it is pending", async () => {
+    let finishRun!: () => void;
+    const calls = mockBackend({
+      routines: [scheduleRoutine({ id: "s1", name: "Morning tidy" })],
+      runGate: new Promise<void>((resolve) => {
+        finishRun = resolve;
+      }),
+    });
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Routine options" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Run now" }));
+
+    // The inline button carries the spinner, and stays on phones while it does.
+    const inline = await screen.findByRole("button", { name: "Running Morning tidy" });
+    expect(inline.className).not.toContain("max-sm:hidden");
+
+    await user.click(screen.getByRole("button", { name: "Routine options" }));
+    const menuRun = await screen.findByRole("menuitem", { name: "Run now" });
+    expect(menuRun.getAttribute("aria-disabled")).toBe("true");
+    await user.click(menuRun);
+    await user.keyboard("{Escape}");
+
+    finishRun();
+    expect(await screen.findByRole("button", { name: "Run Morning tidy now" })).toBeTruthy();
+    const posts = calls.filter(
+      (c) => c.url.endsWith("/api/routines/s1/run") && c.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
+  });
+
   it("a running routine shows Stop, and stopping it restores Run now", async () => {
     const calls = mockBackend({
       routines: [
@@ -400,11 +444,9 @@ describe("RoutinesPage", () => {
     expect(screen.queryByRole("button", { name: /Stop Needs approval/ })).toBeNull();
   });
 
-  it("surfaces a failing count and filters the list to the failing routines when clicked", async () => {
+  it("filters failed routines through the list menu without a page-level failure badge", async () => {
     mockBackend({
       routines: [
-        // Errored last run → counts as failing. Scheduled far out so it isn't the
-        // next-up routine (keeps the name out of the panel's next-up line).
         scheduleRoutine({
           id: "s1",
           name: "Inventory sync",
@@ -428,28 +470,48 @@ describe("RoutinesPage", () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    // The stat panel shows a clickable Failing cell counting the one errored run.
-    const failingCell = await screen.findByRole("button", { name: "Show 1 failing routines" });
-    // All three are listed before filtering.
-    expect(screen.getByText("Morning tidy")).toBeTruthy();
+    expect(await screen.findByText("Morning tidy")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /failing routines/i })).toBeNull();
+    expect(screen.queryByText(/\d+ failing/)).toBeNull();
 
-    await user.click(failingCell);
+    await user.click(screen.getByRole("button", { name: "All routines" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Failing" }));
 
-    // After the click only the failing routine remains in the list.
     await waitFor(() => expect(screen.queryByText("Morning tidy")).toBeNull());
     expect(screen.getByText("Inventory sync")).toBeTruthy();
   });
 
-  it("shows no health indicator at all when nothing is failing", async () => {
+  it("does not show a page-level failure badge for a completed failed one-off", async () => {
     mockBackend({
-      routines: [scheduleRoutine({ id: "s1", name: "Morning tidy" })],
+      routines: [
+        scheduleRoutine({
+          id: "s1",
+          name: "Image test",
+          enabled: false,
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-29",
+          },
+          lastFiredAt: "2026-07-29T09:00:00Z",
+          nextRunAt: null,
+          lastRun: { status: "error", firedAt: "2026-07-29T09:00:00Z" },
+        }),
+      ],
     });
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPage();
 
-    // The page has loaded (the title is up)...
-    expect(await screen.findByRole("heading", { name: "Routines" })).toBeTruthy();
-    // ...but a confirmed-healthy state carries no pill — nothing to click.
-    expect(screen.queryByRole("button", { name: /failing routines/ })).toBeNull();
+    const done = await screen.findByRole("button", { name: /Done/ });
+    expect(screen.queryByRole("button", { name: /failing routines/i })).toBeNull();
+    expect(screen.queryByText(/\d+ failing/)).toBeNull();
+
+    await user.click(done);
+    expect(screen.getByRole("link", { name: "Image test" }).getAttribute("href")).toBe(
+      "/routines/s1",
+    );
   });
 
   it("deletes a routine after the guardian confirms removal", async () => {
@@ -479,7 +541,13 @@ describe("RoutinesPage", () => {
           id: "s1",
           name: "Ship the report",
           enabled: false,
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-20" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-20",
+          },
           lastFiredAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
           nextRunAt: null,
           lastRun: {
@@ -505,7 +573,7 @@ describe("RoutinesPage", () => {
     // Expanded: the completed task appears, marked with a Done badge.
     expect(await screen.findByText("Ship the report")).toBeTruthy();
     expect(screen.getAllByText("Done").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("one-time tasks that already ran")).toBeTruthy();
+    expect(screen.getByText("One-time routines that already ran.")).toBeTruthy();
   });
 
   it("keeps an unfired one-off in the schedule section with no Done section", async () => {
@@ -515,7 +583,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s1",
           name: "Ship the report",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2027-01-01" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2027-01-01",
+          },
         }),
       ],
     });
@@ -535,7 +609,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s1",
           name: "Long export",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-23" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-23",
+          },
           lastFiredAt: new Date().toISOString(),
           nextRunAt: null,
           lastRun: { status: "running", firedAt: new Date().toISOString() },
@@ -775,7 +855,13 @@ describe("RoutinesPage", () => {
         scheduleRoutine({
           id: "s2",
           name: "Ship the report",
-          trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", date: "2026-07-15" },
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            date: "2026-07-15",
+          },
           nextRunAt: midMonth.toISOString(),
         }),
       ],

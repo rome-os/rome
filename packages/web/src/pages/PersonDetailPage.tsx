@@ -1,36 +1,33 @@
-import { useMemo } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, CircleAlert } from "lucide-react";
-import { formatWhatsAppPhone, type TimelineEntry } from "@rome/api-types/people";
+import { normalizeBondLevel } from "@rome/api-types/people";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { PageShell, PageBody } from "@/shell/PageShell";
 import { Avatar } from "./people/avatar";
 import { ChannelPill } from "./people/channel-meta";
-import { clockTime, dayLabel, navigatorLocale, startOfDay } from "./people/format";
+import { PersonConversation } from "./people/conversation";
 import { PersonManagement } from "./people/manage";
 import { PEOPLE_VIEW_PATH, personPath } from "./people/people-model";
-import { usePerson, usePersonTimeline } from "./people/use-roster";
+import { levelLabelKey } from "./people/rows";
+import { accountHandle } from "./people/send-model";
+import { usePerson } from "./people/use-roster";
 
 /**
  * One person's page: the dossier.
  *
- * Who they are on top — name, bond, the accounts that resolve to this person — then
- * the merged timeline of everything said on any of them, grouped by day.
- * Timeline entries are generic, so a channel Rome learns about later shows up
- * here without a change to this page.
- *
- * Two reads own it. `GET /api/people/:id` and `GET /api/people/:id/messages`:
- * one request for the person, one for the history across every account they
- * hold. Which stores that history is merged from is the server's business, and
- * a client that merged per-channel reads itself would have to re-derive the
- * ordering the cursor is written against — and would disagree with it at every
- * page boundary.
+ * Who they are on top — name, bond, the accounts that resolve to this person —
+ * and everything said to or by them below. This file owns the header and the
+ * one read behind it, `GET /api/people/:id`; the conversation under it is
+ * `people/conversation.tsx`, which owns the timeline, the outbox and the
+ * composer together because the three are one surface and settle as one.
  *
  * The management gestures the design puts on this card — the bond select, Link
  * account…, Merge into… — are `people/manage.tsx`, and each settles by
- * invalidating those reads.
+ * invalidating the reads it moved.
  */
 
 /**
@@ -48,6 +45,9 @@ export default function PersonDetailPageRoute() {
 
 function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const { t } = useTranslation("people");
+  // The section this dossier belongs to, named the way the sidebar and the
+  // route title name it, so the tab reads "<Person> · People · Rome".
+  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -64,10 +64,8 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   const back = () => (origin ? navigate(-1) : navigate(PEOPLE_VIEW_PATH.latest, { replace: true }));
 
   const personQuery = usePerson(personId);
-  const timeline = usePersonTimeline(personId);
   const person = personQuery.data ?? null;
-
-  const days = useMemo(() => groupByDay(timeline.entries), [timeline.entries]);
+  useDocumentTitle(person === null ? null : [person.displayName, tCommon("nav.people")]);
 
   if (personQuery.isPending) {
     return (
@@ -115,14 +113,30 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
   }
 
   return (
-    <PageShell>
-      <PageBody>
+    // The page fills the content column so the conversation can take whatever
+    // the header leaves, and the composer's floor reaches the viewport's foot.
+    <PageShell className="flex flex-1 flex-col">
+      <PageBody className="flex flex-1 flex-col">
         <BackLink onClick={back} />
 
-        <div className="flex flex-wrap items-start gap-4 rounded-14 border border-border bg-surface p-5 shadow-1">
-          <Avatar name={person.displayName} tone="bg-surface-muted text-muted-foreground" />
-          <div className="min-w-0 flex-1 basis-64">
-            <h1 className="text-title text-foreground">{person.displayName}</h1>
+        {/* One row at any width: the avatar, then who this is, then a menu of
+            what can be done to them. The bond reads as a badge on the name line
+            and is changed from the menu, so the card states the facts and keeps
+            every gesture in one place — nothing here has to stack or wrap into
+            pieces when the card is narrow. */}
+        <div className="flex items-start gap-4 rounded-14 border border-border bg-surface p-5 shadow-1">
+          <Avatar
+            name={person.displayName}
+            size="lg"
+            tone="bg-surface-muted text-muted-foreground"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-title text-foreground">{person.displayName}</h1>
+              <Badge variant="outline">
+                {t(levelLabelKey(normalizeBondLevel(person.bondLevel)))}
+              </Badge>
+            </div>
             <p className="text-aux text-muted-foreground">
               {t("row.messageCount", { count: person.messageCount })}
             </p>
@@ -135,11 +149,7 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
                     key={`${account.channel}:${account.channelUserId}`}
                     channel={account.channel}
                   >
-                    <span className="font-mono tabular-nums">
-                      {account.channel === "whatsapp"
-                        ? (formatWhatsAppPhone(account.channelUserId) ?? account.channelUserId)
-                        : account.channelUserId}
-                    </span>
+                    <span className="font-mono tabular-nums">{accountHandle(account)}</span>
                   </ChannelPill>
                 ))
               )}
@@ -158,123 +168,18 @@ function PersonDetailPage({ personId }: { personId: string | undefined }) {
           />
         </div>
 
-        <section>
-          <h2 className="text-section uppercase tracking-wide text-muted-foreground">
-            {t("detail.timeline")}
-          </h2>
-          {timeline.isPending ? (
-            <p className="py-8 text-center text-aux text-muted-foreground">{t("page.loading")}</p>
-          ) : timeline.error ? (
-            // Same reason as the person read: "nothing has happened yet" is a
-            // claim about this person, and a failed fetch has not earned it.
-            <div className="py-4">
-              <Alert variant="destructive">
-                <CircleAlert aria-hidden="true" />
-                <AlertTitle>{t("errors.loadFailedTitle")}</AlertTitle>
-                <AlertDescription>{timeline.error.message}</AlertDescription>
-              </Alert>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2"
-                onClick={() => void timeline.refetch()}
-              >
-                {t("errors.retry")}
-              </Button>
-            </div>
-          ) : days.length === 0 ? (
-            <p className="py-8 text-center text-aux text-subtle-foreground">
-              {t("detail.timelineEmpty")}
-            </p>
-          ) : (
-            days.map((day) => (
-              <div key={day.dayStart}>
-                <h3 className="mt-5 mb-1 text-badge uppercase tracking-wide text-subtle-foreground">
-                  {dayLabel(t, day.dayStart, navigatorLocale())}
-                </h3>
-                {day.entries.map((entry) => (
-                  <div
-                    key={`${entry.source}:${entry.ref}`}
-                    className="grid grid-cols-[auto_1fr_auto] items-baseline gap-3 border-b border-border-subtle px-2 py-2"
-                  >
-                    <ChannelPill channel={entry.source} />
-                    <p className="min-w-0 text-ui text-foreground">
-                      {entry.direction === "outbound" && (
-                        <span className="text-subtle-foreground">
-                          {t("detail.outboundPrefix")}{" "}
-                        </span>
-                      )}
-                      <span
-                        className={entry.direction === "outbound" ? "text-muted-foreground" : ""}
-                      >
-                        {entry.body ?? t("row.noPreview")}
-                      </span>
-                    </p>
-                    <span className="font-mono text-badge tabular-nums text-subtle-foreground">
-                      {clockTime(entry.timestamp, navigatorLocale())}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ))
-          )}
-          {timeline.hasNextPage && (
-            <div className="flex justify-center pt-3">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={timeline.isFetchingNextPage}
-                onClick={() => void timeline.fetchNextPage()}
-              >
-                {t("detail.loadOlder")}
-              </Button>
-            </div>
-          )}
-        </section>
+        <PersonConversation key={person.id} person={person} />
       </PageBody>
     </PageShell>
   );
-}
-
-/**
- * The address a person was reached by before the dossier took its own segment.
- *
- * A person id never named a view, so forwarding is unambiguous: `/people/wei-chen`
- * meant that dossier and still reaches it. The two view segments are matched by
- * their own routes ahead of this one and never arrive here.
- */
-export function PersonLegacyRedirect() {
-  const params = useParams<{ personId: string }>();
-  const location = useLocation();
-  return <Navigate to={personPath(params.personId ?? "")} state={location.state} replace />;
 }
 
 function BackLink({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation("people");
   return (
     <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onClick}>
-      <ArrowLeft aria-hidden="true" />
+      <ArrowLeft data-icon="inline-start" aria-hidden="true" />
       {t("detail.back")}
     </Button>
   );
-}
-
-interface TimelineDay {
-  dayStart: number;
-  entries: TimelineEntry[];
-}
-
-/** Entries arrive newest first and stay that way inside each day, so the page
- *  reads top-down as "most recent first" at both levels. */
-function groupByDay(entries: TimelineEntry[]): TimelineDay[] {
-  const days: TimelineDay[] = [];
-  for (const entry of entries) {
-    const dayStart = startOfDay(entry.timestamp);
-    const current = days.at(-1);
-    if (current && current.dayStart === dayStart) current.entries.push(entry);
-    else days.push({ dayStart, entries: [entry] });
-  }
-  return days;
 }

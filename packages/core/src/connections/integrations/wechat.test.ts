@@ -5,15 +5,21 @@
 //      → CredentialRejected{ grant: "account" } and other terminal → Disconnected.
 //   3. The account-401 → renew-once-then-degrade flow end-to-end over the real
 //      ConnectionRegistry (the route-driven scheme's renew answers "re-confer").
+//   4. Inbound delivery over the real WechatAdapter, with ilinkai played by a
+//      stubbed fetch.
 
-import { afterEach, describe, expect, it } from "@rstest/core";
-import type { ConversationId, InboundMessage, NormalizedMessage } from "@rome-os/app-runtime";
+import { mkdtemp, rm } from "node:fs/promises";
+import { sendThrough } from "../../channels/connection-ports.js";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { ConversationId, ChannelMessage } from "@rome-os/app-runtime";
 import { createTestDb } from "../../test/helpers.js";
-import type { WechatAdapterConfig } from "../../channels/wechat.js";
+import { WechatAdapter, type WechatAdapterConfig } from "../../channels/wechat.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
 import { ConnectionRegistry } from "../registry.js";
-import type { Connection, StreamFault, Talk, Talker } from "../types.js";
+import type { Connection, StreamFault, Talker } from "../types.js";
 import { createWechatDescriptor } from "./wechat.js";
 
 // A fresh drizzle-backed ledger per test (InMemoryGrantLedger left with p1);
@@ -38,10 +44,10 @@ function flush(): Promise<void> {
  * poll loop drives on a terminal outcome.
  */
 class FakeWechatAdapter {
-  handler?: (msg: NormalizedMessage) => Promise<void>;
+  handler?: (msg: ChannelMessage) => Promise<void>;
   started = false;
   stopped = false;
-  readonly sent: Array<{ channelUserId: string; threadId: string; text?: string }> = [];
+  readonly sent: Array<{ conversationId: ConversationId; text?: string }> = [];
   readonly typed: string[] = [];
   degradation: { reason: string; retryAt: string } | null = null;
   private readonly onFault?: (err: unknown) => void;
@@ -50,7 +56,7 @@ class FakeWechatAdapter {
     this.onFault = config.onFault;
   }
 
-  onMessage(handler: (msg: NormalizedMessage) => Promise<void>): void {
+  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
     this.handler = handler;
   }
   async start(): Promise<void> {
@@ -59,14 +65,11 @@ class FakeWechatAdapter {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  async sendMessage(
-    channelUserId: string,
-    threadId: string,
-    message: { text?: string },
-  ): Promise<void> {
-    this.sent.push({ channelUserId, threadId, text: message.text });
+  async send(conversationId: ConversationId, message: { text?: string }) {
+    this.sent.push({ conversationId, text: message.text });
+    return { conversationId };
   }
-  async saveIncomingAttachments(msg: NormalizedMessage) {
+  async saveIncomingAttachments(msg: ChannelMessage) {
     return msg.attachments;
   }
   async notifyTyping(threadId: string): Promise<void> {
@@ -136,7 +139,7 @@ describe("wechat descriptor shape", () => {
     const { registry } = setup();
     const conn = await registry.connect("wechat");
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
   });
 
   it("unlocks talk and forwards attachments + typing once the grant is imported", async () => {
@@ -145,23 +148,27 @@ describe("wechat descriptor shape", () => {
     await registry.importCredential(conn.id, "account", validCred());
 
     expect(conn.status().talk).toEqual({ state: "unlocked" });
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(adapters).toHaveLength(1);
     expect(adapters[0].started).toBe(true);
 
-    await conn.talk!.send("addr-1" as ConversationId, { text: "hi" });
-    expect(adapters[0].sent).toEqual([{ channelUserId: "addr-1", threadId: "addr-1", text: "hi" }]);
-    const inboundMedia = conn.talk!.feature("inboundMedia");
+    await expect(sendThrough(conn, "addr-1" as ConversationId, { text: "hi" })).resolves.toEqual({
+      conversationId: "addr-1",
+    });
+    expect(adapters[0].sent).toEqual([{ conversationId: "addr-1", text: "hi" }]);
     const message = {
+      channel: "wechat",
+      direction: "inbound",
       messageId: "message-1",
       conversationId: "addr-1" as ConversationId,
       senderId: "user-1",
       text: "hi",
       attachments: [],
       timestamp: new Date(),
-      raw: { channel: "wechat", rawEvent: null, attachments: [] },
-    } satisfies InboundMessage;
-    await expect(inboundMedia?.materialize(message)).resolves.toEqual([]);
+    } satisfies ChannelMessage;
+    await expect(
+      conn.withTalker((talker) => talker.inboundMedia?.materialize(message)),
+    ).resolves.toEqual([]);
   });
 
   it("reports transient adapter degradation without relocking the talk capability", async () => {
@@ -181,7 +188,7 @@ describe("wechat descriptor shape", () => {
         retryAt: "2026-07-20T12:00:00.000Z",
       },
     });
-    expect(conn.talk).not.toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(true);
     expect(conn.auth.grants().account).toBe("authorized");
   });
 });
@@ -239,7 +246,7 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     adapters[0].fault(new Error("HTTP 401: unauthorized"));
     await flush();
 
-    expect(conn.talk).toBeNull();
+    expect(conn.isUnlocked("talk")).toBe(false);
     expect(conn.status().talk).toEqual({ state: "needs-auth", missingGrants: ["account"] });
     expect(conn.auth.grants().account).toBe("degraded");
 
@@ -251,6 +258,117 @@ describe("wechat account-401 drives renew-once-then-degrade", () => {
     await registry.importCredential(conn.id, "account", validCred());
     expect(conn.status().talk).toEqual({ state: "unlocked" });
     expect(reUnlocked).not.toBeNull();
-    void (conn.talk as Talk | null);
+  });
+});
+
+describe("wechat inbound delivery", () => {
+  const originalFetch = globalThis.fetch;
+  let statePath = "";
+  afterEach(async () => {
+    rs.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
+    if (statePath) await rm(statePath, { recursive: true, force: true });
+    statePath = "";
+  });
+
+  it("delivers the transport's ChannelMessage as it is, and materializes media from raw", async () => {
+    statePath = await mkdtemp(join(tmpdir(), "rome-wechat-delivery-"));
+    // A group message that quotes an earlier message and carries an image, so
+    // every optional field WeChat sets is present.
+    const event = {
+      message_id: 9001,
+      from_user_id: "bob@im.wechat",
+      group_id: "room-1@chatroom",
+      message_type: 1,
+      create_time_ms: 1700000000000,
+      context_token: "ctx-1",
+      item_list: [
+        {
+          type: 2,
+          msg_id: "item-7",
+          image_item: {
+            width: 640,
+            height: 480,
+            media: { encrypt_query_param: "enc", aes_key: "00112233445566778899aabbccddeeff" },
+          },
+          ref_msg: {
+            message_item: { type: 1, msg_id: "orig-1", text_item: { text: "original text" } },
+          },
+        },
+      ],
+    };
+    const cdnRequests: string[] = [];
+    let polls = 0;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        if (url.includes("/ilink/bot/getupdates")) {
+          polls += 1;
+          // One batch, then a refused token so the poll loop ends.
+          return polls === 1
+            ? new Response(JSON.stringify({ ret: 0, msgs: [event] }), { status: 200 })
+            : new Response("unauthorized", { status: 401 });
+        }
+        cdnRequests.push(url);
+        return new Response("unavailable", { status: 503 });
+      }),
+    );
+
+    const desc = createWechatDescriptor({ createAdapter: (config) => new WechatAdapter(config) });
+    const talker = desc.capabilities.talker!.build(
+      { account: { ...validCred(), material: { ...validCred().material, statePath } } },
+      {
+        connectionId: "wechat-test",
+        persist: async () => {},
+        registerIngress: () => () => {},
+      },
+    );
+    const delivered: unknown[] = [];
+    talker.start(
+      (msg) => delivered.push(msg),
+      () => {},
+    );
+    await rs.waitFor(() => expect(delivered).toHaveLength(1));
+
+    expect(delivered).toStrictEqual([
+      {
+        channel: "wechat",
+        direction: "inbound",
+        messageId: "item-7",
+        conversationId: "bob@im.wechat",
+        senderId: "bob@im.wechat",
+        senderDisplayName: "bob",
+        text: "[Image (640x480)]",
+        attachments: [
+          {
+            type: "image",
+            url: "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=enc",
+            fileName: "wechat-image.jpg",
+            mimeType: "image/jpeg",
+          },
+        ],
+        timestamp: new Date(1700000000000),
+        replyTo: { messageId: "orig-1", content: "original text" },
+        thread: { kind: "group", name: "room-1@chatroom" },
+        addressing: "direct",
+        raw: event,
+      },
+    ]);
+
+    // Media reads its CDN reference from raw. A failed download leaves the
+    // attachment unsaved rather than failing the message.
+    const inboundMedia = talker.inboundMedia!;
+    const message = delivered[0] as ChannelMessage;
+    await expect(inboundMedia.materialize(message)).resolves.toStrictEqual(message.attachments);
+    expect(cdnRequests).toEqual([
+      "https://novac2c.cdn.weixin.qq.com/c2c/download?encrypted_query_param=enc",
+    ]);
+
+    // Without the iLink event there is nothing to download with.
+    const { raw: _raw, ...withoutRaw } = message;
+    await expect(inboundMedia.materialize(withoutRaw)).resolves.toBe(withoutRaw.attachments);
+    expect(cdnRequests).toHaveLength(1);
+
+    await talker.stop();
   });
 });

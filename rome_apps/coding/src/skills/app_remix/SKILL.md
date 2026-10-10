@@ -146,6 +146,8 @@ source app id in code. Component ids and unrelated package metadata may stay sta
 names, agent names, skill names, and database
 namespaces must remain isolated from the installed source app.
 
+A remix is a new app, so give it its own `tagline` in `app.yaml` (one sentence, ≤ 80 chars / 40 CJK, benefit-first — see REFERENCE.md) even when the source had none; verification fails without it.
+
 Commit the requested change with its authoring note before installation.
 
 ## Install and verify

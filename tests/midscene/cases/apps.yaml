@@ -1,0 +1,42 @@
+cases:
+  - name: APPS-01 Search the installed-app catalog
+    tags:
+      - apps
+      - shard-2
+    steps:
+      - app.open:
+          path: /apps
+      - aiAct: >-
+          Search for "issue" using the "Search apps" field and finish when the filtered result is
+          visible.
+      - aiAssert: >-
+          The grid shows "1 result" and only the "Issue Triage" app is listed; the other installed
+          apps ("Code Review", "Stock Daily", etc.) are not shown.
+  - name: APPS-02 Disable an app from its tile menu
+    tags:
+      - apps
+      - shard-2
+    steps:
+      - app.open:
+          path: /apps
+      - aiAct: >-
+          First search for "issue" using the "Search apps" field so Issue Triage is the only result.
+          On that remaining card, open its actions menu and choose "Disable". Then reopen the same
+          card's actions menu. Finish with the menu open in the disabled state, showing "Enable"
+          instead of "Disable".
+      - aiAssert: >-
+          The search field contains "issue", the page shows exactly one installed-app result, and
+          that result's open actions menu offers "Enable", confirming the filtered app is disabled.
+  - name: APPS-03 Open Issue Triage from its details page
+    tags:
+      - apps
+      - shard-2
+    steps:
+      - app.open:
+          path: /app-details/issue-triage
+      - aiAct: >-
+          On the Issue Triage details page, click "Open full view" and finish when the Issue Triage
+          app dashboard is open.
+      - aiAssert: >-
+          The full Issue Triage app dashboard is open and shows its triage summary or recent
+          activity rather than the app-details management page or an error state.

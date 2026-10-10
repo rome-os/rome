@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${ROME_ENABLE_CDP_AUTOMATION:-false}" != "true" ]]; then
+  exit 0
+fi
+
 CDP_PORT="${CDP_PORT:-9222}"
 TIMEZONE="${TIMEZONE:-America/Los_Angeles}"
 CHROME_LANG="${CHROME_LANG:-en-US}"

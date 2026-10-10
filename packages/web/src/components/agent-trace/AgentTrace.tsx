@@ -1,7 +1,5 @@
-import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDownIcon, ChevronRightIcon } from "@radix-ui/react-icons";
-import type { TraceBlockDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
+import type { TraceEventDto, TraceSegment, TraceSummary } from "@rome/api-types/trace-segments";
 import { Button } from "@/components/ui/button";
 import { CollapsedTraceSummary, formatDuration } from "./CollapsedTraceSummary";
 import { TraceRunRow } from "./TraceRunRow";
@@ -19,8 +17,8 @@ export function TraceBody({
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
+  renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
+  renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
   live?: boolean;
 }) {
   const { t } = useTranslation("activity");
@@ -52,174 +50,62 @@ export function TraceBody({
   );
 }
 
-export function AgentTrace({
-  summary,
-  segments,
-  loading = false,
-  error = null,
-  onFirstOpen,
-  defaultOpen = false,
-  live = false,
-  renderInlineBlock,
-  renderRunBlocks,
-}: {
-  summary: TraceSummary;
-  segments: TraceSegment[] | null;
-  loading?: boolean;
-  error?: string | null;
-  onFirstOpen?: () => void;
-  defaultOpen?: boolean;
-  live?: boolean;
-  renderInlineBlock: (block: TraceBlockDto, key: string) => React.ReactNode;
-  renderRunBlocks: (blocks: TraceBlockDto[], live: boolean) => React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const hasOpenedRef = useRef(defaultOpen);
-
-  // Zero-tool turns: skip the trace shell and just emit the inline blocks
-  // in stream order. Only applicable when segments are loaded.
-  if (segments && summary.totalSteps === 0) {
-    return (
-      <>
-        {segments.map((seg) =>
-          seg.kind === "block" ? (
-            <span key={seg.id}>{renderInlineBlock(seg.block, seg.id)}</span>
-          ) : null,
-        )}
-      </>
-    );
-  }
-
-  const handleToggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !hasOpenedRef.current) {
-      hasOpenedRef.current = true;
-      onFirstOpen?.();
-    }
-  };
-
-  return (
-    <div className={`rounded-8 ${open ? "bg-surface-muted/60 px-1 py-1" : ""}`}>
-      <button
-        type="button"
-        onClick={handleToggle}
-        className="flex w-full select-text items-center gap-2 rounded-8 px-2 py-1 text-left hover:bg-surface-muted/80"
-      >
-        <CollapsedTraceSummary summary={summary} segments={segments ?? undefined} live={live} />
-        <span className="ml-auto flex-none text-subtle-foreground">
-          {open ? <ChevronDownIcon /> : <ChevronRightIcon />}
-        </span>
-      </button>
-      {open && (
-        <div className="mt-1 px-2 pb-1">
-          <TraceBody
-            segments={segments}
-            loading={loading}
-            error={error}
-            renderInlineBlock={renderInlineBlock}
-            renderRunBlocks={renderRunBlocks}
-            live={live}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
+// A single inline line sized to sit under the agent name beside the avatar.
 export function CollapsedTraceButton({
   summary,
-  segments,
   onClick,
   live = false,
-  compact = false,
 }: {
   summary?: TraceSummary;
-  segments?: TraceSegment[];
   onClick: () => void;
   live?: boolean;
-  compact?: boolean;
 }) {
-  if (compact) {
-    // A single inline line sized to sit under the agent name beside the avatar.
-    return (
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        onClick={onClick}
-        className="-mx-2 max-w-none select-text justify-start text-left"
-      >
-        <CollapsedTraceContent summary={summary} segments={segments} live={live} compact />
-      </Button>
-    );
-  }
   return (
-    <button
+    <Button
       type="button"
+      variant="link"
+      size="xs"
       onClick={onClick}
-      className="transition-all flex w-full select-text items-center gap-2 rounded-8 py-1 px-0 text-left hover:px-2 hover:bg-surface-muted/80"
+      className="-mx-2 max-w-none select-text justify-start text-left hover:no-underline"
     >
-      <CollapsedTraceContent summary={summary} segments={segments} live={live} />
-      <span className="ml-auto flex-none text-subtle-foreground">
-        <ChevronRightIcon />
-      </span>
-    </button>
+      <CollapsedTraceContent summary={summary} live={live} />
+    </Button>
   );
 }
 
-function CollapsedTraceContent({
-  summary,
-  segments,
-  live,
-  compact = false,
-}: {
-  summary?: TraceSummary;
-  segments?: TraceSegment[];
-  live: boolean;
-  compact?: boolean;
-}) {
+function CollapsedTraceContent({ summary, live }: { summary?: TraceSummary; live: boolean }) {
   const { t } = useTranslation("activity");
 
   if (summary?.terminalError) {
     return <TraceErrorSummary error={summary.terminalError} />;
   }
-  if (summary && !isEmptySummary(summary)) {
+  if (live) {
     return (
-      <CollapsedTraceSummary summary={summary} segments={segments} live={live} compact={compact} />
+      <CollapsedTraceSummary
+        summary={summary ?? { distinctApps: [], totalSteps: 0, invocationCounts: {} }}
+        live={live}
+        compact
+      />
     );
   }
+  if (summary && !isEmptySummary(summary)) {
+    return <CollapsedTraceSummary summary={summary} live={live} compact />;
+  }
   if (summary?.stoppedByUser) {
-    return <StatusPill label={t("trace.stoppedByUser")} compact={compact} />;
+    return <StatusPill label={t("trace.stoppedByUser")} />;
   }
   if (summary?.totalDurationMs !== undefined) {
     return (
       <StatusPill
         label={t("trace.thoughtFor", { duration: formatDuration(summary.totalDurationMs) })}
-        compact={compact}
       />
     );
   }
-  return <StatusPill label={t("trace.thinking")} pulse compact={compact} />;
+  return <StatusPill label={t("trace.thinking")} />;
 }
 
-function StatusPill({
-  label,
-  pulse = false,
-  compact = false,
-}: {
-  label: string;
-  pulse?: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <div className={compact ? "text-aux text-subtle-foreground" : "text-ui text-subtle-foreground"}>
-      <span
-        className={`inline-block h-2 w-2 rounded-full bg-border-strong${pulse ? " animate-pulse" : ""}`}
-      />
-      &nbsp;<span>{label}</span>
-    </div>
-  );
+function StatusPill({ label }: { label: string }) {
+  return <span className="text-aux text-muted-foreground">{label}</span>;
 }
 
 function TraceErrorSummary({ error }: { error: string }) {

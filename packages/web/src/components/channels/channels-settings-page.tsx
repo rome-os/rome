@@ -620,6 +620,14 @@ type SettingFieldKey =
   | "agent"
   | "sessionReset";
 
+/**
+ * Fields whose description carries a fact the label and the control do not
+ * already show (docs/ui/secondary-text.md). Every other row is its label plus
+ * its options, which say the same thing in fewer words — "Provider session
+ * reset" is the exception because nothing on the row says memory is destroyed.
+ */
+const FIELDS_WITH_DESCRIPTION = new Set<SettingFieldKey>(["sessionReset"]);
+
 function OverriddenBadge() {
   const { t } = useTranslation("settings");
   return <Badge variant="muted">{t("channels.conversationSettings.source.overridden")}</Badge>;
@@ -671,9 +679,11 @@ function SettingRow({
           )}
           {overridden && <OverriddenBadge />}
         </div>
-        <p className="mt-1 text-aux text-muted-foreground">
-          {t(`channels.conversationSettings.descriptions.${field}`)}
-        </p>
+        {FIELDS_WITH_DESCRIPTION.has(field) && (
+          <p className="mt-1 text-aux text-muted-foreground">
+            {t(`channels.conversationSettings.descriptions.${field}`)}
+          </p>
+        )}
       </div>
       <div className="w-full shrink-0 sm:w-auto">{children}</div>
     </div>

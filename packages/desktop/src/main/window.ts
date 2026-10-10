@@ -97,16 +97,6 @@ async function loadStartupSurface(
   await win.loadURL(startupSurface.url);
 }
 
-// Re-evaluate and load the startup surface for an existing window. Called when
-// the runtime transitions to ready so the booting splash flips to the dashboard
-// without recreating the window.
-export async function reloadStartupSurface(
-  win: BrowserWindow,
-  runtimeManager: RuntimeManager,
-): Promise<void> {
-  await loadStartupSurface(win, runtimeManager);
-}
-
 export async function loadOnboarding(win: BrowserWindow): Promise<void> {
   await win.loadFile(ONBOARDING_HTML);
 }
@@ -264,6 +254,11 @@ export function createQuittingWindow(): BrowserWindow {
 export function createSettingsWindow(): BrowserWindow {
   const existing = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Rome Settings");
   if (existing) {
+    // focus() alone leaves a minimized window in the Dock, and asked from the
+    // floating icon — while another app is frontmost — it can leave the window
+    // behind that app.
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
     existing.focus();
     return existing;
   }

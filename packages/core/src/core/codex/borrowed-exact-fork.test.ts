@@ -70,8 +70,8 @@ describe("evaluateBorrowedExactFork", () => {
 });
 
 describe("createBorrowedExactForkSession", () => {
-  it("scopes dynamic tools to the fork runtime and rolls back", async () => {
-    const rollbackTurn = rs.fn(async () => undefined);
+  it("scopes dynamic tools to the fork runtime and reverts before the borrowed turn", async () => {
+    const revertTurn = rs.fn(async () => undefined);
     let hasForkActionTool = false;
     const session = await createBorrowedExactForkSession({
       providerId: "openai",
@@ -84,7 +84,7 @@ describe("createBorrowedExactForkSession", () => {
         await runtime.beforeTerminal?.({ threadId: "source-thread", turnId: "fork-turn" });
         runtime.sink.push({ type: "result", content: "done" });
       },
-      rollbackTurn,
+      revertTurn,
       interrupt: async () => undefined,
     });
 
@@ -97,7 +97,7 @@ describe("createBorrowedExactForkSession", () => {
     await session.close();
 
     expect(hasForkActionTool).toBe(true);
-    expect(rollbackTurn).toHaveBeenCalledWith("source-thread");
+    expect(revertTurn).toHaveBeenCalledWith("source-thread", "fork-turn");
   });
 
   // A webchat-sourced exact fork opens with supportsInteractiveSurface: true
@@ -129,7 +129,7 @@ describe("createBorrowedExactForkSession", () => {
         confirmRes = await runtime.romeTools.callTool("confirm_output", {});
         runtime.sink.push({ type: "result", content: "done" });
       },
-      rollbackTurn: async () => undefined,
+      revertTurn: async () => undefined,
       interrupt: async () => undefined,
     });
 
@@ -152,5 +152,39 @@ describe("createBorrowedExactForkSession", () => {
     // ... and confirm_output refuses instead of claiming a handback shipped.
     expect(confirmRes!.traceOutput.isError).toBe(true);
     expect(confirmRes!.traceOutput.content[0].text).toContain("nothing was shipped");
+  });
+
+  it("reports the input when it is sent, before it waits for the source's turns", async () => {
+    const events: string[] = [];
+    let release!: () => void;
+    const queued = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const session = await createBorrowedExactForkSession({
+      providerId: "openai",
+      forkSessionId: "fork-session",
+      sourceThreadId: "source-thread",
+      openParams: openParams(),
+      runExclusive: async (work) => {
+        await queued;
+        return await work();
+      },
+      onSend: (input) => events.push(`sent:${input.text}`),
+      runTurn: async (_input, runtime) => {
+        events.push("ran");
+        await runtime.beforeTerminal?.({ threadId: "source-thread", turnId: "fork-turn" });
+        runtime.sink.push({ type: "result", content: "done" });
+      },
+      revertTurn: async () => undefined,
+      interrupt: async () => undefined,
+    });
+
+    const iterator = session.events[Symbol.asyncIterator]();
+    await session.sendUserInput({ text: "feedback" });
+    expect(events).toEqual(["sent:feedback"]);
+    release();
+    await iterator.next();
+    expect(events).toEqual(["sent:feedback", "ran"]);
+    await session.close();
   });
 });

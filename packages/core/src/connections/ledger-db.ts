@@ -3,8 +3,7 @@
 // contract suites (registry-*.test.ts) run against this implementation.
 //
 // The `credential` column stores a PersistedCredential envelope as plain JSON
-// (repo precedent: encryption deliberately dropped — see
-// `packages/core/src/lib/provider-accounts.ts`). The envelope shape is kept so
+// (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
 import { and, eq } from "drizzle-orm";
@@ -12,43 +11,13 @@ import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
 import { ServiceConnectionWriteConflict } from "./errors.js";
 import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
-import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
-
-/** The patch shape shared by `updateGrant` and its write helper. */
-type GrantPatch = Partial<
-  Pick<
-    GrantRecord,
-    "state" | "credential" | "profile" | "conferredAt" | "lastRenewedAt" | "degraded"
-  >
->;
-
-/** A ledger that can also enlist its writes in a caller-owned transaction. Only
- *  the Drizzle-backed ledger implements it; the registry's terminal conferral
- *  (`confer`) needs it to write the credential, a placeholder connection, and the
- *  guardian mapping atomically in one transaction. Each `write*` helper takes an
- *  executor (`this.db` for autocommit, or a `tx`), so one body serves both the
- *  plain async methods and the transaction. The abstract `GrantLedger`
- *  deliberately stays transaction-free so the in-memory test fakes need not model
- *  a transaction they never exercise. */
-export interface TransactionalGrantLedger extends GrantLedger {
-  /** Run `fn` inside one synchronous transaction (better-sqlite3). Any throw
-   *  rolls the whole scope back. */
-  runInTransaction<T>(fn: (tx: DrizzleTx) => T): T;
-  /** Like {@link GrantLedger.deleteConnection}, but enlists an optional caller
-   *  participant in the SAME transaction as the cascading deletes — so a
-   *  teardown side-write (e.g. guardian channel-mapping cleanup) commits
-   *  atomically with the connection removal instead of as a separate write that
-   *  can strand state if it fails after the connection is already gone. */
-  deleteConnection(id: ConnectionId, inTx?: (tx: DrizzleTx) => void): Promise<void>;
-  writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
-  writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void;
-  writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void;
-}
-
-/** Narrowing guard: a ledger that supports caller-owned transactions. */
-export function isTransactionalLedger(ledger: GrantLedger): ledger is TransactionalGrantLedger {
-  return typeof (ledger as Partial<TransactionalGrantLedger>).runInTransaction === "function";
-}
+import type {
+  ConnectionRecord,
+  GrantLedger,
+  GrantPatch,
+  GrantRecord,
+  PersistedCredential,
+} from "./ledger.js";
 
 type GrantRow = typeof connectionGrants.$inferSelect;
 
@@ -90,7 +59,7 @@ function rowToGrant(row: GrantRow): GrantRecord {
   return rec;
 }
 
-export class DrizzleGrantLedger implements TransactionalGrantLedger {
+export class DrizzleGrantLedger implements GrantLedger {
   constructor(private readonly db: DrizzleDb) {}
 
   runInTransaction<T>(fn: (tx: DrizzleTx) => T): T {

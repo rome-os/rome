@@ -16,10 +16,9 @@
 import { afterAll, beforeAll, expect, test } from "@rstest/core";
 import { setupServer } from "msw/node";
 import { STRANGER_PERSON_ID } from "@rome/api-types/persons";
-import { channelMirrorHandlers } from "../../../mock/handlers/people";
 import { peopleHandlers } from "../../../mock/handlers/people-api";
 
-const server = setupServer(...peopleHandlers, ...channelMirrorHandlers);
+const server = setupServer(...peopleHandlers);
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 
@@ -105,8 +104,15 @@ test("proposed /people contract walkthrough", async () => {
     r.body.accounts.find((a: { channelUserId: string }) => a.channelUserId === DEV_JID),
   ).toMatchObject({ state: "linked", personId: devikaId });
   r = await call("GET", `/api/people/${devikaId}`);
+  // Exactly one account, and it is the one just linked. Whether Rome can send
+  // there and when it was last active are answers on the same row that this
+  // walkthrough is not about.
   expect(r.body.accounts).toEqual([
-    { channel: "whatsapp", channelUserId: DEV_JID, displayName: expect.any(String) },
+    expect.objectContaining({
+      channel: "whatsapp",
+      channelUserId: DEV_JID,
+      displayName: expect.any(String),
+    }),
   ]);
 
   // Link a second account — an unseen LinkedIn account; linking does not

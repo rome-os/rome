@@ -129,3 +129,38 @@ export function resolveProfileMemoryPath(filePath: string): string {
 
   return resolve(getProjectRoot(), filePath);
 }
+
+/**
+ * Where every memory profile lives, as the memory file browser addresses it:
+ * one folder under the memory root holding one file per person. The template's
+ * `relationship/BONDS.md` states the same convention to the agent that writes
+ * the profiles.
+ *
+ * Read it from here rather than spelling it again — a second literal keeps
+ * working after this folder moves, and answers about a file nobody writes any
+ * more.
+ */
+export const RELATIONSHIP_DIR = "memory/relationship";
+
+/**
+ * The guardian's profile, which is named for the role rather than for their
+ * person id: onboarding writes it before there is anything to key it by, and
+ * every surface that reads the guardian reads this one name. It is what
+ * `persons.profile_path` holds for the guardian row.
+ */
+export const GUARDIAN_PROFILE_PATH = `${RELATIONSHIP_DIR}/GUARDIAN.md`;
+
+/** How everyone else's profile is named: by the id of the person it is about. */
+export function personProfileFileName(personId: string): string {
+  return `${personId}.md`;
+}
+
+/** The relationship directory on disk, for reading or writing the files in it. */
+export function getRelationshipDir(): string {
+  return resolveProfileMemoryPath(RELATIONSHIP_DIR);
+}
+
+/** The guardian's profile on disk. */
+export function getGuardianProfileFile(): string {
+  return resolveProfileMemoryPath(GUARDIAN_PROFILE_PATH);
+}

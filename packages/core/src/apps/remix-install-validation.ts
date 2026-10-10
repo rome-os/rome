@@ -14,7 +14,7 @@ import {
   parseManifestObject,
   resolvePathWithinBase,
 } from "./packaging/index.js";
-import type { AppView, ArtifactRef, ResolvedApp } from "./state.js";
+import { type AppView, type ArtifactRef, isResolvedApp, type ResolvedApp } from "./state.js";
 
 type RuntimeArtifactKind = "action" | "agent" | "skill";
 type RuntimeArtifactEntry = NonNullable<AppManifestData["actions"]>[number];
@@ -247,10 +247,6 @@ async function assertDatabaseIsolation(
         )} before installing.`,
     );
   }
-}
-
-function isResolvedApp(view: AppView | ResolvedApp): view is ResolvedApp {
-  return (view as ResolvedApp).manifest !== undefined;
 }
 
 async function resolveAllInstalledApps(

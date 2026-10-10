@@ -1,3 +1,6 @@
+import { pairingPayload } from "@rome/api-types/approvals";
+import { PairingApproval, ApprovalHistoryButton } from "@/components/PairingApproval";
+import { useApprovals, useResolveApproval } from "@/hooks/use-approvals";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -10,9 +13,10 @@ import {
 import { artifactLocalName } from "@/lib/artifact-name";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import type { ApprovalStatus, ApprovalType } from "@rome/api-types/approvals";
 
 export interface Approval {
@@ -91,85 +95,49 @@ type StatusStyle = {
   live?: boolean;
 };
 
-// Visual styling per status code; labels come from i18n at render time
-// via t("status.<code>").
-const STATUS_STYLE: Record<string, StatusStyle> = {
-  accepted: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  approved: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  rejected: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  auto_approved: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-  },
-  pending: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  executed: {
-    bar: "border-success",
-    dot: "bg-success",
-    pill: "bg-success-bg text-success-fg ring-success-border",
-  },
-  execution_failed: {
-    bar: "border-destructive",
-    dot: "bg-destructive",
-    pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
-  },
-  awaiting_execution: {
-    bar: "border-warning",
-    dot: "bg-warning",
-    pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
-  },
-  running: {
-    bar: "border-info",
-    dot: "bg-info",
-    pill: "bg-info-bg text-info-fg ring-info-border",
-    live: true,
-  },
+const TONE_STYLE = {
+  info: { bar: "border-info", dot: "bg-info", pill: "bg-info-bg text-info-fg ring-info-border" },
   success: {
     bar: "border-success",
     dot: "bg-success",
     pill: "bg-success-bg text-success-fg ring-success-border",
   },
-  error: {
+  destructive: {
     bar: "border-destructive",
     dot: "bg-destructive",
     pill: "bg-destructive-bg text-destructive-fg ring-destructive-border",
   },
-  pending_approval: {
+  warning: {
     bar: "border-warning",
     dot: "bg-warning",
     pill: "bg-warning-bg text-warning-fg ring-warning-border",
-    live: true,
   },
-  cancelled: {
+  neutral: {
     bar: "border-border-strong",
     dot: "bg-border-strong",
     pill: "bg-surface-muted text-foreground ring-border",
   },
+} satisfies Record<string, StatusStyle>;
+
+// Visual styling per status code; labels come from i18n at render time
+// via t("status.<code>").
+const STATUS_STYLE: Record<string, StatusStyle> = {
+  accepted: TONE_STYLE.info,
+  approved: TONE_STYLE.success,
+  rejected: TONE_STYLE.destructive,
+  auto_approved: TONE_STYLE.info,
+  pending: { ...TONE_STYLE.warning, live: true },
+  executed: TONE_STYLE.success,
+  execution_failed: TONE_STYLE.destructive,
+  awaiting_execution: { ...TONE_STYLE.warning, live: true },
+  running: { ...TONE_STYLE.info, live: true },
+  success: TONE_STYLE.success,
+  error: TONE_STYLE.destructive,
+  pending_approval: { ...TONE_STYLE.warning, live: true },
+  cancelled: TONE_STYLE.neutral,
 };
 
-const FALLBACK_STYLE: StatusStyle = {
-  bar: "border-border-strong",
-  dot: "bg-border-strong",
-  pill: "bg-surface-muted text-foreground ring-border",
-};
+const FALLBACK_STYLE: StatusStyle = TONE_STYLE.neutral;
 
 const TYPE_TINTS: Record<string, string> = {
   person_mapping: "text-brand",
@@ -256,7 +224,7 @@ function Collapsible({ label, children }: { label: string; children: React.React
     <div className="mt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1 text-aux text-muted-foreground transition-colors hover:text-foreground min-h-[var(--control-min-h)]"
       >
         <span
           className={`inline-block transition-transform duration-200 ${open ? "rotate-90" : ""}`}
@@ -309,12 +277,16 @@ function ApprovalCard({
   const displayStatus = getApprovalDisplayStatus(approval);
   const [acting, setActing] = useState<"approve" | "reject" | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [actionError, setActionError] = useState("");
   const canRetry = approval.type === "action_execution" && displayStatus === "execution_failed";
 
   async function handleAction(action: "approve" | "reject") {
     setActing(action);
+    setActionError("");
     try {
       await onAction(approval.id, action);
+    } catch {
+      setActionError(t("approval.resolveFailed"));
     } finally {
       setActing(null);
     }
@@ -339,7 +311,7 @@ function ApprovalCard({
             <StatusPill status={displayStatus} />
             <TimeMeta>{timeAgo(t, approval.createdAt)}</TimeMeta>
           </div>
-          <p className="text-body text-foreground">{approval.description}</p>
+          <p className="text-ui text-foreground">{approval.description}</p>
           <p className="mt-1 text-aux text-muted-foreground">
             {t("approval.requestedBy")}{" "}
             <span className="text-foreground">{approval.requestedBy}</span>
@@ -368,6 +340,11 @@ function ApprovalCard({
               </>
             )}
           </p>
+          {actionError && (
+            <p role="alert" className="text-ui text-destructive">
+              {actionError}
+            </p>
+          )}
           {approval.executionError && (
             <Alert variant="destructive" className="mt-2 px-3 py-2">
               <AlertDescription className="text-aux">
@@ -466,7 +443,7 @@ function WebhookInvocationCard({ invocation }: { invocation: WebhookInvocation }
           <StatusPill status={invocation.status} />
           <TimeMeta>{timeAgo(t, invocation.createdAt)}</TimeMeta>
         </div>
-        <p className="text-body text-foreground">
+        <p className="text-ui text-foreground">
           {t("webhook.received")}{" "}
           <span className="font-mono" title={invocation.actionName}>
             {artifactLocalName(invocation.actionName)}
@@ -689,7 +666,9 @@ function StatTile({
 
 export default function ActivityPage() {
   const { t } = useTranslation("activity");
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const approvalsQuery = useApprovals();
+  const approvals = approvalsQuery.data ?? [];
+  const resolveApproval = useResolveApproval();
   const [executionGroups, setExecutionGroups] = useState<ExecutionGroup[]>([]);
   const [webhookInvocations, setWebhookInvocations] = useState<WebhookInvocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -709,13 +688,11 @@ export default function ActivityPage() {
       params.set("limit", String(limit));
       params.set("offset", String(offset));
 
-      const [approvalsRes, executionsRes, webhooksRes] = await Promise.all([
-        fetch("/api/approvals", { signal: ac.signal }),
+      const [executionsRes, webhooksRes] = await Promise.all([
         fetch(`/api/action-executions?${params}`, { signal: ac.signal }),
         fetch(`/api/webhook-invocations?${params}`, { signal: ac.signal }),
       ]);
 
-      if (approvalsRes.ok) setApprovals(await approvalsRes.json());
       if (executionsRes.ok) setExecutionGroups(await executionsRes.json());
       if (webhooksRes.ok) setWebhookInvocations(await webhooksRes.json());
       setLastFetchedAt(Date.now());
@@ -742,22 +719,26 @@ export default function ActivityPage() {
   }, []);
 
   async function handleAction(id: string, action: "approve" | "reject") {
-    const res = await fetch(`/api/approvals/${id}/${action}`, {
-      method: "POST",
-    });
-    if (res.ok) await fetchData();
+    await resolveApproval.mutateAsync({ id, action });
+    await fetchData();
   }
 
   async function handleRetry(id: string) {
     const res = await fetch(`/api/approvals/${id}/retry`, { method: "POST" });
-    if (res.ok) await fetchData();
+    if (res.ok) {
+      await fetchData();
+      await approvalsQuery.refetch();
+    }
   }
 
   async function handleCancel(id: string) {
     const res = await fetch(`/api/action-executions/${id}/cancel`, {
       method: "POST",
     });
-    if (res.ok) await fetchData();
+    if (res.ok) {
+      await fetchData();
+      await approvalsQuery.refetch();
+    }
   }
 
   const allItems: ActivityItem[] = useMemo(
@@ -800,10 +781,10 @@ export default function ActivityPage() {
   return (
     <PageShell>
       <PageBody>
-        <div className="flex items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-title text-foreground">{t("page.title")}</h1>
-            <div className="mt-1 flex items-center gap-2 text-aux text-muted-foreground">
+        <PageHeader
+          title={t("page.title")}
+          description={
+            <span className="flex items-center gap-2">
               <span
                 className="h-1.5 w-1.5 rounded-full bg-success"
                 style={{
@@ -812,12 +793,22 @@ export default function ActivityPage() {
                 aria-hidden="true"
               />
               <span>{t("page.liveUpdated", { when: updatedLabel })}</span>
-            </div>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={fetchData}>
-            {t("page.refresh")}
-          </Button>
-        </div>
+            </span>
+          }
+          actions={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void fetchData();
+                void approvalsQuery.refetch();
+              }}
+            >
+              {t("page.refresh")}
+            </Button>
+          }
+        />
 
         {/* Stats */}
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -841,7 +832,7 @@ export default function ActivityPage() {
         {stats.pendingApprovals > 0 && statusFilter === "all" && (
           <button
             onClick={() => setStatusFilter("pending")}
-            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left transition-colors hover:bg-warning-bg/70"
+            className="flex w-full items-center justify-between gap-3 rounded-8 border border-warning-border bg-warning-bg px-4 py-2 text-left min-h-[var(--control-min-h)] transition-colors hover:bg-warning-bg/70"
           >
             <div className="flex items-center gap-2">
               <span
@@ -867,28 +858,22 @@ export default function ActivityPage() {
           </button>
         )}
 
-        {/* Filter pills */}
-        <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1">
-          {FILTER_VALUES.map((value) => {
-            const active = statusFilter === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
-                className={`shrink-0 rounded-full px-3 py-1 text-badge transition-colors ${
-                  active
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-border-strong bg-surface text-foreground hover:bg-surface-muted"
-                }`}
-              >
-                {t(`page.filters.${value}`)}
-              </button>
-            );
-          })}
-        </div>
+        <FilterChipGroup
+          aria-label={t("page.filterStatus")}
+          options={FILTER_VALUES.map((value) => ({ value, label: t(`page.filters.${value}`) }))}
+          value={statusFilter}
+          onValueChange={setStatusFilter}
+        />
+
+        <ApprovalHistoryButton />
 
         {/* Content */}
-        {loading ? (
+        {approvalsQuery.isError && (
+          <Alert variant="destructive">
+            <AlertDescription>{t("pairing.loadFailed")}</AlertDescription>
+          </Alert>
+        )}
+        {loading || approvalsQuery.isLoading ? (
           <div className="py-12 text-center">
             <div
               className="mx-auto mb-3 h-5 w-5 rounded-full border-2 border-border-strong border-t-gray-800"
@@ -914,11 +899,15 @@ export default function ActivityPage() {
                   }}
                 >
                   {item.kind === "approval" ? (
-                    <ApprovalCard
-                      approval={item.data}
-                      onAction={handleAction}
-                      onRetry={handleRetry}
-                    />
+                    pairingPayload(item.data) ? (
+                      <PairingApproval approval={item.data} />
+                    ) : (
+                      <ApprovalCard
+                        approval={item.data}
+                        onAction={handleAction}
+                        onRetry={handleRetry}
+                      />
+                    )
                   ) : item.kind === "webhook_invocation" ? (
                     <WebhookInvocationCard invocation={item.data} />
                   ) : (

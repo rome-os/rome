@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 import { fetchSharedChat, type SharedChatPayload } from "@/lib/chat-api";
 import { PublicFreeGrid } from "./PublicFreeGrid";
 
@@ -39,14 +40,7 @@ export default function SharePage() {
   }, [token]);
 
   const title = state.status === "ready" ? state.payload.title : null;
-  useEffect(() => {
-    if (!title) return;
-    const previous = document.title;
-    document.title = `${title} · Rome`;
-    return () => {
-      document.title = previous;
-    };
-  }, [title]);
+  useDocumentTitle(title);
 
   const chat = useMemo(() => {
     if (state.status !== "ready") return null;
@@ -72,7 +66,7 @@ export default function SharePage() {
         <h1 className="text-title text-foreground">
           {t("share.unavailableTitle", "This shared chat is unavailable")}
         </h1>
-        <p className="max-w-md text-body text-muted-foreground">
+        <p className="max-w-md text-ui text-muted-foreground">
           {t("share.unavailableBody", "The link may have been revoked or is no longer valid.")}
         </p>
       </div>

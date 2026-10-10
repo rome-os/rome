@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import {
   accountPageLimit,
+  isChannelIdentifier,
   parseAccountCursor,
   parseAccountState,
   parseStreamCursor,
@@ -46,6 +47,11 @@ export function accountsRoutes(deps: ApiDeps): Hono {
     const state = readState(c);
     if ("error" in state) return c.json({ error: state.error }, 400);
 
+    const channel = c.req.query("channel") || null;
+    if (channel !== null && !isChannelIdentifier(channel)) {
+      return c.json({ error: "channel must name a channel" }, 400);
+    }
+
     const rawCursor = c.req.query("cursor");
     const cursor = parseAccountCursor(rawCursor);
     if (rawCursor != null && rawCursor !== "" && cursor === null) {
@@ -55,6 +61,7 @@ export function accountsRoutes(deps: ApiDeps): Hono {
     return c.json(
       sliceAccountDirectory(await readAccountDirectory(deps), {
         query: c.req.query("q"),
+        channel,
         state: state.state,
         cursor,
         limit: accountPageLimit(c.req.query("limit")),

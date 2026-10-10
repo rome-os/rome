@@ -59,10 +59,12 @@ const BULLET_KEYS: Record<string, string[]> = {
   "telegram.session": ["send", "read", "notice"],
   "whatsapp.bot": ["reply", "start"],
   "wechat.bot": ["reply", "start"],
+  "wechat.session": ["read", "recap", "search"],
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
+  "agents.bot": ["reply", "start"],
   "webchat.bot": ["chat"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
@@ -119,20 +121,18 @@ export function slotCardCopy(
   return { title, subtitle, bullets, privacyNote };
 }
 
-/** Slots that carry a `subtitle` key. */
-const SUBTITLE_SLOTS = new Set([
-  "telegram.bot",
-  "telegram.session",
-  "whatsapp.bot",
-  "wechat.bot",
-  "linkedin.bot",
-  "discord.bot",
-]);
+/**
+ * Slots that carry a `subtitle` key. Only Telegram: a single-slot connection
+ * renders its card bare (see `SoleSlotScope`), and a bare card drops the
+ * subtitle, so a subtitle on any other service would never reach the screen.
+ */
+const SUBTITLE_SLOTS = new Set(["telegram.bot", "telegram.session"]);
 
 /** Slots that carry a `privacyNote` lock box. */
-const PRIVACY_SLOTS = new Set(["telegram.session", "github.user", "google.user", "slack.user"]);
-
-/** The card heading for a slot given its connected/primary/secondary role. */
-export function slotHeadingKey(role: "connected" | "primary" | "secondary"): string {
-  return `connections.headings.${role}`;
-}
+const PRIVACY_SLOTS = new Set([
+  "telegram.session",
+  "wechat.session",
+  "github.user",
+  "google.user",
+  "slack.user",
+]);

@@ -3,6 +3,7 @@ import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import { useTranslation } from "react-i18next";
 import { turnApiPath } from "@/components/agent-trace/turn-api";
 import { BranchingChatBubbleIcon } from "@/components/chat/BranchingChatBubbleIcon";
+import { CHAT_POPOVER_FIT } from "@/components/chat/chat-overlay";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
@@ -14,7 +15,9 @@ import {
   PopoverTitle,
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { placeChatWidget } from "@/pages/free/use-free-cells";
+import { emitSessionsChanged } from "@/lib/session-events";
+import { cn } from "@/lib/utils";
 
 const SUGGESTION_KEYS = [
   "message.branch.suggestions.mermaid",
@@ -28,7 +31,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<false | "generic" | "notBranchable">(false);
 
   const submit = useCallback(
     async (rawPrompt: string) => {
@@ -43,15 +46,24 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: nextPrompt }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const body = (await res.json()) as {
-          placement: { appId: string; route: string };
-        };
-        autoPlaceApp(body.placement.appId, body.placement.route);
+        if (!res.ok) {
+          // A turn with no branch point (a side chat's own first answer is
+          // the common case) is a permanent property of that turn, not a
+          // transient failure — tell the user what to do instead of
+          // suggesting a retry.
+          const body = (await res.json().catch(() => null)) as { code?: string } | null;
+          setError(body?.code === "turn_not_branchable" ? "notBranchable" : "generic");
+          return;
+        }
+        const body = (await res.json()) as { sessionId: string };
+        // The branch is an ordinary chat from its 201 — tell the sidebar and
+        // open it as a real chat card beside this conversation.
+        emitSessionsChanged();
+        placeChatWidget(body.sessionId);
         setPrompt("");
         setOpen(false);
       } catch {
-        setError(true);
+        setError("generic");
       } finally {
         setSubmitting(false);
       }
@@ -79,7 +91,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           />
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-80">
+      <PopoverContent
+        align="start"
+        collisionPadding={CHAT_POPOVER_FIT.collisionPadding}
+        className={cn("w-80", CHAT_POPOVER_FIT.className)}
+      >
         <PopoverHeader>
           <PopoverTitle>{t("message.branch.title")}</PopoverTitle>
           <PopoverDescription>{t("message.branch.description")}</PopoverDescription>
@@ -122,7 +138,11 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           <div className="flex items-center justify-between gap-2">
             {error ? (
               <span aria-live="polite" className="text-aux text-destructive">
-                {t("message.branch.submitFailed")}
+                {t(
+                  error === "notBranchable"
+                    ? "message.branch.notBranchable"
+                    : "message.branch.submitFailed",
+                )}
               </span>
             ) : (
               <span />

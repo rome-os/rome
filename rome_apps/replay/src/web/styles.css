@@ -1,7 +1,0 @@
-/* Rome's design-token layer: Tailwind + the host theme vocabulary. The host
-   mounts this bundle in a Shadow DOM and inherits the live theme, so a UI built
-   only from registered tokens follows light/dark with no `dark:` variants. */
-@import "@rome-os/app-web-sdk/styles";
-
-/* App-specific rules below. Paint only with registered tokens (`bg-card`,
-   `text-muted-foreground`, …) — never raw shades. */

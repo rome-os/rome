@@ -1,3 +1,4 @@
+import type { AgentReporter } from "./feedback-client.js";
 import type { DiagnosticBundle } from "./diagnostics.js";
 
 // Shared shape + limits for the "share feedback" feature.
@@ -5,12 +6,14 @@ import type { DiagnosticBundle } from "./diagnostics.js";
 // The web client sends `{ body, client }`; the instance enriches it with
 // server-assembled diagnostics and relays `{ schemaVersion, body, payload }` to
 // Rome Cloud. The two payload namespaces preserve provenance and the trust
-// boundary: `client` is browser-supplied (untrusted, open-ended), `diagnostics`
-// is measured by the instance and must NEVER be populated from the request body
+// boundary: `client` is reporter-supplied (browser or agent input, untrusted,
+// open-ended), `diagnostics` is instance-owned (measurements and runtime-set
+// reporter provenance) and must NEVER be populated from model or browser input
 // — that is what makes spoofing the trusted namespace structurally impossible.
 //
 // `schemaVersion` is bumped only on a breaking reshape; additive fields under
-// either namespace need no bump (Rome Cloud stores the payload opaquely).
+// either namespace need no bump. Rome Cloud preserves these record namespaces
+// but strips unknown keys directly under payload, so reporter belongs in diagnostics.
 
 export const FEEDBACK_SCHEMA_VERSION = 1;
 
@@ -22,9 +25,11 @@ export interface FeedbackReport {
   schemaVersion: number;
   body: string;
   payload: {
-    /** Browser-supplied context (route, theme, UA, viewport, …). Untrusted. */
+    /** Reporter-supplied context (browser or agent input). Untrusted. */
     client: Record<string, unknown>;
-    /** Instance-measured diagnostics. Server-owned; never from the request. */
-    diagnostics: DiagnosticBundle;
+    /** Instance-owned measurements and runtime provenance; never from model or browser input. */
+    diagnostics: DiagnosticBundle & {
+      reporter: { kind: "guardian" } | AgentReporter;
+    };
   };
 }

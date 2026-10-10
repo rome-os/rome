@@ -12,9 +12,11 @@ import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import type {
   LinkedInMessageInput,
   LinkedInParticipantInput,
+  LinkedInParticipantProfileSyncState,
   LinkedInSyncSink,
   LinkedInThreadCursor,
   LinkedInThreadInput,
+  LinkedInThreadParticipantInput,
 } from "./linkedin-sync.js";
 
 function ok(payload: unknown): OpencliResult {
@@ -95,16 +97,56 @@ function participantRow(threadId: string, participantId: string, overrides = {})
 
 /** A sink that can hold membership, unlike {@link FakeSink}. */
 class ParticipantSink extends FakeSink {
-  participantSets = new Map<string, LinkedInParticipantInput[]>();
+  participantSets = new Map<string, LinkedInThreadParticipantInput[]>();
   participantWrites: string[] = [];
+  profileStates = new Map<string, LinkedInParticipantProfileSyncState>();
+  profileWrites: LinkedInParticipantInput[] = [];
+  profileFailures = new Map<string, Error>();
   backfills = 0;
 
-  async upsertThreadParticipants(
+  async replaceThreadParticipantMembership(
     threadId: string,
-    participants: LinkedInParticipantInput[],
+    participants: LinkedInThreadParticipantInput[],
   ): Promise<void> {
     this.participantWrites.push(threadId);
     this.participantSets.set(threadId, participants);
+  }
+
+  async getParticipantProfileSyncStates(
+    participantIds: string[],
+  ): Promise<Map<string, LinkedInParticipantProfileSyncState>> {
+    return new Map(
+      participantIds.flatMap((id) => {
+        const state = this.profileStates.get(id);
+        return state ? [[id, state] as const] : [];
+      }),
+    );
+  }
+
+  async upsertParticipantProfile(participant: LinkedInParticipantInput): Promise<void> {
+    const failure = this.profileFailures.get(participant.participantId);
+    if (failure) throw failure;
+    this.profileWrites.push(participant);
+    this.profileStates.set(participant.participantId, {
+      participantId: participant.participantId,
+      lastSuccessfulSyncAt: new Date(),
+      profileSyncFailureCount: 0,
+      profileSyncRetryAt: null,
+    });
+  }
+
+  async recordParticipantProfileSyncFailure(
+    participant: LinkedInThreadParticipantInput,
+    failureCount: number,
+    retryAt: Date,
+  ): Promise<void> {
+    const previous = this.profileStates.get(participant.participantId);
+    this.profileStates.set(participant.participantId, {
+      participantId: participant.participantId,
+      lastSuccessfulSyncAt: previous?.lastSuccessfulSyncAt ?? null,
+      profileSyncFailureCount: failureCount,
+      profileSyncRetryAt: retryAt,
+    });
   }
 
   async backfillParticipantsFromMessages(): Promise<void> {
@@ -152,6 +194,7 @@ describe("threadNeedsSnapshot", () => {
     lastMessageAt: new Date("2026-08-19T20:00:00Z"),
     lastMessagePreview: "hello",
     lastSyncedAt: new Date("2026-08-19T20:01:00Z"),
+    participantsLastReadAt: null,
   };
 
   it("is stale when never seen or never snapshotted", () => {
@@ -207,6 +250,7 @@ describe("LinkedInInboxPoller.pollOnce", () => {
       lastMessageAt: new Date("2026-08-19T20:00:00.000Z"),
       lastMessagePreview: "hello",
       lastSyncedAt: new Date(),
+      participantsLastReadAt: null,
     });
     const run = rs.fn(async (args: string[]) => {
       if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
@@ -273,10 +317,15 @@ describe("LinkedInInboxPoller participant sync", () => {
       expect.anything(),
     );
     expect(sink.participantSets.get("t1")).toEqual([
+      { participantId: "ACoAAAda0001", isSelf: false },
+      { participantId: "ACoAASelf0003", isSelf: true },
+    ]);
+    expect(sink.profileWrites).toEqual([
       {
         participantId: "ACoAAAda0001",
         name: "Ada",
         headline: "Engineer",
+        profileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
         type: "member",
         isSelf: false,
       },
@@ -284,6 +333,7 @@ describe("LinkedInInboxPoller participant sync", () => {
         participantId: "ACoAASelf0003",
         name: "Jane Doe",
         headline: "Engineer",
+        profileUrl: "https://www.linkedin.com/in/ACoAASelf0003/",
         type: "member",
         isSelf: true,
       },
@@ -315,7 +365,7 @@ describe("LinkedInInboxPoller participant sync", () => {
       participantRow("t1", "ACoAAGrace002", { participant_index: 2 }),
     ];
     const run = participantRun(() => members);
-    const poller = makePoller(sink, run);
+    const poller = makePoller(sink, run, { membershipRefreshIntervalMs: 0 });
 
     await poller.pollOnce();
     // Grace left, someone new joined; the thread is stale again next tick.
@@ -330,6 +380,147 @@ describe("LinkedInInboxPoller participant sync", () => {
       "ACoAAAda0001",
       "ACoAANew00004",
     ]);
+  });
+
+  it("does not re-read recent membership when a thread changes", async () => {
+    const sink = new ParticipantSink();
+    sink.cursors.set("t1", {
+      threadId: "t1",
+      lastMessageAt: new Date("2026-08-19T19:00:00.000Z"),
+      lastMessagePreview: "old",
+      lastSyncedAt: new Date("2026-08-19T19:01:00.000Z"),
+      participantsLastReadAt: new Date(),
+    });
+    const run = participantRun(() => [participantRow("t1", "ACoAAAda0001")]);
+
+    await makePoller(sink, run).pollOnce();
+
+    expect(run.mock.calls.map((c) => c[0][1])).toEqual(["inbox", "thread-snapshot"]);
+    expect(sink.participantWrites).toEqual([]);
+  });
+
+  it("refreshes membership after its check expires", async () => {
+    const sink = new ParticipantSink();
+    sink.cursors.set("t1", {
+      threadId: "t1",
+      lastMessageAt: new Date("2026-08-19T19:00:00.000Z"),
+      lastMessagePreview: "old",
+      lastSyncedAt: new Date("2026-08-19T19:01:00.000Z"),
+      participantsLastReadAt: new Date(0),
+    });
+    const run = participantRun(() => [participantRow("t1", "ACoAAAda0001")]);
+
+    await makePoller(sink, run).pollOnce();
+
+    expect(run.mock.calls.map((c) => c[0][1])).toEqual([
+      "inbox",
+      "thread-snapshot",
+      "thread-participants",
+    ]);
+    expect(sink.participantWrites).toEqual(["t1"]);
+  });
+
+  it("reuses one recent profile across authoritative reads of different threads", async () => {
+    const sink = new ParticipantSink();
+    const run = rs.fn(async (args: string[]) => {
+      if (args[1] === "inbox") {
+        return ok([
+          inboxRow("t1", "2026-08-19T20:00:00.000Z"),
+          inboxRow("t2", "2026-08-19T19:00:00.000Z"),
+        ]);
+      }
+      const threadId = args.join(" ").includes("/t2/") ? "t2" : "t1";
+      if (args[1] === "thread-participants") {
+        return ok([participantRow(threadId, "ACoAAAda0001")]);
+      }
+      return ok([snapshotRow(threadId, `m-${threadId}`)]);
+    });
+
+    await makePoller(sink, run, { membershipRefreshIntervalMs: 0 }).pollOnce();
+
+    expect(sink.participantWrites).toEqual(["t1", "t2"]);
+    expect(run.mock.calls.filter((call) => call[0][1] === "thread-participants")).toHaveLength(2);
+    expect(sink.profileWrites.map((profile) => profile.participantId)).toEqual(["ACoAAAda0001"]);
+  });
+
+  it("refreshes membership even when every returned profile is recent", async () => {
+    const sink = new ParticipantSink();
+    sink.profileStates.set("ACoAAAda0001", {
+      participantId: "ACoAAAda0001",
+      lastSuccessfulSyncAt: new Date(),
+      profileSyncFailureCount: 0,
+      profileSyncRetryAt: null,
+    });
+    const run = participantRun(() => [participantRow("t1", "ACoAAAda0001")]);
+
+    await makePoller(sink, run).pollOnce();
+
+    expect(sink.participantWrites).toEqual(["t1"]);
+    expect(sink.profileWrites).toEqual([]);
+  });
+
+  it("refreshes an expired message sender profile without re-reading recent membership", async () => {
+    const sink = new ParticipantSink();
+    sink.cursors.set("t1", {
+      threadId: "t1",
+      lastMessageAt: new Date("2026-08-19T19:00:00.000Z"),
+      lastMessagePreview: "old",
+      lastSyncedAt: new Date("2026-08-19T19:01:00.000Z"),
+      participantsLastReadAt: new Date(),
+    });
+    sink.profileStates.set("ACoAAAda0001", {
+      participantId: "ACoAAAda0001",
+      lastSuccessfulSyncAt: new Date(0),
+      profileSyncFailureCount: 0,
+      profileSyncRetryAt: null,
+    });
+    const run = rs.fn(async (args: string[]) => {
+      if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
+      return ok([
+        {
+          ...snapshotRow("t1", "m1"),
+          sender_participant_id: "ACoAAAda0001",
+          sender_profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
+          sender_headline: "Engineer",
+          sender_type: "member",
+        },
+      ]);
+    });
+
+    await makePoller(sink, run).pollOnce();
+
+    expect(run.mock.calls.map((call) => call[0][1])).toEqual(["inbox", "thread-snapshot"]);
+    expect(sink.participantWrites).toEqual([]);
+    expect(sink.profileWrites.map((profile) => profile.participantId)).toEqual(["ACoAAAda0001"]);
+  });
+
+  it("keeps message and group-state sync when a profile update fails", async () => {
+    const sink = new ParticipantSink();
+    sink.profileFailures.set("ACoAAAda0001", new Error("profile write failed"));
+    const run = rs.fn(async (args: string[]) => {
+      if (args[1] === "inbox") return ok([inboxRow("t1", "2026-08-19T20:00:00.000Z")]);
+      if (args[1] === "thread-participants") return ok([participantRow("t1", "ACoAAAda0001")]);
+      return ok([
+        {
+          ...snapshotRow("t1", "m1"),
+          conversation_is_group: true,
+          sender_participant_id: "ACoAAAda0001",
+          sender_profile_url: "https://www.linkedin.com/in/ACoAAAda0001/",
+          sender_type: "member",
+        },
+      ]);
+    });
+
+    await expect(makePoller(sink, run).pollOnce()).resolves.toBeUndefined();
+
+    expect(sink.messages.map((message) => message.messageId)).toEqual(["m1"]);
+    expect(sink.syncedMeta.get("t1")?.isGroup).toBe(true);
+    expect(sink.participantWrites).toEqual(["t1"]);
+    expect(sink.profileStates.get("ACoAAAda0001")).toMatchObject({
+      lastSuccessfulSyncAt: null,
+      profileSyncFailureCount: 1,
+      profileSyncRetryAt: expect.any(Date),
+    });
   });
 
   it("does not crawl participants a sink cannot store", async () => {

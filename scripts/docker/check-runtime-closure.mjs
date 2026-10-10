@@ -17,6 +17,8 @@ const allowedWorkspaceGlobs = [
   "packages/web-content",
   "packages/core",
   "packages/discord-cli",
+  "packages/rome-node-cli",
+  "packages/rome-node-core",
   "packages/ui",
   "packages/web",
   "packages/app-web-sdk",
@@ -30,6 +32,8 @@ const installFilters = [
   "@rome/core...",
   "--filter",
   "@rome/discord-cli...",
+  "--filter",
+  "@rome-os/node...",
   "--filter",
   "rome-web...",
   "--filter",
@@ -49,6 +53,7 @@ async function main() {
 
   run("pnpm", ["install", "--frozen-lockfile", ...installFilters], { cwd: workspace });
   run("pnpm", ["--filter", "@rome/discord-cli", "typecheck"], { cwd: workspace });
+  run("pnpm", ["--filter", "@rome-os/node", "typecheck"], { cwd: workspace });
   run("pnpm", ["--filter", "@rome/core", "typecheck"], { cwd: workspace });
   run("pnpm", ["--filter", "rome-web", "build"], { cwd: workspace });
 
@@ -66,10 +71,11 @@ async function main() {
       "set -eu",
       'for path in /app/packages/desktop /app/packages/pantheon /app/packages/cdp-client /opt/rome/packages/desktop /opt/rome/packages/pantheon /opt/rome/packages/cdp-client; do [ ! -e "$path" ] || { echo "Forbidden path present: $path" >&2; exit 1; }; done',
       'for name in rome-desktop rome-pantheon rome-cdp-client @rome-os/pantheon-cli; do ! find /app/node_modules /opt/rome/node_modules -path "*$name*" -print -quit 2>/dev/null | grep -q . || { echo "Forbidden dependency present: $name" >&2; exit 1; }; done',
-      // docker-entrypoint.sh silently skips opencli plugin registration when the
+      // rome-init.sh silently skips opencli plugin registration when the
       // dir is absent, so assert it shipped rather than trusting the boot path.
       '[ -f /opt/rome/opencli-plugins/twitter/opencli-plugin.json ] || { echo "Missing /opt/rome/opencli-plugins/twitter (opencli plugins absent from image)" >&2; exit 1; }',
       'node /opt/rome/packages/discord-cli/bin/discord.js help >/dev/null || { echo "Discord CLI is not runnable" >&2; exit 1; }',
+      'node /opt/rome/packages/rome-node-cli/bin/rome-node.js --help >/dev/null || { echo "Rome Node CLI is not runnable" >&2; exit 1; }',
     ].join("\n"),
   ]);
 
@@ -122,6 +128,8 @@ function isAllowedWorkspacePackage(packagePath) {
     packagePath === "packages/web-content" ||
     packagePath === "packages/core" ||
     packagePath === "packages/discord-cli" ||
+    packagePath === "packages/rome-node-cli" ||
+    packagePath === "packages/rome-node-core" ||
     packagePath === "packages/ui" ||
     packagePath === "packages/web" ||
     packagePath === "packages/app-web-sdk" ||
@@ -142,6 +150,8 @@ async function assertImportBoundary() {
     "packages/web-content",
     "packages/core",
     "packages/discord-cli",
+    "packages/rome-node-cli",
+    "packages/rome-node-core",
     "packages/ui",
     "packages/web",
     "packages/app-web-sdk",

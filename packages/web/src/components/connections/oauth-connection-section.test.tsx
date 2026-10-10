@@ -69,7 +69,7 @@ function githubCard(
       watch: { state: "unsupported" },
     },
     connect,
-    ...(activeSetupCid ? { setups: { user: activeSetupCid } } : {}),
+    setups: activeSetupCid ? { user: activeSetupCid } : {},
   };
   const card = buildConnectionCards([connection]).find((entry) => entry.service === "github");
   if (!card) throw new Error("no github card");

@@ -38,6 +38,69 @@ describe("LinkedInStoreRepository", () => {
     expect(cursor?.lastMessageAt?.getTime()).toBe(at.getTime());
     expect(cursor?.lastMessagePreview).toBe("See you Sunday?");
     expect(cursor?.lastSyncedAt).toBeNull();
+    expect(cursor?.participantsLastReadAt).toBeNull();
+  });
+
+  describe("reply targets", () => {
+    const recipient = { participantId: "ACoAAAda", type: "member", isSelf: false };
+    const owner = { participantId: "ACoAASelf", type: "member", isSelf: true };
+    const seed = async (id = "reply-thread") => {
+      await repo.upsertThreads([thread(id, new Date())]);
+      await repo.upsertThreadParticipants(id, [recipient, owner]);
+      await repo.markThreadSynced(id, { isGroup: false });
+    };
+
+    it("resolves a member to an existing direct thread and rechecks the same target by thread", async () => {
+      await seed();
+      const target = await repo.findReplyTarget({ participantId: recipient.participantId });
+      expect(target).toEqual({
+        threadId: "reply-thread",
+        threadUrl: thread("reply-thread", new Date()).threadUrl,
+        participantId: recipient.participantId,
+        selfParticipantId: owner.participantId,
+      });
+      expect(await repo.findReplyTarget({ threadId: "reply-thread" })).toEqual(target);
+      expect(await repo.findReplyTarget({ participantId: owner.participantId })).toBeNull();
+    });
+
+    it("does not choose between multiple direct conversations", async () => {
+      await seed("one");
+      await seed("two");
+      expect(await repo.findReplyTarget({ participantId: recipient.participantId })).toBeNull();
+    });
+
+    it("refuses groups, incomplete membership, and missing threads", async () => {
+      expect(await repo.findReplyTarget({ threadId: "missing" })).toBeNull();
+      await seed();
+      await repo.markThreadSynced("reply-thread", { isGroup: true });
+      expect(await repo.findReplyTarget({ threadId: "reply-thread" })).toBeNull();
+      await repo.markThreadSynced("reply-thread", { isGroup: false });
+      await repo.upsertThreadParticipants("reply-thread", [
+        recipient,
+        owner,
+        { ...recipient, participantId: "ACoAAThird" },
+      ]);
+      expect(await repo.findReplyTarget({ threadId: "reply-thread" })).toBeNull();
+      await repo.upsertThreadParticipants("reply-thread", [recipient]);
+      expect(await repo.findReplyTarget({ threadId: "reply-thread" })).toBeNull();
+    });
+
+    it("refuses membership inferred only from message senders", async () => {
+      await repo.upsertThreads([thread("seeded", new Date())]);
+      await repo.upsertMessages(
+        [recipient, owner].map((p) => ({
+          threadId: "seeded",
+          messageId: p.participantId,
+          senderProfileUrl: `https://www.linkedin.com/in/${p.participantId}/`,
+          senderIsSelf: p.isSelf,
+          senderType: "member",
+          text: "hello",
+        })),
+      );
+      await repo.backfillParticipantsFromMessages();
+      await repo.markThreadSynced("seeded", { isGroup: false });
+      expect(await repo.findReplyTarget({ participantId: recipient.participantId })).toBeNull();
+    });
   });
 
   it("a re-listed thread keeps learned fields when the listing drops them", async () => {
@@ -227,6 +290,20 @@ describe("LinkedInStoreRepository", () => {
       expect(columns.map((c) => c.name)).toContain("participants_last_read_at");
     });
 
+    it("the migrations add durable per-profile sync and retry state", () => {
+      const columns = testDb.db.all(
+        sql`SELECT name FROM pragma_table_info('linkedin_participants')`,
+      ) as Array<{ name: string }>;
+      expect(columns.map((column) => column.name)).toEqual(
+        expect.arrayContaining([
+          "profile_url",
+          "last_successful_sync_at",
+          "profile_sync_failure_count",
+          "profile_sync_retry_at",
+        ]),
+      );
+    });
+
     it("upserting the same participant set twice leaves one row per participant", async () => {
       await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
       await repo.upsertThreadParticipants("t1", [ada, grace, self]);
@@ -397,6 +474,9 @@ describe("LinkedInStoreRepository", () => {
         // x.9s and stored as x.0s still lands inside it.
         expect(readAt).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
         expect(readAt).toBeLessThanOrEqual(after);
+        expect(
+          (await repo.getThreadCursors(["t1"])).get("t1")?.participantsLastReadAt?.getTime(),
+        ).toBe(readAt);
       });
 
       it("a later read advances the last-read time", async () => {
@@ -430,6 +510,82 @@ describe("LinkedInStoreRepository", () => {
           self.participantId,
         ]);
         expect(set.lastReadAt).not.toBeNull();
+      });
+    });
+
+    describe("participant profile freshness", () => {
+      it("replaces membership without claiming that profile metadata was refreshed", async () => {
+        await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
+
+        await repo.replaceThreadParticipantMembership("t1", [
+          { participantId: ada.participantId, isSelf: false },
+          { participantId: self.participantId, isSelf: true },
+        ]);
+
+        expect((await repo.getThreadParticipantSet("t1")).lastReadAt).not.toBeNull();
+        const states = await repo.getParticipantProfileSyncStates([
+          ada.participantId,
+          self.participantId,
+        ]);
+        expect(states.get(ada.participantId)).toMatchObject({
+          lastSuccessfulSyncAt: null,
+          profileSyncFailureCount: 0,
+          profileSyncRetryAt: null,
+        });
+        expect(states.get(self.participantId)?.lastSuccessfulSyncAt).toBeNull();
+      });
+
+      it("a successful profile sync stores metadata and clears prior backoff", async () => {
+        const retryAt = new Date("2026-09-12T06:00:00Z");
+        await repo.recordParticipantProfileSyncFailure(
+          { participantId: ada.participantId, isSelf: false },
+          3,
+          retryAt,
+        );
+
+        await repo.upsertParticipantProfile({
+          ...ada,
+          profileUrl: "https://www.linkedin.com/in/ACoAAAda0001/",
+        });
+
+        const state = (await repo.getParticipantProfileSyncStates([ada.participantId])).get(
+          ada.participantId,
+        );
+        expect(state?.lastSuccessfulSyncAt).not.toBeNull();
+        expect(state?.profileSyncFailureCount).toBe(0);
+        expect(state?.profileSyncRetryAt).toBeNull();
+        const rows = testDb.db.all(sql`
+          SELECT profile_url AS profileUrl
+          FROM linkedin_participants
+          WHERE participant_id = ${ada.participantId}
+        `) as Array<{ profileUrl: string | null }>;
+        expect(rows[0]?.profileUrl).toBe("https://www.linkedin.com/in/ACoAAAda0001/");
+      });
+
+      it("a failure preserves the last success and retry state across repository instances", async () => {
+        await repo.upsertParticipantProfile(ada);
+        const successfulAt = (await repo.getParticipantProfileSyncStates([ada.participantId])).get(
+          ada.participantId,
+        )?.lastSuccessfulSyncAt;
+        const retryAt = new Date("2026-09-12T06:00:00Z");
+
+        await repo.recordParticipantProfileSyncFailure(
+          { participantId: ada.participantId, isSelf: false },
+          2,
+          retryAt,
+        );
+
+        const recreated = new LinkedInStoreRepository(testDb.db);
+        expect(
+          (await recreated.getParticipantProfileSyncStates([ada.participantId])).get(
+            ada.participantId,
+          ),
+        ).toEqual({
+          participantId: ada.participantId,
+          lastSuccessfulSyncAt: successfulAt,
+          profileSyncFailureCount: 2,
+          profileSyncRetryAt: retryAt,
+        });
       });
     });
 

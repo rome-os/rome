@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { AlignLeft, Check, ChevronRight, Pause, Play } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlignLeft, Check, Pause, Play } from "lucide-react";
 import type { AgentPlan, AgentPlanStep } from "@rome/api-types/trace-segments";
 import Markdown from "@/components/chat/ChatMarkdown";
+import { CollapsibleCard, CollapsibleSection } from "@/components/chat/CollapsibleCard";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
@@ -59,28 +60,11 @@ function PlanStateMarker({ complete, progress }: { complete: boolean; progress: 
   );
 }
 
-function CollapseMarker({ expanded }: { expanded: boolean }) {
-  return (
-    <ChevronRight
-      data-collapse-marker
-      className={cn(
-        "size-4 shrink-0 text-subtle-foreground transition-transform duration-200 motion-reduce:transition-none",
-        expanded && "rotate-90",
-      )}
-      aria-hidden
-    />
-  );
-}
-
 function statusLabel(status: AgentPlanStep["status"]): string {
   if (status === "completed") return "Completed";
   if (status === "in_progress") return "In progress";
   return "Pending";
 }
-
-const SUMMARY_HEADER_CLASS =
-  "flex min-h-10 w-full items-center justify-between gap-3 px-4 py-2 text-left";
-const INTERACTIVE_HEADER_CLASS = `${SUMMARY_HEADER_CLASS} transition-colors hover:bg-surface-muted/60 focus-visible:bg-surface-muted/60 focus-visible:outline-none`;
 
 function RecapContent({ recap }: { recap: TurnRecapSummary }) {
   return (
@@ -114,8 +98,6 @@ export function TurnSummaryGroup({
   const allComplete = hasPlan && completed === steps.length;
   const [planExpanded, setPlanExpanded] = useState(!allComplete);
   const [recapExpanded, setRecapExpanded] = useState(false);
-  const planContentId = useId();
-  const recapContentId = useId();
 
   useEffect(() => {
     setPlanExpanded(!allComplete);
@@ -128,54 +110,40 @@ export function TurnSummaryGroup({
   const progress = hasPlan ? Math.round((completed / steps.length) * 100) : 0;
   const label = hasPlan && recap ? "Turn summary" : hasPlan ? "Agent plan" : "Turn recap";
 
-  const planHeader = hasPlan ? (
-    <>
-      <div className="flex min-w-0 items-center gap-2">
-        <CollapseMarker expanded={planExpanded} />
-        <PlanStateMarker complete={allComplete} progress={progress} />
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h3 className="shrink-0 text-section text-foreground">Plan</h3>
-          <p
-            className={cn(
-              "truncate text-aux",
-              live || allComplete ? "text-primary" : "text-muted-foreground",
-            )}
-          >
-            {status}
-          </p>
-        </div>
-      </div>
-      <span className="shrink-0 text-aux tabular-nums text-muted-foreground">
-        {completed} of {steps.length}
-      </span>
-    </>
-  ) : null;
-
   return (
-    <section
-      className="my-2 w-full overflow-hidden rounded-12 border border-border-strong bg-surface text-ui shadow-1"
-      aria-label={label}
-    >
-      {hasPlan ? (
-        <div data-summary-item="plan">
-          <button
-            type="button"
-            className={INTERACTIVE_HEADER_CLASS}
-            aria-expanded={planExpanded}
-            aria-controls={planContentId}
-            onClick={() => setPlanExpanded((value) => !value)}
-          >
-            {planHeader}
-          </button>
-
-          <span className="sr-only" aria-live="polite" aria-atomic="true">
-            {live && activeStep ? `In progress: ${activeStep.activeText || activeStep.text}` : ""}
-          </span>
-
-          <div
-            id={planContentId}
-            hidden={!planExpanded}
-            className="border-t border-border px-4 py-3"
+    <>
+      {/* Outside the card so a closed plan does not hide it from the reader. */}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {live && activeStep ? `In progress: ${activeStep.activeText || activeStep.text}` : ""}
+      </span>
+      <CollapsibleCard className="my-2 text-ui" role="region" aria-label={label}>
+        {hasPlan ? (
+          <CollapsibleSection
+            data-summary-item="plan"
+            open={planExpanded}
+            onOpenChange={setPlanExpanded}
+            title={
+              <>
+                <PlanStateMarker complete={allComplete} progress={progress} />
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <h3 className="shrink-0 text-ui text-foreground">Plan</h3>
+                  <p
+                    className={cn(
+                      "truncate text-aux",
+                      live || allComplete ? "text-primary" : "text-muted-foreground",
+                    )}
+                  >
+                    {status}
+                  </p>
+                </span>
+              </>
+            }
+            meta={
+              <span className="shrink-0 text-aux tabular-nums text-muted-foreground">
+                {completed} of {steps.length}
+              </span>
+            }
+            bodyClassName="px-4 py-3"
           >
             {plan?.explanation ? (
               <p className="mb-2 pl-7 text-aux text-muted-foreground">{plan.explanation}</p>
@@ -205,45 +173,39 @@ export function TurnSummaryGroup({
                 );
               })}
             </ol>
-          </div>
-        </div>
-      ) : null}
+          </CollapsibleSection>
+        ) : null}
 
-      {recap ? (
-        <div data-summary-item="recap" className={hasPlan ? "border-t border-border" : undefined}>
-          <button
-            type="button"
-            className={INTERACTIVE_HEADER_CLASS}
-            aria-expanded={recapExpanded}
-            aria-controls={recapContentId}
-            onClick={() => setRecapExpanded((value) => !value)}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <CollapseMarker expanded={recapExpanded} />
-              <span
-                className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
-                aria-hidden
-              >
-                <AlignLeft className="size-3.5" strokeWidth={2.25} />
-              </span>
-              <h3 className="truncate text-section text-foreground">Recap</h3>
-            </div>
-            {recap.audioDurationMs && recap.audioDurationMs > 0 ? (
-              <span className="shrink-0 text-aux tabular-nums text-muted-foreground">
-                {formatTime(recap.audioDurationMs / 1000)}
-              </span>
-            ) : null}
-          </button>
-          <div
-            id={recapContentId}
-            hidden={!recapExpanded}
-            className="border-t border-border px-4 py-3"
+        {recap ? (
+          <CollapsibleSection
+            data-summary-item="recap"
+            open={recapExpanded}
+            onOpenChange={setRecapExpanded}
+            title={
+              <>
+                <span
+                  className="flex size-4 shrink-0 items-center justify-center text-muted-foreground"
+                  aria-hidden
+                >
+                  <AlignLeft className="size-3.5" strokeWidth={2.25} />
+                </span>
+                <h3 className="truncate text-ui text-foreground">Recap</h3>
+              </>
+            }
+            meta={
+              recap.audioDurationMs && recap.audioDurationMs > 0 ? (
+                <span className="shrink-0 text-aux tabular-nums text-muted-foreground">
+                  {formatTime(recap.audioDurationMs / 1000)}
+                </span>
+              ) : null
+            }
+            bodyClassName="px-4 py-3"
           >
             <RecapContent recap={recap} />
-          </div>
-        </div>
-      ) : null}
-    </section>
+          </CollapsibleSection>
+        ) : null}
+      </CollapsibleCard>
+    </>
   );
 }
 

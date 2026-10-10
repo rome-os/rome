@@ -15,9 +15,7 @@ export function BackendUnreachableScreen({ retryIntervalMs }: BackendUnreachable
     >
       <div className="w-full max-w-md text-center">
         <h1 className="mb-2 text-title text-foreground">{t("backendUnreachable.title")}</h1>
-        <p className="mb-6 text-body text-muted-foreground">
-          {t("backendUnreachable.description")}
-        </p>
+        <p className="mb-6 text-ui text-muted-foreground">{t("backendUnreachable.description")}</p>
         <p className="text-aux text-subtle-foreground">
           {t("backendUnreachable.retrying", { seconds })}
         </p>

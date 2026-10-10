@@ -11,17 +11,14 @@ import { getWelcomeCopy } from "@/lib/copy";
 // an inline chat component into the SDK registry at bundle load, so the host can
 // mount them when the welcome-to-rome turn-middleware renders them in the
 // transcript during the conversation this screen kicks off.
-import "@/email-handshake";
-import "@/email-receipt";
-import "@/intro-choice";
-import "@/browser-step";
+import "@/name-card";
 import "@/idea-picker";
 import "@/scout-suggestions";
-import "@/completion-card";
 
 // The animated Rome brand mark. Resolved relative to this module so it works
-// from the app's asset base at runtime; the build script copies it into
-// dist/web/assets/ and it's tracked via Git LFS (.gitattributes `*.mp4`).
+// from the app's asset base at runtime; Rslib emits it to
+// `dist/web/static/media/rome-logo-2.mp4`, and it's tracked via Git LFS
+// (.gitattributes `*.mp4`).
 const ROME_LOGO_VIDEO = new URL("./assets/rome-logo-2.mp4", import.meta.url).href;
 const FALLBACK_AGENT_NAME = "Rome";
 
@@ -221,7 +218,10 @@ export default function App({ bootstrap }: { bootstrap: RomeAppBootstrap }) {
           className={cn("group", starting && "opacity-80")}
         >
           {starting ? copy.landing.opening : copy.landing.start}
-          <ArrowRight className="transition-transform group-hover:translate-x-0.5" />
+          <ArrowRight
+            data-icon="inline-end"
+            className="transition-transform group-hover:translate-x-0.5"
+          />
         </Button>
         {error ? <span className="text-xs text-destructive">{error}</span> : null}
       </div>

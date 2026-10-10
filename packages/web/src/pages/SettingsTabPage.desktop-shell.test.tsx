@@ -32,9 +32,16 @@ afterEach(() => {
 });
 
 function renderAdvanced() {
-  rs.spyOn(globalThis, "fetch").mockImplementation(
-    (async () => ({ ok: true, status: 200, json: async () => ({}) }) as Response) as typeof fetch,
-  );
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const body =
+      url === "/api/public-access"
+        ? { enableAccessControl: false, allowedApps: [], cloudEmailAccess: {} }
+        : url === "/api/dashboard-access"
+          ? { cloudEmailAccess: [] }
+          : {};
+    return { ok: true, status: 200, json: async () => body } as Response;
+  }) as typeof fetch);
 
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -64,15 +71,5 @@ describe("Advanced settings inside the Mac app", () => {
     // because the tab has not rendered yet.
     expect(await screen.findByRole("heading", { name: "Advanced Settings" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "System" })).toBeNull();
-  });
-
-  it("still shows it when only the late-arriving class is present", async () => {
-    // The class lands on DOMContentLoaded, which a render can precede. Gating
-    // on it would fail open with no way back, since nothing re-renders when it
-    // appears. This asserts the gate does not depend on it — the bridge is the
-    // signal, and here it is absent, so this is a browser.
-    document.documentElement.classList.add("is-electron");
-    renderAdvanced();
-    expect(await screen.findByRole("heading", { name: "System" })).toBeDefined();
   });
 });

@@ -21,23 +21,33 @@ string.
 1. **Delete is the expected majority outcome.** This is the inversion that makes
    the skill useful. An audit that keeps most of what it finds has not applied
    the ruleset; it has admired the copy. If your table is mostly `keep`, re-run
-   the category test on every `keep` row and mean it.
-2. **Uncertainty resolves to `delete`.** When a string sits between `delete` and
-   `rewrite`, choose `delete` — the primary label almost always suffices. This
-   is the opposite of the precision-over-recall bias in `ux-semantics-audit`,
-   and deliberately so: there, a false positive makes an agent break working UI;
-   here, the cost of a wrong `delete` is one line of copy, and the cost of a
-   wrong `keep` is permanent noise on the screen.
+   the fact test on every `keep` row and mean it.
+2. **Uncertainty resolves to `delete`, with one exception.** When a string sits
+   between `delete` and `rewrite`, choose `delete` — the primary label almost
+   always suffices. This is the opposite of the precision-over-recall bias in
+   `ux-semantics-audit`, and deliberately so: a wrong `keep` is permanent noise
+   on the screen.
+
+   The exception is a string carrying a cost, a scope, or a cause. Deleting one
+   of those does not cost a line of copy, it costs the reader the fact that made
+   the screen actionable. When the string tells the user what an action breaks,
+   where a setting stops applying, or why a surface is in a state they did not
+   choose, uncertainty resolves to `rewrite`. Trim it to the fact and keep it.
 3. **Judge the rendered pair, never the key name.** A verdict needs the label
    the user actually sees next to the text. A key called `*.description` may
    render as a card subtitle, a tooltip body, a dialog description, or nothing
    at all.
-4. **Category before verdict.** Name which of the seven categories the text
-   carries before deciding anything. A string you cannot categorize is
-   `delete` — that is the rule, not a shortcut.
+4. **Fact before verdict.** Name which kind of fact the text carries before
+   deciding anything. A string carrying none is `delete` — that is the rule,
+   not a shortcut.
 5. **A rewrite must be a real string.** "Tighten this" is not a replacement.
-   Write the sentence that ships. If you cannot write one that passes the rules,
-   the verdict was `delete`.
+   Write the sentence that ships, in the register
+   [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) fixes. If you cannot write
+   one that passes the rules, the verdict was `delete`.
+
+6. **A shorter string is not automatically a better one.** Trimming is the means,
+   not the goal. A replacement that reads as a system log has failed even when
+   every word left is load-bearing — check it against `VOICE.md` before it ships.
 
 ## Workflow
 
@@ -70,7 +80,7 @@ Its flags are **advisory triage**, not verdicts:
 - `forbidden:*` and `generic-verb` are near-certain `delete`, but confirm the
   match is real before writing it down.
 - `no-signal` fires on most rows. It means "re-examine", nothing more — real
-  `consequence` text often has no number.
+  cost text often has no number.
 - `sr-only` rows are out of scope entirely. Never delete them.
 - `UNRENDERED` means no call site was found. Confirm with a grep for the bare
   key before calling copy dead, then verdict it `delete`.
@@ -82,13 +92,15 @@ Its flags are **advisory triage**, not verdicts:
 - `label-inferred` means the label shown is a guess from the key path. Read the
   component before judging that row.
 
-### Step 3 — Read the ruleset
+### Step 3 — Read the ruleset and the voice
 
-Read `references/rules.md` in full. It carries the scope exclusions, the four
-authoring tests, the seven categories with their qualifiers, the forbidden
-patterns, the style rules, the verdict rules, and worked examples — including
-verified examples from this repo. Do not audit from memory of the category
-names; the qualifiers are where the wrong verdicts get caught.
+Read [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) first — it fixes the
+register, the person, and what a description must carry, and every `rewrite`
+row is written in it. Then read
+[`docs/ui/secondary-text.md`](../../../docs/ui/secondary-text.md) in full. It
+carries the scope, the five kinds of fact, the four-question test, and the
+repo rules. Do not
+audit from memory of the kind names.
 
 ### Step 4 — Establish the rendered context
 
@@ -96,9 +108,9 @@ For each surface, read the component and write down, before judging anything:
 
 - **the label** rendered above/beside each string, verbatim;
 - **the siblings** rendered on the same screen (this decides every
-  `disambiguation` verdict);
+  difference verdict);
 - **whether the string is conditional** — empty-state only, error-only,
-  first-run only (this decides `empty-state-guidance` and pulls error copy out
+  first-run only (this decides first-step text and pulls error copy out
   of scope);
 - **what the control's shape already says** — a toggle, a file input, and a
   destructive-variant button each carry information the copy need not repeat.
@@ -106,20 +118,20 @@ For each surface, read the component and write down, before judging anything:
 This step is what separates a verdict from a guess. Skipping it produces
 plausible-sounding tables that are wrong about half the rows.
 
-### Step 5 — Run the four tests per string
+### Step 5 — Run the test per string
 
-Delete → category → restatement → placement, in order, stopping at the first
-failure. Then apply the verdict rules. Then, for `keep` and `rewrite` rows,
-apply the style rules and check that the replacement obeys them.
+Ask the four questions of every string, in order, stopping at the first
+failure. Then, for `rewrite` rows, check that the replacement passes the four questions on its own and
+obeys `VOICE.md`.
 
 ### Step 6 — Verdict-hardening pass
 
 Before emitting, re-examine the table:
 
-- Every `keep` — name its category out loud. If naming it takes a paragraph of
+- Every `keep` — name its kind of fact out loud. If naming it takes a paragraph of
   justification, it is `rewrite` or `delete`.
 - Every `rewrite` — read the replacement alone, without the original. Does it
-  pass the four tests as a new string? Does it lead with the payload?
+  pass the four questions as a new string? Does it lead with the fact?
 - Every `delete` — confirm the information is not lost: either it was
   restatement, or the surviving payload moved into another row's replacement.
   Say which.
@@ -138,7 +150,7 @@ pattern driving most deletions on this surface.>
 
 ## Verdicts
 
-| Location | Label | Secondary text | Category | Verdict | Replacement |
+| Location | Label | Secondary text | Fact | Verdict | Replacement |
 |---|---|---|---|---|---|
 
 ## Notes
@@ -156,7 +168,7 @@ Column rules:
 
 - **Location** — `file:line` of the render site, plus the i18n key when there is
   one. The applying agent needs both: the key to edit, the line to check.
-- **Category** — one of the seven, or `none`.
+- **Fact** — one of the five kinds, or `none`.
 - **Verdict** — `keep`, `rewrite`, or `delete`.
 - **Replacement** — required for `rewrite`, empty for `delete` and `keep`.
 
@@ -197,7 +209,9 @@ replacement that props up a bad label.
 ## What this skill does NOT do
 
 - Judge labels, button text, or headings — that is the primary layer.
-- Judge tone or brand voice — the rules are about information content.
+- Own tone or brand voice — [`docs/ui/VOICE.md`](../../../docs/ui/VOICE.md) does.
+  This skill decides whether a string exists and what it must carry; every
+  replacement it writes must obey that file.
 - Rewrite error messages or validation text — different rules, out of scope.
 - Translate. It flags locales that need retranslation; it does not write them.
 - Apply its own verdicts unless asked. The table is the deliverable.

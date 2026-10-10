@@ -1,12 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import { AppAccessPanel } from "@/components/app-access-panel";
 import { AppActionsFab } from "@/components/app-actions-fab";
 import { RomeAppHost } from "@/components/rome-app-host";
+import { SlotContent } from "@/components/slot";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useAppCatalogEvents } from "@/hooks/use-app-catalog-events";
+import { useDocumentTitle } from "@/hooks/use-document-title";
+import { serverRenderedName } from "@/lib/page-title";
+import { useRecordAppOpened } from "@/hooks/use-recent-apps";
 import { useTheme } from "@/hooks/use-theme";
 import { getActiveLocale } from "@/i18n";
 import { fetchJson } from "@/lib/fetch-json";
@@ -79,6 +83,7 @@ function useAppManifest(appId: string | undefined, path: string, mode: "embedded
 export default function AppEmbeddedPage() {
   const { t } = useTranslation("apps");
   const { resolved: theme, theme: themeName } = useTheme();
+  const location = useLocation();
   const { appId } = useParams<{ appId: string; "*"?: string }>();
   const params = useParams<{ "*"?: string }>();
   const splat = params["*"] ?? "";
@@ -91,6 +96,10 @@ export default function AppEmbeddedPage() {
   const isGuardian = manifest?.bootstrap.caller?.kind === "guardian";
   useAppCatalogEvents(appId, isGuardian, refetch);
 
+  // The sidebar's Recent zone orders by this. Guardian only: a public visitor
+  // reaches this page too, and their visit is not the guardian's recent app.
+  useRecordAppOpened(appId, isGuardian);
+
   // Remount gate (#1640): RomeAppHost keys its mount lifecycle on `entryUrl`
   // (a string, value-compared) and `styleUrls` (an array, reference-compared).
   // Stabilize the styleUrls reference so a refetch that returns the same list —
@@ -101,6 +110,12 @@ export default function AppEmbeddedPage() {
   // the invariant that the JS entry hash also covers CSS.
   const styleUrlsKey = (manifest?.styleUrls ?? []).join("\n");
   const styleUrls = useMemo(() => manifest?.styleUrls ?? [], [styleUrlsKey]);
+
+  // The manifest names the app, and until it lands the title the server already
+  // rendered for this path stands in (packages/core/src/api/app-social-card.ts).
+  // Without that stand-in a direct load reads the app's name, then the shell's
+  // "Apps", then the app's name again once the request returns.
+  useDocumentTitle(manifest?.appName ?? serverRenderedName(location.pathname));
 
   if (error) {
     return (
@@ -145,7 +160,7 @@ export default function AppEmbeddedPage() {
   // renders through AppFullPage and never mounts it — that surface is
   // user-facing.
   return (
-    <div>
+    <div className="min-h-full bg-app-canvas">
       <RomeAppHost
         appId={manifest.appId}
         appName={manifest.appName}
@@ -154,6 +169,19 @@ export default function AppEmbeddedPage() {
         bootstrap={bootstrap}
       />
       {isGuardian ? <AppActionsFab appId={manifest.appId} /> : null}
+      {/* On a phone the sidebar is a closed drawer and the tab title is out of
+          sight, so the mobile header names the app. "Rome" stays the link home
+          that the header's fallback is. */}
+      <SlotContent name="mobileHeader">
+        <Link to="/" className="flex shrink-0 items-center gap-2 min-h-[var(--control-min-h)]">
+          <img src="/icon.svg" alt="" aria-hidden className="h-5 w-5" />
+          <span className="text-ui text-foreground">{t("appName", { ns: "common" })}</span>
+        </Link>
+        <span aria-hidden className="text-ui text-muted-foreground">
+          ›
+        </span>
+        <span className="min-w-0 truncate text-ui text-foreground">{manifest.appName}</span>
+      </SlotContent>
     </div>
   );
 }

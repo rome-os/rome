@@ -26,5 +26,11 @@ export default defineConfig({
     prebundle: "auto",
   },
   setupFiles: ["./src/test/setup.ts"],
-  include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  include: [
+    "src/**/*.test.ts",
+    "mock/**/*.test.ts",
+    "src/**/*.test.tsx",
+    ".storybook/*.test.ts",
+    ".storybook/*.test.tsx",
+  ],
 });

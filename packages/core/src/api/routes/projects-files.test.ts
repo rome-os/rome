@@ -55,6 +55,7 @@ function textMessage(content: string): string {
 function traceMessage(
   accounting: {
     costUsd: number;
+    provider?: string;
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
@@ -62,10 +63,10 @@ function traceMessage(
   },
   hiddenText?: string,
 ): string {
-  const { costUsd, ...usage } = accounting;
+  const { costUsd, provider, ...usage } = accounting;
   const blocks: unknown[] = [];
   if (hiddenText) blocks.push({ type: "text", content: hiddenText });
-  blocks.push({ type: "result", accounting: { costUsd, usage } });
+  blocks.push({ type: "result", accounting: { costUsd, provider, usage } });
   return JSON.stringify(blocks);
 }
 
@@ -212,6 +213,33 @@ describe("Projects files API", () => {
       const src = demo?.children?.find((node) => node.name === "src");
       expect(src).not.toHaveProperty("children");
     });
+
+    it("keeps a project's dist folder browsable while still skipping node_modules", async () => {
+      mkdirSync(join(projectsRoot, "demo", "dist", "assets"), { recursive: true });
+      mkdirSync(join(projectsRoot, "demo", "node_modules", "library"), { recursive: true });
+      writeFileSync(join(projectsRoot, "demo", "dist", "bundle.js"), "export {};\n");
+      writeFileSync(join(projectsRoot, "demo", "dist", "assets", "logo.svg"), "");
+      writeFileSync(join(projectsRoot, "demo", "node_modules", "library", "index.js"), "");
+
+      const res = await buildApp().request("/projects/tree?depth=3");
+
+      expect(res.status).toBe(200);
+      const tree = (await res.json()) as Array<{
+        children?: Array<{ children?: unknown[]; name: string; type: string }>;
+        name: string;
+        type: string;
+      }>;
+      const demo = tree.find((node) => node.name === "demo");
+      const childNames = demo?.children?.map((node) => node.name) ?? [];
+      expect(childNames).toContain("dist");
+      expect(childNames).not.toContain("node_modules");
+      const dist = demo?.children?.find((node) => node.name === "dist");
+      expect(
+        (dist?.children as Array<{ name: string; type: string }> | undefined)?.map(
+          (child) => child.name,
+        ),
+      ).toEqual(["assets", "bundle.js"]);
+    });
   });
 
   describe("GET /projects/search", () => {
@@ -269,6 +297,7 @@ describe("Projects files API", () => {
         traceMessage(
           {
             costUsd: 0.25,
+            provider: "anthropic",
             inputTokens: 100,
             outputTokens: 20,
             cacheReadTokens: 10,
@@ -310,13 +339,24 @@ describe("Projects files API", () => {
         ],
       });
       expect(body.chats[0].searchText).not.toContain("intermediate hidden trace content");
+      const anthropicUsage = {
+        cacheReadTokens: 10,
+        cacheWriteTokens: 5,
+        costUsd: 0.25,
+        inputTokens: 100,
+        outputTokens: 20,
+        provider: "anthropic",
+      };
       expect(body.usage.find((day) => day.date === todayKey)).toMatchObject({
         cacheReadTokens: 10,
         cacheWriteTokens: 5,
         inputTokens: 100,
         outputTokens: 20,
         costUsd: 0.25,
+        providers: [anthropicUsage],
       });
+      expect(body.usage.find((day) => day.date !== todayKey)?.providers).toEqual([]);
+      expect(body.providerUsage).toEqual({ month: [anthropicUsage], total: [anthropicUsage] });
     });
 
     it("returns aggregate usage stats and recent chats for the projects root", async () => {

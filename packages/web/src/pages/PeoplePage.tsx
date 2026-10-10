@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { PageShell, PageBody } from "@/shell/PageShell";
+import { List } from "@/components/ui/list-row";
+import { PageShell, PageBody, PageHeader } from "@/shell/PageShell";
 import { DirectoryRow, StreamRow, levelLabelKey } from "./people/rows";
 import { DismissedEntry, UnknownEntry } from "./people/triage";
 import {
@@ -69,15 +70,6 @@ import { usePeopleRoster } from "./people/use-roster";
  *  person row actually holds. Unknown and Stranger are account states, and the
  *  account read is narrowed by those instead. */
 const PLACED_FILTERS = new Set<PeopleFilter>(["inner-circle", "acquaintance", "other"]);
-
-/** The one-line reading of what each bond level means for Rome's behavior,
- *  sitting beside its group heading. */
-const LEVEL_HINT_KEY: Partial<Record<RowLevel, string>> = {
-  "inner-circle": "levelHints.innerCircle",
-  acquaintance: "levelHints.acquaintance",
-  other: "levelHints.other",
-  stranger: "levelHints.stranger",
-};
 
 /**
  * `/people` is the root the two views share and renders neither: it forwards to
@@ -159,14 +151,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
     () =>
       rows
         .filter((row) => row.kind === "person" && row.level !== "guardian")
-        .map((row) => ({
-          id: row.id,
-          displayName: row.displayName,
-          bondLevel: row.level,
-          accounts: row.accounts,
-          messageCount: row.messageCount,
-          latest: row.latest,
-        })),
+        .map((row) => ({ id: row.id, displayName: row.displayName, bondLevel: row.level })),
     [rows],
   );
 
@@ -203,25 +188,24 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
   return (
     <PageShell>
       <PageBody>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0">
-            <h1 className="text-title text-foreground">{tCommon("nav.people")}</h1>
-            <p className="mt-1 text-aux text-muted-foreground">{t("page.subtitle")}</p>
-          </div>
-          {/* Both of this page's one-of-N controls are the kit's radiogroups
-              rather than buttons wearing `role="radio"`: Radix supplies the
-              roving focus and arrow-key movement the role promises, which a row
-              of tab stops does not have. */}
-          <SegmentedControl<PeopleView>
-            aria-label={t("views.label")}
-            value={view}
-            onValueChange={(next) => go({ view: next })}
-            options={[
-              { value: "latest", label: t("views.latest") },
-              { value: "directory", label: t("views.directory") },
-            ]}
-          />
-        </div>
+        {/* Both of this page's one-of-N controls are the kit's radiogroups
+            rather than buttons wearing `role="radio"`: Radix supplies the
+            roving focus and arrow-key movement the role promises, which a row
+            of tab stops does not have. */}
+        <PageHeader
+          title={tCommon("nav.people")}
+          actions={
+            <SegmentedControl<PeopleView>
+              aria-label={t("views.label")}
+              value={view}
+              onValueChange={(next) => go({ view: next })}
+              options={[
+                { value: "latest", label: t("views.latest") },
+                { value: "directory", label: t("views.directory") },
+              ]}
+            />
+          }
+        />
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
           <Input
@@ -241,8 +225,12 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
               value: option,
               label: option === "all" ? t("filters.all") : t(levelLabelKey(option)),
               // Unknown is the page's one number that asks for a decision, so
-              // it carries a count; the other chips are plain labels.
+              // it carries a count; the other chips are plain labels. It sits
+              // at the far end for the same reason: the chips before it are
+              // bonds the guardian has given, and this is what is still
+              // waiting on them.
               count: option === "unknown" && counts.unknown > 0 ? counts.unknown : undefined,
+              alignEnd: option === "unknown",
             }))}
           />
         </div>
@@ -281,7 +269,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
                 className="mt-3"
                 onClick={() => void roster.refetch()}
               >
-                <RefreshCw aria-hidden="true" />
+                <RefreshCw data-icon="inline-start" aria-hidden="true" />
                 {t("errors.retry")}
               </Button>
             </AlertDescription>
@@ -297,6 +285,7 @@ export default function PeoplePage({ view }: { view: PeopleView }) {
           <DirectoryView
             groups={groups}
             counts={counts}
+            searching={settled !== ""}
             onOpen={openRow}
             renderUnplaced={(row) => unplaced(row, "directory")}
           />
@@ -347,17 +336,11 @@ function LatestView({
     );
   }
 
+  // No heading: the stream is one ungrouped list, and the segmented control
+  // above it already says which view is on screen.
   return (
     <section>
-      <div className="flex items-baseline gap-2 border-b border-border pb-1">
-        <h2 className="text-section uppercase tracking-wide text-muted-foreground">
-          {t("views.latest")}
-        </h2>
-        <span className="ml-auto text-badge text-subtle-foreground">
-          {searching ? t("stream.searchHint") : t("stream.hint")}
-        </span>
-      </div>
-      <div className="flex flex-col">
+      <List>
         {rows.map((row) =>
           row.kind === "account" ? (
             renderUnplaced(row)
@@ -365,7 +348,7 @@ function LatestView({
             <StreamRow key={row.id} row={row} onOpen={() => onOpen(row)} />
           ),
         )}
-      </div>
+      </List>
     </section>
   );
 }
@@ -373,19 +356,26 @@ function LatestView({
 function DirectoryView({
   groups,
   counts,
+  searching,
   onOpen,
   renderUnplaced,
 }: {
   groups: { level: RowLevel; rows: PeopleRow[] }[];
   counts: LevelCounts;
+  searching: boolean;
   onOpen: (row: PeopleRow) => void;
   renderUnplaced: (row: PeopleRow) => React.ReactNode;
 }) {
   const { t } = useTranslation("people");
+  // An empty roster is not a failed search. A chip whose level nobody sits at
+  // empties this view with the box untouched, and All does it on an instance
+  // where nobody has been placed yet.
   if (groups.length === 0) {
     return (
       <div className="rounded-12 border border-dashed border-border-strong bg-surface/50 py-10 text-center">
-        <p className="text-ui text-muted-foreground">{t("page.emptyForSearch")}</p>
+        <p className="text-ui text-muted-foreground">
+          {searching ? t("page.emptyForSearch") : t("page.emptyDirectory")}
+        </p>
       </div>
     );
   }
@@ -404,13 +394,8 @@ function DirectoryView({
             <span className="font-mono text-badge tabular-nums text-subtle-foreground">
               {counts[group.level]}
             </span>
-            {LEVEL_HINT_KEY[group.level] && (
-              <span className="ml-auto text-badge text-subtle-foreground">
-                {t(LEVEL_HINT_KEY[group.level]!)}
-              </span>
-            )}
           </div>
-          <div className="flex flex-col">
+          <List>
             {group.rows.map((row) =>
               row.kind === "account" ? (
                 renderUnplaced(row)
@@ -418,7 +403,7 @@ function DirectoryView({
                 <DirectoryRow key={row.id} row={row} onOpen={() => onOpen(row)} />
               ),
             )}
-          </div>
+          </List>
         </section>
       ))}
     </>

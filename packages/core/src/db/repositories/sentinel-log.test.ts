@@ -78,6 +78,35 @@ describe("SentinelLogRepository", () => {
     expect(unreviewed[0].id).toBe(id2);
   });
 
+  describe("listSenders()", () => {
+    it("answers one row per sender, however many messages the log holds", async () => {
+      await repo.create(makeEntry({ messageId: "msg-1", channel: "telegram", channelUserId: "a" }));
+      await repo.create(makeEntry({ messageId: "msg-2", channel: "telegram", channelUserId: "a" }));
+      await repo.create(makeEntry({ messageId: "msg-3", channel: "telegram", channelUserId: "b" }));
+      await repo.create(makeEntry({ messageId: "msg-4", channel: "whatsapp", channelUserId: "a" }));
+
+      const senders = await repo.listSenders();
+      expect(
+        senders
+          .map((sender) => `${sender.channel}:${sender.channelUserId}`)
+          .sort((left, right) => left.localeCompare(right)),
+      ).toEqual(["telegram:a", "telegram:b", "whatsapp:a"]);
+    });
+
+    it("carries the address alone, and nothing derived from a message", async () => {
+      await repo.create(makeEntry());
+
+      // The callers are account reads: they name an account and preview nothing,
+      // so a newest message or a count here would be work no reader renders.
+      const [sender] = await repo.listSenders();
+      expect(Object.keys(sender).sort()).toEqual(["channel", "channelUserId"]);
+    });
+
+    it("answers nothing for an empty log", async () => {
+      expect(await repo.listSenders()).toEqual([]);
+    });
+  });
+
   it("findByChannelUser() returns entries for specific sender", async () => {
     await repo.create(makeEntry({ messageId: "msg-1", channelUserId: "user-A" }));
     await repo.create(makeEntry({ messageId: "msg-2", channelUserId: "user-A" }));

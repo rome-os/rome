@@ -20,7 +20,9 @@ import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 function buildResolvedApp(
   appId: string,
   skillRef?: ArtifactRef,
-  overrides?: Partial<Pick<ResolvedApp, "firstParty" | "source" | "rootPath" | "includeSource">>,
+  overrides?: Partial<
+    Pick<ResolvedApp, "firstParty" | "source" | "rootPath" | "includeSource" | "installedAt">
+  >,
 ): ResolvedApp {
   return {
     appId,
@@ -31,6 +33,7 @@ function buildResolvedApp(
     source: overrides?.source ?? { mode: "bundle", path: "/tmp/unused" },
     installedHash: "0".repeat(64),
     installedVersion: "0.0.1",
+    installedAt: overrides?.installedAt,
     lastError: null,
     updatedAt: new Date(0).toISOString(),
     manifest: {
@@ -294,6 +297,33 @@ describe("GET /apps", () => {
         status: "disabled",
         displayName: "Test App",
         iconUrl: "/api/apps/dormant/icon",
+      });
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("projects installedAt onto the app card, null when the entry predates the field", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalogWith(
+          buildResolvedApp("fresh", undefined, { installedAt: "2026-09-01T00:00:00.000Z" }),
+          buildResolvedApp("legacy"),
+        ),
+      };
+      const app = new Hono().route("/", appsRoutes(deps));
+
+      const res = await app.request("/apps");
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        apps: Array<{ id: string; installedAt: string | null }>;
+      };
+      expect(Object.fromEntries(body.apps.map((card) => [card.id, card.installedAt]))).toEqual({
+        fresh: "2026-09-01T00:00:00.000Z",
+        legacy: null,
       });
     } finally {
       testDb.close();

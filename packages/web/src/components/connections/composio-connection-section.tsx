@@ -95,7 +95,9 @@ export function ComposioConnectionSection({
       aria-label={pending === "disconnect" ? t("common.disconnecting") : undefined}
       onClick={() => void disconnect()}
     >
-      {pending === "disconnect" && <Spinner size="sm" label={t("common.disconnecting")} />}
+      {pending === "disconnect" && (
+        <Spinner data-icon="inline-start" size="sm" label={t("common.disconnecting")} />
+      )}
       {t("common.disconnect")}
     </Button>
   ) : undefined;
@@ -119,7 +121,7 @@ export function ComposioConnectionSection({
             onClick={() => void connect()}
           >
             {(pending === "connect" || composio?.loginPending) && (
-              <Spinner label={t("common.connecting")} />
+              <Spinner data-icon="inline-start" label={t("common.connecting")} />
             )}
             {t("common.connect")}
           </Button>

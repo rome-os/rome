@@ -1,3 +1,4 @@
+import { useUiScale } from "@rome-os/ui/ui-scale";
 import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { trackAppOpen } from "@/lib/analytics";
@@ -93,25 +94,36 @@ export async function appendScopedStyles(
 }
 
 // The app inherits the host's design language for free: Rome's semantic tokens
-// (--background, --primary, …) are inherited custom properties that pierce the
+// (--app-canvas, --primary, …) are inherited custom properties that pierce the
 // shadow boundary, and the shell toggles `.dark` on <html> (an ancestor of this
 // mount), so the inherited values already track the live theme. App bundles ship
-// no token *values* of their own (see packages/app-template), so there is
-// nothing to override the inherited host tokens — and an app that *does* want to
-// override re-declares them as :host{…}, which beats inheritance. Nothing to
-// inject here; the only theme wiring left is the inner-<body> .dark toggle below,
-// needed because selectors (unlike inherited properties) don't cross the shadow
-// boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
-export function prepareShadowMount(host: HTMLDivElement): HTMLElement {
+// no theme values of their own (see packages/app-template). A page host adds the
+// context alias from `background` to `app-canvas`; an inline chat component keeps
+// inheriting the chat context instead. The inner-<body> .dark toggle below remains
+// necessary because selectors, unlike inherited properties, do not cross the
+// shadow boundary, so the app's Tailwind `dark:` variants need an in-scope .dark.
+export function prepareShadowMount(
+  host: HTMLDivElement,
+  { canvas = "app" }: { canvas?: "app" | "chat" } = {},
+): HTMLElement {
   const shadowRoot = host.shadowRoot ?? host.attachShadow({ mode: "open" });
   shadowRoot.replaceChildren();
-  // Structural only — no token values. The host's semantic tokens (colors and
-  // the --font-sans/--font-mono stacks) are inherited custom properties that
-  // already pierce this shadow boundary (see above), so the font stacks live in
-  // exactly one place (the host globals) rather than being copied here.
+  // Page hosts select the app canvas so existing bundles that paint `background`
+  // move without a rebuild. Inline components select the chat canvas and keep
+  // their outer host transparent. Every other theme value keeps inheriting.
+  const canvasCss =
+    canvas === "app"
+      ? `
+      --background: var(--app-canvas);
+      background-color: var(--background);`
+      : `
+      --background: var(--chat-canvas);
+      --app-canvas: var(--chat-canvas);
+      background-color: transparent;`;
   const shellStyle = document.createElement("style");
   shellStyle.textContent = `
     :host {
+      ${canvasCss}
       display: block;
       min-height: inherit;
     }
@@ -145,6 +157,7 @@ export function RomeAppHost({
   styleUrls: string[];
   bootstrap: RomeAppBootstrap;
 }) {
+  const scale = useUiScale();
   const rootRef = useRef<HTMLDivElement>(null);
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
@@ -171,7 +184,7 @@ export function RomeAppHost({
         mountedModule = module;
         await module.mount(mountRoot, currentBootstrap);
         // Both page surfaces (embedded + full) mount through here; the inline
-        // chat surface has its own mount path in AppComponentBlock. Together
+        // chat surface has its own mount path in AppComponentView. Together
         // the two call sites are the complete record of app
         // opens — including surfaces that never change the URL.
         trackAppOpen(appId, currentBootstrap.shell.mode);
@@ -206,5 +219,5 @@ export function RomeAppHost({
     );
   }
 
-  return <div ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
+  return <div data-ui-scale={scale} ref={rootRef} className="min-h-[420px]" data-app-id={appId} />;
 }

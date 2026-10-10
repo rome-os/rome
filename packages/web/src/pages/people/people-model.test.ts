@@ -211,33 +211,36 @@ describe("directoryGroups", () => {
       group.rows.map((row) => row.displayName),
     ]);
 
-  it("groups everyone in ladder order, and orders each group by name", () => {
-    // A contacts list: every account Rome holds is in here, and the order
-    // within a group is the name, not what anyone last said.
+  it("groups the placed people in ladder order, and orders each group by name", () => {
+    // "All" is the roster the guardian has placed, in ladder order, and the
+    // order within a group is the name, not what anyone last said.
     expect(groupsOf({ filter: "all", search: "" })).toEqual([
-      ["unknown", ["Abby Nunes", "Jonas Tan", "Jules"]],
-      ["guardian", ["Mock Guardian"]],
       ["inner-circle", ["Ray Oster"]],
       ["other", ["Sam Okafor"]],
     ]);
   });
 
-  it("holds both unplaced ends back from All, and enters each on purpose", () => {
-    // "All" means the placed people plus the accounts nobody has placed;
-    // dismissal is entered deliberately.
-    expect(groupsOf({ filter: "all", search: "" }).map(([level]) => level)).not.toContain(
-      "stranger",
-    );
-    // The guardian rides along, as in every view — see below.
-    expect(groupsOf({ filter: "stranger", search: "" })).toEqual([
-      ["guardian", ["Mock Guardian"]],
-      ["stranger", ["Prize"]],
+  it("holds every position but the placed ones back from All, and enters each on purpose", () => {
+    // A queue, a dismissal and the reader's own row each answer a different
+    // question than "who does Rome know", so none of the three pads All.
+    expect(groupsOf({ filter: "all", search: "" }).map(([level]) => level)).toEqual([
+      "inner-circle",
+      "other",
     ]);
+    expect(groupsOf({ filter: "unknown", search: "" })).toEqual([
+      ["unknown", ["Abby Nunes", "Jonas Tan", "Jules"]],
+    ]);
+    expect(groupsOf({ filter: "stranger", search: "" })).toEqual([["stranger", ["Prize"]]]);
   });
 
-  it("keeps the guardian in their own people list, whatever the chip says", () => {
-    const groups = groupsOf({ filter: "inner-circle", search: "" });
-    expect(groups.map(([level]) => level)).toContain("guardian");
+  it("leaves the guardian to a search rather than a chip", () => {
+    // No chip selects the guardian, and no chip carries them along either.
+    expect(groupsOf({ filter: "inner-circle", search: "" }).map(([level]) => level)).not.toContain(
+      "guardian",
+    );
+    // By name: "guardian" would also match the level, and the level is not
+    // what a search reads.
+    expect(groupsOf({ filter: "all", search: "mock" })).toEqual([["guardian", ["Mock Guardian"]]]);
   });
 
   it("reaches the address book through a search, whatever chip is lit", () => {
@@ -302,6 +305,20 @@ describe("rowHandle", () => {
   it("falls back to the raw identifier on a channel with no phone shape", () => {
     const [row] = peopleRows([], [contact({ channel: "discord", channelUserId: "6128843201" })]);
     expect(rowHandle(row)).toBe("6128843201");
+  });
+
+  it("adds nothing under an agent the row already names by its label", () => {
+    const [row] = peopleRows(
+      [],
+      [
+        contact({
+          channel: "agents",
+          channelUserId: "0b6c5a1e-7d2f-4c3a-9e1b-5f8a2d4c6e01",
+          displayName: "atlas (dot)",
+        }),
+      ],
+    );
+    expect(rowHandle(row)).toBeNull();
   });
 });
 

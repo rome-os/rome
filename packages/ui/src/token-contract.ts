@@ -7,6 +7,7 @@ const SHADCN_COMPATIBILITY_TOKENS = [
 /** Custom properties an app bundle inherits from the Rome host. */
 export const INHERITED_TOKENS = [
   ...SHADCN_COMPATIBILITY_TOKENS,
+  "--app-canvas",
   "--background",
   "--border",
   "--border-strong",

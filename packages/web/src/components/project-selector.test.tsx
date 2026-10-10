@@ -7,10 +7,6 @@ import { ProjectSelector } from "./project-selector";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(cleanup);
@@ -182,9 +178,9 @@ describe("project selector create form", () => {
     expect(props.onPickProject).not.toHaveBeenCalled();
   });
 
-  it("sets the new-project field's type from the Body role", () => {
+  it("sets the new-project field's type from the UI role", () => {
     // Routing the field through `Input` is what keeps its typography on the
     // roster; a hand-rolled field drifts to whatever size the page picked.
-    expect(renderCreateForm().className).toContain("text-body");
+    expect(renderCreateForm().className).toContain("text-ui");
   });
 });

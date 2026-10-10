@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
-import { buildChatView, buildRows, interactionResultKey, type AgentIdentity } from "./chat-view";
+import {
+  buildChatView,
+  buildRows,
+  interactionResultKey,
+  isAwaitingGuardian,
+  isLastTurnFailed,
+  type AgentIdentity,
+} from "./chat-view";
 
 const MAIN = "M";
 const CHILD = "C";
@@ -123,6 +130,36 @@ describe("buildChatView", () => {
     });
   });
 
+  const aiToolsCard = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "core",
+    render: { kind: "inline", componentId: "ai-tools-card", builtin: true, props: {} },
+  });
+
+  // The connect-AI card resolves itself once a provider signs in. Typing in the
+  // composer re-shows it, so an earlier copy left open would submit a second
+  // `{ connected: true }` and push the welcome script past the step the
+  // guardian is on.
+  it("auto-dismisses an open connect-AI card when the guardian replies in chat", () => {
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "assistant", "t1", [aiToolsCard("c_0")]),
+          mk(MAIN, "user", "t2", [{ type: "text", content: "what counts as connected?" }]),
+          mk(MAIN, "assistant", "t3", [aiToolsCard("c_1")]),
+        ],
+      ],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
+    expect(v.interactionResults.get(interactionResultKey(MAIN, "c_0"))).toEqual({
+      dismissed: true,
+    });
+    // The card the guardian is actually looking at stays interactive.
+    expect(v.interactionResults.get(interactionResultKey(MAIN, "c_1"))).toBeUndefined();
+  });
+
   it("keeps a real card answer over auto-dismiss, and leaves unanswered cards open", () => {
     const messages = new Map<string, ChatMessage[]>([
       [
@@ -222,5 +259,147 @@ describe("buildRows", () => {
       expect(agentRows[0].kind === "agent" && agentRows[0].messages).toHaveLength(2);
       expect(agentRows[0].kind === "agent" && agentRows[0].trace).toBe(trace); // trace as subtitle
     }
+  });
+});
+
+describe("isLastTurnFailed", () => {
+  const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
+    mk(sessionId, "trace", turnId, [], {
+      traceSummary: { distinctApps: [], totalSteps: 1, invocationCounts: {}, turnStatus },
+    });
+  const failed = (main: ChatMessage[]) =>
+    isLastTurnFailed(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY));
+
+  it("reads the floor's latest turn end", () => {
+    expect(failed([trace(MAIN, "t1", "error")])).toBe(true);
+    expect(failed([trace(MAIN, "t1", "error"), trace(MAIN, "t2", "completed")])).toBe(false);
+    expect(failed([trace(MAIN, "t1", "completed"), trace(MAIN, "t2", "error")])).toBe(true);
+    expect(failed([])).toBe(false);
+  });
+});
+
+describe("isAwaitingGuardian", () => {
+  const questionCard = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "core",
+    render: { kind: "inline", componentId: "question-card", builtin: true, props: {} },
+  });
+  const appForm = (toolUseId: string) => ({
+    type: "pending_interaction",
+    toolUseId,
+    appId: "survey",
+    render: { kind: "inline", componentId: "form", props: {} },
+  });
+  const awaiting = (main: ChatMessage[], child?: ChatMessage[], runningTurnId?: string) => {
+    const messages = new Map<string, ChatMessage[]>([[MAIN, main]]);
+    if (child) messages.set(CHILD, child);
+    return isAwaitingGuardian(buildChatView(messages, MAIN, MAIN_IDENTITY), runningTurnId);
+  };
+
+  it("is true while the last message is an unanswered card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is true when the turn's closing text follows the card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "assistant", "t1", [{ type: "text", content: "Choose the dates above." }], {
+          turnPhase: "final",
+        }),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false once a backend-initiated turn follows the card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "assistant", "backend:b1", [{ type: "text", content: "Approved. Booking now." }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false while a newer turn runs that has saved nothing yet", () => {
+    expect(
+      awaiting(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+          mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        ],
+        undefined,
+        "backend:b1",
+      ),
+    ).toBe(false);
+  });
+
+  it("is true while the running turn itself is parked on the card", () => {
+    expect(
+      awaiting(
+        [
+          mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+          mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        ],
+        undefined,
+        "t1",
+      ),
+    ).toBe(true);
+  });
+
+  it("is true when the turn's recap follows the card", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "user", "t1", [{ type: "text", content: "plan a trip" }]),
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "assistant", "t1", [
+          { type: "turn_recap", turnId: "t1", content: "Asked for dates." },
+        ]),
+      ]),
+    ).toBe(true);
+  });
+
+  it("is false once the card is answered", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "user", "t2", [{ type: "interaction_result", toolUseId: "q_0", output: {} }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("is false once the guardian replies in chat instead", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [questionCard("q_0")]),
+        mk(MAIN, "user", "t2", [{ type: "text", content: "never mind" }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("ignores an app form left open further up the transcript", () => {
+    expect(
+      awaiting([
+        mk(MAIN, "assistant", "t1", [appForm("f_0")]),
+        mk(MAIN, "user", "t2", [{ type: "text", content: "skip the form" }]),
+        mk(MAIN, "assistant", "t2", [{ type: "text", content: "Okay." }]),
+      ]),
+    ).toBe(false);
+  });
+
+  it("reads the floor session while a handoff is open", () => {
+    expect(
+      awaiting(
+        [mk(MAIN, "assistant", "t1", [handoffBlock])],
+        [mk(CHILD, "assistant", "c1", [questionCard("q_0")])],
+      ),
+    ).toBe(true);
   });
 });

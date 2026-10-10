@@ -1,0 +1,43 @@
+{
+  "repository": {
+    "id": "rome-repository",
+    "url": "https://github.com/rome-os/rome",
+    "name": "rome-os/rome",
+    "addedAt": "2026-08-23T13:47:26.705Z"
+  },
+  "settings": {
+    "id": "rome-review-settings",
+    "repo": "rome-os/rome",
+    "autoReviewEnabled": true,
+    "triggerOnCreate": true,
+    "triggerOnRequest": true,
+    "triggerOnReviewRequest": true,
+    "triggerOnMention": true,
+    "triggerOnPush": true,
+    "triggerAccessMode": "allowlist",
+    "triggerAllowlist": ["rome-demo"],
+    "triggerBlocklist": [],
+    "mentionTriggerPhrase": "PTAL",
+    "summaryTriggerPhrase": "summary",
+    "customRules": null,
+    "projectMemory": null,
+    "webhookChannelUrl": null,
+    "githubWebhookId": null,
+    "createdAt": "2026-08-23T13:48:00.627Z",
+    "updatedAt": "2026-09-08T15:27:02.010Z",
+    "manualTriggerAllowlist": ["rome-demo"],
+    "guardianGithubLogin": "rome-demo",
+    "webhookConnected": true,
+    "eventRoutinesReady": true,
+    "eventRoutineStatus": {
+      "ready": true,
+      "required": ["pull_request", "issue_comment", "issues"],
+      "present": ["pull_request", "issue_comment", "issues"],
+      "enabled": ["pull_request", "issue_comment", "issues"],
+      "missing": [],
+      "disabled": []
+    },
+    "triggerWiringHealthy": true,
+    "autoReviewHealthy": true
+  }
+}

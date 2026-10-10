@@ -29,6 +29,18 @@ function getUaArchitecture(source: string) {
 }
 
 describe("rome-apply-cdp-stealth.sh UA architecture", () => {
+  it.each([undefined, "false"])("skips injection when CDP automation is %s", (enabled) => {
+    const result = spawnSync("/bin/bash", [SCRIPT_PATH], {
+      cwd: PROJECT_ROOT,
+      env: { ...process.env, ROME_ENABLE_CDP_AUTOMATION: enabled, PATH: "/nonexistent" },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("");
+  });
+
   it("detects Intel macOS user agents as x86", () => {
     expect(
       getUaArchitecture(

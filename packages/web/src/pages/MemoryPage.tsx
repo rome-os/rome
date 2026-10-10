@@ -49,7 +49,7 @@ function MemoryFolderPanel() {
             <BrainCircuit className="size-6" aria-hidden />
           </div>
           <h2 className="mt-4 text-title text-foreground">{t("memory.home.headline")}</h2>
-          <p className="mx-auto mt-2 max-w-sm text-body text-muted-foreground">
+          <p className="mx-auto mt-2 max-w-sm text-ui text-muted-foreground">
             {t("memory.home.description")}
           </p>
           <div className="mt-6 grid grid-cols-2 gap-2 text-left">
@@ -96,9 +96,7 @@ export default function MemoryPage() {
       logicalRootPath="memory"
       rootLabel={t("memory.rootLabel")}
       searchPlaceholder={t("memory.searchPlaceholder")}
-      selectInitialFolderOnMobile={false}
       sidebarHeading={t("memory.sidebarHeading")}
-      title={t("memory.title")}
     />
   );
 }

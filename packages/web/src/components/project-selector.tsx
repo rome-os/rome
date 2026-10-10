@@ -1,6 +1,8 @@
 import { forwardRef, useMemo, useRef, type Ref } from "react";
 import type { TFunction } from "i18next";
 import { Check, ChevronDown, FolderPlus, X } from "lucide-react";
+import { getProjectDisplayName } from "@/lib/chat-helpers";
+import type { ProjectCatalog } from "@/lib/chat-types";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import {
   Command,
@@ -18,20 +20,8 @@ import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/emp
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@rome-os/ui/spinner";
 
-interface ProjectOption {
-  displayName?: string;
-  name: string;
-  path: string;
-  projectPath?: string;
-}
-
-interface ProjectCatalog {
-  rootPath: string;
-  defaultPath: string;
-  projects: ProjectOption[];
-}
-
 interface ProjectSelectorProps {
+  disabled?: boolean;
   t: TFunction;
   projectCatalog: ProjectCatalog | null;
   projectsLoading: boolean;
@@ -54,13 +44,9 @@ interface ProjectSelectorProps {
   onCreateProject: () => void;
 }
 
-function getProjectDisplayName(name: string): string {
-  const segments = name.split("/").filter(Boolean);
-  return segments.at(-1) ?? name;
-}
-
 export const ProjectSelector = forwardRef(function ProjectSelector(
   {
+    disabled = false,
     t,
     projectCatalog,
     projectsLoading,
@@ -123,8 +109,9 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
   return (
     <div ref={ref} className="shrink-0">
       <Popover
-        open={menuOpen}
+        open={menuOpen && !disabled}
         onOpenChange={(next) => {
+          if (disabled) return;
           if (next !== menuOpen) onToggleMenu();
         }}
       >
@@ -138,6 +125,7 @@ export const ProjectSelector = forwardRef(function ProjectSelector(
             // loudest thing in a row of muted chrome.
             variant={isDefault ? "ghost" : "secondary"}
             size="sm"
+            disabled={disabled}
             className={cn("max-w-[200px] touch-target", isDefault && "text-muted-foreground")}
             title={isDefault ? t("project.buttonLabel") : draftProjectLabel}
             aria-label={t("project.buttonLabel")}

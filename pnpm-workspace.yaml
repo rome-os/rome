@@ -31,6 +31,7 @@ allowBuilds:
   node-pty: true
   protobufjs: true
   sharp: true
+  workerd: true
   # Scripts below were already skipped under pnpm 10 (absent from
   # onlyBuiltDependencies); `false` preserves that, now explicitly.
   "@whiskeysockets/baileys": false
@@ -42,6 +43,8 @@ allowBuilds:
   utf-8-validate: false
 
 overrides:
+  "@rsbuild/core": "2.2.3"
+  "@whiskeysockets/baileys>sharp": "0.34.5"
   react: "19.2.6"
   react-dom: "19.2.6"
   "@types/react": "19.2.15"
@@ -53,6 +56,7 @@ overrides:
   # rome-mobile subtree; keep these in lockstep with the Expo SDK's pins.
   "rome-mobile>react": "19.2.3"
   "rome-mobile>@types/react": "~19.2.14"
+  'shell-quote': '1.9.0'
 
 # The global react pins above rewrite the PEER ranges of mobile's deps
 # (expo/react-native declare `react: ^19.1.0`, the override turns that into

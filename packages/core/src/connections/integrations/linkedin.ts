@@ -1,6 +1,6 @@
 // LinkedIn connection integration. Channel contract: docs/architecture/channels.md.
 //
-// LinkedIn is a read-only Talker with a single `session` grant, and the grant
+// LinkedIn has a single `session` grant, and the grant
 // is custody-external: the signed-in session lives in Rome's server-side
 // Chrome profile (the one opencli drives over CDP), so the ledger holds only a
 // custody marker plus the account identity — there is no secret Rome could
@@ -15,30 +15,24 @@
 // probe keeps the credential, and only a definite signed-out answer degrades
 // to "re-confer".
 //
-// The capability is the inbox poller (channels/linkedin.ts): jittered
-// 15–30 min ticks that mirror the inbox into linkedin_threads/
-// linkedin_messages. v1 mirrors only — no inbound delivery into the agent
-// pipeline and no send path, so `send` refuses loudly. History is served from
-// the mirror through the standard `history` talk feature.
+// The inbox poller mirrors history without delivering inbound agent turns.
+// Replies use the same browser session and the shared People outbox.
 
 import { z } from "zod";
-import type {
-  ConversationId,
-  NormalizedMessage,
-  TalkFeatureMap,
-  TalkFeatureName,
-} from "@rome-os/app-runtime";
+import type { ConversationId } from "@rome-os/app-runtime";
+import type { TalkFeatures } from "../types.js";
 import {
   OpencliAuthError,
   openLinkedInBrowserTab,
   parseWhoami,
+  parseLinkedInReply,
   runOpencli,
   type LinkedInWhoami,
   type RunOpencli,
 } from "../../channels/linkedin-cli.js";
 import { LinkedInInboxPoller } from "../../channels/linkedin.js";
 import { linkedInMemberIdFromProfileUrl } from "../../channels/linkedin-sync.js";
-import type { LinkedInHistoryMessage, LinkedInSyncSink } from "../../channels/linkedin-sync.js";
+import type { LinkedInSyncSink } from "../../channels/linkedin-sync.js";
 import { CredentialRejected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -50,7 +44,9 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
-import { historyFeature } from "./talk-features.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("linkedin-reply");
 
 const LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login";
 const WHOAMI_TIMEOUT_MS = 90_000;
@@ -261,42 +257,6 @@ interface LinkedInTalker extends Talker {
   getRuntimeDegradation(): CapabilityDegradation | null;
 }
 
-/**
- * The `channel_mappings.channel_user_id` a LinkedIn message resolves through.
- *
- * The bare member id is the address the mirror keys on — `linkedin_participants`
- * is primary-keyed by it and promotion writes it into the mapping — so a promoted
- * participant is recognised on their next message with nothing else wired up.
- *
- * The stored profile URL stays the fallback rather than being replaced by one:
- * a URL carrying no member id is a vanity handle (`/in/ada-lovelace`), which is
- * the form the guardian's own mapping is conferred in at connect time. Narrowing
- * to the member id alone would strand it.
- */
-function linkedInChannelUserId(row: LinkedInHistoryMessage): string {
-  return (
-    linkedInMemberIdFromProfileUrl(row.senderProfileUrl) ??
-    row.senderProfileUrl ??
-    (row.senderIsSelf ? "linkedin:self" : "linkedin:unknown")
-  );
-}
-
-function toHistoryNormalizedMessage(row: LinkedInHistoryMessage): NormalizedMessage {
-  return {
-    id: row.messageId,
-    channel: "linkedin",
-    channelUserId: linkedInChannelUserId(row),
-    displayName: row.senderName ?? "",
-    threadId: row.threadId,
-    ...(row.threadName ? { threadName: row.threadName } : {}),
-    threadType: "private",
-    timestamp: row.sentAt,
-    text: row.subject ? `${row.subject}\n${row.text ?? ""}`.trim() : (row.text ?? ""),
-    attachments: [],
-    rawEvent: row,
-  };
-}
-
 export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): ConnectionDescriptor {
   const run = deps.run ?? runOpencli;
   const sessionScheme = linkedinSessionScheme(run);
@@ -314,6 +274,9 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
     capabilities: {
       talker: {
         needs: ["session"] as const,
+        // The inbox is mirrored into the store by the poller; nothing is
+        // delivered as an inbound turn.
+        receives: false,
         build(): Talker {
           const poller = new LinkedInInboxPoller({
             sink: deps.syncSink,
@@ -322,6 +285,17 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             maxIntervalMs: deps.maxIntervalMs,
           });
 
+          const sink = deps.syncSink;
+          const features: TalkFeatures = {};
+          if (sink.findReplyTarget) {
+            features.directMessaging = {
+              async conversationFor(address: string) {
+                const participantId = linkedInMemberIdFromProfileUrl(address) ?? address.trim();
+                const target = await sink.findReplyTarget?.({ participantId });
+                return target ? (target.threadId as ConversationId) : null;
+              },
+            };
+          }
           const talker: LinkedInTalker = {
             // v1 is a mirror: nothing is delivered into the agent pipeline, so
             // `deliver` stays unused until LinkedIn messages join the routed
@@ -335,25 +309,65 @@ export function createLinkedInDescriptor(deps: LinkedInDescriptorDeps): Connecti
             stop(): void {
               poller.stop();
             },
-            async send(_conversationId: ConversationId, _msg) {
-              throw new Error(
-                "The LinkedIn connection is read-only: Rome mirrors your inbox but does not send LinkedIn messages.",
-              );
+            async send(conversationId: ConversationId, msg) {
+              if (
+                !msg.text?.trim() ||
+                msg.attachments?.length ||
+                msg.replyToMessageId ||
+                msg.kind === "email" ||
+                msg.parts?.length
+              ) {
+                throw new Error("LinkedIn replies support plain text only");
+              }
+              const target = await deps.syncSink.findReplyTarget?.({ threadId: conversationId });
+              if (!target)
+                throw new Error("No verified LinkedIn direct conversation for this reply");
+              if (
+                target.threadId !== conversationId ||
+                target.threadUrl !== `https://www.linkedin.com/messaging/thread/${conversationId}/`
+              ) {
+                throw new Error("LinkedIn reply target does not match the selected conversation");
+              }
+              let message;
+              try {
+                message = parseLinkedInReply(
+                  await run(
+                    [
+                      "linkedin",
+                      "reply",
+                      "--thread-url",
+                      target.threadUrl,
+                      "--expected-recipient",
+                      target.participantId,
+                      "--expected-self",
+                      target.selfParticipantId,
+                      "--message",
+                      msg.text,
+                      "--send",
+                    ],
+                    { timeoutMs: 180_000 },
+                  ),
+                  conversationId,
+                );
+              } catch (error) {
+                if (error instanceof OpencliAuthError) {
+                  throw new CredentialRejected({ grant: "session", cause: error });
+                }
+                throw error;
+              }
+              try {
+                await deps.syncSink.upsertMessages([message]);
+              } catch (error) {
+                // Provider acceptance survives a local mirror failure. The next poll repairs it.
+                log.warn("LinkedIn reply accepted but mirror write failed", {
+                  threadId: conversationId,
+                  messageId: message.messageId,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+              return { conversationId, messageId: message.messageId };
             },
-            feature<K extends TalkFeatureName>(name: K): TalkFeatureMap[K] | null {
-              const sink = deps.syncSink;
-              if (!sink.fetchHistory) return null;
-              const features: Partial<TalkFeatureMap> = {
-                history: historyFeature({
-                  fetchHistory: async (conversationId, windowHours) => {
-                    const since = new Date(Date.now() - windowHours * 3_600_000);
-                    const rows = await sink.fetchHistory?.(conversationId, since);
-                    return (rows ?? []).map(toHistoryNormalizedMessage);
-                  },
-                }),
-              };
-              return (features[name] as TalkFeatureMap[K] | undefined) ?? null;
-            },
+            ...features,
             getRuntimeDegradation(): CapabilityDegradation | null {
               return poller.getRuntimeDegradation();
             },

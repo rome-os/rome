@@ -8,6 +8,10 @@ import {
   ArtifactLocalNameV2Schema,
   isValidArtifactReference,
 } from "./artifact-name.js";
+import { widthUnits } from "./width-units.js";
+
+/** Display budget for `tagline`, shared with the social-card template. */
+export const TAGLINE_MAX_WIDTH_UNITS = 80;
 
 /** SQL identifier rule for `app.yaml#db.tablePrefix`; reused by manifest validation and the uninstall-purge primitive. */
 export const TABLE_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
@@ -111,6 +115,21 @@ export const AppManifestSchema = z
       .min(1)
       .refine((v) => valid(v) !== null, "must be a valid semver version"),
     description: z.string().min(1),
+    // One-line, author-written hook for the app's social share card. The
+    // schema enforces the display contract — a single line of at most 80
+    // width units (80 Latin characters or 40 CJK) — so the rendered image and
+    // the og:description text always carry the same, untruncated sentence.
+    // Without it the card shows no description.
+    tagline: z
+      .string()
+      .trim()
+      .min(1, "tagline must not be blank")
+      .refine((v) => !/[\r\n]/.test(v), "tagline must be a single line")
+      .refine(
+        (v) => widthUnits(v) <= TAGLINE_MAX_WIDTH_UNITS,
+        `tagline must be at most ${TAGLINE_MAX_WIDTH_UNITS} width units (80 Latin characters or 40 CJK)`,
+      )
+      .optional(),
     name: z.string().min(1).optional(),
     icon: z.string().min(1).optional(),
     appRoot: z.string().min(1).optional(),

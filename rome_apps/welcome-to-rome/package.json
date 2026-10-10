@@ -3,14 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rome build && mkdir -p dist/web/assets && cp src/web/assets/rome-logo-2.mp4 dist/web/assets/rome-logo-2.mp4",
+    "build": "rome build",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@rome-os/app-runtime": "^0.6.0",
     "@rome-os/app-web-sdk": "^0.3.0",
-    "@rome-os/ui": "^0.2.2",
+    "@rome-os/ui": "^0.3.0",
     "canvas-confetti": "^1.9.4",
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.468.0",

@@ -25,13 +25,23 @@ import {
   type LinkedInInboxRow,
   type RunOpencli,
 } from "./linkedin-cli.js";
-import type { LinkedInSyncSink, LinkedInThreadCursor } from "./linkedin-sync.js";
+import {
+  LinkedInParticipantProfileSynchronizer,
+  type LinkedInParticipantProfileSynchronizerOptions,
+} from "./linkedin-profile-sync.js";
+import {
+  linkedInMemberIdFromProfileUrl,
+  type LinkedInParticipantInput,
+  type LinkedInSyncSink,
+  type LinkedInThreadCursor,
+} from "./linkedin-sync.js";
 
 const log = createLogger("linkedin");
 
 const DEFAULT_INBOX_LIMIT = 40;
 const DEFAULT_THREAD_FETCH_LIMIT = 25;
 const DEFAULT_MAX_SNAPSHOTS_PER_TICK = 6;
+const DEFAULT_MEMBERSHIP_REFRESH_INTERVAL_MS = 60 * 60_000;
 const SNAPSHOT_TIMEOUT_MS = 240_000;
 /** One failed tick is routine (a Chrome restart, a slow page); the guardian is
  *  warned once failures look persistent. */
@@ -52,6 +62,10 @@ export interface LinkedInPollerOptions {
   inboxLimit?: number;
   threadFetchLimit?: number;
   maxSnapshotsPerTick?: number;
+  /** Minimum age of an authoritative membership read before refreshing it. */
+  membershipRefreshIntervalMs?: number;
+  /** Account-scoped profile freshness and retry policy. */
+  profileSync?: LinkedInParticipantProfileSynchronizerOptions;
   /** Test seam for the jitter draw. */
   random?: () => number;
 }
@@ -87,6 +101,8 @@ export class LinkedInInboxPoller {
   private readonly inboxLimit: number;
   private readonly threadFetchLimit: number;
   private readonly maxSnapshotsPerTick: number;
+  private readonly membershipRefreshIntervalMs: number;
+  private readonly profileSynchronizer: LinkedInParticipantProfileSynchronizer | null;
   private readonly random: () => number;
 
   private callbacks: LinkedInPollerCallbacks | null = null;
@@ -110,6 +126,22 @@ export class LinkedInInboxPoller {
     this.inboxLimit = opts.inboxLimit ?? DEFAULT_INBOX_LIMIT;
     this.threadFetchLimit = opts.threadFetchLimit ?? DEFAULT_THREAD_FETCH_LIMIT;
     this.maxSnapshotsPerTick = opts.maxSnapshotsPerTick ?? DEFAULT_MAX_SNAPSHOTS_PER_TICK;
+    this.membershipRefreshIntervalMs =
+      opts.membershipRefreshIntervalMs ?? DEFAULT_MEMBERSHIP_REFRESH_INTERVAL_MS;
+    const getStates = opts.sink.getParticipantProfileSyncStates?.bind(opts.sink);
+    const upsertProfile = opts.sink.upsertParticipantProfile?.bind(opts.sink);
+    const recordFailure = opts.sink.recordParticipantProfileSyncFailure?.bind(opts.sink);
+    this.profileSynchronizer =
+      getStates && upsertProfile && recordFailure
+        ? new LinkedInParticipantProfileSynchronizer(
+            {
+              getParticipantProfileSyncStates: getStates,
+              upsertParticipantProfile: upsertProfile,
+              recordParticipantProfileSyncFailure: recordFailure,
+            },
+            opts.profileSync,
+          )
+        : null;
     this.random = opts.random ?? Math.random;
   }
 
@@ -188,14 +220,18 @@ export class LinkedInInboxPoller {
 
     for (const row of batch) {
       if (this.stopped) return;
-      await this.snapshotThread(row, signal);
+      await this.snapshotThread(row, cursors.get(row.threadId), signal);
     }
     if (batch.length > 0) {
       log.info("linkedin threads synced", { threads: batch.length });
     }
   }
 
-  private async snapshotThread(row: LinkedInInboxRow, signal?: AbortSignal): Promise<void> {
+  private async snapshotThread(
+    row: LinkedInInboxRow,
+    cursor: LinkedInThreadCursor | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const result = await this.run(
       [
         "linkedin",
@@ -230,7 +266,29 @@ export class LinkedInInboxPoller {
       conversationTitle: messages.find((m) => m.conversationTitle)?.conversationTitle ?? null,
       isGroup: messages.find((m) => m.conversationIsGroup != null)?.conversationIsGroup ?? null,
     });
-    await this.syncThreadParticipants(row, signal);
+    await this.syncMessageProfiles(messages);
+    await this.syncThreadParticipants(row, cursor, signal);
+  }
+
+  private async syncMessageProfiles(
+    messages: ReturnType<typeof parseThreadSnapshot>,
+  ): Promise<void> {
+    if (!this.profileSynchronizer) return;
+    const profiles: LinkedInParticipantInput[] = [];
+    for (const message of messages) {
+      const participantId =
+        message.senderParticipantId ?? linkedInMemberIdFromProfileUrl(message.senderProfileUrl);
+      if (!participantId) continue;
+      profiles.push({
+        participantId,
+        name: message.senderName,
+        headline: message.senderHeadline,
+        profileUrl: message.senderProfileUrl,
+        type: message.senderType,
+        isSelf: message.senderIsSelf,
+      });
+    }
+    await this.profileSynchronizer.sync(profiles);
   }
 
   /**
@@ -246,10 +304,23 @@ export class LinkedInInboxPoller {
    * already mirrored. A signed-out session is the exception: that is not a
    * per-thread hiccup, and the grant owner has to hear about it.
    */
-  private async syncThreadParticipants(row: LinkedInInboxRow, signal?: AbortSignal): Promise<void> {
-    const upsert = this.sink.upsertThreadParticipants?.bind(this.sink);
+  private async syncThreadParticipants(
+    row: LinkedInInboxRow,
+    cursor: LinkedInThreadCursor | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const replaceMembership = this.sink.replaceThreadParticipantMembership?.bind(this.sink);
     // No point paying for a crawl whose result nothing can store.
-    if (!upsert) return;
+    if (!replaceMembership) return;
+    // A snapshot refreshes the send-safety group verdict independently.
+    // Authoritative membership has its own thread-scoped clock, so one active
+    // conversation does not need a second page load for every message.
+    if (
+      cursor?.participantsLastReadAt &&
+      Date.now() - cursor.participantsLastReadAt.getTime() < this.membershipRefreshIntervalMs
+    ) {
+      return;
+    }
 
     let participants: ReturnType<typeof parseThreadParticipants>;
     try {
@@ -267,14 +338,21 @@ export class LinkedInInboxPoller {
       return;
     }
 
-    await upsert(
+    await replaceMembership(
       row.threadId,
       participants.map((p) => ({
         participantId: p.participantId,
-        name: p.name,
-        headline: p.headline,
-        type: p.type,
         isSelf: p.isSelf,
+      })),
+    );
+    await this.profileSynchronizer?.sync(
+      participants.map((participant) => ({
+        participantId: participant.participantId,
+        name: participant.name,
+        headline: participant.headline,
+        profileUrl: participant.profileUrl,
+        type: participant.type,
+        isSelf: participant.isSelf,
       })),
     );
   }

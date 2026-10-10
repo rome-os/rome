@@ -1,17 +1,16 @@
-import { memo, type ReactNode, useMemo, useState } from "react";
+import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { Check } from "lucide-react";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import type { TraceSnapshot, TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { renderFlatBlocks } from "@/components/chat/blocks";
-import { parseMessageBlocks } from "@/components/chat/blocks/parse-blocks";
+import { renderFlatEntries } from "@/components/chat/entries";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
+import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
-import {
-  DelegatedSubagentGroup,
-  type DelegatedSubagentNode,
-} from "@/components/chat/DelegatedSubagentGroup";
+import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
+import { LiveTurnActivity } from "@/components/chat/LiveTurnActivity";
 import { TurnSummaryGroup } from "@/components/chat/TurnSummaryGroup";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
@@ -19,9 +18,10 @@ import { TraceTrigger } from "@/components/chat/TraceTrigger";
 import { UserMessage } from "@/components/chat/UserMessage";
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
+import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 // The block-level callbacks + resolved-interaction map threaded into
-// renderFlatBlocks — a single bag instead of six loose props.
+// renderFlatEntries — a single bag instead of six loose props.
 export interface BlockActions {
   onApprovalResolved: () => void;
   onSubmitAppComponent: (
@@ -45,16 +45,16 @@ export interface LivePreview {
   blockIx?: number;
   /** The full SSE text, which may be ahead of the typewriter preview. */
   sourceText?: string;
+  textThroughOrdinal?: number;
   identity: AgentIdentity;
 }
 
-// When inline share selection is active, every selectable turn
+// While inline share selection is on (`selection` is set), every selectable turn
 // in the transcript gets a checkbox + click target so the guardian picks the
 // turns to freeze directly on the messages instead of in a separate list. Only
 // rows belonging to `selectableSessionId` (the main session) are checkable —
 // handoff child turns ride along with their parent automatically.
 export interface ShareSelection {
-  active: boolean;
   selectedTurns: Set<string>;
   selectableSessionId: string;
   onToggleTurn: (turnId: string) => void;
@@ -72,7 +72,7 @@ export interface MessageListProps {
   contentRef: (node: HTMLElement | null) => void;
   onOpenLiveTrace: () => void;
   onOpenStoredTrace: (target: TraceDrawerTarget) => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   actions: BlockActions;
@@ -89,9 +89,7 @@ export interface MessageListProps {
 // approval-resolution turn (interaction_result only, no text) does NOT count,
 // so it can't supersede the card it's resolving.
 function isHumanReply(msg: ChatMessage): boolean {
-  return parseMessageBlocks(msg).some(
-    (b) => b.type === "text" && typeof b.content === "string" && b.content.trim().length > 0,
-  );
+  return parseMessageEntries(msg).some((b) => b.type === "text" && b.content.trim().length > 0);
 }
 
 // The newest still-actionable submission: the specialist's latest submit_output
@@ -103,10 +101,8 @@ export function findActiveSubmission(
   let active: { messageId: string; payload: Record<string, unknown> } | null = null;
   for (const msg of messages) {
     if (msg.role === "assistant") {
-      const card = parseMessageBlocks(msg).find((b) => b.type === "submission_card");
-      if (card?.payload && typeof card.payload === "object") {
-        active = { messageId: msg.id, payload: card.payload as Record<string, unknown> };
-      }
+      const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
+      if (card) active = { messageId: msg.id, payload: card.payload };
     } else if (msg.role === "user" && active && isHumanReply(msg)) {
       active = null;
     }
@@ -121,10 +117,8 @@ export function findLastSubmission(messages: ChatMessage[]): Record<string, unkn
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
-    const card = parseMessageBlocks(msg).find((b) => b.type === "submission_card");
-    if (card?.payload && typeof card.payload === "object") {
-      return card.payload as Record<string, unknown>;
-    }
+    const card = parseMessageEntries(msg).find((b) => b.type === "submission_card");
+    if (card) return card.payload;
   }
   return null;
 }
@@ -133,7 +127,7 @@ export function findLastSubmission(messages: ChatMessage[]): Record<string, unkn
 // `handback_approved` block with no later submission superseding it).
 export function hasPendingApprovalConfirmation(messages: ChatMessage[]): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const blocks = parseMessageBlocks(messages[i]);
+    const blocks = parseMessageEntries(messages[i]);
     if (blocks.some((b) => b.type === "handback_approved")) return true;
     if (blocks.some((b) => b.type === "submission_card")) return false;
   }
@@ -148,14 +142,13 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       turnId={trace.turnId ?? null}
       summary={trace.traceSummary}
       onOpen={onOpen}
-      compact
     />
   ) : null;
 }
 
 function renderSubagents(
   subagents: TraceSnapshot["summary"]["subagents"],
-  onOpenSubagentTrace: ((node: DelegatedSubagentNode) => void) | undefined,
+  onOpenSubagentTrace: ((node: TraceSubagentSummary) => void) | undefined,
   activeTraceTarget: TraceDrawerTarget | null | undefined,
   subagentIconByName: ReadonlyMap<string, string | null> | undefined,
 ) {
@@ -179,7 +172,7 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
     if (row.kind !== "agent") continue;
     for (const message of row.messages) {
       if (!message.turnId) continue;
-      for (const part of parseMessageBlocks(message)) {
+      for (const part of parseMessageEntries(message)) {
         if (part.type !== "text" || part.blockIx === undefined) continue;
         index.set(`${message.turnId}:${part.blockIx}`, row);
       }
@@ -194,25 +187,13 @@ function indexPersistedTextRows(rows: ChatRow[]): Map<string, ChatRow> {
 function turnCopyText(messages: ChatMessage[]): string {
   const parts: string[] = [];
   for (const m of messages) {
-    for (const b of parseMessageBlocks(m)) {
-      if (b.type === "text" && typeof b.content === "string" && b.content.trim()) {
+    for (const b of parseMessageEntries(m)) {
+      if (b.type === "text" && b.content.trim()) {
         parts.push(b.content);
       }
     }
   }
   return parts.join("\n\n");
-}
-
-// The streaming-activity indicator shown when the running turn has no text tail
-// to ride on — between text blocks, during a tool call, or before the first
-// token. Mirrors the live caret's breathing dot (globals.css) as a standalone
-// element so the turn never reads as idle while Stop is still showing.
-function LiveActivityDot() {
-  return (
-    <div className="py-1" role="status" aria-label="Working">
-      <span className="rome-live-activity-dot" />
-    </div>
-  );
 }
 
 // Stable row keys preserve inline-card drafts when the live block moves on or
@@ -233,7 +214,7 @@ const RowView = memo(function RowView({
   actions: BlockActions;
   onOpenLiveTrace: () => void;
   onOpenStoredTrace: (target: TraceDrawerTarget) => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   feedback?: boolean;
@@ -263,19 +244,16 @@ const RowView = memo(function RowView({
   // Running turn: its persisted trace isn't written yet, so the live trace button
   // carries it. Settled turn: its stored trace.
   const subtitle = live ? (
-    <CollapsedTraceButton
-      summary={live.snapshot?.summary}
-      segments={live.snapshot?.segments}
-      onClick={onOpenLiveTrace}
-      live
-      compact
-    />
+    <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live />
   ) : row.trace ? (
     renderTrace(row.trace, onOpenStoredTrace)
   ) : undefined;
   // Copy appears once the turn settles (`live` gone) and only when it produced
   // text — a card-only turn has nothing raw to copy.
   const copyText = live ? "" : turnCopyText(row.messages);
+  // A row can group commentary and a final answer, so use its last saved message.
+  const createdAt = live ? undefined : row.messages.at(-1)?.createdAt;
+  const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
   // Feedback rides the same settled action row; it needs the turn identity.
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
@@ -283,7 +261,7 @@ const RowView = memo(function RowView({
   const showBranch = showFeedback && summary?.turnStatus === "completed";
   const subagents = summary?.subagents;
   const recapMessageId = row.messages.find((message) =>
-    parseMessageBlocks(message).some((block) => block.type === "turn_recap"),
+    parseMessageEntries(message).some((block) => block.type === "turn_recap"),
   )?.id;
   return (
     <MessageRow
@@ -297,22 +275,62 @@ const RowView = memo(function RowView({
         subagentIconByName,
       )}
       className="group"
+      footer={
+        copyText || showFeedback || timestamp ? (
+          // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
+          // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
+          // the row visible while the feedback draft is open (its popover is
+          // portaled, so group-focus-within can't see it) and once a rating is
+          // recorded.
+          <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
+            {copyText ? <CopyMessageButton text={copyText} /> : null}
+            {showFeedback && feedbackTurn?.turnId ? (
+              <TurnFeedbackButtons
+                key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
+                sessionId={feedbackTurn.sessionId}
+                turnId={feedbackTurn.turnId}
+              />
+            ) : null}
+            {showBranch && feedbackTurn?.turnId ? (
+              <TurnBranchButton
+                key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
+                sessionId={feedbackTurn.sessionId}
+                turnId={feedbackTurn.turnId}
+              />
+            ) : null}
+            {timestamp ? (
+              <time dateTime={createdAt} className="ml-2 text-aux text-muted-foreground">
+                {timestamp}
+              </time>
+            ) : null}
+          </div>
+        ) : null
+      }
     >
       {row.messages.map((m) => {
-        const blocks = parseMessageBlocks(m);
+        const blocks = parseMessageEntries(m);
         if (m.id !== recapMessageId) {
           return (
-            <div key={m.id}>{renderFlatBlocks(blocks, { ...actions, sessionId: m.sessionId })}</div>
+            <div key={m.id} className="flex flex-col gap-1">
+              {renderFlatEntries(blocks, {
+                ...actions,
+                sessionId: m.sessionId,
+                turnId: m.turnId ?? undefined,
+                transcript: { live: !!live },
+              })}
+            </div>
           );
         }
 
         const recapIndex = blocks.findIndex((block) => block.type === "turn_recap");
         const recap = blocks[recapIndex];
         return (
-          <div key={m.id}>
-            {renderFlatBlocks(blocks.slice(0, recapIndex), {
+          <div key={m.id} className="flex flex-col gap-1">
+            {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
+              turnId: m.turnId ?? undefined,
+              transcript: { live: !!live },
             })}
             <TurnSummaryGroup
               plan={summary?.plan}
@@ -320,7 +338,7 @@ const RowView = memo(function RowView({
               recap={
                 recap?.type === "turn_recap"
                   ? {
-                      content: recap.content ?? "",
+                      content: recap.content,
                       audioUrl: recap.audioUrl,
                       audioMimeType: recap.audioMimeType,
                       audioDurationMs: recap.audioDurationMs,
@@ -328,9 +346,11 @@ const RowView = memo(function RowView({
                   : undefined
               }
             />
-            {renderFlatBlocks(blocks.slice(recapIndex + 1), {
+            {renderFlatEntries(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
+              turnId: m.turnId ?? undefined,
+              transcript: { live: !!live },
             })}
           </div>
         );
@@ -339,46 +359,31 @@ const RowView = memo(function RowView({
         // rome-live-caret appends the pulsing live dot after the last rendered
         // character (see globals.css).
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
+          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+            ...actions,
+            turnId: live.runningTurnId ?? undefined,
+            transcript: { live: true },
+          })}
         </div>
-      ) : live ? (
-        // Streaming with no text tail (tool call / block gap): keep the
-        // breathing dot alive on its own so the turn never reads as idle. A
-        // live Plan already carries its own animated state marker.
-        summary?.plan?.steps.length ? null : (
-          <LiveActivityDot />
-        )
+      ) : null}
+      {live ? (
+        <LiveTurnActivity
+          snapshot={live.snapshot}
+          textThroughOrdinal={live.textThroughOrdinal}
+          hasText={!!live.text}
+          entranceKey={typingEntranceKey(live)}
+        />
       ) : null}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
-      {copyText || showFeedback ? (
-        // Settled-turn action row: copy + feedback + side-chat branch.
-        // Hover-revealed on
-        // pointer devices, always visible on touch — mirrors the affordance
-        // under the guardian's own bubbles. `has-[[aria-pressed=true]]` keeps
-        // the row visible while the feedback draft is open (its popover is
-        // portaled, so group-focus-within can't see it) and once a rating is
-        // recorded.
-        <div className="-ml-2 mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
-          {copyText ? <CopyMessageButton text={copyText} /> : null}
-          {showFeedback && feedbackTurn?.turnId ? (
-            <TurnFeedbackButtons
-              key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-              sessionId={feedbackTurn.sessionId}
-              turnId={feedbackTurn.turnId}
-            />
-          ) : null}
-          {showBranch && feedbackTurn?.turnId ? (
-            <TurnBranchButton
-              key={`branch:${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
-              sessionId={feedbackTurn.sessionId}
-              turnId={feedbackTurn.turnId}
-            />
-          ) : null}
-        </div>
-      ) : null}
     </MessageRow>
   );
 });
+
+// The typing bubble pops in again each time the agent goes back to work after
+// a text block, so its key moves with the text it follows.
+function typingEntranceKey(live: LivePreview): string {
+  return `${live.runningTurnId ?? "no-turn"}:typing:${live.textThroughOrdinal ?? -1}`;
+}
 
 // A block without an agent row at its transcript position carries its own header.
 // Persisted cards stay in RowView so their local state survives the handoff.
@@ -393,7 +398,7 @@ function StandaloneLiveTail({
   live: LivePreview;
   actions: BlockActions;
   onOpenLiveTrace: () => void;
-  onOpenSubagentTrace?: (node: DelegatedSubagentNode) => void;
+  onOpenSubagentTrace?: (node: TraceSubagentSummary) => void;
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
 }) {
@@ -402,13 +407,7 @@ function StandaloneLiveTail({
       name={live.identity.name}
       avatar={<AgentAvatar iconUrl={live.identity.iconUrl} label={live.identity.name} />}
       subtitle={
-        <CollapsedTraceButton
-          summary={live.snapshot?.summary}
-          segments={live.snapshot?.segments}
-          onClick={onOpenLiveTrace}
-          live
-          compact
-        />
+        <CollapsedTraceButton summary={live.snapshot?.summary} onClick={onOpenLiveTrace} live />
       }
       headerAccessory={renderSubagents(
         live.snapshot?.summary.subagents,
@@ -419,13 +418,19 @@ function StandaloneLiveTail({
     >
       {live.text ? (
         <div className="rome-live-caret">
-          {renderFlatBlocks([{ type: "text", content: live.text }], actions)}
+          {renderFlatEntries([{ type: "text", content: live.text, blockIx: live.blockIx ?? 0 }], {
+            ...actions,
+            turnId: live.runningTurnId ?? undefined,
+            transcript: { live: true },
+          })}
         </div>
-      ) : live.snapshot?.summary.plan?.steps.length ? null : (
-        // No text persisted yet (turn just opened, or first phase is a tool
-        // call): the breathing dot stands in for the missing tail.
-        <LiveActivityDot />
-      )}
+      ) : null}
+      <LiveTurnActivity
+        snapshot={live.snapshot}
+        textThroughOrdinal={live.textThroughOrdinal}
+        hasText={!!live.text}
+        entranceKey={typingEntranceKey(live)}
+      />
       <TurnSummaryGroup plan={live.snapshot?.summary.plan} live />
     </MessageRow>
   );
@@ -496,6 +501,7 @@ export function MessageList({
   actions,
   feedback,
 }: MessageListProps) {
+  const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
   const sourceText = live.sourceText ?? live.text;
@@ -535,9 +541,9 @@ export function MessageList({
       />
     ) : null;
 
-  return (
+  const content = (
     <div className="flex-1">
-      <div ref={contentRef} className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
+      <div ref={contentRef} data-chat-transcript className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
         {rows.flatMap((row) => {
           const isRunning = row === runningRow;
           const view = (
@@ -568,7 +574,7 @@ export function MessageList({
             ) : (
               node
             );
-          if (!selection?.active) return [anchored(view, row.key), tail];
+          if (!selection) return [anchored(view, row.key), tail];
           const { turnId, sessionId } = rowTurnRef(row);
           if (!turnId || sessionId !== selection.selectableSessionId) {
             // Not selectable (child-session row, or no turn): still dim it so the
@@ -595,5 +601,10 @@ export function MessageList({
         {!anchorRow ? standalone : null}
       </div>
     </div>
+  );
+  return (
+    <ChatCodeBlockStateContext.Provider value={codeBlockDisclosureState}>
+      {content}
+    </ChatCodeBlockStateContext.Provider>
   );
 }

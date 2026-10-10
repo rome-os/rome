@@ -373,6 +373,7 @@ echo "dev-up: syncing node_modules (pnpm install --frozen-lockfile) ..."
 if ! docker compose -f compose.dev.yml -p "$SLUG" run --rm --no-deps -T -e CI=true rome pnpm install --frozen-lockfile \
   --filter @rome/core... \
   --filter @rome/discord-cli... \
+  --filter @rome-os/node... \
   --filter rome-web... \
   --filter @rome-os/app-web-sdk... \
   --filter @rome-os/app-runtime... \

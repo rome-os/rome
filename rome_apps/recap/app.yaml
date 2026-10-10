@@ -4,6 +4,7 @@ name: Recap
 icon: assets/icon.svg
 version: 0.1.1
 description: Spoken recaps for completed WebChat turns
+tagline: "Hear a spoken recap of every chat, hands-free."
 appRoot: dist
 
 web:
