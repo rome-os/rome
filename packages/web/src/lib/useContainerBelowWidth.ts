@@ -26,10 +26,11 @@ export function useContainerBelowWidth<T extends HTMLElement>(
     if (!element || typeof ResizeObserver === "undefined") return;
 
     const update = (width: number) => {
-      // A detached or `display:none` element measures 0; treat that as
-      // not-below so an off-screen panel never momentarily claims the compact
-      // layout (and flip back the instant it gets a real width).
-      setIsBelow(width > 0 && width < threshold);
+      // A detached or `display:none` element measures 0; keep the last
+      // layout. Flipping while hidden (e.g. an inactive workspace tab) would
+      // swap the layout's subtree and lose state such as the folder a compact
+      // file browser had drilled into.
+      if (width > 0) setIsBelow(width < threshold);
     };
 
     update(element.getBoundingClientRect().width);

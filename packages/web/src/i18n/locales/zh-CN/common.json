@@ -243,6 +243,7 @@
     "tools": "应用",
     "toolOpened": "已打开",
     "toolUpdated": "新内容",
+    "openToolNewTab": "在新标签页中打开{{name}}",
     "closeTool": "关闭{{name}}",
     "allTools": "所有已打开应用",
     "collapseTools": "收起应用",
