@@ -23,7 +23,7 @@ const scheduleTriggerSchema = z.object({
   tzMode: z
     .enum(["fixed", "floating"])
     .describe(
-      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast).",
+      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast). A one-off (a date, or neither date nor rrule) is always stored as 'fixed' and fires in tzid, so pass the guardian's real zone for it.",
     ),
   localTime: z.string().describe("Time of day in HH:mm format (24-hour)"),
   rrule: z

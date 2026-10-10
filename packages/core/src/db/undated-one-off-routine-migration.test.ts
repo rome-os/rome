@@ -12,11 +12,15 @@ const MIGRATION = readFileSync(
   "utf8",
 );
 
-function utcDate(offsetDays: number): string {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + offsetDays))
+function utcDate(at: Date, offsetDays: number): string {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate() + offsetDays))
     .toISOString()
     .slice(0, 10);
+}
+
+/** What the migration should pick for `localTime` if it ran at `at`. */
+function expectedDate(at: Date, localTime: string): string {
+  return localTime > at.toISOString().slice(11, 16) ? utcDate(at, 0) : utcDate(at, 1);
 }
 
 describe("undated one-off routine migration", () => {
@@ -39,7 +43,14 @@ describe("undated one-off routine migration", () => {
     insert.run("dated", dated, null);
     insert.run("manual", manual, null);
 
+    // SQLite reads its own clock, so accept the answer for either side of the run.
+    const before = new Date();
     sqlite.exec(MIGRATION);
+    const after = new Date();
+    const pendingDate = (localTime: string) => [
+      expectedDate(before, localTime),
+      expectedDate(after, localTime),
+    ];
 
     const triggers = Object.fromEntries(
       (
@@ -51,10 +62,9 @@ describe("undated one-off routine migration", () => {
     );
     const parsed = (id: string) => JSON.parse(triggers[id]) as Record<string, unknown>;
     expect(parsed("fired")).toMatchObject({ date: "2026-06-23", tzMode: "fixed" });
-    // 23:59 is still ahead today unless the test runs in that last minute.
-    const nowHm = new Date().toISOString().slice(11, 16);
-    expect(parsed("pending-late").date).toBe(nowHm < "23:59" ? utcDate(0) : utcDate(1));
-    expect(parsed("pending-early")).toMatchObject({ date: utcDate(1), tzMode: "fixed" });
+    expect(pendingDate("23:59")).toContain(parsed("pending-late").date);
+    expect(pendingDate("00:00")).toContain(parsed("pending-early").date);
+    expect(parsed("pending-early").tzMode).toBe("fixed");
     expect(parsed("blank-rrule").date).toBe(parsed("pending-late").date);
     expect(triggers.recurring).toBe(recurring);
     expect(triggers.dated).toBe(dated);
