@@ -11,6 +11,13 @@ export interface DeliveryCheck {
   conversation: string;
   /** The most a message may hold, in the characters the peer counts. */
   maxPartLength: number;
+  /**
+   * The agent's complete text differs from what streamed, so a message may
+   * correctly go back, as when it is edited to put right an edit whose answer
+   * was lost. The rules that assume the stream is the final text leave the
+   * reply out.
+   */
+  revised?: boolean;
 }
 
 type Rule = { id: string; check(input: DeliveryCheck): string | undefined };
@@ -66,9 +73,12 @@ const RULES: Rule[] = [
   },
   {
     // Holds for a codec whose preview is a prefix of its settled text, as plain
-    // text is.
+    // text is, and for a reply whose complete text is what streamed. A reply
+    // that revised the stream can put a message back, so its caller sets
+    // `revised` and the rule leaves it out.
     id: "text-never-goes-back",
-    check: ({ peer, conversation }) => {
+    check: ({ peer, conversation, revised }) => {
+      if (revised) return undefined;
       const texts = new Map<string, string[]>();
       for (const { message } of peer.changes(conversation)) {
         if (message.from !== "rome") continue;

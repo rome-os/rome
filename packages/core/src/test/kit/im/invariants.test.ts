@@ -140,6 +140,16 @@ describe("checkDelivery", () => {
     );
   });
 
+  it("leaves out a message going back when the caller says the complete text revised the stream", () => {
+    // An edit that was applied but whose answer was lost shows "Hello world", and the
+    // complete block then puts "Hello" back. That is correct, so the caller says so.
+    const { store, input } = reply({ source: "Hello", sent: ["Hello"] });
+    store.edit("1", "Hello world");
+    store.edit("1", "Hello");
+    expect(verdicts(input)["text-never-goes-back"]).toBe(false);
+    expect(verdicts({ ...input, revised: true })["text-never-goes-back"]).toBe(true);
+  });
+
   it("judges the reply's text only when the reply was delivered", () => {
     const { input } = reply({ source: "one. two.", sent: ["one. "], shown: ["one."] });
     const partial: ReplyOutcome = { ...input.outcome, status: "partial" };

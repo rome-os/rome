@@ -87,7 +87,7 @@ Each rule reads what the peer shows, not what the engine believes. A platform ma
 | `one-message-per-part` | The platform shows one message per accepted part, so no create was repeated |
 | `receipts-name-what-is-shown` | Every receipt names a message that shows the part's text |
 | `every-message-fits` | No message exceeds the platform's limit |
-| `text-never-goes-back` | Each edit of a message extends the text it showed before |
+| `text-never-goes-back` | Each edit of a message extends the text it showed before. Holds when the complete text is what streamed, so a caller whose run revised the stream passes `revised` and the rule leaves it out |
 
 ## Add a platform
 
