@@ -5011,27 +5011,48 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
+      let sessionParams: ModelSessionParams | undefined;
+      let keyDuringTurn: string | undefined;
+      const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
+        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
+        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
+          "demo_action",
+          "send_message",
+        ]);
+        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
+          /Unknown action: internal_action/,
+        );
+        executionWasRejected = true;
+        yield { type: "result", content: "Done" };
+      });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (params) {
-          expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-            "demo_action",
-            "send_message",
-          ]);
-          await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-            /Unknown action: internal_action/,
-          );
-          executionWasRejected = true;
-          yield { type: "result", content: "Done" };
-        }),
+        openSession: async (params) => {
+          sessionParams = params;
+          return openFromRun(params);
+        },
       };
       const runner = createRunner(provider);
 
-      await collectMessages(runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }));
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+      );
 
       expect(executionWasRejected).toBe(true);
+      // The activation key is scoped by the same turn id the stream reports,
+      // which is how the webchat drain derives the card's key.
+      const turnStart = messages.find((m) => m.type === "turn_start") as
+        | { turnId: string }
+        | undefined;
+      expect(turnStart).toBeDefined();
+      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
+      // propose_routine's auto-enable gate mirrors the same allow-list.
+      const gate = sessionParams?.routineActivation;
+      expect(gate?.canCallAction("demo_action")).toBe("permitted");
+      expect(gate?.canCallAction("internal_action")).toBe("denied");
+      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {

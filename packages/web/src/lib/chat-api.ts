@@ -604,22 +604,59 @@ export async function createRoutine(payload: CreateRoutinePayload): Promise<Crea
   return { ok: false, status: res.status, error: row?.error };
 }
 
-/** Identity fields of existing routines, used by the draft card to find the
- * routine it already created (so a reload links to it instead of offering to
- * create a duplicate). */
+/** Identity and state of existing routines, used by the routine card to find
+ * the routine it created (so a reload links to it instead of offering to
+ * create a duplicate) and to show whether it is paused. */
 export interface RoutineRef {
   id: string;
   name: string;
   key: string | null;
+  enabled: boolean;
 }
 
-export async function listRoutineRefs(): Promise<RoutineRef[]> {
-  const res = await fetch("/api/routines", { credentials: "include" });
-  if (!res.ok) return [];
-  const rows = (await res.json().catch(() => [])) as Array<Partial<RoutineRef>>;
+/** Null when the list can't be loaded, so a failed fetch never reads as "the
+ * routine is gone". */
+export async function listRoutineRefs(): Promise<RoutineRef[] | null> {
+  const res = await fetch("/api/routines", { credentials: "include" }).catch(() => null);
+  if (!res?.ok) return null;
+  const rows = (await res.json().catch(() => null)) as Array<Partial<RoutineRef>> | null;
+  if (!Array.isArray(rows)) return null;
   return rows.flatMap((r) =>
-    typeof r.id === "string" ? [{ id: r.id, name: r.name ?? "", key: r.key ?? null }] : [],
+    typeof r.id === "string"
+      ? [{ id: r.id, name: r.name ?? "", key: r.key ?? null, enabled: r.enabled !== false }]
+      : [],
   );
+}
+
+export interface RoutineMutationResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function routineMutation(
+  id: string,
+  init: RequestInit,
+  fallback: string,
+): Promise<RoutineMutationResult> {
+  const res = await fetch(`/api/routines/${encodeURIComponent(id)}`, {
+    credentials: "include",
+    ...init,
+  }).catch(() => null);
+  if (res?.ok) return { ok: true };
+  const payload = (await res?.json().catch(() => null)) as { error?: string } | null;
+  return { ok: false, error: payload?.error ?? fallback };
+}
+
+export function setRoutineEnabled(id: string, enabled: boolean): Promise<RoutineMutationResult> {
+  return routineMutation(
+    id,
+    { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ enabled }) },
+    enabled ? "Couldn't resume the routine." : "Couldn't pause the routine.",
+  );
+}
+
+export function deleteRoutine(id: string): Promise<RoutineMutationResult> {
+  return routineMutation(id, { method: "DELETE" }, "Couldn't delete the routine.");
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<boolean> {

@@ -129,6 +129,29 @@ export interface FacadeParams {
    * thread to wake (e.g. keyless validation runs).
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /**
+   * Lets `propose_routine` with `activate: true` create the routine itself.
+   * Absent → auto-enable is unavailable and the draft card is shown instead.
+   */
+  routineActivation?: RoutineActivationGate;
+}
+
+/** What `propose_routine` checks before it creates a routine without the
+ * guardian's click. */
+export interface RoutineActivationGate {
+  /** Whether this session's agent may call `name` itself — the same allow-list
+   * check `executeAction` enforces. Auto-enable needs both `create_routine` and
+   * the target action, so it never schedules anything the agent couldn't
+   * already schedule by calling `create_routine` directly. */
+  canCallAction(name: string): "permitted" | "denied" | "unknown";
+  /** The target action's input-schema check on the routine's args — the same
+   * one `POST /api/routines` runs for the card's "Turn it on". Null when the
+   * args fit. */
+  validateArgs(actionName: string, args: Record<string, unknown>): string | null;
+  /** The key to create this tool call's routine with — derived from the
+   * current Rome turn, the same way the webchat drain derives the card's key.
+   * Undefined when no turn is running. */
+  routineKeyFor(toolUseId: string): string | undefined;
 }
 
 interface ActionArgumentSummary {
@@ -698,6 +721,9 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.interactiveSurfaceDetached ?? false,
       !!params.handback,
       params.executeDefer,
+      params.routineActivation
+        ? { ...params.routineActivation, executeAction: params.executeAction }
+        : undefined,
     ),
   };
 }
@@ -709,6 +735,103 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
 
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
+
+type ActivationDeps = RoutineActivationGate & {
+  executeAction: (name: string, input: unknown) => Promise<unknown>;
+};
+
+const CREATE_ROUTINE_ACTION = "create_routine";
+
+/** Create the drafted routine enabled, on the guardian's explicit instruction.
+ * The routine goes through the agent's own `create_routine` call (same
+ * allow-list, validation and attribution as a direct call); the target must be
+ * an action the agent may call too. Without that permission, it falls back to
+ * the draft card, so the guardian's click stays the gate.
+ *
+ * The routine's key comes from the turn and the tool call (`routineKeyFor`), so
+ * the webchat drain derives the card's key on its own and never takes a
+ * routine identity from the tool's output. A non-error result means "show a
+ * card"; whether that card is On or a draft is settled by the card's lookup. */
+async function activateRoutineDraft(
+  draft: import("@rome-os/app-runtime").RoutineDraftSpec,
+  toolUseId: string | undefined,
+  deps: ActivationDeps | undefined,
+): Promise<FacadeToolResult> {
+  const text = (t: string, isError?: true): FacadeToolResult => ({
+    content: [{ type: "text", text: t }],
+    ...(isError ? { isError } : {}),
+  });
+  const uncertain = (detail: string) =>
+    text(
+      `create_routine did not confirm the routine (${detail}), so it may or may not exist. Its card was shown and reflects what was saved — do NOT call propose_routine or any create action again. Tell the guardian to check the card, then end your turn.`,
+    );
+  const fallback = (reason: string) =>
+    text(
+      `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
+    );
+
+  if (!deps) return fallback("auto-enable is not available in this session");
+  const routineKey = toolUseId ? deps.routineKeyFor(toolUseId) : undefined;
+  if (!routineKey) return fallback("this tool call has no id to key the routine by");
+  const target = deps.canCallAction(draft.actionName);
+  if (target === "unknown") {
+    return text(
+      `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
+      true,
+    );
+  }
+  if (target === "denied") {
+    return fallback(`"${draft.actionName}" is not an action you are permitted to call`);
+  }
+  if (deps.canCallAction(CREATE_ROUTINE_ACTION) !== "permitted") {
+    return fallback("you are not permitted to create routines directly");
+  }
+
+  // create_routine checks only that the target exists; run the same args check
+  // the card's "Turn it on" gets, so an auto-enabled routine can't be saved
+  // with args that fail on every fire.
+  const argsError = deps.validateArgs(draft.actionName, draft.args);
+  if (argsError) {
+    return text(
+      `The routine was NOT created and no card was shown: ${argsError}. Fix the args and call propose_routine again.`,
+      true,
+    );
+  }
+
+  let result: unknown;
+  try {
+    result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
+      key: routineKey,
+      name: draft.name,
+      trigger: draft.trigger,
+      actionName: draft.actionName,
+      args: draft.args,
+    });
+  } catch (err) {
+    // A throw (an RPC failure, an aborted turn) doesn't say whether the row
+    // was saved. Don't report "not created": the agent would retry under a new
+    // key and could leave a second live routine. Show the card instead; its
+    // lookup by key shows whether the routine exists.
+    return uncertain(err instanceof Error ? err.message : String(err));
+  }
+  const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
+  // The key is this call's own, so "already exists" means its routine was saved
+  // (e.g. the card's Turn it on won a race after a stopped turn). The wording is
+  // pinned by create_routine's duplicate-key test.
+  if (r.status === "error" && typeof r.error === "string" && /already exists/.test(r.error)) {
+    return uncertain(r.error);
+  }
+  if (r.status === "error" || typeof r.routineId !== "string") {
+    const error = typeof r.error === "string" ? r.error : "create_routine returned no routineId";
+    return text(
+      `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
+      true,
+    );
+  }
+  return text(
+    `Routine "${draft.name}" is on (id ${r.routineId}). The guardian can pause or delete it from the Routines page. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+  );
+}
 
 const CONFIRM_OUTPUT_DIRECTIVE =
   "The guardian's approval has been recorded — the result you last submitted is being handed back now, exactly as if they had clicked Approve. Reply with one short line confirming it's shipping, then end your turn. Do not call submit_output or confirm_output again.";
@@ -1066,6 +1189,7 @@ function buildInteractiveTools(
   interactiveSurfaceDetached: boolean,
   hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
+  activation?: ActivationDeps,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1183,7 +1307,7 @@ function buildInteractiveTools(
   tools.push({
     name: "propose_routine",
     description:
-      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). The card shows a plain-language summary and a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
     inputSchema: {
       type: "object",
       required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -1273,9 +1397,14 @@ function buildInteractiveTools(
           type: "object",
           description: "A single argument object for the action. Not an array.",
         },
+        activate: {
+          type: "boolean",
+          description:
+            "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
+        },
       },
     },
-    handler: async (input) => {
+    handler: async (input, context) => {
       const result = normalizeRoutineDraftForCard(input);
       if (!result.ok) {
         return { content: [{ type: "text", text: result.error }], isError: true };
@@ -1292,6 +1421,9 @@ function buildInteractiveTools(
           ],
           isError: true,
         };
+      }
+      if (input.activate === true) {
+        return activateRoutineDraft(result.draft, context?.toolUseId, activation);
       }
       return { content: [{ type: "text", text: PROPOSE_ROUTINE_DIRECTIVE }] };
     },
