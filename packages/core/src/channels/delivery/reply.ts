@@ -47,7 +47,8 @@ export interface ReplyOutcome {
   /**
    * `delivered`: every part settled. `partial`: some parts were accepted
    * before a failure. `failed`: none was. `unknown`: a create may or may not
-   * have happened. `stopped`: the run was stopped.
+   * have happened, even when the reply was then stopped. `stopped`: the run
+   * was stopped.
    */
   status: "delivered" | "partial" | "failed" | "unknown" | "stopped";
   parts: DeliveredPart[];
@@ -139,12 +140,13 @@ const MAX_UNKNOWN_EDITS = 3;
  *   last acknowledged, and only a successful edit settles it. The text that
  *   edit carried counts as shown, so no later part ends before it. If the
  *   block then ends with nothing to put back, the reply is `unknown`.
- * - A platform's rate limit pauses the account. A reply waits out at most a
- *   minute of them in all, and then fails `rate-limited`.
+ * - A platform's rate limit pauses the account for the time it names, even
+ *   when the reply gives up on it. A reply waits out at most a minute of them
+ *   in all, and then fails `rate-limited`.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
  * - After `stop()`, nothing new is written. A write already running finishes
- *   and is reported.
+ *   and is reported, and a create whose result is unknown stays `unknown`.
  *
  * The run's events go to `accept()`. `finish()` closes the reply once the run
  * ends and resolves when every write has finished.
@@ -552,14 +554,15 @@ export class ReplyDelivery {
   private handle(failure: DeliveryFailure): void {
     if (failure.kind === "rate-limited") {
       const wait = failure.retryAfterMs ?? 1000;
+      // A platform's answer does not say whose limit it hit, so the whole
+      // account waits. It does so when the reply gives up too, since a send the
+      // caller makes next would run into the same window.
+      this.options.pacer.pause(wait);
       if (this.rateLimitedMs + wait > MAX_RATE_LIMIT_WAIT_MS) {
         this.fail({ kind: "rate-limited", message: failure.message });
         return;
       }
       this.rateLimitedMs += wait;
-      // A platform's answer does not say whose limit it hit, so the whole
-      // account waits.
-      this.options.pacer.pause(wait);
       return;
     }
     this.fail({ kind: failure.kind, message: failure.message });
@@ -581,15 +584,18 @@ export class ReplyDelivery {
       })),
     );
     const accepted = parts.some((part) => part.receipt);
-    const status: ReplyOutcome["status"] = this.abort.signal.aborted
-      ? "stopped"
-      : parts.some((part) => part.state === "unknown") || this.failure?.kind === "unknown"
+    // An unknown create ranks above a stop: a caller that decides whether to
+    // send again reads the status, and a second create could show the text twice.
+    const status: ReplyOutcome["status"] =
+      parts.some((part) => part.state === "unknown") || this.failure?.kind === "unknown"
         ? "unknown"
-        : this.failure
-          ? accepted
-            ? "partial"
-            : "failed"
-          : "delivered";
+        : this.abort.signal.aborted
+          ? "stopped"
+          : this.failure
+            ? accepted
+              ? "partial"
+              : "failed"
+            : "delivered";
     return { status, parts, ...(this.failure ? { failure: this.failure } : {}) };
   }
 }

@@ -407,6 +407,28 @@ describe("ReplyDelivery", () => {
     expect(outcome.status).toBe("stopped");
   });
 
+  it("reports a create whose result is unknown as unknown, even when the reply was stopped", async () => {
+    // The create is in flight when the stop comes, and its answer is lost.
+    let release!: () => void;
+    platform.hold = new Promise((resolve) => (release = resolve));
+    platform.failures.push({
+      write: "create",
+      failure: new DeliveryFailure("unknown", "the answer was lost"),
+    });
+    const delivery = reply({ editIntervalMs: 0 });
+    delivery.accept(delta("Hello"));
+    await advance(0);
+    const stopping = delivery.stop();
+    release();
+    platform.hold = undefined;
+    const outcome = await stopping;
+
+    // A caller that decides whether to send again reads the status, and a second
+    // create could show the text twice.
+    expect(outcome.status).toBe("unknown");
+    expect(outcome.parts).toEqual([expect.objectContaining({ state: "unknown" })]);
+  });
+
   it("fails rather than holding more unsent text than its bound", async () => {
     const delivery = reply({ mode: "edit", maxPendingChars: 10 });
     delivery.accept(delta("more than ten characters"));
@@ -699,6 +721,33 @@ describe("ReplyDelivery", () => {
 
       expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
       expect(platform.messages).toHaveLength(0);
+    });
+
+    it("still pauses the account for a limit it gave up on", async () => {
+      limited(120_000, 1);
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(result("Hello"));
+      const outcome = await delivery.finish();
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+
+      // The caller sends the reply whole through the same account. The platform
+      // named the window, so that send waits it out, as does every other write.
+      let sent = false;
+      const whole = pacer.run("c1", async () => {
+        sent = true;
+      });
+      await advance(60_000);
+      expect(sent).toBe(false);
+      await advance(61_000);
+      await whole;
+      expect(sent).toBe(true);
     });
 
     it("fails the reply when its waits add up past what it will hold a reply for", async () => {
