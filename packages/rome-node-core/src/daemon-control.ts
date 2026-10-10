@@ -127,7 +127,19 @@ export async function stopDaemon(config: NodeConfig): Promise<void> {
     const legacy = await legacyRequest(state, "/status").catch(() => null);
     if (legacy?.pid === state.pid) {
       await legacyRequest(state, "/stop");
-    } else return;
+    } else {
+      // An older RPC daemon only accepts daemon.stop after a hello in its own protocol version.
+      const older =
+        typeof state.protocolVersion === "number"
+          ? await connectRpc(state, undefined, state.protocolVersion).catch(() => null)
+          : null;
+      if (!older) return;
+      try {
+        await older.rpc.request("daemon.stop", {}, 5000);
+      } finally {
+        older.rpc.close();
+      }
+    }
   } else {
     const found = await findDaemon(config);
     if (!found) return;

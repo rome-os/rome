@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { DeviceConnector } from "./connector.js";
 import type { GatewayClientOptions } from "./client.js";
 import type { OutboundEnvelope } from "./protocol.js";
+import { decodeMeta, encodeMeta, FRAME_TYPE, type Frame } from "./frame.js";
+
+const device = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const other = "16fd2706-8baf-433b-82eb-8c7fada847da";
 
 const connectors: DeviceConnector[] = [];
 afterEach(() => {
@@ -21,12 +25,17 @@ function fixture(waitMs = 1000) {
     );
   let options!: GatewayClientOptions;
   const sent: OutboundEnvelope[] = [];
+  const frames: Frame[] = [];
   const connect = rs.fn((value: GatewayClientOptions) => {
     options = value;
     queueMicrotask(() => value.onStatus?.("online"));
     return {
       send: (message: OutboundEnvelope) => {
         sent.push(message);
+        return true;
+      },
+      sendFrame: (frame: Frame) => {
+        frames.push(frame);
         return true;
       },
       stop: () => value.onStatus?.("stopped"),
@@ -38,7 +47,7 @@ function fixture(waitMs = 1000) {
     waitMs,
   });
   connectors.push(connector);
-  return { connector, connect, fetch, sent, options: () => options };
+  return { connector, connect, fetch, sent, frames, options: () => options };
 }
 
 describe("CLI device connector", () => {
@@ -107,5 +116,72 @@ describe("CLI device connector", () => {
     f.connector.stop();
     expect(await pending).toMatchObject({ error: { code: "unknown_outcome" } });
     expect(f.sent).toHaveLength(2);
+  });
+
+  it("sends binary requests as frames and matches replies by request ID and sender", async () => {
+    const f = fixture();
+    const input = Uint8Array.from([0, 255, 10]);
+    const pending = f.connector.runBinary(device.toUpperCase(), "exec", { command: "cat" }, input);
+    await rs.waitFor(() => expect(f.frames).toHaveLength(1));
+    const request = f.frames[0];
+    expect(request).toMatchObject({ type: FRAME_TYPE.request, peer: device });
+    expect(decodeMeta(request.meta)).toEqual({
+      type: "request",
+      action: "exec",
+      args: { command: "cat" },
+    });
+    expect(request.body).toBe(input);
+    expect(f.sent).toEqual([]);
+    const done = rs.fn();
+    void pending.then(done);
+    const response = { type: "response", ok: true, result: { exitCode: 0 } };
+    const reply = (frame: Partial<Frame>) =>
+      f.options().onFrame?.({
+        type: FRAME_TYPE.response,
+        id: request.id,
+        peer: device,
+        meta: encodeMeta(response),
+        body: Uint8Array.from([1, 2]),
+        ...frame,
+      });
+    reply({ peer: other });
+    reply({ id: other });
+    reply({ type: FRAME_TYPE.request });
+    reply({ meta: encodeMeta({ type: "nonsense" }) });
+    f.options().onMessage({ id: request.id, from: device, payload: response });
+    await Promise.resolve();
+    expect(done).not.toHaveBeenCalled();
+    reply({ body: Uint8Array.from([0, 255]) });
+    const result = await pending;
+    expect(result.response).toEqual(response);
+    expect(Array.from(result.body)).toEqual([0, 255]);
+  });
+
+  it("maps binary route errors, rejects non-UUID targets, and reports unknown outcomes", async () => {
+    const f = fixture(300);
+    expect(await f.connector.runBinary("target", "exec", {}, new Uint8Array())).toMatchObject({
+      response: { ok: false, error: { code: "invalid_request" } },
+    });
+    expect(f.connect).not.toHaveBeenCalled();
+    const missing = f.connector.runBinary(device, "exec", {}, new Uint8Array());
+    await rs.waitFor(() => expect(f.frames).toHaveLength(1));
+    f.options().onFrame?.({
+      type: FRAME_TYPE.routeError,
+      id: f.frames[0].id,
+      peer: device,
+      meta: encodeMeta({ code: "target_unavailable" }),
+      body: new Uint8Array(),
+    });
+    const routed = await missing;
+    expect(routed.response).toMatchObject({ ok: false, error: { code: "target_unavailable" } });
+    expect(routed.body.byteLength).toBe(0);
+    expect(
+      (await f.connector.runBinary(device, "exec", {}, new Uint8Array())).response,
+    ).toMatchObject({ ok: false, error: { code: "unknown_outcome" } });
+    const lost = f.connector.runBinary(device, "exec", {}, new Uint8Array());
+    await rs.waitFor(() => expect(f.frames).toHaveLength(3));
+    f.options().onStatus?.("retrying");
+    expect((await lost).response).toMatchObject({ error: { code: "unknown_outcome" } });
+    expect(f.frames).toHaveLength(3);
   });
 });

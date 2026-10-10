@@ -8,6 +8,12 @@ export type ActionResponse =
   | { type: "response"; ok: true; result: unknown }
   | { type: "response"; ok: false; error: { code: string; message: string } };
 
+/** Response of a binary request. The body holds output bytes and is empty for every failure. */
+export interface BinaryActionResult {
+  response: ActionResponse;
+  body: Uint8Array;
+}
+
 export function actionError(code: string, message: string): ActionResponse {
   return { type: "response", ok: false, error: { code, message } };
 }

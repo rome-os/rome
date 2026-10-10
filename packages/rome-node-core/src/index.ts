@@ -19,4 +19,18 @@ export {
   parseResponse,
   type ActionResponse,
   type ActionRequest,
+  type BinaryActionResult,
 } from "./actions.js";
+export {
+  FRAME_TYPE,
+  FRAME_VERSION,
+  decodeMeta,
+  encodeFrame,
+  encodeMeta,
+  isUuid,
+  parseFrame,
+  uuidBytes,
+  uuidString,
+  type Frame,
+  type FrameType,
+} from "./frame.js";

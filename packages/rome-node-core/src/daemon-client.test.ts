@@ -13,6 +13,7 @@ import {
   stopDaemon,
 } from "./daemon-client.js";
 import { writePrivateJson } from "./storage.js";
+import { DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -52,9 +53,14 @@ async function rpcFixture(
     pid: process.pid,
     port: f.config.port,
     token: `romenode_${"a".repeat(43)}`,
-    protocolVersion: 2,
+    protocolVersion: DAEMON_PROTOCOL_VERSION,
   });
-  const status = { pid: process.pid, protocolVersion: 2, connection: "online", token: "private" };
+  const status = {
+    pid: process.pid,
+    protocolVersion: DAEMON_PROTOCOL_VERSION,
+    connection: "online",
+    token: "private",
+  };
   let subscriptions = 0;
   sockets.on("connection", (socket) =>
     socket.on("message", async (data) => {
@@ -100,6 +106,52 @@ describe("caller client boundaries", () => {
     expect(stops).toBe(1);
   });
 
+  it("refuses an older RPC daemon and stops it with a hello in its own protocol version", async () => {
+    const f = await fixture((_req, res) => res.writeHead(426).end());
+    const sockets = new WebSocketServer({ server: f.server });
+    cleanup.push(async () => {
+      for (const socket of sockets.clients) socket.terminate();
+      await new Promise<void>((resolve) => sockets.close(() => resolve()));
+    });
+    await writePrivateJson(join(f.config.directory, "daemon.json"), {
+      pid: process.pid,
+      port: f.config.port,
+      token: `romenode_${"a".repeat(43)}`,
+      protocolVersion: 2,
+    });
+    const hellos: unknown[] = [];
+    let stops = 0;
+    sockets.on("connection", (socket) =>
+      socket.on("message", (data) => {
+        const request = JSON.parse(data.toString());
+        const reply = (body: object) =>
+          socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, ...body }));
+        if (request.method === "daemon.hello") {
+          hellos.push(request.params.protocolVersion);
+          if (request.params.protocolVersion !== 2)
+            reply({ error: { code: -32002, message: "Incompatible daemon protocol." } });
+          else reply({ result: { pid: process.pid, protocolVersion: 2, connection: "stopped" } });
+        } else if (request.method === "daemon.stop") {
+          stops++;
+          reply({ result: { stopped: true } });
+          setImmediate(() => {
+            for (const client of sockets.clients) client.terminate();
+            f.server.closeAllConnections();
+            f.server.close();
+          });
+        }
+      }),
+    );
+    const client = createNodeClient(f.config);
+    cleanup.push(async () => client.disconnect());
+    await expect(client.run("target", "system.info")).rejects.toBeInstanceOf(DaemonVersionError);
+    expect(stops).toBe(0);
+    await stopDaemon(f.config);
+    expect(stops).toBe(1);
+    expect(hellos).toContain(DAEMON_PROTOCOL_VERSION);
+    expect(hellos).toContain(2);
+  });
+
   it("restores subscriptions without replaying an action whose local response was lost", async () => {
     let requests = 0;
     const f = await rpcFixture((method, _params, socket) => {
@@ -120,12 +172,20 @@ describe("caller client boundaries", () => {
     expect(events).toEqual([
       {
         transport: "connected",
-        daemon: { pid: process.pid, protocolVersion: 2, connection: "online" },
+        daemon: {
+          pid: process.pid,
+          protocolVersion: DAEMON_PROTOCOL_VERSION,
+          connection: "online",
+        },
       },
       { transport: "disconnected", daemon: null, reason: "connection_lost" },
       {
         transport: "connected",
-        daemon: { pid: process.pid, protocolVersion: 2, connection: "online" },
+        daemon: {
+          pid: process.pid,
+          protocolVersion: DAEMON_PROTOCOL_VERSION,
+          connection: "online",
+        },
       },
     ]);
     expect(requests).toBe(1);
@@ -143,7 +203,7 @@ describe("caller client boundaries", () => {
     expect(requests).toBe(0);
     expect(await f.client.getConnectionStatus()).toEqual({
       pid: process.pid,
-      protocolVersion: 2,
+      protocolVersion: DAEMON_PROTOCOL_VERSION,
       connection: "online",
     });
     f.client.disconnect();

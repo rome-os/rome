@@ -27,6 +27,18 @@ const result = await client.run("device-id", "exec", {
   args: ["status"],
   cwd: "/workspace",
 });
+const { response, body } = await client.runBinary(
+  "device-id",
+  "exec",
+  { command: "gzip", args: ["-c"] },
+  input,
+);
+const copied = await client.copy({
+  direction: "push",
+  localPath: "/data/video.mp4",
+  deviceId: "device-id",
+  remotePath: "/tmp/video.mp4",
+});
 client.disconnect();
 ```
 
@@ -35,6 +47,25 @@ client.disconnect();
 Gateway connection. `connection` describes the caller connection to Gateway,
 not the online state of remote devices. `listDevices()` returns authorized
 devices without asserting that they are online.
+
+`runBinary(deviceId, action, args?, body?)` resolves to `{ response, body }`.
+It sends `body` as input bytes in a binary frame. For `exec`, the input is the
+program's stdin and the reply `body` is its raw stdout. Neither side is JSON or
+base64 encoded. `response` is the same `ActionResponse` as `run()`, and the exec
+result has no `stdout` field. Failures have an empty `body`. The device ID must
+be a UUID, and the input must fit in the 64 MiB local message limit. Gateway
+accepts at most 32 MiB per frame. A host version without binary frame support
+does not reply, and the call returns `unknown_outcome` after the wait limit.
+See [binary frames](../../docs/rome-node.md#binary-frames).
+
+`copy({ direction, localPath, deviceId, remotePath }, { onProgress? })` copies
+one file between the daemon's computer and a device. `direction` is `push` or
+`pull`, and `localPath` must be absolute. It resolves to `{ bytes, ms, sha256 }`
+after both sides verified the size and checksum. It throws `DeviceActionError`
+otherwise, and the destination stays unchanged. `onProgress` receives
+`{ bytes, total }` about four times per second. The copy has no total time limit
+and aborts after 60 seconds without progress or when the client disconnects.
+See [copying files](../../docs/rome-node.md#copying-files).
 
 `getDevicesStatus()` checks device reachability through read-only `system.info`
 requests through an existing daemon and returns `{ connection, checkedAt, devices }`.
@@ -144,7 +175,8 @@ where `expiresIn` is in seconds. It returns a `DeviceSession` after approval and
 rejects on denial, expiry, cancellation, or a terminal error. It opens no browser
 or callback listener. The callback receives neither the device code nor the access token.
 
-The host exposes `system.info` and `exec`. Programs run as the application's OS
+The host exposes `system.info` and `exec`, in text envelopes and in binary frames.
+It also accepts the internal file transfers that `copy()` uses. Programs run as the application's OS
 user. Connection loss terminates direct child processes on a best-effort basis.
 A local caller timeout does not cancel remote execution.
 

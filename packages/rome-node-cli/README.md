@@ -60,6 +60,27 @@ rome-node device describe <device-id>
 rome-node device run <device-id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'
 ```
 
+Copy a file to or from a device:
+
+```sh
+rome-node cp ./video.mp4 <device-id>:/tmp/video.mp4
+rome-node cp <device-id>:/tmp/video.mp4 ./video.mp4
+```
+
+The caller daemon and `rome-node connect` read and write the files with Node
+streams. The destination changes only after its size and SHA-256 checksum match.
+A failed copy leaves it unchanged and is safe to run again. To copy between two
+devices, copy to this computer first and then to the second device. Progress
+goes to stderr, and `{"bytes":...,"ms":...,"sha256":"..."}` goes to stdout. The
+device needs a rome-node version with file transfer support.
+
+To pass raw bytes to a program and read its raw stdout, add `--input` or `--output`
+to `device run`:
+
+```sh
+rome-node device run <device-id> exec --args '{"command":"gzip","args":["-c"]}' --input data.bin --output data.bin.gz
+```
+
 Use `rome-node <command> --help` or `-h` for command-specific help.
 Help includes action arguments, examples, output fields, and failure handling.
 It works offline without credentials and does not start the daemon.
@@ -76,10 +97,12 @@ After a connection loss it waits for the daemon and subscribes again; it does
 not restart a stopped daemon. Ctrl+C closes only the watcher. These events
 report the caller's Gateway connection, not remote device presence.
 
-Commands print JSON to stdout and diagnostics to stderr. Errors and nonzero
+Commands print JSON to stdout and diagnostics to stderr. With `--input` and no
+`--output <file>`, `device run` prints the program's raw stdout and moves the JSON
+response to stderr. Errors and nonzero
 remote exit codes produce a nonzero local exit status. Output is collected in memory
 and returned in full after program exit. Action message limits follow the WebSocket library and infrastructure.
-The local daemon disconnects event observers that exceed its send-buffer limit. A lost response reports
+The local daemon disconnects event observers that exceed its unsent event limit. A lost response reports
 `unknown_outcome`. Never automatically retry an unknown outcome.
 An authorized device is
 not necessarily online. Use `describe` to query its current platform and actions.
@@ -87,4 +110,4 @@ not necessarily online. Use `describe` to query its current platform and actions
 The CLI uses [`@rome-os/node-core`](../rome-node-core/README.md) for authorization,
 its shared caller daemon, and the computer host. The package also re-exports
 the Gateway client, socket adapter, and action response contract for compatibility. See [the device architecture and operating guide](../../docs/rome-node.md)
-for credential boundaries, file operations, output limits, and disconnection behavior.
+for credential boundaries, binary frames, file copies, output limits, and disconnection behavior.
