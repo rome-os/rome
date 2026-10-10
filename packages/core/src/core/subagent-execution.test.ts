@@ -236,7 +236,7 @@ describe("SubagentExecutionService", () => {
     expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.any(Object),
+      expect.objectContaining({ romeSessionId: "child-resume" }),
     );
     resumed.releases[0].resolve();
     await execution.completion;
