@@ -132,5 +132,32 @@ describe("telegramTransport", () => {
   it("reports a failed connection as unknown, since the write may have arrived", async () => {
     const failure = await failureOf(new HttpError("Network request failed", new Error("socket")));
     expect(failure).toMatchObject({ kind: "unknown", message: "Network request failed" });
+
+    // A reset or a timeout can come after the request was written.
+    for (const code of ["ECONNRESET", "ETIMEDOUT"])
+      expect(
+        await failureOf(
+          new HttpError("Network request failed", Object.assign(new Error(code), { code })),
+        ),
+      ).toMatchObject({ kind: "unknown" });
+  });
+
+  it("reports a connection that never opened as unavailable, since the write did not arrive", async () => {
+    for (const code of ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH"])
+      expect(
+        await failureOf(
+          new HttpError("Network request failed", Object.assign(new Error(code), { code })),
+        ),
+      ).toMatchObject({ kind: "unavailable" });
+
+    // A client that wraps the system error in a cause.
+    const wrapped = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.telegram.org"), {
+        code: "ENOTFOUND",
+      }),
+    });
+    expect(await failureOf(new HttpError("Network request failed", wrapped))).toMatchObject({
+      kind: "unavailable",
+    });
   });
 });

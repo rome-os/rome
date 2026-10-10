@@ -904,6 +904,21 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  it("fails, and does not report unknown, when the platform could not be reached", async () => {
+    // A write that certainly did not arrive may be sent again, so a caller can send the reply whole.
+    platform.failures.push({
+      write: "create",
+      failure: new DeliveryFailure("unavailable", "getaddrinfo ENOTFOUND"),
+    });
+    const delivery = reply({ editIntervalMs: 0 });
+    delivery.accept(result("Hello"));
+    const outcome = await delivery.finish();
+
+    expect(outcome).toMatchObject({ status: "failed", failure: { kind: "unavailable" } });
+    expect(outcome.parts).toEqual([]);
+    expect(platform.messages).toHaveLength(0);
+  });
+
   it("settles a preview as shown, and reports it differing, when its block completes with nothing visible", async () => {
     const delivery = reply({ editIntervalMs: 0 });
     delivery.accept(delta("Hello", "a"));

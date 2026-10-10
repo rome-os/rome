@@ -400,7 +400,13 @@ export class ReplyDelivery {
 
   /** The next write, or when to look again, or null when there is nothing
    *  to do until more text arrives. `now` decides waits; `ignoreWaits` plans
-   *  as though every wait were over. */
+   *  as though every wait were over.
+   *
+   *  It runs twice per write, once to choose it and once when the pacer lets
+   *  it run. It also brings the reply's bookkeeping up to date with the text,
+   *  such as what was passed over and which parts differ, and each of those
+   *  steps leaves a second run's state as it is. A step that did not would
+   *  make a write's turn change what the write does. */
   private plan(now: number, ignoreWaits = false): Plan {
     // Nothing is written before the reply finishes, so there is nothing to plan.
     if (this.mode === "final" && !this.closed) return null;

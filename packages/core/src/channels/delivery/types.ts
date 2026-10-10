@@ -101,12 +101,21 @@ export interface DeliveryTransport {
  *   since the platform does not say whose limit it hit.
  * - `unsupported`: the platform cannot do this at all (an edit it does not
  *   allow).
+ * - `unavailable`: the platform could not be reached, so the write certainly
+ *   did not arrive. It may be sent again, and a caller can send the reply
+ *   whole.
  * - `unknown`: the write may or may not have happened (a timeout, a lost
  *   answer). A create that ends this way is never repeated.
  */
 export class DeliveryFailure extends Error {
   constructor(
-    readonly kind: "rejected" | "unauthorized" | "rate-limited" | "unsupported" | "unknown",
+    readonly kind:
+      | "rejected"
+      | "unauthorized"
+      | "rate-limited"
+      | "unsupported"
+      | "unavailable"
+      | "unknown",
     message: string,
     readonly retryAfterMs?: number,
   ) {
