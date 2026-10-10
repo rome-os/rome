@@ -1,6 +1,6 @@
 import { Cron } from "croner";
 import type { TriggerProvider } from "./trigger-provider.js";
-import type { Routine, ScheduleTrigger } from "./types.js";
+import type { Routine, ScheduleTrigger, Trigger } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { withoutSessionActor } from "../lib/session-actor.js";
 import { createLogger } from "../logger.js";
@@ -259,4 +259,27 @@ function calendarDate(at: Date, tzid: string): string {
   }).formatToParts(at);
   const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
   return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
+/** Store "once at the next `localTime`" (a schedule with neither `date` nor
+ * `rrule`) as the dated one-off it is, pinned `fixed`. A `floating` request
+ * follows the guardian, so it is dated in, and pinned to, the guardian's zone.
+ * A blank `rrule` is dropped so a schedule never carries both fields. Every
+ * writer goes through this, so the scheduler only sees dated or recurring
+ * schedules. Expects a validated `localTime` and `tzid`. */
+export async function resolveOneOffDate(
+  trigger: Trigger,
+  guardianTimezone: () => Promise<string>,
+): Promise<Trigger> {
+  if (trigger.type !== "schedule") return trigger;
+  const { rrule, ...rest } = trigger;
+  const schedule: ScheduleTrigger = rrule?.trim() ? trigger : rest;
+  if (schedule.date || schedule.rrule) return schedule;
+  const tzid = schedule.tzMode === "floating" ? await guardianTimezone() : schedule.tzid;
+  return {
+    ...schedule,
+    tzid,
+    tzMode: "fixed",
+    date: nextDateForLocalTime(schedule.localTime, tzid),
+  };
 }

@@ -93,9 +93,10 @@ export interface CreateRoutineDeps {
    * fails the `actionEngine.run` lookup on every fire. Both the main process
    * and the action worker put a fully-populated registry in the action deps. */
   actionRegistry: ActionExistenceChecker;
-  /** The guardian's current timezone, the zone a `floating` schedule follows.
-   * Each process resolves it from its own settings. */
-  guardianTimezone: () => Promise<string>;
+  /** Core's resolver that stores "once at the next localTime" as a dated
+   * one-off, the same one POST /routines uses. Each process binds it to its own
+   * guardian-timezone setting. */
+  resolveOneOffDate: (trigger: Trigger) => Promise<Trigger>;
 }
 
 /** The single capability create_routine needs from the action registry: ask
@@ -207,41 +208,6 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
       ? { filter: trigger.filter.map((c) => ({ field: c.field.trim(), equals: c.equals })) }
       : {}),
   };
-}
-
-/** A schedule with neither `date` nor `rrule` fires once at the next
- * `localTime`. Store that as the dated one-off it is: the date of the next time
- * the clock reads `localTime`, pinned `fixed` like any dated one-off. A
- * `floating` request follows the guardian, so it is dated in, and pinned to,
- * the guardian's zone. Runs after validation, since it needs a valid
- * `localTime` and `tzid`. Mirrors `resolveOneOffDate` and
- * `nextDateForLocalTime` in core, which POST /routines uses; inlined because
- * app actions can't import core internals, so keep the two in sync. */
-async function withOneOffDate(
-  trigger: Trigger,
-  guardianTimezone: () => Promise<string>,
-): Promise<Trigger> {
-  if (trigger.type !== "schedule" || trigger.date || trigger.rrule) return trigger;
-  const tzid = trigger.tzMode === "floating" ? await guardianTimezone() : trigger.tzid;
-  const today = calendarDate(new Date(), tzid);
-  let date = today;
-  if (wallClockToUtc(today, trigger.localTime, tzid).getTime() <= Date.now()) {
-    const [year, month, day] = today.split("-").map(Number);
-    date = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
-  }
-  return { ...trigger, tzid, date, tzMode: "fixed" };
-}
-
-/** The "YYYY-MM-DD" calendar date of `at` in `tzid`. */
-function calendarDate(at: Date, tzid: string): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tzid,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(at);
-  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
-  return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
 /** Validate trigger fields per type. Returns an error string (for the agent to
@@ -467,7 +433,7 @@ export async function createRoutine(
   if (triggerError) {
     return { status: "error", error: triggerError };
   }
-  const trigger = await withOneOffDate(canonical, deps.guardianTimezone);
+  const trigger = await deps.resolveOneOffDate(canonical);
 
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is
@@ -529,8 +495,8 @@ export function createAction(
   if (typeof deps.actionRegistry?.has !== "function") {
     throw new Error("create_routine requires an actionRegistry dep with has()");
   }
-  if (typeof deps.guardianTimezone !== "function") {
-    throw new Error("create_routine requires a guardianTimezone dep");
+  if (typeof deps.resolveOneOffDate !== "function") {
+    throw new Error("create_routine requires a resolveOneOffDate dep");
   }
   return createCreateRoutineAction(config, deps);
 }

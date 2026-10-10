@@ -7,7 +7,8 @@ import { RoutinesRepository } from "../../../../../packages/core/src/db/reposito
 // reads whatever store we wrap the call in.
 import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
 import type { RoutineEngine } from "../../../../../packages/core/src/routines/engine.js";
-import type { Routine } from "../../../../../packages/core/src/routines/types.js";
+import type { Routine, Trigger } from "../../../../../packages/core/src/routines/types.js";
+import { resolveOneOffDate as resolveInZone } from "../../../../../packages/core/src/routines/schedule-trigger-provider.js";
 import { createAction, createRoutine } from "./index.js";
 
 /** Run `fn` as if invoked by app `callerAppId` via its app-context runAction —
@@ -43,8 +44,9 @@ function makeThrowingEngine(): RoutineEngine {
  * subject isn't action-existence validation. */
 const allActions = { has: () => true };
 
-/** The guardian's zone, for tests that don't depend on it. */
-const guardianTimezone = async () => "UTC";
+/** Core's one-off resolver with the guardian in UTC, for tests that don't
+ * depend on the zone. */
+const resolveOneOffDate = (trigger: Trigger) => resolveInZone(trigger, async () => "UTC");
 
 let testDb: TestDb;
 let repo: RoutinesRepository;
@@ -75,7 +77,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -108,7 +110,12 @@ describe("create_routine — engine activation", () => {
           actionName: "send_message",
           args: {},
         },
-        { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+        {
+          routinesRepo: repo,
+          actionRegistry: allActions,
+          routineEngine: engine,
+          resolveOneOffDate,
+        },
       ),
     );
 
@@ -129,7 +136,7 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -152,7 +159,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -175,7 +182,7 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -204,7 +211,8 @@ describe("create_routine — engine activation", () => {
             routinesRepo: repo,
             actionRegistry: allActions,
             routineEngine: engine,
-            guardianTimezone: async () => "Asia/Tokyo",
+            resolveOneOffDate: (trigger: Trigger) =>
+              resolveInZone(trigger, async () => "Asia/Tokyo"),
           },
         );
         if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -233,7 +241,7 @@ describe("create_routine — engine activation", () => {
         actionName: "dream",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -255,7 +263,7 @@ describe("create_routine — engine activation", () => {
         actionName: "summon",
         args: { agentName: "main", prompt: "summarize it" },
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -281,7 +289,7 @@ describe("create_routine — engine activation", () => {
         args: {},
         enabled: false,
       },
-      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: allActions, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -311,7 +319,7 @@ describe("create_routine — engine activation", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeThrowingEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -361,14 +369,14 @@ describe("create_routine — action factory", () => {
     ).toThrow(/actionRegistry/);
   });
 
-  it("createAction refuses to load without a guardianTimezone dep", () => {
+  it("createAction refuses to load without a resolveOneOffDate dep", () => {
     expect(() =>
       createAction(actionConfig, {
         routinesRepo: repo,
         routineEngine: makeFakeEngine(),
         actionRegistry: allActions,
       } as unknown as Parameters<typeof createAction>[1]),
-    ).toThrow(/guardianTimezone/);
+    ).toThrow(/resolveOneOffDate/);
   });
 });
 
@@ -391,7 +399,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "morning_brief_run",
         args: {},
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -419,7 +427,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: { agentName: "assistant", prompt: "review emails" },
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -447,7 +455,7 @@ describe("create_routine — validation and fail-closed", () => {
         actionName: "summon",
         args: { agentName: "assistant", prompt: "review emails" },
       },
-      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, guardianTimezone },
+      { routinesRepo: repo, actionRegistry: registry, routineEngine: engine, resolveOneOffDate },
     );
 
     expect(result.status).toBe("ok");
@@ -472,7 +480,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -499,7 +507,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -525,7 +533,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -552,7 +560,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -579,7 +587,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -603,7 +611,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -637,7 +645,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -664,7 +672,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -690,7 +698,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -715,7 +723,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -740,7 +748,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -759,7 +767,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -785,7 +793,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -810,7 +818,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -835,7 +843,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -860,7 +868,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -885,7 +893,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -910,7 +918,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     expect(result.status).toBe("ok");
@@ -934,7 +942,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -957,7 +965,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -982,7 +990,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (blank.status !== "error") throw new Error(`expected error, got ${blank.status}`);
@@ -1005,7 +1013,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (padded.status !== "ok") throw new Error(`expected ok, got ${padded.status}`);
@@ -1031,7 +1039,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1057,7 +1065,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
@@ -1083,7 +1091,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     expect(result.status).toBe("ok");
@@ -1107,7 +1115,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1132,7 +1140,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1157,7 +1165,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
@@ -1182,7 +1190,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     expect(result.status).toBe("ok");
@@ -1206,7 +1214,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1229,7 +1237,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1257,7 +1265,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1277,7 +1285,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1302,7 +1310,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1330,7 +1338,7 @@ describe("create_routine — validation and fail-closed", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1360,7 +1368,7 @@ describe("create_routine — key dedup", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1377,7 +1385,7 @@ describe("create_routine — key dedup", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
     if (first.status !== "ok") throw new Error(`expected ok, got ${first.status}`);
@@ -1388,7 +1396,7 @@ describe("create_routine — key dedup", () => {
         routinesRepo: repo,
         actionRegistry: allActions,
         routineEngine: makeFakeEngine(),
-        guardianTimezone,
+        resolveOneOffDate,
       },
     );
 
@@ -1406,7 +1414,7 @@ describe("create_routine — key dedup", () => {
           routinesRepo: repo,
           actionRegistry: allActions,
           routineEngine: makeFakeEngine(),
-          guardianTimezone,
+          resolveOneOffDate,
         },
       );
       if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);

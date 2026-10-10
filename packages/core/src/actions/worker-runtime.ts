@@ -54,6 +54,8 @@ import {
 } from "../apps/artifact-id.js";
 import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
 import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
+import type { Trigger } from "../routines/types.js";
 
 const log = createLogger("action-worker");
 
@@ -153,7 +155,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       approvalsRepo,
       policyEngine,
       routinesRepo,
-      guardianTimezone: () => resolveGuardianTimezone(settingsRepo),
+      resolveOneOffDate: (trigger: Trigger) =>
+        resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
       // Worker actions reach the live main-process services over RPC. Injecting
       // the proxies here (the real coordinators are injected in the main
       // process) lets the event/app-lifecycle actions call their dep directly

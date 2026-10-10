@@ -550,6 +550,7 @@ describe("Routines API", () => {
       expect(await create("09:00")).toMatchObject({ date: "2026-06-24", ...pinned });
       expect(await create("00:30")).toMatchObject({ date: "2026-06-25", ...pinned });
       expect(await create("09:00", { rrule: "" })).not.toHaveProperty("rrule");
+      expect(await create("09:00", { rrule: " " })).not.toHaveProperty("rrule");
     } finally {
       rs.useRealTimers();
     }
