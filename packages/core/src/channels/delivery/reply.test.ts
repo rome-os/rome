@@ -436,16 +436,19 @@ describe("ReplyDelivery", () => {
   });
 
   it("refuses a policy whose unsent-text bound cannot hold one message", () => {
-    // The platform's limit is 20, so a bound of 20 fails while the first message fills.
+    // The platform's limit is 20. A bound of 20 fails while the first message fills, and one
+    // just above it fails most replies of more than one message, so twice the limit is the least.
     expect(() => reply({ mode: "edit", maxPendingChars: 20 })).toThrow(/maxPendingChars/);
+    expect(() => reply({ mode: "edit", maxPendingChars: 39 })).toThrow(/maxPendingChars/);
+    expect(() => reply({ mode: "edit", maxPendingChars: 40 })).not.toThrow();
     expect(() => reply({ mode: "blocks", maxPendingChars: 5 })).toThrow(/maxPendingChars/);
     // A final reply waits by design and has no bound.
     expect(() => reply({ mode: "final", maxPendingChars: 5 })).not.toThrow();
   });
 
   it("fails rather than holding more unsent text than its bound", async () => {
-    const delivery = reply({ mode: "edit", maxPendingChars: 30 });
-    delivery.accept(delta("more than thirty characters, which goes past it"));
+    const delivery = reply({ mode: "edit", maxPendingChars: 40 });
+    delivery.accept(delta("more than forty characters, which is more than the bound allows"));
     const outcome = await delivery.finish();
     expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
     expect(platform.messages).toHaveLength(0);
@@ -453,7 +456,7 @@ describe("ReplyDelivery", () => {
 
   it("delivers text that arrived complete and is longer than the bound, split into messages", async () => {
     // A provider that does not stream sends its answer whole, and it can be split and sent.
-    const delivery = reply({ mode: "edit", editIntervalMs: 0, maxPendingChars: 30 });
+    const delivery = reply({ mode: "edit", editIntervalMs: 0, maxPendingChars: 40 });
     delivery.accept(text("x".repeat(100), "a"));
     delivery.accept(result("y".repeat(100)));
     const outcome = await delivery.finish();
@@ -576,9 +579,9 @@ describe("ReplyDelivery", () => {
     });
 
     it("does not send once the reply has failed", async () => {
-      const { delivery } = paused({ maxPendingChars: 30 });
+      const { delivery } = paused({ maxPendingChars: 40 });
       delivery.accept(delta("small", "a"));
-      delivery.accept(delta(" and more than the bound lets wait", "a"));
+      delivery.accept(delta(" and more than the bound of forty lets wait", "a"));
       const finished = delivery.finish();
       await advance(2000);
       const outcome = await finished;

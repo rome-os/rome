@@ -223,11 +223,14 @@ export class ReplyDelivery {
   constructor(private readonly options: ReplyOptions) {
     this.mode = effectiveMode(options.policy, options.transport.capabilities);
     const longest = options.transport.capabilities.maxPartLength;
-    // A bound that cannot hold one message fails every reply while its first
-    // message is still filling, so it is refused up front.
-    if (this.mode !== "final" && options.policy.maxPendingChars <= longest)
+    // An open preview counts as unsent until the edit that settles it has run,
+    // and that edit waits its turn while the text goes on arriving. A bound
+    // that cannot hold one message fails every reply while its first message
+    // fills, and one just above it fails most replies of more than one, so it
+    // is refused up front. A real policy gives far more than the least.
+    if (this.mode !== "final" && options.policy.maxPendingChars < 2 * longest)
       throw new Error(
-        `maxPendingChars (${options.policy.maxPendingChars}) must exceed the platform's longest message (${longest})`,
+        `maxPendingChars (${options.policy.maxPendingChars}) must be at least twice the platform's longest message (${longest})`,
       );
     this.conversation = options.conversation;
     this.paceKey = options.conversation;

@@ -49,9 +49,12 @@ export interface DeliveryPolicy {
    * The most source text that may wait unsent in `edit` and `blocks` mode,
    * counting the blocks that are still streaming, which includes the text of a
    * preview still open. A block the agent completed is not counted, since it
-   * was produced whole and can be split and sent. It must exceed the
-   * platform's longest message, or an `edit` reply fails while its first
-   * message is still filling, so a reply refuses a policy where it does not.
+   * was produced whole and can be split and sent. It must be at least twice
+   * the platform's longest message, or an `edit` reply fails while its first
+   * message is still filling, or as the next one starts, since an open preview
+   * counts as unsent until the edit that settles it has run and the text goes
+   * on arriving meanwhile. A reply refuses a policy where it is not. A real
+   * policy gives far more than the least.
    * A reply that exceeds it fails rather than dropping text. A `final` reply
    * waits by design and has no bound.
    *
