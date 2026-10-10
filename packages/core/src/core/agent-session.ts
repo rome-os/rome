@@ -544,6 +544,7 @@ export function createAgentSessionManager(
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             newSessionId: uuidv4(),
+            conversationId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
           log.info("provider_session.rotated", {
@@ -905,6 +906,7 @@ async function openSession(
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
         newSessionId: uuidv4(),
+        conversationId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
       resumeResult = undefined;
@@ -937,6 +939,7 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
+      conversationId: romeSessionId,
       workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -945,6 +948,8 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionManager.setWorkingDir(sessionId, workingDir);
+  } else if (romeSessionId) {
+    await deps.sessionManager.fillConversationId(sessionId, romeSessionId);
   }
 
   if (config.outputSchema && init.handback) {

@@ -180,6 +180,36 @@ describe("AgentSessionManager working dirs", () => {
     );
   });
 
+  it("records the conversation a session serves and keeps it in a fresh generation", async () => {
+    const projectDir = join(directory, "moved-away");
+    await mkdir(projectDir);
+    const key = { agentName: AGENT, channelThreadKey: "webchat:conv-1" };
+    const original = await manager.acquire(key, {
+      workingDir: projectDir,
+      romeSessionId: "conv-1",
+    });
+    await original.close("idle");
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("conv-1");
+
+    await rm(projectDir, { recursive: true });
+    const replacement = await manager.acquire(key);
+
+    expect(replacement.sessionId).not.toBe(original.sessionId);
+    expect((await sessionsRepo.findById(replacement.sessionId))?.conversationId).toBe("conv-1");
+  });
+
+  it("records the conversation on a reused row that had none", async () => {
+    const key = { agentName: AGENT, channelThreadKey: "webchat:legacy" };
+    const original = await manager.acquire(key);
+    await original.close("idle");
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBeNull();
+
+    const reused = await manager.acquire(key, { romeSessionId: "legacy" });
+
+    expect(reused.sessionId).toBe(original.sessionId);
+    expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("legacy");
+  });
+
   it("records the dir a resume or a keyed reuse was moved to, once the provider opens", async () => {
     const firstDir = join(directory, "first");
     const secondDir = join(directory, "second");

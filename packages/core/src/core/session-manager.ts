@@ -54,6 +54,7 @@ export class SessionManager {
     agentName: string;
     channelThreadKey: string;
     newSessionId: string;
+    conversationId?: string;
   }) {
     return await this.sessionsRepository.rotateProviderGeneration(input);
   }
@@ -95,9 +96,16 @@ export class SessionManager {
       id: session.id,
       agentName: session.agentName,
       channelThreadKey: session.channelThreadKey,
+      conversationId: session.conversationId,
       status: session.status,
       workingDir: session.workingDir,
     });
+  }
+
+  /** Record the conversation on a reused row that predates the column or was
+   *  created without one. A row that already names a conversation keeps it. */
+  async fillConversationId(sessionId: string, conversationId: string): Promise<void> {
+    await this.sessionsRepository.fillConversationId(sessionId, conversationId);
   }
 
   async setWorkingDir(sessionId: string, workingDir: string): Promise<void> {

@@ -74,6 +74,8 @@ export interface AgentSession {
   id: string;
   agentName: string;
   channelThreadKey: string;
+  /** The Rome conversation this session serves, when the caller named one. */
+  conversationId?: string;
   providerThreadId?: string;
   workingDir?: string;
   createdAt: Date;
