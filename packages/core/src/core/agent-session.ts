@@ -540,6 +540,7 @@ export function createAgentSessionManager(
         }
         let preparedSessionId: string | undefined;
         if (decision.due) {
+          warnOnConversationMismatch(key, active?.id, active?.conversationId, init.romeSessionId);
           const replacement = await deps.sessionManager.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
@@ -831,6 +832,26 @@ async function reachableRecordedWorkingDir(recorded: string): Promise<string | u
   return isDirectory ? recorded : undefined;
 }
 
+/** A channel-thread key maps to one conversation, so a stored row that names
+ *  another one than the caller means the stored value cannot be trusted yet.
+ *  The stored value wins on reuse and on rotation. */
+function warnOnConversationMismatch(
+  key: AgentSessionKey,
+  sessionId: string | undefined,
+  storedConversationId: string | null | undefined,
+  requestedConversationId: string | undefined,
+): void {
+  if (!storedConversationId || !requestedConversationId) return;
+  if (storedConversationId === requestedConversationId) return;
+  log.warn("agent session serves a different conversation than requested", {
+    sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    storedConversationId,
+    requestedConversationId,
+  });
+}
+
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -903,6 +924,12 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumeResult.workingDir,
       });
+      warnOnConversationMismatch(
+        key,
+        resumeResult.id,
+        resumeResult.conversationId,
+        requestedRomeSessionId,
+      );
       const replacement = await deps.sessionManager.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
@@ -951,16 +978,8 @@ async function openSession(
     await deps.sessionManager.setWorkingDir(sessionId, workingDir);
   } else if (romeSessionId && !resumeResult?.conversationId) {
     await deps.sessionManager.fillConversationId(sessionId, romeSessionId);
-  } else if (romeSessionId && resumeResult?.conversationId !== romeSessionId) {
-    // A channel-thread key maps to one conversation, so a reused row that
-    // names another one means the stored value cannot be trusted yet.
-    log.warn("agent session serves a different conversation than requested", {
-      sessionId,
-      agentName: key.agentName,
-      channelThreadKey: key.channelThreadKey,
-      storedConversationId: resumeResult?.conversationId,
-      requestedConversationId: romeSessionId,
-    });
+  } else {
+    warnOnConversationMismatch(key, sessionId, resumeResult?.conversationId, romeSessionId);
   }
 
   if (config.outputSchema && init.handback) {
@@ -2863,6 +2882,8 @@ class AgentSessionImpl implements AgentSession {
         id: forkSessionId,
         agentName: this.key.agentName,
         channelThreadKey,
+        // A persisted fork's conversation is minted under the fork's own id.
+        conversationId: forkSessionId,
         workingDir: this.workingDir,
         createdAt: new Date(),
         lastActiveAt: new Date(),

@@ -225,7 +225,7 @@ describe("SessionsRepository", () => {
     expect((await repo.findById(unbound))?.conversationId).toBeNull();
   });
 
-  it("rotation keeps the retired row's conversation unless the caller names one", async () => {
+  it("rotation keeps the retired row's conversation over the caller's", async () => {
     await repo.create({
       id: "old",
       agentName: "main",
@@ -246,7 +246,19 @@ describe("SessionsRepository", () => {
       newSessionId: "gen-3",
       conversationId: "conv-renamed",
     });
-    expect(named.conversationId).toBe("conv-renamed");
+    expect(named.conversationId).toBe("channel:telegram:thread-1");
+  });
+
+  it("rotation takes the caller's conversation when the retired row names none", async () => {
+    await repo.create({ id: "legacy", agentName: "main", channelThreadKey: "webchat:conv-1" });
+
+    const replacement = await repo.rotateProviderGeneration({
+      agentName: "main",
+      channelThreadKey: "webchat:conv-1",
+      newSessionId: "gen-2",
+      conversationId: "conv-1",
+    });
+    expect(replacement.conversationId).toBe("conv-1");
   });
 
   it("fillConversationId() fills a missing conversation and never overwrites one", async () => {

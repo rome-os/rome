@@ -1,6 +1,7 @@
 -- Each rule writes only an id that rome_sessions already holds, and only
 -- where conversation_id is still null, so a row no rule can place stays null.
--- Subagent rows serve the conversation minted under their own session id.
+-- Rows whose own session id was minted as a conversation: subagents and
+-- persisted forks.
 UPDATE `sessions` SET `conversation_id` = `id`
 WHERE `conversation_id` IS NULL
   AND `id` IN (SELECT `id` FROM `rome_sessions`);--> statement-breakpoint
