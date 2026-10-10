@@ -243,22 +243,35 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
                 -32602,
                 "files.copy requires direction push or pull, an absolute localPath, a device UUID, and remotePath.",
               );
-            const info = await connector.run(request.deviceId, "system.info", {});
-            if (!info.ok) {
-              result = info;
-              break;
-            }
-            if (!isRecord(info.result) || info.result.transferVersion !== TRANSFER_VERSION) {
-              result = actionError(
-                "unsupported_device",
-                "The device runs a rome-node version without file transfers. Update rome-node on that device.",
-              );
-              break;
-            }
+            // The controller exists before the first await. A client that disconnects during the
+            // capability probe below then cancels the copy instead of leaving it to run unowned.
             const controller = new AbortController();
             peer.copies.add(controller);
+            if (peer.socket.readyState !== WebSocket.OPEN) controller.abort();
+            const canceled = () =>
+              actionError("canceled", "The client disconnected. The copy did not start.");
             let last = 0;
             try {
+              if (controller.signal.aborted) {
+                result = canceled();
+                break;
+              }
+              const info = await connector.run(request.deviceId, "system.info", {});
+              if (controller.signal.aborted) {
+                result = canceled();
+                break;
+              }
+              if (!info.ok) {
+                result = info;
+                break;
+              }
+              if (!isRecord(info.result) || info.result.transferVersion !== TRANSFER_VERSION) {
+                result = actionError(
+                  "unsupported_device",
+                  "The device runs a rome-node version without file transfers. Update rome-node on that device.",
+                );
+                break;
+              }
               const summary = await copyWithDevice(
                 (events) => connector.openChannel(request.deviceId, events),
                 request,

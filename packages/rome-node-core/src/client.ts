@@ -1,4 +1,4 @@
-import { encodeFrame, FRAME_TYPE, isUuid, parseFrame, type Frame } from "./frame.js";
+import { encodeFrame, FRAME_TYPE, frameFits, isUuid, parseFrame, type Frame } from "./frame.js";
 import { parseGatewayUrl } from "./gateway-url.js";
 import {
   CLOSE,
@@ -158,9 +158,13 @@ export function connectGateway(options: GatewayClientOptions) {
         return false;
       }
     },
-    /** Sends a request or response frame with the same no-queue semantics as send. */
+    /**
+     * Sends a request or response frame with the same no-queue semantics as send. Returns false
+     * without sending a frame larger than MAX_FRAME_BYTES, so the connection stays open.
+     */
     sendFrame(frame: Frame): boolean {
       if (stopped || !socket || socket.readyState !== 1) return false;
+      if (!frameFits(frame.meta.byteLength, frame.body.byteLength)) return false;
       if (frame.type !== FRAME_TYPE.request && frame.type !== FRAME_TYPE.response) return false;
       if (!isUuid(frame.id) || !isUuid(frame.peer)) return false;
       try {

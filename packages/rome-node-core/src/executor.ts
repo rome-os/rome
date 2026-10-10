@@ -1,7 +1,14 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { platform } from "node:os";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
-import { decodeMeta, encodeMeta, FRAME_TYPE, type Frame } from "./frame.js";
+import {
+  decodeMeta,
+  encodeMeta,
+  FRAME_TYPE,
+  frameFits,
+  MAX_FRAME_BYTES,
+  type Frame,
+} from "./frame.js";
 import type { InboundEnvelope, OutboundEnvelope } from "./protocol.js";
 import { parseTransferMessage, TRANSFER_VERSION, TransferHost } from "./transfer.js";
 
@@ -62,6 +69,8 @@ export function createExecutor(
     result: {
       name,
       platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
+      // Lists caller-facing actions only. transfer.open is an internal frame protocol for
+      // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
       actions: ["system.info", "exec"],
       frameVersion: 1,
       transferVersion: TRANSFER_VERSION,
@@ -242,13 +251,19 @@ export function createExecutor(
           };
       // A process from an earlier connection must never reply on its replacement.
       if (current !== generation) return;
-      sendFrame({
-        type: FRAME_TYPE.response,
-        id: frame.id,
-        peer: frame.peer,
-        meta: encodeMeta(result.response),
-        body: result.body,
-      });
+      let meta = encodeMeta(result.response);
+      let body = result.body;
+      // An oversized frame would close this connection and with it every program and transfer.
+      if (!frameFits(meta.byteLength, body.byteLength)) {
+        meta = encodeMeta(
+          actionError(
+            "output_too_large",
+            `The output does not fit in one ${MAX_FRAME_BYTES / 1024 / 1024} MiB frame and was discarded. The program ran. Use rome-node cp to copy large files.`,
+          ),
+        );
+        body = empty;
+      }
+      sendFrame({ type: FRAME_TYPE.response, id: frame.id, peer: frame.peer, meta, body });
     },
     disconnect() {
       generation++;

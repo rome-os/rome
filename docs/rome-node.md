@@ -109,8 +109,9 @@ at most about four per second. The request has no total wait limit. If the
 requesting client disconnects, the daemon aborts the copy.
 
 The daemon and the client close a local socket with code 1009 when one message
-exceeds 64 MiB. The client rejects a larger input with `invalid_request` before
-sending it. The daemon replaces a larger reply with a `message_too_large` failure.
+exceeds 64 MiB. Binary input never gets near this limit, because the client
+first refuses input that cannot fit in one [Gateway frame](#binary-frames). The
+daemon replaces a larger reply with a `message_too_large` failure.
 
 Each client has one full-duplex WebSocket. Responses match request IDs within
 that connection. Independent clients can use the same IDs. Events and concurrent
@@ -287,7 +288,14 @@ and text envelopes are unchanged. Integers are big-endian.
 Gateway rewrites `peer` to the sender's device ID. If the recipient is not
 connected, Gateway returns type `3` with the same `id`, the requested `peer`, meta
 `{"code":"target_unavailable"}`, and an empty body. Gateway closes a socket that
-sends a malformed frame with code 1008. Cloudflare's 32 MiB limit applies to each frame.
+sends a malformed frame with code 1008.
+
+Cloudflare closes a Gateway socket that receives a message over 32 MiB. That
+drops every request and copy on the connection, so no client sends such a frame.
+The 32 MiB limit covers the whole encoded frame, header and meta included.
+`runBinary` fails with `message_too_large` before sending input that cannot fit.
+If binary `exec` output cannot fit, the host discards it and replies
+`output_too_large` with an empty body. The program has already run by then.
 
 The request format decides the response format. A binary request carries meta
 `{ type: "request", action, args }` and the input bytes as the body. The host
@@ -303,7 +311,9 @@ The host replaces each occurrence of its communication token in stdout with the
 same number of `*` bytes, so byte offsets stay valid. Text-mode output replaces
 the token with `[redacted]`. `system.info` reports `frameVersion: 1` on hosts
 that handle binary frames, and `transferVersion: 1` on hosts that accept
-[file transfers](#file-transfer-protocol). There is no capability handshake with Gateway.
+[file transfers](#file-transfer-protocol). Its `actions` list names the actions a
+caller can run. `transfer.open` is internal to `rome-node cp` and is not listed, so
+detect it through `transferVersion`. There is no capability handshake with Gateway.
 A host version without frame support drops binary frames. The caller then reports
 `unknown_outcome` after its wait limit.
 
@@ -384,11 +394,24 @@ command runs. The host offers no file action to callers. The daemon first checks
 that `system.info` reports `transferVersion: 1`, and otherwise fails with
 `unsupported_device`.
 
-The receiver writes to `<dst>.rome-part`. It renames the part file to `<dst>` only
-after the size and the SHA-256 checksum match the sender's. Any failure, abort,
-or Ctrl+C deletes the part file and leaves `<dst>` unchanged. A copy that ends
-with `connection_lost` after the sender finished can still have replaced `<dst>`.
-There is no resume and no automatic retry. Run a failed copy again.
+The source must be a regular file. A directory, FIFO, or device fails with
+`not_a_file` and is never read.
+
+Each copy writes to its own part file next to the destination, named
+`.<name>.<uuid>.rome-part`. The receiver creates it with `O_EXCL` and mode 0600,
+so it never reuses an existing file or follows a symlink. Concurrent copies to
+one destination cannot mix their bytes. The rename to `<dst>` is the
+only step that touches the destination. It happens only after the size and the
+SHA-256 checksum match the sender's, and after the data is flushed to disk.
+
+A replaced file keeps its permission bits. A new file gets the mode a new file
+in that directory gets by default. Setuid, setgid, and sticky bits are not
+carried over. On Windows, file modes are not changed.
+
+Any failure, abort, or Ctrl+C deletes that copy's part file and leaves `<dst>`
+unchanged. A copy that ends with `connection_lost` after the sender finished can
+still have replaced `<dst>`. There is no resume and no automatic retry. Run a
+failed copy again.
 
 Progress goes to stderr. Success prints `{ bytes, ms, sha256 }` to stdout and
 exits 0. A copy failure prints the failed `ActionResponse` to stdout and exits 1.
@@ -416,14 +439,21 @@ Frames from the caller are type 1, and frames from the host are type 2.
 carries the source `size`. The host refuses a directory as the push destination
 and anything other than a regular file as the pull source.
 
-The sender reads in 4 MiB chunks. An ack carries the number of bytes the receiver
+Both sides check a source with `stat` before opening it. Where the platform has
+`O_NONBLOCK`, the open uses it, so a path swapped for a FIFO cannot block. The
+sender then checks the open descriptor and reads only a regular file.
+
+The sender reads in 4 MiB chunks, so each data frame stays within the frame limit. An ack carries the number of bytes the receiver
 has handed to the OS, which it sends only after the write completes. The sender
 keeps at most 16 MiB unacknowledged and pauses reading until acks arrive. Gateway
 has no backpressure, so this window bounds the memory each side buffers.
 
-Both sides hash the data as it passes. After end, the receiver closes the part
-file, checks the size and checksum, renames it, and replies with done. Either
-side aborts after 60 seconds without a message sent or received. Connection loss
+Both sides hash the data as it passes. After end, the receiver sets the part
+file's mode, flushes it to disk, and closes it. It then checks the size and
+checksum, renames the part file, and replies with done. So a done means
+the data reached the disk.
+
+Either side aborts after 60 seconds without a message sent or received. Connection loss
 aborts every transfer on that side. A host accepts at most four concurrent
 transfers and replies `busy` to more. Each transfer accepts frames only from the
 peer that opened it. Host frames from an earlier connection never go out on a

@@ -1,11 +1,14 @@
 // File transfers over binary frames. Protocol: docs/rome-node.md#file-transfer-protocol.
 // The caller daemon and the host share these endpoints, so both sides use Node fs streams
 // and the same windowing, checksum, and cleanup rules.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { Stream } from "node:stream";
 import { actionError, isRecord, parseResponse, type ActionResponse } from "./actions.js";
 import type { CopyProgress, CopyRequest } from "./daemon-protocol.js";
+import { FRAME_HEADER_BYTES, MAX_FRAME_BYTES } from "./frame.js";
 
 export const TRANSFER_VERSION = 1;
 export const TRANSFER_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -164,19 +167,30 @@ export interface Source {
   close(): Promise<void>;
 }
 
-/** Opens a regular file for sending. Throws TransferError. */
+const notAFile = (path: string) =>
+  new TransferError("not_a_file", `${path} is not a regular file.`);
+
+/** Opens a regular file for sending. Refuses FIFOs, devices, and directories. Throws TransferError. */
 export async function openSource(path: string): Promise<Source> {
+  // Opening a FIFO for reading blocks inside a libuv worker, where no timeout or abort reaches it.
+  const info = await stat(path).catch((error) => {
+    throw fsError(error);
+  });
+  if (!info.isFile()) throw notAFile(path);
   let handle: FileHandle;
   try {
-    handle = await open(path, "r");
+    // O_NONBLOCK keeps open() from waiting if the path became a FIFO after the stat above.
+    // Reads from a regular file ignore it. Windows defines no O_NONBLOCK.
+    handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   } catch (error) {
     throw fsError(error);
   }
   let size: number;
   try {
-    const info = await handle.stat();
-    if (!info.isFile()) throw new TransferError("not_a_file", `${path} is not a regular file.`);
-    size = info.size;
+    // The descriptor, not the path, decides what is read.
+    const opened = await handle.stat();
+    if (!opened.isFile()) throw notAFile(path);
+    size = opened.size;
   } catch (error) {
     await handle.close().catch(() => {});
     throw error instanceof TransferError ? error : fsError(error);
@@ -202,6 +216,9 @@ function startSender(
   const chunkBytes = options.chunkBytes ?? TRANSFER_CHUNK_BYTES;
   const windowBytes = options.windowBytes ?? TRANSFER_WINDOW_BYTES;
   if (windowBytes < chunkBytes) throw new RangeError("The window must hold at least one chunk.");
+  // Data meta stays far below 1 KiB, so this keeps every data frame within MAX_FRAME_BYTES.
+  if (chunkBytes > MAX_FRAME_BYTES - FRAME_HEADER_BYTES - 1024)
+    throw new RangeError("A chunk must fit in one frame.");
   const stream = handle.createReadStream({ highWaterMark: chunkBytes });
   const hash = createHash("sha256");
   let sent = 0;
@@ -250,28 +267,43 @@ function startSender(
 }
 
 export interface Destination {
-  /** Starts accepting data frames into `<path>.rome-part`. Call at most once. */
+  /** Path of the part file this transfer owns. */
+  part: string;
+  /** Starts accepting data frames into the part file. Call at most once. */
   start(send: TransferSend, options?: TransferOptions & { size?: number }): ReceiverEndpoint;
   /** Deletes the part file when start was never called. */
   cancel(): Promise<void>;
 }
 
-/** Creates or truncates `<path>.rome-part`. Refuses a directory at path. Throws TransferError. */
+/**
+ * Creates `<dir>/.<name>.<id>.rome-part` next to `path` with mode 0600. The exclusive create
+ * fails on any existing file or symlink, so a transfer never writes through a name it does not own.
+ */
+export async function createPartFile(
+  path: string,
+  id: string = randomUUID(),
+): Promise<{ part: string; handle: FileHandle }> {
+  // Keeps the name within the 255-byte file name limit of common filesystems.
+  const name = Buffer.from(basename(path)).subarray(0, 160).toString("utf8");
+  const part = join(dirname(path), `.${name}.${id}${PART_SUFFIX}`);
+  try {
+    return { part, handle: await open(part, "wx", 0o600) };
+  } catch (error) {
+    throw fsError(error);
+  }
+}
+
+/** Creates this transfer's own part file. Refuses a directory at path. Throws TransferError. */
 export async function openDestination(path: string): Promise<Destination> {
   const existing = await stat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw fsError(error);
   });
   if (existing?.isDirectory()) throw new TransferError("is_directory", `${path} is a directory.`);
-  const part = `${path}${PART_SUFFIX}`;
-  let handle: FileHandle;
-  try {
-    handle = await open(part, "w");
-  } catch (error) {
-    throw fsError(error);
-  }
+  const { part, handle } = await createPartFile(path);
   let started = false;
   return {
+    part,
     start(send, options) {
       started = true;
       return startReceiver(handle, path, part, send, options);
@@ -284,6 +316,25 @@ export async function openDestination(path: string): Promise<Destination> {
   };
 }
 
+/**
+ * Mode for a finished copy: the replaced file's permission bits, or what a new file in that
+ * directory gets. Setuid, setgid, and sticky bits are not carried over to the new content.
+ */
+async function finalMode(path: string): Promise<number> {
+  const current = await stat(path).catch(() => null);
+  if (current) return current.mode & 0o777;
+  // A probe file created with the default mode shows the umask and any default ACL. Reading
+  // the umask through process.umask() is deprecated because it briefly changes it.
+  const probe = join(dirname(path), `.${randomUUID()}.rome-mode`);
+  const handle = await open(probe, "wx");
+  try {
+    return (await handle.stat()).mode & 0o777;
+  } finally {
+    await handle.close();
+    await rm(probe, { force: true });
+  }
+}
+
 function startReceiver(
   handle: FileHandle,
   path: string,
@@ -291,7 +342,8 @@ function startReceiver(
   send: TransferSend,
   options: TransferOptions & { size?: number } = {},
 ): ReceiverEndpoint {
-  const stream = handle.createWriteStream();
+  // flush makes the stream fsync the part file before it closes the handle.
+  const stream = handle.createWriteStream({ flush: true });
   const hash = createHash("sha256");
   let expected = options.size;
   let received = 0;
@@ -299,13 +351,21 @@ function startReceiver(
   let ending = false;
   const life = lifecycle(send, options.idleMs ?? TRANSFER_IDLE_MS, async () => {
     await closed(stream);
+    // Only this transfer's own part file is removed.
     await rm(part, { force: true });
   });
   stream.on("error", (error) => life.abort("write_failed", error.message));
   async function finish(size: number, sha256: string) {
     const actual = hash.digest("hex");
-    await new Promise<void>((resolve) => stream.end(() => resolve()));
-    await closed(stream);
+    // fchmod works on the open descriptor. The handle closes when the stream does.
+    if (process.platform !== "win32") await handle.chmod(await finalMode(path));
+    if (life.settled) return;
+    // done promises the data survives a crash, so the flush and close finish before the rename.
+    await new Promise<void>((resolve, reject) => {
+      stream.once("close", resolve);
+      stream.once("error", reject);
+      stream.end();
+    });
     if (life.settled) return;
     if (received !== size || (expected !== undefined && expected !== size))
       return life.abort(
@@ -499,15 +559,19 @@ export async function copyWithDevice(
   options: CopyOptions = {},
 ): Promise<{ bytes: number; sha256: string; ms: number }> {
   const started = Date.now();
-  if (options.signal?.aborted) throw new TransferError("canceled", "The copy was canceled.");
   const { signal, onProgress, ...transfer } = options;
+  const canceled = () => new TransferError("canceled", "The copy was canceled.");
+  if (signal?.aborted) throw canceled();
   const idleMs = transfer.idleMs ?? TRANSFER_IDLE_MS;
   const source = request.direction === "push" ? await openSource(request.localPath) : undefined;
   let destination: Destination | undefined;
   try {
     if (request.direction === "pull") destination = await openDestination(request.localPath);
+    // An abort during the awaits above has no listener yet, so each await is followed by a check.
+    if (signal?.aborted) throw canceled();
   } catch (error) {
     await source?.close();
+    await destination?.cancel();
     throw error;
   }
   let total = source?.size ?? 0;
@@ -577,11 +641,19 @@ export async function copyWithDevice(
       : new TransferError(result.error.code, result.error.message);
   }
   channel = result;
+  if (signal?.aborted) {
+    clearTimeout(opening);
+    channel.close();
+    await (source?.close() ?? destination?.cancel());
+    throw canceled();
+  }
+  // No await follows until transfer.open is sent, so an abort after the check above reaches the
+  // listener registered below.
   if (destination) {
     receiver = destination.start(channel.send, { ...transfer, onProgress: progress });
     attach(receiver);
   }
-  const cancel = () => fail(new TransferError("canceled", "The copy was canceled."), true);
+  const cancel = () => fail(canceled(), true);
   signal?.addEventListener("abort", cancel, { once: true });
   const args = {
     direction: request.direction,

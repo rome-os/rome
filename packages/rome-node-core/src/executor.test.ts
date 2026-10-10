@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createExecutor, redactBytes } from "./executor.js";
-import { decodeMeta, encodeMeta, FRAME_TYPE, type Frame } from "./frame.js";
+import { decodeMeta, encodeMeta, FRAME_TYPE, MAX_FRAME_BYTES, type Frame } from "./frame.js";
 import type { OutboundEnvelope } from "./protocol.js";
 
 const requestId = "0f8fad5b-d9cb-469f-a165-70867728950e";
@@ -154,6 +154,47 @@ describe("computer actions over binary frames", () => {
     expect(
       (await executeFrame("exec", { command: "rome-node-nonexistent-executable" })).response,
     ).toMatchObject({ ok: false, error: { code: "exec_failed" } });
+  });
+
+  it("replaces stdout that cannot fit in one frame with output_too_large and keeps other programs", async () => {
+    const frames: Frame[] = [];
+    const executor = createExecutor(
+      "Test",
+      () => true,
+      [],
+      (frame) => {
+        frames.push(frame);
+        return true;
+      },
+    );
+    cleanups.push(async () => executor.disconnect());
+    const request = (id: string, code: string): Frame => ({
+      type: FRAME_TYPE.request,
+      id,
+      peer: caller,
+      meta: encodeMeta({
+        type: "request",
+        action: "exec",
+        args: { command: process.execPath, args: ["-e", code] },
+      }),
+      body: new Uint8Array(),
+    });
+    const slowId = "16fd2706-8baf-433b-82eb-8c7fada847da";
+    const slow = executor.receiveFrame(
+      request(slowId, "setTimeout(()=>process.stdout.write('still running'),500)"),
+    );
+    await executor.receiveFrame(
+      request(requestId, `process.stdout.write(Buffer.alloc(${MAX_FRAME_BYTES + 1}))`),
+    );
+    expect(frames).toHaveLength(1);
+    expect(decodeMeta(frames[0].meta)).toMatchObject({
+      ok: false,
+      error: { code: "output_too_large", message: expect.stringContaining("rome-node cp") },
+    });
+    expect(frames[0].body.byteLength).toBe(0);
+    await slow;
+    expect(frames[1]).toMatchObject({ id: slowId });
+    expect(Buffer.from(frames[1].body).toString()).toBe("still running");
   });
 
   it("ignores non-request frames and never replies on a replacement connection", async () => {

@@ -14,6 +14,7 @@ import {
 } from "./daemon-client.js";
 import { writePrivateJson } from "./storage.js";
 import { DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
+import { encodeMeta, FRAME_HEADER_BYTES, MAX_FRAME_BYTES } from "./frame.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -189,6 +190,27 @@ describe("caller client boundaries", () => {
       },
     ]);
     expect(requests).toBe(1);
+  });
+
+  it("refuses binary input that cannot fit in one Gateway frame before contacting the daemon", async () => {
+    let requests = 0;
+    const f = await rpcFixture(() => {
+      requests++;
+    });
+    const device = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    const meta = encodeMeta({ type: "request", action: "exec", args: { command: "cat" } });
+    const fits = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - meta.byteLength;
+    const refused = await f.client.runBinary(
+      device,
+      "exec",
+      { command: "cat" },
+      new Uint8Array(fits + 1),
+    );
+    expect(refused).toMatchObject({
+      response: { ok: false, error: { code: "message_too_large" } },
+    });
+    expect(refused.body.byteLength).toBe(0);
+    expect(requests).toBe(0);
   });
 
   it("rejects non-JSON input before discovery and strips credentials from status", async () => {

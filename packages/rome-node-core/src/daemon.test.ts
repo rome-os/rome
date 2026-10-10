@@ -50,7 +50,14 @@ async function fixture() {
   const sockets = new WebSocketServer({ server: gateway });
   const received: { binary: boolean; data: Buffer }[] = [];
   // While held, frames from the device queue up instead of reaching the caller.
-  const gate = { hold: false, held: [] as Buffer[], forwarded: 0, holdAfter: Infinity };
+  // While probe is pending, text requests to the device wait, which holds the system.info probe.
+  const gate = {
+    hold: false,
+    held: [] as Buffer[],
+    forwarded: 0,
+    holdAfter: Infinity,
+    probe: undefined as Promise<void> | undefined,
+  };
   let callerSocket: WebSocket | undefined;
   const executor = createExecutor(
     "In-process device",
@@ -78,7 +85,9 @@ async function fixture() {
       if (!binary) {
         const envelope = JSON.parse(buffer.toString());
         if (envelope.to === device)
-          void executor.receive({ id: envelope.id, from: caller, payload: envelope.payload });
+          void (gate.probe ?? Promise.resolve()).then(() =>
+            executor.receive({ id: envelope.id, from: caller, payload: envelope.payload }),
+          );
         else if (envelope.to === older)
           socket.send(
             JSON.stringify({
@@ -357,14 +366,43 @@ describe("caller daemon binary requests", () => {
     const deadline = Date.now() + 5000;
     while (!progressed && Date.now() < deadline) await delay(10);
     expect(progressed).toBe(true);
-    expect(await readdir(f.directory)).toContain("pushed.bin.rome-part");
+    const hasPart = async () =>
+      (await readdir(f.directory)).some((name) => /^\.pushed\.bin\..*\.rome-part$/.test(name));
+    expect(await hasPart()).toBe(true);
     f.client.disconnect();
     expect(await copying).toMatchObject({ code: "unknown_outcome" });
     const until = Date.now() + 5000;
-    while ((await readdir(f.directory)).includes("pushed.bin.rome-part") && Date.now() < until)
-      await delay(20);
+    while ((await hasPart()) && Date.now() < until) await delay(20);
     expect((await readdir(f.directory)).sort()).toEqual(
       ["caller.json", "daemon.json", "large.bin"].sort(),
     );
+  });
+
+  it("does not start a copy when the client disconnects during the capability probe", async () => {
+    const f = await fixture();
+    const local = join(f.directory, "local.bin");
+    await writeFile(local, randomBytes(100_000));
+    let release!: () => void;
+    f.gate.probe = new Promise((resolve) => {
+      release = resolve;
+    });
+    const copying = f.client
+      .copy({
+        direction: "push",
+        localPath: local,
+        deviceId: device,
+        remotePath: join(f.directory, "pushed.bin"),
+      })
+      .catch((error) => error);
+    const deadline = Date.now() + 5000;
+    while (!f.received.some((message) => !message.binary) && Date.now() < deadline) await delay(10);
+    f.client.disconnect();
+    expect(await copying).toMatchObject({ code: "unknown_outcome" });
+    // Give the daemon time to see the close before the probe answers.
+    await delay(100);
+    release();
+    await delay(300);
+    expect(f.received.filter((message) => message.binary)).toEqual([]);
+    expect((await readdir(f.directory)).some((name) => name.includes("pushed.bin"))).toBe(false);
   });
 });

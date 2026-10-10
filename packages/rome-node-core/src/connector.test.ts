@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { DeviceConnector } from "./connector.js";
 import type { GatewayClientOptions } from "./client.js";
 import type { OutboundEnvelope } from "./protocol.js";
-import { decodeMeta, encodeMeta, FRAME_TYPE, type Frame } from "./frame.js";
+import {
+  decodeMeta,
+  encodeMeta,
+  FRAME_HEADER_BYTES,
+  FRAME_TYPE,
+  MAX_FRAME_BYTES,
+  type Frame,
+} from "./frame.js";
 
 const device = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const other = "16fd2706-8baf-433b-82eb-8c7fada847da";
@@ -183,5 +190,54 @@ describe("CLI device connector", () => {
     f.options().onStatus?.("retrying");
     expect((await lost).response).toMatchObject({ error: { code: "unknown_outcome" } });
     expect(f.frames).toHaveLength(3);
+  });
+
+  it("refuses binary input that cannot fit in one frame without disturbing other requests", async () => {
+    const f = fixture(5000);
+    const pending = f.connector.run("target", "exec", {});
+    await rs.waitFor(() => expect(f.sent).toHaveLength(1));
+    const meta = encodeMeta({ type: "request", action: "exec", args: {} });
+    const fits = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - meta.byteLength;
+    const refused = await f.connector.runBinary(device, "exec", {}, new Uint8Array(fits + 1));
+    expect(refused.response).toMatchObject({ ok: false, error: { code: "message_too_large" } });
+    expect(f.frames).toEqual([]);
+    const accepted = f.connector.runBinary(device, "exec", {}, new Uint8Array(fits));
+    await rs.waitFor(() => expect(f.frames).toHaveLength(1));
+    const payload = { type: "response", ok: true, result: {} };
+    f.options().onMessage({ id: f.sent[0].id, from: "target", payload });
+    expect(await pending).toEqual(payload);
+    f.options().onFrame?.({
+      type: FRAME_TYPE.response,
+      id: f.frames[0].id,
+      peer: device,
+      meta: encodeMeta(payload),
+      body: new Uint8Array(),
+    });
+    expect((await accepted).response).toEqual(payload);
+    expect(f.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("submits exactly 128 of a 200-request burst and answers the rest busy", async () => {
+    const f = fixture(5000);
+    let busy = 0;
+    let channels = 0;
+    const count = (response: { ok: boolean; error?: { code: string } }) => {
+      if (!response.ok && response.error?.code === "busy") busy++;
+    };
+    const events = { frame() {}, lost() {} };
+    for (let n = 0; n < 200; n++) {
+      if (n % 3 === 0) void f.connector.run("target", "exec", { n }).then(count);
+      else if (n % 3 === 1)
+        void f.connector
+          .runBinary(device, "exec", { n }, new Uint8Array())
+          .then((r) => count(r.response));
+      else
+        void f.connector.openChannel(device, events).then((result) => {
+          if ("send" in result) channels++;
+          else count(result);
+        });
+    }
+    await rs.waitFor(() => expect(busy).toBe(72));
+    expect(f.sent.length + f.frames.length + channels).toBe(128);
   });
 });

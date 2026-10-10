@@ -9,11 +9,22 @@ import {
 } from "./actions.js";
 import { connectGateway, type ConnectionStatus } from "./client.js";
 import { cloudRequest, CloudError, gatewayConfig } from "./cloud.js";
-import { decodeMeta, encodeMeta, FRAME_TYPE, isUuid, type Frame } from "./frame.js";
+import {
+  decodeMeta,
+  encodeMeta,
+  FRAME_TYPE,
+  frameFits,
+  isUuid,
+  MAX_FRAME_BYTES,
+  type Frame,
+} from "./frame.js";
 import { validId, type GatewayMessage } from "./protocol.js";
 import { createNodeSocket } from "./socket.js";
 import type { CallerCredential } from "./local.js";
 import type { ChannelEvents, TransferChannel } from "./transfer.js";
+
+/** Most requests and channels the connector keeps pending at once. */
+const MAX_PENDING = 128;
 
 export interface DeviceConnectorOptions {
   credential: CallerCredential;
@@ -171,9 +182,17 @@ export class DeviceConnector {
         "gateway_unavailable",
         "The device connection is offline. No operation was sent.",
       );
-    if (this.pending.size >= 128)
-      return actionError("busy", "Too many device requests are pending.");
     return null;
+  }
+
+  /**
+   * Requests and channels share one cap. Callers check it synchronously right before
+   * registering, because any await between the check and the registration lets a burst pass it.
+   */
+  private full(): ActionResponse | null {
+    return this.pending.size + this.channels.size >= MAX_PENDING
+      ? actionError("busy", "Too many device requests are pending.")
+      : null;
   }
 
   async run(
@@ -197,6 +216,8 @@ export class DeviceConnector {
     } catch {
       return actionError("invalid_request", "Action arguments must be JSON.");
     }
+    const busy = this.full();
+    if (busy) return busy;
     return new Promise((resolve) => {
       const finish = (response: ActionResponse) => {
         clearTimeout(timer);
@@ -247,8 +268,18 @@ export class DeviceConnector {
         body: empty,
       };
     }
+    if (!frameFits(meta.byteLength, body.byteLength))
+      return {
+        response: actionError(
+          "message_too_large",
+          `The input does not fit in one ${MAX_FRAME_BYTES / 1024 / 1024} MiB frame. Nothing was sent. Use rome-node cp for large files.`,
+        ),
+        body: empty,
+      };
     const refused = await this.admit();
     if (refused) return { response: refused, body: empty };
+    const busy = this.full();
+    if (busy) return { response: busy, body: empty };
     const id = randomUUID();
     const peer = target.toLowerCase();
     return new Promise((resolve) => {
@@ -290,6 +321,8 @@ export class DeviceConnector {
     if (!isUuid(target)) return actionError("invalid_request", "A device UUID is required.");
     const refused = await this.admit();
     if (refused) return refused;
+    const busy = this.full();
+    if (busy) return busy;
     const id = randomUUID();
     const peer = target.toLowerCase();
     this.channels.set(id, { target: peer, events });

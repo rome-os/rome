@@ -1,14 +1,29 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRecord } from "./actions.js";
+import { FRAME_HEADER_BYTES, MAX_FRAME_BYTES } from "./frame.js";
 import {
   copyWithDevice,
+  createPartFile,
   openDestination,
   openSource,
   parseTransferMessage,
+  TRANSFER_CHUNK_BYTES,
   TransferHost,
   type ChannelEvents,
   type TransferEndpoint,
@@ -32,6 +47,11 @@ async function tempDir() {
 }
 
 const sha = (data: Uint8Array) => createHash("sha256").update(data).digest("hex");
+const posix = process.platform !== "win32";
+/** Maps `.<name>.<uuid>.rome-part` to `<name>`, and any other file name to itself. */
+const partOwner = (file: string) => /^\.(.*)\.[0-9a-f-]{36}\.rome-part$/.exec(file)?.[1] ?? file;
+const parts = async (dir: string) =>
+  (await readdir(dir)).filter((file) => /\.[0-9a-f-]{36}\.rome-part$/.test(file));
 
 /**
  * Connects a sender and a receiver with asynchronous, ordered delivery. `filter` can drop or
@@ -177,7 +197,7 @@ describe("file transfer endpoints", () => {
 });
 
 /** Opens channels to an in-process TransferHost with asynchronous, ordered delivery. */
-function hostChannels(host: TransferHost) {
+function hostChannels(host: TransferHost, actions: string[] = []) {
   return async (events: ChannelEvents) => {
     const id = randomUUID();
     const toCaller: TransferSend = (meta, body = empty) => {
@@ -190,8 +210,10 @@ function hostChannels(host: TransferHost) {
         setImmediate(() => {
           const message = parseTransferMessage(meta);
           if (message) host.receive(id, caller, message, body);
-          else if (isRecord(meta) && meta.action === "transfer.open")
+          else if (isRecord(meta) && meta.action === "transfer.open") {
+            actions.push(meta.action);
             void host.open(id, caller, meta.args, toCaller);
+          }
         });
         return true;
       },
@@ -270,17 +292,212 @@ describe("copies between the caller and a transfer host", () => {
     expect(replies[2]).toMatchObject([{ ok: false, error: { code: "busy" } }]);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(replies[0]).toMatchObject([{ ok: true }]);
-    expect((await readdir(dir)).sort()).toEqual(["f0.rome-part", "f1.rome-part"]);
+    expect((await readdir(dir)).map(partOwner).sort()).toEqual(["f0", "f1"]);
     host.receive(
       ids[0],
       randomUUID(),
       { type: "transfer", kind: "abort", code: "x", message: "x" },
       empty,
     );
-    expect((await readdir(dir)).sort()).toEqual(["f0.rome-part", "f1.rome-part"]);
+    expect((await readdir(dir)).map(partOwner).sort()).toEqual(["f0", "f1"]);
     host.abortAll();
     await Promise.all(opens);
     expect(await readdir(dir)).toEqual([]);
     expect(replies[0]).toHaveLength(1);
+  });
+});
+
+describe("part files", () => {
+  it("lets concurrent copies to one destination each finish verified without mixed bytes", async () => {
+    const dir = await tempDir();
+    const first = randomBytes(1024 * 1024 + 1);
+    const second = randomBytes(1024 * 1024 + 2);
+    await writeFile(join(dir, "first.bin"), first);
+    await writeFile(join(dir, "second.bin"), second);
+    const [a, b] = await Promise.all([
+      copyThrough(join(dir, "first.bin"), join(dir, "copy.bin")),
+      copyThrough(join(dir, "second.bin"), join(dir, "copy.bin")),
+    ]);
+    expect(a.received).toMatchObject({ status: "fulfilled", value: { sha256: sha(first) } });
+    expect(b.received).toMatchObject({ status: "fulfilled", value: { sha256: sha(second) } });
+    const result = await readFile(join(dir, "copy.bin"));
+    expect(result.equals(first) || result.equals(second)).toBe(true);
+    expect(await parts(dir)).toEqual([]);
+  });
+
+  it("creates each part file exclusively with mode 0600 next to the destination", async () => {
+    const dir = await tempDir();
+    const { part, handle } = await createPartFile(join(dir, "video.mp4"));
+    await handle.close();
+    expect(part).toMatch(/[\\/]\.video\.mp4\.[0-9a-f-]{36}\.rome-part$/);
+    if (posix) expect((await stat(part)).mode & 0o777).toBe(0o600);
+    const id = randomUUID();
+    await writeFile(join(dir, `.taken.${id}.rome-part`), "keep");
+    await expect(createPartFile(join(dir, "taken"), id)).rejects.toBeDefined();
+    expect(await readFile(join(dir, `.taken.${id}.rome-part`), "utf8")).toBe("keep");
+  });
+
+  it.skipIf(!posix)("never follows a symlink at a part file name", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "victim.txt"), "secret");
+    const id = randomUUID();
+    await symlink(join(dir, "victim.txt"), join(dir, `.copy.bin.${id}.rome-part`));
+    await expect(createPartFile(join(dir, "copy.bin"), id)).rejects.toBeDefined();
+    // The fixed name an older version used, as a symlink, is not touched either.
+    await symlink(join(dir, "victim.txt"), join(dir, "copy.bin.rome-part"));
+    await writeFile(join(dir, "source.bin"), randomBytes(5000));
+    const { received } = await copyThrough(join(dir, "source.bin"), join(dir, "copy.bin"));
+    expect(received.status).toBe("fulfilled");
+    expect(await readFile(join(dir, "victim.txt"), "utf8")).toBe("secret");
+  });
+
+  it("leaves a user file named like the old part file untouched", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "copy.bin.rome-part"), "user data");
+    await writeFile(join(dir, "source.bin"), randomBytes(5000));
+    const { received } = await copyThrough(join(dir, "source.bin"), join(dir, "copy.bin"));
+    expect(received.status).toBe("fulfilled");
+    expect(await readFile(join(dir, "copy.bin.rome-part"), "utf8")).toBe("user data");
+    expect(await parts(dir)).toEqual([]);
+  });
+
+  it("flushes the part file to disk before the rename", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "source.bin"), randomBytes(5000));
+    const probe = await open(join(dir, "source.bin"), "r");
+    const prototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    const sync = rs.spyOn(prototype, "sync");
+    try {
+      const { received } = await copyThrough(join(dir, "source.bin"), join(dir, "copy.bin"));
+      expect(received.status).toBe("fulfilled");
+      expect(sync).toHaveBeenCalledTimes(1);
+    } finally {
+      sync.mockRestore();
+    }
+  });
+
+  it.skipIf(!posix)(
+    "keeps the mode of a replaced file and gives a new file the default mode",
+    async () => {
+      const dir = await tempDir();
+      await writeFile(join(dir, "source.bin"), randomBytes(5000));
+      for (const mode of [0o600, 0o755]) {
+        const target = join(dir, `existing-${mode.toString(8)}`);
+        await writeFile(target, "old");
+        await chmod(target, mode);
+        const { received } = await copyThrough(join(dir, "source.bin"), target);
+        expect(received.status).toBe("fulfilled");
+        expect((await stat(target)).mode & 0o777).toBe(mode);
+      }
+      await writeFile(join(dir, "reference"), "");
+      const { received } = await copyThrough(join(dir, "source.bin"), join(dir, "new.bin"));
+      expect(received.status).toBe("fulfilled");
+      expect((await stat(join(dir, "new.bin"))).mode & 0o777).toBe(
+        (await stat(join(dir, "reference"))).mode & 0o777,
+      );
+      expect((await readdir(dir)).some((file) => file.endsWith(".rome-mode"))).toBe(false);
+    },
+  );
+});
+
+describe("transfer limits and setup", () => {
+  it("keeps every data frame within the Gateway frame limit", async () => {
+    expect(TRANSFER_CHUNK_BYTES + FRAME_HEADER_BYTES + 1024).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+    const dir = await tempDir();
+    await writeFile(join(dir, "source.bin"), "x");
+    const source = await openSource(join(dir, "source.bin"));
+    expect(() =>
+      source.start(() => true, { chunkBytes: MAX_FRAME_BYTES, windowBytes: MAX_FRAME_BYTES }),
+    ).toThrow(RangeError);
+  });
+
+  it.skipIf(!posix)(
+    "rejects a FIFO source at once on either side and keeps the host usable",
+    async () => {
+      const dir = await tempDir();
+      execFileSync("mkfifo", [join(dir, "pipe")]);
+      await expect(openSource(join(dir, "pipe"))).rejects.toMatchObject({ code: "not_a_file" });
+      const host = new TransferHost({ limit: 4 });
+      const pull = (n: number) =>
+        copyWithDevice(hostChannels(host), {
+          direction: "pull",
+          localPath: join(dir, `back-${n}`),
+          deviceId: caller,
+          remotePath: join(dir, "pipe"),
+        });
+      // Two rounds that each fill every host slot show the refused FIFOs release their slots.
+      for (const round of [0, 4]) {
+        const results = await Promise.allSettled([1, 2, 3, 4].map((n) => pull(round + n)));
+        for (const result of results)
+          expect(result).toMatchObject({ status: "rejected", reason: { code: "not_a_file" } });
+      }
+      await expect(
+        copyWithDevice(hostChannels(host), {
+          direction: "push",
+          localPath: join(dir, "pipe"),
+          deviceId: caller,
+          remotePath: join(dir, "remote"),
+        }),
+      ).rejects.toMatchObject({ code: "not_a_file" });
+      await writeFile(join(dir, "regular"), "ok");
+      await copyWithDevice(hostChannels(host), {
+        direction: "pull",
+        localPath: join(dir, "copied"),
+        deviceId: caller,
+        remotePath: join(dir, "regular"),
+      });
+      expect(await readFile(join(dir, "copied"), "utf8")).toBe("ok");
+      expect(await parts(dir)).toEqual([]);
+    },
+  );
+
+  it("does not send transfer.open when aborted during the local file open", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "local.bin"), randomBytes(5000));
+    const actions: string[] = [];
+    const controller = new AbortController();
+    const copying = copyWithDevice(
+      hostChannels(new TransferHost(), actions),
+      {
+        direction: "push",
+        localPath: join(dir, "local.bin"),
+        deviceId: caller,
+        remotePath: join(dir, "remote.bin"),
+      },
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(copying).rejects.toMatchObject({ code: "canceled" });
+    expect(actions).toEqual([]);
+    expect(await readdir(dir)).toEqual(["local.bin"]);
+  });
+
+  it("does not send transfer.open when aborted during channel setup", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "remote.bin"), randomBytes(5000));
+    for (const direction of ["push", "pull"] as const) {
+      const actions: string[] = [];
+      const controller = new AbortController();
+      const channels = hostChannels(new TransferHost(), actions);
+      const copying = copyWithDevice(
+        async (events) => {
+          const channel = await channels(events);
+          controller.abort();
+          return channel;
+        },
+        {
+          direction,
+          localPath: join(dir, direction === "push" ? "remote.bin" : "local.bin"),
+          deviceId: caller,
+          remotePath: join(dir, direction === "push" ? "pushed.bin" : "remote.bin"),
+        },
+        { signal: controller.signal },
+      );
+      await expect(copying).rejects.toMatchObject({ code: "canceled" });
+      expect(actions).toEqual([]);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await readdir(dir)).toEqual(["remote.bin"]);
   });
 });

@@ -7,9 +7,8 @@ import {
   type BinaryActionResult,
 } from "./actions.js";
 import { validId } from "./protocol.js";
-import { isUuid } from "./frame.js";
+import { encodeMeta, frameFits, isUuid, MAX_FRAME_BYTES } from "./frame.js";
 import {
-  MAX_LOCAL_MESSAGE_BYTES,
   parseDaemonStatus,
   type DaemonStatus,
   type ConnectionEvent,
@@ -211,18 +210,20 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
     });
     if (!isUuid(deviceId) || typeof action !== "string" || !action || action.length > 128)
       return failure("invalid_request", "A device UUID and action are required.");
-    let params: unknown;
-    let size: number;
+    let params: { deviceId: string; action: string; args?: unknown };
     try {
-      const text = JSON.stringify({ deviceId, action, args });
-      params = JSON.parse(text);
-      size = Buffer.byteLength(text);
+      params = JSON.parse(JSON.stringify({ deviceId, action, args }));
     } catch {
       return failure("invalid_request", "Action arguments must be JSON.");
     }
-    // The envelope adds well under 1 KiB to the params and body.
-    if (size + body.byteLength + 1024 > MAX_LOCAL_MESSAGE_BYTES)
-      return failure("invalid_request", "The input exceeds the 64 MiB local message limit.");
+    // The daemon sends this exact meta to Gateway. A frame that cannot fit is refused here, so
+    // the local message also stays far below its 64 MiB ceiling.
+    const meta = encodeMeta({ type: "request", action, args: params.args ?? {} });
+    if (!frameFits(meta.byteLength, body.byteLength))
+      return failure(
+        "message_too_large",
+        `The input does not fit in one ${MAX_FRAME_BYTES / 1024 / 1024} MiB frame. Nothing was sent. Use rome-node cp for large files.`,
+      );
     try {
       const rpc = await connect(true);
       assertOpen();

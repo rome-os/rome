@@ -167,12 +167,13 @@ Raw bytes (--input or --output):
   The JSON response goes to stdout, or to stderr when the output is -.
   exec result: {exitCode, signal, stderr, truncated}. stdout is the raw output.
   Secrets in stdout are replaced by the same number of * bytes.
-  Each request and each response is one frame. Gateway accepts at most 32 MiB
-  per frame, so larger input or output fails. Use rome-node cp for large files.
+  Each request and each response is one frame of at most 32 MiB. Larger input
+  fails with message_too_large before anything is sent. Larger output fails with
+  output_too_large after the program ran. Use rome-node cp for large files.
   A target without binary frame support (no frameVersion in system.info) drops
   the request, and the caller reports unknown_outcome after 60 seconds.
-  device run does not check frameVersion. rome-node cp checks it first and fails
-  at once with unsupported_device.
+  device run does not check frameVersion. rome-node cp checks transferVersion
+  first and fails at once with unsupported_device.
   Example:
     rome-node device run <device-id> exec --args '{"command":"gzip","args":["-c"]}' --input data.bin --output data.bin.gz
 
@@ -196,12 +197,16 @@ To copy between two devices, copy in two steps through this computer:
   rome-node cp ./video.mp4 <device-b>:/data/video.mp4
 
 The caller daemon reads or writes the local file, and rome-node connect reads
-or writes the device file. Programs and shells are not involved. Data goes to
-<dst>.rome-part, which replaces <dst> only after the size and SHA-256 checksum
-match the source. An existing <dst> is replaced.
+or writes the device file. Programs and shells are not involved. The source
+must be a regular file. FIFOs, devices, and directories fail with not_a_file.
+
+Each copy writes its own .<name>.<uuid>.rome-part next to <dst>, created with
+mode 0600. It replaces <dst> only after the size and SHA-256 checksum match the
+source and the data is flushed to disk. A replaced file keeps its permission
+bits, and a new file gets the directory's default mode.
 
 A failed or interrupted copy (including Ctrl+C) leaves <dst> unchanged and
-deletes the part file. There is no resume or automatic retry. Run the copy
+deletes its part file. There is no resume or automatic retry. Run the copy
 again. A copy aborts after 60 seconds without progress. The device must run a
 rome-node version that reports transferVersion in system.info.
 

@@ -3,6 +3,16 @@ export const FRAME_VERSION = 1;
 export const FRAME_TYPE = { request: 1, response: 2, routeError: 3 } as const;
 export type FrameType = (typeof FRAME_TYPE)[keyof typeof FRAME_TYPE];
 export const FRAME_HEADER_BYTES = 40;
+/**
+ * Largest encoded frame, header and meta included. Cloudflare closes a Gateway socket that
+ * receives a larger message, which drops every request on that connection.
+ */
+export const MAX_FRAME_BYTES = 32 * 1024 * 1024;
+
+/** Returns whether a frame with this meta and body stays within MAX_FRAME_BYTES. */
+export function frameFits(metaBytes: number, bodyBytes: number): boolean {
+  return FRAME_HEADER_BYTES + metaBytes + bodyBytes <= MAX_FRAME_BYTES;
+}
 const PEER_OFFSET = 20;
 const META_LENGTH_OFFSET = 36;
 

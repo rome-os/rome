@@ -24,6 +24,8 @@ export {
 export {
   FRAME_TYPE,
   FRAME_VERSION,
+  MAX_FRAME_BYTES,
+  frameFits,
   decodeMeta,
   encodeFrame,
   encodeMeta,

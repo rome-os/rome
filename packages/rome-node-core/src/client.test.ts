@@ -5,7 +5,9 @@ import {
   decodeMeta,
   encodeFrame,
   encodeMeta,
+  FRAME_HEADER_BYTES,
   FRAME_TYPE,
+  MAX_FRAME_BYTES,
   parseFrame,
   type Frame,
 } from "./frame.js";
@@ -137,6 +139,26 @@ describe("device connection helper", () => {
     expect(f.frames).not.toHaveBeenCalled();
     f.client.stop();
     expect(f.client.sendFrame(frame)).toBe(false);
+  });
+  it("refuses a frame over the Gateway limit without sending it or closing the socket", () => {
+    const f = fixture();
+    f.sockets[0].open();
+    const meta = encodeMeta({ type: "request", action: "exec", args: {} });
+    const fits = MAX_FRAME_BYTES - FRAME_HEADER_BYTES - meta.byteLength;
+    const frame = (bodyBytes: number): Frame => ({
+      type: FRAME_TYPE.request,
+      id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+      peer: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      meta,
+      body: new Uint8Array(bodyBytes),
+    });
+    expect(f.client.sendFrame(frame(fits + 1))).toBe(false);
+    expect(f.sockets[0].sent).toEqual([]);
+    expect(f.sockets[0].readyState).toBe(1);
+    expect(f.client.sendFrame(frame(fits))).toBe(true);
+    expect((f.sockets[0].sent[0] as Uint8Array).byteLength).toBe(MAX_FRAME_BYTES);
+    expect(f.client.sendFrame(frame(1))).toBe(true);
+    f.client.stop();
   });
   it.each([
     CLOSE.revoked,

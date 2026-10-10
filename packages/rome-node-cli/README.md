@@ -68,7 +68,9 @@ rome-node cp <device-id>:/tmp/video.mp4 ./video.mp4
 ```
 
 The caller daemon and `rome-node connect` read and write the files with Node
-streams. The destination changes only after its size and SHA-256 checksum match.
+streams. Each copy writes its own hidden part file next to the destination.
+The destination changes only after its size and SHA-256 checksum match and the
+data is flushed to disk. A replaced file keeps its permission bits.
 A failed copy leaves it unchanged and is safe to run again. To copy between two
 devices, copy to this computer first and then to the second device. Progress
 goes to stderr, and `{"bytes":...,"ms":...,"sha256":"..."}` goes to stdout. The

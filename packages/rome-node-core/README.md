@@ -53,8 +53,10 @@ It sends `body` as input bytes in a binary frame. For `exec`, the input is the
 program's stdin and the reply `body` is its raw stdout. Neither side is JSON or
 base64 encoded. `response` is the same `ActionResponse` as `run()`, and the exec
 result has no `stdout` field. Failures have an empty `body`. The device ID must
-be a UUID, and the input must fit in the 64 MiB local message limit. Gateway
-accepts at most 32 MiB per frame. A host version without binary frame support
+be a UUID. The request must fit in one 32 MiB Gateway frame, header and meta
+included. Larger input fails with `message_too_large` before anything is sent.
+Output that cannot fit fails with `output_too_large` after the program ran.
+A host version without binary frame support
 does not reply, and the call returns `unknown_outcome` after the wait limit.
 See [binary frames](../../docs/rome-node.md#binary-frames).
 
