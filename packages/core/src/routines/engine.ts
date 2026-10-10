@@ -8,6 +8,8 @@ import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import { createLogger } from "../logger.js";
 import { withRomeSpan } from "../telemetry.js";
 import { runWithoutHookInvocationContext } from "../core/hook-recursion.js";
+import { actionExecutionContext } from "../actions/context.js";
+import { replayContext } from "../actions/replay.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
 
 const log = createLogger("routine-engine");
@@ -211,8 +213,15 @@ export class RoutineEngine {
         };
 
         try {
+          // A routine fire is its own root. Event-bus subscribers run in the
+          // publisher's async context, so without exiting it the run would be
+          // nested under the publishing action and inherit its agentName.
           const result = await runWithoutHookInvocationContext(() =>
-            this.actionEngine.run(routine.actionName, mergedArgs, context),
+            replayContext.exit(() =>
+              actionExecutionContext.exit(() =>
+                this.actionEngine.run(routine.actionName, mergedArgs, context),
+              ),
+            ),
           );
           const durationMs = this.clock.now().getTime() - startTime;
 
