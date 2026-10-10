@@ -51,6 +51,37 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("pushes every sent message to open chats", async () => {
+    await repo.createSession("sent-session", "Sent");
+    const pushed: string[] = [];
+    const stop = repo.onMessageInserted((message) => pushed.push(message.id));
+    try {
+      await repo.addSentMessage(
+        "live",
+        "sent-session",
+        [{ type: "text", content: "a" }],
+        "live-turn",
+      );
+      await repo.addSentMessage(
+        "later",
+        "sent-session",
+        [{ type: "text", content: "b" }],
+        "turn-2",
+      );
+      await repo.addSentMessage("bare", "sent-session", [{ type: "text", content: "c" }], null);
+    } finally {
+      stop();
+    }
+
+    expect(pushed).toEqual(["live", "later", "bare"]);
+    const messages = await repo.getMessages("sent-session");
+    expect(messages.map((message) => [message.id, message.turnId]).sort()).toEqual([
+      ["bare", null],
+      ["later", "turn-2"],
+      ["live", "live-turn"],
+    ]);
+  });
+
   it("persists input identity, consumption binding, and uncertain recovery without replay", async () => {
     await repo.createSession("input-session", "Inputs");
     expect(await repo.recordUserInput("first", "input-session", "[]")).toBe(true);

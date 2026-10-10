@@ -79,6 +79,7 @@ import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js"
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
+import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -653,12 +654,11 @@ export interface WebchatRuntime {
    *
    * The task receives an `emit` helper that pushes `agent_message` events to
    * subscribers and accumulates them into the persisted trace, identical to
-   * the /chat/send code path.
+   * the /chat/send code path. An event emitted as `recorded` already has its
+   * trace saved and its reply delivered by the task, so the stream only shows
+   * it live and mounts its cards.
    */
-  enqueueSessionTask(
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void>;
+  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -1669,7 +1669,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
-  const emitTraceEvent = (
+  const emitLiveTraceEvent = (
     stream: ActiveWebchatStream,
     msg: TraceableEvent & { agent?: string },
   ): void => {
@@ -1690,6 +1690,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const snap = stream.segmentBuilder.snapshot();
       emitToStream(stream, "summary_update", snap.summary, "summary");
     }
+  };
+
+  // Show an AgentEvent live and persist it into the stream's trace.
+  const emitTraceEvent = (
+    stream: ActiveWebchatStream,
+    msg: TraceableEvent & { agent?: string },
+  ): void => {
+    emitLiveTraceEvent(stream, msg);
     // Incrementally persist so trace blocks survive a mid-turn crash (e.g.
     // CDP connection closed, long-running tool errors). persistTrace is
     // idempotent + serialized via tracePersistPromise and writes only the
@@ -3763,10 +3771,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return handleChatSend(c, id, body);
   });
 
-  const runEnqueuedTask = async (
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void> => {
+  const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
     if (predecessor && !predecessor.finished) {
@@ -3821,7 +3826,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
     const builtinQuestionCards: PendingInteractionPart[] = [];
-    const emit = (msg: AgentEvent & { agent?: string }) => {
+    // A recorded event's turn delivers its own reply, so its cards are written
+    // as they arrive, ahead of that reply, under the turn's own id.
+    let recordedTurnId: string | undefined;
+    let recordedCardWrites: Promise<void> = Promise.resolve();
+    const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
+      const recorded = options?.recorded === true;
+      if (recorded && msg.type === "turn_start") recordedTurnId = msg.turnId;
       if (msg.type === "turn_start" && stream.channelThreadKey) {
         const owner = deps.agentSessionManager.peek({
           agentName: msg.agent ?? stream.agentName,
@@ -3836,21 +3847,34 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       // Backend turns have no live bubble; drop delta events.
-      if (isTransientDelta(msg) || msg.type === "input_status") return;
-      stream.traceEvents.push(msg);
-      emitTraceEvent(stream, msg);
-      if (msg.type === "result") replyText = msg.content;
+      if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
+      if (recorded) {
+        emitLiveTraceEvent(stream, msg);
+      } else {
+        stream.traceEvents.push(msg);
+        emitTraceEvent(stream, msg);
+        if (msg.type === "result") replyText = msg.content;
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
         if (suspension && suspension.kind === "inline" && suspension.builtin) {
           const card = buildBuiltinCard(msg, suspension, sessionId);
-          if (card) builtinQuestionCards.push(card);
+          if (card && recorded) {
+            const cardTurnId = recordedTurnId ?? syntheticTurnId;
+            recordedCardWrites = recordedCardWrites.then(() =>
+              persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
+            );
+          } else if (card) {
+            builtinQuestionCards.push(card);
+          }
         }
       }
+      return recordedCardWrites;
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
       await task({ emit });
+      await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.

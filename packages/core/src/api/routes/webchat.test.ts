@@ -4327,6 +4327,68 @@ describe("Webchat API", () => {
       });
     });
 
+    it("leaves a recorded continuation's reply and trace to its task but writes its cards first", async () => {
+      // A defer wake-up saves its own trace and sends its reply on the webchat
+      // channel. The session stream still shows it and mounts its cards.
+      const sessionId = "sess-recorded-continuation";
+      await deps.webchatRepo.createSession(sessionId, "Recorded Continuation");
+      const { runtime } = createWebchatRuntime(deps);
+      const pushed: string[] = [];
+      const stop = deps.webchatRepo.onMessageInserted((message) => {
+        if (message.sessionId === sessionId) pushed.push(message.content);
+      });
+      const recorded = { recorded: true };
+
+      try {
+        await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+          await emit(
+            { type: "turn_start", turnId: "turn-r", sessionId: "agent-1", userPrompt: "Wake" },
+            recorded,
+          );
+          await emit(
+            {
+              type: "tool_result",
+              tool: "ask_question",
+              toolUseId: "recorded-ask-1",
+              output: {
+                pendingInteraction: true,
+                appId: "core",
+                render: {
+                  kind: "inline",
+                  componentId: "question-card",
+                  props: { questions: [] },
+                  builtin: true,
+                },
+              },
+            },
+            recorded,
+          );
+          await emit({ type: "result", content: "Choose above." }, recorded);
+          // The channel's send port, as the backend turn calls it.
+          await deps.webchatRepo.addSentMessage(
+            "reply-1",
+            sessionId,
+            [{ type: "text", content: "Choose above." }],
+            "turn-r",
+          );
+        });
+      } finally {
+        stop();
+      }
+
+      // The card reached the open chat before the reply, both without a reload,
+      // and the stream wrote no reply of its own.
+      expect(pushed.map((content) => JSON.parse(content)[0])).toEqual([
+        expect.objectContaining({ type: "pending_interaction", toolUseId: "recorded-ask-1" }),
+        { type: "text", content: "Choose above." },
+      ]);
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      expect(messages.map((message) => [message.role, message.turnId])).toEqual([
+        ["assistant", "turn-r"],
+        ["assistant", "turn-r"],
+      ]);
+    });
+
     // The connect-AI card is the second host-owned card. Only its own tool may
     // mount it: a tool_result under any other name is a spoof and is dropped.
     it.each([

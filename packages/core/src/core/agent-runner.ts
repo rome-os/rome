@@ -546,8 +546,10 @@ export class AgentRunner {
       );
     }
 
+    const persistTrace =
+      conversation.recorderOwned || (params.persistTrace ?? shouldPersistAgentTrace(threadContext));
     const recorder =
-      this.webchatRepo && (conversation.recorderOwned || shouldPersistAgentTrace(threadContext))
+      this.webchatRepo && persistTrace
         ? new AgentTraceRecorder({
             webchatRepo: this.webchatRepo,
             agentName,
@@ -557,7 +559,9 @@ export class AgentRunner {
             channelThreadKey,
             turnId: handle.turnId,
             threadContext,
-            persistTranscript: true,
+            // A recorder-owned conversation has no other transcript, whatever
+            // the caller's channel keeps.
+            persistTranscript: conversation.recorderOwned || (params.persistTranscript ?? true),
             persistUserTranscript: !conversation.promptPersisted,
           })
         : null;

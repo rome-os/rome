@@ -309,6 +309,41 @@ describe("AgentRunner", () => {
     );
   });
 
+  it.each([
+    ["saves", true, ["trace"]],
+    ["leaves", undefined, []],
+  ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-trace", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-trace",
+        prompt: "continue",
+        threadContext: { channel: "webchat", threadId: "chat-trace", romeSessionId: "chat-trace" },
+        persistTrace,
+        persistTranscript: false,
+      }),
+    );
+
+    const messages = await webchatRepo.getMessages("chat-trace");
+    expect(messages.map((message) => message.role)).toEqual(roles);
+    await manager.shutdown();
+  });
+
   it("runs a forked turn from the matching live source session", async () => {
     const inputs: Array<{ prompt: string; tier?: string }> = [];
     const source = {
@@ -569,6 +604,43 @@ describe("AgentRunner", () => {
         expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
         expect(roles).toContain("user");
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("writes a recorded subagent transcript for a webchat backend turn", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // The flags a webchat backend turn passes: the chat keeps its own
+        // transcript, but not this conversation's.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toEqual(expect.arrayContaining(["user", "assistant"]));
       } finally {
         testDb.close();
       }
