@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { splitPoint } from "./split.js";
+import { lastBreak, splitPoint } from "./split.js";
 import { plainText, type TextCodec } from "./types.js";
 
 describe("splitPoint", () => {
@@ -57,5 +57,42 @@ describe("splitPoint", () => {
 
   it("refuses a limit no character fits", () => {
     expect(() => splitPoint("abc", 0, plainText)).toThrow("Not even one character fits");
+  });
+});
+
+describe("splitPoint, where a full stop may be part of a number or a name", () => {
+  it("does not end a part between a decimal point and its digits", () => {
+    // A cut at "ab 3." would leave "14" for the next message.
+    expect(splitPoint("ab 3.14", 5, plainText)).toBe(3);
+  });
+
+  it("still ends a part after a full stop that whitespace follows", () => {
+    expect(splitPoint("ab 3. 14", 5, plainText)).toBe(5);
+  });
+});
+
+describe("lastBreak", () => {
+  it("ends after the last whitespace when a full stop ends the text that has arrived", () => {
+    // The text may go on as "3.14", so the full stop is not a sentence end yet.
+    expect(lastBreak("The value of pi is 3.")).toBe("The value of pi is ".length);
+  });
+
+  it("has no break inside a name, a number or a word", () => {
+    expect(lastBreak("example.com")).toBe(0);
+    expect(lastBreak("v1.2")).toBe(0);
+    expect(lastBreak("Hello")).toBe(0);
+  });
+
+  it("treats a full stop followed by whitespace as a sentence end", () => {
+    expect(lastBreak("Done. Next")).toBe("Done.".length);
+  });
+
+  it("prefers a paragraph break in the second half to a later space", () => {
+    const text = "First paragraph here.\n\nSecond one";
+    expect(lastBreak(text)).toBe("First paragraph here.\n\n".length);
+  });
+
+  it("ends after a full-width full stop at once, since nothing follows one in Chinese", () => {
+    expect(lastBreak("第一句话说完了。")).toBe("第一句话说完了。".length);
   });
 });

@@ -3,15 +3,21 @@ import type { TextCodec } from "./types.js";
 // Breaks a reader can follow, best first. A part ends just after one.
 const BREAKS = [/\n\n/g, /\n/g, /[.!?。！？](?=\s|$)|[。！？]/g, /\s/g];
 
+// The same for text that is still growing. Its end is only where the stream
+// has got to, so a full stop there may be a decimal point or a domain's dot.
+// A full stop is a sentence end once whitespace follows it.
+const GROWING_BREAKS = [/\n\n/g, /\n/g, /[.!?](?=\s)|[。！？]/g, /\s/g];
+
 /**
- * The offset just after the last readable break in `source`, or 0 when it has
- * none. A stronger break wins when one lies in the second half, as in
- * `splitPoint`, and otherwise the latest break of any kind does.
+ * The offset just after the last readable break in `source`, which is text
+ * that may still grow, or 0 when it has none. A stronger break wins when one
+ * lies in the second half, as in `splitPoint`, and otherwise the latest break
+ * of any kind does.
  */
 export function lastBreak(source: string): number {
   const floor = Math.ceil(source.length / 2);
   let latest = 0;
-  for (const pattern of BREAKS) {
+  for (const pattern of GROWING_BREAKS) {
     let found = 0;
     for (const match of source.matchAll(pattern)) found = match.index + match[0].length;
     if (found > 0 && found >= floor) return found;
@@ -51,11 +57,14 @@ export function splitPoint(source: string, limit: number, codec: TextCodec): num
   if (low > 0 && isLowSurrogate(source.charCodeAt(low))) low -= 1;
   if (low === 0) throw new Error("Not even one character fits in a message");
 
+  // Breaks are found in all of `source`, so a full stop at the cut counts only
+  // when whitespace follows it there, and not when more of a number does.
   const floor = Math.ceil(low / 2);
   for (const pattern of BREAKS) {
     let found = -1;
-    for (const match of source.slice(0, low).matchAll(pattern)) {
+    for (const match of source.matchAll(pattern)) {
       const end = match.index + match[0].length;
+      if (end > low) break;
       if (end >= floor) found = end;
     }
     if (found > 0) return found;

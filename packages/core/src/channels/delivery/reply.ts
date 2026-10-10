@@ -76,12 +76,21 @@ interface Part {
   receipt?: PartReceipt;
   settled: boolean;
   unknown?: true;
+  /**
+   * An edit's result is unknown: the platform may show the text it asked for.
+   * The text the part last had acknowledged proves nothing about what the
+   * platform shows, so only an edit that succeeds settles it.
+   */
+  uncertain?: true;
   diverged?: true;
   lastWriteAt: number;
 }
 
 interface BlockState {
   parts: Part[];
+  /** The source offset up to which text was passed over because a split left
+   *  nothing visible in it. The next part starts here at the earliest. */
+  skipped?: number;
   /** When unsent text started waiting, in `blocks` mode. */
   waitingSince?: number;
 }
@@ -112,6 +121,9 @@ const MAX_UNKNOWN_EDITS = 3;
  * - A message is never created for text with nothing visible in it, since a
  *   platform refuses one. The reply waits for visible text instead.
  * - A message never receives text older than what it shows.
+ * - An edit whose result is unknown leaves its part uncertain. The part is
+ *   edited again to the text it should show, even when that matches the text
+ *   last acknowledged, and only a successful edit settles it.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
  * - After `stop()`, nothing new is written. A write already running finishes
@@ -244,6 +256,8 @@ export class ReplyDelivery {
    *  to do until more text arrives. `now` decides waits; `ignoreWaits` plans
    *  as though every wait were over. */
   private plan(now: number, ignoreWaits = false): Plan {
+    // Nothing is written before the reply finishes, so there is nothing to plan.
+    if (this.mode === "final" && !this.closed) return null;
     const { codec, capabilities } = this.options.transport;
     const limit = capabilities.maxPartLength;
     for (const [index, block] of this.assembler.blocks.entries()) {
@@ -253,13 +267,13 @@ export class ReplyDelivery {
       for (const part of state.parts) {
         if (!part.settled || part.diverged || part.unknown) continue;
         const source = block.text.slice(part.start, part.end);
-        if (source === part.sentSource) continue;
+        if (source === part.sentSource && !part.uncertain) continue;
         const rendered = codec.render(source, true);
         if (this.mode !== "edit" || codec.measure(rendered) > limit) {
           part.diverged = true;
           continue;
         }
-        if (rendered === part.sent) {
+        if (rendered === part.sent && !part.uncertain) {
           part.sentSource = source;
           continue;
         }
@@ -272,14 +286,21 @@ export class ReplyDelivery {
         const last = state.parts.at(-1);
         if (last?.unknown) return null;
         const active = last && !last.settled ? last : undefined;
-        const start = active ? active.start : (last?.end ?? 0);
+        const start = active ? active.start : Math.max(last?.end ?? 0, state.skipped ?? 0);
         const remaining = block.text.slice(start);
         // Nothing visible yet, or only a whitespace tail after a split. A
         // platform refuses a message with no visible text, and one refusal
         // ends the reply.
         if (!remaining || !codec.render(remaining, true).trim()) {
-          if (complete) break;
-          return null;
+          if (!complete) return null;
+          // The block ended with nothing more to show. A preview it already
+          // shows cannot be taken back, so it stays as shown, and the part
+          // is reported as differing from the final text.
+          if (active) {
+            active.diverged = true;
+            this.settlePart(active, active.start + active.sentSource.length);
+          }
+          break;
         }
         let end = start + splitPoint(remaining, limit, codec);
         // A message never gives back text it already shows to the next one.
@@ -291,9 +312,16 @@ export class ReplyDelivery {
           end = shown;
         const settle = complete || end < block.text.length;
         const source = block.text.slice(start, end);
+        // The split can choose a prefix with nothing visible in it, such as a
+        // long run of spaces. It is passed over without a message, and the
+        // visible rest starts the next part.
+        if (!active && !codec.render(source, settle).trim()) {
+          state.skipped = end;
+          continue;
+        }
 
         if (active) {
-          if (codec.render(source, settle) === active.sent) {
+          if (codec.render(source, settle) === active.sent && !active.uncertain) {
             if (!settle) return null;
             this.settlePart(active, end);
             continue;
@@ -303,11 +331,9 @@ export class ReplyDelivery {
           return { write: "edit", block: index, part: active, end, source, settle };
         }
         if (this.mode === "edit" || settle) {
-          if (this.mode === "final" && !this.closed) return null;
           state.waitingSince = undefined;
           return { write: "create", block: index, start, end, source, settle };
         }
-        if (this.mode === "final") return null;
         state.waitingSince ??= now;
         const due = state.waitingSince + this.options.policy.blockWaitMs;
         if (now < due && !ignoreWaits) return { waitUntil: due };
@@ -400,6 +426,7 @@ export class ReplyDelivery {
       if (!transport.edit) throw new Error("unreachable: edit mode without edit");
       await transport.edit(part.receipt!, rendered);
       Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
+      delete part.uncertain;
       if (!part.settled) part.end = plan.end;
       if (plan.settle && !part.settled) this.settlePart(part, plan.end);
       this.unknownEdits = 0;
@@ -408,6 +435,7 @@ export class ReplyDelivery {
       const failure = asDeliveryFailure(error);
       report(failure.kind, partIndex);
       part.lastWriteAt = this.now();
+      if (failure.kind === "unknown") part.uncertain = true;
       if (failure.kind === "unsupported") {
         // The platform will not edit: keep what it shows and carry on in blocks.
         this.mode = "blocks";

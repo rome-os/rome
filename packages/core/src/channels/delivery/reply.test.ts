@@ -24,6 +24,10 @@ class MemoryPlatform implements DeliveryTransport {
   hold?: Promise<void>;
   /** Refuses text with nothing visible in it, as Telegram does. */
   rejectBlank = false;
+  /** Holds each edit until released, to model one still in flight. */
+  editGate?: Promise<void>;
+  /** The next edits are applied and then answer as lost, so their result is unknown. */
+  lostEditAnswers = 0;
   readonly edit?: (receipt: PartReceipt, text: string) => Promise<void>;
 
   constructor(
@@ -32,8 +36,13 @@ class MemoryPlatform implements DeliveryTransport {
   ) {
     if (capabilities.edit)
       this.edit = async (receipt, text) => {
+        await this.editGate;
         this.fail("edit");
         this.messages.find((m) => m.id === receipt.messageId)!.history.push(text);
+        if (this.lostEditAnswers > 0) {
+          this.lostEditAnswers -= 1;
+          throw new DeliveryFailure("unknown", "the answer was lost");
+        }
       };
   }
 
@@ -450,6 +459,25 @@ describe("ReplyDelivery", () => {
       expect(outcome.status).toBe("delivered");
     });
 
+    it("passes over a prefix a split chooses when it holds nothing visible, and sends the rest", async () => {
+      // A limit of 20 makes the split end the first part inside the run of spaces.
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(text(`${" ".repeat(20)}hello`, "a"));
+      const outcome = await delivery.finish();
+
+      expect(platform.shown).toEqual(["hello"]);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("passes over a blank prefix that ends at a paragraph break", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(text(`${" ".repeat(12)}\n\n${"x".repeat(10)}`, "a"));
+      const outcome = await delivery.finish();
+
+      expect(platform.shown).toEqual(["x".repeat(10)]);
+      expect(outcome.status).toBe("delivered");
+    });
+
     it("waits in blocks mode too, however long its block has waited", async () => {
       const delivery = reply({ mode: "blocks", blockWaitMs: 0 });
       delivery.accept(delta(" ", "a"));
@@ -550,6 +578,79 @@ describe("ReplyDelivery", () => {
     await finished;
     expect(otherRan).toBe(true);
     expect(platform.shown).toEqual(["hi"]);
+  });
+
+  describe("an edit whose result is unknown", () => {
+    /** Starts an edit to "Hello world" and holds it in flight, then completes the block back to "Hello". */
+    const reviseBackWhileAnEditIsInFlight = async (delivery: ReplyDelivery) => {
+      delivery.accept(delta("Hello", "a"));
+      await advance(0);
+      let release!: () => void;
+      platform.editGate = new Promise<void>((resolve) => (release = resolve));
+      delivery.accept(delta(" world", "a"));
+      await advance(0);
+      delivery.accept(text("Hello", "a"));
+      platform.editGate = undefined;
+      release();
+    };
+
+    it("is edited again before the part counts as settled, even when the text matches what was last acknowledged", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      platform.lostEditAnswers = 1;
+      await reviseBackWhileAnEditIsInFlight(delivery);
+      const outcome = await delivery.finish();
+
+      // The lost edit changed the platform to "Hello world". Only a second edit puts "Hello" back.
+      expect(platform.shown).toEqual(["Hello"]);
+      expect(outcome.status).toBe("delivered");
+      expect(outcome.parts).toEqual([expect.objectContaining({ text: "Hello", state: "settled" })]);
+    });
+
+    it("reports the reply as unknown when the edit that reconciles it is lost too", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      platform.lostEditAnswers = 3;
+      await reviseBackWhileAnEditIsInFlight(delivery);
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("unknown");
+    });
+  });
+
+  it("settles a preview as shown, and reports it differing, when its block completes with nothing visible", async () => {
+    const delivery = reply({ editIntervalMs: 0 });
+    delivery.accept(delta("Hello", "a"));
+    await advance(0);
+    delivery.accept(text("", "a"));
+    const outcome = await delivery.finish();
+
+    expect(platform.shown).toEqual(["Hello"]);
+    expect(outcome.parts).toEqual([
+      expect.objectContaining({ text: "Hello", state: "settled", diverged: true }),
+    ]);
+  });
+
+  it("does no planning work for a final reply until it finishes", async () => {
+    let renders = 0;
+    const counting: DeliveryTransport = Object.create(platform, {
+      codec: {
+        value: {
+          render: (source: string) => {
+            renders += 1;
+            return source;
+          },
+          measure: (rendered: string) => rendered.length,
+        },
+      },
+    });
+    const delivery = reply({ mode: "final" }, counting);
+    for (let i = 0; i < 50; i++) delivery.accept(delta("word ", "a"));
+    await advance(0);
+    expect(renders).toBe(0);
+
+    delivery.accept(text("word ".repeat(50), "a"));
+    const outcome = await delivery.finish();
+    expect(outcome.status).toBe("delivered");
+    expect(renders).toBeGreaterThan(0);
   });
 
   it("fails the reply instead of planning the same write again when a write fails outside the transport", async () => {

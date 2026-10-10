@@ -17,13 +17,17 @@ export interface TextBlock {
  *   still open.
  * - A `text` completes its block and its content replaces whatever the
  *   deltas built, since the complete block is authoritative.
- * - A `result` adds the answer as a last block unless a block already carries
- *   exactly that text, so a final answer is never sent twice.
+ * - A `result` adds the answer as a last block, unless the provider already
+ *   sent the answer as a text block marked `final`, or a block carries exactly
+ *   that text. The `result` repeats the answer, and the two may differ by
+ *   whitespace, so the answer is never sent twice.
  */
 export class ReplyAssembler {
   readonly blocks: TextBlock[] = [];
   private readonly byId = new Map<string, TextBlock>();
   private open?: TextBlock;
+  /** A block the provider marked as the turn's final answer has completed. */
+  private finalSeen = false;
 
   /** Applies `event` and answers how much the reply's text grew (negative
    *  when a complete block came out shorter than its deltas). */
@@ -39,12 +43,13 @@ export class ReplyAssembler {
       const grew = event.content.length - block.text.length;
       block.text = event.content;
       block.complete = true;
+      if (event.turnPhase === "final") this.finalSeen = true;
       if (block === this.open) this.open = undefined;
       return grew;
     }
     if (event.type === "result") {
       const answer = event.content;
-      if (!answer || this.blocks.some((block) => block.text === answer)) return 0;
+      if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return 0;
       this.blocks.push({ text: answer, complete: true });
       return answer.length;
     }

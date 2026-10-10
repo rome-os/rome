@@ -2,7 +2,6 @@
 // never names a platform: what a platform can do arrives as capabilities, how
 // a reply should look as a policy, and the platform's API as a transport.
 // Requirements: issue #427.
-import { z } from "zod";
 import type { Budget } from "./pacer.js";
 
 /** Facts about a platform, declared by its integration. Not configurable. */
@@ -21,26 +20,32 @@ export interface DeliveryCapabilities {
  * cannot edit delivers as `blocks`. Callers build a policy from constants, and
  * nothing parses one from configuration.
  */
-const deliveryPolicySchema = z.object({
+export interface DeliveryPolicy {
   /**
    * `edit` creates a message early and keeps replacing its text. `blocks`
    * sends each part once its text is settled. `final` sends nothing until the
    * reply is finished.
    */
-  mode: z.enum(["edit", "blocks", "final"]),
+  mode: DeliveryMode;
   /** The least time between two writes to the same message, in `edit` mode. */
-  editIntervalMs: z.number().int().nonnegative(),
+  editIntervalMs: number;
   /** How long a `blocks` part may wait for more text before it is sent. */
-  blockWaitMs: z.number().int().nonnegative(),
-  /** The most source text that may wait unsent in `edit` and `blocks` mode,
-   *  which includes the text of a preview still open. It must exceed the
-   *  platform's longest message. A reply that exceeds it fails rather than
-   *  dropping text. A `final` reply waits by design and has no bound. */
-  maxPendingChars: z.number().int().positive(),
-});
+  blockWaitMs: number;
+  /**
+   * The most source text that may wait unsent in `edit` and `blocks` mode,
+   * which includes the text of a preview still open. It must exceed the
+   * platform's longest message, or an `edit` reply fails while its first
+   * message is still filling. A reply that exceeds it fails rather than
+   * dropping text. A `final` reply waits by design and has no bound.
+   *
+   * A block the agent never completes, as when a turn is interrupted
+   * mid-block, holds the blocks after it back until the reply finishes, and its
+   * text counts here.
+   */
+  maxPendingChars: number;
+}
 
-export type DeliveryPolicy = z.infer<typeof deliveryPolicySchema>;
-export type DeliveryMode = DeliveryPolicy["mode"];
+export type DeliveryMode = "edit" | "blocks" | "final";
 
 /** The mode a reply uses: the policy's, unless the platform cannot do it. */
 export function effectiveMode(
