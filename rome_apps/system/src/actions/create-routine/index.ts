@@ -23,7 +23,7 @@ const scheduleTriggerSchema = z.object({
   tzMode: z
     .enum(["fixed", "floating"])
     .describe(
-      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast). A one-off (a date, or neither date nor rrule) is always stored as 'fixed' and fires in tzid, so pass the guardian's real zone for it.",
+      "REQUIRED — how the timezone is bound; choose deliberately. 'floating' means the routine follows the guardian: it fires at localTime in their CURRENT timezone and re-targets automatically if they move (use this for almost everything — 'remind me at 9am' means 9am wherever they are). 'fixed' pins the absolute zone in tzid forever, ignoring where the guardian goes — only for a zone-anchored event (a travel reminder at the destination's time, a market open, a locale-tied broadcast). A one-off is always stored as 'fixed': a dated one fires in tzid, and one with neither date nor rrule fires at the next localTime in tzid, or in the guardian's current zone when 'floating'.",
     ),
   localTime: z.string().describe("Time of day in HH:mm format (24-hour)"),
   rrule: z
@@ -93,6 +93,9 @@ export interface CreateRoutineDeps {
    * fails the `actionEngine.run` lookup on every fire. Both the main process
    * and the action worker put a fully-populated registry in the action deps. */
   actionRegistry: ActionExistenceChecker;
+  /** The guardian's current timezone, the zone a `floating` schedule follows.
+   * Each process resolves it from its own settings. */
+  guardianTimezone: () => Promise<string>;
 }
 
 /** The single capability create_routine needs from the action registry: ask
@@ -207,19 +210,25 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
 }
 
 /** A schedule with neither `date` nor `rrule` fires once at the next
- * `localTime`. Store that as the dated one-off it is: the date in `tzid` of the
- * next time its clock reads `localTime`, pinned `fixed` like any dated one-off.
- * Runs after validation, since it needs a valid `localTime` and `tzid`. */
-function withOneOffDate(trigger: Trigger): Trigger {
+ * `localTime`. Store that as the dated one-off it is: the date of the next time
+ * the clock reads `localTime`, pinned `fixed` like any dated one-off. A
+ * `floating` request follows the guardian, so it is dated in, and pinned to,
+ * the guardian's zone. Runs after validation, since it needs a valid
+ * `localTime` and `tzid`. */
+async function withOneOffDate(
+  trigger: Trigger,
+  guardianTimezone: () => Promise<string>,
+): Promise<Trigger> {
   if (trigger.type !== "schedule" || trigger.date || trigger.rrule) return trigger;
+  const tzid = trigger.tzMode === "floating" ? await guardianTimezone() : trigger.tzid;
   // en-CA formats a date as YYYY-MM-DD.
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: trigger.tzid }).format(new Date());
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: tzid }).format(new Date());
   let date = today;
-  if (wallClockToUtc(today, trigger.localTime, trigger.tzid).getTime() <= Date.now()) {
+  if (wallClockToUtc(today, trigger.localTime, tzid).getTime() <= Date.now()) {
     const [year, month, day] = today.split("-").map(Number);
     date = new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
   }
-  return { ...trigger, date, tzMode: "fixed" };
+  return { ...trigger, tzid, date, tzMode: "fixed" };
 }
 
 /** Validate trigger fields per type. Returns an error string (for the agent to
@@ -445,7 +454,7 @@ export async function createRoutine(
   if (triggerError) {
     return { status: "error", error: triggerError };
   }
-  const trigger = withOneOffDate(canonical);
+  const trigger = await withOneOffDate(canonical, deps.guardianTimezone);
 
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is
@@ -506,6 +515,9 @@ export function createAction(
   }
   if (typeof deps.actionRegistry?.has !== "function") {
     throw new Error("create_routine requires an actionRegistry dep with has()");
+  }
+  if (typeof deps.guardianTimezone !== "function") {
+    throw new Error("create_routine requires a guardianTimezone dep");
   }
   return createCreateRoutineAction(config, deps);
 }

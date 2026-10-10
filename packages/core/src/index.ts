@@ -846,6 +846,7 @@ async function main() {
   });
   const appActionDeps = {
     agentRunner,
+    guardianTimezone: () => resolveGuardianTimezone(settingsRepo),
     resolveArtifactReference,
     channelsService,
     conversationSettings,

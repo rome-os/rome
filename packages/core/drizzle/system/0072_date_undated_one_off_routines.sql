@@ -13,7 +13,9 @@
 --     accept that over a boot-time fixup.
 --   * every row → `fixed`, like any dated one-off. A `floating` row followed
 --     the guardian, so it first takes the guardian's zone as its `tzid` when
---     one is set, and is then pinned there.
+--     one is set, and is then pinned there. With no setting the scheduler
+--     fell back to the host zone, which SQL can't read, so the row keeps its
+--     stored `tzid`.
 --
 -- A blank `rrule` goes, so the row holds only its date.
 -- substr('0' || ..., -5) pads a one-digit hour ("9:00") so the times compare
