@@ -131,9 +131,13 @@ export class Pacer {
     });
   }
 
-  /** How long the account is paused for, after the platform asked to slow down; 0 when it is not. */
-  pausedFor(): number {
-    return Math.max(0, this.pausedUntil - this.now());
+  /**
+   * When the account's latest pause ends, as a time of the clock, or 0 when it
+   * was never paused. A pause that is over still answers, so a write that waited
+   * can tell that one held it back.
+   */
+  lastPauseEnd(): number {
+    return this.pausedUntil;
   }
 
   /** Holds every write of the account for `ms`, after the platform asked to slow down. */

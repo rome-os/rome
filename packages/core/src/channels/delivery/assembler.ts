@@ -14,7 +14,9 @@ export interface TextBlock {
  * docs/concepts/sessions.md (Event, Block, Delta).
  *
  * - A `text_delta` grows its block, matched by `blockId`, or else the block
- *   still open.
+ *   still open. A provider gives a block's deltas and its text one id, or
+ *   neither, and an event with an id is not taken to be part of a block that
+ *   has none, since that could join two different blocks.
  * - A `text` completes its block and its content replaces whatever the
  *   deltas built, since the complete block is authoritative.
  * - A `result` adds the answer as a last block, unless the provider already
@@ -29,23 +31,20 @@ export class ReplyAssembler {
   /** A block the provider marked as the turn's final answer has completed. */
   private finalSeen = false;
 
-  /** Applies `event` and answers how much the reply's text grew (negative
-   *  when a complete block came out shorter than its deltas). */
-  apply(event: StreamAgentEvent): number {
+  /** Applies `event` to the blocks. */
+  apply(event: StreamAgentEvent): void {
     if (event.type === "text_delta") {
       const block = this.blockFor(event.blockId);
-      if (block.complete) return 0;
-      block.text += event.content;
-      return event.content.length;
+      if (!block.complete) block.text += event.content;
+      return;
     }
     if (event.type === "text") {
       const block = this.blockFor(event.blockId);
-      const grew = event.content.length - block.text.length;
       block.text = event.content;
       block.complete = true;
       if (event.turnPhase === "final") this.finalSeen = true;
       if (block === this.open) this.open = undefined;
-      return grew;
+      return;
     }
     if (event.type === "result") {
       const answer = event.content;
@@ -54,11 +53,9 @@ export class ReplyAssembler {
       // An agent that declares an output schema has a `result` of canonical JSON,
       // which may not be what streamed. Which of the two is authoritative is
       // decided where the engine is wired into runs.
-      if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return 0;
+      if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return;
       this.blocks.push({ text: answer, complete: true });
-      return answer.length;
     }
-    return 0;
   }
 
   private blockFor(id: string | undefined): TextBlock {

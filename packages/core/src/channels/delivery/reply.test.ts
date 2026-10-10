@@ -899,6 +899,32 @@ describe("ReplyDelivery", () => {
       expect(platform.shown).toEqual(["Hello"]);
     });
 
+    it("reports a limit that ended while the write was still queued as a rate limit", async () => {
+      // An hour's wait elsewhere ended at 50 s, and the write is still behind another
+      // conversation's when its own wait runs out, so no pause is in effect then.
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      pacer.pause(50_000);
+      let end = () => {};
+      void pacer.run("c2", () => new Promise<void>((resolve) => (end = resolve)));
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(61_000);
+      await settle();
+
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      // The pause was what held it back, though it is over by now.
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+      end();
+    });
+
     it("reports a write held by its own conversation as unavailable, not as a rate limit", async () => {
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
       // An earlier call for this conversation is still running, past what its caller waited for.

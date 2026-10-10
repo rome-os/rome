@@ -239,8 +239,9 @@ describe.each(platforms)("%s", (platform) => {
               content: "aaaa bbbb cccc dddd eeee ffff gggg hhhh",
               blockId: "a",
             });
-            await channel.peer.server.waitFor((e) => e.accepted);
-            await sleep(60);
+            // The shorter text must arrive once the platform shows the parts it
+            // will leave as they are, however long the round trips take.
+            await channel.peer.server.waitFor(() => romeMessages(channel).length >= 3, 10_000);
             emit({ type: "text", content: "aaaa", blockId: "a", turnPhase: "final" });
           },
           { maxPartLength: 12 },

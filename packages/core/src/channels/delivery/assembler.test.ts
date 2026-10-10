@@ -7,6 +7,21 @@ const text = (content: string, blockId: string, turnPhase?: "commentary" | "fina
 const blocksOf = (assembler: ReplyAssembler) => assembler.blocks.map((block) => block.text);
 
 describe("ReplyAssembler", () => {
+  it("matches a block's deltas to its text by id, and does not guess when only one side has an id", () => {
+    const matched = new ReplyAssembler();
+    matched.apply({ type: "text_delta", content: "Hel", blockId: "a" });
+    matched.apply({ type: "text_delta", content: "lo", blockId: "a" });
+    matched.apply({ type: "text", content: "Hello", blockId: "a" });
+    expect(matched.blocks).toEqual([{ text: "Hello", complete: true }]);
+
+    // A provider gives a block's deltas and its text one id, or neither. Merging a block
+    // that has an id into one that has none could join two different blocks, so they stay apart.
+    const mixed = new ReplyAssembler();
+    mixed.apply({ type: "text_delta", content: "Hi", blockId: "a" });
+    mixed.apply({ type: "text", content: "Hi" });
+    expect(mixed.blocks).toHaveLength(2);
+  });
+
   it("does not add a result that repeats a block exactly", () => {
     const assembler = new ReplyAssembler();
     assembler.apply(text("The answer is 42.", "a"));

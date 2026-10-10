@@ -349,7 +349,8 @@ export class ReplyDelivery {
     // A write waits in the account's queue behind whatever pauses it. A pause
     // that came from elsewhere is not this reply's to wait out for an hour.
     const queued = new AbortController();
-    const ownPause = Math.max(0, this.ownPausedUntil - this.now());
+    const queuedAt = this.now();
+    const ownPause = Math.max(0, this.ownPausedUntil - queuedAt);
     const queueTimer = this.options.clock.setTimeout(
       () => queued.abort(new QueueWaitExceeded()),
       ownPause + QUEUE_WAIT_MS,
@@ -382,11 +383,11 @@ export class ReplyDelivery {
         // A write the stop dropped before it ran: nothing happened.
         if (this.abort.signal.aborted) return;
         if (error instanceof QueueWaitExceeded) {
-          // A pause from elsewhere is a limit the caller can wait out. With no
-          // pause in effect, the conversation is still held by an earlier call,
-          // and waiting out a limit would not help. Either way, the write never
-          // started.
-          const paused = this.options.pacer.pausedFor() > 0;
+          // A pause that was in effect while the write waited, even one that is
+          // over by now, is a limit the caller can wait out. With none, the
+          // conversation is still held by an earlier call, and waiting out a
+          // limit would not help. Either way, the write never started.
+          const paused = this.options.pacer.lastPauseEnd() > queuedAt;
           this.fail({ kind: paused ? "rate-limited" : "unavailable", message: error.message });
           return;
         }
