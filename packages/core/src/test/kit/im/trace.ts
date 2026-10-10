@@ -4,7 +4,7 @@
 // reads both through these schemas.
 import { z } from "zod";
 
-export const TRACE_VERSION = 2;
+export const TRACE_VERSION = 3;
 
 /** The `task.meta` key under which a test names its trace file. */
 export const TRACE_META_KEY = "channelTrace";
@@ -46,6 +46,23 @@ const exchangeSchema = z.object({
   answeredAt: z.number().optional(),
 });
 
+/** Something the agent emitted, or something Rome did, at one moment. */
+const eventSchema = z.object({
+  /** Milliseconds since the scenario started. */
+  at: z.number(),
+  lane: z.enum(["agent", "rome"]),
+  label: z.string(),
+  detail: z.unknown().optional(),
+});
+
+/** One invariant a scenario checked, and whether it held. */
+const checkSchema = z.object({
+  id: z.string(),
+  ok: z.boolean(),
+  /** What broke the invariant. */
+  detail: z.string().optional(),
+});
+
 const stepSchema = z.object({
   label: z.string(),
   status: z.enum(["passed", "failed"]),
@@ -70,6 +87,11 @@ export const traceSchema = z.object({
    *  platform applied them. A step's `visible` is the last change of each
    *  message up to the step's end. The browser UI replays these. */
   changes: z.array(changeSchema),
+  /** What the agent emitted and what Rome did, as the scenario noted them, on
+   *  the same clock as the steps. */
+  events: z.array(eventSchema),
+  /** The invariants the scenario checked, in the order it checked them. */
+  checks: z.array(checkSchema),
 });
 
 export const traceIndexSchema = z.object({
@@ -95,4 +117,6 @@ export type TraceStep = Trace["steps"][number];
 export type TraceExchange = Trace["exchanges"][number];
 export type TraceMessage = TraceStep["visible"][number];
 export type TraceChange = Trace["changes"][number];
+export type TraceEvent = Trace["events"][number];
+export type TraceCheck = Trace["checks"][number];
 export type TraceIndex = z.infer<typeof traceIndexSchema>;
