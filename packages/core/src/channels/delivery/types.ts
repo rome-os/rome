@@ -2,7 +2,20 @@
 // never names a platform: what a platform can do arrives as capabilities, how
 // a reply should look as a policy, and the platform's API as a transport.
 // Requirements: issue #427.
-import type { Budget } from "./pacer.js";
+
+/** How fast one account may write to a platform. */
+export interface Budget {
+  /** Writes the account may make back to back before it has to wait. */
+  burst: number;
+  /** How long one write's allowance takes to come back. */
+  refillMs: number;
+  /**
+   * The least time between two writes to the same conversation. A platform
+   * whose conversations differ, such as private chats and groups, gives a
+   * function of the conversation.
+   */
+  conversationSpacingMs: number | ((conversation: string) => number);
+}
 
 /** Facts about a platform, declared by its integration. Not configurable. */
 export interface DeliveryCapabilities {
@@ -101,9 +114,9 @@ export interface DeliveryTransport {
  *   since the platform does not say whose limit it hit.
  * - `unsupported`: the platform cannot do this at all (an edit it does not
  *   allow).
- * - `unavailable`: the platform could not be reached, so the write certainly
- *   did not arrive. It may be sent again, and a caller can send the reply
- *   whole.
+ * - `unavailable`: the write certainly did not arrive, because the platform
+ *   could not be reached or the write never left its queue. It may be sent
+ *   again, and a caller can send the reply whole.
  * - `unknown`: the write may or may not have happened (a timeout, a lost
  *   answer). A create that ends this way is never repeated.
  */

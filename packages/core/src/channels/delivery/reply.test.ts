@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { FakeClock } from "../../test/kit/clock.js";
-import { Pacer } from "./pacer.js";
+import { Outlasted, Pacer } from "./pacer.js";
 import { type DeliveryEvent, ReplyDelivery } from "./reply.js";
 import {
   DeliveryFailure,
@@ -843,6 +843,29 @@ describe("ReplyDelivery", () => {
       const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
       expect(outcome).not.toBe("hung");
       expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+      expect(platform.messages).toHaveLength(0);
+    });
+
+    it("reports a write held by its own conversation as unavailable, not as a rate limit", async () => {
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      // An earlier call for this conversation is still running, past what its caller waited for.
+      await pacer.run("c1", async () => new Outlasted(new Promise<void>(() => {})));
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(61_000);
+      await settle();
+
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      // No pause is in effect, so waiting out a limit would not help. The write never started.
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "unavailable" } });
       expect(platform.messages).toHaveLength(0);
     });
 

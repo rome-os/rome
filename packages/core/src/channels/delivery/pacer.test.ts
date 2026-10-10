@@ -1,7 +1,8 @@
 import { getEventListeners } from "node:events";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { FakeClock } from "../../test/kit/clock.js";
-import { type Budget, Outlasted, Pacer, SKIPPED } from "./pacer.js";
+import { Outlasted, Pacer, SKIPPED } from "./pacer.js";
+import type { Budget } from "./types.js";
 
 describe("Pacer", () => {
   let clock: FakeClock;
@@ -239,6 +240,60 @@ describe("Pacer", () => {
     await advance(0);
     await expect(second).resolves.toBe("a again");
     expect(log).toEqual(["b@0", "a again@0"]);
+  });
+
+  describe("a conversation held by a call that never ends", () => {
+    it("gives the conversation back after a limit when the call its caller stopped waiting for never ends", async () => {
+      const paced = pacer();
+      await paced.run("a", async () => new Outlasted(new Promise<void>(() => {})));
+      const next = paced.run("a", write("a again"));
+
+      await advance("119s");
+      expect(log).toEqual([]);
+      await advance("2s");
+      await expect(next).resolves.toBe("a again");
+      expect(log).toEqual(["a again@120000"]);
+    });
+
+    it("gives the conversation back after a limit when a hung write never ends", async () => {
+      const paced = pacer();
+      void paced.run("a", () => new Promise<string>(() => {}));
+      const next = paced.run("a", write("a again"));
+
+      // The watchdog frees the account at 30 s, and the limit follows it.
+      await advance("149s");
+      expect(log).toEqual([]);
+      await advance("2s");
+      await expect(next).resolves.toBe("a again");
+      expect(log).toEqual(["a again@150000"]);
+    });
+
+    it("does not let a call that ends after the limit free a conversation that has gone on", async () => {
+      const paced = pacer();
+      let endFirst!: () => void;
+      await paced.run(
+        "a",
+        async () => new Outlasted(new Promise<void>((resolve) => (endFirst = resolve))),
+      );
+      let finishSecond!: () => void;
+      const second = paced.run(
+        "a",
+        () => new Promise<string>((resolve) => (finishSecond = () => resolve("second"))),
+      );
+      const third = paced.run("a", write("third"));
+      // The limit gave the conversation back, so the second write runs.
+      await advance("121s");
+
+      // The first call ends late, while the second still runs. The third keeps waiting.
+      endFirst();
+      await advance(0);
+      expect(log).toEqual([]);
+
+      finishSecond();
+      await advance(0);
+      await expect(second).resolves.toBe("second");
+      await expect(third).resolves.toBe("third");
+    });
   });
 
   it("keeps a conversation's later writes behind its hung write, while other conversations go on", async () => {

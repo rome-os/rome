@@ -1,18 +1,8 @@
 import type { Clock, ClockTimer } from "../../lib/clock.js";
+import { createLogger } from "../../logger.js";
+import type { Budget } from "./types.js";
 
-/** How fast one account may write to a platform. */
-export interface Budget {
-  /** Writes the account may make back to back before it has to wait. */
-  burst: number;
-  /** How long one write's allowance takes to come back. */
-  refillMs: number;
-  /**
-   * The least time between two writes to the same conversation. A platform
-   * whose conversations differ, such as private chats and groups, gives a
-   * function of the conversation.
-   */
-  conversationSpacingMs: number | ((conversation: string) => number);
-}
+const log = createLogger("delivery-pacer");
 
 /**
  * What a write returns when it decided not to write after all. Its turn then
@@ -34,6 +24,11 @@ export class Outlasted {
 /** How long a write may run before it stops holding the queue. */
 const SLOW_WRITE_MS = 30_000;
 
+/** How long a conversation stays held by a call that its caller stopped waiting
+ *  for, after the account's queue went on. Past it the conversation is given
+ *  back, since a call that never settles must not block a chat for good. */
+const MAX_HOLD_MS = 120_000;
+
 interface Job {
   write: () => Promise<unknown>;
   resolve: (value: unknown) => void;
@@ -45,9 +40,10 @@ interface Job {
 interface Lane {
   conversation: string;
   queue: Job[];
-  /** A write of this conversation is running, or hung and passed over by the
-   *  watchdog. Its later writes wait for it to settle. */
-  busy?: boolean;
+  /** The write of this conversation that is running, or hung and passed over by
+   *  the watchdog, or whose call outlasted its caller. Its later writes wait for
+   *  it to settle, or for the hold limit. */
+  holder?: object;
   /** When this conversation may next be written to. */
   readyAt: number;
   /** When it was last served, as a count of writes started; 0 for never. */
@@ -71,7 +67,8 @@ interface Lane {
  *   queue, so a request that hangs cannot stall the account. It is not cut
  *   off, and its result still reaches its caller. Its own conversation waits
  *   for it, so that conversation's writes stay in order, and its spacing
- *   counts from when it really ended.
+ *   counts from when it really ended. The conversation is given back after
+ *   two minutes more if the write never ends.
  * - A write may return `Outlasted` to say its call is still running past what
  *   its caller waited for. The conversation is treated as it is after a hung
  *   write.
@@ -134,6 +131,11 @@ export class Pacer {
     });
   }
 
+  /** How long the account is paused for, after the platform asked to slow down; 0 when it is not. */
+  pausedFor(): number {
+    return Math.max(0, this.pausedUntil - this.now());
+  }
+
   /** Holds every write of the account for `ms`, after the platform asked to slow down. */
   pause(ms: number): void {
     this.pausedUntil = Math.max(this.pausedUntil, this.now() + ms);
@@ -155,7 +157,7 @@ export class Pacer {
     let next = Number.POSITIVE_INFINITY;
     let chosen: Lane | undefined;
     for (const [conversation, lane] of this.lanes) {
-      if (lane.busy) continue;
+      if (lane.holder) continue;
       if (!lane.queue.length) {
         if (lane.readyAt <= now) this.lanes.delete(conversation);
         else next = Math.min(next, lane.readyAt);
@@ -185,7 +187,10 @@ export class Pacer {
     const job = lane.queue.shift()!;
     job.dispose?.();
     const readyBefore = lane.readyAt;
-    lane.busy = true;
+    // Identifies this write as the lane's holder, so that a call which ends
+    // after the hold limit cannot free the lane for a write that came later.
+    const holder = {};
+    lane.holder = holder;
     lane.servedTurn = ++this.turns;
     this.tokens -= 1;
     this.running = true;
@@ -205,7 +210,35 @@ export class Pacer {
       } else lane.readyAt = this.now() + this.spacing(lane.conversation);
       this.pump();
     };
-    const watchdog = this.clock.setTimeout(release, this.slowWriteMs);
+    let holdLimit: ClockTimer | undefined;
+    // The write passed over by the watchdog, or outlasted by its call, holds
+    // its conversation for a while longer and no more.
+    const limitHold = () => {
+      if (holdLimit || lane.holder !== holder) return;
+      holdLimit = this.clock.setTimeout(() => {
+        if (lane.holder !== holder) return;
+        lane.holder = undefined;
+        log.warn("a call held its conversation past the limit", {
+          conversation: lane.conversation,
+          heldMs: MAX_HOLD_MS,
+        });
+        this.pump();
+      }, MAX_HOLD_MS);
+    };
+    const watchdog = this.clock.setTimeout(() => {
+      release();
+      limitHold();
+    }, this.slowWriteMs);
+    const reopen = (late: boolean) => {
+      if (holdLimit) this.clock.clearTimeout(holdLimit);
+      // The hold limit may have given the conversation back already.
+      if (lane.holder !== holder) return;
+      lane.holder = undefined;
+      // A write that ended after it handed the queue on counts its spacing from
+      // its real end, so the next write does not land back to back with a
+      // request that may have just been handled.
+      if (late && !skipped) lane.readyAt = this.now() + this.spacing(lane.conversation);
+    };
     // A write that throws before it returns a promise rejects its caller. It
     // must not leave `running` set, which would stop every write of the account.
     let written: Promise<unknown>;
@@ -225,22 +258,20 @@ export class Pacer {
         const handedOn = released;
         if (outlasting) {
           // The caller stopped waiting, and the call is still running. The
-          // account goes on, and the conversation stays busy until it ends.
+          // account goes on, and the conversation stays held until it ends, or
+          // for the hold limit.
           release();
+          limitHold();
           const ended = () => {
-            lane.busy = false;
-            lane.readyAt = this.now() + this.spacing(lane.conversation);
+            reopen(true);
             this.pump();
           };
           void outlasting.then(ended, ended);
           return;
         }
-        lane.busy = false;
         // A write the watchdog passed over has already handed the queue on.
-        // This conversation's later writes were waiting on it alone, and its
-        // spacing counts from now, so the next write does not land back to
-        // back with a request that may have just been handled.
-        if (handedOn && !skipped) lane.readyAt = this.now() + this.spacing(lane.conversation);
+        // This conversation's later writes were waiting on it alone.
+        reopen(handedOn);
         release();
         if (handedOn) this.pump();
       });

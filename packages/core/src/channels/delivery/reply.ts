@@ -177,9 +177,10 @@ class WriteTimedOut extends DeliveryFailure {
  * - A platform's rate limit pauses the account for the time it names, even
  *   when the reply gives up on it. A reply waits out at most a minute of its
  *   own limits in all, and then fails `rate-limited`. A write that has waited
- *   a minute in the account's queue, held by a pause that came from elsewhere
- *   on the account, fails the reply the same way, so `finish()` is not held
- *   for as long as another reply's flood wait.
+ *   a minute in the account's queue fails the reply, so `finish()` is not held
+ *   for as long as another reply's flood wait. It is `rate-limited` when a
+ *   pause from elsewhere on the account holds it, and `unavailable` when its
+ *   conversation is still held by an earlier call.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
  * - A write the platform does not answer within 30 s stops holding the reply.
@@ -367,7 +368,12 @@ export class ReplyDelivery {
         // A write the stop dropped before it ran: nothing happened.
         if (this.abort.signal.aborted) return;
         if (error instanceof QueueWaitExceeded) {
-          this.fail({ kind: "rate-limited", message: error.message });
+          // A pause from elsewhere is a limit the caller can wait out. With no
+          // pause in effect, the conversation is still held by an earlier call,
+          // and waiting out a limit would not help. Either way, the write never
+          // started.
+          const paused = this.options.pacer.pausedFor() > 0;
+          this.fail({ kind: paused ? "rate-limited" : "unavailable", message: error.message });
           return;
         }
         // Anything else escaped the write's own handling of the transport's
