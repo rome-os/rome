@@ -393,6 +393,19 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
+    // Turning a one-off back on after its date has passed would leave it
+    // enabled with nothing left to fire.
+    if (body.enabled === true && body.trigger === undefined) {
+      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
+      const trigger = current ? toRoutine(current).trigger : undefined;
+      if (trigger?.type === "schedule") {
+        const datedError = datedOneOffError(trigger);
+        if (datedError) {
+          return c.json({ error: datedError }, 400);
+        }
+      }
+    }
+
     const updates: Record<string, unknown> = {};
     if (body.name !== undefined) updates.name = body.name;
     if (body.enabled !== undefined) updates.enabled = body.enabled;

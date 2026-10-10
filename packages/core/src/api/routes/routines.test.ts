@@ -1010,6 +1010,31 @@ describe("Routines fire path", () => {
     expect(harness.manualProvider.isActive(id)).toBe(true);
   });
 
+  it("PATCH enabled=true refuses a one-off whose date has passed", async () => {
+    registerStubAction(harness.actionRegistry, "noop_action");
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    try {
+      rs.setSystemTime(new Date("2026-06-23T08:00:00Z"));
+      const { id } = await createRoutineViaApi(harness.app, {
+        name: "spent-one-off",
+        trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" },
+        actionName: "noop_action",
+        enabled: false,
+      });
+
+      rs.setSystemTime(new Date("2026-06-24T08:00:00Z"));
+      const res = await harness.app.request(`/routines/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(res.status).toBe(400);
+      expect(harness.manualProvider.isActive(id)).toBe(false);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("PATCH trigger re-activates the routine with the new trigger spec", async () => {
     registerStubAction(harness.actionRegistry, "noop_action");
     const { id } = await createRoutineViaApi(harness.app, {
