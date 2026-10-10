@@ -1,18 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, BellRing, CalendarClock, Check, Play } from "lucide-react";
+import { ArrowRight, BellRing, CalendarClock, Check, Pause, Play } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { createRoutine, listRoutineRefs, type RoutineRef } from "@/lib/chat-api";
+import {
+  createRoutine,
+  deleteRoutine,
+  listRoutineRefs,
+  setRoutineEnabled,
+  type RoutineRef,
+} from "@/lib/chat-api";
 import type { PreviewPayload, RoutineDraftSpec } from "@/lib/chat-types";
 
 type CardState =
   | { kind: "draft" }
   | { kind: "creating" }
   // `routineId` is unknown only if a create succeeded without returning a row.
-  | { kind: "on"; routineId?: string }
+  | { kind: "on"; routineId?: string; enabled: boolean }
   | { kind: "error"; message: string };
+
+type Busy = "toggle" | "delete" | null;
 
 /** The routine this card created, if it still exists. Cards carry a unique
  * `routineKey` the routine was created with; cards written before keys existed
@@ -28,26 +36,46 @@ function findCreatedRoutine(
 }
 
 /**
- * The confirm card for a routine the agent proposed via `propose_routine`.
- * Turning it on creates the routine through POST /api/routines (which also
- * activates it), so confirmation needs no second agent turn. On mount we look
- * up the routine this card created, so a reload shows "On" with a link to its
- * run history instead of re-offering to create a duplicate.
+ * The card for a routine the agent proposed via `propose_routine`.
+ *
+ * A draft waits for the guardian: "Turn it on" creates the routine through
+ * POST /api/routines (which also activates it), so confirmation needs no
+ * second agent turn. When the agent already created it on the guardian's
+ * explicit instruction (`activate: true`), `routineId` is set and the card
+ * opens saved. A saved routine links to its run history and can be paused or
+ * deleted from here, so an auto-enabled routine stays visible and reversible.
+ *
+ * On mount we look up the routine this card created, so a reload shows its
+ * live state instead of re-offering to create a duplicate — or offers to turn
+ * it on again if it was deleted.
  */
 export function RoutineDraftCard({
   draft,
   routineKey,
+  routineId,
 }: {
   draft: RoutineDraftSpec;
   routineKey?: string;
+  routineId?: string;
 }) {
-  const [state, setState] = useState<CardState>({ kind: "draft" });
+  const [state, setState] = useState<CardState>(
+    routineId ? { kind: "on", routineId, enabled: true } : { kind: "draft" },
+  );
+  const [busy, setBusy] = useState<Busy>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void listRoutineRefs().then((refs) => {
+      // A failed load says nothing about the routine; keep what we know.
+      if (cancelled || !refs) return;
       const created = findCreatedRoutine(refs, draft.name, routineKey);
-      if (!cancelled && created) setState({ kind: "on", routineId: created.id });
+      setState(
+        created
+          ? { kind: "on", routineId: created.id, enabled: created.enabled }
+          : { kind: "draft" },
+      );
     });
     return () => {
       cancelled = true;
@@ -64,7 +92,7 @@ export function RoutineDraftCard({
       ...(routineKey ? { key: routineKey } : {}),
     });
     if (result.ok) {
-      setState({ kind: "on", routineId: result.routineId });
+      setState({ kind: "on", routineId: result.routineId, enabled: true });
     } else {
       setState({
         kind: "error",
@@ -73,7 +101,24 @@ export function RoutineDraftCard({
     }
   };
 
-  const isOn = state.kind === "on";
+  const toggle = async (id: string, enabled: boolean) => {
+    setBusy("toggle");
+    const result = await setRoutineEnabled(id, enabled);
+    setBusy(null);
+    setActionError(result.ok ? null : (result.error ?? null));
+    if (result.ok) setState({ kind: "on", routineId: id, enabled });
+  };
+
+  // Deleting returns the card to its draft, so "Turn it on" undoes it.
+  const remove = async (id: string) => {
+    setBusy("delete");
+    const result = await deleteRoutine(id);
+    setBusy(null);
+    setConfirmingDelete(false);
+    setActionError(result.ok ? null : (result.error ?? null));
+    if (result.ok) setState({ kind: "draft" });
+  };
+
   const isSchedule = draft.trigger.type === "schedule";
   const isManual = draft.trigger.type === "manual";
   const TriggerIcon = isManual ? Play : isSchedule ? CalendarClock : BellRing;
@@ -83,6 +128,7 @@ export function RoutineDraftCard({
     : isSchedule
       ? "Scheduled routine"
       : "Event routine";
+  const error = state.kind === "error" ? state.message : actionError;
 
   return (
     <div className="mb-3 overflow-hidden rounded-12 border border-border bg-surface">
@@ -91,12 +137,18 @@ export function RoutineDraftCard({
           <TriggerIcon aria-hidden />
           {badgeLabel}
         </Badge>
-        {isOn && (
-          <Badge variant="success">
-            <Check aria-hidden />
-            On
-          </Badge>
-        )}
+        {state.kind === "on" &&
+          (state.enabled ? (
+            <Badge variant="success">
+              <Check aria-hidden />
+              On
+            </Badge>
+          ) : (
+            <Badge variant="muted">
+              <Pause aria-hidden />
+              Paused
+            </Badge>
+          ))}
       </div>
 
       <div className="space-y-3 px-4 py-3">
@@ -110,29 +162,38 @@ export function RoutineDraftCard({
           ) : (
             <SpecRow label="Then" value={draft.thenSummary} />
           )}
+          {/* The real bound action, so the agent's summary can't stand in for it. */}
+          <SpecRow label="Action" value={draft.actionName} mono />
         </dl>
       </div>
 
-      {state.kind === "error" && (
+      {error && (
         <div className="border-t border-destructive-border bg-destructive-bg/60 px-4 py-2 text-aux text-destructive-fg">
-          {state.message}
+          {error}
         </div>
       )}
 
       {state.kind === "on" ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-muted/50 px-4 py-2">
           <p className="min-w-0 text-aux text-muted-foreground">
-            {isManual
-              ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
-              : "Saved. Next time it matches, Rome will run it within a minute."}
+            {!state.enabled
+              ? "Paused. It won’t run until you resume it."
+              : isManual
+                ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
+                : "Saved. Next time it matches, Rome will run it within a minute."}
           </p>
           {state.routineId && (
-            <Button asChild size="sm" variant="outline">
-              <Link to={`/routines/${encodeURIComponent(state.routineId)}`}>
-                View run history
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </Button>
+            <SavedControls
+              routineId={state.routineId}
+              enabled={state.enabled}
+              isManual={isManual}
+              busy={busy}
+              confirmingDelete={confirmingDelete}
+              onToggle={toggle}
+              onAskDelete={() => setConfirmingDelete(true)}
+              onCancelDelete={() => setConfirmingDelete(false)}
+              onDelete={remove}
+            />
           )}
         </div>
       ) : (
@@ -150,6 +211,73 @@ export function RoutineDraftCard({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function SavedControls({
+  routineId,
+  enabled,
+  isManual,
+  busy,
+  confirmingDelete,
+  onToggle,
+  onAskDelete,
+  onCancelDelete,
+  onDelete,
+}: {
+  routineId: string;
+  enabled: boolean;
+  isManual: boolean;
+  busy: Busy;
+  confirmingDelete: boolean;
+  onToggle: (id: string, enabled: boolean) => void;
+  onAskDelete: () => void;
+  onCancelDelete: () => void;
+  onDelete: (id: string) => void;
+}) {
+  if (confirmingDelete) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-aux text-foreground">Delete this routine?</span>
+        <Button size="sm" variant="ghost" onClick={onCancelDelete} disabled={busy !== null}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => onDelete(routineId)}
+          disabled={busy !== null}
+        >
+          {busy === "delete" && <Spinner data-icon="inline-start" size="sm" label="Deleting" />}
+          Delete
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {/* A manual routine never fires on its own, so there is nothing to pause. */}
+      {!isManual && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onToggle(routineId, !enabled)}
+          disabled={busy !== null}
+        >
+          {busy === "toggle" && <Spinner data-icon="inline-start" size="sm" label="Saving" />}
+          {enabled ? "Pause" : "Resume"}
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" onClick={onAskDelete} disabled={busy !== null}>
+        Delete
+      </Button>
+      <Button asChild size="sm" variant="outline">
+        <Link to={`/routines/${encodeURIComponent(routineId)}`}>
+          View run history
+          <ArrowRight data-icon="inline-end" />
+        </Link>
+      </Button>
     </div>
   );
 }
@@ -177,11 +305,11 @@ function PreviewRows({ preview }: { preview: PreviewPayload }) {
   );
 }
 
-function SpecRow({ label, value }: { label: string; value: string }) {
+function SpecRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex gap-2">
       <dt className="w-16 shrink-0 text-subtle-foreground">{label}</dt>
-      <dd className="text-foreground">{value}</dd>
+      <dd className={mono ? "break-all font-mono text-foreground" : "text-foreground"}>{value}</dd>
     </div>
   );
 }

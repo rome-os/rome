@@ -3011,6 +3011,127 @@ describe("Webchat API", () => {
       await drainTurn(app, res);
       expect(await cardIn(sessionId, "tu-ghost-1")).toBeUndefined();
     });
+
+    // propose_routine: a draft card is written off the tool_use; an
+    // `activate: true` call waits for its tool_result, which says whether the
+    // routine was created (saved card with its id) or fell back to a draft.
+    describe("propose_routine cards", () => {
+      const routineInput = {
+        kind: "schedule",
+        sentence: "Every 12 hours, Rome will check new feedback.",
+        name: "Feedback triage",
+        watchLabel: "Every 12 hours",
+        thenSummary: "triage new feedback",
+        tzid: "America/Los_Angeles",
+        localTime: "09:00",
+        rrule: "FREQ=HOURLY;INTERVAL=12",
+        actionName: "summon",
+        args: { agentName: "main", prompt: "Check feedback." },
+      };
+
+      async function routineCards(sessionId: string) {
+        const cards: Record<string, unknown>[] = [];
+        for (const m of await deps.webchatRepo.getMessages(sessionId)) {
+          if (m.role !== "assistant") continue;
+          let parts: unknown;
+          try {
+            parts = JSON.parse(m.content);
+          } catch {
+            continue;
+          }
+          if (!Array.isArray(parts)) continue;
+          for (const p of parts) {
+            if (p && typeof p === "object" && p.type === "routine_draft_card") cards.push(p);
+          }
+        }
+        return cards;
+      }
+
+      const proposeEvents = (input: Record<string, unknown>, resultText: string | null) =>
+        async function* () {
+          yield {
+            type: "tool_use",
+            id: "tu-routine",
+            tool: "mcp__ask_user__propose_routine",
+            input,
+          };
+          if (resultText !== null) {
+            yield {
+              type: "tool_result",
+              toolUseId: "tu-routine",
+              tool: "mcp__ask_user__propose_routine",
+              output: [{ type: "text", text: resultText }],
+            };
+          }
+          yield { type: "result", content: "" };
+        };
+
+      async function runTurn(events: ReturnType<typeof proposeEvents>) {
+        mockScriptedManager().setEvents(events);
+        const app = createWebchatRuntime(deps).routes;
+        const sessionId = await newSession(app);
+        const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "check feedback every 12 hours" }),
+        });
+        await drainTurn(app, res);
+        return routineCards(sessionId);
+      }
+
+      it("writes a draft card off the tool_use when not activating", async () => {
+        const cards = await runTurn(proposeEvents(routineInput, "delivered"));
+        expect(cards).toHaveLength(1);
+        expect(cards[0]).toMatchObject({
+          toolUseId: "tu-routine",
+          draft: { name: "Feedback triage" },
+        });
+        expect(cards[0].routineId).toBeUndefined();
+      });
+
+      it("writes a saved card with the routine id once an activated routine exists", async () => {
+        const cards = await runTurn(
+          proposeEvents(
+            { ...routineInput, activate: true },
+            JSON.stringify({
+              routineCard: "active",
+              routineId: "r-7",
+              routineKey: "chat-routine:from-handler",
+              message: "on",
+            }),
+          ),
+        );
+        expect(cards).toHaveLength(1);
+        // The card carries the key the routine was created with, not a new one.
+        expect(cards[0]).toMatchObject({
+          toolUseId: "tu-routine",
+          routineId: "r-7",
+          routineKey: "chat-routine:from-handler",
+          draft: { name: "Feedback triage", actionName: "summon" },
+        });
+      });
+
+      it("writes a plain draft card when activation fell back", async () => {
+        const cards = await runTurn(
+          proposeEvents(
+            { ...routineInput, activate: true },
+            JSON.stringify({ routineCard: "draft", message: "not permitted" }),
+          ),
+        );
+        expect(cards).toHaveLength(1);
+        expect(cards[0].routineId).toBeUndefined();
+        expect(cards[0].routineKey).toMatch(/^chat-routine:/);
+      });
+
+      it("writes no card when activation failed or never returned", async () => {
+        expect(
+          await runTurn(
+            proposeEvents({ ...routineInput, activate: true }, "NOT created: bad rrule"),
+          ),
+        ).toEqual([]);
+        expect(await runTurn(proposeEvents({ ...routineInput, activate: true }, null))).toEqual([]);
+      });
+    });
   });
 
   describe("turn feedback routes", () => {

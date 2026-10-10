@@ -174,6 +174,8 @@ export interface ModelSessionParams {
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.canCallAction. */
+  canCallAction?: (name: string) => "permitted" | "denied" | "unknown";
   /**
    * Whether the consuming surface can render interactive inline UI
    * (`propose_routine` cards, app components). True only for webchat-bound

@@ -172,6 +172,7 @@ export function renderSingleEntry(
           // Parts can arrive unvalidated (e.g. via channels.send); a malformed
           // key falls back to the keyless card rather than failing every create.
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+          routineId={block.routineId}
         />
       );
     case "submission_card":

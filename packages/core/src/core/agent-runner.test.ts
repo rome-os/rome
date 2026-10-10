@@ -5011,27 +5011,36 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
+      let sessionParams: ModelSessionParams | undefined;
+      const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
+        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
+          "demo_action",
+          "send_message",
+        ]);
+        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
+          /Unknown action: internal_action/,
+        );
+        executionWasRejected = true;
+        yield { type: "result", content: "Done" };
+      });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (params) {
-          expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-            "demo_action",
-            "send_message",
-          ]);
-          await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-            /Unknown action: internal_action/,
-          );
-          executionWasRejected = true;
-          yield { type: "result", content: "Done" };
-        }),
+        openSession: async (params) => {
+          sessionParams = params;
+          return openFromRun(params);
+        },
       };
       const runner = createRunner(provider);
 
       await collectMessages(runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }));
 
       expect(executionWasRejected).toBe(true);
+      // propose_routine's auto-enable gate mirrors the same allow-list.
+      expect(sessionParams?.canCallAction?.("demo_action")).toBe("permitted");
+      expect(sessionParams?.canCallAction?.("internal_action")).toBe("denied");
+      expect(sessionParams?.canCallAction?.("no_such_action")).toBe("unknown");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {

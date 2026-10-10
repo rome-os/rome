@@ -1,6 +1,6 @@
 name: create_routine
 type: system
-description: Create a routine that runs an action when its trigger fires — a schedule (recurring or one-off), a watched event, or manual (no automatic trigger; run by hand from the Routines page's "Run now" button) — and bring it live immediately, with no confirmation card. For guardian-initiated "do this automatically" requests prefer the routine-from-chat skill (propose_routine), which confirms with a card; use create_routine for direct/programmatic creation
+description: Create a routine that runs an action when its trigger fires — a schedule (recurring or one-off), a watched event, or manual (no automatic trigger; run by hand from the Routines page's "Run now" button) — and bring it live immediately, with no confirmation card. For guardian-initiated "do this automatically" requests prefer the routine-from-chat skill (propose_routine), which shows the routine on a card (activate: true creates it immediately when the guardian asked for it explicitly); use create_routine for direct/programmatic creation
 complexity: simple
 speed: fast
 reliability: high

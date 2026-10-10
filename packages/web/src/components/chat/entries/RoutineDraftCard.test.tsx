@@ -5,18 +5,22 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { RoutineDraftCard } from "./RoutineDraftCard";
-import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
+import { createRoutine, deleteRoutine, listRoutineRefs, setRoutineEnabled } from "@/lib/chat-api";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
 
-// The card reaches the backend through exactly these two calls; stub them so
-// the component renders from fixture data alone — no agent, no server.
+// The card reaches the backend through exactly these calls; stub them so the
+// component renders from fixture data alone — no agent, no server.
 rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
   listRoutineRefs: rs.fn(),
+  setRoutineEnabled: rs.fn(),
+  deleteRoutine: rs.fn(),
 }));
 
 const mockCreate = rs.mocked(createRoutine);
 const mockList = rs.mocked(listRoutineRefs);
+const mockSetEnabled = rs.mocked(setRoutineEnabled);
+const mockDelete = rs.mocked(deleteRoutine);
 
 // The saved state links into the router, so render inside one.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
@@ -56,6 +60,8 @@ beforeEach(() => {
   // Default: this routine doesn't exist yet, and creating it succeeds.
   mockList.mockResolvedValue([]);
   mockCreate.mockResolvedValue({ ok: true, status: 201, routineId: "r-1" });
+  mockSetEnabled.mockResolvedValue({ ok: true });
+  mockDelete.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -178,8 +184,8 @@ describe("RoutineDraftCard", () => {
 
   it("on reload, finds its routine by key — not by a same-named routine", async () => {
     mockList.mockResolvedValue([
-      { id: "r-other", name: "Landlord emails", key: null },
-      { id: "r-mine", name: "Renamed in Routines", key: "chat-routine:card-1" },
+      { id: "r-other", name: "Landlord emails", key: null, enabled: true },
+      { id: "r-mine", name: "Renamed in Routines", key: "chat-routine:card-1", enabled: true },
     ]);
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
@@ -190,7 +196,9 @@ describe("RoutineDraftCard", () => {
   });
 
   it("offers to turn it on again when its keyed routine no longer exists", async () => {
-    mockList.mockResolvedValue([{ id: "r-other", name: "Landlord emails", key: null }]);
+    mockList.mockResolvedValue([
+      { id: "r-other", name: "Landlord emails", key: null, enabled: true },
+    ]);
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
     await waitFor(() => expect(mockList).toHaveBeenCalled());
@@ -200,13 +208,119 @@ describe("RoutineDraftCard", () => {
 
   it("matches a card without a key (written before keys) by name among unkeyed routines", async () => {
     mockList.mockResolvedValue([
-      { id: "r-keyed", name: "Landlord emails", key: "chat-routine:other-card" },
-      { id: "r-legacy", name: "Landlord emails", key: null },
+      { id: "r-keyed", name: "Landlord emails", key: "chat-routine:other-card", enabled: true },
+      { id: "r-legacy", name: "Landlord emails", key: null, enabled: true },
     ]);
     render(<RoutineDraftCard draft={eventDraft} />);
 
     const link = await screen.findByRole("link", { name: /view run history/i });
     expect(link.getAttribute("href")).toBe("/routines/r-legacy");
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("shows the real bound action name", async () => {
+    render(<RoutineDraftCard draft={eventDraft} />);
+    expect(screen.getByText("Action")).toBeTruthy();
+    expect(screen.getByText("summon")).toBeTruthy();
+    await waitFor(() => expect(mockList).toHaveBeenCalled());
+  });
+
+  // `propose_routine` with `activate: true`: the agent created the routine with
+  // the card's key, and the part carries its id.
+  describe("an activated routine (routineId set)", () => {
+    const key = "chat-routine:card-5";
+    const ref = { id: "r-5", name: "Landlord emails", key, enabled: true };
+    const renderActivated = (draft: RoutineDraftSpec = eventDraft) =>
+      render(<RoutineDraftCard draft={draft} routineKey={key} routineId="r-5" />);
+
+    beforeEach(() => {
+      mockList.mockResolvedValue([ref]);
+    });
+
+    it("opens saved with Pause, Delete and the run-history link — never Turn it on", async () => {
+      renderActivated();
+
+      expect(screen.getByText("On")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+      const link = screen.getByRole("link", { name: /view run history/i });
+      expect(link.getAttribute("href")).toBe("/routines/r-5");
+      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it("reflects a routine paused elsewhere", async () => {
+      mockList.mockResolvedValue([{ ...ref, enabled: false }]);
+      renderActivated();
+      expect(await screen.findByText("Paused")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+    });
+
+    it("pauses and resumes the routine", async () => {
+      const user = userEvent.setup();
+      renderActivated();
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+
+      await user.click(screen.getByRole("button", { name: "Pause" }));
+      expect(mockSetEnabled).toHaveBeenCalledWith("r-5", false);
+      expect(await screen.findByText("Paused")).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: "Resume" }));
+      expect(mockSetEnabled).toHaveBeenLastCalledWith("r-5", true);
+      expect(await screen.findByText("On")).toBeTruthy();
+    });
+
+    it("surfaces a failed pause and keeps the routine on", async () => {
+      const user = userEvent.setup();
+      mockSetEnabled.mockResolvedValue({ ok: false, error: "Routine not found" });
+      renderActivated();
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+
+      await user.click(screen.getByRole("button", { name: "Pause" }));
+      expect(await screen.findByText("Routine not found")).toBeTruthy();
+      expect(screen.getByText("On")).toBeTruthy();
+    });
+
+    it("deletes only after confirmation, then offers Turn it on as the undo", async () => {
+      const user = userEvent.setup();
+      renderActivated();
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(screen.getByText("Delete this routine?")).toBeTruthy();
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+      expect(mockDelete).toHaveBeenCalledWith("r-5");
+      expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
+      expect(screen.queryByText("On")).toBeNull();
+    });
+
+    it("offers Turn it on when the routine was deleted elsewhere", async () => {
+      mockList.mockResolvedValue([]);
+      renderActivated();
+      expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
+    });
+
+    it("keeps the saved state when the routine list can't load", async () => {
+      mockList.mockResolvedValue(null);
+      renderActivated();
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+      expect(screen.getByText("On")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
+    });
+
+    it("offers no Pause for a manual routine", async () => {
+      renderActivated({
+        ...eventDraft,
+        watchLabel: "Run on demand",
+        filterSummary: undefined,
+        trigger: { type: "manual" },
+      });
+      await waitFor(() => expect(mockList).toHaveBeenCalled());
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+    });
   });
 });

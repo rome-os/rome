@@ -53,6 +53,8 @@ interface BuildAnthropicMcpServersParams {
   interactiveSurfaceDetached?: boolean;
   /** See FacadeParams.executeDefer. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /** See FacadeParams.canCallAction. */
+  canCallAction?: (name: string) => "permitted" | "denied" | "unknown";
 }
 
 export type AnthropicMcpServers = Record<
@@ -110,6 +112,7 @@ export function buildAnthropicMcpServers({
   supportsInteractiveSurface,
   interactiveSurfaceDetached,
   executeDefer,
+  canCallAction,
 }: BuildAnthropicMcpServersParams): AnthropicMcpServers {
   const server = createRomeMcpServer({
     getActionCatalog,
@@ -122,6 +125,7 @@ export function buildAnthropicMcpServers({
     supportsInteractiveSurface,
     interactiveSurfaceDetached,
     executeDefer,
+    canCallAction,
   });
 
   // The actions + skills MCP servers always register so the agent can list

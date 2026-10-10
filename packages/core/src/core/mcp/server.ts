@@ -59,6 +59,7 @@ export function createRomeMcpServerForSession(params: ModelSessionForkOpenParams
     supportsInteractiveSurface: params.supportsInteractiveSurface,
     interactiveSurfaceDetached: params.interactiveSurfaceDetached,
     executeDefer: params.executeDefer,
+    canCallAction: params.canCallAction,
   });
 }
 

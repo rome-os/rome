@@ -21,6 +21,9 @@ const fromNow = (offsetMs: number): string => new Date(Date.now() + offsetMs).to
 const routines: Routine[] = [
   {
     id: "routine-brief",
+    // Created from chat with `propose_routine` `activate: true` (see the
+    // activated card in mock-chat-3), so it carries that card's key.
+    key: "chat-routine:mock-chat-3-active-1",
     name: "Morning brief",
     enabled: true,
     trigger: {

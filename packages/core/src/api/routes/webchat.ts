@@ -197,6 +197,8 @@ type WebchatEventName =
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
 // carries the full create payload; turning it on POSTs /api/routines directly.
+// `created` is set when the routine already exists (`activate: true`), so the
+// card renders it saved instead of offering to create it.
 async function persistRoutineDraftCard(
   webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
   actionRegistry: import("../../actions/types.js").ActionRegistry,
@@ -204,6 +206,7 @@ async function persistRoutineDraftCard(
   turnId: string,
   toolUseId: string,
   toolInput: unknown,
+  created?: { routineId: string; routineKey: string },
 ): Promise<void> {
   const normalized = normalizeRoutineDraftForCard(toolInput ?? {});
   if (!normalized.ok) return;
@@ -218,7 +221,10 @@ async function persistRoutineDraftCard(
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
     // Minted here, not taken from the agent's input, so it names this card only.
-    routineKey: `chat-routine:${randomUUID()}`,
+    // An activated routine was already created with a key minted the same
+    // way (in the propose_routine handler); the card carries that one.
+    routineKey: created?.routineKey ?? `chat-routine:${randomUUID()}`,
+    ...(created ? { routineId: created.routineId } : {}),
   };
   try {
     await webchatRepo.addMessage(
@@ -290,14 +296,33 @@ type Suspension =
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
 
-/** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
- * out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the facade. Returns null for any non-suspended
- * result so the drain loop ignores ordinary tool calls. */
-function readSuspensionFromOutput(output: unknown): Suspension | null {
+const isProposeRoutineTool = (tool: unknown): boolean =>
+  typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
+
+/** The card state an `activate: true` propose_routine call settled on (see
+ * `RoutineCardOutcome` in mcp-facade): saved with its id, or a draft fallback.
+ * Null for an error result, which shows no card. */
+function readRoutineCardOutcome(
+  output: unknown,
+): { created?: { routineId: string; routineKey: string } } | null {
+  const o = readToolResultObject(output);
+  if (
+    o?.routineCard === "active" &&
+    typeof o.routineId === "string" &&
+    typeof o.routineKey === "string"
+  ) {
+    return { created: { routineId: o.routineId, routineKey: o.routineKey } };
+  }
+  if (o?.routineCard === "draft") return {};
+  return null;
+}
+
+/** The JSON object a tool returned, whether it arrived structured or
+ * JSON-serialized through the facade. An MCP facade tool_result surfaces as
+ * `[{ type: "text", text: "<json>" }]` (or `{ content: [...] }`); unwrap to the
+ * JSON text the tool returned. Null for anything that isn't a JSON object. */
+function readToolResultObject(output: unknown): Record<string, unknown> | null {
   let value: unknown = output;
-  // An MCP facade tool_result surfaces as `[{ type: "text", text: "<json>" }]`
-  // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const content = (value as { content?: unknown }).content;
     if (Array.isArray(content)) value = content;
@@ -319,8 +344,17 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
       return null;
     }
   }
-  if (!value || typeof value !== "object") return null;
-  const o = value as Record<string, unknown>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
+ * out of an action's tool_result output, whether it arrived structured or
+ * JSON-serialized through the facade. Returns null for any non-suspended
+ * result so the drain loop ignores ordinary tool calls. */
+function readSuspensionFromOutput(output: unknown): Suspension | null {
+  const o = readToolResultObject(output);
+  if (!o) return null;
   if (typeof o.appId !== "string") return null;
   const asRecord = (v: unknown): Record<string, unknown> | undefined =>
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
@@ -414,30 +448,8 @@ function readPlaceWidgetFromOutput(output: unknown): {
   route?: string;
   params?: Record<string, string | number | boolean>;
 } | null {
-  let value: unknown = output;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const content = (value as { content?: unknown }).content;
-    if (Array.isArray(content)) value = content;
-  }
-  if (Array.isArray(value)) {
-    const textBlock = value.find(
-      (b): b is { type: "text"; text: string } =>
-        !!b &&
-        typeof b === "object" &&
-        (b as { type?: unknown }).type === "text" &&
-        typeof (b as { text?: unknown }).text === "string",
-    );
-    value = textBlock?.text;
-  }
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object") return null;
-  const o = value as Record<string, unknown>;
+  const o = readToolResultObject(output);
+  if (!o) return null;
   if (o.placeWidget !== true) return null;
   if (typeof o.appId !== "string") return null;
   // `route` addresses a screen inside the app; `params` are flat scalar query
@@ -3342,6 +3354,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
+            // propose_routine `activate: true` inputs, by tool-use id, until
+            // their tool_result says which card to show.
+            const pendingRoutineActivations = new Map<string, unknown>();
             for await (const msg of handle.events) {
               if (msg.type === "input_status") continue;
               // Deltas other than text have no webchat consumer yet.
@@ -3454,11 +3469,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               }
               if (msg.type === "result") resultContent = msg.content;
               if (msg.type === "error") resultError = msg;
-              // Out-of-band snapshot for the routine draft card.
+              // Out-of-band snapshot for the routine draft card. An
+              // `activate: true` call creates the routine in its handler, so its
+              // card waits for the tool_result, which carries the routine id.
               if (
                 msg.type === "tool_use" &&
-                (msg.tool === "propose_routine" || msg.tool.endsWith("__propose_routine"))
+                isProposeRoutineTool(msg.tool) &&
+                (msg.input as { activate?: unknown } | undefined)?.activate === true
               ) {
+                pendingRoutineActivations.set(msg.id, msg.input);
+              } else if (msg.type === "tool_use" && isProposeRoutineTool(msg.tool)) {
                 await persistRoutineDraftCard(
                   deps.webchatRepo,
                   deps.actionRegistry,
@@ -3530,6 +3550,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // handoff also mints a dedicated child session for its
               // design conversation so it never interleaves with this (parent)
               // thread.
+              if (msg.type === "tool_result" && pendingRoutineActivations.has(msg.toolUseId)) {
+                const toolInput = pendingRoutineActivations.get(msg.toolUseId);
+                pendingRoutineActivations.delete(msg.toolUseId);
+                const outcome = readRoutineCardOutcome(msg.output);
+                if (outcome) {
+                  await persistRoutineDraftCard(
+                    deps.webchatRepo,
+                    deps.actionRegistry,
+                    sessionId,
+                    turnId,
+                    msg.toolUseId,
+                    toolInput,
+                    outcome.created,
+                  );
+                }
+              }
               if (msg.type === "tool_result") {
                 const suspension = readSuspensionFromOutput(msg.output);
                 if (suspension && suspension.kind === "inline" && suspension.builtin) {

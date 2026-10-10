@@ -18,6 +18,7 @@
 // The Anthropic MCP-server test (`anthropic-mcp-servers.test.ts`) is the
 // regression gate for this module.
 
+import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 import type { DeferInput } from "./defer.js";
 import type {
@@ -129,6 +130,15 @@ export interface FacadeParams {
    * thread to wake (e.g. keyless validation runs).
    */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /**
+   * Whether this session's agent may call `name` itself — the same allow-list
+   * check `executeAction` enforces. `propose_routine` with `activate: true`
+   * creates the routine only when the agent may call both `create_routine`
+   * and the target action, so auto-enabling never schedules anything the
+   * agent couldn't already schedule by calling `create_routine` directly.
+   * Absent → auto-enable is unavailable and the draft card is shown instead.
+   */
+  canCallAction?: (name: string) => "permitted" | "denied" | "unknown";
 }
 
 interface ActionArgumentSummary {
@@ -698,6 +708,9 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
       params.interactiveSurfaceDetached ?? false,
       !!params.handback,
       params.executeDefer,
+      params.canCallAction
+        ? { canCallAction: params.canCallAction, executeAction: params.executeAction }
+        : undefined,
     ),
   };
 }
@@ -709,6 +722,95 @@ export function buildFacadeBundle(params: FacadeParams): FacadeBundle {
 
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
+
+/** Machine-readable `propose_routine` result for an `activate: true` call. The
+ * webchat drain reads `routineCard` off the tool_result to persist the card in
+ * the matching state (saved with `routineId`, or a draft fallback); `message`
+ * is the model-facing directive. */
+type RoutineCardOutcome =
+  | { routineCard: "active"; routineId: string; routineKey: string; message: string }
+  | { routineCard: "draft"; message: string };
+
+type ActivationDeps = {
+  canCallAction: (name: string) => "permitted" | "denied" | "unknown";
+  executeAction: (name: string, input: unknown) => Promise<unknown>;
+};
+
+const CREATE_ROUTINE_ACTION = "create_routine";
+
+/** Create the drafted routine enabled, on the guardian's explicit instruction.
+ * The routine goes through the agent's own `create_routine` call (same
+ * allow-list, validation and attribution as a direct call); the target must be
+ * an action the agent may call too. Without that permission, it falls back to
+ * the draft card, so the guardian's click stays the gate. */
+async function activateRoutineDraft(
+  draft: import("@rome-os/app-runtime").RoutineDraftSpec,
+  deps: ActivationDeps | undefined,
+): Promise<FacadeToolResult> {
+  const json = (outcome: RoutineCardOutcome): FacadeToolResult => ({
+    content: [{ type: "text", text: JSON.stringify(outcome) }],
+  });
+  const fallback = (reason: string) =>
+    json({
+      routineCard: "draft",
+      message: `Not turned on automatically: ${reason}. A draft card was shown instead — the guardian turns it on themselves, so do NOT call any create action. Reply with one short line saying the routine is drafted and needs their click, then end your turn.`,
+    });
+
+  if (!deps) return fallback("auto-enable is not available in this session");
+  const target = deps.canCallAction(draft.actionName);
+  if (target === "unknown") {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `actionName "${draft.actionName}" is not a registered action, so no routine was created and no card was shown. Bind the routine to an existing action.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+  if (target === "denied") {
+    return fallback(`"${draft.actionName}" is not an action you are permitted to call`);
+  }
+  if (deps.canCallAction(CREATE_ROUTINE_ACTION) !== "permitted") {
+    return fallback("you are not permitted to create routines directly");
+  }
+
+  // The same key shape the webchat drain mints for a draft card, so the card
+  // finds this routine by key after a reload.
+  const routineKey = `chat-routine:${randomUUID()}`;
+  let result: unknown;
+  try {
+    result = await deps.executeAction(CREATE_ROUTINE_ACTION, {
+      key: routineKey,
+      name: draft.name,
+      trigger: draft.trigger,
+      actionName: draft.actionName,
+      args: draft.args,
+    });
+  } catch (err) {
+    result = { status: "error", error: err instanceof Error ? err.message : String(err) };
+  }
+  const r = (result ?? {}) as { status?: unknown; error?: unknown; routineId?: unknown };
+  if (r.status === "error" || typeof r.routineId !== "string") {
+    const error = typeof r.error === "string" ? r.error : "create_routine returned no routineId";
+    return {
+      content: [
+        {
+          type: "text",
+          text: `The routine was NOT created and no card was shown: ${error}. Fix the input and call propose_routine again.`,
+        },
+      ],
+      isError: true,
+    };
+  }
+  return json({
+    routineCard: "active",
+    routineId: r.routineId,
+    routineKey,
+    message: `Routine "${draft.name}" is on (id ${r.routineId}). The guardian sees it as a saved card with Pause, Delete and a link to its run history. Do NOT call any create action. Reply with one short line confirming what is now scheduled, then end your turn.`,
+  });
+}
 
 const CONFIRM_OUTPUT_DIRECTIVE =
   "The guardian's approval has been recorded — the result you last submitted is being handed back now, exactly as if they had clicked Approve. Reply with one short line confirming it's shipping, then end your turn. Do not call submit_output or confirm_output again.";
@@ -1066,6 +1168,7 @@ function buildInteractiveTools(
   interactiveSurfaceDetached: boolean,
   hasHandback: boolean,
   executeDefer?: (input: DeferInput) => Promise<unknown>,
+  activation?: ActivationDeps,
 ): FacadeToolDef[] {
   // `ask_question` is registered on every surface: webchat mounts the card; other
   // surfaces (messaging channels, subagents, CLI) get the questions relayed as
@@ -1183,7 +1286,7 @@ function buildInteractiveTools(
   tools.push({
     name: "propose_routine",
     description:
-      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). The card shows a plain-language summary and a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
+      "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with search_event_catalog rather than guessing.",
     inputSchema: {
       type: "object",
       required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -1273,6 +1376,11 @@ function buildInteractiveTools(
           type: "object",
           description: "A single argument object for the action. Not an array.",
         },
+        activate: {
+          type: "boolean",
+          description:
+            "Create the routine enabled right away instead of waiting for the guardian's click. Use only when the guardian explicitly stated the trigger or cadence, what to run and its arguments — nothing you inferred — and it acts on their behalf (sending, posting, spending) only as they asked. Otherwise omit it. Falls back to a draft card if you may not call the action yourself.",
+        },
       },
     },
     handler: async (input) => {
@@ -1293,6 +1401,7 @@ function buildInteractiveTools(
           isError: true,
         };
       }
+      if (input.activate === true) return activateRoutineDraft(result.draft, activation);
       return { content: [{ type: "text", text: PROPOSE_ROUTINE_DIRECTIVE }] };
     },
   });

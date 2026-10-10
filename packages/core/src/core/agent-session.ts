@@ -1011,6 +1011,12 @@ async function openSession(
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
   };
+  // The same check, non-throwing: lets `propose_routine` auto-enable only a
+  // routine the agent could already create with `create_routine` itself.
+  const canCallAction = (name: string): "permitted" | "denied" | "unknown" => {
+    if (!deps.actionRegistry.get(name)) return "unknown";
+    return findPermittedAction(name) ? "permitted" : "denied";
+  };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
     name: a.config.name,
     description: a.config.description,
@@ -1417,6 +1423,7 @@ async function openSession(
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    canCallAction,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });
