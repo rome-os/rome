@@ -28,7 +28,8 @@ describe("0068_backfill_session_conversation_id migration", () => {
           conversation_id text
         );
         INSERT INTO rome_sessions (id) VALUES
-          ('chat'), ('fork'), ('child'), ('channel:telegram:42'), ('channel:slack:C1:T9');
+          ('chat'), ('fork'), ('child'), ('channel:telegram:42'), ('channel:slack:C1:T9'),
+          ('channel:webchat:gone'), ('adhoc');
         INSERT INTO sessions (id, channel_thread_key, conversation_id) VALUES
           ('webchat', 'webchat:chat', NULL),
           ('model-choice', 'webchat:chat:large-model:sel', NULL),
@@ -39,7 +40,8 @@ describe("0068_backfill_session_conversation_id migration", () => {
           ('sentinel', 'sentinel:slack:C1:T9', NULL),
           ('unknown-chat', 'webchat:gone', NULL),
           ('adhoc', 'main:adhoc', NULL),
-          ('bound', 'webchat:chat', 'kept');
+          ('bound', 'webchat:chat', 'kept'),
+          ('keyless', NULL, NULL);
       `);
 
       runMigration(sqlite);
@@ -58,6 +60,7 @@ describe("0068_backfill_session_conversation_id migration", () => {
         "unknown-chat": null,
         adhoc: null,
         bound: "kept",
+        keyless: null,
       });
     } finally {
       sqlite.close();
