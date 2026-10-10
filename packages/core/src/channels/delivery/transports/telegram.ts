@@ -95,6 +95,9 @@ function classify(error: unknown): DeliveryFailure {
     if (error.error_code === 401) return new DeliveryFailure("unauthorized", error.description);
     // A server error is a hiccup, and the write may have gone through before it.
     if (error.error_code >= 500) return new DeliveryFailure("unknown", error.description);
+    // Anything else is a refusal, including an edit to a message the user has
+    // deleted ("message to edit not found"). Whether a reply then recreates
+    // the message or stops is decided where the engine is wired into runs.
     return new DeliveryFailure("rejected", error.description);
   }
   if (error instanceof HttpError) {

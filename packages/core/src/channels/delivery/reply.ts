@@ -352,7 +352,9 @@ export class ReplyDelivery {
           // unnecessary. Only a write for the same target runs, with the
           // latest text. A write that does not run costs the pacer nothing.
           if (this.failure) return SKIPPED;
-          const fresh = this.planSafely(this.now(), true);
+          // Planned on a copy of the bookkeeping, so that planning again cannot
+          // change the reply. The next planning notes what this one would have.
+          const fresh = this.planSafely(this.now(), true, true);
           if (!fresh || !sameTarget(fresh, plan)) return SKIPPED;
           await this.write(fresh);
           // A call the reply stopped waiting for is still running. The pacer
@@ -392,9 +394,9 @@ export class ReplyDelivery {
 
   /** `plan`, where a fault in planning fails the reply instead of throwing
    *  into whoever fed it text, or into the pacer. */
-  private planSafely(now: number, ignoreWaits = false): Plan {
+  private planSafely(now: number, ignoreWaits = false, dry = false): Plan {
     try {
-      return this.plan(now, ignoreWaits);
+      return this.plan(now, ignoreWaits, dry);
     } catch (error) {
       this.fail({
         kind: "internal",
@@ -410,16 +412,20 @@ export class ReplyDelivery {
    *
    *  It runs twice per write, once to choose it and once when the pacer lets
    *  it run. It also brings the reply's bookkeeping up to date with the text,
-   *  such as what was passed over and which parts differ, and each of those
-   *  steps leaves a second run's state as it is. A step that did not would
-   *  make a write's turn change what the write does. */
-  private plan(now: number, ignoreWaits = false): Plan {
+   *  such as what was passed over and which parts differ. The second run is
+   *  `dry`: it plans on a copy of that bookkeeping and fails nothing, so it
+   *  cannot change the reply, and the next planning notes what it would have. */
+  private plan(now: number, ignoreWaits = false, dry = false): Plan {
     // Nothing is written before the reply finishes, so there is nothing to plan.
     if (this.mode === "final" && !this.closed) return null;
     const { codec, capabilities } = this.options.transport;
     const limit = capabilities.maxPartLength;
+    const blocks = dry ? this.snapshot() : this.blocks;
     for (const [index, block] of this.assembler.blocks.entries()) {
-      const state = (this.blocks[index] ??= { parts: [] });
+      const state = (blocks[index] ??= { parts: [] });
+      // A part of the copy is the reply's own part again when a write names it.
+      const own = (part: Part) =>
+        dry ? this.blocks[index]!.parts[state.parts.indexOf(part)]! : part;
       const complete = block.complete || this.closed;
       this.reconcileLayout(block.text, state);
 
@@ -432,7 +438,7 @@ export class ReplyDelivery {
         // is now empty stays as it is, and the part is reported as differing.
         // If its last edit's result is unknown, nothing can put its text back.
         if (!rendered.trim()) {
-          if (part.uncertain) return this.failUncertain();
+          if (part.uncertain) return dry ? null : this.failUncertain();
           part.diverged = true;
           continue;
         }
@@ -446,7 +452,14 @@ export class ReplyDelivery {
         }
         const due = part.lastWriteAt + this.options.policy.editIntervalMs;
         if (now < due && !ignoreWaits) return { waitUntil: due };
-        return { write: "edit", block: index, part, end: part.end, source, settle: true };
+        return {
+          write: "edit",
+          block: index,
+          part: own(part),
+          end: part.end,
+          source,
+          settle: true,
+        };
       }
 
       for (;;) {
@@ -464,7 +477,7 @@ export class ReplyDelivery {
           // shows cannot be taken back, so it stays as shown, and the part
           // is reported as differing from the final text.
           if (active) {
-            if (active.uncertain) return this.failUncertain();
+            if (active.uncertain) return dry ? null : this.failUncertain();
             active.diverged = true;
             this.settlePart(active, active.start + active.sentSource.length);
           }
@@ -492,7 +505,7 @@ export class ReplyDelivery {
           // A preview already shown at the start of this text stays as it is,
           // since a blank edit is refused, and is reported as differing.
           if (active) {
-            if (active.uncertain) return this.failUncertain();
+            if (active.uncertain) return dry ? null : this.failUncertain();
             active.diverged = true;
             this.settlePart(active, active.start + active.sentSource.length);
           }
@@ -508,7 +521,7 @@ export class ReplyDelivery {
           }
           const due = active.lastWriteAt + this.options.policy.editIntervalMs;
           if (now < due && !ignoreWaits) return { waitUntil: due };
-          return { write: "edit", block: index, part: active, end, source, settle };
+          return { write: "edit", block: index, part: own(active), end, source, settle };
         }
         if (this.mode === "edit" || settle) {
           state.waitingSince = undefined;
@@ -535,6 +548,14 @@ export class ReplyDelivery {
       }
     }
     return null;
+  }
+
+  /** A copy of the blocks' bookkeeping, for planning that must not change it. */
+  private snapshot(): BlockState[] {
+    return this.blocks.map((state) => ({
+      ...state,
+      parts: state.parts.map((part) => ({ ...part })),
+    }));
   }
 
   /**

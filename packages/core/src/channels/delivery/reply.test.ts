@@ -1038,6 +1038,46 @@ describe("ReplyDelivery", () => {
     });
   });
 
+  it("leaves the reply's state alone when it plans again as a write's turn comes", async () => {
+    // The pacer is busy, so the second block's create waits in the queue with the reply writing.
+    const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+    let release = () => {};
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer,
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "c1",
+      clock,
+    });
+    delivery.accept(delta("Hello there my friend, nice day", "a"));
+    delivery.accept(text("Hello there my friend, nice day", "a"));
+    await advance(0);
+    await advance(0);
+    void pacer.run("c1", () => new Promise<void>((resolve) => (release = resolve)));
+    delivery.accept(delta("Second", "b"));
+    await settle();
+    // The first block is revised to nothing visible, which a plan notes as parts
+    // that differ. The reply is still writing, so nothing has planned since.
+    delivery.accept(text("", "a"));
+
+    type Probe = {
+      planSafely(now: number, ignoreWaits: boolean, dry: boolean): unknown;
+      blocks: Array<{ parts: Array<{ diverged?: true }> }>;
+    };
+    const probe = delivery as unknown as Probe;
+    const differing = () => probe.blocks[0]!.parts.filter((part) => part.diverged).length;
+    expect(differing()).toBe(0);
+    // Planning as the pacer's job does, when its turn comes, changes nothing.
+    probe.planSafely(clock.now().getTime(), true, true);
+    expect(differing()).toBe(0);
+    // Planning for real notes the parts.
+    probe.planSafely(clock.now().getTime(), false, false);
+    expect(differing()).toBeGreaterThan(0);
+
+    release();
+    await delivery.finish();
+  });
+
   it("keeps the conversation's later writes behind a create the reply stopped waiting for", async () => {
     const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
     let release!: () => void;

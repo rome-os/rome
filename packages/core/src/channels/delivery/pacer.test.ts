@@ -242,6 +242,26 @@ describe("Pacer", () => {
     expect(log).toEqual(["b@0", "a again@0"]);
   });
 
+  it("does not count a skipped write as a turn served, so its conversation keeps its place", async () => {
+    const paced = pacer();
+    // "a" is served first, then "b", so "a" has waited longest.
+    await paced.run("a", write("a0"));
+    await paced.run("b", write("b0"));
+    const blocker = paced.run("c", async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+    // "a" asks twice, the first of which is dropped, and "b" asks once.
+    const dropped = paced.run("a", async () => SKIPPED);
+    const aAgain = paced.run("a", write("a1"));
+    const bAgain = paced.run("b", write("b1"));
+    await blocker;
+    await advance(0);
+    await Promise.all([dropped, aAgain, bAgain]);
+
+    // The dropped write wrote nothing, so "a" still goes before "b".
+    expect(log).toEqual(["a0@0", "b0@0", "a1@0", "b1@0"]);
+  });
+
   describe("a conversation held by a call that never ends", () => {
     it("gives the conversation back after a limit when the call its caller stopped waiting for never ends", async () => {
       const paced = pacer();

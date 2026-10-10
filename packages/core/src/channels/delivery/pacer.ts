@@ -187,6 +187,7 @@ export class Pacer {
     const job = lane.queue.shift()!;
     job.dispose?.();
     const readyBefore = lane.readyAt;
+    const servedBefore = lane.servedTurn;
     // Identifies this write as the lane's holder, so that a call which ends
     // after the hold limit cannot free the lane for a write that came later.
     const holder = {};
@@ -207,6 +208,7 @@ export class Pacer {
       if (skipped) {
         this.tokens = Math.min(this.budget.burst, this.tokens + 1);
         lane.readyAt = readyBefore;
+        lane.servedTurn = servedBefore;
       } else lane.readyAt = this.now() + this.spacing(lane.conversation);
       this.pump();
     };
