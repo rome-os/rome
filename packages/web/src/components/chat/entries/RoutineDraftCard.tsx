@@ -1,36 +1,58 @@
 import { useEffect, useState } from "react";
-import { BellRing, CalendarClock, Check, Play } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowRight, BellRing, CalendarClock, Check, Play } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { createRoutine, listRoutineNames } from "@/lib/chat-api";
+import { createRoutine, listRoutineRefs, type RoutineRef } from "@/lib/chat-api";
 import type { PreviewPayload, RoutineDraftSpec } from "@/lib/chat-types";
 
 type CardState =
   | { kind: "draft" }
   | { kind: "creating" }
-  | { kind: "on" }
+  // `routineId` is unknown only if a create succeeded without returning a row.
+  | { kind: "on"; routineId?: string }
   | { kind: "error"; message: string };
+
+/** The routine this card created, if it still exists. Cards carry a unique
+ * `routineKey` the routine was created with; cards written before keys existed
+ * fall back to the old name match, limited to routines without a key. */
+function findCreatedRoutine(
+  refs: RoutineRef[],
+  name: string,
+  routineKey: string | undefined,
+): RoutineRef | undefined {
+  return routineKey
+    ? refs.find((r) => r.key === routineKey)
+    : refs.find((r) => r.key === null && r.name === name);
+}
 
 /**
  * The confirm card for a routine the agent proposed via `propose_routine`.
  * Turning it on creates the routine through POST /api/routines (which also
- * activates it), so confirmation needs no second agent turn. On mount we check
- * existing routine names so a reload after creation shows "On" instead of
- * re-offering to create a duplicate.
+ * activates it), so confirmation needs no second agent turn. On mount we look
+ * up the routine this card created, so a reload shows "On" with a link to its
+ * run history instead of re-offering to create a duplicate.
  */
-export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
+export function RoutineDraftCard({
+  draft,
+  routineKey,
+}: {
+  draft: RoutineDraftSpec;
+  routineKey?: string;
+}) {
   const [state, setState] = useState<CardState>({ kind: "draft" });
 
   useEffect(() => {
     let cancelled = false;
-    void listRoutineNames().then((names) => {
-      if (!cancelled && names.includes(draft.name)) setState({ kind: "on" });
+    void listRoutineRefs().then((refs) => {
+      const created = findCreatedRoutine(refs, draft.name, routineKey);
+      if (!cancelled && created) setState({ kind: "on", routineId: created.id });
     });
     return () => {
       cancelled = true;
     };
-  }, [draft.name]);
+  }, [draft.name, routineKey]);
 
   const turnOn = async () => {
     setState({ kind: "creating" });
@@ -39,9 +61,10 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
       trigger: draft.trigger,
       actionName: draft.actionName,
       args: draft.args,
+      ...(routineKey ? { key: routineKey } : {}),
     });
     if (result.ok) {
-      setState({ kind: "on" });
+      setState({ kind: "on", routineId: result.routineId });
     } else {
       setState({
         kind: "error",
@@ -96,11 +119,21 @@ export function RoutineDraftCard({ draft }: { draft: RoutineDraftSpec }) {
         </div>
       )}
 
-      {isOn ? (
-        <div className="border-t border-border bg-surface-muted/50 px-4 py-2 text-aux text-muted-foreground">
-          {isManual
-            ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
-            : "Saved. Next time it matches, Rome will run it within a minute. Manage it in Routines."}
+      {state.kind === "on" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-muted/50 px-4 py-2">
+          <p className="min-w-0 text-aux text-muted-foreground">
+            {isManual
+              ? 'Saved. It won’t run on its own — use "Run now" in Routines whenever you want it.'
+              : "Saved. Next time it matches, Rome will run it within a minute."}
+          </p>
+          {state.routineId && (
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/routines/${encodeURIComponent(state.routineId)}`}>
+                View run history
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </Button>
+          )}
         </div>
       ) : (
         <div className="flex items-center justify-end border-t border-border bg-surface-muted/60 px-4 py-2">

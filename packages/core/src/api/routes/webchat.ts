@@ -217,6 +217,8 @@ async function persistRoutineDraftCard(
     type: "routine_draft_card" as const,
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
+    // Minted here, not taken from the agent's input, so it names this card only.
+    routineKey: `chat-routine:${randomUUID()}`,
   };
   try {
     await webchatRepo.addMessage(

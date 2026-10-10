@@ -1935,6 +1935,44 @@ describe("Webchat API", () => {
       }
     });
 
+    it("persists a propose_routine card with a server-minted routine key", async () => {
+      const { sessionId } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield {
+              type: "tool_use",
+              id: "tu-routine",
+              tool: "mcp__ask_user__propose_routine",
+              input: {
+                kind: "manual",
+                sentence: "Rome will check the inbox when you run it.",
+                name: "Inbox check",
+                watchLabel: "Run on demand",
+                thenSummary: "check the inbox",
+                actionName: "summon",
+                args: { agentName: "main", prompt: "Check the inbox." },
+              },
+            };
+            yield { type: "text", content: "Done." };
+            yield { type: "result", content: "Done." };
+          })() as AsyncGenerator<never>,
+      );
+
+      const parts = (await deps.webchatRepo.getMessages(sessionId))
+        .filter((m) => m.role === "assistant")
+        .flatMap((m) => {
+          try {
+            return JSON.parse(m.content) as Array<{ type?: string; routineKey?: unknown }>;
+          } catch {
+            return [];
+          }
+        });
+      const card = parts.find((p) => p.type === "routine_draft_card");
+      expect(card).toBeTruthy();
+      // Unique per card, so the routine it creates can be found again after a reload.
+      expect(card!.routineKey).toMatch(/^chat-routine:[0-9a-f-]{36}$/);
+    });
+
     it("persists each commentary block as its own live message; send_message carries only the final", async () => {
       const { sendMessageRun, sessionId } = await runScriptedStream(
         () =>

@@ -579,6 +579,7 @@ const transcripts: Record<string, ChatMessage[]> = {
         {
           type: "routine_draft_card",
           toolUseId: "mock-chat-3-draft-1",
+          routineKey: "chat-routine:mock-chat-3-draft-1",
           draft: {
             sentence: "Every Monday at 9:00 AM, list anything that has stalled and nudge me.",
             name: "Weekly stall check",
