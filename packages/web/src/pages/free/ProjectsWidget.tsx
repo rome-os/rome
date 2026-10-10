@@ -69,13 +69,14 @@ export function ProjectsWidget({
   // Until the browser reaches the restored spot (or navigates elsewhere), its
   // empty mount state must not overwrite the saved location.
   const restorePendingRef = useRef(restorePath !== null);
-  // A saved path that no longer resolves will never be reached: release the
+  // A saved path that no longer exists will never be reached: release the
   // guard and drop it, so the placement and its link follow what is shown.
+  // A failed lookup is not proof of absence, so it keeps the saved path.
   useEffect(() => {
-    if (!restored.settled || restored.selection || !restorePendingRef.current) return;
+    if (!restored.missing || !restorePendingRef.current) return;
     restorePendingRef.current = false;
     if (placementId) updateProjectsSelection(placementId, null);
-  }, [restored.settled, restored.selection, placementId]);
+  }, [restored.missing, placementId]);
 
   const candidatePath = useMemo(() => {
     if (!targetPath) return null;

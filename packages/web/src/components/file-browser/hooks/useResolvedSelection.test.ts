@@ -22,7 +22,7 @@ describe("useResolvedSelection", () => {
     await waitFor(() =>
       expect(result.current).toEqual({
         selection: { path: "projects/docs", type: "directory" },
-        settled: true,
+        missing: false,
       }),
     );
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
@@ -41,14 +41,43 @@ describe("useResolvedSelection", () => {
   it("selects nothing without a path", () => {
     const fetchMock = stubResolve("file");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", null));
-    expect(result.current).toEqual({ selection: null, settled: true });
+    expect(result.current).toEqual({ selection: null, missing: false });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("settles with no selection when the saved path is missing", async () => {
+  it("reports a missing path only once /resolve says so", async () => {
     stubResolve("missing");
     const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/gone"));
-    expect(result.current).toEqual({ selection: null, settled: false });
-    await waitFor(() => expect(result.current).toEqual({ selection: null, settled: true }));
+    expect(result.current).toEqual({ selection: null, missing: false });
+    await waitFor(() => expect(result.current).toEqual({ selection: null, missing: true }));
+  });
+
+  it("does not treat a failed lookup as missing", async () => {
+    const fetchMock = rs.fn(async () => new Response("", { status: 503 }));
+    rs.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useResolvedSelection("/api/projects", "projects/a.md"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.current).toEqual({ selection: null, missing: false });
+  });
+
+  it("keeps the previous selection while the next path resolves", async () => {
+    let release: (() => void) | undefined;
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        if (url.includes("b.md")) await new Promise<void>((resolve) => (release = resolve));
+        return new Response(JSON.stringify({ type: "file" }), { status: 200 });
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ path }) => useResolvedSelection("/api/projects", path),
+      { initialProps: { path: "projects/a.md" } },
+    );
+    await waitFor(() => expect(result.current.selection?.path).toBe("projects/a.md"));
+    rerender({ path: "projects/b.md" });
+    expect(result.current.selection?.path).toBe("projects/a.md");
+    release?.();
+    await waitFor(() => expect(result.current.selection?.path).toBe("projects/b.md"));
   });
 });

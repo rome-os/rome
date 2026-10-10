@@ -10,12 +10,20 @@ type Selection = {
   selectedTreePaths: string[];
 };
 
-const browser: { onSelectionChange?: (selection: Selection) => void } = {};
+const browser: {
+  onSelectionChange?: (selection: Selection) => void;
+  shown: (string | undefined)[];
+} = { shown: [] };
 const updateProjectsSelection = rs.fn();
 
 rs.mock("@/components/file-browser-page", () => ({
-  FileBrowserPage: (props: { onSelectionChange?: (selection: Selection) => void }) => {
+  FileBrowserPage: (props: {
+    onSelectionChange?: (selection: Selection) => void;
+    externalSelection?: { path: string } | null;
+  }) => {
     browser.onSelectionChange = props.onSelectionChange;
+    const path = props.externalSelection?.path;
+    if (browser.shown.at(-1) !== path) browser.shown.push(path);
     return null;
   },
 }));
@@ -30,9 +38,9 @@ function stubResolve(type: string) {
   );
 }
 
-function mount(initialSelectedPath?: string) {
+function mount(initialSelectedPath?: string, store = createWorkspaceStore()) {
   return render(
-    <WorkspaceStoreContext.Provider value={createWorkspaceStore()}>
+    <WorkspaceStoreContext.Provider value={store}>
       <ProjectsWidget dragging={false} placementId="p1" initialSelectedPath={initialSelectedPath} />
     </WorkspaceStoreContext.Provider>,
   );
@@ -52,6 +60,7 @@ function show(selection: Partial<Selection>) {
 beforeEach(() => {
   updateProjectsSelection.mockClear();
   browser.onSelectionChange = undefined;
+  browser.shown = [];
 });
 afterEach(() => {
   cleanup();
@@ -88,5 +97,30 @@ describe("ProjectsWidget location persistence", () => {
     mount("projects/gone");
     show({});
     await waitFor(() => expect(updateProjectsSelection).toHaveBeenCalledWith("p1", null));
+  });
+
+  it("does not reopen the saved location between successive agent links", async () => {
+    const pending = new Map<string, () => void>();
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        if (url.includes("c.md")) await new Promise<void>((resolve) => pending.set("c", resolve));
+        return new Response(JSON.stringify({ type: "file" }), { status: 200 });
+      }),
+    );
+    const store = createWorkspaceStore();
+    mount("projects/saved.md", store);
+    await waitFor(() => expect(browser.shown.at(-1)).toBe("projects/saved.md"));
+    act(() => store.set("followTargetPath", "projects/b.md"));
+    await waitFor(() => expect(browser.shown.at(-1)).toBe("projects/b.md"));
+    act(() => store.set("followTargetPath", "projects/c.md"));
+    await waitFor(() => expect(pending.has("c")).toBe(true));
+    act(() => pending.get("c")?.());
+    await waitFor(() => expect(browser.shown.at(-1)).toBe("projects/c.md"));
+    expect(browser.shown.filter(Boolean)).toEqual([
+      "projects/saved.md",
+      "projects/b.md",
+      "projects/c.md",
+    ]);
   });
 });
