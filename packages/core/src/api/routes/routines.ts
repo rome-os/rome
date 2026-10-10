@@ -407,13 +407,17 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.enabled === true && body.trigger === undefined) {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
-      if (trigger?.type === "schedule" && datedOneOffError(trigger)) {
+      const datedError = trigger?.type === "schedule" ? datedOneOffError(trigger) : null;
+      if (datedError === "schedule.date is in the past" && trigger?.type === "schedule") {
         return c.json(
           {
             error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
           },
           400,
         );
+      }
+      if (datedError) {
+        return c.json({ error: datedError }, 400);
       }
     }
 

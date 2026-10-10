@@ -535,7 +535,7 @@ describe("Routines API", () => {
             name: `next-${localTime}`,
             trigger: {
               type: "schedule",
-              tzid: "Asia/Tokyo",
+              tzid: "UTC",
               tzMode: "floating",
               localTime,
               ...extra,

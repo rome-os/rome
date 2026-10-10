@@ -214,7 +214,9 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
  * the clock reads `localTime`, pinned `fixed` like any dated one-off. A
  * `floating` request follows the guardian, so it is dated in, and pinned to,
  * the guardian's zone. Runs after validation, since it needs a valid
- * `localTime` and `tzid`. */
+ * `localTime` and `tzid`. Mirrors `resolveOneOffDate` and
+ * `nextDateForLocalTime` in core, which POST /routines uses; inlined because
+ * app actions can't import core internals, so keep the two in sync. */
 async function withOneOffDate(
   trigger: Trigger,
   guardianTimezone: () => Promise<string>,
