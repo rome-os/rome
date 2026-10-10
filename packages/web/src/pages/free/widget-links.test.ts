@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { WidgetPlacement } from "./use-free-cells";
-import { buildFullAppPath, getWidgetFullHref } from "./widget-links";
+import { buildFullAppPath, getWidgetFullHref, projectsLocation } from "./widget-links";
 
 function placement(overrides: Partial<WidgetPlacement> & { type: WidgetPlacement["type"] }) {
   return { id: "w1", order: 1, ...overrides } as WidgetPlacement;
@@ -52,5 +52,24 @@ describe("getWidgetFullHref", () => {
   it("returns null for tiles without a target", () => {
     expect(getWidgetFullHref(placement({ type: "chat" }))).toBeNull();
     expect(getWidgetFullHref(placement({ type: "app" }))).toBeNull();
+  });
+});
+
+describe("projectsLocation", () => {
+  it("prefers the open file over the folder shown", () => {
+    expect(
+      projectsLocation({ selectedPath: "projects/a/b.md", currentFolderPath: "projects/c" }),
+    ).toBe("projects/a/b.md");
+  });
+
+  it("falls back to the folder shown", () => {
+    expect(projectsLocation({ selectedPath: null, currentFolderPath: "projects/c" })).toBe(
+      "projects/c",
+    );
+  });
+
+  it("treats the root as no location, so a fresh tile persists nothing", () => {
+    expect(projectsLocation({ selectedPath: null, currentFolderPath: "projects" })).toBeNull();
+    expect(projectsLocation({ selectedPath: null, currentFolderPath: null })).toBeNull();
   });
 });

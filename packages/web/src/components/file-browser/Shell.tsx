@@ -130,7 +130,7 @@ export function Shell({
   usePageHideKeepalive();
   useAutoSaveOrchestration();
   useExternalSelection(externalSelection);
-  useSelectionChangeBroadcast(onSelectionChange);
+  useSelectionChangeBroadcast(isBelowMd, onSelectionChange);
 
   const handleUploadSelection = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {

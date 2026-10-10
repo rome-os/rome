@@ -10,6 +10,19 @@ import type { WidgetPlacement } from "./use-free-cells";
 const PROJECTS_LOGICAL_ROOT = "projects";
 
 /**
+ * Where a Projects tile is: the open file, else the folder it shows. The root
+ * is no location, so a tile that never navigated persists nothing.
+ */
+export function projectsLocation(selection: {
+  selectedPath: string | null;
+  currentFolderPath: string | null;
+}): string | null {
+  if (selection.selectedPath) return selection.selectedPath;
+  const folder = selection.currentFolderPath;
+  return folder === PROJECTS_LOGICAL_ROOT ? null : folder;
+}
+
+/**
  * Build the `/full/apps/<appId>[/<route>][?<params>]` path — the app's own
  * route rides the path (per-segment encoded) and its own params ride the
  * query, mirroring how AppFullPage parses them back apart. Shared by the

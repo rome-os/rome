@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileBrowserPage } from "@/components/file-browser-page";
 import { useResolvedSelection } from "@/components/file-browser/hooks/useResolvedSelection";
 import { getSession } from "@/lib/chat-api";
 import { updateProjectsSelection } from "./use-free-cells";
+import { projectsLocation } from "./widget-links";
 import { buildProjectsBuiltin, useWorkspaceContextRegistry } from "./workspace-context";
 import { useWorkspaceValue } from "./workspace-store";
 
@@ -65,6 +66,9 @@ export function ProjectsWidget({
   // agent follow target, when present, takes precedence below.
   const [restorePath] = useState<string | null>(() => initialSelectedPath ?? null);
   const restoredTarget = useResolvedSelection("/api/projects", restorePath);
+  // Until the browser reaches the restored spot (or navigates elsewhere), its
+  // empty mount state must not overwrite the saved location.
+  const restorePendingRef = useRef(restorePath !== null);
 
   const candidatePath = useMemo(() => {
     if (!targetPath) return null;
@@ -109,9 +113,12 @@ export function ProjectsWidget({
       // Persist wherever the user is — the open file, or the folder the
       // browser is showing when no file is open. The restore path already
       // resolves either kind through `/resolve`.
-      if (placementId) {
-        updateProjectsSelection(placementId, sel.selectedPath ?? sel.currentFolderPath);
+      const location = projectsLocation(sel);
+      if (restorePendingRef.current) {
+        if (location === null) return;
+        restorePendingRef.current = false;
       }
+      if (placementId) updateProjectsSelection(placementId, location);
     },
     [placementId],
   );
