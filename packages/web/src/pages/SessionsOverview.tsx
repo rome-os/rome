@@ -36,7 +36,7 @@ const METRIC_LABELS: Record<SessionsMetric, string> = {
   errors: "Errors",
 };
 
-export const SESSION_OVERVIEW_GROUPS = [
+const SESSION_OVERVIEW_GROUPS = [
   "app",
   "agent",
   "model",

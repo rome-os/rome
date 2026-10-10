@@ -192,8 +192,6 @@ export const TABS = [
 
 type Tab = (typeof TABS)[number];
 
-export const VISIBLE_TABS = TABS;
-
 // Only these tabs read what `loadAll` fetches (/api/settings plus the tailscale
 // device list). Connections, Devices, Channels and Favors own their requests, and
 // Appearance reads the theme/i18n context, so neither the initial settings load
@@ -387,7 +385,7 @@ export default function SettingsPage() {
       </PageHeader>
 
       <PageNav aria-label={t("page.title")}>
-        {VISIBLE_TABS.map((tab) => (
+        {TABS.map((tab) => (
           <PageNavLink asChild key={tab} active={tab === activeTab}>
             <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
           </PageNavLink>

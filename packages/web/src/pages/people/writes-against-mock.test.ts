@@ -22,12 +22,11 @@ import {
 // The page's own write functions against a backend that implements the /people
 // contract, rather than against a stub written from the same reading of it.
 //
-// `writes.test.ts` pins the request each verb sends. That leaves one thing it
-// cannot see: whether the request a route can answer is the request this client
-// builds. An account identifier is escaped into the path — a WhatsApp jid
-// carries an `@`, and channels are free to mint worse — so the escaping and the
-// decoding have to agree, and a test that asserts a URL string proves only that
-// the client is self-consistent.
+// This is where the request each verb sends is checked: whether the request a
+// route can answer is the request this client builds. An account identifier is
+// escaped into the path — a WhatsApp jid carries an `@`, and channels are free
+// to mint worse — so the escaping and the decoding have to agree, and a test
+// that asserts a URL string proves only that the client is self-consistent.
 
 const server = setupServer(...peopleHandlers);
 

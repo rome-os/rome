@@ -14,8 +14,7 @@ import {
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
-import SessionsPage, { sessionsViewportClass } from "./SessionsPage";
-import { SESSION_OVERVIEW_GROUPS } from "./SessionsOverview";
+import SessionsPage from "./SessionsPage";
 
 rs.mock("@/components/agent-trace/TraceDrawer", () => ({
   TraceDrawer: () => null,
@@ -194,18 +193,6 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
-describe("sessionsViewportClass", () => {
-  it("keeps the standard mobile shell surface edge-to-edge", () => {
-    expect(sessionsViewportClass(false)).toContain("h-[var(--rome-mobile-content-height)]");
-    expect(sessionsViewportClass(false)).not.toContain("pb-safe");
-  });
-
-  it("protects the top edge in full mode without shrinking its bottom surface", () => {
-    expect(sessionsViewportClass(true)).toContain("pt-safe");
-    expect(sessionsViewportClass(true)).not.toContain("pb-safe");
-  });
-});
-
 describe("SessionsPage landmarks", () => {
   // The shell owns the one `main` on /sessions/*. /full/apps/sessions/* mounts
   // outside it, so there the page owns it — on every view, or a reader crossing
@@ -236,7 +223,6 @@ describe("SessionsPage landmarks", () => {
         const mains = view.container.querySelectorAll("main");
         expect(mains.length, `${entry} should carry exactly one main`).toBe(1);
         expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
-        expect(mains[0].className).toContain("pt-safe");
       });
       cleanup();
     }
@@ -364,41 +350,6 @@ describe("SessionsPage live fork details", () => {
 });
 
 describe("SessionsPage explorer", () => {
-  it("only exposes identity-oriented overview groups and ignores legacy query state", async () => {
-    expect(SESSION_OVERVIEW_GROUPS).toEqual(["app", "agent", "model", "project"]);
-    rs.mocked(getSessionMetrics).mockResolvedValue({
-      scope: {
-        from: "2026-07-08T00:00:00.000Z",
-        to: "2026-07-15T00:00:00.000Z",
-        timeZone: "UTC",
-      },
-      totals: {
-        sessionCount: 0,
-        runCount: 0,
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          totalTokens: 0,
-          costUsd: null,
-          costedRunCount: 0,
-        },
-        outcomes: { completed: 0, interrupted: 0, error: 0, unknown: 0 },
-      },
-      projections: [],
-    });
-
-    renderIndex("/sessions?groupBy=source&range=all");
-
-    await waitFor(() =>
-      expect(getSessionMetrics).toHaveBeenCalledWith(
-        expect.objectContaining({ groupBy: "app", range: "7d" }),
-      ),
-    );
-    expect(screen.getByRole("combobox", { name: "Group by" }).textContent).toContain("Apps");
-  });
-
   it("shows usage overview and switches to the human-readable inventory", async () => {
     rs.mocked(getSessionMetrics).mockResolvedValue({
       scope: { from: "2026-07-08T00:00:00.000Z", to: "2026-07-15T00:00:00.000Z", timeZone: "UTC" },

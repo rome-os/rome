@@ -203,7 +203,7 @@ export function FreeGrid() {
     setChatSessionId(urlSessionId);
     setActiveSession(urlSessionId ?? null);
     const applyInitialWidgets = (targetSessionId: string | null) => {
-      if (!initialWidgetsKey || !Array.isArray(initialWidgets) || initialWidgets.length === 0) {
+      if (!initialWidgetsKey || !initialWidgets) {
         return;
       }
       // A narrow workspace shows one pane at a time, so an expanded panel
@@ -230,7 +230,7 @@ export function FreeGrid() {
 
   useEffect(() => {
     return eventBus.on<{ paths: string[]; force?: boolean }>("projects:opened", (payload) => {
-      if (!payload?.paths || payload.paths.length === 0) return;
+      if (payload.paths.length === 0) return;
       // A forced open (an explicit click on a /projects link in chat) overrides
       // the user's earlier manual close of the panel; the passive agent-link
       // path (no force) still respects that close.

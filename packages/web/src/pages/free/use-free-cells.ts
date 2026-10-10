@@ -253,38 +253,44 @@ export function placeChatWidget(sessionId: string): string {
   return id;
 }
 
+// One tile per app. A repeat placement retargets the existing tile to the new
+// route/params rather than stacking a duplicate: keep its grid position
+// (`order`) so it doesn't jump, but mint a fresh id so the iframe remounts at
+// the new src.
+function withAppPlacement(
+  placements: WidgetPlacement[],
+  seed: Omit<Extract<WidgetSeed, { type: "app" }>, "type">,
+): { placements: WidgetPlacement[]; id: string } {
+  const existing = placements.find((p) => p.type === "app" && p.targetId === seed.appId);
+  const order = existing ? existing.order : nextOrder(placements);
+  const kept = existing ? placements.filter((p) => p.id !== existing.id) : placements;
+  const id = genId();
+  return {
+    id,
+    placements: [
+      ...kept,
+      {
+        id,
+        type: "app",
+        targetId: seed.appId,
+        order,
+        ...(seed.route !== undefined ? { route: seed.route } : {}),
+        ...(seed.params !== undefined ? { params: seed.params } : {}),
+      },
+    ],
+  };
+}
+
 export function autoPlaceApp(
   appId: string,
   route?: string,
   params?: Record<string, string | number | boolean>,
   activate = false,
 ): string {
-  let current = getSnapshot();
-
-  // One tile per app. A repeat call retargets the existing tile to the new
-  // route/params rather than stacking a duplicate: keep its grid position
-  // (`order`) so it doesn't jump, but mint a fresh id so the iframe remounts
-  // at the new src.
-  const existing = current.find((p) => p.type === "app" && p.targetId === appId);
-  const order = existing ? existing.order : nextOrder(current);
-  if (existing) {
-    current = current.filter((p) => p.id !== existing.id);
-  }
-
-  const id = genId();
-  persist([
-    ...current,
-    {
-      id,
-      type: "app",
-      targetId: appId,
-      order,
-      ...(route !== undefined ? { route } : {}),
-      ...(params !== undefined ? { params } : {}),
-    },
-  ]);
-  if (activate) selectTool(id);
-  return id;
+  const next = withAppPlacement(getSnapshot(), { appId, route, params });
+  persist(next.placements);
+  if (activate) selectTool(next.id);
+  return next.id;
 }
 
 export function placeWidgets(widgets: readonly WidgetSeed[]): void {
@@ -296,20 +302,7 @@ export function placeWidgets(widgets: readonly WidgetSeed[]): void {
   for (const widget of widgets) {
     if (widget.type === "app") {
       if (!widget.appId) continue;
-      const existing = current.find((p) => p.type === "app" && p.targetId === widget.appId);
-      const order = existing ? existing.order : nextOrder(current);
-      if (existing) current = current.filter((p) => p.id !== existing.id);
-      current = [
-        ...current,
-        {
-          id: genId(),
-          type: "app",
-          targetId: widget.appId,
-          order,
-          ...(widget.route !== undefined ? { route: widget.route } : {}),
-          ...(widget.params !== undefined ? { params: widget.params } : {}),
-        },
-      ];
+      current = withAppPlacement(current, widget).placements;
       changed = true;
       continue;
     }

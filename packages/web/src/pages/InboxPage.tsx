@@ -80,10 +80,7 @@ export default function InboxPage() {
       // body (e.g. `{ error }`), so never feed it straight into state — that
       // would crash the sentinel-log `.map` and the settings reads.
       if (sRes.ok) setSettings((await sRes.json()) as InboxSettings);
-      if (slRes.ok) {
-        const log = await slRes.json();
-        setSentinelLog(Array.isArray(log) ? (log as SentinelEntry[]) : []);
-      }
+      if (slRes.ok) setSentinelLog((await slRes.json()) as SentinelEntry[]);
       if (cRes.ok) {
         const payload = (await cRes.json()) as {
           connections?: ConnectionLite[];

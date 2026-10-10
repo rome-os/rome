@@ -293,7 +293,7 @@ export function ToolWorkspace({
               <EmptyStateTitle>{t("chat.emptyAppsTitle")}</EmptyStateTitle>
               <EmptyStateDescription>{t("chat.emptyAppsDescription")}</EmptyStateDescription>
               <EmptyStateAction>
-                <WidgetPicker onSelect={addWidget}>
+                <WidgetPicker onSelect={addWidget} placements={placements}>
                   <Button data-coach="add-widget" variant="outline">
                     <Plus data-icon="inline-start" />
                     {t("chat.add")}

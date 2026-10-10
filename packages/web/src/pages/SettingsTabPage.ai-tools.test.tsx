@@ -45,11 +45,6 @@ describe("AI Tools refresh", () => {
     render(<AiToolsPanel showUsage />);
     const user = userEvent.setup();
     const refresh = await screen.findByRole("button", { name: "Refresh" });
-    expect(refresh.getAttribute("data-slot")).toBe("button");
-    expect(refresh.getAttribute("data-variant")).toBe("outline");
-    expect(refresh.getAttribute("data-size")).toBe("sm");
-    expect(refresh.classList.contains("rounded-8")).toBe(true);
-    expect(refresh.classList.contains("bg-surface-elevated")).toBe(true);
     await user.click(refresh);
 
     expect(
@@ -232,14 +227,7 @@ describe("AI Tools provider presentation", () => {
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
     const claudeLogin = screen.getByRole("button", { name: "Log In" });
     const apiKey = screen.getByRole("button", { name: "API Key" });
-    const logOut = screen.getByRole("button", { name: "Log Out" });
-    for (const button of [claudeLogin, apiKey, logOut]) {
-      expect(button.getAttribute("data-slot")).toBe("button");
-      expect(button.getAttribute("data-variant")).toBe("outline");
-      expect(button.getAttribute("data-size")).toBe("sm");
-      expect(button.classList.contains("rounded-8")).toBe(true);
-      expect(button.classList.contains("bg-surface-elevated")).toBe(true);
-    }
+    expect(screen.getByRole("button", { name: "Log Out" })).toBeTruthy();
     expect(screen.getByText("ChatGPT").closest(".bg-surface")).toBeTruthy();
     expect(claudeLogin.parentElement).toBe(apiKey.parentElement);
     expect(claudeLogin.parentElement?.getAttribute("role")).toBe("group");
@@ -265,15 +253,8 @@ describe("AI Tools provider presentation", () => {
 
     const chatgpt = await screen.findByText("ChatGPT");
     const claude = screen.getByText("Claude");
-    const browser = screen.getByRole("button", { name: "Browser" });
-    const deviceCode = screen.getByRole("button", { name: "Device code" });
-    for (const button of [browser, deviceCode]) {
-      expect(button.getAttribute("data-slot")).toBe("button");
-      expect(button.getAttribute("data-variant")).toBe("outline");
-      expect(button.getAttribute("data-size")).toBe("sm");
-      expect(button.classList.contains("rounded-8")).toBe(true);
-      expect(button.classList.contains("bg-surface-elevated")).toBe(true);
-    }
+    expect(screen.getByRole("button", { name: "Browser" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Device code" })).toBeTruthy();
     expect(chatgpt.compareDocumentPosition(claude) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

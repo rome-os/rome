@@ -249,7 +249,7 @@ function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children
   );
 }
 
-export function sessionsViewportClass(fullMode: boolean): string {
+function sessionsViewportClass(fullMode: boolean): string {
   return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
 }
 

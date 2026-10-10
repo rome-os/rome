@@ -39,7 +39,7 @@ afterEach(cleanup);
 async function openPicker(onSelect = rs.fn()) {
   const user = userEvent.setup();
   render(
-    <WidgetPicker onSelect={onSelect}>
+    <WidgetPicker onSelect={onSelect} placements={[]}>
       <button type="button">Add widget</button>
     </WidgetPicker>,
   );
