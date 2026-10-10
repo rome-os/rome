@@ -41,7 +41,7 @@ function makeThrowingEngine(): RoutineEngine {
 
 /** Registry stub that recognizes every action — the default for tests whose
  * subject isn't action-existence validation. */
-const allActions = { has: () => true };
+const allActions = { has: () => true, isExplicit: () => false };
 
 let testDb: TestDb;
 let repo: RoutinesRepository;
@@ -324,7 +324,10 @@ describe("create_routine — validation and fail-closed", () => {
   it("rejects a routine bound to an unregistered action, persisting nothing", async () => {
     const engine = makeFakeEngine();
     // Registry knows the built-ins but not a workflow action that hasn't been built.
-    const registry = { has: (n: string) => n === "summon" || n === "send_message" };
+    const registry = {
+      has: (n: string) => n === "summon" || n === "send_message",
+      isExplicit: () => false,
+    };
 
     const result = await createRoutine(
       {
@@ -352,7 +355,7 @@ describe("create_routine — validation and fail-closed", () => {
 
   it("accepts a routine bound to a built-in action the registry knows", async () => {
     const engine = makeFakeEngine();
-    const registry = { has: (n: string) => n === "summon" };
+    const registry = { has: (n: string) => n === "summon", isExplicit: () => false };
 
     const result = await createRoutine(
       {
@@ -379,6 +382,9 @@ describe("create_routine — validation and fail-closed", () => {
     const registry = {
       async has(name: string) {
         return name === "summon";
+      },
+      async isExplicit() {
+        return false;
       },
     };
 
@@ -1167,5 +1173,93 @@ describe("create_routine — key dedup", () => {
     const all = await repo.findAll();
     expect(all).toHaveLength(2);
     expect(all.every((r) => r.key === null)).toBe(true);
+  });
+});
+
+describe("create_routine — explicit action targets (#679)", () => {
+  const rootScript = "system:execute_root_script";
+  const explicitRoot = { has: () => true, isExplicit: (n: string) => n === rootScript };
+  const input = {
+    name: "root-once",
+    trigger: {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "03:00",
+    },
+    actionName: rootScript,
+    args: {},
+  };
+  const asAgent = <T>(agentName: string, fn: () => Promise<T>, callerAppId?: string) =>
+    actionExecutionContext.run(
+      { executionId: "exec", rootExecutionId: "root", agentName, callerAppId },
+      fn,
+    );
+
+  it("rejects an explicit target the calling agent does not hold", async () => {
+    const engine = makeFakeEngine();
+    const result = await asAgent("inbox:sentinel", () =>
+      createRoutine(input, {
+        routinesRepo: repo,
+        actionRegistry: explicitRoot,
+        agentRunner: { hasAction: () => false },
+        routineEngine: engine,
+      }),
+    );
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/is explicit/);
+    expect(await repo.findAll()).toHaveLength(0);
+    expect(engine.activated).toHaveLength(0);
+  });
+
+  it("rejects an explicit target from a routine-fired call (two-stage scheduling)", async () => {
+    // Stage 1: an agent schedules create_routine itself (a public target).
+    // Stage 2: that routine fires with no agent principal and asks for the
+    // explicit action; it must fail closed even though no agent is named.
+    const engine = makeFakeEngine();
+    const result = await actionExecutionContext.run(
+      { executionId: "exec", rootExecutionId: "root", initiator: "routine:stage-1" },
+      () =>
+        createRoutine(input, {
+          routinesRepo: repo,
+          actionRegistry: explicitRoot,
+          agentRunner: { hasAction: () => true },
+          routineEngine: engine,
+        }),
+    );
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/is explicit/);
+    expect(await repo.findAll()).toHaveLength(0);
+    expect(engine.activated).toHaveLength(0);
+  });
+
+  it("allows an explicit target the calling agent holds", async () => {
+    const hasAction = (agent: string, action: string) => agent === "main" && action === rootScript;
+    const result = await asAgent("main", () =>
+      createRoutine(input, {
+        routinesRepo: repo,
+        actionRegistry: explicitRoot,
+        agentRunner: { hasAction },
+        routineEngine: makeFakeEngine(),
+      }),
+    );
+    expect(result.status).toBe("ok");
+  });
+
+  it("trusts app code binding an explicit action", async () => {
+    const result = await asAgent(
+      "inbox:sentinel",
+      () =>
+        createRoutine(input, {
+          routinesRepo: repo,
+          actionRegistry: explicitRoot,
+          agentRunner: { hasAction: () => false },
+          routineEngine: makeFakeEngine(),
+        }),
+      "system",
+    );
+    expect(result.status).toBe("ok");
   });
 });

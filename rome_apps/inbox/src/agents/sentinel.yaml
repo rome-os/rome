@@ -6,8 +6,9 @@ tools:
   - Read
   - Glob
   - Grep
-actions:
-  - "*"
+# Reads untrusted sender text and only returns a decision, so it holds no
+# actions: anything it can call is reachable by prompt injection.
+actions: []
 # To migrate this agent to structured output, declare:
 #   outputSchema:
 #     type: object
