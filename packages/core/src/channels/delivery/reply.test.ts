@@ -28,6 +28,8 @@ class MemoryPlatform implements DeliveryTransport {
   editGate?: Promise<void>;
   /** The next edits are applied and then answer as lost, so their result is unknown. */
   lostEditAnswers = 0;
+  /** A failure the first edit after the next lost answer meets. */
+  afterLostAnswer?: DeliveryFailure;
   readonly edit?: (receipt: PartReceipt, text: string) => Promise<void>;
 
   constructor(
@@ -43,6 +45,10 @@ class MemoryPlatform implements DeliveryTransport {
         this.messages.find((m) => m.id === receipt.messageId)!.history.push(text);
         if (this.lostEditAnswers > 0) {
           this.lostEditAnswers -= 1;
+          if (this.afterLostAnswer) {
+            this.failures.push({ write: "edit", failure: this.afterLostAnswer });
+            this.afterLostAnswer = undefined;
+          }
           throw new DeliveryFailure("unknown", "the answer was lost");
         }
       };
@@ -630,6 +636,39 @@ describe("ReplyDelivery", () => {
       expect(outcome.parts).toEqual([expect.objectContaining({ text: "Hello", state: "settled" })]);
     });
 
+    it.each([
+      ["is not supported", new DeliveryFailure("unsupported", "the platform will not edit")],
+      ["is refused", new DeliveryFailure("rejected", "message can't be edited")],
+      [
+        "meets a rate limit the reply will not wait out",
+        new DeliveryFailure("rate-limited", "slow down", 3_600_000),
+      ],
+    ])("reports the reply as unknown when the edit that reconciles it %s", async (_, failure) => {
+      const delivery = reply({ editIntervalMs: 0 });
+      platform.lostEditAnswers = 1;
+      platform.afterLostAnswer = failure;
+      await reviseBackWhileAnEditIsInFlight(delivery);
+      const outcome = await delivery.finish();
+
+      // The platform may show "Hello world", and nothing put "Hello" back.
+      expect(outcome.status).toBe("unknown");
+      expect(outcome.parts).toEqual([expect.objectContaining({ text: "Hello" })]);
+    });
+
+    it("does not create the rest of the text again when edits become unsupported after a lost one", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello", "a"));
+      await advance(0);
+      platform.lostEditAnswers = 1;
+      platform.afterLostAnswer = new DeliveryFailure("unsupported", "the platform will not edit");
+      delivery.accept(delta(" world", "a"));
+      const outcome = await delivery.finish();
+
+      // The platform may already show "Hello world", so a create of " world" would show it twice.
+      expect(outcome.status).toBe("unknown");
+      expect(platform.messages).toHaveLength(1);
+    });
+
     it("reports the reply as unknown when the edit that reconciles it is lost too", async () => {
       const delivery = reply({ editIntervalMs: 0 });
       platform.lostEditAnswers = 3;
@@ -723,8 +762,8 @@ describe("ReplyDelivery", () => {
       expect(platform.messages).toHaveLength(0);
     });
 
-    it("still pauses the account for a limit it gave up on", async () => {
-      limited(120_000, 1);
+    /** A reply that shares its account's pacer with a write the test makes elsewhere. */
+    const onSharedPacer = () => {
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
       const delivery = new ReplyDelivery({
         transport: platform,
@@ -733,21 +772,48 @@ describe("ReplyDelivery", () => {
         conversation: "c1",
         clock,
       });
+      return { pacer, delivery };
+    };
+
+    it("still pauses the account for a limit it gave up on, whichever conversation writes next", async () => {
+      limited(120_000, 1);
+      const { pacer, delivery } = onSharedPacer();
       delivery.accept(result("Hello"));
       const outcome = await delivery.finish();
       expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
 
-      // The caller sends the reply whole through the same account. The platform
-      // named the window, so that send waits it out, as does every other write.
-      let sent = false;
-      const whole = pacer.run("c1", async () => {
-        sent = true;
+      // Another conversation of the account, and the caller's whole send. The
+      // platform named the window, so each waits it out.
+      let other = false;
+      const elsewhere = pacer.run("c2", async () => {
+        other = true;
       });
       await advance(60_000);
-      expect(sent).toBe(false);
+      expect(other).toBe(false);
       await advance(61_000);
-      await whole;
-      expect(sent).toBe(true);
+      await elsewhere;
+      expect(other).toBe(true);
+    });
+
+    it("pauses the account for the wait that exhausted the allowance, when waits add up", async () => {
+      limited(30_000, 5);
+      const { pacer, delivery } = onSharedPacer();
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      // Two waits are held, and the third would pass the allowance at the 60 s mark.
+      await advance(60_000);
+      const outcome = await finished;
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+
+      let other = false;
+      const elsewhere = pacer.run("c2", async () => {
+        other = true;
+      });
+      await advance(20_000);
+      expect(other).toBe(false);
+      await advance(15_000);
+      await elsewhere;
+      expect(other).toBe(true);
     });
 
     it("fails the reply when its waits add up past what it will hold a reply for", async () => {
@@ -784,6 +850,8 @@ describe("ReplyDelivery", () => {
     expect(outcome.parts).toEqual([
       expect.objectContaining({ text: "Hello", state: "settled", diverged: true }),
     ]);
+    // The outcome says so too, so a caller need not scan the parts.
+    expect(outcome.diverged).toBe(true);
   });
 
   it("keeps a settled part's message, reported as differing, when a shorter final text leaves nothing at its place", async () => {
@@ -800,6 +868,71 @@ describe("ReplyDelivery", () => {
     expect(outcome.failure).toBeUndefined();
     expect(outcome.status).toBe("delivered");
     expect(outcome.parts.slice(1).every((part) => part.diverged === true)).toBe(true);
+    expect(outcome.diverged).toBe(true);
+  });
+
+  it("does not report a faithful reply as differing", async () => {
+    const delivery = reply({ editIntervalMs: 0 });
+    delivery.accept(result("Hello"));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(outcome.diverged).toBeUndefined();
+  });
+
+  describe("a write the platform does not answer", () => {
+    const never = new Promise<void>(() => {});
+
+    it("lets stop() return within the write deadline, reporting the create unknown", async () => {
+      platform.hold = never;
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      const stopping = delivery.stop();
+      await advance(30_000);
+      await settle();
+
+      const outcome = await Promise.race([stopping, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      // A second create could show the text twice, so the reply never repeats it.
+      expect(outcome).toMatchObject({ status: "unknown", failure: { kind: "unknown" } });
+      expect(platform.messages).toHaveLength(0);
+    });
+
+    it("lets finish() return within the write deadline, without writing the edit again", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      platform.editGate = never;
+      delivery.accept(delta(" there"));
+      await advance(0);
+      const finished = delivery.finish();
+      await advance(30_000);
+      await settle();
+
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      expect(outcome).toMatchObject({ status: "unknown", failure: { kind: "unknown" } });
+      expect(events.filter((event) => event.result === "unknown")).toHaveLength(1);
+    });
+
+    it("ignores the answer that arrives after the deadline", async () => {
+      let release!: () => void;
+      platform.hold = new Promise<void>((resolve) => (release = resolve));
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(delta("Hello"));
+      await advance(0);
+      const finished = delivery.finish();
+      await advance(30_000);
+      const outcome = await finished;
+      release();
+      platform.hold = undefined;
+      await advance(5000);
+
+      expect(outcome.status).toBe("unknown");
+      // The late create reached the platform, but the reply had already given up on it.
+      expect(events.filter((event) => event.result === "accepted")).toHaveLength(0);
+    });
   });
 
   describe("text a split passed over because it was blank", () => {

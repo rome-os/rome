@@ -11,7 +11,8 @@ export interface DeliveryCapabilities {
   /** The platform can replace a message's text after sending it. */
   edit: boolean;
   /** How fast one account may write. Every write the account makes, ordinary
-   *  sends included, shares it. */
+   *  sends included, shares it. This is the one authority: whoever wires the
+   *  engine builds the account's Pacer from it. */
   budget: Budget;
 }
 

@@ -57,6 +57,14 @@ describe("checkDelivery", () => {
     });
   });
 
+  it("leaves a reply that reports itself as differing out of the final-text rule", () => {
+    const { input } = reply({ source: "aaaa", sent: ["aaaa bbbb"] });
+    expect(verdicts(input)["final-text-is-the-reply"]).toBe(false);
+
+    const diverged = { ...input, outcome: { ...input.outcome, diverged: true as const } };
+    expect(verdicts(diverged)["final-text-is-the-reply"]).toBe(true);
+  });
+
   it("tolerates the whitespace a platform trims at a message's edges, and nothing else", () => {
     const trimmed = reply({
       source: "one. two. ",

@@ -257,6 +257,7 @@ describe.each(platforms)("%s", (platform) => {
           expect(romeMessages(channel).length).toBeGreaterThanOrEqual(3);
           expect(outcome.parts.length).toBeGreaterThanOrEqual(3);
           expect(outcome.parts.slice(1).every((part) => part.diverged === true)).toBe(true);
+          expect(outcome.diverged).toBe(true);
         });
       });
     },

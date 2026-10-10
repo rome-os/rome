@@ -25,7 +25,8 @@ const RULES: Rule[] = [
   {
     id: "final-text-is-the-reply",
     check: ({ source, outcome, peer, conversation }) => {
-      if (outcome.status !== "delivered") return undefined;
+      // A reply that reports itself as differing is not held to its final text.
+      if (outcome.status !== "delivered" || outcome.diverged) return undefined;
       const shown = romeMessages(peer, conversation).map((message) => message.text);
       return tiles(source, shown)
         ? undefined

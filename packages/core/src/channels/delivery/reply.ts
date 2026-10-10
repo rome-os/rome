@@ -47,11 +47,18 @@ export interface ReplyOutcome {
   /**
    * `delivered`: every part settled. `partial`: some parts were accepted
    * before a failure. `failed`: none was. `unknown`: a create may or may not
-   * have happened, even when the reply was then stopped. `stopped`: the run
-   * was stopped.
+   * have happened, or an edit's result is unknown and nothing put it right,
+   * even when the reply was then stopped or failed otherwise. `stopped`: the
+   * run was stopped.
    */
   status: "delivered" | "partial" | "failed" | "unknown" | "stopped";
   parts: DeliveredPart[];
+  /**
+   * A part shows text that differs from the agent's final text, and could not
+   * be edited to match. The status is unchanged, so a caller that must know
+   * the reply is faithful reads this and need not scan `parts`.
+   */
+  diverged?: true;
   /**
    * Why the reply stopped. A platform's refusal has a `DeliveryFailure` kind.
    * `overflow` is a reply that outran its bound on unsent text, and `internal`
@@ -62,7 +69,11 @@ export interface ReplyOutcome {
 
 export interface ReplyOptions {
   transport: DeliveryTransport;
-  /** The pacer of the account the transport writes as. */
+  /**
+   * The pacer of the account the transport writes as. Whoever wires the
+   * engine builds it from the transport's declared `capabilities.budget`, one
+   * per account. A test may pass an open one to leave rate limits out.
+   */
   pacer: Pacer;
   policy: DeliveryPolicy;
   conversation: string;
@@ -118,6 +129,16 @@ const MAX_RATE_LIMIT_WAIT_MS = 60_000;
 /** Consecutive edits with an unknown result before the reply gives up. */
 const MAX_UNKNOWN_EDITS = 3;
 
+/** How long a write may run before the reply stops waiting for its answer. */
+const WRITE_DEADLINE_MS = 30_000;
+
+/** A write the platform did not answer in time. It may have done it. */
+class WriteTimedOut extends DeliveryFailure {
+  constructor() {
+    super("unknown", `the platform did not answer within ${WRITE_DEADLINE_MS / 1000} s`);
+  }
+}
+
 /**
  * Delivers one run's reply to one conversation as its text arrives: every
  * commentary and the answer, each split into as many messages as the
@@ -139,12 +160,16 @@ const MAX_UNKNOWN_EDITS = 3;
  *   edited again to the text it should show, even when that matches the text
  *   last acknowledged, and only a successful edit settles it. The text that
  *   edit carried counts as shown, so no later part ends before it. If the
- *   block then ends with nothing to put back, the reply is `unknown`.
+ *   block then ends with nothing to put back, or the platform then refuses or
+ *   will not edit, or a rate limit ends the reply, it is `unknown`.
  * - A platform's rate limit pauses the account for the time it names, even
  *   when the reply gives up on it. A reply waits out at most a minute of them
  *   in all, and then fails `rate-limited`.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
+ * - A write the platform does not answer within 30 s stops holding the reply.
+ *   It counts as unknown, is not repeated, and the call is left to finish
+ *   unheeded, so `stop()` and `finish()` return within that time.
  * - After `stop()`, nothing new is written. A write already running finishes
  *   and is reported, and a create whose result is unknown stays `unknown`.
  *
@@ -482,10 +507,8 @@ export class ReplyDelivery {
       const first = this.blocks.every((block) => block.parts.length === 0);
       const partIndex = state.parts.length;
       try {
-        const receipt = await transport.create(
-          this.conversation,
-          rendered,
-          first ? this.options.replyTo : undefined,
+        const receipt = await this.answered(
+          transport.create(this.conversation, rendered, first ? this.options.replyTo : undefined),
         );
         // Later messages follow the first wherever it landed.
         this.conversation = receipt.conversationId;
@@ -524,7 +547,7 @@ export class ReplyDelivery {
     try {
       if (!transport.edit)
         throw new DeliveryFailure("unsupported", "the transport declares edits but has no edit");
-      await transport.edit(part.receipt!, rendered);
+      await this.answered(transport.edit(part.receipt!, rendered));
       Object.assign(part, { sent: rendered, sentSource: plan.source, lastWriteAt: this.now() });
       delete part.uncertain;
       delete part.attempted;
@@ -540,13 +563,26 @@ export class ReplyDelivery {
         part.uncertain = true;
         part.attempted = plan.source;
       }
-      if (failure.kind === "unsupported") {
+      if (failure.kind === "unsupported" && !part.uncertain) {
         // The platform will not edit: keep what it shows and carry on in blocks.
         this.mode = "blocks";
         if (!part.settled) this.settlePart(part, part.start + part.sentSource.length);
         return;
       }
-      if (failure.kind === "unknown" && ++this.unknownEdits < MAX_UNKNOWN_EDITS) return;
+      if (failure.kind === "unsupported") {
+        // An earlier edit's result is unknown, so what the part shows is not
+        // known, and nothing can put its text back.
+        this.fail({ kind: "unknown", message: failure.message });
+        return;
+      }
+      // A write that timed out is not tried again: a transport that does not
+      // answer would hold the reply for another deadline each time.
+      if (
+        failure.kind === "unknown" &&
+        !(failure instanceof WriteTimedOut) &&
+        ++this.unknownEdits < MAX_UNKNOWN_EDITS
+      )
+        return;
       this.handle(failure);
     }
   }
@@ -568,6 +604,19 @@ export class ReplyDelivery {
     this.fail({ kind: failure.kind, message: failure.message });
   }
 
+  /** `call`'s answer, or a `WriteTimedOut` when the platform does not give one in time. */
+  private async answered<T>(call: Promise<T>): Promise<T> {
+    let timer: ClockTimer | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = this.options.clock.setTimeout(() => reject(new WriteTimedOut()), WRITE_DEADLINE_MS);
+    });
+    try {
+      return await Promise.race([call, deadline]);
+    } finally {
+      if (timer) this.options.clock.clearTimeout(timer);
+    }
+  }
+
   private settlePart(part: Part, end: number): void {
     part.end = end;
     part.settled = true;
@@ -584,10 +633,15 @@ export class ReplyDelivery {
       })),
     );
     const accepted = parts.some((part) => part.receipt);
-    // An unknown create ranks above a stop: a caller that decides whether to
-    // send again reads the status, and a second create could show the text twice.
+    // An unknown result ranks above a stop or any other failure: a caller that
+    // decides whether to send again reads the status, and a second create could
+    // show the text twice. An edit whose result nothing resolved leaves the
+    // platform showing text that is not known.
+    const unresolved = this.blocks.some((state) => state.parts.some((part) => part.uncertain));
     const status: ReplyOutcome["status"] =
-      parts.some((part) => part.state === "unknown") || this.failure?.kind === "unknown"
+      unresolved ||
+      parts.some((part) => part.state === "unknown") ||
+      this.failure?.kind === "unknown"
         ? "unknown"
         : this.abort.signal.aborted
           ? "stopped"
@@ -596,7 +650,12 @@ export class ReplyDelivery {
               ? "partial"
               : "failed"
             : "delivered";
-    return { status, parts, ...(this.failure ? { failure: this.failure } : {}) };
+    return {
+      status,
+      parts,
+      ...(parts.some((part) => part.diverged) ? { diverged: true as const } : {}),
+      ...(this.failure ? { failure: this.failure } : {}),
+    };
   }
 }
 
