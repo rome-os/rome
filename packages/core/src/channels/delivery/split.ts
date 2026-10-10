@@ -72,6 +72,20 @@ export function splitPoint(source: string, limit: number, codec: TextCodec): num
   return low;
 }
 
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
 function isLowSurrogate(code: number): boolean {
   return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/** Whether a cut at `at` would separate the two halves of a surrogate pair. */
+export function splitsPair(text: string, at: number): boolean {
+  return (
+    at > 0 &&
+    at < text.length &&
+    isHighSurrogate(text.charCodeAt(at - 1)) &&
+    isLowSurrogate(text.charCodeAt(at))
+  );
 }

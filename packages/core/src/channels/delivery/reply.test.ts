@@ -816,6 +816,63 @@ describe("ReplyDelivery", () => {
       expect(other).toBe(true);
     });
 
+    it("fails the reply when the account's queue holds its write for longer than a minute", async () => {
+      // Another reply of the account got an hour's wait, which pauses every write.
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      pacer.pause(3_600_000);
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(61_000);
+      await settle();
+
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+      expect(platform.messages).toHaveLength(0);
+    });
+
+    it("fails the reply when another write's wait starts after its own write is queued", async () => {
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      let release = () => {};
+      void pacer.run("c2", () => new Promise<void>((resolve) => (release = resolve)));
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+        conversation: "c1",
+        clock,
+      });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await settle();
+      // The write that runs ahead of it ends, and its platform answers with an hour's wait.
+      pacer.pause(3_600_000);
+      release();
+      await advance(61_000);
+      await settle();
+
+      const outcome = await Promise.race([finished, Promise.resolve("hung" as const)]);
+      expect(outcome).not.toBe("hung");
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
+    });
+
+    it("keeps a write that waits behind its own limit of a minute", async () => {
+      limited(60_000, 1);
+      const delivery = reply({ editIntervalMs: 0 });
+      delivery.accept(result("Hello"));
+      const finished = delivery.finish();
+      await advance(70_000);
+
+      expect((await finished).status).toBe("delivered");
+    });
+
     it("fails the reply when its waits add up past what it will hold a reply for", async () => {
       limited(30_000, 5);
       const delivery = reply({ editIntervalMs: 0 });
@@ -932,6 +989,48 @@ describe("ReplyDelivery", () => {
       expect(outcome.status).toBe("unknown");
       // The late create reached the platform, but the reply had already given up on it.
       expect(events.filter((event) => event.result === "accepted")).toHaveLength(0);
+    });
+  });
+
+  describe("boundaries kept from the streamed text", () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+    it("never splits a surrogate pair when the final text moves a kept boundary into one", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      // A leading space and 19 letters fill the first message, so "😀b" starts the second.
+      delivery.accept(delta(` ${"a".repeat(19)}😀b`, "a"));
+      await advance(0);
+      await advance(0);
+      // The complete block has no leading space, which puts the emoji across the boundary.
+      delivery.accept(text(`${"a".repeat(19)}😀b`, "a"));
+      const outcome = await delivery.finish();
+
+      expect(platform.shown.some((shown) => lone.test(shown))).toBe(false);
+      expect(platform.shown.join("")).toBe(`${"a".repeat(19)}😀b`);
+      expect(outcome.status).toBe("delivered");
+    });
+
+    it("counts text that a final text made visible among the unsent text, whatever was passed over", async () => {
+      // The pacer is busy, so the first message waits in the queue.
+      const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+      let release = () => {};
+      void pacer.run("c1", () => new Promise<void>((resolve) => (release = resolve)));
+      const delivery = new ReplyDelivery({
+        transport: platform,
+        pacer,
+        policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 40 },
+        conversation: "c1",
+        clock,
+      });
+      // The split passes over 20 spaces and plans the rest.
+      delivery.accept(delta(`${" ".repeat(30)}hello`, "a"));
+      await settle();
+      // The complete block is 60 letters, all of them visible and all of them unsent.
+      delivery.accept(text("a".repeat(60), "a"));
+      release();
+      const outcome = await delivery.finish();
+
+      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
     });
   });
 

@@ -3,7 +3,7 @@ import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
 import { type Pacer, SKIPPED } from "./pacer.js";
-import { lastBreak, splitPoint } from "./split.js";
+import { lastBreak, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
   DeliveryFailure,
@@ -129,8 +129,20 @@ const MAX_RATE_LIMIT_WAIT_MS = 60_000;
 /** Consecutive edits with an unknown result before the reply gives up. */
 const MAX_UNKNOWN_EDITS = 3;
 
+/** How long a write may wait in the account's queue before the reply gives up
+ *  on it: the most it waits out of rate limits, and a second for the queue's
+ *  own spacing, so a limit of exactly that long still passes. */
+const QUEUE_WAIT_MS = MAX_RATE_LIMIT_WAIT_MS + 1000;
+
 /** How long a write may run before the reply stops waiting for its answer. */
 const WRITE_DEADLINE_MS = 30_000;
+
+/** A write that waited too long in the account's queue. It never started. */
+class QueueWaitExceeded extends Error {
+  constructor() {
+    super(`a write waited more than ${QUEUE_WAIT_MS / 1000} s in the account's queue`);
+  }
+}
 
 /** A write the platform did not answer in time. It may have done it. */
 class WriteTimedOut extends DeliveryFailure {
@@ -163,8 +175,11 @@ class WriteTimedOut extends DeliveryFailure {
  *   block then ends with nothing to put back, or the platform then refuses or
  *   will not edit, or a rate limit ends the reply, it is `unknown`.
  * - A platform's rate limit pauses the account for the time it names, even
- *   when the reply gives up on it. A reply waits out at most a minute of them
- *   in all, and then fails `rate-limited`.
+ *   when the reply gives up on it. A reply waits out at most a minute of its
+ *   own limits in all, and then fails `rate-limited`. A write that has waited
+ *   a minute in the account's queue, held by a pause that came from elsewhere
+ *   on the account, fails the reply the same way, so `finish()` is not held
+ *   for as long as another reply's flood wait.
  * - A create whose result is unknown is never repeated: the reply stops
  *   writing and reports `unknown`.
  * - A write the platform does not answer within 30 s stops holding the reply.
@@ -206,6 +221,12 @@ export class ReplyDelivery {
   accept(event: StreamAgentEvent): void {
     if (this.closed || this.failure) return;
     this.assembler.apply(event);
+    // The block's text can differ from what streamed, so what was passed over
+    // and where parts end are checked before text is counted as unsent.
+    for (const [index, block] of this.assembler.blocks.entries()) {
+      const state = this.blocks[index];
+      if (state) this.reconcileLayout(block.text, state);
+    }
     const waiting = this.pendingChars();
     // A `final` reply waits for its end by design, so nothing bounds its text.
     if (this.mode !== "final" && waiting > this.options.policy.maxPendingChars)
@@ -292,10 +313,18 @@ export class ReplyDelivery {
       return;
     }
     this.writing = true;
+    // A write waits in the account's queue behind whatever pauses it. A pause
+    // that came from elsewhere is not this reply's to wait out for an hour.
+    const queued = new AbortController();
+    const queueTimer = this.options.clock.setTimeout(
+      () => queued.abort(new QueueWaitExceeded()),
+      QUEUE_WAIT_MS,
+    );
     void this.options.pacer
       .run(
         this.paceKey,
         async (): Promise<void | typeof SKIPPED> => {
+          this.options.clock.clearTimeout(queueTimer);
           // The reply can change while a write waits its turn. Its text may
           // have grown, it may have failed, and the write may have become
           // unnecessary. Only a write for the same target runs, with the
@@ -305,11 +334,15 @@ export class ReplyDelivery {
           if (!fresh || !sameTarget(fresh, plan)) return SKIPPED;
           return this.write(fresh);
         },
-        this.abort.signal,
+        AbortSignal.any([this.abort.signal, queued.signal]),
       )
       .catch((error: unknown) => {
         // A write the stop dropped before it ran: nothing happened.
         if (this.abort.signal.aborted) return;
+        if (error instanceof QueueWaitExceeded) {
+          this.fail({ kind: "rate-limited", message: error.message });
+          return;
+        }
         // Anything else escaped the write's own handling of the transport's
         // errors, such as a codec that throws. Left alone it would plan the
         // same write again, so the reply fails.
@@ -318,6 +351,7 @@ export class ReplyDelivery {
         this.fail({ kind: "internal", message });
       })
       .finally(() => {
+        this.options.clock.clearTimeout(queueTimer);
         this.writing = false;
         this.pump();
       });
@@ -348,7 +382,7 @@ export class ReplyDelivery {
     for (const [index, block] of this.assembler.blocks.entries()) {
       const state = (this.blocks[index] ??= { parts: [] });
       const complete = block.complete || this.closed;
-      this.reviewPassedOver(block.text, state);
+      this.reconcileLayout(block.text, state);
 
       for (const part of state.parts) {
         if (!part.settled || part.diverged || part.unknown) continue;
@@ -408,6 +442,8 @@ export class ReplyDelivery {
           codec.measure(codec.render(block.text.slice(start, shown), true)) <= limit
         )
           end = shown;
+        // What a preview showed can end inside a pair of the final text.
+        if (end > start + 1 && splitsPair(block.text, end)) end -= 1;
         const settle = complete || end < block.text.length;
         const source = block.text.slice(start, end);
         // The split can choose a prefix with nothing visible in it, such as a
@@ -463,22 +499,31 @@ export class ReplyDelivery {
   }
 
   /**
+   * Parts keep the offsets they got while the text streamed, and a block's
+   * final text can differ from it. Two things then need another look.
+   *
+   * A boundary can fall inside a surrogate pair. It moves back before the
+   * pair, which shortens the part it ends and lengthens the one it starts.
+   *
    * A split passes over text with nothing visible in it and sends nothing for
-   * it. A block's final text can differ from what streamed, and that text can
-   * turn visible. Text behind the last message is simply sent. Text between
-   * two messages cannot be, since a message cannot be put in front of one that
-   * exists, so the message after it is reported as differing.
+   * it, and that text can turn visible. Text behind the last message is simply
+   * sent. Text between two messages cannot be, since a message cannot be put in
+   * front of one that exists, so the message after it is reported as differing.
    */
-  private reviewPassedOver(text: string, state: BlockState): void {
+  private reconcileLayout(text: string, state: BlockState): void {
     const { codec } = this.options.transport;
     const visible = (from: number, to: number) =>
       to > from && codec.render(text.slice(from, to), true).trim() !== "";
     let covered = 0;
     for (const part of state.parts) {
+      if (splitsPair(text, part.start)) part.start -= 1;
+      if (splitsPair(text, part.end)) part.end -= 1;
       if (!part.diverged && visible(covered, part.start)) part.diverged = true;
       covered = Math.max(covered, part.end);
     }
-    if (state.skipped !== undefined && visible(covered, state.skipped)) state.skipped = undefined;
+    if (state.skipped === undefined) return;
+    if (splitsPair(text, state.skipped)) state.skipped -= 1;
+    if (visible(covered, state.skipped)) state.skipped = undefined;
   }
 
   private async write(plan: Exclude<Plan, null | { waitUntil: number }>): Promise<void> {

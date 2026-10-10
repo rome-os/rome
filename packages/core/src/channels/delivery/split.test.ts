@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { lastBreak, splitPoint } from "./split.js";
+import { lastBreak, splitPoint, splitsPair } from "./split.js";
 import { plainText, type TextCodec } from "./types.js";
 
 describe("splitPoint", () => {
@@ -94,5 +94,20 @@ describe("lastBreak", () => {
 
   it("ends after a full-width full stop at once, since nothing follows one in Chinese", () => {
     expect(lastBreak("第一句话说完了。")).toBe("第一句话说完了。".length);
+  });
+});
+
+describe("splitsPair", () => {
+  it("is true only between the two halves of a surrogate pair", () => {
+    const text = "a😀b";
+    expect(splitsPair(text, 1)).toBe(false);
+    expect(splitsPair(text, 2)).toBe(true);
+    expect(splitsPair(text, 3)).toBe(false);
+  });
+
+  it("is false at either end of the text", () => {
+    expect(splitsPair("😀", 0)).toBe(false);
+    expect(splitsPair("😀", 2)).toBe(false);
+    expect(splitsPair("", 0)).toBe(false);
   });
 });
