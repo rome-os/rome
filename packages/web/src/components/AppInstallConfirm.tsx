@@ -33,6 +33,7 @@ export interface ListingDetailPayload {
   available: boolean;
   reason?: string;
   error?: string;
+  browseOrigin?: string | null;
   listing?: ListingDetail;
   versions?: VersionRow[];
 }
@@ -43,8 +44,23 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-function httpIconUrl(iconUrl: string | null): string | null {
-  return iconUrl && /^https?:\/\//i.test(iconUrl) ? iconUrl : null;
+// The listing comes from Rome Cloud, not core, so a relative icon URL is still
+// resolved against the store's origin.
+function resolveIconUrl(
+  browseOrigin: string | null | undefined,
+  iconUrl: string | null,
+): string | null {
+  if (!iconUrl) return null;
+  if (/^https?:\/\//i.test(iconUrl)) return iconUrl;
+  if (!browseOrigin) return null;
+  try {
+    const resolved = new URL(iconUrl, browseOrigin);
+    return resolved.protocol === "http:" || resolved.protocol === "https:"
+      ? resolved.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface AppInstallConfirmProps {
@@ -155,7 +171,7 @@ export function AppInstallConfirm({
   }, [target, installing, listingId, data, onInstalled, t]);
 
   const listing = data?.listing ?? null;
-  const iconUrl = listing ? httpIconUrl(listing.iconUrl) : null;
+  const iconUrl = listing ? resolveIconUrl(data?.browseOrigin, listing.iconUrl) : null;
   const displayName = listing?.name ?? listing?.id ?? listingId;
 
   if (loading) {

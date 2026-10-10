@@ -17,6 +17,7 @@ afterEach(() => {
 function listingPayload(overrides?: { iconUrl?: string | null }): ListingDetailPayload {
   return {
     available: true,
+    browseOrigin: "https://store.example",
     listing: {
       id: "customer-service",
       handle: "rome",
@@ -70,6 +71,16 @@ describe("AppInstallConfirm", () => {
     const icon = container.querySelector("img");
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("src")).toBe("https://cdn.example/icons/customer-service.png");
+  });
+
+  it("resolves a relative iconUrl against browseOrigin", async () => {
+    mockListingFetch(listingPayload({ iconUrl: "/icons/customer-service.png" }));
+    const { container } = renderConfirm();
+
+    await screen.findByText("Install this app?");
+    expect(container.querySelector("img")?.getAttribute("src")).toBe(
+      "https://store.example/icons/customer-service.png",
+    );
   });
 
   it("falls back to a letter avatar when the listing has no icon", async () => {
