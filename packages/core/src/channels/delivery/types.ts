@@ -36,8 +36,9 @@ export interface DeliveryPolicy {
    * The most source text that may wait unsent in `edit` and `blocks` mode,
    * which includes the text of a preview still open. It must exceed the
    * platform's longest message, or an `edit` reply fails while its first
-   * message is still filling. A reply that exceeds it fails rather than
-   * dropping text. A `final` reply waits by design and has no bound.
+   * message is still filling, so a reply refuses a policy where it does not.
+   * A reply that exceeds it fails rather than dropping text. A `final` reply
+   * waits by design and has no bound.
    *
    * A block the agent never completes, as when a turn is interrupted
    * mid-block, holds the blocks after it back until the reply finishes, and its

@@ -2,7 +2,7 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { Clock, ClockTimer } from "../../lib/clock.js";
 import { createLogger } from "../../logger.js";
 import { ReplyAssembler } from "./assembler.js";
-import { type Pacer, SKIPPED } from "./pacer.js";
+import { Outlasted, type Pacer, SKIPPED } from "./pacer.js";
 import { lastBreak, splitPoint, splitsPair } from "./split.js";
 import {
   asDeliveryFailure,
@@ -184,7 +184,9 @@ class WriteTimedOut extends DeliveryFailure {
  *   writing and reports `unknown`.
  * - A write the platform does not answer within 30 s stops holding the reply.
  *   It counts as unknown, is not repeated, and the call is left to finish
- *   unheeded, so `stop()` and `finish()` return within that time.
+ *   unheeded, so `stop()` and `finish()` return within that time. The
+ *   conversation stays busy in the pacer until the call really ends, so a later
+ *   write to it cannot overtake it.
  * - After `stop()`, nothing new is written. A write already running finishes
  *   and is reported, and a create whose result is unknown stays `unknown`.
  *
@@ -208,11 +210,20 @@ export class ReplyDelivery {
   private failure?: ReplyOutcome["failure"];
   private unknownEdits = 0;
   private rateLimitedMs = 0;
+  /** The transport call of the write that just timed out, still running. */
+  private outlasting?: Promise<unknown>;
   private timer?: ClockTimer;
   private readonly idle: Array<() => void> = [];
 
   constructor(private readonly options: ReplyOptions) {
     this.mode = effectiveMode(options.policy, options.transport.capabilities);
+    const longest = options.transport.capabilities.maxPartLength;
+    // A bound that cannot hold one message fails every reply while its first
+    // message is still filling, so it is refused up front.
+    if (this.mode !== "final" && options.policy.maxPendingChars <= longest)
+      throw new Error(
+        `maxPendingChars (${options.policy.maxPendingChars}) must exceed the platform's longest message (${longest})`,
+      );
     this.conversation = options.conversation;
     this.paceKey = options.conversation;
   }
@@ -222,10 +233,20 @@ export class ReplyDelivery {
     if (this.closed || this.failure) return;
     this.assembler.apply(event);
     // The block's text can differ from what streamed, so what was passed over
-    // and where parts end are checked before text is counted as unsent.
-    for (const [index, block] of this.assembler.blocks.entries()) {
-      const state = this.blocks[index];
-      if (state) this.reconcileLayout(block.text, state);
+    // and where parts end are checked before text is counted as unsent. A
+    // codec that throws fails the reply, as it does when planning.
+    try {
+      for (const [index, block] of this.assembler.blocks.entries()) {
+        const state = this.blocks[index];
+        if (state) this.reconcileLayout(block.text, state);
+      }
+    } catch (error) {
+      this.fail({
+        kind: "internal",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      this.pump();
+      return;
     }
     const waiting = this.pendingChars();
     // A `final` reply waits for its end by design, so nothing bounds its text.
@@ -323,7 +344,7 @@ export class ReplyDelivery {
     void this.options.pacer
       .run(
         this.paceKey,
-        async (): Promise<void | typeof SKIPPED> => {
+        async (): Promise<void | typeof SKIPPED | Outlasted> => {
           this.options.clock.clearTimeout(queueTimer);
           // The reply can change while a write waits its turn. Its text may
           // have grown, it may have failed, and the write may have become
@@ -332,7 +353,13 @@ export class ReplyDelivery {
           if (this.failure) return SKIPPED;
           const fresh = this.planSafely(this.now(), true);
           if (!fresh || !sameTarget(fresh, plan)) return SKIPPED;
-          return this.write(fresh);
+          await this.write(fresh);
+          // A call the reply stopped waiting for is still running. The pacer
+          // keeps the conversation busy until it ends, so a later write to it
+          // cannot overtake it.
+          const late = this.outlasting;
+          this.outlasting = undefined;
+          return late ? new Outlasted(late) : undefined;
         },
         AbortSignal.any([this.abort.signal, queued.signal]),
       )
@@ -657,6 +684,9 @@ export class ReplyDelivery {
     });
     try {
       return await Promise.race([call, deadline]);
+    } catch (error) {
+      if (error instanceof WriteTimedOut) this.outlasting = call;
+      throw error;
     } finally {
       if (timer) this.options.clock.clearTimeout(timer);
     }

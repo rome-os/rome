@@ -49,6 +49,11 @@ export class ReplyAssembler {
     }
     if (event.type === "result") {
       const answer = event.content;
+      // Once a text block marked `final` has arrived, the answer was streamed,
+      // and the `result` would show it twice where the two differ by whitespace.
+      // An agent that declares an output schema has a `result` of canonical JSON,
+      // which may not be what streamed. Which of the two is authoritative is
+      // decided where the engine is wired into runs.
       if (!answer || this.finalSeen || this.blocks.some((block) => block.text === answer)) return 0;
       this.blocks.push({ text: answer, complete: true });
       return answer.length;

@@ -21,6 +21,16 @@ export interface Budget {
  */
 export const SKIPPED = Symbol("skipped");
 
+/**
+ * What a write returns when its caller stops waiting for a call that is still
+ * running, such as a request past its deadline. The caller gets the answer at
+ * once and the account's queue goes on, but the conversation stays busy until
+ * `settled` does, so its later writes cannot overtake the call.
+ */
+export class Outlasted {
+  constructor(readonly settled: Promise<unknown>) {}
+}
+
 /** How long a write may run before it stops holding the queue. */
 const SLOW_WRITE_MS = 30_000;
 
@@ -60,7 +70,11 @@ interface Lane {
  * - A write that runs longer than `slowWriteMs` stops holding the account's
  *   queue, so a request that hangs cannot stall the account. It is not cut
  *   off, and its result still reaches its caller. Its own conversation waits
- *   for it, so that conversation's writes stay in order.
+ *   for it, so that conversation's writes stay in order, and its spacing
+ *   counts from when it really ended.
+ * - A write may return `Outlasted` to say its call is still running past what
+ *   its caller waited for. The conversation is treated as it is after a hung
+ *   write.
  *
  * At most one timer is pending for the earliest moment something becomes
  * ready, plus one for the write that is running. A conversation's state is
@@ -180,6 +194,7 @@ export class Pacer {
     // write that ends later cannot release the write that replaced it.
     let released = false;
     let skipped = false;
+    let outlasting: Promise<unknown> | undefined;
     const release = () => {
       if (released) return;
       released = true;
@@ -202,14 +217,30 @@ export class Pacer {
     void written
       .then((value) => {
         skipped = value === SKIPPED;
+        if (value instanceof Outlasted) outlasting = value.settled;
         job.resolve(value);
       }, job.reject)
       .finally(() => {
         this.clock.clearTimeout(watchdog);
+        const handedOn = released;
+        if (outlasting) {
+          // The caller stopped waiting, and the call is still running. The
+          // account goes on, and the conversation stays busy until it ends.
+          release();
+          const ended = () => {
+            lane.busy = false;
+            lane.readyAt = this.now() + this.spacing(lane.conversation);
+            this.pump();
+          };
+          void outlasting.then(ended, ended);
+          return;
+        }
         lane.busy = false;
         // A write the watchdog passed over has already handed the queue on.
-        // This conversation's later writes were waiting on it alone.
-        const handedOn = released;
+        // This conversation's later writes were waiting on it alone, and its
+        // spacing counts from now, so the next write does not land back to
+        // back with a request that may have just been handled.
+        if (handedOn && !skipped) lane.readyAt = this.now() + this.spacing(lane.conversation);
         release();
         if (handedOn) this.pump();
       });

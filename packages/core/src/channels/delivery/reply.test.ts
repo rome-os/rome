@@ -435,9 +435,17 @@ describe("ReplyDelivery", () => {
     expect(outcome.parts).toEqual([expect.objectContaining({ state: "unknown" })]);
   });
 
+  it("refuses a policy whose unsent-text bound cannot hold one message", () => {
+    // The platform's limit is 20, so a bound of 20 fails while the first message fills.
+    expect(() => reply({ mode: "edit", maxPendingChars: 20 })).toThrow(/maxPendingChars/);
+    expect(() => reply({ mode: "blocks", maxPendingChars: 5 })).toThrow(/maxPendingChars/);
+    // A final reply waits by design and has no bound.
+    expect(() => reply({ mode: "final", maxPendingChars: 5 })).not.toThrow();
+  });
+
   it("fails rather than holding more unsent text than its bound", async () => {
-    const delivery = reply({ mode: "edit", maxPendingChars: 10 });
-    delivery.accept(delta("more than ten characters"));
+    const delivery = reply({ mode: "edit", maxPendingChars: 30 });
+    delivery.accept(delta("more than thirty characters, which goes past it"));
     const outcome = await delivery.finish();
     expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
     expect(platform.messages).toHaveLength(0);
@@ -557,9 +565,9 @@ describe("ReplyDelivery", () => {
     });
 
     it("does not send once the reply has failed", async () => {
-      const { delivery } = paused({ maxPendingChars: 10 });
+      const { delivery } = paused({ maxPendingChars: 30 });
       delivery.accept(delta("small", "a"));
-      delivery.accept(delta(" too much", "a"));
+      delivery.accept(delta(" and more than the bound lets wait", "a"));
       const finished = delivery.finish();
       await advance(2000);
       const outcome = await finished;
@@ -990,6 +998,66 @@ describe("ReplyDelivery", () => {
       // The late create reached the platform, but the reply had already given up on it.
       expect(events.filter((event) => event.result === "accepted")).toHaveLength(0);
     });
+  });
+
+  it("keeps the conversation's later writes behind a create the reply stopped waiting for", async () => {
+    const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
+    let release!: () => void;
+    platform.hold = new Promise<void>((resolve) => (release = resolve));
+    const delivery = new ReplyDelivery({
+      transport: platform,
+      pacer,
+      policy: { mode: "edit", editIntervalMs: 0, blockWaitMs: 0, maxPendingChars: 10_000 },
+      conversation: "c1",
+      clock,
+    });
+    delivery.accept(delta("Hello"));
+    await advance(0);
+    const finished = delivery.finish();
+    await advance(30_000);
+    expect((await finished).status).toBe("unknown");
+
+    // A write for the same conversation, asked for after the reply gave up on its create.
+    const seen: number[] = [];
+    const later = pacer.run("c1", async () => {
+      seen.push(platform.messages.length);
+    });
+    await advance(0);
+    await settle();
+    expect(seen).toEqual([]);
+
+    release();
+    platform.hold = undefined;
+    await later;
+    // The create ended first, so the later write does not come before it.
+    expect(seen).toEqual([1]);
+  });
+
+  it("fails the reply, and never throws into its caller, when the codec breaks while the layout is checked", async () => {
+    let broken = false;
+    const transport: DeliveryTransport = {
+      codec: {
+        ...plainText,
+        render: (value, settled) => {
+          if (broken) throw new Error("render broke");
+          return plainText.render(value, settled);
+        },
+      },
+      capabilities: platform.capabilities,
+      create: (...args) => platform.create(...args),
+      edit: platform.edit,
+    };
+    const delivery = reply({ editIntervalMs: 0 }, transport);
+    // The spaces are passed over, and the rest becomes a visible message.
+    delivery.accept(delta(`${" ".repeat(30)}hello world and more text`, "a"));
+    await advance(0);
+    expect(platform.messages.length).toBeGreaterThan(0);
+
+    broken = true;
+    expect(() => delivery.accept(delta(" and more", "a"))).not.toThrow();
+    const outcome = await delivery.finish();
+
+    expect(outcome.failure).toMatchObject({ kind: "internal" });
   });
 
   describe("boundaries kept from the streamed text", () => {

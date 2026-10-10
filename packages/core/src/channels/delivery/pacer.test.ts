@@ -1,7 +1,7 @@
 import { getEventListeners } from "node:events";
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { FakeClock } from "../../test/kit/clock.js";
-import { type Budget, Pacer, SKIPPED } from "./pacer.js";
+import { type Budget, Outlasted, Pacer, SKIPPED } from "./pacer.js";
 
 describe("Pacer", () => {
   let clock: FakeClock;
@@ -197,6 +197,48 @@ describe("Pacer", () => {
     await expect(slow).resolves.toBe("late result");
     await advance(0);
     await expect(later).resolves.toBe("later");
+  });
+
+  it("counts a conversation's spacing from when its hung write really ended", async () => {
+    const paced = pacer({ conversationSpacingMs: 5000 });
+    let finishSlow!: () => void;
+    const slow = paced.run(
+      "a",
+      () => new Promise<string>((resolve) => (finishSlow = () => resolve("slow"))),
+    );
+    const next = paced.run("a", write("a again"));
+    // The watchdog fired at 30 s, and its spacing would have passed by 35 s.
+    await advance("40s");
+    finishSlow();
+    await slow;
+    await advance(0);
+
+    // The platform may have handled the hung request just before it answered, so
+    // the next write is not sent back to back with it.
+    expect(log).toEqual([]);
+    await advance("5s");
+    await expect(next).resolves.toBe("a again");
+    expect(log).toEqual(["a again@45000"]);
+  });
+
+  it("keeps a conversation's later writes behind a call its caller stopped waiting for, while other conversations go on", async () => {
+    const paced = pacer();
+    let end!: () => void;
+    const call = new Promise<void>((resolve) => (end = resolve));
+    const first = paced.run("a", async () => new Outlasted(call));
+    const second = paced.run("a", write("a again"));
+    const other = paced.run("b", write("b"));
+    await advance(0);
+
+    // The first caller has its answer, and the account went on to "b".
+    await expect(first).resolves.toBeInstanceOf(Outlasted);
+    expect(log).toEqual(["b@0"]);
+    await other;
+
+    end();
+    await advance(0);
+    await expect(second).resolves.toBe("a again");
+    expect(log).toEqual(["b@0", "a again@0"]);
   });
 
   it("keeps a conversation's later writes behind its hung write, while other conversations go on", async () => {
