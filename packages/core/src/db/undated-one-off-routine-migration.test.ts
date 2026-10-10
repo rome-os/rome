@@ -19,8 +19,9 @@ function utcDate(at: Date, offsetDays: number): string {
 }
 
 /** What the migration should pick for `localTime` if it ran at `at`. */
-function expectedDate(at: Date, localTime: string): string {
-  return localTime > at.toISOString().slice(11, 16) ? utcDate(at, 0) : utcDate(at, 1);
+function expectedDate(at: Date, localTime: string, extraDays = 0): string {
+  const today = localTime > at.toISOString().slice(11, 16) ? 0 : 1;
+  return utcDate(at, today + extraDays);
 }
 
 describe("undated one-off routine migration", () => {
@@ -35,6 +36,8 @@ describe("undated one-off routine migration", () => {
     insert.run("fired", JSON.stringify({ ...schedule, localTime: "12:00" }), 1_782_216_000);
     insert.run("pending-late", JSON.stringify({ ...schedule, localTime: "23:59" }), null);
     insert.run("pending-early", JSON.stringify({ ...schedule, localTime: "0:00" }), null);
+    const tokyo = { ...schedule, tzid: "Asia/Tokyo", localTime: "23:59" };
+    insert.run("pending-tokyo", JSON.stringify(tokyo), null);
     insert.run("blank-rrule", JSON.stringify({ ...schedule, localTime: "23:59", rrule: "" }), null);
     const recurring = JSON.stringify({ ...schedule, localTime: "09:00", rrule: "FREQ=DAILY" });
     const dated = JSON.stringify({ ...schedule, localTime: "09:00", date: "2099-01-01" });
@@ -47,9 +50,9 @@ describe("undated one-off routine migration", () => {
     const before = new Date();
     sqlite.exec(MIGRATION);
     const after = new Date();
-    const pendingDate = (localTime: string) => [
-      expectedDate(before, localTime),
-      expectedDate(after, localTime),
+    const pendingDate = (localTime: string, extraDays = 0) => [
+      expectedDate(before, localTime, extraDays),
+      expectedDate(after, localTime, extraDays),
     ];
 
     const triggers = Object.fromEntries(
@@ -65,6 +68,8 @@ describe("undated one-off routine migration", () => {
     expect(pendingDate("23:59")).toContain(parsed("pending-late").date);
     expect(pendingDate("00:00")).toContain(parsed("pending-early").date);
     expect(parsed("pending-early").tzMode).toBe("fixed");
+    // A non-UTC zone takes the day after, so the date is never already past there.
+    expect(pendingDate("23:59", 1)).toContain(parsed("pending-tokyo").date);
     expect(parsed("blank-rrule").date).toBe(parsed("pending-late").date);
     expect(triggers.recurring).toBe(recurring);
     expect(triggers.dated).toBe(dated);

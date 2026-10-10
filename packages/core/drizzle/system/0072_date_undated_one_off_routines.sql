@@ -5,9 +5,11 @@
 --   * fired rows → the UTC date they fired on. They are spent; the date only
 --     keeps the row well-formed.
 --   * unfired rows → the next UTC day whose clock reaches localTime. SQLite
---     has no zone data, so this compares in UTC rather than `tzid`: in a zone
---     far from UTC a pending reminder can land a day off. These rows live at
---     most a day before firing, so we accept that over a boot-time fixup.
+--     has no zone data, so that is exact only for a UTC row. Any other zone
+--     is up to 14 hours off UTC, and the date it gives can already be past
+--     there. So a non-UTC row takes the day after: it never lands in the past,
+--     but it can fire a day or two later than before. These rows live at most
+--     a day before firing, so we accept that over a boot-time fixup.
 --   * every row → `fixed`, like any dated one-off. A `floating` row now fires
 --     in its stored `tzid` rather than the guardian's current zone.
 --
@@ -21,9 +23,15 @@ SET `trigger` = json_set(
   '$.date',
   CASE
     WHEN `last_fired_at` IS NOT NULL THEN date(`last_fired_at`, 'unixepoch')
-    WHEN substr('0' || json_extract(`trigger`, '$.localTime'), -5) > strftime('%H:%M', 'now')
-      THEN date('now')
-    ELSE date('now', '+1 day')
+    ELSE date(
+      'now',
+      CASE
+        WHEN substr('0' || json_extract(`trigger`, '$.localTime'), -5) > strftime('%H:%M', 'now')
+          THEN '+0 days'
+        ELSE '+1 day'
+      END,
+      CASE WHEN json_extract(`trigger`, '$.tzid') = 'UTC' THEN '+0 days' ELSE '+1 day' END
+    )
   END
 )
 WHERE json_valid(`trigger`)
