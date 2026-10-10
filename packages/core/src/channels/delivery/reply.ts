@@ -131,7 +131,9 @@ const MAX_UNKNOWN_EDITS = 3;
 
 /** How long a write may wait in the account's queue before the reply gives up
  *  on it: the most it waits out of rate limits, and a second for the queue's
- *  own spacing, so a limit of exactly that long still passes. */
+ *  own spacing, so a limit of exactly that long still passes. It counts from
+ *  the end of the reply's own limit, so the writes of other conversations that
+ *  go first once the pause ends do not use it up. */
 const QUEUE_WAIT_MS = MAX_RATE_LIMIT_WAIT_MS + 1000;
 
 /** How long a write may run before the reply stops waiting for its answer. */
@@ -211,6 +213,8 @@ export class ReplyDelivery {
   private failure?: ReplyOutcome["failure"];
   private unknownEdits = 0;
   private rateLimitedMs = 0;
+  /** When the pause for the reply's own rate limits ends. */
+  private ownPausedUntil = 0;
   /** The transport call of the write that just timed out, still running. */
   private outlasting?: Promise<unknown>;
   private timer?: ClockTimer;
@@ -270,14 +274,18 @@ export class ReplyDelivery {
   }
 
   /**
-   * Source text that is not in a settled message yet: in every block, what
-   * follows its last settled part or the prefix passed over, including a
-   * preview that is still open. It is read off the blocks and parts, so text a
-   * split passed over, and a block that shrank, cannot leave it drifting.
+   * Source text that is not in a settled message yet: in every block that is
+   * still streaming, what follows its last settled part or the prefix passed
+   * over, including a preview that is still open. A block the agent completed
+   * is not counted. It was produced whole and is already held in full, so it
+   * is no backlog, and it can be split and sent. It is read off the blocks and
+   * parts, so text a split passed over, and a block that shrank, cannot leave
+   * it drifting.
    */
   private pendingChars(): number {
     let total = 0;
     for (const [index, block] of this.assembler.blocks.entries()) {
+      if (block.complete) continue;
       const state = this.blocks[index];
       let consumed = state?.skipped ?? 0;
       for (let i = (state?.parts.length ?? 0) - 1; i >= 0; i--) {
@@ -338,9 +346,10 @@ export class ReplyDelivery {
     // A write waits in the account's queue behind whatever pauses it. A pause
     // that came from elsewhere is not this reply's to wait out for an hour.
     const queued = new AbortController();
+    const ownPause = Math.max(0, this.ownPausedUntil - this.now());
     const queueTimer = this.options.clock.setTimeout(
       () => queued.abort(new QueueWaitExceeded()),
-      QUEUE_WAIT_MS,
+      ownPause + QUEUE_WAIT_MS,
     );
     void this.options.pacer
       .run(
@@ -493,7 +502,7 @@ export class ReplyDelivery {
           end < shown &&
           codec.measure(codec.render(block.text.slice(start, shown), true)) <= limit
         )
-          end = shown;
+          end = Math.min(shown, block.text.length);
         // What a preview showed can end inside a pair of the final text.
         if (end > start + 1 && splitsPair(block.text, end)) end -= 1;
         const settle = complete || end < block.text.length;
@@ -699,6 +708,7 @@ export class ReplyDelivery {
       // account waits. It does so when the reply gives up too, since a send the
       // caller makes next would run into the same window.
       this.options.pacer.pause(wait);
+      this.ownPausedUntil = Math.max(this.ownPausedUntil, this.now() + wait);
       if (this.rateLimitedMs + wait > MAX_RATE_LIMIT_WAIT_MS) {
         this.fail({ kind: "rate-limited", message: failure.message });
         return;

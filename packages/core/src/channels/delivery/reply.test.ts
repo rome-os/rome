@@ -451,6 +451,17 @@ describe("ReplyDelivery", () => {
     expect(platform.messages).toHaveLength(0);
   });
 
+  it("delivers text that arrived complete and is longer than the bound, split into messages", async () => {
+    // A provider that does not stream sends its answer whole, and it can be split and sent.
+    const delivery = reply({ mode: "edit", editIntervalMs: 0, maxPendingChars: 30 });
+    delivery.accept(text("x".repeat(100), "a"));
+    delivery.accept(result("y".repeat(100)));
+    const outcome = await delivery.finish();
+
+    expect(outcome.status).toBe("delivered");
+    expect(platform.shown.join("")).toBe(`${"x".repeat(100)}${"y".repeat(100)}`);
+  });
+
   it("delivers a reply longer than the unsent-text bound in final mode, which waits by design", async () => {
     const delivery = reply({ mode: "final", maxPendingChars: 10 });
     delivery.accept(result("more than ten characters"));
@@ -677,6 +688,18 @@ describe("ReplyDelivery", () => {
       expect(platform.messages).toHaveLength(1);
     });
 
+    it("keeps the part's end inside the block's text when the final text is shorter than the lost edit's", async () => {
+      const delivery = reply({ editIntervalMs: 0 });
+      platform.lostEditAnswers = 1;
+      await reviseBackWhileAnEditIsInFlight(delivery);
+      const outcome = await delivery.finish();
+
+      expect(outcome.status).toBe("delivered");
+      // The lost edit carried "Hello world", but the block is "Hello".
+      const probe = delivery as unknown as { blocks: Array<{ parts: Array<{ end: number }> }> };
+      expect(probe.blocks[0]!.parts[0]!.end).toBeLessThanOrEqual("Hello".length);
+    });
+
     it("reports the reply as unknown when the edit that reconciles it is lost too", async () => {
       const delivery = reply({ editIntervalMs: 0 });
       platform.lostEditAnswers = 3;
@@ -844,6 +867,33 @@ describe("ReplyDelivery", () => {
       expect(outcome).not.toBe("hung");
       expect(outcome).toMatchObject({ status: "failed", failure: { kind: "rate-limited" } });
       expect(platform.messages).toHaveLength(0);
+    });
+
+    it("does not give up on a write that waits behind other conversations after its own limit", async () => {
+      limited(50_000, 1);
+      const { pacer, delivery } = onSharedPacer();
+      // The first create is in flight when another conversation's write is queued behind it.
+      let releaseCreate!: () => void;
+      platform.hold = new Promise<void>((resolve) => (releaseCreate = resolve));
+      delivery.accept(result("Hello"));
+      await advance(0);
+      let end = () => {};
+      const ahead = pacer.run("c2", () => new Promise<void>((resolve) => (end = resolve)));
+      const finished = delivery.finish();
+      // The create meets a 50 s limit, so the account pauses and both writes wait.
+      releaseCreate();
+      platform.hold = undefined;
+      await advance(0);
+      // When the pause ends the other write goes first, and it takes its time.
+      await advance(50_000);
+      // The reply has now waited longer than a minute and a second in all.
+      await advance(15_000);
+      end();
+      await ahead;
+      await advance(0);
+
+      expect((await finished).status).toBe("delivered");
+      expect(platform.shown).toEqual(["Hello"]);
     });
 
     it("reports a write held by its own conversation as unavailable, not as a rate limit", async () => {
@@ -1156,7 +1206,7 @@ describe("ReplyDelivery", () => {
       expect(outcome.status).toBe("delivered");
     });
 
-    it("counts text that a final text made visible among the unsent text, whatever was passed over", async () => {
+    it("sends a complete block that a final text made visible, however long it is against the bound", async () => {
       // The pacer is busy, so the first message waits in the queue.
       const pacer = new Pacer({ burst: 1000, refillMs: 1, conversationSpacingMs: 0 }, clock);
       let release = () => {};
@@ -1172,11 +1222,13 @@ describe("ReplyDelivery", () => {
       delivery.accept(delta(`${" ".repeat(30)}hello`, "a"));
       await settle();
       // The complete block is 60 letters, all of them visible and all of them unsent.
+      // It was produced whole, so the bound on a backlog does not apply to it.
       delivery.accept(text("a".repeat(60), "a"));
       release();
       const outcome = await delivery.finish();
 
-      expect(outcome).toMatchObject({ status: "failed", failure: { kind: "overflow" } });
+      expect(outcome.status).toBe("delivered");
+      expect(platform.shown.join("")).toBe("a".repeat(60));
     });
   });
 
@@ -1251,11 +1303,12 @@ describe("ReplyDelivery", () => {
   });
 
   it("does not count text a split passed over, or a whitespace tail, as unsent", async () => {
-    // Each block carries 25 spaces that are never sent. With them counted, 50 characters would wait.
+    // Each block carries 25 spaces that are never sent. With them counted, 60 characters would wait.
+    // The blocks are still streaming, since a block the agent completed is not counted at all.
     const delivery = reply({ editIntervalMs: 0, maxPendingChars: 40 });
-    delivery.accept(text(`${" ".repeat(25)}hello`, "a"));
+    delivery.accept(delta(`${" ".repeat(25)}hello`, "a"));
     await advance(100);
-    delivery.accept(text(`${" ".repeat(25)}world`, "b"));
+    delivery.accept(delta(`${" ".repeat(25)}world`, "b"));
     const outcome = await delivery.finish();
 
     expect(outcome.status).toBe("delivered");
