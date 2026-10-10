@@ -1,30 +1,29 @@
-import { describe, expect, it } from "@rstest/core";
-import {
-  allowsVerticalScroll,
-  findScrollableYAncestor,
-  hasVerticalOverflow,
-} from "./scroll-container";
+// @rstest-environment jsdom
+import { afterEach, describe, expect, it } from "@rstest/core";
+import { allowsVerticalScroll, findScrollableYAncestor } from "./scroll-container";
 
 function element({
   clientHeight,
   overflowY,
-  parentElement = null,
+  parent,
   scrollHeight,
 }: {
   clientHeight: number;
   overflowY: string;
-  parentElement?: HTMLElement | null;
+  parent?: HTMLElement;
   scrollHeight: number;
 }): HTMLElement {
-  return {
-    clientHeight,
-    dataset: { overflowY },
-    parentElement,
-    scrollHeight,
-  } as unknown as HTMLElement;
+  const el = document.createElement("div");
+  el.style.overflowY = overflowY;
+  Object.defineProperty(el, "clientHeight", { value: clientHeight });
+  Object.defineProperty(el, "scrollHeight", { value: scrollHeight });
+  (parent ?? document.body).appendChild(el);
+  return el;
 }
 
-const overflowY = (candidate: HTMLElement) => candidate.dataset.overflowY ?? "visible";
+afterEach(() => {
+  document.body.replaceChildren();
+});
 
 describe("scroll-container", () => {
   it("recognizes vertical scroll overflow modes", () => {
@@ -35,52 +34,30 @@ describe("scroll-container", () => {
     expect(allowsVerticalScroll("hidden")).toBe(false);
   });
 
-  it("requires real vertical overflow", () => {
-    expect(hasVerticalOverflow({ clientHeight: 100, scrollHeight: 101 })).toBe(false);
-    expect(hasVerticalOverflow({ clientHeight: 100, scrollHeight: 102 })).toBe(true);
-  });
-
   it("uses the nearest ancestor that can actually scroll", () => {
     const body = element({ clientHeight: 400, overflowY: "auto", scrollHeight: 900 });
-    const list = element({
-      clientHeight: 200,
-      overflowY: "auto",
-      parentElement: body,
-      scrollHeight: 600,
-    });
+    const list = element({ clientHeight: 200, overflowY: "auto", parent: body, scrollHeight: 600 });
     const sentinel = element({
       clientHeight: 44,
       overflowY: "visible",
-      parentElement: list,
+      parent: list,
       scrollHeight: 44,
     });
 
-    expect(findScrollableYAncestor(sentinel, { fallback: body, getOverflowY: overflowY })).toBe(
-      list,
-    );
+    expect(findScrollableYAncestor(sentinel, { fallback: body })).toBe(list);
   });
 
   it("skips non-scrolling ancestors and falls back to the mobile body scroller", () => {
     const body = element({ clientHeight: 400, overflowY: "auto", scrollHeight: 900 });
-    const list = element({
-      clientHeight: 600,
-      overflowY: "auto",
-      parentElement: body,
-      scrollHeight: 600,
-    });
+    // One pixel of slack is rounding, not overflow.
+    const list = element({ clientHeight: 600, overflowY: "auto", parent: body, scrollHeight: 601 });
     const sentinel = element({
       clientHeight: 44,
       overflowY: "visible",
-      parentElement: list,
+      parent: list,
       scrollHeight: 44,
     });
 
-    expect(
-      findScrollableYAncestor(sentinel, {
-        boundary: body,
-        fallback: body,
-        getOverflowY: overflowY,
-      }),
-    ).toBe(body);
+    expect(findScrollableYAncestor(sentinel, { boundary: body, fallback: body })).toBe(body);
   });
 });

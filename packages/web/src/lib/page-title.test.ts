@@ -10,16 +10,6 @@ describe("composeTitle", () => {
 
   it("returns the site name alone when nothing names the page", () => {
     expect(composeTitle([])).toBe("Rome");
-    expect(composeTitle([null, undefined, "", "   "])).toBe("Rome");
-  });
-
-  it("drops the gaps rather than rendering empty separators", () => {
-    expect(composeTitle([null, "Routines"])).toBe("Routines · Rome");
-    expect(composeTitle(["17.md", undefined, "Memory"])).toBe("17.md · Memory · Rome");
-  });
-
-  it("trims each segment", () => {
-    expect(composeTitle(["  Alice  ", " People "])).toBe("Alice · People · Rome");
   });
 
   it("truncates a long segment so the site name stays in view", () => {

@@ -4,7 +4,7 @@ export function allowsVerticalScroll(overflowY: string): boolean {
   return SCROLLABLE_OVERFLOW_VALUES.has(overflowY);
 }
 
-export function hasVerticalOverflow(element: Pick<HTMLElement, "clientHeight" | "scrollHeight">) {
+function hasVerticalOverflow(element: Pick<HTMLElement, "clientHeight" | "scrollHeight">) {
   return element.scrollHeight - element.clientHeight > 1;
 }
 
@@ -13,16 +13,17 @@ export function findScrollableYAncestor(
   {
     boundary = null,
     fallback = null,
-    getOverflowY = (element) => window.getComputedStyle(element).overflowY,
   }: {
     boundary?: HTMLElement | null;
     fallback?: Element | null;
-    getOverflowY?: (element: HTMLElement) => string;
   } = {},
 ): Element | null {
   let element = start.parentElement;
   while (element) {
-    if (allowsVerticalScroll(getOverflowY(element)) && hasVerticalOverflow(element)) {
+    if (
+      allowsVerticalScroll(window.getComputedStyle(element).overflowY) &&
+      hasVerticalOverflow(element)
+    ) {
       return element;
     }
     if (element === boundary) {

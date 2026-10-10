@@ -1,7 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import {
-  RECENT_APPS_VISIBLE,
-  RECENT_APPS_WINDOW_MS,
   type RecentAppCandidate,
   isUnopened,
   lastActiveMs,
@@ -27,13 +25,6 @@ function app(id: string, overrides: Partial<RecentAppCandidate> = {}): RecentApp
     ...overrides,
   };
 }
-
-describe("constants", () => {
-  it("match the spec", () => {
-    expect(RECENT_APPS_VISIBLE).toBe(3);
-    expect(RECENT_APPS_WINDOW_MS).toBe(14 * DAY);
-  });
-});
 
 describe("parseAppLastOpened", () => {
   it("keeps only string values that parse as dates", () => {

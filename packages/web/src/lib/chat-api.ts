@@ -288,8 +288,8 @@ export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
 
 export async function listSkills(): Promise<SkillSummary[]> {
   const res = await fetch("/api/skills", { credentials: "include" });
-  const data = await jsonOrThrow<{ skills?: SkillSummary[] }>(res);
-  return data.skills ?? [];
+  const data = await jsonOrThrow<{ skills: SkillSummary[] }>(res);
+  return data.skills;
 }
 
 export async function createSession(input: CreateSessionInput): Promise<ChatSession> {
@@ -603,12 +603,6 @@ export async function listRoutineNames(): Promise<string[]> {
   if (!res.ok) return [];
   const rows = (await res.json().catch(() => [])) as Array<{ name?: string }>;
   return rows.map((r) => r.name ?? "").filter(Boolean);
-}
-
-export async function loadSettings(): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/settings", { credentials: "include" });
-  if (!res.ok) return {};
-  return (await res.json()) as Record<string, unknown>;
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<boolean> {

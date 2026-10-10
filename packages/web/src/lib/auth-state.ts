@@ -32,22 +32,17 @@ export function hasSession(bootstrap: BootstrapState | null): boolean {
   return bootstrap?.phase === "needs-onboarding" || bootstrap?.phase === "ready";
 }
 
-type Fetcher = typeof fetch;
-
-interface FetchAuthStateOptions {
-  fetcher?: Fetcher;
+export async function fetchAuthState({
+  signal,
+}: {
   signal?: AbortSignal;
-}
-
-export async function fetchAuthState(options: FetchAuthStateOptions = {}): Promise<AuthState> {
-  const { fetcher = fetch, signal } = options;
-
+} = {}): Promise<AuthState> {
   // Two parallel probes. The bootstrap state folds in session + onboarding +
   // enrollment, so there's no separate /api/auth/session round trip anymore.
   // When the backend is unreachable, bootstrap fails as fast as health does.
   const [healthRes, bootstrapRes] = await Promise.allSettled([
-    fetcher("/api/health", { signal }),
-    fetcher("/api/bootstrap", { credentials: "include", signal }),
+    fetch("/api/health", { signal }),
+    fetch("/api/bootstrap", { credentials: "include", signal }),
   ]);
 
   const healthy = healthRes.status === "fulfilled" && healthRes.value.ok;

@@ -29,6 +29,11 @@ describe("useDocumentTitle", () => {
     expect(document.title).toBe("Connections · Settings · Rome");
   });
 
+  it("trims each segment and drops the gaps rather than rendering empty separators", () => {
+    render(<Page title={["  17.md  ", null, "", "   ", " Memory "]} />);
+    expect(document.title).toBe("17.md · Memory · Rome");
+  });
+
   // React runs a child's effect before its parent's, so a layout that assigned
   // document.title directly would win this race and erase the page's title.
   it("lets the page outrank the layout it renders inside", () => {

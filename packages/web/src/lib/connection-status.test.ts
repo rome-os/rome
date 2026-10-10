@@ -167,6 +167,7 @@ describe("connectionStatus — Telegram fold row states", () => {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     };
   }
 
@@ -185,6 +186,7 @@ describe("connectionStatus — Telegram fold row states", () => {
         watch: { state: "unsupported" },
       },
       connect: null,
+      setups: {},
     };
   }
 

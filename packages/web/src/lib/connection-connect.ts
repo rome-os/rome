@@ -13,20 +13,18 @@ import type { ComposioCliStatus } from "@/lib/provider-types";
 /** Typed result of a Composio account ceremony. */
 export type ComposioActionResult = { ok: true } | { ok: false; error: string };
 
+const STATUS_POLL_TRIES = 30;
+const STATUS_POLL_INTERVAL_MS = 2_000;
+
 /**
- * Composio ACCOUNT login: kick off `login`, then poll `status` (bounded, ~30
+ * Composio ACCOUNT login: kick off `login`, then poll `status` (bounded, 30
  * tries at 2s) until `loggedIn`. Verbatim endpoint contracts from the legacy
  * Integrations tab. `onLoginUrl` surfaces the login URL to the caller (which may
- * open it); polling uses the injected `sleep` so tests can run it instantly.
+ * open it).
  */
 export async function runComposioLogin(options?: {
   onLoginUrl?: (loginUrl: string) => void;
-  sleep?: (ms: number) => Promise<void>;
-  maxTries?: number;
 }): Promise<ComposioActionResult> {
-  const sleep = options?.sleep ?? ((ms: number) => new Promise((r) => window.setTimeout(r, ms)));
-  const maxTries = options?.maxTries ?? 30;
-
   const response = await fetch("/api/integrations/composio/login", { method: "POST" });
   const payload = (await response.json().catch(() => null)) as {
     loginUrl?: string;
@@ -37,8 +35,8 @@ export async function runComposioLogin(options?: {
   }
   options?.onLoginUrl?.(payload.loginUrl);
 
-  for (let attempt = 0; attempt < maxTries; attempt++) {
-    await sleep(2_000);
+  for (let attempt = 0; attempt < STATUS_POLL_TRIES; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
     const statusResponse = await fetch("/api/integrations/composio/status", { cache: "no-store" });
     const statusPayload = (await statusResponse.json().catch(() => null)) as {
       composio?: ComposioCliStatus;

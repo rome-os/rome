@@ -1,10 +1,10 @@
-import type { QuickEntry } from "@/config/quick-entries";
+import type { ResolvedRomeNewsItem } from "@rome-os/rome-web-components/news-item/schema";
 import { HorizontalScrollRail } from "@/components/chat/HorizontalScrollRail";
 import { QuickEntryCard } from "@/components/chat/QuickEntryCard";
 
 export interface QuickEntryGridProps {
-  entries: QuickEntry[];
-  onActivate: (entry: QuickEntry) => void;
+  entries: ResolvedRomeNewsItem[];
+  onActivate: (entry: ResolvedRomeNewsItem) => void;
 }
 
 /** Horizontally scrollable rail of quick-entry tiles. Renders nothing when there are none. */

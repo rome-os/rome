@@ -47,6 +47,7 @@ import type {
   ChatSearchMessageMatch,
   ChatSession,
 } from "@/lib/chat-types";
+import { isApplePlatform } from "@/lib/desktop-vnc";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
@@ -68,10 +69,6 @@ interface AppSearchEntry {
 
 function currentPlatform(): string {
   return typeof navigator === "undefined" ? "" : navigator.platform;
-}
-
-function isApplePlatform(platform: string): boolean {
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
 }
 
 export function chatSearchShortcutForPlatform(platform = currentPlatform()): string {

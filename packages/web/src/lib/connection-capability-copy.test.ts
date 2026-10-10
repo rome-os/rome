@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import enSettings from "@/i18n/locales/en/settings.json";
 import zhSettings from "@/i18n/locales/zh-CN/settings.json";
 import type { ConnectionSlot, SlotKey } from "@/lib/connection-cards";
-import { slotCardCopy, slotHeadingKey } from "./connection-capability-copy";
+import { slotCardCopy } from "./connection-capability-copy";
 
 function slot(key: SlotKey, overrides: Partial<ConnectionSlot> = {}): ConnectionSlot {
   return {
@@ -24,24 +24,6 @@ function lookup(bundle: unknown, key: string): unknown {
     return undefined;
   }, bundle);
 }
-
-describe("slotHeadingKey", () => {
-  it("maps the three card roles to their heading keys", () => {
-    expect(slotHeadingKey("connected")).toBe("connections.headings.connected");
-    expect(slotHeadingKey("primary")).toBe("connections.headings.primary");
-    expect(slotHeadingKey("secondary")).toBe("connections.headings.secondary");
-  });
-
-  it("emits heading keys that exist in both bundles", () => {
-    for (const role of ["connected", "primary", "secondary"] as const) {
-      const key = slotHeadingKey(role);
-      expect(lookup(enSettings, key), `missing en copy for ${key}`).toBeTypeOf("string");
-      expect(lookup(zhSettings, key), `missing zh copy for ${key}`).toBeTypeOf("string");
-    }
-    expect(lookup(enSettings, "connections.headings.availableToAdd")).toBeTypeOf("string");
-    expect(lookup(zhSettings, "connections.headings.availableToAdd")).toBeTypeOf("string");
-  });
-});
 
 describe("slotCardCopy", () => {
   it("gives the Telegram bot slot fallback title + fallback bullets before the identity is known", () => {

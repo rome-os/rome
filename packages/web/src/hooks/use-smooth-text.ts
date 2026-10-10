@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { splitGraphemes } from "@/lib/graphemes";
 
 // Typewriter pacing for the live assistant bubble. The server streams the
 // accumulated text of the current block in provider-sized chunks (often whole
@@ -13,21 +14,6 @@ const CATCH_UP_PER_SEC = 4;
 // Clamp per-frame dt so a backgrounded tab (paused rAF) doesn't dump the
 // whole backlog in one frame when it resumes.
 const MAX_FRAME_SECONDS = 0.1;
-
-const graphemeSegmenter =
-  typeof Intl !== "undefined" && "Segmenter" in Intl ? new Intl.Segmenter() : null;
-
-/** Split into grapheme clusters so the reveal never tears an emoji, flag, or
- *  ZWJ sequence mid-frame (UTF-16 slicing would render half a surrogate pair
- *  as � for a frame). Falls back to code points where Intl.Segmenter is
- *  unavailable — still surrogate-safe, just splits combining sequences. */
-export function splitGraphemes(text: string): string[] {
-  if (!text) return [];
-  if (graphemeSegmenter) {
-    return Array.from(graphemeSegmenter.segment(text), (s) => s.segment);
-  }
-  return Array.from(text);
-}
 
 /** One reveal step: how many graphemes to show after `dtSeconds` elapsed.
  *  `carry` holds the fractional budget between frames. Pure so the pacing is

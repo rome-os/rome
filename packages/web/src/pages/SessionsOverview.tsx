@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@rome-os/ui/spinner";
-import type { RomeSessionRecord } from "@/lib/chat-types";
+import type { RomeSessionExplorerRecord } from "@/lib/chat-types";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { cn } from "@/lib/utils";
 import { Timestamp } from "@rome-os/ui/timestamp";
@@ -102,10 +102,10 @@ function RecentSessions({
   onOpen,
   onViewAll,
 }: {
-  sessions: RomeSessionRecord[];
+  sessions: RomeSessionExplorerRecord[];
   error: string | null;
   loading: boolean;
-  onOpen: (session: RomeSessionRecord) => void;
+  onOpen: (session: RomeSessionExplorerRecord) => void;
   onViewAll: () => void;
 }) {
   return (
@@ -206,14 +206,14 @@ export function SessionsOverview({
   metric: SessionsMetric;
   trendBy: "app" | "model";
   groupBy: SessionOverviewGroupDimension;
-  recentSessions: RomeSessionRecord[];
+  recentSessions: RomeSessionExplorerRecord[];
   recentSessionsError: string | null;
   recentSessionsLoading: boolean;
   onMetricChange: (metric: SessionsMetric) => void;
   onTrendByChange: (trendBy: "app" | "model") => void;
   onGroupByChange: (groupBy: SessionOverviewGroupDimension) => void;
   onGroupSelect: (group: SessionMetricGroup) => void;
-  onRecentSessionOpen: (session: RomeSessionRecord) => void;
+  onRecentSessionOpen: (session: RomeSessionExplorerRecord) => void;
   onSeriesSelect: (series: SessionMetricGroup) => void;
   onViewAllSessions: () => void;
 }) {

@@ -27,6 +27,7 @@ function conn(overrides: Partial<ApiConnection> & Pick<ApiConnection, "service">
       watch: { state: "unsupported" },
     },
     connect: null,
+    setups: {},
     ...overrides,
   };
 }

@@ -326,14 +326,6 @@ export function relativeTime(dateStr: string | null, now: number = Date.now()): 
   return new Date(target).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-// Absolute time-of-day for the schedule summary line: "9:00 AM".
-export function formatClock(dateStr: string | null): string {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
 // Run history → plain language
 
 // Trimmed to exactly what the page consumes. The runs endpoint returns more

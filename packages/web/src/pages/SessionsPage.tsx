@@ -58,7 +58,11 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
-import type { ChatMessage, RomeSessionRecord, RomeSessionsPageResult } from "@/lib/chat-types";
+import type {
+  ChatMessage,
+  RomeSessionExplorerRecord,
+  RomeSessionsPageResult,
+} from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -92,7 +96,9 @@ function sessionAgentLabel(agentName: string | null | undefined): string {
   return artifactLocalName(agentName ?? "main");
 }
 
-function sessionTriggerLabel(session: RomeSessionRecord | RomeSessionDetail): string | null {
+function sessionTriggerLabel(
+  session: RomeSessionExplorerRecord | RomeSessionDetail,
+): string | null {
   return (
     session.triggerName ??
     (session.triggerActionName ? artifactLocalName(session.triggerActionName) : null)
@@ -367,7 +373,7 @@ function SessionsIndexPage({
   const recentInventory = useRomeSessions(recentOptions, view === "overview");
   const { data, loading, error } = inventory;
   const sessions = data?.sessions ?? [];
-  const columns = useMemo<DataTableColumn<RomeSessionRecord>[]>(
+  const columns = useMemo<DataTableColumn<RomeSessionExplorerRecord>[]>(
     () => [
       {
         id: "session",
@@ -595,7 +601,7 @@ function SessionsIndexPage({
   // not the drill-in filters the overview hands over, which the chip row shows.
   const popoverFilterCount = (type ? 1 : 0) + (source ? 1 : 0);
   const openSession = useCallback(
-    (session: RomeSessionRecord) => {
+    (session: RomeSessionExplorerRecord) => {
       navigate(
         view === "overview"
           ? encodeURIComponent(session.id)
@@ -1047,7 +1053,7 @@ function ReadOnlySessionChat({
   messages,
   liveTurn,
 }: {
-  session: RomeSessionRecord;
+  session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
 }) {

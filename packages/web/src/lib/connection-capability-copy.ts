@@ -136,8 +136,3 @@ const PRIVACY_SLOTS = new Set([
   "google.user",
   "slack.user",
 ]);
-
-/** The card heading for a slot given its connected/primary/secondary role. */
-export function slotHeadingKey(role: "connected" | "primary" | "secondary"): string {
-  return `connections.headings.${role}`;
-}

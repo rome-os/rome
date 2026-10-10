@@ -17,13 +17,13 @@ export function detectBrowserTimezone(): string | null {
 /** Post the browser timezone once per page load. Safe to call from every
  *  render that sees a signed-in guardian; later calls are no-ops. A failed
  *  post is not retried. */
-export async function reportDetectedTimezoneOnce(fetcher: typeof fetch = fetch): Promise<void> {
+export async function reportDetectedTimezoneOnce(): Promise<void> {
   if (reported) return;
   reported = true;
   const timezone = detectBrowserTimezone();
   if (!timezone) return;
   try {
-    await fetcher("/api/settings/guardian-timezone/detected", {
+    await fetch("/api/settings/guardian-timezone/detected", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -32,9 +32,4 @@ export async function reportDetectedTimezoneOnce(fetcher: typeof fetch = fetch):
   } catch {
     // Scheduling falls back to the host zone until the guardian sets one.
   }
-}
-
-/** Test seam: forget that the zone was reported. */
-export function resetDetectedTimezoneReport(): void {
-  reported = false;
 }
