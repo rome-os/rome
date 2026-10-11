@@ -7,8 +7,9 @@ This document is the **workflow guide** for Rome app development: when to commit
 > - [`REFERENCE.md`](./REFERENCE.md) — **file-level API lookup**. On-disk layout; meaning of `app.yaml` / `action.yaml` / agent yaml fields; the `@rome-os/app-runtime` + `@rome-os/app-web-sdk` surfaces; the `rome` CLI; shared-SQLite + `tablePrefix` storage; Tailwind / component-kit / shadow-DOM rules; mobile patterns.
 > - [`GAMES.md`](./GAMES.md) — **game-specific authoring guidance**. Read it when the user wants to create a game: how to choose between raw canvas, Three.js, and a real game engine; how to source and ship game assets.
 > - [`PAID_APPS.md`](./PAID_APPS.md) — **shared/public apps with visitor accounts**. Read it when visitors sign in with Rome Cloud, own private data, get free allowances, or pay in favors.
+> - [`NATIVE_DEPENDENCIES.md`](./NATIVE_DEPENDENCIES.md) — **dependencies with native code**. Read it before adding a dependency with a build script, or when an install fails in `node-gyp`.
 >
-> AUTHORING.md is *workflow and what to build*. REFERENCE.md is *how to type each piece*. GAMES.md is *how to make game-specific technical and asset choices*. PAID_APPS.md is *how to scope, cap, and charge visitors*.
+> AUTHORING.md is *workflow and what to build*. REFERENCE.md is *how to type each piece*. GAMES.md is *how to make game-specific technical and asset choices*. PAID_APPS.md is *how to scope, cap, and charge visitors*. NATIVE_DEPENDENCIES.md is *how to ship native code that installs on every Rome upgrade*.
 
 **Scope assumption.** Every step below operates on a directory called `<app-root>` — the absolute path to the app's source tree, with a git repo at its root. `coding:app_creation` produces `<app-root>` (via `op: "create"` + `git init`) and points `spec.source` at it.
 

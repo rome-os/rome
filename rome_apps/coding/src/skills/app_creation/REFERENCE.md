@@ -340,6 +340,8 @@ decide whether to load the skill.
 }
 ```
 
+Before adding a dependency with a build script, read [`NATIVE_DEPENDENCIES.md`](./NATIVE_DEPENDENCIES.md). The Rome container has no C or C++ compiler.
+
 ### The `rome` CLI
 
 `rome` is the app build CLI shipped by `@rome-os/app-web-sdk`. From `<app-root>`:
