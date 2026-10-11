@@ -66,7 +66,7 @@ export interface MessageListProps {
   live: LivePreview;
   selection?: ShareSelection;
   // Stick-to-bottom observes this content-sized wrapper. It must NOT be the
-  // flex/min-h-dvh column (whose height is floored to the viewport): content
+  // flex column whose min-height is floored to the viewport: content
   // growing inside that floor wouldn't resize it, so the ResizeObserver would
   // never fire for a late-expanding component.
   contentRef: (node: HTMLElement | null) => void;
