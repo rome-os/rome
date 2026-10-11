@@ -332,15 +332,59 @@ describe("EmailAdapter.send", () => {
     expect(provider.sent[0].text).toContain("Safe");
   });
 
-  it("rejects an empty email without issuing a receipt", async () => {
+  it("receipts the conversation it was asked for when nothing is sent", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    await expect(adapter.send("t-empty" as ConversationId, { text: "   " })).rejects.toThrow(
-      "Email requires non-empty text or HTML",
-    );
+    const receipt = await adapter.send("t-empty" as ConversationId, { text: "   " });
+
     expect(provider.sent).toHaveLength(0);
     expect(provider.listMessages).not.toHaveBeenCalled();
+    expect(receipt).toEqual({ conversationId: "t-empty" });
+  });
+
+  it("skips a parts-only approval card without a provider call or an error", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    const receipt = await adapter.send("t-approval" as ConversationId, {
+      parts: [
+        {
+          type: "approval_card",
+          approvalId: "approval-1",
+          actionName: "send_message",
+          preview: { kind: "generic", title: "Send email", summary: "The agent wants to send." },
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(receipt).toEqual({ conversationId: "t-approval" });
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("names the rejected recipient and the fix when no address resolves", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "not-an-address", text: "hi" }),
+    ).rejects.toThrow('"not-an-address" is not an email address. No email was sent.');
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "guardian", text: "hi" }),
+    ).rejects.toThrow("Rome has no guardian email address yet");
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit email request whose body is empty", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "a@example.com", text: "   " }),
+    ).rejects.toThrow("Email requires non-empty text or HTML. No email was sent.");
+    expect(provider.send).not.toHaveBeenCalled();
   });
 });
 

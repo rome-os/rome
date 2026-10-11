@@ -1,17 +1,118 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { MailProvider, RomeMailListItem } from "../lib/rome-cloud-mail.js";
 import { resolveEmailReplyTarget } from "./email-reply-target.js";
 
-function item(threadId: string, providerMessageId = "message"): RomeMailListItem {
+function item(
+  threadId: string,
+  providerMessageId = "message",
+  labels: string[] = ["sent"],
+): RomeMailListItem {
   return {
     threadId,
     providerMessageId,
     receivedAt: "2020-01-01T00:00:00.000Z",
-    labels: ["sent"],
+    labels,
   };
 }
 
+function after<T>(ms: number, value: T): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
 describe("resolveEmailReplyTarget", () => {
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  it("prefers the newest received message over newer messages the inbox sent", async () => {
+    const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
+      messages: [
+        item("wanted", "sent-newest"),
+        item("other", "other-inbound", ["received"]),
+        item("wanted", "inbound-newest", ["received", "unread"]),
+        item("wanted", "sent-older"),
+        item("wanted", "inbound-older", ["received"]),
+      ],
+    }));
+
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe(
+      "inbound-newest",
+    );
+  });
+
+  it("finds a received message on a later page past the inbox's own sends", async () => {
+    const listMessages = rs
+      .fn<MailProvider["listMessages"]>()
+      .mockResolvedValueOnce({ messages: [item("wanted", "sent-1")], nextPageToken: "page-2" })
+      .mockResolvedValueOnce({ messages: [item("wanted", "inbound", ["received"])] });
+
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("inbound");
+    expect(listMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the newest sent message when the thread has no received mail", async () => {
+    const listMessages = rs
+      .fn<MailProvider["listMessages"]>()
+      .mockResolvedValueOnce({
+        messages: [item("wanted", "sent-newest"), item("other", "x", ["received"])],
+        nextPageToken: "page-2",
+      })
+      .mockResolvedValueOnce({ messages: [item("wanted", "sent-older")] });
+
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("sent-newest");
+    expect(listMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies direction with the caller's predicate", async () => {
+    const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
+      messages: [
+        { ...item("wanted", "from-self", []), from: "Rome <rome@example.com>" },
+        { ...item("wanted", "from-alice", []), from: "Alice <alice@example.com>" },
+      ],
+    }));
+
+    await expect(
+      resolveEmailReplyTarget({ listMessages }, "wanted", {
+        isOutbound: (listed) => listed.from?.includes("rome@example.com") ?? false,
+      }),
+    ).resolves.toBe("from-alice");
+  });
+
+  it("rejects when the time budget ends with no match and stops reading pages", async () => {
+    rs.useFakeTimers();
+    let page = 0;
+    const listMessages = rs.fn<MailProvider["listMessages"]>(() => {
+      page += 1;
+      return after(400, { messages: [item("other")], nextPageToken: `page-${page}` });
+    });
+
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", { budgetMs: 1_000 }).then(
+      () => new Error("expected a rejection"),
+      (err: unknown) => err,
+    );
+    await rs.advanceTimersByTimeAsync(10_000);
+
+    expect(String(await result)).toContain("took longer than 1s. No email was sent");
+    expect(listMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns the sent fallback when the time budget ends before a received match", async () => {
+    rs.useFakeTimers();
+    let page = 0;
+    const listMessages = rs.fn<MailProvider["listMessages"]>(() => {
+      page += 1;
+      return after(400, {
+        messages: [page === 1 ? item("wanted", "sent-1") : item("other")],
+        nextPageToken: `page-${page}`,
+      });
+    });
+
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", { budgetMs: 1_000 });
+    await rs.advanceTimersByTimeAsync(1_000);
+
+    await expect(result).resolves.toBe("sent-1");
+  });
+
   it("finds the newest matching message without a history cutoff or body fetch", async () => {
     const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
       messages: [item("other"), item("wanted", "newest"), item("wanted", "older")],

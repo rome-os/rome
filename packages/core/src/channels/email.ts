@@ -18,6 +18,7 @@ import type {
   RomeMailEvent,
   RomeMailMessage,
   RomeMailListItem,
+  SendMailResult,
   EmailAddress,
   EmailBodyPart,
 } from "../lib/rome-cloud-mail.js";
@@ -198,8 +199,9 @@ export class EmailAdapter {
 
   private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  // An observed message identifies the thread for a reply. This bounded cache
-  // avoids a mailbox scan after a send or inbound, but is not durable state.
+  // The message each thread's replies target: the newest inbound, or a message
+  // Rome sent, for a thread with no inbound. This bounded cache saves a mailbox
+  // scan per reply but is not durable state; a miss falls back to that scan.
   private readonly threadReplyTarget = new Map<string, string>();
 
   // Per-inbound attachment manifest (provider message id → downloadable body
@@ -312,39 +314,60 @@ export class EmailAdapter {
   }
 
   /**
-   * A receipt confirms provider acceptance and carries its message and thread IDs.
-   * Unresolved threads, empty bodies, and unsupported attachments throw before
-   * sending. An invalid provider receipt leaves delivery unconfirmed.
+   * Send into a conversation and return the provider's receipt: its message ID
+   * and thread ID. Unresolved threads, unresolved recipients, and attachments
+   * throw before anything is sent. A provider answer without both IDs throws as
+   * unconfirmed, since the mail may have gone out.
+   *
+   * An empty body is the one exception that neither sends nor throws, unless the
+   * caller asked for an email explicitly (`kind: "email"`). Parts-only messages
+   * such as approval cards have no email rendering, so the adapter skips them and
+   * receipts the conversation it was asked for, without a `messageId`.
+   *
+   * A thread reply targets the newest received message in the thread, falling
+   * back to a message Rome sent for a thread nobody else wrote in.
    */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     const sent = await this.sendMail(conversationId, message);
-    if (
-      typeof sent?.messageId !== "string" ||
-      !sent.messageId.trim() ||
-      typeof sent.threadId !== "string" ||
-      !sent.threadId.trim()
-    ) {
-      throw new Error(
-        "Email delivery is unconfirmed: the provider did not return valid message and thread IDs. " +
-          "Check email history before retrying to avoid sending a duplicate.",
-      );
-    }
-    this.rememberReplyTarget(sent.threadId, sent.messageId);
+    if (!sent) return { conversationId };
+    // A sent message is a reply target only for a thread with none yet. Once a
+    // thread has a received message, replies keep addressing the other party.
+    this.rememberReplyTarget(sent.threadId, sent.messageId, { overwrite: false });
     log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
     return { conversationId: sent.threadId as ConversationId, messageId: sent.messageId };
   }
 
-  private rememberReplyTarget(threadId: string, messageId: string): void {
+  private rememberReplyTarget(
+    threadId: string,
+    messageId: string,
+    { overwrite }: { overwrite: boolean },
+  ): void {
     if (!threadId || !messageId) return;
+    const target = overwrite ? messageId : (this.threadReplyTarget.get(threadId) ?? messageId);
     this.threadReplyTarget.delete(threadId);
-    this.threadReplyTarget.set(threadId, messageId);
+    this.threadReplyTarget.set(threadId, target);
     if (this.threadReplyTarget.size > REPLY_TARGET_CACHE_SIZE) {
       const oldest = this.threadReplyTarget.keys().next().value;
       if (oldest !== undefined) this.threadReplyTarget.delete(oldest);
     }
   }
 
-  private async sendMail(threadId: string, message: OutgoingMessage) {
+  private async resolveThreadReplyTarget(threadId: string): Promise<string> {
+    const selfAddress = normalizeAddress(this.address);
+    const target = await resolveEmailReplyTarget(this.provider, threadId, {
+      isOutbound: (item) =>
+        item.labels.includes("sent") ||
+        (selfAddress !== "" && normalizeAddress(item.from) === selfAddress),
+    });
+    this.rememberReplyTarget(threadId, target, { overwrite: false });
+    return target;
+  }
+
+  /** Returns undefined only when an empty body was skipped without sending. */
+  private async sendMail(
+    threadId: string,
+    message: OutgoingMessage,
+  ): Promise<SendMailResult | undefined> {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
@@ -373,7 +396,9 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      throw new Error("Email requires non-empty text or HTML. No email was sent.");
+      if (email) throw new Error("Email requires non-empty text or HTML. No email was sent.");
+      log.debug("skipping empty outbound email", { threadId: threadId || null });
+      return undefined;
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
@@ -384,7 +409,7 @@ export class EmailAdapter {
     let inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
     const addressTarget = !email && this.resolveRecipients(threadId);
     if (!inReplyToMessageId && threadId && !addressTarget) {
-      inReplyToMessageId = await resolveEmailReplyTarget(this.provider, threadId);
+      inReplyToMessageId = await this.resolveThreadReplyTarget(threadId);
     }
     if (inReplyToMessageId) {
       return this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
@@ -392,13 +417,28 @@ export class EmailAdapter {
 
     // No thread: start a fresh email. Recipients come from `email.to`,
     // falling back to the conversation id, which then names the address.
-    const recipients = this.resolveRecipients(email?.to ?? threadId);
+    const to = email?.to ?? threadId;
+    const recipients = this.resolveRecipients(to);
     const hasRecipient = Array.isArray(recipients) ? recipients.length > 0 : !!recipients;
-    if (!hasRecipient) {
-      throw new Error("Cannot send email: no recipient resolved. No email was sent.");
-    }
+    if (!hasRecipient) throw new Error(this.noRecipientMessage(to));
     const subject = email?.subject?.trim() || "Message from Rome";
     return this.provider.send({ to: recipients, cc, bcc, subject, text, html });
+  }
+
+  private noRecipientMessage(to: string | string[]): string {
+    const values = (Array.isArray(to) ? to : [to]).map((value) => value.trim());
+    if (values.some((value) => value.toLowerCase() === "guardian") && !this.guardianEmail) {
+      return (
+        'Cannot send email to "guardian": Rome has no guardian email address yet. ' +
+        "No email was sent. Set `to` to an email address."
+      );
+    }
+    const shown = values.map((value) => JSON.stringify(value)).join(", ") || '""';
+    const verdict = values.length > 1 ? `none of ${shown} is` : `${shown} is not`;
+    return (
+      `Cannot send email: ${verdict} an email address. No email was sent. ` +
+      'Set `to` to an email address or "guardian", or reply on a thread with `threadId`.'
+    );
   }
 
   /**
@@ -539,7 +579,7 @@ export class EmailAdapter {
     }
 
     const threadId = event.threadId;
-    this.rememberReplyTarget(threadId, event.providerMessageId);
+    this.rememberReplyTarget(threadId, event.providerMessageId, { overwrite: true });
 
     // Attachment manifest from the event (bytes pulled lazily by
     // saveIncomingAttachments). Keep the parts list aligned with the surfaced

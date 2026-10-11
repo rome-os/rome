@@ -338,6 +338,14 @@ export async function executeSendMessage(
 
   await requireSendableChannel(channels, channel);
 
+  // The mail transport carries no attachments. Fail before validating sources
+  // that email could never deliver. The adapter rejects them too.
+  if (channel === "email" && hasAttachments) {
+    throw new Error(
+      "Email attachments are not supported by the mail transport. No email was sent.",
+    );
+  }
+
   const safeInput = await validateAttachmentSources(input);
 
   if (channel === "email") {
@@ -347,7 +355,7 @@ export async function executeSendMessage(
       text !== undefined
         ? !!text.trim()
         : !!parts?.some((part) => part.type === "text" && part.content.trim());
-    if (!hasText && !hasHtml && !hasAttachments) {
+    if (!hasText && !hasHtml) {
       throw new Error("Email requires non-empty `text` or `html`");
     }
     // Reply on a thread, or start a new email to `to` — one must be present.
@@ -375,6 +383,8 @@ export async function executeSendMessage(
       html: email.html,
       inReplyToMessageId: replyTarget,
     });
+    // Checked here, not only at the mail provider: the receipt crosses the
+    // channel RPC, where `messageId` is optional for every channel.
     if (
       typeof delivery?.messageId !== "string" ||
       !delivery.messageId.trim() ||
