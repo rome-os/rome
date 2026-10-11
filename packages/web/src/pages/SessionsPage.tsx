@@ -256,7 +256,9 @@ function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children
 }
 
 function sessionsViewportClass(fullMode: boolean): string {
-  return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
+  return fullMode
+    ? "h-[var(--rome-viewport-height)] pt-safe"
+    : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]";
 }
 
 function SessionsIndexPage({

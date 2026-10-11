@@ -193,7 +193,9 @@ export function Shell({
       // variants — the CSS counterpart to the JS `isBelowMd` above, both keyed
       // to this same element at the same breakpoint.
       className={`@container/fb relative flex flex-col bg-surface-muted ${
-        embedded ? "h-full" : "h-[var(--rome-mobile-content-height)] md:h-dvh"
+        embedded
+          ? "h-full"
+          : "h-[var(--rome-mobile-content-height)] md:h-[var(--rome-viewport-height)]"
       }`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
