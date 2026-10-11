@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 interface MessageRowProps {
-  /** Avatar (AgentAvatar), at the top of the gutter beside the name line. */
+  /** Avatar (AgentAvatar), at the top of the gutter, or on the name line when
+   * the row is narrow. MessageRow sets its size. */
   avatar: ReactNode;
   /** Display name, in small type above the first bubble. */
   name: string;
@@ -12,14 +13,20 @@ interface MessageRowProps {
   headerAccessory?: ReactNode;
   /** The turn's bubbles and cards, stacked top to bottom. */
   children?: ReactNode;
-  /** Turn actions under the bubbles, outside the avatar's column. */
+  /** Turn actions under the bubbles, outside the avatar's column when there is one. */
   footer?: ReactNode;
   className?: string;
 }
 
 /** One agent turn in the transcript, laid out like a group chat: the avatar at
  * the top of the gutter, the name and trace on a small line beside it above the
- * first bubble, and the turn actions below both. */
+ * first bubble, and the turn actions below both.
+ *
+ * A narrow row has no gutter: the avatar shrinks onto the name line, and the
+ * bubbles and actions take the full width. The outer element is the query
+ * container, so the choice follows the transcript's width in every host. The
+ * grid sits one level in because a container query cannot style its own
+ * container. */
 export function MessageRow({
   avatar,
   name,
@@ -30,25 +37,27 @@ export function MessageRow({
   className,
 }: MessageRowProps) {
   return (
-    <div className={cn("mb-4", className)}>
-      <div className="flex items-start gap-2">
-        <div className="shrink-0">{avatar}</div>
-        <div className="min-w-0 flex-1">
-          {/* A fixed height keeps the row on whole pixels: the aux line height alone
-              is fractional, and the transcript would carry the fraction into the
-              pinned composer. */}
-          <div className="flex h-5 min-w-0 items-center gap-2 pl-3">
-            <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
-            {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
-            {headerAccessory ? (
-              <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
-            ) : null}
-          </div>
-          {children ? <div className="mt-1 flex flex-col gap-1">{children}</div> : null}
+    <div className={cn("@container/message mb-4", className)}>
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 [grid-template-areas:'avatar_header'_'body_body'_'footer_footer'] @min-[40rem]/message:[grid-template-areas:'avatar_header'_'avatar_body'_'._footer']">
+        {/* The slot sizes the avatar: 20px on the name line, 32px in the gutter. */}
+        <div className="size-5 self-start [grid-area:avatar] *:size-full @min-[40rem]/message:size-8">
+          {avatar}
         </div>
+        {/* A fixed height keeps the row on whole pixels: the aux line height alone
+            is fractional, and the transcript would carry the fraction into the
+            pinned composer. */}
+        <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header] @min-[40rem]/message:pl-3">
+          <span className="shrink-0 truncate text-aux text-muted-foreground">{name}</span>
+          {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
+          {headerAccessory ? (
+            <div className="min-w-0 flex-1 overflow-hidden">{headerAccessory}</div>
+          ) : null}
+        </div>
+        {children ? (
+          <div className="mt-1 flex min-w-0 flex-col gap-1 [grid-area:body]">{children}</div>
+        ) : null}
+        {footer ? <div className="min-w-0 [grid-area:footer]">{footer}</div> : null}
       </div>
-      {/* Indent past the avatar (size-8) and gap-2 so actions align under the bubbles. */}
-      {footer ? <div className="pl-10">{footer}</div> : null}
     </div>
   );
 }
