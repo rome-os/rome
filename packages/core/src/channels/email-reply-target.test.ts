@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { MailProvider, RomeMailListItem } from "../lib/rome-cloud-mail.js";
-import { type EmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
+import { type ResolvedEmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
 
 function item(
   threadId: string,
@@ -17,12 +17,12 @@ function item(
 
 const bySentLabel = { isOutbound: (listed: RomeMailListItem) => listed.labels.includes("sent") };
 
-function inbound(messageId: string): EmailReplyTarget {
-  return { messageId, outbound: false };
+function inbound(messageId: string): ResolvedEmailReplyTarget {
+  return { messageId, outbound: false, complete: true };
 }
 
-function sent(messageId: string): EmailReplyTarget {
-  return { messageId, outbound: true };
+function sent(messageId: string, complete = true): ResolvedEmailReplyTarget {
+  return { messageId, outbound: true, complete };
 }
 
 function after<T>(ms: number, value: T): Promise<T> {
@@ -130,7 +130,7 @@ describe("resolveEmailReplyTarget", () => {
     });
     await rs.advanceTimersByTimeAsync(1_000);
 
-    await expect(result).resolves.toEqual(sent("sent-1"));
+    await expect(result).resolves.toEqual(sent("sent-1", false));
   });
 
   it("returns the sent fallback when a later page fails", async () => {
@@ -140,7 +140,7 @@ describe("resolveEmailReplyTarget", () => {
       .mockRejectedValueOnce(new Error("mail list unavailable"));
 
     await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
-      sent("sent-1"),
+      sent("sent-1", false),
     );
   });
 

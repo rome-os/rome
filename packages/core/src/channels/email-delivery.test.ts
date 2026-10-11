@@ -415,6 +415,29 @@ describe("email delivery through send_message", () => {
     }
   });
 
+  it("does not cache a sent fallback from a lookup cut short by a failed page", async () => {
+    const listMessages = rs
+      .fn<MailProvider["listMessages"]>()
+      .mockResolvedValueOnce({ messages: [listItem("rome-sent")], nextPageToken: "page-2" })
+      .mockRejectedValueOnce(new Error("mail list unavailable"))
+      .mockResolvedValueOnce({ messages: [listItem("rome-sent"), listItem("in-1", ["received"])] });
+    const h = await harness({ listMessages });
+
+    for (const text of ["first", "second"]) {
+      await executeSendMessage(h.channels, { channel: "email", threadId: THREAD, text }, h.deps);
+    }
+
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ inReplyToMessageId: "rome-sent", text: "first" }),
+    );
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ inReplyToMessageId: "in-1", text: "second" }),
+    );
+    expect(listMessages).toHaveBeenCalledTimes(3);
+  });
+
   it("uses an explicit reply message before cached state or mailbox lookup", async () => {
     const h = await harness();
     await executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "first" });

@@ -12,7 +12,11 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
-import { type EmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
+import {
+  type EmailReplyTarget,
+  type ResolvedEmailReplyTarget,
+  resolveEmailReplyTarget,
+} from "./email-reply-target.js";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -358,9 +362,9 @@ export class EmailAdapter {
   private async threadReplyTargetFor(threadId: string): Promise<EmailReplyTarget> {
     const cached = this.threadReplyTarget.get(threadId);
     if (cached) return cached;
-    let target: EmailReplyTarget;
+    let resolved: ResolvedEmailReplyTarget;
     try {
-      target = await resolveEmailReplyTarget(this.provider, threadId, {
+      resolved = await resolveEmailReplyTarget(this.provider, threadId, {
         isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
       });
     } catch (err) {
@@ -369,10 +373,14 @@ export class EmailAdapter {
       if (live) return live;
       throw err;
     }
-    // An inbound that arrived during the lookup is newer than anything it found.
+    const target = { messageId: resolved.messageId, outbound: resolved.outbound };
+    // A target cached while the lookup ran is newer than anything it found,
+    // unless it is Rome's own message and the lookup found an inbound one.
     const live = this.threadReplyTarget.get(threadId);
-    if (live && !live.outbound) return live;
-    this.rememberReplyTarget(threadId, target);
+    if (live && (!live.outbound || target.outbound)) return live;
+    // A fallback from a lookup cut short serves this send only, so the next
+    // reply looks for the inbound again.
+    if (resolved.complete) this.rememberReplyTarget(threadId, target);
     return target;
   }
 

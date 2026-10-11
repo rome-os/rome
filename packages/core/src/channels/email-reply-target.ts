@@ -19,6 +19,14 @@ export interface EmailReplyTarget {
   outbound: boolean;
 }
 
+/**
+ * A resolved target. `complete` is false when the lookup stopped early, at the
+ * time budget or a failed page, so a received message may exist further back.
+ */
+export interface ResolvedEmailReplyTarget extends EmailReplyTarget {
+  complete: boolean;
+}
+
 export interface ResolveEmailReplyTargetOptions {
   /** Whether a listed message is one this inbox sent. */
   isOutbound: (item: RomeMailListItem) => boolean;
@@ -40,15 +48,17 @@ export async function resolveEmailReplyTarget(
   provider: Pick<MailProvider, "listMessages">,
   threadId: string,
   options: ResolveEmailReplyTargetOptions,
-): Promise<EmailReplyTarget> {
+): Promise<ResolvedEmailReplyTarget> {
   const { isOutbound } = options;
   const budgetMs = options.budgetMs ?? REPLY_LOOKUP_BUDGET_MS;
   const state: ScanState = { expired: false };
-  const fallback = (): EmailReplyTarget | undefined =>
-    state.sentFallback ? { messageId: state.sentFallback, outbound: true } : undefined;
+  const fallback = (): ResolvedEmailReplyTarget | undefined =>
+    state.sentFallback
+      ? { messageId: state.sentFallback, outbound: true, complete: false }
+      : undefined;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<EmailReplyTarget>((resolve, reject) => {
+  const deadline = new Promise<ResolvedEmailReplyTarget>((resolve, reject) => {
     timer = setTimeout(() => {
       state.expired = true;
       const found = fallback();
@@ -89,7 +99,7 @@ async function scan(
   threadId: string,
   isOutbound: (item: RomeMailListItem) => boolean,
   state: ScanState,
-): Promise<EmailReplyTarget> {
+): Promise<ResolvedEmailReplyTarget> {
   let pageToken: string | undefined;
   let scanned = 0;
   const visited = new Set<string>();
@@ -107,7 +117,7 @@ async function scan(
       scanned += 1;
       const messageId = item.providerMessageId?.trim();
       if (item.threadId !== threadId || !messageId) continue;
-      if (!isOutbound(item)) return { messageId, outbound: false };
+      if (!isOutbound(item)) return { messageId, outbound: false, complete: true };
       state.sentFallback ??= messageId;
     }
     const next = page.nextPageToken;
@@ -116,7 +126,7 @@ async function scan(
     pageToken = next;
   }
 
-  if (state.sentFallback) return { messageId: state.sentFallback, outbound: true };
+  if (state.sentFallback) return { messageId: state.sentFallback, outbound: true, complete: true };
   throw new Error(
     `Cannot resolve email thread "${threadId}" within the reply lookup limits. ` +
       "No email was sent. Supply a provider message ID as `replyToMessageId`, " +
