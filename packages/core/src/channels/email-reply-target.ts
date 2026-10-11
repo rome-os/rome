@@ -1,24 +1,23 @@
-import { DEFAULT_RPC_TIMEOUT_MS } from "../actions/ipc.js";
-import {
-  MAIL_REQUEST_TIMEOUT_MS,
-  type MailProvider,
-  type RomeMailListItem,
-} from "../lib/rome-cloud-mail.js";
+import type { MailProvider, RomeMailListItem } from "../lib/rome-cloud-mail.js";
 
 const PAGE_SIZE = 100;
 const MAX_MESSAGES = 2000;
 const MAX_PAGES = 20;
-// Headroom for the RPC hop and adapter work around the lookup and the send.
-const DEADLINE_MARGIN_MS = 5_000;
 
 /**
  * Time a thread lookup may take. An action reaches the adapter through the
- * `channels.send` RPC, so the lookup and the provider send that follows it
- * must both finish inside that RPC's deadline. Otherwise the action could
- * fail while the send is still in flight and later succeeds.
+ * `channels.send` worker RPC, so the lookup and the mail request after it must
+ * both finish inside that RPC's 30s deadline, with room to spare. Otherwise the
+ * action could fail while the send is still in flight. `email-delivery.test.ts`
+ * checks this budget against both timeouts.
  */
-export const REPLY_LOOKUP_BUDGET_MS =
-  DEFAULT_RPC_TIMEOUT_MS - MAIL_REQUEST_TIMEOUT_MS - DEADLINE_MARGIN_MS;
+export const REPLY_LOOKUP_BUDGET_MS = 10_000;
+
+/** A message to reply to, and whether this inbox sent it. */
+export interface EmailReplyTarget {
+  messageId: string;
+  outbound: boolean;
+}
 
 export interface ResolveEmailReplyTargetOptions {
   /** Whether a listed message is one this inbox sent. Defaults to the `sent` label. */
@@ -27,30 +26,34 @@ export interface ResolveEmailReplyTargetOptions {
 }
 
 /**
- * Resolve a thread to a provider message ID to reply to. Prefers the newest
+ * Resolve a thread to a provider message to reply to. Prefers the newest
  * message the inbox received, so a reply addresses the other party. Falls back
  * to the newest message the inbox sent when the thread has no received mail.
  *
  * Scans the provider's newest 2,000 messages across at most 20 pages, reading
- * metadata only. When the time budget runs out it returns the sent fallback if
- * it has one, and otherwise rejects. A miss or a timeout never authorizes a
- * new email. Provider errors propagate without a send attempt.
+ * metadata only. When the time budget runs out or a later page fails, it
+ * returns the sent fallback if it has one, and otherwise rejects. A miss or a
+ * timeout never authorizes a new email. Without a fallback, provider errors
+ * propagate without a send attempt.
  */
 export async function resolveEmailReplyTarget(
   provider: Pick<MailProvider, "listMessages">,
   threadId: string,
   options: ResolveEmailReplyTargetOptions = {},
-): Promise<string> {
+): Promise<EmailReplyTarget> {
   const isOutbound = options.isOutbound ?? ((item) => item.labels.includes("sent"));
   const budgetMs = options.budgetMs ?? REPLY_LOOKUP_BUDGET_MS;
-  const state: { expired: boolean; sentFallback?: string } = { expired: false };
+  const state: ScanState = { expired: false };
+  const fallback = (): EmailReplyTarget | undefined =>
+    state.sentFallback ? { messageId: state.sentFallback, outbound: true } : undefined;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<string>((resolve, reject) => {
+  const deadline = new Promise<EmailReplyTarget>((resolve, reject) => {
     timer = setTimeout(() => {
       state.expired = true;
-      if (state.sentFallback) {
-        resolve(state.sentFallback);
+      const found = fallback();
+      if (found) {
+        resolve(found);
         return;
       }
       reject(
@@ -61,20 +64,32 @@ export async function resolveEmailReplyTarget(
       );
     }, budgetMs);
   });
+  // A message already found in the thread outranks a failed later page, as it
+  // does when the budget runs out.
+  const scanned = scan(provider, threadId, isOutbound, state).catch((err: unknown) => {
+    const found = fallback();
+    if (found) return found;
+    throw err;
+  });
 
   try {
-    return await Promise.race([scan(provider, threadId, isOutbound, state), deadline]);
+    return await Promise.race([scanned, deadline]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+interface ScanState {
+  expired: boolean;
+  sentFallback?: string;
 }
 
 async function scan(
   provider: Pick<MailProvider, "listMessages">,
   threadId: string,
   isOutbound: (item: RomeMailListItem) => boolean,
-  state: { expired: boolean; sentFallback?: string },
-): Promise<string> {
+  state: ScanState,
+): Promise<EmailReplyTarget> {
   let pageToken: string | undefined;
   let scanned = 0;
   const visited = new Set<string>();
@@ -92,7 +107,7 @@ async function scan(
       scanned += 1;
       const messageId = item.providerMessageId?.trim();
       if (item.threadId !== threadId || !messageId) continue;
-      if (!isOutbound(item)) return messageId;
+      if (!isOutbound(item)) return { messageId, outbound: false };
       state.sentFallback ??= messageId;
     }
     const next = page.nextPageToken;
@@ -101,7 +116,7 @@ async function scan(
     pageToken = next;
   }
 
-  if (state.sentFallback) return state.sentFallback;
+  if (state.sentFallback) return { messageId: state.sentFallback, outbound: true };
   throw new Error(
     `Cannot resolve email thread "${threadId}" within the reply lookup limits. ` +
       "No email was sent. Supply a provider message ID as `replyToMessageId`, " +

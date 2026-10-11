@@ -12,7 +12,7 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
-import { resolveEmailReplyTarget } from "./email-reply-target.js";
+import { type EmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -199,10 +199,11 @@ export class EmailAdapter {
 
   private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  // The message each thread's replies target: the newest inbound, or a message
-  // Rome sent, for a thread with no inbound. This bounded cache saves a mailbox
-  // scan per reply but is not durable state; a miss falls back to that scan.
-  private readonly threadReplyTarget = new Map<string, string>();
+  // The message each thread's replies target: the newest inbound, or the newest
+  // message Rome sent, for a thread with no inbound. The mailbox scan applies
+  // the same rule. This bounded cache saves that scan per reply but is not
+  // durable state; a miss falls back to the scan.
+  private readonly threadReplyTarget = new Map<string, EmailReplyTarget>();
 
   // Per-inbound attachment manifest (provider message id → downloadable body
   // parts), set in ingestInbound and consumed by saveIncomingAttachments to pull
@@ -325,27 +326,24 @@ export class EmailAdapter {
    * receipts the conversation it was asked for, without a `messageId`.
    *
    * A thread reply targets the newest received message in the thread, falling
-   * back to a message Rome sent for a thread nobody else wrote in.
+   * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     const sent = await this.sendMail(conversationId, message);
     if (!sent) return { conversationId };
-    // A sent message is a reply target only for a thread with none yet. Once a
-    // thread has a received message, replies keep addressing the other party.
-    this.rememberReplyTarget(sent.threadId, sent.messageId, { overwrite: false });
+    this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
     log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
     return { conversationId: sent.threadId as ConversationId, messageId: sent.messageId };
   }
 
-  private rememberReplyTarget(
-    threadId: string,
-    messageId: string,
-    { overwrite }: { overwrite: boolean },
-  ): void {
-    if (!threadId || !messageId) return;
-    const target = overwrite ? messageId : (this.threadReplyTarget.get(threadId) ?? messageId);
+  // A sent message never replaces a received one, so once a thread has inbound
+  // mail, replies keep addressing the other party.
+  private rememberReplyTarget(threadId: string, target: EmailReplyTarget): void {
+    if (!threadId || !target.messageId) return;
+    const cached = this.threadReplyTarget.get(threadId);
+    const next = target.outbound && cached && !cached.outbound ? cached : target;
     this.threadReplyTarget.delete(threadId);
-    this.threadReplyTarget.set(threadId, target);
+    this.threadReplyTarget.set(threadId, next);
     if (this.threadReplyTarget.size > REPLY_TARGET_CACHE_SIZE) {
       const oldest = this.threadReplyTarget.keys().next().value;
       if (oldest !== undefined) this.threadReplyTarget.delete(oldest);
@@ -359,8 +357,8 @@ export class EmailAdapter {
         item.labels.includes("sent") ||
         (selfAddress !== "" && normalizeAddress(item.from) === selfAddress),
     });
-    this.rememberReplyTarget(threadId, target, { overwrite: false });
-    return target;
+    this.rememberReplyTarget(threadId, target);
+    return target.messageId;
   }
 
   /** Returns undefined only when an empty body was skipped without sending. */
@@ -406,7 +404,8 @@ export class EmailAdapter {
 
     // An explicit message ID wins. A thread miss must not become a fresh send,
     // even when the caller also supplied `to`.
-    let inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
+    let inReplyToMessageId =
+      email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId)?.messageId;
     const addressTarget = !email && this.resolveRecipients(threadId);
     if (!inReplyToMessageId && threadId && !addressTarget) {
       inReplyToMessageId = await this.resolveThreadReplyTarget(threadId);
@@ -579,7 +578,7 @@ export class EmailAdapter {
     }
 
     const threadId = event.threadId;
-    this.rememberReplyTarget(threadId, event.providerMessageId, { overwrite: true });
+    this.rememberReplyTarget(threadId, { messageId: event.providerMessageId, outbound: false });
 
     // Attachment manifest from the event (bytes pulled lazily by
     // saveIncomingAttachments). Keep the parts list aligned with the surfaced

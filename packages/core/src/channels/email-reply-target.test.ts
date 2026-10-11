@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { MailProvider, RomeMailListItem } from "../lib/rome-cloud-mail.js";
-import { resolveEmailReplyTarget } from "./email-reply-target.js";
+import { type EmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
 
 function item(
   threadId: string,
@@ -13,6 +13,14 @@ function item(
     receivedAt: "2020-01-01T00:00:00.000Z",
     labels,
   };
+}
+
+function inbound(messageId: string): EmailReplyTarget {
+  return { messageId, outbound: false };
+}
+
+function sent(messageId: string): EmailReplyTarget {
+  return { messageId, outbound: true };
 }
 
 function after<T>(ms: number, value: T): Promise<T> {
@@ -35,8 +43,8 @@ describe("resolveEmailReplyTarget", () => {
       ],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe(
-      "inbound-newest",
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      inbound("inbound-newest"),
     );
   });
 
@@ -46,7 +54,9 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [item("wanted", "sent-1")], nextPageToken: "page-2" })
       .mockResolvedValueOnce({ messages: [item("wanted", "inbound", ["received"])] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("inbound");
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      inbound("inbound"),
+    );
     expect(listMessages).toHaveBeenCalledTimes(2);
   });
 
@@ -59,7 +69,9 @@ describe("resolveEmailReplyTarget", () => {
       })
       .mockResolvedValueOnce({ messages: [item("wanted", "sent-older")] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("sent-newest");
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      sent("sent-newest"),
+    );
     expect(listMessages).toHaveBeenCalledTimes(2);
   });
 
@@ -75,7 +87,7 @@ describe("resolveEmailReplyTarget", () => {
       resolveEmailReplyTarget({ listMessages }, "wanted", {
         isOutbound: (listed) => listed.from?.includes("rome@example.com") ?? false,
       }),
-    ).resolves.toBe("from-alice");
+    ).resolves.toEqual(inbound("from-alice"));
   });
 
   it("rejects when the time budget ends with no match and stops reading pages", async () => {
@@ -110,7 +122,18 @@ describe("resolveEmailReplyTarget", () => {
     const result = resolveEmailReplyTarget({ listMessages }, "wanted", { budgetMs: 1_000 });
     await rs.advanceTimersByTimeAsync(1_000);
 
-    await expect(result).resolves.toBe("sent-1");
+    await expect(result).resolves.toEqual(sent("sent-1"));
+  });
+
+  it("returns the sent fallback when a later page fails", async () => {
+    const listMessages = rs
+      .fn<MailProvider["listMessages"]>()
+      .mockResolvedValueOnce({ messages: [item("wanted", "sent-1")], nextPageToken: "page-2" })
+      .mockRejectedValueOnce(new Error("mail list unavailable"));
+
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      sent("sent-1"),
+    );
   });
 
   it("finds the newest matching message without a history cutoff or body fetch", async () => {
@@ -118,7 +141,9 @@ describe("resolveEmailReplyTarget", () => {
       messages: [item("other"), item("wanted", "newest"), item("wanted", "older")],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("newest");
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      sent("newest"),
+    );
     expect(listMessages).toHaveBeenCalledTimes(1);
     expect(listMessages).toHaveBeenCalledWith({
       ascending: false,
@@ -134,7 +159,9 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [], nextPageToken: "page-3" })
       .mockResolvedValueOnce({ messages: [item("wanted", "found")] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("found");
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      sent("found"),
+    );
     expect(listMessages.mock.calls.map(([params]) => params?.pageToken)).toEqual([
       undefined,
       "page-2",
@@ -158,7 +185,9 @@ describe("resolveEmailReplyTarget", () => {
       messages: [item("wanted", "   "), item("wanted", "valid")],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toBe("valid");
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+      sent("valid"),
+    );
   });
 
   it("stops a cursor cycle without requesting any page twice", async () => {
@@ -208,7 +237,7 @@ describe("resolveEmailReplyTarget", () => {
       const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({ messages }));
       const result = resolveEmailReplyTarget({ listMessages }, "wanted");
       if (position === 1999) {
-        await expect(result).resolves.toBe("message");
+        await expect(result).resolves.toEqual(sent("message"));
       } else {
         await expect(result).rejects.toThrow("No email was sent");
       }

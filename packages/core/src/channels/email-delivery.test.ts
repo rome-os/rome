@@ -155,7 +155,7 @@ describe("email delivery through send_message", () => {
     expect(h.provider.send).toHaveBeenCalledWith(expect.objectContaining({ to: GUARDIAN }));
   });
 
-  it("replies by threadId alone on an outbound-only thread, targeting Rome's first send", async () => {
+  it("replies by threadId alone on an outbound-only thread, targeting Rome's newest send", async () => {
     const h = await harness();
     const inputs: SendMessageEmailInput[] = [
       { channel: "email", to: "guardian", subject: "Report", text: "first" },
@@ -175,7 +175,7 @@ describe("email delivery through send_message", () => {
     );
     expect(h.provider.send).toHaveBeenNthCalledWith(
       3,
-      expect.objectContaining({ inReplyToMessageId: "sent-1", text: "third" }),
+      expect.objectContaining({ inReplyToMessageId: "sent-2", text: "third" }),
     );
     expect(h.provider.listMessages).not.toHaveBeenCalled();
     expect(h.recordOutboundMessage.mock.calls.map(([row]) => row.platformMessageId)).toEqual([
@@ -282,6 +282,25 @@ describe("email delivery through send_message", () => {
     expect(h.provider.send).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ inReplyToMessageId: "in-1", text: "again" }),
+    );
+    expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves an outbound-only thread's target to Rome's newest send after a lookup", async () => {
+    const h = await harness({
+      listMessages: rs.fn(async () => ({ messages: [listItem("persisted-send")] })),
+    });
+
+    for (const text of ["after restart", "again"]) {
+      await executeSendMessage(h.channels, { channel: "email", threadId: THREAD, text }, h.deps);
+    }
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ inReplyToMessageId: "persisted-send" }),
+    );
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ inReplyToMessageId: "sent-1" }),
     );
     expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
   });
