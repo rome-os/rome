@@ -35,6 +35,7 @@
 @source "./layout-form.tsx";
 @source "./layout-list.tsx";
 @source "./list-row.tsx";
+@source "./loading-state.tsx";
 @source "./markdown.tsx";
 @source "./mermaid-download-menu.tsx";
 @source "./page.tsx";
@@ -877,5 +878,30 @@
       align-items: center;
       justify-content: center;
     }
+  }
+}
+
+/* ─────────────────────────── LOADING STATE ANIMATIONS ───────────────────────
+   Keyframes for LoadingState / LoaderGrid pixel-grid animations. */
+@keyframes rome-pixel-on {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  18%,
+  42% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes rome-shimmer-text {
+  from {
+    background-position: 150% center;
+  }
+  to {
+    background-position: -50% center;
   }
 }

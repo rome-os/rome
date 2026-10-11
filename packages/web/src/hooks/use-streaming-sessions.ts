@@ -3,6 +3,8 @@ import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 export type SessionStreamState = {
   turnId: string;
+  /** Stable Unix epoch milliseconds for this turn, independent of live bubble mounts. */
+  startedAt: number;
   snapshot: TraceSnapshot | null;
   // Live preview of the CURRENT in-flight assistant text block (server
   // `assistant_text` SSE events, `{blockIx, text}`). Each completed block
@@ -22,11 +24,14 @@ export function startStream(
   prev: StreamingSessionMap,
   sessionId: string,
   turnId: string,
+  startedAt?: number,
 ): StreamingSessionMap {
   if (prev.get(sessionId)?.turnId === turnId) return prev;
   const next = new Map(prev);
   next.set(sessionId, {
     turnId,
+    // Freeze the first start, including a fallback, for the lifetime of this turn.
+    startedAt: startedAt !== undefined && Number.isFinite(startedAt) ? startedAt : Date.now(),
     snapshot: null,
     assistantText: "",
     assistantBlockIx: 0,
@@ -104,8 +109,8 @@ export function useStreamingSessions() {
   const streamsRef = useRef(streams);
   streamsRef.current = streams;
 
-  const start = useCallback((sessionId: string, turnId: string) => {
-    setStreams((prev) => startStream(prev, sessionId, turnId));
+  const start = useCallback((sessionId: string, turnId: string, startedAt?: number) => {
+    setStreams((prev) => startStream(prev, sessionId, turnId, startedAt));
   }, []);
   const update = useCallback((sessionId: string, turnId: string, snapshot: TraceSnapshot) => {
     setStreams((prev) => updateSnapshot(prev, sessionId, turnId, snapshot));

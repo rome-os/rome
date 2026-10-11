@@ -54,9 +54,17 @@ rs.mock("@/components/chat/ChatComposer", () => ({
 }));
 
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: ({ live }: { live: { isStreaming: boolean; text: string } }) => (
-    <div data-testid="session-messages" data-streaming={String(live.isStreaming)}>
-      {live.text}
+  MessageList: ({
+    live,
+  }: {
+    live: { isStreaming: boolean; text: string; startedAt?: number } | null;
+  }) => (
+    <div
+      data-testid="session-messages"
+      data-streaming={String(live?.isStreaming)}
+      data-started-at={live?.startedAt}
+    >
+      {live?.text}
     </div>
   ),
 }));
@@ -406,6 +414,20 @@ describe("SessionsPage live fork details", () => {
       streamController?.close();
     });
     await waitFor(() => expect(listRomeSessionMessages).toHaveBeenCalledTimes(2));
+  });
+
+  it("carries turn startedAt into the live session viewer", async () => {
+    rs.mocked(openTurnStream).mockImplementation(async () => {
+      return new Response(new ReadableStream<Uint8Array>());
+    });
+
+    renderDetail();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("session-messages").dataset.startedAt).toBe(
+        String(Date.parse("2026-07-12T00:00:00.000Z")),
+      );
+    });
   });
 
   it("refreshes messages when a turn finishes during initial attachment", async () => {

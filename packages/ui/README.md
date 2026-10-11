@@ -6,7 +6,7 @@ each copying shadcn components by hand and drifting apart.
 
 > **Status: filling up.** The publish rail, the CSS canon (`./styles.css`), the
 > [control primitives](#controls), the [floating family](#floating-family),
-> [`Alert`](#alert), [`Card`](#card), [`Spinner`](#spinner),
+> [`Alert`](#alert), [`Card`](#card), [`Spinner`](#spinner), [`LoadingState`](#loadingstate),
 > [`Timestamp`](#timestamp), [`Toaster`](#toaster), [`Calendar`](#calendar),
 > [`Command`](#command), and [`Markdown`](#markdown) are in. The remaining containers land in follow-up
 > tickets. The app scaffold (`packages/app-template/template`) depends on the
@@ -225,6 +225,21 @@ import { Spinner } from "@rome-os/ui/spinner";
   match above keeps the width stable — so a prop would only add a second way to
   say the same thing.
 
+
+### `LoadingState`
+
+A pixel-grid loader for long-running work, paired with a shimmering label and live elapsed timer in tabular figures.
+
+```tsx
+import { LoadingState } from "@rome-os/ui/loading-state";
+
+<LoadingState label="Indexing embeddings" variant="Drive" />
+```
+
+- Three variants: `Drive` (square cells, chevron wavefront driving right), `Dots` (circular cells, chevron wavefront), and `Orbit` (perimeter comet lapping the grid).
+- Automatically styled in the active system theme color (`primary`: Ember orange, Ash coral, Slate blue, and Dark mode).
+- `elapsed` defaults to `true` (live ticking timer), or `false` to hide.
+- Under `prefers-reduced-motion`, the pixel grid freezes to its dim resting state and shimmer animation stops, while the timer continues to tick.
 ### `Timestamp`
 
 An instant rendered inline as text, in the zone the user configured rather

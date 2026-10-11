@@ -96,11 +96,17 @@ rs.mock("@/components/chat/MessageList", () => ({
     live,
     rows,
   }: {
-    live: { identity: { name: string } };
+    live: { identity: { name: string }; startedAt?: number; runningTurnId?: string | null };
     rows: { kind: string; key: string; message?: { content: string } }[];
   }) => (
     <>
-      <div data-testid="message-list">{live.identity.name}</div>
+      <div
+        data-testid="message-list"
+        data-started-at={live.startedAt}
+        data-running-turn-id={live.runningTurnId}
+      >
+        {live.identity.name}
+      </div>
       {rows
         .filter((row) => row.kind === "user")
         .map((row) => (
@@ -523,7 +529,9 @@ describe("Chat turn stream lifecycle", () => {
     beforeEach(() => {
       droppingStreams.length = 0;
       rs.mocked(listSessionTurns)
-        .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+        .mockResolvedValueOnce([
+          { turnId: "turn-1", status: "running", startedAt: "2026-06-13T00:00:05.000Z" },
+        ])
         .mockResolvedValue([]);
     });
     afterEach(() => {
@@ -547,6 +555,9 @@ describe("Chat turn stream lifecycle", () => {
         droppingStreams[0]!.error(new TypeError("network connection was lost"));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
+      expect(Number(screen.getByTestId("message-list").getAttribute("data-started-at"))).toBe(
+        Date.parse("2026-06-13T00:00:05.000Z"),
+      );
       // Still live: the drop alone neither ends the turn nor reloads.
       expect(composer()).toBe("true");
       expect(rs.mocked(listSessionMessages).mock.calls.length).toBe(reloadsBeforeDrop);
@@ -962,36 +973,173 @@ describe("Chat jump to latest", () => {
   });
 });
 
-describe("Chat draft", () => {
-  it("creates its session on the first send and follows that turn without a reattach", async () => {
-    rs.mocked(createSession).mockResolvedValueOnce({ id: "created-1" } as Awaited<
-      ReturnType<typeof createSession>
-    >);
-    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
-    const onSessionCreated = rs.fn();
-    renderChat(<Chat emptyState={<p>Empty home</p>} onSessionCreated={onSessionCreated} />);
-    expect(screen.getByText("Empty home")).toBeTruthy();
-    expect(screen.queryByTestId("message-list")).toBeNull();
-    expect(screen.queryByRole("button", { name: "navbar.more" })).toBeNull();
-    const composer = screen.getByTestId("chat-composer");
+describe("Chat turn start wiring", () => {
+  const initialOpen = rs.mocked(openTurnStream).getMockImplementation();
+  afterEach(() => {
+    rs.mocked(listSessionTurns)
+      .mockReset()
+      .mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(openTurnStream).mockReset().mockImplementation(initialOpen!);
+    rs.restoreAllMocks();
+  });
+  const startAt = () => Number(screen.getByTestId("message-list").getAttribute("data-started-at"));
+  const turnId = () => screen.getByTestId("message-list").getAttribute("data-running-turn-id");
+  const serverStart = "2026-06-13T00:00:05.000Z";
 
+  it("reattaches using the matched running turn, not the first queued turn", async () => {
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "queued", status: "queued", startedAt: "2026-06-13T00:00:01.000Z" },
+      { turnId: "running", status: "running", startedAt: serverStart },
+    ]);
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(turnId()).toBe("running"));
+    expect(startAt()).toBe(Date.parse(serverStart));
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" mainAgentDisplayName="Updated name" />
+      </MemoryRouter>,
+    );
+    expect(startAt()).toBe(Date.parse(serverStart));
+  });
+
+  it.each([
+    undefined,
+    "invalid server timestamp",
+  ])("uses one stable fallback for a reattach with start %s", async (startedAt) => {
+    const now = rs.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "turn-1", status: "running", startedAt },
+    ]);
+    const { rerender } = renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(turnId()).toBe("turn-1"));
+    expect(startAt()).toBe(1_800_000_000_000);
+    now.mockReturnValue(1_800_000_010_000);
+    rerender(
+      <MemoryRouter>
+        <Chat sessionId="session-1" mainAgentDisplayName="Updated name" />
+      </MemoryRouter>,
+    );
+    expect(startAt()).toBe(1_800_000_000_000);
+  });
+
+  it("uses the child floor session's matched start during a handoff, never the parent's", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const childStart = "2026-06-13T00:01:05.000Z";
+    rs.mocked(listSessionTurns).mockImplementation(async (id) => [
+      {
+        turnId: id === "session-1" ? "parent-turn" : "child-turn",
+        status: "running",
+        startedAt: id === "session-1" ? serverStart : childStart,
+      },
+    ]);
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(turnId()).toBe("parent-turn"));
+    expect(startAt()).toBe(Date.parse(serverStart));
+    await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+    act(() =>
+      MockEventSource.instances[0]!.emit("message_insert", {
+        id: "fixture-handoff",
+        sessionId: "session-1",
+        turnId: "parent-turn",
+        role: "assistant",
+        content: JSON.stringify([
+          {
+            type: "handoff",
+            toolUseId: "handoff",
+            appId: "fixture",
+            childSessionId: "child-1",
+            payload: { agentLabel: "Fixture specialist" },
+          },
+        ]),
+        createdAt: "2026-06-13T00:00:06.000Z",
+      }),
+    );
+    await waitFor(() => expect(turnId()).toBe("child-turn"));
+    expect(listSessionTurns).toHaveBeenCalledWith("child-1");
+    expect(startAt()).toBe(Date.parse(childStart));
+  });
+  it("anchors send time to local client clock and does not reset it for appended input", async () => {
+    const sendTime = 1_800_000_000_000;
+    const now = rs.spyOn(Date, "now").mockReturnValue(sendTime);
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(postSessionTurn)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          turnId: "sent-turn",
+          startedAt: serverStart,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          turnId: "sent-turn",
+          startedAt: "2026-06-13T00:00:09.000Z",
+        },
+      });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionTurns).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(turnId()).toBe("sent-turn"));
+    expect(startAt()).toBe(sendTime);
+    now.mockReturnValue(1_800_000_005_000);
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(2));
+    expect(startAt()).toBe(sendTime);
+    expect(openTurnStream).toHaveBeenCalledTimes(1);
+    now.mockRestore();
+  });
 
-    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
-    expect(onSessionCreated).toHaveBeenCalledWith("created-1");
-    expect(createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "sidebar.newChat", reasoningEffort: "medium" }),
+  it("discovers the next queued turn through the existing reattach loop with its own start", async () => {
+    const sendTime = 1_800_000_000_000;
+    const now = rs.spyOn(Date, "now").mockReturnValue(sendTime);
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(value) {
+              controller = value;
+            },
+          }),
+        ),
+      ),
     );
-    expect(postSessionTurn).toHaveBeenCalledWith(
-      "created-1",
-      expect.any(FormData),
-      expect.anything(),
-    );
-    expect(screen.queryByText("Empty home")).toBeNull();
-    expect(screen.getByTestId("message-list")).toBeTruthy();
-    expect(screen.getByTestId("chat-composer")).toBe(composer);
-    // The send registered its local follow before the render that adopted the
-    // session, so the reattach poll never looks the turn up.
-    expect(listSessionTurns).not.toHaveBeenCalled();
+    rs.mocked(postSessionTurn)
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          turnId: "first",
+          startedAt: serverStart,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          turnId: "next",
+          inputState: "queued",
+          startedAt: "2026-06-13T00:00:08.000Z",
+        },
+      });
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionTurns).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(turnId()).toBe("first"));
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(2));
+    expect(turnId()).toBe("first");
+    expect(startAt()).toBe(sendTime);
+    const nextStart = "2026-06-13T00:00:10.000Z";
+    rs.mocked(listSessionTurns).mockResolvedValue([
+      { turnId: "next", status: "running", startedAt: nextStart },
+    ]);
+    act(() => {
+      controller.enqueue(new TextEncoder().encode('event: done\ndata: {"success":true}\n\n'));
+      controller.close();
+    });
+    await waitFor(() => expect(turnId()).toBe("next"), { timeout: 3_000 });
+    expect(startAt()).toBe(Date.parse(nextStart));
+    expect(rs.mocked(openTurnStream).mock.calls.map(([id]) => id)).toEqual(["first", "next"]);
   });
 });

@@ -1055,7 +1055,12 @@ function ReadOnlySessionChat({
 }: {
   session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
-  liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
+  liveTurn: {
+    turnId: string;
+    snapshot: TraceSnapshot;
+    text: string;
+    startedAt?: number;
+  } | null;
 }) {
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const messagesBySession = useMemo(() => {
@@ -1142,6 +1147,7 @@ function ReadOnlySessionChat({
                 runningTurnId: liveTurn?.turnId ?? null,
                 snapshot: liveTurn?.snapshot ?? null,
                 text: liveTurn?.text ?? "",
+                startedAt: liveTurn?.startedAt,
                 identity,
               }}
               contentRef={NO_OP}
@@ -1347,6 +1353,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     turnId: string;
     snapshot: TraceSnapshot;
     text: string;
+    startedAt?: number;
   } | null>(null);
 
   const handleBack = useCallback(() => {
@@ -1429,12 +1436,17 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
         invocationCounts: {},
       };
       let text = "";
+      const parsedStart = active.startedAt ? Date.parse(active.startedAt) : NaN;
+      const turnStartedAt = Number.isFinite(parsedStart)
+        ? Math.min(Date.now(), parsedStart)
+        : Date.now();
       const publish = () => {
         if (!cancelled) {
           setLiveTurn({
             turnId: active.turnId,
             snapshot: { segments: segments.slice(), summary },
             text,
+            startedAt: turnStartedAt,
           });
         }
       };

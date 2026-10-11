@@ -397,9 +397,9 @@ export function Chat({
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
   const turnStreamControllersRef = useRef<Map<string, AbortController>>(new Map());
-  // Per-session FIFO queue of in-flight turnIds; the session's
-  // streaming entry is only removed when this set drains.
-  const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Per-session FIFO queue of in-flight turnIds and their server start times;
+  // the session's streaming entry is only removed when this queue drains.
+  const inflightTurnsRef = useRef<Map<string, Map<string, number>>>(new Map());
 
   // Auto stick-to-bottom against the message scroller — a bounded
   // `overflow-y-auto` node, NOT the document. The chat shell is now
@@ -1155,7 +1155,12 @@ export function Chat({
         if (locallyStreamingSessionIdsRef.current.has(reattachSessionId)) return;
 
         const target = turns.find((t) => t.status === "running") ?? turns[0];
-        startSessionStream(reattachSessionId, target.turnId);
+        const targetStart = target.startedAt ? Date.parse(target.startedAt) : NaN;
+        startSessionStream(
+          reattachSessionId,
+          target.turnId,
+          Number.isFinite(targetStart) ? Math.min(Date.now(), targetStart) : undefined,
+        );
         setStreamError(null);
         // Not cancelled with this effect: followTurn ends with its turn (or
         // on unmount), and the entry it holds keeps this poll from doubling up.
@@ -1205,6 +1210,7 @@ export function Chat({
       const wasLocallyStreaming = locallyStreamingSessionIdsRef.current.has(sendingSessionId);
       locallyStreamingSessionIdsRef.current.add(sendingSessionId);
       const sentAt = new Date().toISOString();
+      const sendClientTime = Date.now();
 
       const putUserMessage = (message: ChatMessage, replacesId?: string) => {
         const localIds =
@@ -1282,7 +1288,8 @@ export function Chat({
 
       const createResp: CreateTurnResponse = result.data;
       const pendingTurnId = createResp.turnId;
-      const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
+      const turnsForSession =
+        inflightTurnsRef.current.get(sendingSessionId) ?? new Map<string, number>();
 
       const userMsg: ChatMessage = {
         id: createResp.inputId ?? immediateInputId ?? crypto.randomUUID(),
@@ -1306,9 +1313,10 @@ export function Chat({
         setStreamReconnectRevision((revision) => revision + 1);
         return;
       }
-      turnsForSession.add(pendingTurnId);
+      const startedAt = sendClientTime;
+      turnsForSession.set(pendingTurnId, startedAt);
       inflightTurnsRef.current.set(sendingSessionId, turnsForSession);
-      startSessionStream(sendingSessionId, pendingTurnId);
+      startSessionStream(sendingSessionId, pendingTurnId, startedAt);
 
       // The turn is already submitted, so a failed attach or a mid-stream drop
       // must never reject this function — that rejection is what used to
@@ -1324,10 +1332,10 @@ export function Chat({
           }
           const currentEntry = streamingSessionsRef.current.get(sendingSessionId);
           if (currentEntry?.turnId === pendingTurnId) {
-            const remaining = turns ? Array.from(turns) : [];
+            const remaining = turns ? Array.from(turns.keys()) : [];
             const next = remaining[0];
             if (next) {
-              startSessionStream(sendingSessionId, next);
+              startSessionStream(sendingSessionId, next, turns?.get(next));
             }
           }
           if (!turns || turns.size === 0) {
@@ -1906,40 +1914,38 @@ export function Chat({
               ref={attachScroller}
               className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
             >
-              {mainSessionId ? (
-                <MessageList
-                  rows={rows}
-                  live={{
-                    isStreaming: displayedStreaming,
-                    runningTurnId,
-                    snapshot: currentSnapshot,
-                    text: liveAssistantText,
-                    blockIx: floorSessionStream?.assistantBlockIx,
-                    sourceText: floorSessionStream?.assistantText,
-                    textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                    identity: floorIdentity,
-                  }}
-                  selection={
-                    shareMode
-                      ? {
-                          selectedTurns: selectedShareTurns,
-                          selectableSessionId: mainSessionId,
-                          onToggleTurn: toggleShareTurn,
-                        }
-                      : undefined
-                  }
-                  contentRef={attachContent}
-                  onOpenLiveTrace={openLiveTraceDrawer}
-                  onOpenStoredTrace={setTraceDrawerTarget}
-                  onOpenSubagentTrace={openSubagentTraceDrawer}
-                  activeTraceTarget={traceDrawerTarget}
-                  subagentIconByName={subagentIconByName}
-                  actions={blockActions}
-                  feedback
-                />
-              ) : (
-                emptyState
-              )}
+              <MessageList
+                rows={rows}
+                live={{
+                  isStreaming: displayedStreaming,
+                  runningTurnId,
+                  snapshot: currentSnapshot,
+                  text: liveAssistantText,
+                  blockIx: floorSessionStream?.assistantBlockIx,
+                  sourceText: floorSessionStream?.assistantText,
+                  textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
+                  startedAt: floorSessionStream?.startedAt,
+                  identity: floorIdentity,
+                }}
+                selection={
+                  shareMode
+                    ? {
+                        active: true,
+                        selectedTurns: selectedShareTurns,
+                        selectableSessionId: mainSessionId,
+                        onToggleTurn: toggleShareTurn,
+                      }
+                    : undefined
+                }
+                contentRef={attachContent}
+                onOpenLiveTrace={openLiveTraceDrawer}
+                onOpenStoredTrace={setTraceDrawerTarget}
+                onOpenSubagentTrace={openSubagentTraceDrawer}
+                activeTraceTarget={traceDrawerTarget}
+                subagentIconByName={subagentIconByName}
+                actions={blockActions}
+                feedback
+              />
 
               {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur

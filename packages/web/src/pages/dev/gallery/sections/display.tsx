@@ -35,6 +35,7 @@ import {
   AvatarGroupCount,
 } from "@/components/ui/avatar";
 import { Spinner } from "@rome-os/ui/spinner";
+import { LoadingState } from "@rome-os/ui/loading-state";
 import {
   List,
   ListRow,
@@ -525,6 +526,25 @@ export function DisplaySection() {
                 <Input className="w-48" placeholder="Repository URL" readOnly />
                 <Spinner label="Checking repository" />
               </Row>
+            </Item>
+          </Row>
+        </Specimen>
+      </Component>
+
+      <Component id="loading-state" name="LoadingState" source="@rome-os/ui/loading-state">
+        <Specimen
+          label="LoadingState — variants"
+          note="Pixel-grid loader for long-running work, styled in the active system theme color (primary). Square cells (Drive), circular cells (Dots), and perimeter comet (Orbit)."
+        >
+          <Row className="flex-wrap gap-8 items-start">
+            <Item label="Drive (default)">
+              <LoadingState variant="Drive" />
+            </Item>
+            <Item label="Dots">
+              <LoadingState variant="Dots" label="Synthesizing" />
+            </Item>
+            <Item label="Orbit">
+              <LoadingState variant="Orbit" label="Revolving" />
             </Item>
           </Row>
         </Specimen>

@@ -252,36 +252,7 @@
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
 }
 
-/* Typing bubble (chat TypingBubble): three dots rising in turn while the agent
-   works and has no text to show. Under reduced motion the dots rest. */
-.rome-typing-dot {
-  animation: rome-typing-dot 1.2s ease-in-out infinite;
-}
-
-.rome-typing-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.rome-typing-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes rome-typing-dot {
-
-  0%,
-  60%,
-  100% {
-    opacity: 0.4;
-    transform: translateY(0);
-  }
-
-  30% {
-    opacity: 1;
-    transform: translateY(-3px);
-  }
-}
-
-/* The status line in the typing bubble fades in each time it changes. */
+/* The status line in live turn activity fades in each time it changes. */
 .rome-status-fade {
   animation: rome-status-fade 0.2s ease-out;
 }
@@ -297,8 +268,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-
-  .rome-typing-dot,
   .rome-status-fade {
     animation: none;
   }

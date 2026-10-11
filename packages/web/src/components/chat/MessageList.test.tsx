@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 // RomeLogo (the avatar fallback) renders an SVG mask that jsdom can't construct;
 // stub it so the transcript renders. Same approach as ChatComponent.test.tsx.
@@ -26,7 +26,10 @@ import { buildRows, type AgentIdentity } from "./chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ThemeProvider } from "@/hooks/use-theme";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  rs.useRealTimers();
+});
 
 let seq = 0;
 function assistantSubmission(name: string): ChatMessage {
@@ -675,5 +678,63 @@ describe("timeline anchors", () => {
     );
 
     expect(anchorIds(container)).toEqual(["u-dimmed"]);
+  });
+});
+
+describe("MessageList activity clock", () => {
+  it("preserves elapsed time between standalone and persisted running rows and after hiding", () => {
+    rs.useFakeTimers();
+    rs.setSystemTime(20_000);
+    const { live, actions } = renderList(true);
+    const view = (messages: ChatMessage[], preview: Partial<LivePreview> = {}) => (
+      <ThemeProvider>
+        <MessageList
+          rows={buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
+            runningTurnId: "turn-1",
+            isStreaming: true,
+          })}
+          live={{ ...live, startedAt: 10_000, ...preview }}
+          contentRef={() => {}}
+          onOpenLiveTrace={() => {}}
+          onOpenStoredTrace={() => {}}
+          actions={actions}
+        />
+      </ThemeProvider>
+    );
+    const { rerender, unmount } = render(view([]));
+    expect(screen.getByText("10.0s")).toBeTruthy();
+    expect(screen.getAllByLabelText("Working")).toHaveLength(1);
+    act(() => {
+      rs.setSystemTime(25_000);
+      rs.advanceTimersByTime(100);
+    });
+    rerender(view([commentary("Persisted commentary")]));
+    expect(screen.getByText("15.1s")).toBeTruthy();
+    expect(screen.getByText("Persisted commentary")).toBeTruthy();
+    expect(screen.getAllByLabelText("Working")).toHaveLength(1);
+    rerender(view([], { text: "Live body" }));
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    rerender(
+      view([], {
+        blockIx: 1,
+        snapshot: {
+          segments: [
+            {
+              kind: "block",
+              id: "think",
+              ordinal: 1,
+              block: { type: "thinking", content: "Next step" },
+            },
+          ],
+          summary: { distinctApps: [], totalSteps: 1, invocationCounts: {} },
+        },
+      }),
+    );
+    expect(screen.getByText("Next step")).toBeTruthy();
+    expect(screen.getByText("15.1s")).toBeTruthy();
+    rerender(view([], { isStreaming: false }));
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    unmount();
+    expect(rs.getTimerCount()).toBe(0);
   });
 });

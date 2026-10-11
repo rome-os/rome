@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import {
   endStream,
@@ -118,5 +118,43 @@ describe("streaming-sessions state", () => {
     const after = updateAssistantText(state, "A", "turn-1", 0, "stale");
     expect(after).toBe(state);
     expect(state.get("A")?.assistantText).toBe("");
+  });
+});
+
+afterEach(() => rs.restoreAllMocks());
+
+describe("turn start metadata", () => {
+  it("keeps the server start across same-turn reattach, text and summary updates", () => {
+    let state = startStream(new Map(), "A", "turn-1", 1_000);
+    state = updateSnapshot(state, "A", "turn-1", snapshotFor("trace"));
+    state = updateAssistantText(state, "A", "turn-1", 1, "Current text");
+    expect(startStream(state, "A", "turn-1", 9_000)).toBe(state);
+    expect(state.get("A")?.startedAt).toBe(1_000);
+  });
+  it.each([
+    undefined,
+    NaN,
+    Infinity,
+    -Infinity,
+  ])("freezes one fallback for a missing or invalid start (%s)", (startedAt) => {
+    const now = rs.spyOn(Date, "now").mockReturnValue(5_000);
+    const state = startStream(new Map(), "A", "turn-1", startedAt);
+    expect(state.get("A")?.startedAt).toBe(5_000);
+    now.mockReturnValue(10_000);
+    expect(startStream(state, "A", "turn-1", 1_000)).toBe(state);
+    expect(state.get("A")?.startedAt).toBe(5_000);
+    expect(now).toHaveBeenCalledTimes(1);
+  });
+  it("gives promoted turns and concurrent sessions independent starts without weakening guards", () => {
+    let state = startStream(new Map(), "A", "turn-1", 0);
+    state = startStream(state, "B", "turn-B", 2_000);
+    state = startStream(state, "A", "turn-2", 3_000);
+    expect(state.get("A")?.startedAt).toBe(3_000);
+    expect(state.get("B")?.startedAt).toBe(2_000);
+    expect(updateSnapshot(state, "A", "turn-1", snapshotFor("stale"))).toBe(state);
+    expect(updateAssistantText(state, "A", "turn-1", 0, "stale")).toBe(state);
+    expect(endStream(state, "A", "turn-1")).toBe(state);
+    state = endStream(state, "A", "turn-2");
+    expect(state.get("B")?.startedAt).toBe(2_000);
   });
 });

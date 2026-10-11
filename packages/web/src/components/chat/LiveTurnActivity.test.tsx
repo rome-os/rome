@@ -1,12 +1,15 @@
 // @rstest-environment jsdom
-import { afterEach, describe, expect, it } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import { startStream, updateAssistantText, updateSnapshot } from "@/hooks/use-streaming-sessions";
 import { LiveTurnActivity } from "./LiveTurnActivity";
 import "@/i18n";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  rs.useRealTimers();
+});
 
 const thinking = (ordinal: number, content: string): TraceSegment => ({
   kind: "block",
@@ -33,7 +36,7 @@ describe("transient turn activity", () => {
       snapshot(thinking(0, "**Planning shell commands**")),
     );
     const { rerender } = render(view());
-    expect(screen.getByRole("status").textContent).toBe("Planning shell commands");
+    expect(screen.getByText("Planning shell commands").textContent).toBe("Planning shell commands");
 
     const next = snapshot(
       thinking(0, "**Planning shell commands**"),
@@ -119,22 +122,114 @@ describe("transient turn activity", () => {
   });
 });
 
-describe("typing bubble", () => {
-  it("shows only the rising dots for plain thinking, and names it for screen readers", () => {
+describe("activity indicator", () => {
+  it("shows only Orbit and elapsed time for plain thinking, and names it for screen readers", () => {
     render(<LiveTurnActivity snapshot={null} hasText={false} />);
     const bubble = screen.getByRole("status");
-    expect(bubble.classList.contains("rounded-16")).toBe(true);
-    expect(bubble.querySelectorAll(".rome-typing-dot")).toHaveLength(3);
+    expect(bubble.classList.contains("rounded-16")).toBe(false);
+    expect(bubble.querySelector("[data-variant=Orbit]")).toBeTruthy();
+    expect(bubble.querySelectorAll("[data-slot=loader-grid-cell]")).toHaveLength(9);
+    expect(bubble.querySelector("[data-slot=loading-state-label]")).toBeNull();
+    expect(
+      bubble.querySelector("[data-slot=loading-state-elapsed]")?.getAttribute("aria-hidden"),
+    ).toBe("true");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(bubble.getAttribute("aria-label")).toBe("Working");
     expect(screen.getByText("Thinking…").className).toBe("sr-only");
   });
 
-  it("cuts a specific step to one line inside the bubble", () => {
+  it("cuts a specific step to one line inside the activity indicator", () => {
     render(
       <LiveTurnActivity snapshot={snapshot(thinking(0, "Checking results"))} hasText={false} />,
     );
     const label = screen.getByText("Checking results");
-    expect(label.closest("[role=status]")?.classList.contains("rounded-16")).toBe(true);
+    expect(label.closest("[role=status]")?.classList.contains("rounded-16")).toBe(false);
+    expect(label.closest("[role=status]")).toBeTruthy();
     expect(label.classList.contains("truncate")).toBe(true);
     expect(label.className).not.toContain("shimmer");
+  });
+});
+
+describe("controlled activity time", () => {
+  it("keeps the turn start through status/entrance changes, hidden activity and remounts", () => {
+    rs.useFakeTimers();
+    rs.setSystemTime(10_000);
+    const trace = snapshot(thinking(0, "Checking results"));
+    const { rerender, unmount } = render(
+      <LiveTurnActivity snapshot={trace} hasText={false} startedAt={2_000} entranceKey="first" />,
+    );
+    expect(screen.getByText("8.0s").getAttribute("aria-hidden")).toBe("true");
+    act(() => {
+      rs.setSystemTime(12_000);
+      rs.advanceTimersByTime(100);
+    });
+    rerender(
+      <LiveTurnActivity
+        snapshot={snapshot(thinking(1, "Verifying output"))}
+        hasText={false}
+        startedAt={2_000}
+        entranceKey="next"
+      />,
+    );
+    expect(screen.getByText("10.1s")).toBeTruthy();
+    expect(screen.getByText("Verifying output").classList.contains("rome-status-fade")).toBe(true);
+    rerender(
+      <LiveTurnActivity snapshot={trace} hasText startedAt={2_000} textThroughOrdinal={0} />,
+    );
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    expect(rs.getTimerCount()).toBe(0);
+    rerender(<LiveTurnActivity snapshot={null} hasText={false} startedAt={2_000} />);
+    expect(screen.getByText("10.1s")).toBeTruthy();
+    unmount();
+    expect(rs.getTimerCount()).toBe(0);
+    render(<LiveTurnActivity snapshot={null} hasText={false} startedAt={2_000} />);
+    expect(screen.getByText("10.1s")).toBeTruthy();
+  });
+  it("uses a new start only for a new turn, and clamps future server times", () => {
+    rs.useFakeTimers();
+    rs.setSystemTime(10_000);
+    const { rerender } = render(<LiveTurnActivity snapshot={null} hasText={false} startedAt={0} />);
+    expect(screen.getByText("10.0s")).toBeTruthy();
+    rerender(<LiveTurnActivity snapshot={null} hasText={false} startedAt={9_000} />);
+    expect(screen.getByText("1.0s")).toBeTruthy();
+    rerender(<LiveTurnActivity snapshot={null} hasText={false} startedAt={11_000} />);
+    expect(screen.getByText("0.0s")).toBeTruthy();
+  });
+  it("keeps the existing plan/body/watermark and terminal-error hiding rules", () => {
+    const trace = snapshot(thinking(2, "New activity"));
+    const { rerender } = render(
+      <LiveTurnActivity snapshot={trace} hasText textThroughOrdinal={1} startedAt={0} />,
+    );
+    expect(screen.getByText("New activity")).toBeTruthy();
+    rerender(<LiveTurnActivity snapshot={trace} hasText textThroughOrdinal={2} startedAt={0} />);
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    rerender(
+      <LiveTurnActivity
+        snapshot={{
+          ...snapshot(),
+          summary: {
+            ...trace.summary,
+            plan: { steps: [{ text: "Verify", status: "pending" }] },
+          },
+        }}
+        hasText={false}
+        startedAt={0}
+      />,
+    );
+    expect(screen.queryByLabelText("Working")).toBeNull();
+    rerender(
+      <LiveTurnActivity
+        snapshot={{
+          ...trace,
+          summary: {
+            ...trace.summary,
+            terminalError: { message: "Fixture failure" },
+          },
+        }}
+        hasText={false}
+        startedAt={0}
+      />,
+    );
+    expect(screen.queryByLabelText("Working")).toBeNull();
   });
 });

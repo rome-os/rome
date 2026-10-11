@@ -107,6 +107,10 @@
       "types": "./dist/list-row.d.ts",
       "default": "./dist/list-row.js"
     },
+    "./loading-state": {
+      "types": "./dist/loading-state.d.ts",
+      "default": "./dist/loading-state.js"
+    },
     "./markdown": {
       "types": "./dist/markdown.d.ts",
       "default": "./dist/markdown.js"

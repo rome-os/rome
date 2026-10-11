@@ -46,6 +46,7 @@ export interface LivePreview {
   /** The full SSE text, which may be ahead of the typewriter preview. */
   sourceText?: string;
   textThroughOrdinal?: number;
+  startedAt?: number;
   identity: AgentIdentity;
 }
 
@@ -369,6 +370,7 @@ const RowView = memo(function RowView({
       {live ? (
         <LiveTurnActivity
           snapshot={live.snapshot}
+          startedAt={live.startedAt}
           textThroughOrdinal={live.textThroughOrdinal}
           hasText={!!live.text}
           entranceKey={typingEntranceKey(live)}
@@ -427,6 +429,7 @@ function StandaloneLiveTail({
       ) : null}
       <LiveTurnActivity
         snapshot={live.snapshot}
+        startedAt={live.startedAt}
         textThroughOrdinal={live.textThroughOrdinal}
         hasText={!!live.text}
         entranceKey={typingEntranceKey(live)}
