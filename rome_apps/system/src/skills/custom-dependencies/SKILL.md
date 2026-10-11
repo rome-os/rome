@@ -48,7 +48,7 @@ A tool that links against the image's system libraries can break when an upgrade
 The image's Python 3 has no `pip` and no `ensurepip`, and Debian marks it as externally managed. Use [uv](https://docs.astral.sh/uv/), which installs into `~/.local/bin` and keeps its Pythons and tools under `~/.local/share/uv`:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
 ~/.local/bin/uv tool install --managed-python --python 3.12 httpie   # a CLI tool → ~/.local/bin/http
 ~/.local/bin/uv venv --managed-python --python 3.12 ~/.venvs/work    # an environment
 ~/.local/bin/uv pip install --python ~/.venvs/work/bin/python requests
@@ -139,7 +139,7 @@ If no package ships a binary for the instance, build the `.node` file once on an
 
 1. Build the addon with N-API. A non-N-API addon loads only on the Node major version it was built for. A Rome upgrade can move to a new Node major.
 2. Build it in the `node:24-bookworm` Docker image, which has the compilers, once with `--platform linux/amd64` and once with `--platform linux/arm64`. Use a machine with Docker, such as the guardian's computer or a CI runner. A build for one architecture is enough only for an app that stays on this instance. A shared or published app runs on both.
-3. Commit the files under `src/`, for example as `src/native/<name>-linux-x64.node` and `src/native/<name>-linux-arm64.node`. `rome build` copies the files under `src/` into the `appRoot` directory, except `.ts`, `.tsx`, and `.css` files and `src/web/`. With `includeSource: true`, the published source carries the files too.
+3. Commit the files under `src/`, for example as `src/native/<name>-linux-x64.node` and `src/native/<name>-linux-arm64.node`. `rome build` copies the files under `src/` into the `appRoot` directory, except `.ts`, `.tsx`, and `.css` files and `src/web/`. With `includeSource: true`, the published source carries the files too, so each binary counts twice against the 50 MB App Store bundle limit.
 4. Load the file for `process.arch` with `createRequire(import.meta.url)` and a path that starts from the loading module's directory. The same path works from `src/` and from the built output.
 
 ### 5. On a self-hosted instance, extend the image

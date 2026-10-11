@@ -340,7 +340,7 @@ decide whether to load the skill.
 }
 ```
 
-Before adding a dependency with a build script, read `system:custom-dependencies`. The Rome container has no C or C++ compiler.
+Before adding a dependency with a build script, read `system:custom-dependencies`.
 
 ### The `rome` CLI
 
