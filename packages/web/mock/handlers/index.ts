@@ -41,6 +41,7 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { liveEventsHandlers } from "./live-events";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
@@ -1290,6 +1291,7 @@ export const handlers = [
   ...settingsHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
+  ...liveEventsHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
   // dir and the memory dir a person's dossier links into.
   ...projectFileHandlers,

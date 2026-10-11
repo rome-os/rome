@@ -52,6 +52,7 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
+import type { LiveEventEmit } from "../../live-events-server.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
@@ -692,6 +693,16 @@ export interface WebchatRuntime {
    * it live and mounts its cards.
    */
   enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+  /**
+   * Emits `session_running` whenever a chat starts or stops running a turn,
+   * after first emitting one for every chat running now. Returns the
+   * unsubscribe.
+   */
+  subscribeStatusEvents(emit: LiveEventEmit): () => void;
+  /** Emits `message_insert` and `session_name` for one session. Returns the unsubscribe. */
+  subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
+  /** Whether the id names a session the session events stream serves. */
+  hasStoredSession(sessionId: string): Promise<boolean>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -733,6 +744,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     for (const listener of runningListeners) listener(event);
   };
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
+  const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
+    const listener = (event: { sessionId: string; running: boolean }) =>
+      emit("session_running", event);
+    runningListeners.add(listener);
+    for (const sessionId of runningSessions) listener({ sessionId, running: true });
+    return () => {
+      runningListeners.delete(listener);
+    };
+  };
+  const subscribeSessionEvents = (sessionId: string, emit: LiveEventEmit): (() => void) => {
+    const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
+      if (message.sessionId === sessionId) emit("message_insert", message);
+    });
+    const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
+      if (event.sessionId === sessionId) emit("session_name", event);
+    });
+    return () => {
+      unsubscribeMessages();
+      unsubscribeSessionName();
+    };
+  };
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -1980,11 +2012,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const closed = new Promise<void>((resolve) => {
         close = resolve;
       });
-      const listener = (event: { sessionId: string; running: boolean }) => {
-        // Fire-and-forget so a stalled client can't hold up the stream that
-        // is starting or finishing.
-        sse.writeSSE({ event: "session_running", data: JSON.stringify(event) }).catch(finish);
-      };
+      let unsubscribe = () => {};
       const heartbeat = setInterval(() => {
         sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
       }, 20_000);
@@ -1992,11 +2020,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (finished) return;
         finished = true;
         clearInterval(heartbeat);
-        runningListeners.delete(listener);
+        unsubscribe();
         close();
       }
-      runningListeners.add(listener);
-      for (const sessionId of runningSessions) listener({ sessionId, running: true });
+      // Fire-and-forget so a stalled client can't hold up the stream that is
+      // starting or finishing.
+      unsubscribe = subscribeStatusEvents((event, data) => {
+        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+      });
       sse.onAbort(finish);
       await closed;
     }),
@@ -2489,25 +2520,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         });
       };
 
-      unsubscribe = deps.webchatRepo.onMessageInserted((message) => {
-        if (message.sessionId !== sessionId) return;
-        write({
-          event: "message_insert",
-          data: JSON.stringify(message),
-        });
+      unsubscribe = subscribeSessionEvents(sessionId, (event, data) => {
+        write({ event, data: JSON.stringify(data) });
       });
-      const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
-        if (event.sessionId !== sessionId) return;
-        write({
-          event: "session_name",
-          data: JSON.stringify(event),
-        });
-      });
-      const unsubscribeMessages = unsubscribe;
-      unsubscribe = () => {
-        unsubscribeMessages();
-        unsubscribeSessionName();
-      };
       heartbeat = setInterval(() => {
         write({ event: "keepalive", data: "" });
       }, 20_000);
@@ -4024,6 +4039,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       activeStreams.clear();
     },
     enqueueSessionTask,
+    subscribeStatusEvents,
+    subscribeSessionEvents,
+    async hasStoredSession(sessionId) {
+      const session = await deps.webchatRepo.getSession(sessionId);
+      return Boolean(session && isStoredWebchatSession(session));
+    },
   };
 
   return { routes: app, runtime };

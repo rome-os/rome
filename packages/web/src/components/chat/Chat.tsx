@@ -68,7 +68,7 @@ import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
-import { useSseEvents } from "@/hooks/use-sse-events";
+import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import {
   MessageList,
@@ -215,8 +215,8 @@ function ChatSessionEvents({
   onSessionName,
   onReconnect,
 }: ChatSessionEventsProps) {
-  useSseEvents(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/events`,
+  useLiveEvents(
+    chatSessionTopic(sessionId),
     {
       message_insert: {
         schema: chatMessageSchema,
@@ -782,7 +782,7 @@ export function Chat({
 
   // Subscribe to the main session and the floor (the only one streaming): a
   // handoff's child streams while it holds the floor; the main session streams
-  // again once it resumes. Each child owns one EventSource through useSseEvents.
+  // again once it resumes. Each child holds one subscription through useLiveEvents.
   const sessionEventIds = useMemo(
     () =>
       Array.from(new Set([mainSessionId, floorSessionId])).filter((id): id is string =>

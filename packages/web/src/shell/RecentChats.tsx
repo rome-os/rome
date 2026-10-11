@@ -34,7 +34,7 @@ import type { ChatSession } from "@/lib/chat-types";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
 import { usePinnedProjects } from "@/hooks/use-pinned-projects";
-import { useSseEvents } from "@/hooks/use-sse-events";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import {
   emitSessionsChanged,
   useArchiveSession,
@@ -322,8 +322,8 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
 
   // Live running state. A stop refetches the list for unread and
   // lastTurnFailed, and a reconnect refetches whatever changed meanwhile.
-  useSseEvents(
-    "/api/chat/status/events",
+  useLiveEvents(
+    chatStatusTopic,
     {
       session_running: {
         schema: sessionRunningSchema,
