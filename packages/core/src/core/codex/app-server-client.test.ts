@@ -37,14 +37,38 @@ describe("AppServerClient", () => {
     client.start();
 
     const inflight = client.request("turn/start", {});
-    proc.emit("exit", 1);
+    proc.emit("exit", 1, null);
 
     // In-flight requests reject on exit…
-    await expect(inflight).rejects.toThrow(/exited/);
-    expect(onExit).toHaveBeenCalledWith(1);
+    await expect(inflight).rejects.toThrow("codex app-server exited (code 1)");
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "codex app-server exited (code 1)" }),
+    );
     // …and later requests reject immediately instead of pending forever —
     // the borrowed exact-fork revert depends on this to not hang.
-    await expect(client.request("thread/revert", {})).rejects.toThrow(/exited/);
+    await expect(client.request("thread/revert", {})).rejects.toThrow(
+      "codex app-server exited (code 1)",
+    );
+  });
+
+  it("names the signal that killed the app-server", async () => {
+    const proc = fakeProc();
+    spawnMock.mockReturnValue(proc);
+    const onExit = rs.fn();
+    const client = new AppServerClient({
+      cwd: "/",
+      env: {},
+      onNotification: () => undefined,
+      onServerRequest: () => ({}),
+      onExit,
+    });
+    client.start();
+
+    proc.emit("exit", null, "SIGTERM");
+
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "codex app-server exited (signal SIGTERM)" }),
+    );
   });
 
   it("turns a stdin EPIPE into one transport exit instead of an unhandled error", async () => {
@@ -62,10 +86,11 @@ describe("AppServerClient", () => {
 
     const inflight = client.request("turn/start", {});
     proc.stdin.emit("error", new Error("write EPIPE"));
-    proc.emit("exit", 1);
+    proc.emit("exit", 1, null);
 
-    await expect(inflight).rejects.toThrow("write EPIPE");
+    const cause = "codex app-server connection failed: write EPIPE";
+    await expect(inflight).rejects.toThrow(cause);
     expect(onExit).toHaveBeenCalledTimes(1);
-    expect(onExit).toHaveBeenCalledWith(null);
+    expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ message: cause }));
   });
 });

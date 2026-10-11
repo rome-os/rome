@@ -28,7 +28,7 @@ const {
   closeMock: rs.fn(),
   captured: {
     onNotification: undefined as undefined | ((m: string, p: unknown) => void),
-    onExit: undefined as undefined | ((code: number | null) => void),
+    onExit: undefined as undefined | ((error: Error) => void),
     onServerRequest: undefined as
       | undefined
       | ((method: string, params: unknown) => Promise<unknown>),
@@ -944,7 +944,7 @@ describe("CodexAppServerProvider", () => {
         // turn/start is acknowledged, then the process dies before
         // turn/completed ever arrives.
         captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
-        captured.onExit?.(1);
+        captured.onExit?.(new Error("codex app-server exited (code 1)"));
       }
       return {};
     });
@@ -957,9 +957,62 @@ describe("CodexAppServerProvider", () => {
 
     expect(msgs.find((m) => m.type === "error")).toMatchObject({
       type: "error",
-      error: "codex app-server exited",
+      error: "Codex stopped before the turn finished: codex app-server exited (code 1)",
     });
     // The settled turn released the coordinator, so shutdown does not hang.
+    await session.close();
+  });
+
+  it("keeps a model error that arrived before the app-server exited", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        captured.onNotification?.("error", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          error: { message: "upstream failed" },
+          willRetry: false,
+        });
+        captured.onExit?.(new Error("codex app-server exited (code 1)"));
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "upstream failed",
+    });
+    await session.close();
+  });
+
+  it("says Rome is shutting down when the provider closes during a turn", async () => {
+    let provider!: CodexAppServerProvider;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        provider.close();
+      }
+      return {};
+    });
+
+    provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "Codex stopped before the turn finished: Rome is shutting down",
+    });
     await session.close();
   });
 
@@ -990,7 +1043,11 @@ describe("CodexAppServerProvider", () => {
 
       appServerManager.setDefaultProvider("rome_credits");
       expect(await first).toEqual([
-        expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+        expect.objectContaining({
+          type: "error",
+          error:
+            "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+        }),
       ]);
       expect(await collectUntilTerminal(session)).toEqual([
         expect.objectContaining({
@@ -1018,7 +1075,7 @@ describe("CodexAppServerProvider", () => {
         const turnId = `turn-${turnNumber}`;
         n("turn/started", { threadId: "thread-restart", turn: { id: turnId } });
         if (turnNumber === 1) {
-          captured.onExit?.(137);
+          captured.onExit?.(new Error("codex app-server exited (code 137)"));
         } else {
           n("item/completed", {
             item: {
@@ -1045,7 +1102,10 @@ describe("CodexAppServerProvider", () => {
     const failed = collectUntilTerminal(session);
     await session.sendUserInput({ text: "first" });
     expect(await failed).toEqual([
-      expect.objectContaining({ type: "error", error: "codex app-server exited" }),
+      expect.objectContaining({
+        type: "error",
+        error: "Codex stopped before the turn finished: codex app-server exited (code 137)",
+      }),
     ]);
 
     const recovered = collectUntilTerminal(session);
@@ -1072,11 +1132,11 @@ describe("CodexAppServerProvider", () => {
           threadId: "source-thread",
           turn: { id: "fork-turn" },
         });
-        captured.onExit?.(137);
+        captured.onExit?.(new Error("codex app-server exited (code 137)"));
       }
       // The real client rejects post-exit requests immediately instead of
       // leaving them pending (see AppServerClient.request).
-      if (method === "thread/revert") throw new Error("codex app-server exited");
+      if (method === "thread/revert") throw new Error("codex app-server exited (code 137)");
       return {};
     });
 

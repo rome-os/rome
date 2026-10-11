@@ -940,7 +940,7 @@ export class CodexAppServerProvider implements ModelProvider {
     const binding: CodexThreadBinding = {
       onNotification,
       onDynamicToolCall,
-      onExit: () => {
+      onExit: (error) => {
         if (closed) return;
         const turn = activeTurn;
         if (!turn) return;
@@ -948,7 +948,7 @@ export class CodexAppServerProvider implements ModelProvider {
         // never arrive. Settle exactly this active turn; idle sessions retain
         // their thread configuration and lazily resume on their next turn.
         turn.failed = true;
-        turn.errorMessage ??= "codex app-server exited";
+        turn.errorMessage ??= `Codex stopped before the turn finished: ${error.message}`;
         turn.resolveDone();
       },
     };
