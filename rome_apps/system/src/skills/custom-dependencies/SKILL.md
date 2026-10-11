@@ -1,6 +1,6 @@
 ---
 name: custom-dependencies
-description: Install software that Rome does not ship, such as a system package, CLI tool, language runtime, Python or global npm package, or an app dependency with native code, so it keeps working after Rome upgrades. Use when the guardian asks to install a tool or package in Rome, when `apt-get`, `sudo`, `pip`, or `npm install -g` fails, or when an app install fails with `gyp ERR!`, a missing `make`, or `ERR_PNPM_IGNORED_BUILDS`.
+description: Install software that Rome does not ship, such as a system package, CLI tool, language runtime, Python or global npm package, or an app dependency with native code, so it keeps working after Rome upgrades. Use when the guardian asks to install a tool or package in Rome, when `apt-get`, `sudo`, `pip`, or `npm install -g` fails, or when an app install fails with a native-build hint or `ERR_PNPM_IGNORED_BUILDS`.
 ---
 
 # Custom dependencies
@@ -9,9 +9,9 @@ description: Install software that Rome does not ship, such as a system package,
 
 - Rome runs as the `rome` account. Its `sudo` rights cover two Rome maintenance commands and nothing else, so it cannot run `apt-get` or install into `/usr`.
 - A Rome upgrade replaces the container. Of the files you can change, only those under `/home/rome`, `/home/user`, and `/app/memory` carry over. `/home/rome` is the home directory of `rome`.
-- Rome's own processes run with the image's `PATH`: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`. This covers the daemon, app code, and app installs. Login shells also get `~/.local/bin`, which the default `~/.profile` adds when the directory exists.
+- Rome's processes, app installs, app code, and the `rome` and `user` shells have `~/.local/bin` at the end of `PATH`. Commands there run by name, and an image command wins any name clash.
 
-Install custom software under `/home/rome`, and call it by its absolute path from app code, routines, and scripts.
+Install custom software under `/home/rome`. Commands in `~/.local/bin` run by name. Anything elsewhere, such as `~/.local/go/bin/go`, needs a symlink into `~/.local/bin` or its absolute path.
 
 ## What a Rome upgrade keeps
 
@@ -20,7 +20,7 @@ Install custom software under `/home/rome`, and call it by its absolute path fro
 | `/home/rome`: `~/.local`, `~/.cache`, `~/.npmrc`, the shell profiles, app repos, installed apps, app data, the database, the pnpm store | Kept |
 | `/home/user` | Kept |
 | `/app` | Rome's own code, replaced by the new image. `/app/memory` is kept. |
-| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` or `npm install -g` | Replaced by the new image, except Rome's SSH host keys and Tailscale state |
+| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` | Replaced by the new image, except Rome's SSH host keys and Tailscale state |
 
 Rome publishes a new image every weekday on a schedule, plus manual releases ([release schedule](https://github.com/rome-os/rome/blob/main/docs/releases.md#scheduled-patch-releases)). An instance upgrades at these times:
 
@@ -36,34 +36,28 @@ Rome publishes a new image every weekday on a schedule, plus manual releases ([r
 Download a static binary or the official Linux tarball, and unpack it under `~/.local`:
 
 ```bash
-mkdir -p ~/.local
+mkdir -p ~/.local/bin
 curl -fsSL "https://go.dev/dl/go<version>.linux-$(dpkg --print-architecture).tar.gz" | tar -xz -C ~/.local
-~/.local/go/bin/go version
+ln -s ~/.local/go/bin/go ~/.local/bin/
+go version
 ```
 
 A tool that links against the image's system libraries can break when an upgrade changes them. Prefer a static build.
 
 ### Python packages and tools
 
-The image's Python 3 has no `pip` and no `ensurepip`, and Debian marks it as externally managed. Use [uv](https://docs.astral.sh/uv/), which installs into `~/.local/bin` and keeps its Pythons and tools under `~/.local/share/uv`:
+The image's Python 3 has no `pip` and no `ensurepip`, and Debian marks it as externally managed. Use [uv](https://docs.astral.sh/uv/), which installs into `~/.local/bin` and keeps its Pythons and tools under `~/.local/share/uv`. The image configures uv to use only the Pythons it installs there, so its environments survive upgrades.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
-~/.local/bin/uv tool install --managed-python --python 3.12 httpie   # a CLI tool → ~/.local/bin/http
-~/.local/bin/uv venv --managed-python --python 3.12 ~/.venvs/work    # an environment
-~/.local/bin/uv pip install --python ~/.venvs/work/bin/python requests
+uv tool install httpie                                 # a CLI tool → ~/.local/bin/http
+uv venv ~/.venvs/work                                  # an environment; add --python <version> to pick one
+uv pip install --python ~/.venvs/work/bin/python requests
 ```
-
-Pass `--managed-python` with `--python <version>` to every `uv tool install` and `uv venv`. The flag makes uv use a Python it installs under home. Without it, uv builds the environment on the image's `/usr/bin/python3`, which an upgrade can replace.
 
 ### Global npm packages
 
-Point npm's global prefix at home once. `~/.npmrc` keeps the setting across upgrades.
-
-```bash
-npm config set prefix ~/.local
-npm install -g <package>                              # → ~/.local/bin/<command>
-```
+Rome sets npm's global prefix to `~/.local` in `~/.npmrc` unless the file already sets one, so `npm install -g <package>` puts its commands in `~/.local/bin`.
 
 Global packages run on the image's Node. A global package with native code can stop loading when an upgrade moves to a new Node major version.
 
@@ -88,7 +82,7 @@ Rome installs an app's dependencies inside the container, as `rome`, in two step
 1. A source install runs `pnpm install` and then the app's `build` script in the app repo. Dev dependencies install in this step too.
 2. Every install of an app with runtime dependencies, including an App Store install, runs `pnpm install --prod` for the packed artifact.
 
-Both steps run every build script that the app's `pnpm-workspace.yaml` approves under `allowBuilds`. A build that compiles C or C++ fails, because the image has no `make` and no C or C++ compiler. A compiler under `/home/rome` does not help, because installs run with the image's `PATH`. Rome runs step 2 again for every new version of the app, including each App Store update. The app must install on the stock image every time. Step 2 reuses the installed copy when the packed artifact has not changed. So a successful reinstall of an unchanged app does not prove that an install fix works.
+Both steps run every build script that the app's `pnpm-workspace.yaml` approves under `allowBuilds`. A build that compiles C or C++ fails, because the image has no `make` and no C or C++ compiler. The failed install ends with a hint that names the package. A `make` or compiler in `~/.local/bin` would be found, but it exists only on this instance. The app would still fail on the stock image and for anyone who installs it from the App Store, so do not rely on one. Rome runs step 2 again for every new version of the app, including each App Store update. The app must install on the stock image every time. Step 2 reuses the installed copy when the packed artifact has not changed. So a successful reinstall of an unchanged app does not prove that an install fix works.
 
 Try these options in order.
 
