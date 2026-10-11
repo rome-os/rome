@@ -1,0 +1,65 @@
+Progress: resolved 1, reused 0, downloaded 0, added 0
+
+   ╭───────────────────────────────────────────────╮
+   │                                               │
+   │      Update available! 11.6.0 → 12.11.2.      │
+   │     Changelog: https://pnpm.io/v/12.11.2      │
+   │   To update, run: corepack use pnpm@12.11.2   │
+   │                                               │
+   ╰───────────────────────────────────────────────╯
+
+Packages: +2
+++
+Progress: resolved 2, reused 0, downloaded 2, added 2, done
+.../node_modules/better-sqlite3 install$ node-gyp rebuild
+.../node_modules/better-sqlite3 install: gyp info it worked if it ends with ok
+.../node_modules/better-sqlite3 install: gyp info using node-gyp@12.3.0
+.../node_modules/better-sqlite3 install: gyp info using node@24.21.0 | linux | arm64
+.../node_modules/better-sqlite3 install: gyp info find Python using Python version 3.11.2 found at "/usr/bin/python3"
+.../node_modules/better-sqlite3 install: gyp http GET https://nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz
+.../node_modules/better-sqlite3 install: gyp http 200 https://nodejs.org/download/release/v24.21.0/node-v24.21.0-headers.tar.gz
+.../node_modules/better-sqlite3 install: gyp http GET https://nodejs.org/download/release/v24.21.0/SHASUMS256.txt
+.../node_modules/better-sqlite3 install: gyp http 200 https://nodejs.org/download/release/v24.21.0/SHASUMS256.txt
+.../node_modules/better-sqlite3 install: gyp info spawn /usr/bin/python3
+.../node_modules/better-sqlite3 install: gyp info spawn args [
+.../node_modules/better-sqlite3 install: gyp info spawn args '/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/gyp/gyp_main.py',
+.../node_modules/better-sqlite3 install: gyp info spawn args 'binding.gyp',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-f',
+.../node_modules/better-sqlite3 install: gyp info spawn args 'make',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-I',
+.../node_modules/better-sqlite3 install: gyp info spawn args '/tmp/nomake/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/build/config.gypi',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-I',
+.../node_modules/better-sqlite3 install: gyp info spawn args '/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/addon.gypi',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-I',
+.../node_modules/better-sqlite3 install: gyp info spawn args '/home/rome/.cache/node-gyp/24.21.0/include/node/common.gypi',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dlibrary=shared_library',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dvisibility=default',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dnode_root_dir=/home/rome/.cache/node-gyp/24.21.0',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dnode_gyp_dir=/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dnode_lib_file=/home/rome/.cache/node-gyp/24.21.0/<(target_arch)/node.lib',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dmodule_root_dir=/tmp/nomake/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Dnode_engine=v8',
+.../node_modules/better-sqlite3 install: gyp info spawn args '--depth=.',
+.../node_modules/better-sqlite3 install: gyp info spawn args '--no-parallel',
+.../node_modules/better-sqlite3 install: gyp info spawn args '--generator-output',
+.../node_modules/better-sqlite3 install: gyp info spawn args 'build',
+.../node_modules/better-sqlite3 install: gyp info spawn args '-Goutput_dir=.'
+.../node_modules/better-sqlite3 install: gyp info spawn args ]
+.../node_modules/better-sqlite3 install: gyp ERR! build error 
+.../node_modules/better-sqlite3 install: gyp ERR! stack Error: not found: make
+.../node_modules/better-sqlite3 install: gyp ERR! stack at getNotFoundError (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/which/lib/index.js:16:17)
+.../node_modules/better-sqlite3 install: gyp ERR! stack at which (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/which/lib/index.js:77:9)
+.../node_modules/better-sqlite3 install: gyp ERR! stack at async doWhich (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/lib/build.js:120:22)
+.../node_modules/better-sqlite3 install: gyp ERR! stack at async loadConfigGypi (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/lib/build.js:78:7)
+.../node_modules/better-sqlite3 install: gyp ERR! stack at async build (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/lib/build.js:36:3)
+.../node_modules/better-sqlite3 install: gyp ERR! stack at async run (/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/bin/node-gyp.js:81:18)
+.../node_modules/better-sqlite3 install: gyp ERR! System Linux 6.12.76-linuxkit
+.../node_modules/better-sqlite3 install: gyp ERR! command "/usr/local/bin/node" "/opt/rome-corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/bin/node-gyp.js" "rebuild"
+.../node_modules/better-sqlite3 install: gyp ERR! cwd /tmp/nomake/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3
+.../node_modules/better-sqlite3 install: gyp ERR! node -v v24.21.0
+.../node_modules/better-sqlite3 install: gyp ERR! node-gyp -v v12.3.0
+.../node_modules/better-sqlite3 install: gyp ERR! $npm_package_name better-sqlite3
+.../node_modules/better-sqlite3 install: gyp ERR! $npm_package_version 13.0.3
+.../node_modules/better-sqlite3 install: gyp ERR! not ok 
+.../node_modules/better-sqlite3 install: Failed
+[ELIFECYCLE] Command failed with exit code 1.

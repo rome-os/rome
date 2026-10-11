@@ -1,0 +1,69 @@
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +1
++
+Progress: resolved 1, reused 1, downloaded 0, added 1, done
+.../node_modules/native-broken install$ node-gyp rebuild
+.../node_modules/native-broken install: gyp info it worked if it ends with ok
+.../node_modules/native-broken install: gyp info using node-gyp@12.3.0
+.../node_modules/native-broken install: gyp info using node@24.18.0 | linux | arm64
+
+   ╭───────────────────────────────────────────────╮
+   │                                               │
+   │      Update available! 11.6.0 → 12.11.2.      │
+   │     Changelog: https://pnpm.io/v/12.11.2      │
+   │   To update, run: corepack use pnpm@12.11.2   │
+   │                                               │
+   ╰───────────────────────────────────────────────╯
+
+.../node_modules/native-broken install: gyp info find Python using Python version 3.11.2 found at "/usr/bin/python3"
+.../node_modules/native-broken install: gyp http GET https://nodejs.org/download/release/v24.18.0/node-v24.18.0-headers.tar.gz
+.../node_modules/native-broken install: gyp http 200 https://nodejs.org/download/release/v24.18.0/node-v24.18.0-headers.tar.gz
+.../node_modules/native-broken install: gyp http GET https://nodejs.org/download/release/v24.18.0/SHASUMS256.txt
+.../node_modules/native-broken install: gyp http 200 https://nodejs.org/download/release/v24.18.0/SHASUMS256.txt
+.../node_modules/native-broken install: gyp info spawn /usr/bin/python3
+.../node_modules/native-broken install: gyp info spawn args [
+.../node_modules/native-broken install: gyp info spawn args '/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/gyp/gyp_main.py',
+.../node_modules/native-broken install: gyp info spawn args 'binding.gyp',
+.../node_modules/native-broken install: gyp info spawn args '-f',
+.../node_modules/native-broken install: gyp info spawn args 'make',
+.../node_modules/native-broken install: gyp info spawn args '-I',
+.../node_modules/native-broken install: gyp info spawn args '/tmp/compile/node_modules/.pnpm/native-broken@file+native/node_modules/native-broken/build/config.gypi',
+.../node_modules/native-broken install: gyp info spawn args '-I',
+.../node_modules/native-broken install: gyp info spawn args '/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/addon.gypi',
+.../node_modules/native-broken install: gyp info spawn args '-I',
+.../node_modules/native-broken install: gyp info spawn args '/root/.cache/node-gyp/24.18.0/include/node/common.gypi',
+.../node_modules/native-broken install: gyp info spawn args '-Dlibrary=shared_library',
+.../node_modules/native-broken install: gyp info spawn args '-Dvisibility=default',
+.../node_modules/native-broken install: gyp info spawn args '-Dnode_root_dir=/root/.cache/node-gyp/24.18.0',
+.../node_modules/native-broken install: gyp info spawn args '-Dnode_gyp_dir=/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp',
+.../node_modules/native-broken install: gyp info spawn args '-Dnode_lib_file=/root/.cache/node-gyp/24.18.0/<(target_arch)/node.lib',
+.../node_modules/native-broken install: gyp info spawn args '-Dmodule_root_dir=/tmp/compile/node_modules/.pnpm/native-broken@file+native/node_modules/native-broken',
+.../node_modules/native-broken install: gyp info spawn args '-Dnode_engine=v8',
+.../node_modules/native-broken install: gyp info spawn args '--depth=.',
+.../node_modules/native-broken install: gyp info spawn args '--no-parallel',
+.../node_modules/native-broken install: gyp info spawn args '--generator-output',
+.../node_modules/native-broken install: gyp info spawn args 'build',
+.../node_modules/native-broken install: gyp info spawn args '-Goutput_dir=.'
+.../node_modules/native-broken install: gyp info spawn args ]
+.../node_modules/native-broken install: gyp info spawn make
+.../node_modules/native-broken install: gyp info spawn args [ 'BUILDTYPE=Release', '-C', 'build' ]
+.../node_modules/native-broken install: make: Entering directory '/tmp/compile/node_modules/.pnpm/native-broken@file+native/node_modules/native-broken/build'
+.../node_modules/native-broken install:   CC(target) Release/obj.target/broken/broken.o
+.../node_modules/native-broken install: ../broken.c:1:11: error: expected declaration specifiers or '...' before '{' token
+.../node_modules/native-broken install:     1 | int main( { return 0 }
+.../node_modules/native-broken install:       |           ^
+.../node_modules/native-broken install: make: *** [broken.target.mk:106: Release/obj.target/broken/broken.o] Error 1
+.../node_modules/native-broken install: make: Leaving directory '/tmp/compile/node_modules/.pnpm/native-broken@file+native/node_modules/native-broken/build'
+.../node_modules/native-broken install: gyp ERR! build error 
+.../node_modules/native-broken install: gyp ERR! stack Error: `make` failed with exit code: 2
+.../node_modules/native-broken install: gyp ERR! stack at ChildProcess.<anonymous> (/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/lib/build.js:219:23)
+.../node_modules/native-broken install: gyp ERR! System Linux 6.12.76-linuxkit
+.../node_modules/native-broken install: gyp ERR! command "/usr/local/bin/node" "/root/.cache/node/corepack/v1/pnpm/11.6.0/dist/node_modules/node-gyp/bin/node-gyp.js" "rebuild"
+.../node_modules/native-broken install: gyp ERR! cwd /tmp/compile/node_modules/.pnpm/native-broken@file+native/node_modules/native-broken
+.../node_modules/native-broken install: gyp ERR! node -v v24.18.0
+.../node_modules/native-broken install: gyp ERR! node-gyp -v v12.3.0
+.../node_modules/native-broken install: gyp ERR! $npm_package_name native-broken
+.../node_modules/native-broken install: gyp ERR! $npm_package_version 1.0.0
+.../node_modules/native-broken install: gyp ERR! not ok 
+.../node_modules/native-broken install: Failed
+[ELIFECYCLE] Command failed with exit code 1.

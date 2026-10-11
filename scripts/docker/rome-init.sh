@@ -272,12 +272,33 @@ configure_github_git_helper() {
   echo "GitHub CLI is not authenticated for ${username}; skipping git credential helper setup."
 }
 
+# Points npm's global prefix at ~/.local, so `npm install -g` works without root,
+# survives upgrades with the home directory, and puts commands in ~/.local/bin.
+# ~/.npmrc keeps any prefix already there, including one the account chose. The
+# account writes the file itself, so root never follows a link it planted.
+ensure_npm_prefix() {
+  local username="$1"
+  local home_dir="$2"
+
+  run_as_account "$username" "$home_dir" sh -c '
+    npmrc="$HOME/.npmrc"
+    if grep -Eqs "^[[:space:]]*prefix[[:space:]]*=" "$npmrc"; then
+      exit 0
+    fi
+    if [ -s "$npmrc" ] && [ -n "$(tail -c 1 "$npmrc")" ]; then
+      printf "\n" >>"$npmrc"
+    fi
+    printf "prefix=%s\n" "$HOME/.local" >>"$npmrc"
+  '
+}
+
 configure_shell_user() {
   local username="$1"
   local group_name="$2"
   local home_dir="$3"
   local alias_source_line='[ -f /app/scripts/docker/rome-shell-aliases.sh ] && . /app/scripts/docker/rome-shell-aliases.sh'
   local github_source_line='[ -f /app/scripts/docker/rome-github-shell.sh ] && . /app/scripts/docker/rome-github-shell.sh'
+  local path_source_line='[ -f /usr/local/share/rome/rome-shell-path.sh ] && . /usr/local/share/rome/rome-shell-path.sh'
 
   mkdir -p "$home_dir/.rome"
   safe_chown "$username:$group_name" "$home_dir/.rome"
@@ -285,8 +306,12 @@ configure_shell_user() {
   for shell_rc in "$home_dir/.bashrc" "$home_dir/.profile"; do
     ensure_line_present "$shell_rc" "$alias_source_line"
     ensure_line_present "$shell_rc" "$github_source_line"
+    ensure_line_present "$shell_rc" "$path_source_line"
     safe_chown "$username:$group_name" "$shell_rc"
   done
+  if ! ensure_npm_prefix "$username" "$home_dir"; then
+    echo "Warning: failed to set the npm global prefix for ${username}; continuing without it."
+  fi
 
   if ! configure_github_git_helper "$username" "$home_dir"; then
     echo "Warning: failed to configure GitHub git credential helper for ${username}; continuing without it."
