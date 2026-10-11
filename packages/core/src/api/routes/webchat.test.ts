@@ -54,6 +54,8 @@ describe("Webchat API", () => {
   });
 
   it("sends inputs through and opens one stream for the SDK-owned turn", async () => {
+    const generateTitle = rs.fn(async () => "SDK turn chat");
+    deps.conversationTitleGenerator = { generate: generateTitle };
     const started: string[] = [];
     const subscribers = new Set<
       (message: import("@rome-os/app-runtime").StreamAgentMessage, turnId: string) => void
@@ -180,6 +182,8 @@ describe("Webchat API", () => {
     const inputs = messages.filter((message) => message.role === "user");
     expect(inputs).toHaveLength(2);
     expect(inputs.map((message) => message.inputState)).toEqual(["sent", "sent"]);
+    // The detached background turn must not repeat the first input's title request.
+    expect(generateTitle).toHaveBeenCalledOnce();
   });
 
   it("suppresses every caller fallback echoed by an SDK turn", async () => {
