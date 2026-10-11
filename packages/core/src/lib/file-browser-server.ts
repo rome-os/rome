@@ -518,9 +518,8 @@ function isWithinRealRoot(rootDir: string, resolvedPath: string): boolean {
   let realRoot: string;
   try {
     realRoot = realpathSync(rootDir);
-  } catch (error) {
-    // Nothing exists under a missing root, so let the handler report the miss.
-    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  } catch {
+    return false;
   }
 
   // A missing path is judged by its nearest existing ancestor, so a miss under an

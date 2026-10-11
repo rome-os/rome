@@ -10,7 +10,10 @@ import {
 } from "../../lib/file-browser-server.js";
 import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
-import { resolveWebchatProjectPath } from "../../webchat/projects.js";
+import {
+  resolveProjectWorkingDirWithinRoot,
+  resolveWebchatProjectPath,
+} from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
@@ -64,15 +67,20 @@ export function shareRoutes(deps: ApiDeps): Hono {
     }
   };
 
-  // The project dir this share is scoped to, or null if it can't/shouldn't serve
-  // files (revoked, no projects tile, or no/invalid stored project path). A
-  // non-null result is guaranteed to sit inside the projects root.
-  const projectRootForShare = (share: StoredSharedChat): string | null => {
+  // The real project dir this share is scoped to, or null if it can't/shouldn't
+  // serve files (revoked, no projects tile, no/invalid stored project path, or a
+  // project dir that is missing or leaves the projects root through a symlink).
+  // A non-null result is guaranteed to sit inside the real projects root.
+  const projectRootForShare = async (share: StoredSharedChat): Promise<string | null> => {
     if (!share.projectPath || !layoutHasProjectsWidget(share.layout)) return null;
     try {
       // resolveWebchatProjectPath normalizes and rejects traversal (`..`,
-      // absolute, backslash), so the result can never escape the projects root.
-      return resolveWebchatProjectPath(share.projectPath, projectsRoot);
+      // absolute, backslash). The real-path check then catches a project dir, or
+      // a parent of a nested one, that is itself a symlink out of the root.
+      return await resolveProjectWorkingDirWithinRoot(
+        resolveWebchatProjectPath(share.projectPath, projectsRoot),
+        projectsRoot,
+      );
     } catch {
       return null;
     }
@@ -100,7 +108,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
     async (c, next) => {
       const token = c.req.param("token") ?? "";
       const share = token ? await deps.webchatRepo.getSharedChat(token) : null;
-      const rootDir = share ? projectRootForShare(share) : null;
+      const rootDir = share ? await projectRootForShare(share) : null;
       if (!rootDir) return c.json({ error: "Share not found" }, 404);
       return make(scopeFor(token, rootDir))(c, next);
     };

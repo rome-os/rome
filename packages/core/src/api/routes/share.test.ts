@@ -348,6 +348,42 @@ describe("Share chat", () => {
     });
   });
 
+  for (const projectName of ["proj-out", "team/sub"]) {
+    it(`404s the projects browser when shared project ${projectName} leaves the projects root`, async () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), "rome-share-outside-"));
+      try {
+        mkdirSync(join(outsideDir, "sub"));
+        writeFileSync(join(outsideDir, "MEMORY.md"), "outside-secret-contents");
+        writeFileSync(join(outsideDir, "sub", "MEMORY.md"), "outside-secret-contents");
+        // proj-out is itself the escaping link. team/sub escapes through its parent.
+        symlinkSync(outsideDir, join(projectsRoot, projectName.split("/")[0]));
+        const token = await shareProjectsTile(projectName);
+
+        const publicApp = shareRoutes(deps);
+        for (const request of ["tree", "file?path=projects/MEMORY.md"]) {
+          const res = await publicApp.request(`/share/${token}/projects/${request}`);
+          expect({ request, status: res.status }).toEqual({ request, status: 404 });
+          expect(await res.text()).not.toContain("outside-secret-contents");
+        }
+      } finally {
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("serves a shared project reached through a symlink inside the projects root", async () => {
+    mkdirSync(join(projectsRoot, "proj-a"), { recursive: true });
+    writeFileSync(join(projectsRoot, "proj-a", "inside.txt"), "in scope");
+    symlinkSync(join(projectsRoot, "proj-a"), join(projectsRoot, "proj-alias"));
+    const token = await shareProjectsTile("proj-alias");
+
+    const res = await shareRoutes(deps).request(
+      `/share/${token}/projects/file?path=projects/inside.txt`,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("in scope");
+  });
+
   it("404s the projects browser when the shared project directory is gone", async () => {
     mkdirSync(join(projectsRoot, "proj-a"), { recursive: true });
     writeFileSync(join(projectsRoot, "proj-a", "inside.txt"), "in scope");
