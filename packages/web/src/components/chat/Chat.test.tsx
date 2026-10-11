@@ -121,8 +121,14 @@ rs.mock("@/components/chat/ChatComposer", () => ({
     isStreaming?: boolean;
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
+    streamError?: string | { message: string } | null;
   }) => (
     <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      {props.streamError ? (
+        <div data-testid="stream-error">
+          {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
+        </div>
+      ) : null}
       {props.isStreaming && props.onStop ? (
         <button type="button" data-testid="stop-button" onClick={props.onStop} />
       ) : null}
@@ -773,6 +779,112 @@ describe("Chat turn stream lifecycle", () => {
         expect.objectContaining({ sessionId: "session-1", segment: expect.anything() }),
       );
       expect(autoPlaceApp).not.toHaveBeenCalled();
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
+  it("keeps a background turn's failure off the floor composer", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const encoder = new TextEncoder();
+    const dropping: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    rs.mocked(openTurnStream)
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(new ReadableStream<Uint8Array>({ start: (c) => void dropping.push(c) })),
+        ),
+      )
+      .mockImplementationOnce(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(c) {
+                c.enqueue(
+                  encoder.encode('event: done\ndata: {"success":false,"error":"parent boom"}\n\n'),
+                );
+                c.close();
+              },
+            }),
+          ),
+        ),
+      );
+    const onSessionMessage = rs.fn();
+    try {
+      renderChat(<Chat sessionId="session-1" onSessionMessage={onSessionMessage} />);
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(0));
+
+      // The parent hands the floor to a specialist child.
+      act(() => {
+        MockEventSource.instances[0]?.emit("message_insert", {
+          id: "m-handoff",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              type: "handoff",
+              toolUseId: "h1",
+              appId: "workflow-studio",
+              childSessionId: "child-1",
+              payload: { agentLabel: "Planner" },
+            },
+          ]),
+          createdAt: "2026-10-06T00:00:00.000Z",
+        });
+      });
+      await waitFor(() =>
+        expect(onSessionMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: "child-1" }),
+        ),
+      );
+
+      // The parent's stream drops and its resumed replay ends the turn failed.
+      await act(async () => {
+        dropping[0]!.error(new TypeError("network connection was lost"));
+      });
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(screen.queryByTestId("stream-error")).toBeNull();
+    } finally {
+      rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+      rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);
+    }
+  });
+
+  it.each([
+    ["done", '{"success":false,"error":"floor boom"}'],
+    ["stream_error", '{"error":"floor boom"}'],
+  ])("shows the floor turn's own %s failure on the composer", async (event, data) => {
+    const encoder = new TextEncoder();
+    const defaultOpen = rs.mocked(openTurnStream).getMockImplementation();
+    rs.mocked(listSessionTurns)
+      .mockResolvedValueOnce([{ turnId: "turn-1", status: "running" }])
+      .mockResolvedValue([]);
+    rs.mocked(openTurnStream).mockImplementationOnce(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(encoder.encode(`event: ${event}\ndata: ${data}\n\n`));
+              c.close();
+            },
+          }),
+        ),
+      ),
+    );
+    try {
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId("stream-error").textContent).toBe("floor boom"),
+      );
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
       rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);

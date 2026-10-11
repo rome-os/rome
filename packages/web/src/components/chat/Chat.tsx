@@ -833,7 +833,14 @@ export function Chat({
               // Model-resolution failures are persisted as assistant error
               // messages, so they render once in the conversation rather than
               // being duplicated above the composer.
-              if (!payload.success && payload.error && !isModelResolutionErrorCode(payload.code)) {
+              // The composer banner belongs to the floor, as for reconnect
+              // errors below; a background turn's failure stays off it.
+              if (
+                !payload.success &&
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
@@ -851,7 +858,11 @@ export function Chat({
           if (evt.event === "stream_error") {
             try {
               const payload = JSON.parse(evt.data) as Partial<DoneEventData>;
-              if (payload.error && !isModelResolutionErrorCode(payload.code)) {
+              if (
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
