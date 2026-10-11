@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.6...app-web-sdk-v0.3.7) (2026-10-11)
+
+
+### Bug Fixes
+
+* **app-web-sdk:** show non-JSON login errors and drop duplicated CLI and runtime code ([#853](https://github.com/rome-os/rome/issues/853)) ([1c46dcc](https://github.com/rome-os/rome/commit/1c46dcc0017920e8c1da454294ab22d04d299d83))
+
 ## [0.3.6](https://github.com/rome-os/rome/compare/app-web-sdk-v0.3.5...app-web-sdk-v0.3.6) (2026-10-10)
 
 
