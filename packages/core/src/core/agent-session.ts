@@ -326,7 +326,8 @@ export interface AgentSession {
    * The conversation this session serves: the caller's, else the recorded one.
    * For identity and fork lineage only. A turn picks where it records through
    * `resolveTurnConversation`, which leaves channel and webchat ones to their
-   * owners.
+   * owners. Transitional: step 5 of the session identity plan merges
+   * `romeSessionId` into it.
    */
   readonly conversationId?: string;
   /**

@@ -16,7 +16,7 @@ export interface RunParams extends SdkRunParams {
    *  transcript rows. Defaults to true. A caller whose channel keeps its own
    *  transcript turns it off. A turn routed into a recorded subagent or fork
    *  conversation writes them anyway, since that conversation has no other
-   *  transcript. */
+   *  transcript, while an explicit `persistTrace: false` still skips both. */
   persistTranscript?: boolean;
 }
 

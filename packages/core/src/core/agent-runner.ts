@@ -4,7 +4,7 @@ import type { DeferInput } from "./defer.js";
 import type { RoutineActivationGate } from "./mcp-facade.js";
 import type { UsageFunding } from "../usage/events.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -569,8 +569,7 @@ export class AgentRunner {
       );
     }
 
-    const persistTrace =
-      params.persistTrace ?? (conversation.recorderOwned || shouldPersistAgentTrace(threadContext));
+    const persistTrace = params.persistTrace ?? shouldPersistAgentTrace(threadContext);
     const recorder =
       this.webchatRepo && persistTrace
         ? new AgentTraceRecorder({
@@ -663,7 +662,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversationId);
+          recorder = await this.createForkTraceRecorder(params, message, source);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -713,14 +712,17 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceConversationId?: string,
+    source: Pick<AgentSession, "romeSessionId" | "recordedConversation">,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     try {
       const thread = params.threadContext;
-      // Prefer the source's conversation while it exists. The fallbacks
-      // cover rows that recorded none, or one since deleted.
-      const recorded = await findRecordedConversation(this.webchatRepo, sourceConversationId);
+      // Prefer the source's conversation while it exists. The session already
+      // looked up a recorded one at open, so only a named one is read here.
+      // The fallbacks cover rows that recorded none, or one since deleted.
+      const recorded = source.romeSessionId
+        ? await findRecordedConversation(this.webchatRepo, source.romeSessionId)
+        : source.recordedConversation;
       const parentSessionId =
         recorded?.id ??
         thread?.romeSessionId ??

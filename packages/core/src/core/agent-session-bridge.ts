@@ -179,8 +179,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         }
 
         const recorder =
-          this.webchatRepo &&
-          (conversation.recorderOwned || shouldPersistAgentTrace(req.init?.threadContext))
+          this.webchatRepo && shouldPersistAgentTrace(req.init?.threadContext)
             ? new AgentTraceRecorder({
                 webchatRepo: this.webchatRepo,
                 agentName: req.key.agentName,
