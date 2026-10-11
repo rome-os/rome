@@ -231,11 +231,13 @@ function saveLayout(sessionId: string, layout: WidgetPlacement[], stored: boolea
   void drainLayoutSaves(sessionId, save);
 }
 
-// Sends one PUT at a time per session, so an older layout can never land on
-// the server after a newer one. When the PUT carrying the newest layout
-// succeeds, the unsynced marker clears only if the stored layout still matches
-// it. A different stored layout came from another tab, and this PUT may have
-// landed after that tab's, so the marker is set to make a later load resend it.
+// Sends one PUT at a time per session, so this tab never sends an older layout
+// after a newer one. A timed-out PUT can still land after the next one if the
+// server stalls past the timeout and then applies it. When the PUT carrying the
+// newest layout succeeds, the unsynced marker clears only if the stored layout
+// still matches it. A different stored layout came from another tab, and this
+// PUT may have landed after that tab's, so the marker is set to make a later
+// load resend it.
 async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
   while (save.next) {
     const layout = save.next;
