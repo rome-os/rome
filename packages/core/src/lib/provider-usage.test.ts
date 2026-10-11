@@ -1,8 +1,20 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "@rstest/core";
-import { normalizeUsageStatus, parseUsageText, readLiveOrCachedUsage } from "./provider-usage.js";
+import { describe, expect, it, rs } from "@rstest/core";
+
+const logError = rs.hoisted(() => rs.fn());
+
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ error: logError, info: rs.fn(), warn: rs.fn(), debug: rs.fn() }),
+}));
+
+import {
+  normalizeUsageStatus,
+  parseUsageText,
+  readClaudeOAuthUsage,
+  readLiveOrCachedUsage,
+} from "./provider-usage.js";
 
 describe("AI tool usage parsing", () => {
   it("normalizes Claude-style usage windows", () => {
@@ -274,6 +286,72 @@ describe("AI tool usage parsing", () => {
     ).resolves.toMatchObject({
       source: "live",
       error: "live probe failed",
+    });
+  });
+
+  it("logs a failed Claude usage request with its status and Retry-After", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "secret-token";
+    globalThis.fetch = rs.fn(
+      async () => new Response("{}", { status: 429, headers: { "Retry-After": "3600" } }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(readClaudeOAuthUsage()).resolves.toMatchObject({
+        error: "Claude usage request failed with HTTP 429",
+      });
+      expect(logError).toHaveBeenCalledWith("Claude usage request failed", {
+        status: 429,
+        retryAfter: "3600",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
+  });
+
+  describe("Claude OAuth usage with no reported windows", () => {
+    const respondWith = async (payload: unknown) => {
+      const originalFetch = globalThis.fetch;
+      const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = "secret-token";
+      globalThis.fetch = rs.fn(
+        async () => new Response(JSON.stringify(payload), { status: 200 }),
+      ) as unknown as typeof fetch;
+      try {
+        return await readClaudeOAuthUsage();
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+        else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+      }
+    };
+
+    it.each([
+      ["null windows", { five_hour: null, seven_day: null, extra_usage: null }],
+      [
+        "windows with null utilization",
+        {
+          five_hour: { utilization: null, resets_at: null },
+          seven_day: { utilization: null, resets_at: null },
+        },
+      ],
+    ])("treats %s as a successful empty snapshot", async (_label, payload) => {
+      const usage = await respondWith(payload);
+      expect(usage).toMatchObject({ source: "claude oauth usage" });
+      expect(usage?.error).toBeUndefined();
+      expect(usage?.fiveHour).toBeUndefined();
+      expect(usage?.sevenDay).toBeUndefined();
+    });
+
+    it.each([
+      ["an empty object", {}],
+      ["unrecognized windows", { five_hour: { foo: 1 }, seven_day: null }],
+    ])("reports %s as an unrecognized payload", async (_label, payload) => {
+      await expect(respondWith(payload)).resolves.toMatchObject({
+        error: "Claude usage response did not include usage windows",
+      });
     });
   });
 });

@@ -320,3 +320,208 @@ describe("AgentSessionBridge working dir", () => {
     expect(acquired.map((init) => init.workingDir)).toEqual([undefined]);
   });
 });
+
+describe("AgentSessionBridge worker disconnect", () => {
+  type IpcMessage = {
+    type: string;
+    reqId?: string;
+    name?: string;
+    channelId?: string;
+    error?: string;
+  };
+
+  /** A turn that runs until the test finishes it or someone interrupts it. */
+  function controllableTurn(turnId: string) {
+    let end!: (status: "completed" | "interrupted") => void;
+    const ended = new Promise<"completed" | "interrupted">((resolve) => {
+      end = resolve;
+    });
+    const interrupt = rs.fn(async (_reason?: string) => end("interrupted"));
+    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
+      yield { type: "turn_start", turnId, sessionId: "session-1", userPrompt: "hello" };
+      const status = await ended;
+      yield { type: "turn_end", turnId, status, durationMs: 1 };
+    })();
+    const handle = { turnId, events, interrupt } as unknown as AgentTurnHandle;
+    return { handle, interrupt, finish: () => end("completed") };
+  }
+
+  function setup(
+    handles: AgentTurnHandle[],
+    options: {
+      beforeAcquire?: () => Promise<void>;
+      webchatRepo?: WebChatRepository;
+      romeSessionId?: string;
+    } = {},
+  ) {
+    const queue = [...handles];
+    const session = {
+      key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+      sessionId: "session-1",
+      conversation: options.romeSessionId
+        ? { origin: "named", id: options.romeSessionId }
+        : undefined,
+      sendTurn: () => queue.shift()!,
+    } as unknown as AgentSession;
+    const manager = {
+      acquire: async () => {
+        await options.beforeAcquire?.();
+        return session;
+      },
+      peek: () => session,
+    } as unknown as AgentSessionManager;
+    const turns = createAgentTurnStreamRegistry();
+    const child = new FakeChild();
+    new AgentSessionBridge(manager, options.webchatRepo, undefined, turns).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+      child as unknown as ChildProcess,
+    );
+    const sent = () => child.sent as IpcMessage[];
+
+    let seq = 0;
+    const requestTurn = (params: Record<string, unknown> = {}) => {
+      const reqId = `request-${++seq}`;
+      child.emit("message", {
+        type: "rpc_request",
+        reqId,
+        method: "agent.session.runTurn",
+        params: { key: session.key, input: { prompt: "hello" }, ...params },
+      });
+      return reqId;
+    };
+    const response = async (reqId: string) => {
+      let found: IpcMessage | undefined;
+      await rs.waitFor(() => {
+        found = sent().find((m) => m.type === "rpc_response" && m.reqId === reqId);
+        expect(found).toBeDefined();
+      });
+      return found!;
+    };
+    const turnStreamClosed = (turnId: string) => {
+      const opened = sent().find(
+        (m) => m.type === "stream_open" && m.name === `agent.turn:${turnId}`,
+      );
+      return sent().some((m) => m.type === "stream_close" && m.channelId === opened?.channelId);
+    };
+    const workerGone = (event: "disconnect" | "exit") => {
+      child.connected = false;
+      child.emit(event);
+    };
+    return { turns, sent, requestTurn, response, turnStreamClosed, workerGone };
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it("interrupts a running turn when its worker disconnects", async () => {
+    const turn = controllableTurn("turn-1");
+    const { turns, requestTurn, response, workerGone } = setup([turn.handle]);
+
+    await response(requestTurn());
+    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(false));
+
+    workerGone("disconnect");
+
+    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
+    expect(turn.interrupt).toHaveBeenCalledTimes(1);
+    expect(turn.interrupt).toHaveBeenCalledWith("action worker disconnected");
+    expect(turns.get("turn-1")?.messages().at(-1)).toMatchObject({
+      type: "turn_end",
+      status: "interrupted",
+    });
+  });
+
+  it("interrupts a running turn when its worker exits", async () => {
+    const turn = controllableTurn("turn-1");
+    const { requestTurn, response, workerGone } = setup([turn.handle]);
+
+    await response(requestTurn());
+    workerGone("exit");
+
+    await rs.waitFor(() =>
+      expect(turn.interrupt).toHaveBeenCalledWith("action worker disconnected"),
+    );
+  });
+
+  it("interrupts a turn whose worker disconnected before the turn started", async () => {
+    const turn = controllableTurn("turn-1");
+    let acquireStarted = false;
+    let releaseAcquire!: () => void;
+    const acquireReleased = new Promise<void>((resolve) => {
+      releaseAcquire = resolve;
+    });
+    const { requestTurn, workerGone } = setup([turn.handle], {
+      beforeAcquire: async () => {
+        acquireStarted = true;
+        await acquireReleased;
+      },
+    });
+
+    requestTurn();
+    await rs.waitFor(() => expect(acquireStarted).toBe(true));
+    workerGone("disconnect");
+    releaseAcquire();
+
+    await rs.waitFor(() =>
+      expect(turn.interrupt).toHaveBeenCalledWith("action worker disconnected"),
+    );
+  });
+
+  it("leaves a finished turn alone when its worker later disconnects", async () => {
+    const turn = controllableTurn("turn-1");
+    const { requestTurn, response, turnStreamClosed, workerGone } = setup([turn.handle]);
+
+    await response(requestTurn());
+    turn.finish();
+    await rs.waitFor(() => expect(turnStreamClosed("turn-1")).toBe(true));
+
+    workerGone("disconnect");
+    await settle();
+
+    expect(turn.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("interrupts only the turn still running when a worker with two turns disconnects", async () => {
+    const first = controllableTurn("turn-1");
+    const second = controllableTurn("turn-2");
+    const { requestTurn, response, turnStreamClosed, workerGone } = setup([
+      first.handle,
+      second.handle,
+    ]);
+
+    await response(requestTurn());
+    await response(requestTurn());
+    first.finish();
+    await rs.waitFor(() => expect(turnStreamClosed("turn-1")).toBe(true));
+
+    workerGone("disconnect");
+
+    await rs.waitFor(() =>
+      expect(second.interrupt).toHaveBeenCalledWith("action worker disconnected"),
+    );
+    expect(first.interrupt).not.toHaveBeenCalled();
+  });
+
+  it("interrupts a turn whose message assignment fails, and only once", async () => {
+    const turn = controllableTurn("turn-1");
+    const webchatRepo = {
+      assignConversationMessageTurn: async () => {
+        throw new Error("db down");
+      },
+    } as unknown as WebChatRepository;
+    const { sent, requestTurn, response, workerGone } = setup([turn.handle], {
+      webchatRepo,
+      romeSessionId: "channel:discord:channel-1",
+    });
+
+    const result = await response(requestTurn({ platformMessageId: "message-1" }));
+
+    expect(result.error).toContain("db down");
+    await rs.waitFor(() => expect(turn.interrupt).toHaveBeenCalledWith("agent turn setup failed"));
+    expect(sent().some((m) => m.type === "stream_open")).toBe(false);
+
+    workerGone("disconnect");
+    await settle();
+
+    expect(turn.interrupt).toHaveBeenCalledTimes(1);
+  });
+});

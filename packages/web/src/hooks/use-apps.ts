@@ -129,7 +129,9 @@ export type StoreListingVersion = { published: true; version: string } | { publi
 // publish row can say whether publishing will be accepted. Advisory: an
 // unreachable or unconfigured store, a deleted listing, or any other failure
 // yields null and the row keeps its plain hint; the store still enforces the
-// version policy on publish.
+// version policy on publish. A result is never reused across visits and is
+// re-read on window focus: agents and the CLI publish without going through
+// the dashboard's publish mutation, so a cached "not published" can be false.
 export function useStoreListingVersion(
   appId: string,
   options: { enabled: boolean },
@@ -137,7 +139,8 @@ export function useStoreListingVersion(
   const listing = useQuery({
     queryKey: [...STORE_LISTING_QUERY_KEY, appId],
     enabled: options.enabled,
-    staleTime: 60_000,
+    staleTime: 0,
+    gcTime: 0,
     queryFn: async ({ signal }): Promise<StoreListingVersion | null> => {
       // Scoped ids (`@handle/slug`) map onto the proxy's two-segment route.
       const path = appId.split("/").map(encodeURIComponent).join("/");

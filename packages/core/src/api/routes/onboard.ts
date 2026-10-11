@@ -1,40 +1,25 @@
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { v4 as uuidv4 } from "uuid";
-import { guardianAuth, persons, settings } from "../../db/schema.js";
+import { guardianAuth, persons } from "../../db/schema.js";
 import { STRANGER_PERSON_ID, STRANGER_PERSON_DISPLAY_NAME } from "../../constants.js";
 import { COOKIE_NAME, hashPassword, issueGuardianSession, verifySession } from "../../lib/auth.js";
 import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
-import {
-  applyGuardianProfile,
-  applySetupDefaults,
-  type GuardianProfileInput,
-} from "../../lib/guardian-profile.js";
+import { applySetupDefaults } from "../../lib/guardian-profile.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { getInstanceToken } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 
-const RESUMABLE_SETTING_KEYS = new Set([
-  "agentName",
-  "agentPurpose",
-  "guardianName",
-  "guardianTimezone",
-  "guardianX",
-  "guardianLinkedin",
-  "interests",
-  "onboardingStep",
-]);
-
 export function onboardRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
 
   // The SPA bootstrap probe. Returns the lifecycle as a single
   // discriminated `BootstrapState` computed server-side — the SPA's gate is a
-  // `switch (phase)` over this. Unauthenticated (it reads the session if present
-  // but never requires one); the resume payload lives on `/onboard/draft`.
+  // `switch (phase)` over this. Unauthenticated: it reads the session if present
+  // but never requires one.
   app.get("/bootstrap", async (c) => {
     const session = await resolveGuardianSession(c, deps.db);
     const visitor = resolveVisitorSession(c);
@@ -56,25 +41,6 @@ export function onboardRoutes(deps: ApiDeps): Hono {
     });
 
     return c.json(state);
-  });
-
-  // Returns the authenticated guardian's id and any partially-filled onboarding
-  // settings. Setup writes both names itself, so this serves a legacy instance
-  // that was mid-onboarding before setup moved into the welcome conversation.
-  app.get("/onboard/draft", async (c) => {
-    const session = await resolveGuardianSession(c, deps.db);
-    if (!session) {
-      return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    const rows = await deps.db.select().from(settings);
-    const draft: Record<string, unknown> = {};
-    for (const row of rows) {
-      if (!RESUMABLE_SETTING_KEYS.has(row.key)) continue;
-      draft[row.key] = row.value;
-    }
-
-    return c.json({ userId: session.userId, settings: draft });
   });
 
   // The whole of local-first setup. Creating the seat also finishes it: the
@@ -139,44 +105,6 @@ export function onboardRoutes(deps: ApiDeps): Hono {
 
     issueGuardianSession(c, userId);
     deps.loginUsage.recordLogin("onboard");
-
-    return c.json({ success: true });
-  });
-
-  app.post("/onboard/setup", async (c) => {
-    const token = getCookie(c, COOKIE_NAME);
-    if (!token) {
-      return c.json({ error: "Not authenticated" }, 401);
-    }
-
-    const session = verifySession(token);
-    if (!session) {
-      return c.json({ error: "Invalid session" }, 401);
-    }
-
-    const [existing] = await deps.db.select({ id: guardianAuth.id }).from(guardianAuth).limit(1);
-
-    if (!existing) {
-      return c.json({ error: "No account found. Please create an account first." }, 400);
-    }
-
-    const body = await c.req.json<{ profile?: GuardianProfileInput }>().catch(() => null);
-    if (!body) {
-      return c.json({ error: "Invalid request body" }, 400);
-    }
-
-    // The guardian's display name is what the greeting and the person graph
-    // render, and there is no acceptable machine fallback. The shared write
-    // rejects a blank name before any write, so a blank never reaches the
-    // person row or the settings KV.
-    const result = await applyGuardianProfile(body.profile ?? {}, {
-      db: deps.db,
-      settingsRepo: deps.settingsRepo,
-      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
-    });
-    if (!result.ok) {
-      return c.json({ error: "Guardian name is required" }, 400);
-    }
 
     return c.json({ success: true });
   });

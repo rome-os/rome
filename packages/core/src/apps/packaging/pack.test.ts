@@ -9,7 +9,8 @@ import {
 } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { buildSourceWorkspace, packArtifact, runPnpm } from "./pack.js";
 import { hashArtifact } from "./hash.js";
@@ -847,6 +848,27 @@ describe("runPnpm", () => {
     expect(message).not.toContain("tok_xyz");
   });
 
+  it("puts a hint before the tail when a dependency build found no make", async () => {
+    fakePnpm(`cat '${nativeBuildFixture("pnpm-native-build-no-make.txt")}'\nexit 1`);
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    const [summary, hint, tailHeading] = message.split("\n");
+    expect(summary).toBe(`Command failed: pnpm install (cwd: ${cwd}, exit 1)`);
+    expect(hint).toMatch(
+      /^Hint: building better-sqlite3 needs make .* system:custom-dependencies skill/,
+    );
+    expect(tailHeading).toBe("pnpm output (tail):");
+    expect(message).toContain("gyp ERR! stack Error: not found: make");
+  });
+
+  it("adds no hint when a native build failed with its toolchain present", async () => {
+    fakePnpm(`cat '${nativeBuildFixture("pnpm-native-build-compile-error.txt")}'\nexit 1`);
+    const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
+      .message;
+    expect(message).toContain("gyp ERR! not ok");
+    expect(message).not.toContain("Hint:");
+  });
+
   it("leaves the message unchanged when pnpm printed nothing", async () => {
     fakePnpm("exit 2");
     const message = ((await runPnpm(["install"], { cwd }).catch((e: unknown) => e)) as Error)
@@ -854,6 +876,10 @@ describe("runPnpm", () => {
     expect(message).toBe(`Command failed: pnpm install (cwd: ${cwd}, exit 2)`);
   });
 });
+
+function nativeBuildFixture(name: string): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "__fixtures__", name);
+}
 
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];

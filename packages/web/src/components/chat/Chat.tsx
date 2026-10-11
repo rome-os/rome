@@ -116,7 +116,7 @@ import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -894,7 +894,14 @@ export function Chat({
               // Model-resolution failures are persisted as assistant error
               // messages, so they render once in the conversation rather than
               // being duplicated above the composer.
-              if (!payload.success && payload.error && !isModelResolutionErrorCode(payload.code)) {
+              // The composer banner belongs to the floor, as for reconnect
+              // errors below; a background turn's failure stays off it.
+              if (
+                !payload.success &&
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
@@ -912,7 +919,11 @@ export function Chat({
           if (evt.event === "stream_error") {
             try {
               const payload = JSON.parse(evt.data) as Partial<DoneEventData>;
-              if (payload.error && !isModelResolutionErrorCode(payload.code)) {
+              if (
+                payload.error &&
+                !isModelResolutionErrorCode(payload.code) &&
+                sessionId === floorSessionIdRef.current
+              ) {
                 setStreamError({
                   message: payload.error,
                   ...(payload.code ? { code: payload.code } : {}),
@@ -1005,11 +1016,13 @@ export function Chat({
           }
           if (evt.event === "widget_placement") {
             // An action returned `place_widget`: mount the app's widget on the
-            // freegrid without parking the agent. autoPlaceApp keys by appId, so
-            // a repeat placement retargets the existing tile (to the new
-            // route/params) in place rather than stacking duplicates.
+            // freegrid without parking the agent. Placement keys by appId, so a
+            // repeat placement retargets the existing tile (to the new
+            // route/params) in place rather than stacking duplicates, and a
+            // replayed `placementId` the layout already applied is skipped.
             try {
-              const { appId, route, params } = JSON.parse(evt.data) as {
+              const { placementId, appId, route, params } = JSON.parse(evt.data) as {
+                placementId?: string;
                 appId?: string;
                 route?: string;
                 params?: Record<string, string | number | boolean>;
@@ -1017,7 +1030,7 @@ export function Chat({
               // The floor owns the workspace; a background turn's replayed
               // placement would remount (and reset) a widget in use.
               if (appId && sessionId === floorSessionIdRef.current) {
-                autoPlaceApp(appId, route, params);
+                applyAgentPlacement(placementId, appId, route, params);
               }
             } catch {
               // ignore parse errors

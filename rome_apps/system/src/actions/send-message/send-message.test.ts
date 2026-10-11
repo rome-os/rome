@@ -100,7 +100,12 @@ describe("send_message attachments", () => {
 
 describe("send_message email union", () => {
   function makeEmailAdapter(): ChannelsService {
-    return makeAdapter("email");
+    const adapter = makeAdapter("email");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      conversationId: "t1",
+      messageId: "msg_1",
+    });
+    return adapter;
   }
 
   it("maps email-specific fields into OutgoingMessage.email for a new email", async () => {
@@ -153,6 +158,26 @@ describe("send_message email union", () => {
     });
     const [, , message] = (adapter.send as ReturnType<typeof rs.fn>).mock.calls[0];
     expect(message.html).toBe("<p>hi</p>");
+  });
+
+  it("rejects email attachments before checking their sources or the body", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, {
+        channel: "email",
+        to: "x@y.com",
+        attachments: [{ type: "document", source: "/outside/any/workspace.txt" }],
+      }),
+    ).rejects.toThrow("Email attachments are not supported by the mail transport");
+    expect(adapter.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects an email whose text and html are blank", async () => {
+    const adapter = makeEmailAdapter();
+    await expect(
+      executeSendMessage(adapter, { channel: "email", to: "x@y.com", text: " ", html: "" }),
+    ).rejects.toThrow("Email requires non-empty `text` or `html`");
+    expect(adapter.send).not.toHaveBeenCalled();
   });
 });
 

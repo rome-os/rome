@@ -2270,6 +2270,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "workflow-studio",
       });
 
@@ -2288,6 +2289,61 @@ describe("Webchat API", () => {
         }
       });
       expect(hasCard).toBe(false);
+    });
+
+    it("replays a placement under the id it went out with live, and mints a new id per placement", async () => {
+      deps.appCatalog = {
+        listResolved: () => [{ appId: "orders", manifest: { components: [] } }],
+      } as unknown as typeof deps.appCatalog;
+      const placementIds = (events: Array<{ event: string; data: string }>) =>
+        events
+          .filter((e) => e.event === "widget_placement")
+          .map((e) => (JSON.parse(e.data) as { placementId: string }).placementId);
+      const placeOrders = (toolUseId: string) => ({
+        type: "tool_result",
+        toolUseId,
+        tool: "execute_action",
+        output: [
+          {
+            type: "text",
+            text: JSON.stringify({ placeWidget: true, appId: "orders", route: "orders/123" }),
+          },
+        ],
+      });
+
+      // Hold the placements until the reader is attached, so they go out live.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const { events, app } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "Placing" };
+            await gate;
+            yield placeOrders("tu-place-1");
+            yield placeOrders("tu-place-2");
+            yield { type: "result", content: "" };
+          })() as AsyncGenerator<never>,
+        (evt) => {
+          if (evt.event === "assistant_text") release();
+        },
+      );
+
+      // Two placements with the same route are two placements, not a replay.
+      const live = placementIds(events);
+      expect(live).toHaveLength(2);
+      expect(live[0]).not.toBe(live[1]);
+
+      // A reconnect inside the terminal grace window replays the app's latest
+      // placement under the same id, so a client can tell it was applied.
+      const resumed = await app.request("/chat/turns/turn-stream-1/stream");
+      expect(resumed.status).toBe(200);
+      const replayed = (await resumed.text())
+        .split("\n\n")
+        .filter((frame) => frame.startsWith("event: widget_placement\n"))
+        .map(
+          (frame) => (JSON.parse(frame.split("data: ")[1]!) as { placementId: string }).placementId,
+        );
+      expect(replayed).toEqual([live[1]]);
     });
 
     it("does not emit widget_placement when the owning app is not installed (fail closed)", async () => {
@@ -2314,6 +2370,7 @@ describe("Webchat API", () => {
       const placement = events.find((event) => event.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "sessions",
         route: "feedback-fork-session",
       });
@@ -2334,6 +2391,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "orders",
         route: "orders/123",
         params: { tab: "history" },
@@ -2354,6 +2412,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "orders",
         params: { orderId: 123 },
       });
@@ -2934,6 +2993,116 @@ describe("Webchat API", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    const askQuestionEvents = (toolUseId: string) =>
+      async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId,
+          tool: "ask_question",
+          output: {
+            pendingInteraction: true,
+            appId: "core",
+            render: {
+              kind: "inline",
+              componentId: "question-card",
+              props: { questions: [] },
+              builtin: true,
+            },
+          },
+        };
+        yield { type: "result", content: "" };
+      };
+
+    async function userPartsIn(sessionId: string) {
+      const messages = await deps.webchatRepo.getMessages(sessionId);
+      return messages
+        .filter((m) => m.role === "user")
+        .flatMap((m) => JSON.parse(m.content) as Array<Record<string, unknown>>);
+    }
+
+    it("closes an open question card when the guardian types a reply instead", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(askQuestionEvents("tu-ask-typed"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me plan" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-ask-typed")).toBeDefined();
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const replyRes = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "Just go with the small one" }),
+      });
+      expect(replyRes.status).toBe(200);
+      await drainTurn(app, replyRes);
+
+      // The agent hears that the card was skipped, and still gets the reply.
+      const prompt = ctl.sentTurns.at(-1)?.prompt ?? "";
+      expect(prompt).toContain("skipped your open card");
+      expect(prompt).toContain("Just go with the small one");
+      // The dismissal is stored with the reply, so the card is closed for good.
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-typed",
+        output: { dismissed: true },
+      });
+      const lateRes = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            { type: "interaction_result", toolUseId: "tu-ask-typed", output: { scope: "Small" } },
+          ],
+        }),
+      });
+      expect(lateRes.status).toBe(400);
+    });
+
+    it("leaves an app's inline card open when the guardian types a reply", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(inlineRenderEvents("tu-app-typed", "ask-user", "question-card"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "ask me something" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-app-typed")).toBeDefined();
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "one more thing" }),
+        }),
+      );
+
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain("skipped your open card");
+      expect((await userPartsIn(sessionId)).some((p) => p.type === "interaction_result")).toBe(
+        false,
+      );
     });
 
     // An inline component goes through the same suspension lifecycle as a

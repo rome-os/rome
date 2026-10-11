@@ -1,3 +1,4 @@
+import { APIError } from "@composio/client";
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as sharedModule from "../shared.js" with { rstest: "importActual" };
@@ -175,6 +176,9 @@ describe("connector_proxy response mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/401/);
     expect(result.error).toMatch(/invalid token/);
+    // The provider refused its own token, which says nothing about the Composio
+    // sign-in, so the agent must not be sent to connector_login.
+    expect(result.error).not.toMatch(/connector_login/);
   });
 
   it("fails closed when the toolkit is not connected", async () => {
@@ -404,5 +408,82 @@ describe("connector_proxy response mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/Refusing to proxy/);
     expect(readSlackOAuthTokens).not.toHaveBeenCalled();
+  });
+});
+
+// The error the SDK throws when Composio rejects Rome's own CLI session key.
+function composioError(status: number) {
+  return APIError.generate(
+    status,
+    { error: { slug: "UserApiKey_Unauthorized", message: "Invalid or revoked user API key" } },
+    undefined,
+    new Headers(),
+  );
+}
+
+describe("connector_proxy when Composio rejects the call", () => {
+  it("sends the agent to connector_login when the account lookup is rejected", async () => {
+    const proxyTool = rs.fn();
+    const ping = rs.fn(async () => ({ ok: false, status: 401, message: "revoked" }));
+    loadConnectorClient.mockResolvedValueOnce({
+      findActiveConnectedAccount: async () => {
+        throw composioError(401);
+      },
+      proxyTool,
+      ping,
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/connector_login/);
+    expect(result.error).toMatch(/sign in again/i);
+    expect(result.error).toMatch(/UserApiKey_Unauthorized/);
+    expect(proxyTool).not.toHaveBeenCalled();
+  });
+
+  it("sends the agent to connector_login when the proxy call itself is rejected", async () => {
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(401);
+      }),
+      ping: async () => ({ ok: false, status: 401, message: "revoked" }),
+    });
+    const result = await run(linearCall);
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/connector_login/),
+    });
+  });
+
+  it("keeps the generic error when the saved sign-in still pings OK", async () => {
+    // A 401 the ping does not confirm is about something other than the sign-in.
+    // connector_login would answer signed_in, so naming it here would loop.
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(401);
+      }),
+      ping: async () => ({ ok: true }),
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/^Composio proxy call failed: /);
+    expect(result.error).not.toMatch(/connector_login/);
+  });
+
+  it.each([403, 429, 500])("keeps the generic error for a thrown %i", async (status) => {
+    const ping = rs.fn();
+    loadConnectorClient.mockResolvedValueOnce({
+      ...clientWithProxy(async () => {
+        throw composioError(status);
+      }),
+      ping,
+    });
+    const result = await run(linearCall);
+    expect(result.status).toBe("error");
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toMatch(/^Composio proxy call failed: /);
+    expect(result.error).not.toMatch(/connector_login/);
+    expect(ping).not.toHaveBeenCalled();
   });
 });

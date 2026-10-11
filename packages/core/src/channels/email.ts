@@ -12,11 +12,17 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
+import {
+  type EmailReplyTarget,
+  type ResolvedEmailReplyTarget,
+  resolveEmailReplyTarget,
+} from "./email-reply-target.js";
 import type {
   MailProvider,
   RomeMailEvent,
   RomeMailMessage,
   RomeMailListItem,
+  SendMailResult,
   EmailAddress,
   EmailBodyPart,
 } from "../lib/rome-cloud-mail.js";
@@ -140,6 +146,7 @@ const HISTORY_MAX_SCAN = 2000;
 // cursor (0 messages ⇒ scan count never advances). This caps the number of
 // list calls regardless of what each page contains, guaranteeing termination.
 const HISTORY_MAX_PAGES = 50;
+const REPLY_TARGET_CACHE_SIZE = 2000;
 
 function attachmentTypeFromMime(mime: string | undefined): Attachment["type"] {
   const m = (mime ?? "").toLowerCase();
@@ -196,13 +203,11 @@ export class EmailAdapter {
 
   private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  // AgentMail wants a provider message id to keep a reply on-thread, but Rome's
-  // thread key is the (stable) AgentMail thread id. Map the latest inbound
-  // message id per thread so a reply can address the thread correctly. In-memory
-  // is fine: a reply follows its inbound within the same process lifetime, and a
-  // miss falls back to a fresh `to:` send.
-  private readonly threadReplyTarget = new Map<string, string>();
-  private readonly threadSubject = new Map<string, string>();
+  // The message each thread's replies target: the newest inbound, or the newest
+  // message Rome sent, for a thread with no inbound. The mailbox scan applies
+  // the same rule. This bounded cache saves that scan per reply but is not
+  // durable state; a miss falls back to the scan.
+  private readonly threadReplyTarget = new Map<string, EmailReplyTarget>();
 
   // Per-inbound attachment manifest (provider message id → downloadable body
   // parts), set in ingestInbound and consumed by saveIncomingAttachments to pull
@@ -288,7 +293,6 @@ export class EmailAdapter {
 
   async stop(): Promise<void> {
     this.threadReplyTarget.clear();
-    this.threadSubject.clear();
     this.pendingAttachments.clear();
     log.info("email channel stopped");
   }
@@ -314,22 +318,95 @@ export class EmailAdapter {
     return resolved.includes("@") ? resolved : "";
   }
 
-  /** Send into a conversation. The email replies on-thread when it has a reply
-   *  target: `email.inReplyToMessageId`, or the last inbound this process saw
-   *  in the conversation. Otherwise it starts a fresh email to `email.to`, or
-   *  to the conversation id read as an address. The receipt's
-   *  `conversationId` is the provider's thread id when an email went out, and
-   *  `conversationId` when none did. */
+  /**
+   * Send into a conversation and return the provider's receipt: its message ID
+   * and thread ID. Unresolved threads, unresolved recipients, and attachments
+   * throw before anything is sent. A provider answer without both IDs throws as
+   * unconfirmed, since the mail may have gone out.
+   *
+   * An empty body is the one exception that neither sends nor throws, unless the
+   * caller asked for an email explicitly (`kind: "email"`). Parts-only messages
+   * such as approval cards have no email rendering, so the adapter skips them and
+   * receipts the conversation it was asked for, without a `messageId`.
+   *
+   * A thread reply targets the newest received message in the thread, falling
+   * back to the newest message Rome sent for a thread nobody else wrote in.
+   */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const sent = await this.sendMail(conversationId, message);
-    return {
-      conversationId: (sent?.threadId ?? conversationId) as ConversationId,
-      ...(sent?.messageId ? { messageId: sent.messageId } : {}),
-    };
+    const outcome = await this.sendMail(conversationId, message);
+    if (!outcome) return { conversationId };
+    const { sent, startedThread } = outcome;
+    // An explicit reply on an uncached thread says nothing about whether the
+    // thread has inbound mail, so only a new or cached thread records the send.
+    if (startedThread || this.threadReplyTarget.has(sent.threadId)) {
+      this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
+    }
+    log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
+    return { conversationId: sent.threadId as ConversationId, messageId: sent.messageId };
   }
 
-  private async sendMail(threadId: string, message: OutgoingMessage) {
+  // A sent message never replaces a received one, so once a thread has inbound
+  // mail, replies keep addressing the other party.
+  private rememberReplyTarget(threadId: string, target: EmailReplyTarget): void {
+    if (!threadId || !target.messageId) return;
+    const cached = this.threadReplyTarget.get(threadId);
+    const next = target.outbound && cached && !cached.outbound ? cached : target;
+    this.threadReplyTarget.delete(threadId);
+    this.threadReplyTarget.set(threadId, next);
+    if (this.threadReplyTarget.size > REPLY_TARGET_CACHE_SIZE) {
+      const oldest = this.threadReplyTarget.keys().next().value;
+      if (oldest !== undefined) this.threadReplyTarget.delete(oldest);
+    }
+  }
+
+  private async threadReplyTargetFor(threadId: string): Promise<EmailReplyTarget> {
+    const cached = this.threadReplyTarget.get(threadId);
+    if (cached) return cached;
+    let resolved: ResolvedEmailReplyTarget;
+    try {
+      resolved = await resolveEmailReplyTarget(this.provider, threadId, {
+        isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
+      });
+    } catch (err) {
+      // A target cached while the lookup ran is as good as a cache hit.
+      const live = this.threadReplyTarget.get(threadId);
+      if (live) return live;
+      throw err;
+    }
+    const target = { messageId: resolved.messageId, outbound: resolved.outbound };
+    // A target cached while the lookup ran is newer than anything it found,
+    // unless it is Rome's own message and the lookup found an inbound one.
+    const live = this.threadReplyTarget.get(threadId);
+    if (live && (!live.outbound || target.outbound)) return live;
+    // A fallback from a lookup cut short serves this send only, so the next
+    // reply looks for the inbound again.
+    if (resolved.complete) this.rememberReplyTarget(threadId, target);
+    return target;
+  }
+
+  // AgentMail labels this inbox's own sends "sent". A `from` equal to the inbox
+  // address also counts, so the rule survives a change in label vocabulary.
+  private isOwnMessage(labels: string[], fromAddress: string): boolean {
+    const selfAddress = normalizeAddress(this.address);
+    return labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
+  }
+
+  /** Returns undefined only when an empty body was skipped without sending. */
+  private async sendMail(
+    threadId: string,
+    message: OutgoingMessage,
+  ): Promise<{ sent: SendMailResult; startedThread: boolean } | undefined> {
+    // The mail transport has no attachment field. Reject before sending a body
+    // that would falsely appear to deliver the requested files.
+    if (message.attachments?.length) {
+      throw new Error(
+        "Email attachments are not supported by the mail transport. No email was sent.",
+      );
+    }
     const email = message.kind === "email" ? message : undefined;
+    if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
+      throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+    }
     const bodyText = (message.text ?? textFromParts(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
@@ -347,38 +424,66 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
+      if (email) throw new Error("Email requires non-empty text or HTML. No email was sent.");
       log.debug("skipping empty outbound email", { threadId: threadId || null });
-      return;
+      return undefined;
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
     const bcc = email?.bcc?.length ? email.bcc : undefined;
 
-    // Reply on-thread when we have a provider message id — either passed
-    // explicitly (survives restarts) or remembered from the inbound this process
-    // handled. The provider keeps the subject/recipients of the original thread.
-    const inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
-    if (inReplyToMessageId) {
+    // An explicit message ID wins. A thread miss must not become a fresh send,
+    // even when the caller also supplied `to`.
+    if (email?.inReplyToMessageId) {
+      const inReplyToMessageId = email.inReplyToMessageId;
       const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
-      log.info("sent email reply", { threadId: threadId || null });
-      return sent;
+      return { sent, startedThread: false };
+    }
+    // A chat-style conversation id that names an address or the guardian alias
+    // starts a new email, so a missing guardian address gets its own error.
+    const addressTarget =
+      !email &&
+      (!!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian");
+    if (threadId && (this.threadReplyTarget.has(threadId) || !addressTarget)) {
+      const target = await this.threadReplyTargetFor(threadId);
+      if (target.outbound) {
+        // Where the provider delivers a reply to Rome's own message is
+        // unverified, so leave a trace for anyone checking that path.
+        log.info("email reply targets a message Rome sent", {
+          threadId,
+          inReplyToMessageId: target.messageId,
+        });
+      }
+      const inReplyToMessageId = target.messageId;
+      const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+      return { sent, startedThread: false };
     }
 
     // No thread: start a fresh email. Recipients come from `email.to`,
     // falling back to the conversation id, which then names the address.
-    const recipients = this.resolveRecipients(email?.to ?? threadId);
+    const to = email?.to ?? threadId;
+    const recipients = this.resolveRecipients(to);
     const hasRecipient = Array.isArray(recipients) ? recipients.length > 0 : !!recipients;
-    if (!hasRecipient) {
-      log.warn("cannot send email: no recipient resolved", { threadId: threadId || null });
-      return;
-    }
-    const subject =
-      email?.subject?.trim() || this.threadSubject.get(threadId) || "Message from Rome";
+    if (!hasRecipient) throw new Error(this.noRecipientMessage(to));
+    const subject = email?.subject?.trim() || "Message from Rome";
     const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
-    log.info("sent new email", {
-      recipients: Array.isArray(recipients) ? recipients.length : 1,
-    });
-    return sent;
+    return { sent, startedThread: true };
+  }
+
+  private noRecipientMessage(to: string | string[]): string {
+    const values = (Array.isArray(to) ? to : [to]).map((value) => value.trim());
+    if (values.some((value) => value.toLowerCase() === "guardian") && !this.guardianEmail) {
+      return (
+        'Cannot send email to "guardian": Rome has no guardian email address yet. ' +
+        "No email was sent. Set `to` to an email address."
+      );
+    }
+    const shown = values.map((value) => JSON.stringify(value)).join(", ") || '""';
+    const verdict = values.length > 1 ? `none of ${shown} is` : `${shown} is not`;
+    return (
+      `Cannot send email: ${verdict} an email address. No email was sent. ` +
+      'Set `to` to an email address or "guardian", or reply on a thread with `threadId`.'
+    );
   }
 
   /**
@@ -519,8 +624,7 @@ export class EmailAdapter {
     }
 
     const threadId = event.threadId;
-    this.threadReplyTarget.set(threadId, event.providerMessageId);
-    this.threadSubject.set(threadId, event.subject ? `Re: ${event.subject}` : "Message from Rome");
+    this.rememberReplyTarget(threadId, { messageId: event.providerMessageId, outbound: false });
 
     // Attachment manifest from the event (bytes pulled lazily by
     // saveIncomingAttachments). Keep the parts list aligned with the surfaced
@@ -561,7 +665,7 @@ export class EmailAdapter {
    * returns ChannelMessages oldest-first. A line this inbox sent has direction
    * `outbound`. Each line's `raw` is the provider's message, or its list item
    * when the body pull failed. This path is pure: unlike `ingestInbound` it
-   * records no dedup, mutates no reply-target/subject/attachment state, and
+   * records no dedup, mutates no reply-target/attachment state, and
    * dispatches nothing — it only reads and shapes.
    */
   async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {
@@ -659,14 +763,11 @@ export class EmailAdapter {
     const fromName = fromContact?.name?.trim() || parseDisplayName(item.from) || fromAddress;
 
     // A thread mixes inbound (counterparty) mail and outbound mail Rome itself
-    // sent. AgentMail labels our own sends "sent"; we also treat a `from` that
-    // matches our own inbox as outbound so attribution survives a label-vocabulary
-    // change. Attributing outbound to Rome (rather than to the recipient) keeps
+    // sent. Attributing outbound to Rome (rather than to the recipient) keeps
     // the transcript a readable two-sided conversation: received lines show the
     // counterparty, sent lines show Rome — mirroring the telegram-user adapter.
     const selfAddress = normalizeAddress(this.address);
-    const isOutbound =
-      item.labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
+    const isOutbound = this.isOwnMessage(item.labels, fromAddress);
     const senderId = isOutbound ? selfAddress : fromAddress;
     const senderDisplayName = isOutbound ? selfAddress : fromName;
 

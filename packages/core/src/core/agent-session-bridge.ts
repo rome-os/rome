@@ -17,6 +17,7 @@ import type {
   AgentSessionKey,
   AgentSessionManager,
   AgentSession,
+  AgentTurnHandle,
   AgentTurnInput,
 } from "./agent-session.js";
 import { createLogger } from "../logger.js";
@@ -36,6 +37,8 @@ import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 
 const log = createLogger("agent-session-bridge");
+
+const WORKER_DISCONNECTED_REASON = "action worker disconnected";
 
 /** The one action whose agent runs inherit the calling session's project. */
 const SUMMON_ACTION = "system:summon";
@@ -71,6 +74,11 @@ export interface AgentSessionChildBridge {
  * The bridge registers `agent.session.runTurn` on the child's IpcRpc. The
  * handler resolves to `{ turnId, sessionId, romeSession }`, and the worker subscribes to the named
  * stream `agent.turn:<turnId>` to receive AgentMessages.
+ *
+ * A turn started over the bridge lives only as long as the worker that asked
+ * for it. When that worker's IpcRpc disconnects (the child crashes, exits, or
+ * is killed by action cancellation), the bridge interrupts every turn the
+ * worker started that has not ended, so it finishes `interrupted`.
  */
 export class AgentSessionBridge implements AgentSessionChildBridge {
   constructor(
@@ -169,12 +177,25 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           romeSessionType,
           replyTo: req.replyTo,
         });
+        const turnLogFields = {
+          ...baseLogFields,
+          sessionId: session.sessionId,
+          turnId: handle.turnId,
+        };
+        const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
         if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
-          await this.webchatRepo.assignConversationMessageTurn(
-            romeSessionId,
-            req.platformMessageId,
-            handle.turnId,
-          );
+          try {
+            await this.webchatRepo.assignConversationMessageTurn(
+              romeSessionId,
+              req.platformMessageId,
+              handle.turnId,
+            );
+          } catch (err) {
+            // The drain loop below never starts, so nothing would read this
+            // turn's events and the worker never learns its turnId.
+            workerWatch.interrupt("agent turn setup failed");
+            throw err;
+          }
         }
 
         const recorder =
@@ -249,6 +270,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             });
             stream.close({ error: err instanceof Error ? err : new Error(String(err)) });
           } finally {
+            workerWatch.release();
             liveStream?.finish();
           }
         })();
@@ -288,4 +310,54 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     const callerSessionId = req.actionContext?.sessionId;
     return callerSessionId ? this.manager.findWorkingDirBySessionId(callerSessionId) : undefined;
   }
+}
+
+interface TurnWorkerWatch {
+  /** Stops watching. Call once the turn has ended. */
+  release(): void;
+  /** Interrupts the turn now and stops watching, so a later disconnect does not interrupt it again. */
+  interrupt(reason: string): void;
+}
+
+/**
+ * Interrupts `handle`'s turn when `rpc` disconnects. A worker that already
+ * disconnected still gets its turn interrupted, because `IpcRpc.onDisconnect`
+ * runs a late subscriber on the next microtask. Never throws: an interrupt
+ * that fails is logged.
+ */
+function interruptTurnOnWorkerDisconnect(
+  rpc: IpcRpc,
+  session: AgentSession,
+  handle: AgentTurnHandle,
+  logFields: Record<string, unknown>,
+): TurnWorkerWatch {
+  let watching = true;
+  let offDisconnect: () => void = () => undefined;
+  const interrupt = (reason: string): void => {
+    if (!watching) return;
+    watching = false;
+    offDisconnect();
+    log.info("interrupting agent turn", { ...logFields, reason });
+    void (async () => {
+      try {
+        await (handle.interrupt
+          ? handle.interrupt(reason)
+          : session.interrupt(reason, handle.turnId));
+      } catch (err) {
+        log.warn("failed to interrupt agent turn", {
+          ...logFields,
+          reason,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  };
+  offDisconnect = rpc.onDisconnect(() => interrupt(WORKER_DISCONNECTED_REASON));
+  return {
+    release: () => {
+      watching = false;
+      offDisconnect();
+    },
+    interrupt,
+  };
 }
