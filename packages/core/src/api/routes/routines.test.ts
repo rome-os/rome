@@ -1095,6 +1095,26 @@ describe("Routines fire path", () => {
     }
   });
 
+  it("PATCH enabled=true refuses a stored one-off with neither date nor rrule", async () => {
+    registerStubAction(harness.actionRegistry, "noop_action");
+    const { id } = await createRoutineViaApi(harness.app, {
+      name: "legacy-one-off",
+      trigger: scheduleTrigger,
+      actionName: "noop_action",
+      enabled: false,
+    });
+    const legacy = { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" };
+    await harness.db.update(routines).set({ trigger: legacy }).where(eq(routines.id, id));
+
+    const res = await harness.app.request(`/routines/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/no date/);
+  });
+
   it("PATCH enabled=true answers 400 for a stored one-off whose tzid no longer parses", async () => {
     registerStubAction(harness.actionRegistry, "noop_action");
     const { id } = await createRoutineViaApi(harness.app, {

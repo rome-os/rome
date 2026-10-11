@@ -382,6 +382,16 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.enabled === true) {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
+      // A one-off saved before writers dated it has neither date nor rrule, and
+      // the scheduler refuses it.
+      if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
+        return c.json(
+          {
+            error: `This one-off at ${trigger.localTime} has no date and can no longer run. Create a new routine to run it.`,
+          },
+          400,
+        );
+      }
       const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
       if (state === "past" && trigger?.type === "schedule") {
         return c.json(

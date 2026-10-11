@@ -2565,8 +2565,8 @@ export interface ScheduleTrigger {
    * `tzid`. */
   tzMode: "fixed" | "floating";
   /** Calendar date for a one-off ("YYYY-MM-DD"). Mutually exclusive with
-   * `rrule`. A stored schedule has one or the other: `system:create_routine`
-   * resolves a trigger with neither to the date of the next `localTime`. */
+   * `rrule`. A stored schedule has one or the other: writers resolve a
+   * trigger with neither to the date of the next `localTime`. */
   date?: string;
   rrule?: string;
 }
