@@ -269,6 +269,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       notifyCodexLoginChanged(previousCodexLogin);
     },
     markQuotaExhausted(provider) {
+      const failedAt = Date.now();
       const applyRuntimeSignal = (): boolean => {
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
@@ -276,8 +277,10 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         // A failure before the usage reset agrees with the snapshot, so the
         // reset still ends it. A failure after the reset comes from a limit the
         // snapshot did not show, so it holds until a successful usage probe.
+        // The replay below judges the failure by failedAt, not by when the
+        // older probe settles.
         const until = target.quotaExhaustedUntil;
-        if (until !== undefined && Date.parse(until) <= Date.now()) {
+        if (until !== undefined && Date.parse(until) <= failedAt) {
           delete target.quotaExhaustedUntil;
         }
         return true;

@@ -471,6 +471,34 @@ describe("AIToolState", () => {
       }
     });
 
+    it("judges a replayed runtime quota failure by when it happened", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(HOUR), source: "test", error: "HTTP 429" };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+
+        rs.setSystemTime(now + HOUR);
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
     it("lets a runtime quota failure after the usage reset outlast it", async () => {
       rs.useFakeTimers({ shouldAdvanceTime: false });
       rs.setSystemTime(now);
