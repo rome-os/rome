@@ -46,6 +46,29 @@ describe("readSpreadsheetPreview", () => {
     expect(sheet.totalColumns).toBe(60);
   });
 
+  it("reads only the capped columns of a sheet that declares a huge range", () => {
+    const sheet = utils.aoa_to_sheet([["Name"], ["Ada"]]);
+    sheet["!ref"] = "A1:XFD150";
+
+    const startedAt = performance.now();
+    const [preview] = readSpreadsheetPreview(workbookBytes({ Wide: sheet }));
+
+    expect(performance.now() - startedAt).toBeLessThan(1000);
+    expect(preview.rows).toHaveLength(150);
+    expect(preview.rows[0]).toHaveLength(50);
+    expect(preview.rows[1][0]).toBe("Ada");
+    expect(preview.totalColumns).toBe(16384);
+  });
+
+  it("shows a formula error instead of a blank cell", () => {
+    const sheet = utils.aoa_to_sheet([["Ratio"], [0]]);
+    sheet.A2 = { t: "e", v: 0x07, f: "1/0" };
+
+    const [preview] = readSpreadsheetPreview(workbookBytes({ Calc: sheet }));
+
+    expect(preview.rows[1][0]).toBe("#DIV/0!");
+  });
+
   it("throws on a file that is not a workbook", () => {
     const zipHeaderOnly = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]).buffer;
     expect(() => readSpreadsheetPreview(zipHeaderOnly)).toThrow();

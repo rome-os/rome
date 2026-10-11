@@ -19,9 +19,9 @@ interface SpreadsheetSheetPreview {
 }
 
 /** Read a workbook into display-ready sheets: formatted cell text (formula
- *  results, dates and percentages as the workbook formats them), capped at
- *  200 rows × 50 columns per sheet. Throws on a malformed or
- *  password-protected file. */
+ *  results and errors, dates and percentages as the workbook formats them),
+ *  capped at 200 rows × 50 columns per sheet. Throws when the file cannot be
+ *  read, e.g. a damaged or password-protected workbook. */
 export function readSpreadsheetPreview(data: ArrayBuffer): SpreadsheetSheetPreview[] {
   const workbook = read(data, { type: "array", sheetRows: MAX_SPREADSHEET_ROWS });
   return workbook.SheetNames.map((name) => {
@@ -29,11 +29,21 @@ export function readSpreadsheetPreview(data: ArrayBuffer): SpreadsheetSheetPrevi
     // `sheetRows` trims `!ref` to the rows read; `!fullref` keeps the real size.
     const fullRef = sheet?.["!fullref"] ?? sheet?.["!ref"];
     const range = fullRef ? utils.decode_range(fullRef) : null;
-    const rows = sheet
-      ? utils
-          .sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "", blankrows: true })
-          .map((row) => row.slice(0, MAX_SPREADSHEET_COLUMNS).map((cell) => String(cell ?? "")))
-      : [];
+    // Visit only the capped window. A sheet can declare a far wider range than
+    // it fills (up to column XFD), so converting the whole range first stalls.
+    const rows: string[][] = [];
+    if (sheet && range) {
+      const lastRow = Math.min(range.e.r, range.s.r + MAX_SPREADSHEET_ROWS - 1);
+      const lastColumn = Math.min(range.e.c, range.s.c + MAX_SPREADSHEET_COLUMNS - 1);
+      for (let r = range.s.r; r <= lastRow; r++) {
+        const row: string[] = [];
+        for (let c = range.s.c; c <= lastColumn; c++) {
+          const cell = sheet[utils.encode_cell({ r, c })];
+          row.push(cell ? utils.format_cell(cell) : "");
+        }
+        rows.push(row);
+      }
+    }
     return {
       name,
       rows,
