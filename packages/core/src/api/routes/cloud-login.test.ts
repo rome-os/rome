@@ -519,7 +519,7 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
 
 // A fresh seat finishes setup right in the callback, so the onboarding page is
 // never reached on a cloud-default instance. The profile write is the same
-// shared function `/onboard/setup` uses.
+// shared function local create-account uses.
 describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () => {
   async function signInFresh(claims: { name?: string; email?: string }) {
     const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
