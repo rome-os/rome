@@ -169,7 +169,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           romeSessionType,
           replyTo: req.replyTo,
         });
-        if (this.webchatRepo && boundRomeSessionId && req.platformMessageId) {
+        if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
           await this.webchatRepo.assignConversationMessageTurn(
             romeSessionId,
             req.platformMessageId,

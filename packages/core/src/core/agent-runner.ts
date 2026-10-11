@@ -560,7 +560,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
-    if (this.webchatRepo && boundRomeSessionId && params.platformMessageId) {
+    if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
