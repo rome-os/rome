@@ -305,6 +305,17 @@ describe("Share chat", () => {
       }
     });
 
+    it("does not let a search query turn on rg's symlink following", async () => {
+      // rg --follow fails on the dangling link, which would hide a leak behind a 500.
+      rmSync(join(projectsRoot, "proj-a", "dang"));
+      const token = await shareProjectsTile("proj-a");
+      const res = await shareRoutes(deps).request(
+        `/share/${token}/projects/search?q=${encodeURIComponent(`-Le${secret}`)}`,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).not.toContain(secret);
+    });
+
     it("rejects missing paths under an escaping symlink instead of reporting them missing", async () => {
       const token = await shareProjectsTile("proj-a");
       const publicApp = shareRoutes(deps);

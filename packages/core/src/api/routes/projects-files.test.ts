@@ -288,10 +288,11 @@ describe("Projects files API", () => {
         },
       ]);
       // The recorded argv is the outbound contract with the rg subprocess:
-      // the query must be passed as a fixed string, not a regex.
+      // the query must be passed as a fixed string, not a regex, and after "--"
+      // so it can never be read as a flag.
       const rgArgs = readFileSync(rgSpyFile, "utf-8").trim().split("\n");
       expect(rgArgs).toContain("--fixed-strings");
-      expect(rgArgs.slice(-2)).toEqual(["C++", "."]);
+      expect(rgArgs.slice(-3)).toEqual(["--", "C++", "."]);
     });
   });
 

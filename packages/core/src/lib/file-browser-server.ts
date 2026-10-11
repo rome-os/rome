@@ -1797,6 +1797,9 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
         "--smart-case",
         ...(scope.searchGlobs ?? []).flatMap((pattern) => ["--glob", pattern]),
         ...DOT_ENTRY_SEARCH_GLOBS.flatMap((pattern) => ["--glob", pattern]),
+        // Without "--", a query such as "-L" turns into an rg flag, and --follow
+        // would read through symlinks out of the root.
+        "--",
         query,
         ".",
       ];
