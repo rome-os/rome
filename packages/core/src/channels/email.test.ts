@@ -374,6 +374,10 @@ describe("EmailAdapter.send", () => {
     await expect(
       adapter.send("" as ConversationId, { kind: "email", to: "guardian", text: "hi" }),
     ).rejects.toThrow("Rome has no guardian email address yet");
+    await expect(adapter.send("guardian" as ConversationId, { text: "hi" })).rejects.toThrow(
+      "Rome has no guardian email address yet",
+    );
+    expect(provider.listMessages).not.toHaveBeenCalled();
     expect(provider.send).not.toHaveBeenCalled();
   });
 

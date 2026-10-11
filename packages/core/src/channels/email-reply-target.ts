@@ -21,7 +21,7 @@ export interface EmailReplyTarget {
 
 /**
  * A resolved target. `complete` is false when the lookup stopped early, at the
- * time budget or a failed page, so a received message may exist further back.
+ * time budget or a failed page, before it read every page its bounds allow.
  */
 export interface ResolvedEmailReplyTarget extends EmailReplyTarget {
   complete: boolean;

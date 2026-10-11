@@ -439,7 +439,11 @@ export class EmailAdapter {
       const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
       return { sent, startedThread: false };
     }
-    const addressTarget = !email && this.resolveRecipients(threadId);
+    // A chat-style conversation id that names an address or the guardian alias
+    // starts a new email, so a missing guardian address gets its own error.
+    const addressTarget =
+      !email &&
+      (!!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian");
     if (threadId && (this.threadReplyTarget.has(threadId) || !addressTarget)) {
       const target = await this.threadReplyTargetFor(threadId);
       if (target.outbound) {
