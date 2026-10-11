@@ -162,7 +162,14 @@ async function attempt(
     });
   }
 
-  return wire({ ...row, state: "unconfirmed", providerMessageId: receipt.messageId });
+  // `accepted` restarted the row's clock, and the window a discard waits out
+  // runs from it.
+  return wire({
+    ...row,
+    state: "unconfirmed",
+    providerMessageId: receipt.messageId,
+    updatedAt: new Date(),
+  });
 }
 
 /**

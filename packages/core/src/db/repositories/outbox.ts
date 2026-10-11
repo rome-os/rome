@@ -55,8 +55,12 @@ function isDismissable(row: Pick<OutboxRow, "state" | "updatedAt">, now: Date): 
   return row.state === "unconfirmed" && row.updatedAt.getTime() < settledBefore(now).getTime();
 }
 
+/**
+ * Floored to whole seconds, the granularity `updated_at` is stored at, so the
+ * predicate and the SQL bind agree right at the boundary.
+ */
 function settledBefore(now: Date): Date {
-  return new Date(now.getTime() - SETTLES_WITHIN_MS);
+  return new Date(Math.floor((now.getTime() - SETTLES_WITHIN_MS) / 1000) * 1000);
 }
 
 export interface OutboxAccount {

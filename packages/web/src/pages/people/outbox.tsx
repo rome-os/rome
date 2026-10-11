@@ -78,10 +78,9 @@ export function Outbox({
  * again from. Discard reaches further: a row Rome accepted and never saw arrive
  * is stuck once the landing window has passed, and on a channel with no mirror
  * of its own, dismissing it is the only way it ever leaves. Which rows those are
- * is the server's answer, read off `dismissable`: the window runs from a time
- * the wire does not carry, and a copy of the rule here drifted from it. The poll
- * keeps an in-flight row fresh, so one crossing the window grows its Discard
- * within a tick of doing so.
+ * is the server's answer, read off `dismissable`, because the window runs from a
+ * time the wire does not carry. The poll keeps an in-flight row fresh, so one
+ * crossing the window grows its Discard within a tick of doing so.
  *
  * A 404 is not reported. It means the row is not what this page thought it was
  * — already discarded, or claimed by a retry that won — and the outbox read
