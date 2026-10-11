@@ -10,9 +10,10 @@
 // keeps the one unavoidable per-channel difference — how a reply is delivered —
 // in exactly one place:
 //   - webchat: run inside `enqueueSessionTask` so the turn queues behind any
-//     in-flight browser turn and the reply rides the session's SSE push
-//     (`addBackendReplyMessage`). That push path is main-process-only, which is
-//     why this lives here and the worker reaches it over one RPC.
+//     in-flight browser turn and shows live on the session's stream. That
+//     stream is main-process-only, which is why this lives here and the worker
+//     reaches it over one RPC. The reply still goes out on the channel's `send`
+//     port, which pushes it to open chats.
 //   - other channels: run the turn, then hand the reply to the channel's `send`
 //     port (channels/channel.ts).
 //
@@ -27,7 +28,7 @@ import type {
   ConversationRepository,
 } from "@rome-os/app-runtime";
 import type { Channel } from "../channels/channel.js";
-import type { AgentRunnerInterface } from "../core/types.js";
+import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type { AgentEvent } from "../types.js";
 import { createLogger } from "../logger.js";
 
@@ -39,16 +40,22 @@ const log = createLogger("backend-turn");
  * not depend on the API layer — same pattern as `ApprovalSessionStreamHost`.
  */
 export interface WebchatSessionStreamHost {
-  enqueueSessionTask(
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void>;
+  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+}
+
+export interface BackendEmitOptions {
+  /** The task already saved this event's trace and delivers its turn's reply
+   * itself, so the session stream only shows the event live and mounts its
+   * cards. */
+  recorded?: boolean;
 }
 
 /** A backend session task: code that runs inside a session's stream context and
- * may emit agent messages (rendered as live trace + captured for delivery). */
+ * may emit agent messages (rendered as live trace + captured for delivery).
+ * `emit` settles once the cards the event carries are written, so a task that
+ * awaits it can deliver its reply after them. */
 export type BackendSessionTask = (helpers: {
-  emit: (msg: AgentEvent & { agent?: string }) => void;
+  emit: (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => Promise<void>;
 }) => Promise<void>;
 
 /** The main-process runner. Beyond the worker-facing `runAndDeliver`, it owns
@@ -86,8 +93,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
   const runTurn = (
     params: BackendTurnParams,
     workingDir: string | undefined,
+    trace: Pick<RunParams, "persistTrace" | "persistTranscript"> = {},
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
+      ...trace,
       agentName: params.agentName,
       prompt: params.prompt,
       // Resume the exact runtime/provider conversation that scheduled the
@@ -124,7 +133,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     }
     // No webchat stream to attach to (messaging, or runtime not yet wired): run
     // the task with a no-op emit. Reply delivery, if any, is the task's job.
-    await task({ emit: () => {} });
+    await task({ emit: async () => {} });
   };
 
   return {
@@ -141,11 +150,26 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       const workingDir = await deps.resolveWorkingDir?.(params.channel, params.threadId);
 
       if (params.channel === "webchat") {
-        // Webchat delivery rides the session's SSE push inside the session task.
+        // The turn queues behind any in-flight browser turn and shows live on
+        // the session's stream, but like any channel's turn it saves its own
+        // trace and sends its reply on the channel's `send` port. The chat
+        // keeps its transcript itself, so the runner writes no transcript rows.
+        const send = deps.channel(params.channel)?.send;
+        if (!send) throw new Error(`Channel "${params.channel}" cannot send`);
         await runBackendSessionTask(params.channel, params.threadId, async ({ emit }) => {
-          for await (const msg of runTurn(params, workingDir)) {
-            emit({ ...msg, agent: params.agentName });
+          let reply = "";
+          let turnId: string | undefined;
+          const trace = { persistTrace: true, persistTranscript: false };
+          for await (const msg of runTurn(params, workingDir, trace)) {
+            if (msg.type === "turn_start") turnId = msg.turnId;
+            if (msg.type === "result") reply = msg.content;
+            await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
+          if (!reply.trim()) return;
+          await send.send(params.threadId as ConversationId, {
+            text: reply,
+            ...(turnId ? { turnId } : {}),
+          });
         });
         return;
       }

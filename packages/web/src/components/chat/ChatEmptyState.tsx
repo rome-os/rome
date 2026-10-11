@@ -4,7 +4,7 @@ import { MessageSquare, Pin, X } from "lucide-react";
 import { HorizontalScrollRail } from "@/components/chat/HorizontalScrollRail";
 import { QuickEntryGrid } from "@/components/chat/QuickEntryGrid";
 import { RomeLogo } from "@/components/logo";
-import type { QuickEntry } from "@/config/quick-entries";
+import type { ResolvedRomeNewsItem } from "@rome-os/rome-web-components/news-item/schema";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { cn } from "@/lib/utils";
 
@@ -17,10 +17,10 @@ export interface PinnedChatSummary {
 export interface ChatEmptyStateProps {
   guardianName: string;
   pinnedChats: PinnedChatSummary[];
-  quickEntries: QuickEntry[];
+  quickEntries: ResolvedRomeNewsItem[];
   onOpenPinnedChat: (id: string) => void;
   onUnpinChat: (id: string) => void;
-  onActivateQuickEntry: (entry: QuickEntry) => void;
+  onActivateQuickEntry: (entry: ResolvedRomeNewsItem) => void;
   composer: ReactNode;
 }
 

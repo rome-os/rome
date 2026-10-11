@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.4](https://github.com/rome-os/rome/compare/ui-v0.3.3...ui-v0.3.4) (2026-10-10)
+
+
+### Features
+
+* message an agent from Cmd-K ([#502](https://github.com/rome-os/rome/issues/502)) ([9298dc3](https://github.com/rome-os/rome/commit/9298dc39ba17c079c2a26e0159b96e014bd3db14))
+* **ui:** add adaptive platform scales for shared controls ([#605](https://github.com/rome-os/rome/issues/605)) ([4af451a](https://github.com/rome-os/rome/commit/4af451a8c905cb0a63fbbcc4493f7ea4e8c1a072))
+
+
+### Bug Fixes
+
+* **ui:** apply interface-polish rules to the component kit ([#820](https://github.com/rome-os/rome/issues/820)) ([765a989](https://github.com/rome-os/rome/commit/765a98963e1174a705c043baa7d560b6c18a3752))
+* **ui:** drop a markdown list's trailing empty items ([#542](https://github.com/rome-os/rome/issues/542)) ([30d3213](https://github.com/rome-os/rome/commit/30d32137cf52ee687c20975e4a170fcfb122b352))
+* **ui:** keep Markdown table columns readable on narrow screens ([#782](https://github.com/rome-os/rome/issues/782)) ([af34f20](https://github.com/rome-os/rome/commit/af34f206994928e94c5a08836b93cc0aefb22315))
+* **ui:** let Dialog and Sheet content scroll inside an app's shadow root ([#777](https://github.com/rome-os/rome/issues/777)) ([1367eb1](https://github.com/rome-os/rome/commit/1367eb171e06512f70839566f935590f6acbb8af))
+* **ui:** let markdown tables grow to their full height ([#571](https://github.com/rome-os/rome/issues/571)) ([b7b0dd4](https://github.com/rome-os/rome/commit/b7b0dd47cd99165d4eb93c4049171ef470ba8920))
+* **ui:** optically center Button glyphs against their labels ([#823](https://github.com/rome-os/rome/issues/823)) ([c202693](https://github.com/rome-os/rome/commit/c2026939301b6ade4b79aa21ad0e90c584bbdfd7))
+* **ui:** repair Mermaid diagram downloads ([#521](https://github.com/rome-os/rome/issues/521)) ([a23a01a](https://github.com/rome-os/rome/commit/a23a01a1dca75604791f766e303b2a736e98a5b6))
+* **ui:** show a chevron on clipped ends of scrolling PageNav and FilterChipGroup rows ([#748](https://github.com/rome-os/rome/issues/748)) ([16aa640](https://github.com/rome-os/rome/commit/16aa6404db5be16f5dbc0029c33da7bfa4db5cb9))
+
+
+### Performance Improvements
+
+* **ui:** load the mermaid, KaTeX and Shiki plugins only when a message needs them ([#794](https://github.com/rome-os/rome/issues/794)) ([772fda4](https://github.com/rome-os/rome/commit/772fda469f39f4bbce5257c1f0cfd5178a934123))
+
 ## [0.3.3](https://github.com/rome-os/rome/compare/ui-v0.3.2...ui-v0.3.3) (2026-09-25)
 
 

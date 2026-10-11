@@ -101,6 +101,11 @@ export class ActionRegistryProxy {
     const result = await callMain<{ hasAction: boolean }>("actions.has", { actionName });
     return result.hasAction;
   }
+
+  async isExplicit(actionName: string): Promise<boolean> {
+    const result = await callMain<{ explicit: boolean }>("actions.isExplicit", { actionName });
+    return result.explicit;
+  }
 }
 
 /**

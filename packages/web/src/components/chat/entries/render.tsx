@@ -23,7 +23,6 @@ import { UsageSummaryView } from "./UsageSummaryView";
 export interface RenderEntryOptions {
   onApprovalResolved?: () => void;
   compact?: boolean;
-  toolUseInput?: unknown;
   /** Trace drawer is currently live-streaming (forwarded to ToolCallView). */
   live?: boolean;
   /** Session that owns the message these blocks belong to — namespaces resolved
@@ -57,7 +56,6 @@ export function renderSingleEntry(
   const {
     onApprovalResolved,
     compact = false,
-    toolUseInput,
     sessionId,
     turnId,
     interactionResults,
@@ -93,9 +91,7 @@ export function renderSingleEntry(
     case "tool_use":
       return <ToolUseBlock key={key} tool={block.tool} input={block.input} />;
     case "tool_result":
-      return (
-        <ToolResultBlock key={key} tool={block.tool} output={block.output} input={toolUseInput} />
-      );
+      return <ToolResultBlock key={key} tool={block.tool} output={block.output} />;
     case "subagent_start":
       return (
         <SubagentCallView
@@ -169,7 +165,15 @@ export function renderSingleEntry(
         />
       );
     case "routine_draft_card":
-      return <RoutineDraftCard key={`routine-${block.toolUseId}`} draft={block.draft} />;
+      return (
+        <RoutineDraftCard
+          key={`routine-${block.toolUseId}`}
+          draft={block.draft}
+          // Parts can arrive unvalidated (e.g. via channels.send); a malformed
+          // key falls back to the keyless card rather than failing every create.
+          routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+        />
+      );
     case "submission_card":
       // The borrowed agent's submit_output is not rendered in the conversation
       // flow — the result already lives on the app's own surface beside the

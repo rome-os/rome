@@ -1,4 +1,4 @@
-import { getChannelFromThreadKey } from "./session-manager.js";
+import { sessionKeyChannel } from "./agent-session-key.js";
 
 const GUARDIAN_FACING_CHANNELS = new Set([
   "webchat",
@@ -10,5 +10,5 @@ const GUARDIAN_FACING_CHANNELS = new Set([
 ]);
 
 export function isGuardianFacingChannel(channelThreadKey: string): boolean {
-  return GUARDIAN_FACING_CHANNELS.has(getChannelFromThreadKey(channelThreadKey));
+  return GUARDIAN_FACING_CHANNELS.has(sessionKeyChannel(channelThreadKey) ?? "");
 }

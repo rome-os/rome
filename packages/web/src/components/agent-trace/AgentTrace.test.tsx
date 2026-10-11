@@ -14,19 +14,17 @@ it("keeps the live transcript header as a trace entry while activity changes", (
     totalSteps: 1,
     invocationCounts: { system: 1 },
   };
-  const { rerender } = render(<CollapsedTraceButton onClick={onClick} live compact />);
+  const { rerender } = render(<CollapsedTraceButton onClick={onClick} live />);
   fireEvent.click(screen.getByRole("button", { name: "0 apps · 0 steps" }));
   expect(onClick).toHaveBeenCalledTimes(1);
 
-  rerender(<CollapsedTraceButton summary={summary} onClick={onClick} live compact />);
+  rerender(<CollapsedTraceButton summary={summary} onClick={onClick} live />);
   const entry = screen.getByRole("button", { name: "1 app · 1 step" });
   expect(entry.querySelector("img")).not.toBeNull();
   expect(entry.querySelector(".shimmer")).toBeNull();
   expect(screen.queryByText("Using System")).toBeNull();
 
-  rerender(
-    <CollapsedTraceButton summary={{ ...summary, totalSteps: 2 }} onClick={onClick} live compact />,
-  );
+  rerender(<CollapsedTraceButton summary={{ ...summary, totalSteps: 2 }} onClick={onClick} live />);
   expect(screen.getByRole("button", { name: "1 app · 2 steps" })).toBeTruthy();
   expect(screen.queryByText("Thinking…")).toBeNull();
 });
@@ -39,21 +37,15 @@ it("keeps settled zero-tool turns readable and their trace accessible", () => {
     invocationCounts: {},
     totalDurationMs: 3100,
   };
-  const { rerender } = render(
-    <CollapsedTraceButton summary={summary} onClick={onClick} live compact />,
-  );
+  const { rerender } = render(<CollapsedTraceButton summary={summary} onClick={onClick} live />);
   expect(screen.getByRole("button").textContent).toBe("0 apps · 0 steps");
-  rerender(<CollapsedTraceButton summary={summary} onClick={onClick} compact />);
+  rerender(<CollapsedTraceButton summary={summary} onClick={onClick} />);
   const entry = screen.getByRole("button", { name: "Thought for 3.1s" });
   expect(entry.querySelector(".rounded-full")).toBeNull();
   fireEvent.click(entry);
   expect(onClick).toHaveBeenCalledTimes(1);
   rerender(
-    <CollapsedTraceButton
-      summary={{ ...summary, stoppedByUser: true }}
-      onClick={onClick}
-      compact
-    />,
+    <CollapsedTraceButton summary={{ ...summary, stoppedByUser: true }} onClick={onClick} />,
   );
   expect(screen.getByRole("button").textContent).toBe("Stopped by user");
 });
@@ -65,10 +57,8 @@ it("shows duration only after the live turn settles", () => {
     invocationCounts: {},
     totalDurationMs: 40000,
   };
-  const { rerender } = render(
-    <CollapsedTraceButton summary={summary} onClick={() => {}} live compact />,
-  );
+  const { rerender } = render(<CollapsedTraceButton summary={summary} onClick={() => {}} live />);
   expect(screen.getByRole("button").textContent).toBe("0 apps · 2 steps");
-  rerender(<CollapsedTraceButton summary={summary} onClick={() => {}} compact />);
+  rerender(<CollapsedTraceButton summary={summary} onClick={() => {}} />);
   expect(screen.getByRole("button").textContent).toBe("0 apps · 2 steps · 40s");
 });

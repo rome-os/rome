@@ -7,6 +7,8 @@ import type { ActionEngine } from "../actions/engine.js";
 import { systemClock, type Clock } from "../lib/clock.js";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { Trigger } from "./types.js";
+import { actionExecutionContext, type ActionExecutionStore } from "../actions/context.js";
+import { replayContext, type ReplayStore } from "../actions/replay.js";
 
 // reactivateFloating only touches routinesRepo + activate(); the other ctor
 // deps are never reached, so stub them rather than stand up the whole engine.
@@ -167,5 +169,59 @@ describe("RoutineEngine worker admission", () => {
       expect.anything(),
       expect.objectContaining({ whenWorkersBusy: "queue" }),
     );
+  });
+});
+
+describe("RoutineEngine fire context", () => {
+  let testDb: TestDb;
+
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+
+  afterEach(() => testDb.close());
+
+  it("runs as a root, not nested under the action whose event fired it, retries included", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const seen: Array<{ execution: unknown; replay: unknown }> = [];
+    const actionEngine = {
+      run: async () => {
+        seen.push({
+          execution: actionExecutionContext.getStore(),
+          replay: replayContext.getStore(),
+        });
+        // Fail the first attempt so the engine schedules a retry.
+        if (seen.length === 1) throw new Error("worker crashed");
+        return { status: "success", result: null };
+      },
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 1, systemClock);
+    let fire: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
+    const provider: Pick<TriggerProvider, "activate" | "deactivate"> = {
+      activate: async (_routine, onFire) => {
+        fire = onFire;
+      },
+      deactivate: () => {},
+    };
+    engine.registerProvider("event-bus", provider as TriggerProvider);
+    await routines.create({
+      name: "stage-2",
+      trigger: { type: "event-bus", eventName: "x.y" },
+      actionName: "noop",
+      args: {},
+    });
+    await engine.start();
+
+    // Event-bus subscribers fire synchronously inside the publishing action.
+    await replayContext.run({} as ReplayStore, () =>
+      actionExecutionContext.run({ agentName: "main" } as ActionExecutionStore, () => fire?.({})),
+    );
+    for (let i = 0; i < 100 && seen.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const clean = { execution: undefined, replay: undefined };
+    expect(seen).toEqual([clean, clean]);
   });
 });

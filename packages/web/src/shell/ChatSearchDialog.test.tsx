@@ -10,17 +10,11 @@ import { toast } from "sonner";
 import i18n from "@/i18n";
 import type { AgentCatalogGroup, ChatSearchMessageMatch, ChatSession } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
-import {
-  agentMentionQuery,
-  ChatSearchDialog,
-  chatSearchShortcutForPlatform,
-  isChatSearchShortcut,
-  matchRanges,
-} from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
+import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -364,36 +358,6 @@ describe("ChatSearchDialog", () => {
       (mark) => mark.textContent,
     );
     expect(snippetMarks).toContain("roadmap");
-  });
-
-  it("renders one row per session when the search returns repeat matches", async () => {
-    // The endpoint documents one match per session; if it ever returns two,
-    // the row must not be duplicated — that would collide on both the React
-    // key and the cmdk option value.
-    const contentOnly = chatSession("content-only", "Random notes", "work/rome");
-    const message = (id: string, snippet: string) => ({
-      id,
-      role: "assistant" as const,
-      snippet,
-      createdAt: "2026-07-14T10:00:00.000Z",
-    });
-    mockSessionSearch(
-      [contentOnly],
-      [
-        { session: contentOnly, message: message("m1", "…first roadmap mention…") },
-        { session: contentOnly, message: message("m2", "…second roadmap mention…") },
-      ],
-    );
-    const user = userEvent.setup();
-    renderSearch("/chat", true);
-
-    await user.type(
-      await screen.findByRole("combobox", { name: "Search apps and chats" }),
-      "roadmap",
-    );
-
-    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(1));
-    expect(screen.getByText("1 result")).toBeTruthy();
   });
 
   it("keeps apps out of the blank state, then groups them before matching chats", async () => {

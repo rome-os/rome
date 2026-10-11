@@ -4,10 +4,10 @@ import {
   computeGestureTransform,
   createDeferredPasteController,
   createMetaToControlController,
-  isApplePlatform,
   isPasteShortcut,
   sendTextAsKeysyms,
 } from "./desktop-vnc";
+import { isApplePlatform } from "./platform";
 
 describe("sendTextAsKeysyms", () => {
   it("sends ASCII, Chinese, and every emoji code point in order", () => {

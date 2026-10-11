@@ -5,7 +5,7 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
 import type { ChatMessage } from "@/lib/chat-types";
-import { parseEntries } from "@/components/chat/entries/parse-entries";
+import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 import { useSendFlight } from "@/components/chat/use-chat-motion";
@@ -20,10 +20,7 @@ export const UserMessage = memo(
     const rowRef = useRef<HTMLDivElement>(null);
     const bubbleRef = useRef<HTMLDivElement>(null);
     useSendFlight(msg.id, rowRef, bubbleRef);
-    const text = useMemo(() => {
-      const blocks = parseEntries(msg.content);
-      return blocks.flatMap((b) => (b.type === "text" ? [b.content] : [])).join("\n");
-    }, [msg.content]);
+    const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
     const undelivered =
       msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";

@@ -90,6 +90,12 @@ describe("webchat descriptor over a real ConnectionRegistry", () => {
     );
   });
 
+  it("declares a surface that renders cards and needs no prompt context", () => {
+    const talker = makeWebchatDescriptor({ webchatRepo: {} as never }).capabilities.talker;
+    expect(talker?.interactiveCards).toBe(true);
+    expect(talker?.promptContext).toBe(false);
+  });
+
   it("forwards history to the wrapped adapter", async () => {
     await repo.createSession("sess-2", "History Session");
     await repo.addMessage(

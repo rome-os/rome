@@ -1,7 +1,5 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { fetchAuthState, hasSession } from "@/lib/auth-state";
-
-type Fetcher = typeof fetch;
 
 function jsonResponse(body: unknown, init: Partial<Response> = {}): Response {
   return {
@@ -16,18 +14,30 @@ function notOkResponse(status = 502): Response {
   return { ok: false, status, json: async () => ({}) } as unknown as Response;
 }
 
-function makeFetcher(handler: (path: string) => Response | Promise<Response>): Fetcher {
-  return rs.fn(async (input: RequestInfo | URL) => handler(String(input))) as unknown as Fetcher;
+function stubFetch(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>,
+) {
+  return rs
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input, init) => handler(input, init));
 }
+
+function stubFetchByPath(handler: (path: string) => Response | Promise<Response>) {
+  return stubFetch((input) => handler(String(input)));
+}
+
+afterEach(() => {
+  rs.restoreAllMocks();
+});
 
 describe("fetchAuthState", () => {
   it("flags backendReachable=false when /api/health throws (e.g. ECONNREFUSED)", async () => {
-    const fetcher = rs.fn(async (input: RequestInfo | URL) => {
+    stubFetch(async (input: RequestInfo | URL) => {
       if (String(input) === "/api/health") throw new TypeError("Failed to fetch");
       return jsonResponse({});
-    }) as unknown as Fetcher;
+    });
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.ready).toBe(true);
     expect(state.backendReachable).toBe(false);
@@ -35,23 +45,23 @@ describe("fetchAuthState", () => {
   });
 
   it("flags backendReachable=false when /api/health returns 502", async () => {
-    const fetcher = makeFetcher((path) =>
+    stubFetchByPath((path) =>
       path === "/api/health" ? notOkResponse(502) : jsonResponse({ phase: "ready" }),
     );
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.backendReachable).toBe(false);
   });
 
   it("returns the bootstrap state when health and bootstrap both succeed", async () => {
-    const fetcher = makeFetcher((path) => {
+    stubFetchByPath((path) => {
       if (path === "/api/health") return jsonResponse({ status: "ok" });
       if (path === "/api/bootstrap") return jsonResponse({ phase: "ready" });
       throw new Error(`unexpected fetch: ${path}`);
     });
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state).toEqual({
       ready: true,
@@ -61,7 +71,7 @@ describe("fetchAuthState", () => {
   });
 
   it("carries the needs-signin payload through verbatim", async () => {
-    const fetcher = makeFetcher((path) => {
+    stubFetchByPath((path) => {
       if (path === "/api/health") return jsonResponse({ status: "ok" });
       if (path === "/api/bootstrap")
         return jsonResponse({
@@ -72,7 +82,7 @@ describe("fetchAuthState", () => {
       throw new Error(`unexpected fetch: ${path}`);
     });
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.bootstrap).toEqual({
       phase: "needs-signin",
@@ -82,30 +92,30 @@ describe("fetchAuthState", () => {
   });
 
   it("flags backendReachable=false when /api/bootstrap throws after a healthy probe", async () => {
-    const fetcher = rs.fn(async (input: RequestInfo | URL) => {
+    stubFetch(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === "/api/health") return jsonResponse({ status: "ok" });
       throw new TypeError("Failed to fetch");
-    }) as unknown as Fetcher;
+    });
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.backendReachable).toBe(false);
     expect(state.bootstrap).toBeNull();
   });
 
   it("flags backendReachable=false when /api/bootstrap returns non-2xx", async () => {
-    const fetcher = makeFetcher((path) =>
+    stubFetchByPath((path) =>
       path === "/api/health" ? jsonResponse({ status: "ok" }) : notOkResponse(500),
     );
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.backendReachable).toBe(false);
   });
 
   it("flags backendReachable=false when /api/bootstrap returns non-JSON 200", async () => {
-    const fetcher = makeFetcher((path) => {
+    stubFetchByPath((path) => {
       if (path === "/api/health") return jsonResponse({ status: "ok" });
       return {
         ok: true,
@@ -116,21 +126,21 @@ describe("fetchAuthState", () => {
       } as unknown as Response;
     });
 
-    const state = await fetchAuthState({ fetcher });
+    const state = await fetchAuthState();
 
     expect(state.backendReachable).toBe(false);
   });
 
   it("does not send credentials with the health probe", async () => {
-    const fetcher = rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetcher = stubFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input) === "/api/health") {
         expect(init?.credentials).toBeUndefined();
         return jsonResponse({ status: "ok" });
       }
       return jsonResponse({ phase: "ready" });
-    }) as unknown as Fetcher;
+    });
 
-    await fetchAuthState({ fetcher });
+    await fetchAuthState();
 
     expect(fetcher).toHaveBeenCalled();
   });
@@ -138,13 +148,13 @@ describe("fetchAuthState", () => {
   it("threads the AbortSignal through both fetch calls (health + bootstrap only)", async () => {
     const controller = new AbortController();
     const seen: (AbortSignal | undefined)[] = [];
-    const fetcher = rs.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    stubFetch(async (input: RequestInfo | URL, init?: RequestInit) => {
       seen.push(init?.signal ?? undefined);
       if (String(input) === "/api/health") return jsonResponse({ status: "ok" });
       return jsonResponse({ phase: "ready" });
-    }) as unknown as Fetcher;
+    });
 
-    await fetchAuthState({ fetcher, signal: controller.signal });
+    await fetchAuthState({ signal: controller.signal });
 
     expect(seen).toHaveLength(2);
     seen.forEach((s) => expect(s).toBe(controller.signal));

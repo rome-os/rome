@@ -2,8 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TraceSubagentSummary } from "@rome/api-types/trace-segments";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { openTurnStream } from "@/lib/chat-api";
-import { DelegatedSubagentGroup, type DelegatedSubagentNode } from "./DelegatedSubagentGroup";
+import { DelegatedSubagentGroup } from "./DelegatedSubagentGroup";
 
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,10 +22,6 @@ rs.mock("react-i18next", () => ({
       return labels[key] ?? key;
     },
   }),
-}));
-
-rs.mock("@/lib/chat-api", () => ({
-  openTurnStream: rs.fn(),
 }));
 
 rs.mock("@/components/chat/AgentAvatar", () => ({
@@ -50,8 +45,6 @@ rs.mock("@/components/chat/AgentAvatar", () => ({
     />
   ),
 }));
-
-const openTurnStreamMock = rs.mocked(openTurnStream);
 
 afterEach(() => {
   cleanup();
@@ -123,12 +116,11 @@ describe("DelegatedSubagentGroup", () => {
     expect(screen.getByText("1 step · 900ms")).toBeTruthy();
     expect(container.querySelectorAll("[data-subagent-separator]")).toHaveLength(3);
     expect(container.querySelector("svg[data-subagent-connectors]")).toBeNull();
-    expect(openTurnStreamMock).not.toHaveBeenCalled();
   });
 
   it("opens the selected child trace", async () => {
     const child = completedSubagent();
-    const onOpen = rs.fn((_node: DelegatedSubagentNode) => {});
+    const onOpen = rs.fn((_node: TraceSubagentSummary) => {});
     render(
       <DelegatedSubagentGroup
         subagents={[child]}
@@ -151,7 +143,7 @@ describe("DelegatedSubagentGroup", () => {
     expect(onOpen).toHaveBeenCalledWith(child);
   });
 
-  it("does not consume a turn-stream connection for running children", () => {
+  it("shows running children as thinking", () => {
     const children = Array.from({ length: 4 }, (_, index) =>
       completedSubagent({
         toolUseId: `subagent-${index}`,
@@ -166,6 +158,5 @@ describe("DelegatedSubagentGroup", () => {
     render(<DelegatedSubagentGroup subagents={children} onOpenSubagentTrace={() => {}} />);
 
     expect(screen.getAllByText("Thinking…")).toHaveLength(4);
-    expect(openTurnStreamMock).not.toHaveBeenCalled();
   });
 });

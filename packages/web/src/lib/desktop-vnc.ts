@@ -1,3 +1,7 @@
+import { splitGraphemes } from "./graphemes";
+import { COARSE_POINTER_QUERY, matchesMediaQuery } from "./media-query";
+import { isApplePlatform } from "./platform";
+
 interface RemoteKeySender {
   sendKey(keysym: number, code: string | null, down?: boolean): void;
 }
@@ -178,10 +182,6 @@ export function createDeferredPasteController({
   };
 }
 
-export function isApplePlatform(platform: string): boolean {
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
-}
-
 export function createMetaToControlController(rfb: RemoteKeySender, enabled: boolean) {
   const pressedMetaKeys = new Set<string>();
   const implicitMetaChordKeys = new Set<string>();
@@ -265,13 +265,6 @@ export function createMetaToControlController(rfb: RemoteKeySender, enabled: boo
 
     release,
   };
-}
-
-export function isTouchDevice() {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return false;
-  }
-  return window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 }
 
 interface Size {
@@ -502,13 +495,6 @@ const KEYSYM_BACKSPACE = 0xff08;
 const KEYSYM_ENTER = 0xff0d;
 const KEYSYM_TAB = 0xff09;
 
-function splitGraphemes(text: string): string[] {
-  if (typeof Intl.Segmenter !== "function") return [...text];
-  return [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(
-    ({ segment }) => segment,
-  );
-}
-
 function setupKeyboardToolbar(rfb: RemoteKeySender, screen: HTMLElement) {
   const toggle = document.getElementById("kb-toggle");
   const input = document.getElementById("keyboard-input");
@@ -652,7 +638,12 @@ export function initDesktopVnc(RFB: DesktopRfbConstructor): void {
   const path = params.get("path") ?? "desktop-proxy/websockify";
   const resize = params.get("resize") ?? "remote";
   const touchOverride = params.get("touch");
-  const touchMode = touchOverride === "1" ? true : touchOverride === "0" ? false : isTouchDevice();
+  const touchMode =
+    touchOverride === "1"
+      ? true
+      : touchOverride === "0"
+        ? false
+        : matchesMediaQuery(COARSE_POINTER_QUERY);
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const wsUrl = `${protocol}://${window.location.host}/${path}`;
 

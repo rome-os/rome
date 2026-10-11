@@ -140,7 +140,6 @@ export interface FileBrowserConfig {
   t: TFunction;
   embedded: boolean;
   getDeleteDescription?: DeleteDescriptionResolver;
-  onStartChatFromFolder?: (path: string) => void;
   onPathsDeleted?: (paths: string[]) => void;
   /** Fired after a folder is created. Lets a host (e.g. the projects page) act on
    * a brand-new top-level project — e.g. proceed with a sync connection the user
@@ -150,10 +149,6 @@ export interface FileBrowserConfig {
    * for new folders). `parentPath` is the create target's parent (may be null
    * when creating at the root). */
   renderCreateExtra?: (ctx: { type: "file" | "folder"; parentPath: string | null }) => ReactNode;
-  onSelectionChange?: (selection: {
-    selectedPath: string | null;
-    selectedTreePaths: string[];
-  }) => void;
 }
 
 export type TreeClickModifiers = Pick<

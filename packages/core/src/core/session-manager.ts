@@ -23,6 +23,7 @@ export class SessionManager {
         model: string | null;
         reasoningEffort: string | null;
         workingDir?: string | null;
+        conversationId?: string | null;
         createdAt: Date;
         lastActiveAt: Date;
       }
@@ -41,6 +42,7 @@ export class SessionManager {
       model: row.model,
       reasoningEffort: row.reasoningEffort,
       workingDir: row.workingDir,
+      conversationId: row.conversationId,
       createdAt: row.createdAt,
       lastActiveAt: row.lastActiveAt,
     };
@@ -62,6 +64,7 @@ export class SessionManager {
         providerThreadId: string | null;
         model: string | null;
         workingDir?: string | null;
+        conversationId?: string | null;
       }
     | undefined
   > {
@@ -75,6 +78,7 @@ export class SessionManager {
       providerThreadId: row.providerThreadId,
       model: row.model,
       workingDir: row.workingDir,
+      conversationId: row.conversationId,
     };
   }
 
@@ -83,6 +87,7 @@ export class SessionManager {
       id: session.id,
       agentName: session.agentName,
       channelThreadKey: session.channelThreadKey,
+      conversationId: session.conversationId,
       status: session.status,
       workingDir: session.workingDir,
     });
@@ -107,8 +112,4 @@ export class SessionManager {
       return false;
     }
   }
-}
-
-export function getChannelFromThreadKey(channelThreadKey: string): string {
-  return channelThreadKey.split(":", 1)[0] ?? "";
 }

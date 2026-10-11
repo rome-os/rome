@@ -16,8 +16,12 @@ function authHeaders(bearer: CliBearer): Record<string, string> {
 }
 
 async function readError(response: Response): Promise<string> {
+  // Read the body once: after a failed json() the body is consumed, so a
+  // text() fallback could never return a non-JSON error page.
+  const text = await response.text().catch(() => "");
+  if (!text) return response.statusText;
   try {
-    const body = await response.json();
+    const body: unknown = JSON.parse(text);
     if (
       body &&
       typeof body === "object" &&
@@ -25,14 +29,10 @@ async function readError(response: Response): Promise<string> {
     ) {
       return (body as { error: string }).error;
     }
-    return JSON.stringify(body);
   } catch {
-    try {
-      return await response.text();
-    } catch {
-      return response.statusText;
-    }
+    // Not JSON: show the body as sent.
   }
+  return text;
 }
 
 export async function getJson<T>(host: string, path: string, bearer?: CliBearer): Promise<T> {

@@ -13,7 +13,7 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { getChannelFromThreadKey } from "./session-manager.js";
+import { findRecordedConversation, type RecordedConversation } from "./agent-trace-recorder.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
@@ -21,6 +21,9 @@ import {
 } from "./prompt-builder.js";
 import type { ActionRegistry, Action } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
+import { validateActionArgs } from "../actions/validate-action-args.js";
+import type { RoutineActivationGate } from "./mcp-facade.js";
+import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { SkillCatalog } from "./skill-catalog.js";
 import type { AgentEvent, AgentSession as DbAgentSession, McpServerConfig } from "../types.js";
@@ -60,11 +63,7 @@ import {
   type ModelResolver,
 } from "./model-resolver.js";
 import { resolveAgentModelRequest } from "./agent-model-selection.js";
-import {
-  resolveWebchatLargeModelSelection,
-  type ModelSelectionId,
-  type WebchatLargeModelSelection,
-} from "./model-selector.js";
+import { resolveWebchatLargeModelSelection, type ModelSelectionId } from "./model-selector.js";
 import { type ForkRunMode, type ForkSourceCheckpoint, type ThreadContext } from "./types.js";
 import { createLogger } from "../logger.js";
 import { ensureDefaultAgentWorkingDir, getDefaultAgentWorkingDir } from "../paths.js";
@@ -120,6 +119,11 @@ import type {
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { evaluateProviderSessionReset } from "../conversation-settings/reset-policy.js";
+import {
+  forkSessionKey,
+  sessionKeyChannel,
+  webchatConversationOfKey,
+} from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -200,7 +204,6 @@ export interface AgentSessionInit {
   /** Stable Rome conversation bound to this provider/runtime session. */
   romeSessionId?: string;
   sharedContext?: Record<string, unknown>;
-  forceNewSession?: boolean;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
    * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
@@ -225,8 +228,11 @@ export interface AgentSessionInit {
    * same degradation an exact fork's own turn already gets.
    */
   interactiveSurfaceDetached?: boolean;
-  /** Existing inbound platform message id, when this acquire starts its turn. */
-  platformMessageId?: string;
+  /**
+   * This acquire starts a turn for an inbound channel message, so the
+   * connection's provider-session reset policy applies before the session opens.
+   */
+  applyProviderSessionReset?: boolean;
   /**
    * Session-scoped handback contract for a handoff child conversation
    * (handoff + interactive summon). Exposes the `submit_output` tool validated
@@ -238,8 +244,6 @@ export interface AgentSessionInit {
    * It cannot be combined with an agent-declared `outputSchema`.
    */
   handback?: { schema: Record<string, unknown>; validate?: string };
-  /** Runtime-internal id for a generation already created transactionally. */
-  preparedSessionId?: string;
 }
 
 export interface AgentTurnInput {
@@ -321,6 +325,20 @@ export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly romeSessionId?: string;
+  /**
+   * The conversation this session serves: the caller's, else the recorded one.
+   * For identity and fork lineage only. A turn picks where it records through
+   * `resolveTurnConversation`, which leaves channel and webchat ones to their
+   * owners. Transitional: step 5 of the session identity plan merges
+   * `romeSessionId` into it.
+   */
+  readonly conversationId?: string;
+  /**
+   * The conversation the row recorded, looked up when no caller named one and
+   * only if it still exists. Kept on the session so a turn resolves where it
+   * records without an await between acquire and sendTurn.
+   */
+  readonly recordedConversation?: RecordedConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -354,6 +372,13 @@ export interface AgentSessionManager {
    * open session has the id. Never opens a session.
    */
   findWorkingDirBySessionId(sessionId: string): string | undefined;
+  /**
+   * Record the conversation a session serves, for callers that learn it only
+   * after acquire (a subagent's conversation is minted under its own id).
+   * Never overwrites a recorded conversation. Only sessions cached by this
+   * manager see the new value, so call it on the manager that acquired them.
+   */
+  recordConversation(sessionId: string, conversationId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -380,6 +405,41 @@ interface ManagerDeps {
   resolveProviderSessionReset?: (ref: ConversationRef) => Promise<ProviderSessionResetPolicy>;
   /** Receives every turn this manager's sessions finish, forked turns included. */
   usageRecorder?: TurnUsageSink;
+  /** What the named channel's surface supports, or null for a name no channel
+   *  has. A null result reads as a messaging channel. */
+  channelSurface: (channel: string) => ChannelSurface | null;
+}
+
+/** The parts of a channel's surface that change how its sessions prompt. */
+export interface ChannelSurface {
+  /** The next human turn arrives on a surface that renders interactive cards. */
+  interactiveCards: boolean;
+  /** Prompts carry the stored messages the agent has not seen. */
+  promptContext: boolean;
+}
+
+const MESSAGING_CHANNEL_SURFACE: ChannelSurface = {
+  interactiveCards: false,
+  promptContext: true,
+};
+
+/** The surface a channel's talker declares, with an omitted fact read as a
+ *  messaging channel's. */
+export function talkerChannelSurface(talker: {
+  interactiveCards?: boolean;
+  promptContext?: boolean;
+}): ChannelSurface {
+  return {
+    interactiveCards: talker.interactiveCards ?? MESSAGING_CHANNEL_SURFACE.interactiveCards,
+    promptContext: talker.promptContext ?? MESSAGING_CHANNEL_SURFACE.promptContext,
+  };
+}
+
+function channelSurfaceOf(
+  deps: Pick<ManagerDeps, "channelSurface">,
+  channel: string,
+): ChannelSurface {
+  return deps.channelSurface(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
 interface ManagerOptions {
@@ -454,10 +514,12 @@ export function createAgentSessionManager(
     key: AgentSessionKey,
     span: Span,
     init?: AgentSessionInit,
+    /** Set when the reset policy already ran for this acquire. */
+    resetChecked?: { preparedSessionId?: string; preparedConversationId?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const resetRef =
-      init?.platformMessageId &&
+      init?.applyProviderSessionReset &&
       init.threadContext?.connectionId &&
       deps.resolveProviderSessionReset
         ? {
@@ -465,7 +527,7 @@ export function createAgentSessionManager(
             conversationId: init.threadContext.threadId as ConversationId,
           }
         : undefined;
-    if (init && resetRef && !init.resumeSessionId && !init.preparedSessionId) {
+    if (init && resetRef && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const reset = await deps.resolveProviderSessionReset!(resetRef);
       const conversationId = init.romeSessionId ?? init.threadContext?.romeSessionId;
@@ -494,13 +556,17 @@ export function createAgentSessionManager(
           }
         }
         let preparedSessionId: string | undefined;
+        let preparedConversationId: string | undefined;
         if (decision.due) {
+          warnOnConversationMismatch(key, active?.id, active?.conversationId, init.romeSessionId);
           const replacement = await deps.sessionsRepo.rotateProviderGeneration({
             agentName: key.agentName,
             channelThreadKey: key.channelThreadKey,
             newSessionId: uuidv4(),
+            conversationId: init.romeSessionId,
           });
           preparedSessionId = replacement.id;
+          preparedConversationId = replacement.conversationId ?? undefined;
           log.info("provider_session.rotated", {
             conversationId,
             agentName: key.agentName,
@@ -512,14 +578,12 @@ export function createAgentSessionManager(
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, {
-          ...init,
-          platformMessageId: undefined,
-          ...(preparedSessionId ? { preparedSessionId } : {}),
+        return await acquireInner(key, span, init, {
+          preparedSessionId,
+          preparedConversationId,
         });
       });
     }
-    let forceNewSession = init?.forceNewSession === true;
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -590,16 +654,13 @@ export function createAgentSessionManager(
     }
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
-      const sess = await openSession(
-        deps,
-        key,
-        { ...(init ?? {}), forceNewSession },
-        {
-          keepAlive,
-          onClosed: onSessionClosed,
-          isSubagent,
-        },
-      );
+      const sess = await openSession(deps, key, init ?? {}, {
+        preparedSessionId: resetChecked?.preparedSessionId,
+        preparedConversationId: resetChecked?.preparedConversationId,
+        keepAlive,
+        onClosed: onSessionClosed,
+        isSubagent,
+      });
       sessions.set(k, sess);
       return sess;
     })();
@@ -664,6 +725,20 @@ export function createAgentSessionManager(
       }
       return undefined;
     },
+    async recordConversation(sessionId, conversationId) {
+      const filled = await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
+      if (!filled) return;
+      // A cached session reads the same value a cold reopen would. A session
+      // still opening is not cached yet and misses this, so callers record
+      // only after their acquire has returned.
+      for (const session of [...sessions.values()]) {
+        if (session.sessionId !== sessionId || session.conversationId) continue;
+        session.recordedConversation = await findRecordedConversation(
+          deps.webchatRepo,
+          conversationId,
+        );
+      }
+    },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
       const all = [...sessions.values()];
@@ -674,6 +749,10 @@ export function createAgentSessionManager(
 }
 
 interface OpenOptions {
+  /** Id of a generation the reset path already created transactionally. */
+  preparedSessionId?: string;
+  /** The conversation that prepared generation recorded, if any. */
+  preparedConversationId?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -762,19 +841,6 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
-function resolveSelectionFromChannelThreadKey(
-  channelThreadKey: string,
-): WebchatLargeModelSelection | undefined {
-  if (!channelThreadKey.startsWith("webchat:")) return undefined;
-  const marker = ":large-model:";
-  const markerIndex = channelThreadKey.lastIndexOf(marker);
-  if (markerIndex < 0) return undefined;
-  return (
-    resolveWebchatLargeModelSelection(channelThreadKey.slice(markerIndex + marker.length)) ??
-    undefined
-  );
-}
-
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
 async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
@@ -783,6 +849,28 @@ async function reachableRecordedWorkingDir(recorded: string): Promise<string | u
     () => false,
   );
   return isDirectory ? recorded : undefined;
+}
+
+/** A channel-thread key maps to one conversation, so a stored row that names
+ *  another one than the caller means the stored value cannot be trusted yet.
+ *  The live session records turns under the caller's conversation, and the
+ *  next rotation writes the caller's value onto the new row. Checked only when
+ *  a row is read (cold open and rotation); a cached live session reads none. */
+function warnOnConversationMismatch(
+  key: AgentSessionKey,
+  sessionId: string | undefined,
+  storedConversationId: string | null | undefined,
+  requestedConversationId: string | undefined,
+): void {
+  if (!storedConversationId || !requestedConversationId) return;
+  if (storedConversationId === requestedConversationId) return;
+  log.warn("agent session serves a different conversation than requested", {
+    sessionId,
+    agentName: key.agentName,
+    channelThreadKey: key.channelThreadKey,
+    storedConversationId,
+    requestedConversationId,
+  });
 }
 
 async function openSession(
@@ -810,13 +898,14 @@ async function openSession(
         providerThreadId: string | null;
         model: string | null;
         workingDir?: string | null;
+        conversationId?: string | null;
       }
     | undefined;
-  if (init.preparedSessionId) {
+  if (opts.preparedSessionId) {
     // The lifecycle transaction already inserted this fresh generation. Keep
     // resumeResult empty so provider open and prompt framing use new-session
     // semantics while retaining the transactionally allocated runtime id.
-  } else if (init.resumeSessionId && !init.forceNewSession) {
+  } else if (init.resumeSessionId) {
     resumeResult = await deps.sessionManager.findResumableSessionById(
       init.resumeSessionId,
       key.agentName,
@@ -827,7 +916,7 @@ async function openSession(
     if (resumeResult.channelThreadKey !== key.channelThreadKey) {
       throw new Error(`Agent session "${init.resumeSessionId}" does not match this session key`);
     }
-  } else if (key.channelThreadKey && !init.forceNewSession) {
+  } else if (key.channelThreadKey) {
     resumeResult = await deps.sessionManager.findReusableSession(
       key.channelThreadKey,
       key.agentName,
@@ -836,7 +925,8 @@ async function openSession(
 
   // The provider keeps a transcript per cwd, so a resumed row reopens where it
   // was written unless the caller names a dir. Legacy rows record none.
-  let preparedSessionId = init.preparedSessionId;
+  let preparedSessionId = opts.preparedSessionId;
+  let preparedConversationId = opts.preparedConversationId;
   let recordedWorkingDir: string | undefined;
   if (init.workingDir === undefined && resumeResult?.workingDir) {
     recordedWorkingDir = await reachableRecordedWorkingDir(resumeResult.workingDir);
@@ -856,12 +946,20 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumeResult.workingDir,
       });
+      warnOnConversationMismatch(
+        key,
+        resumeResult.id,
+        resumeResult.conversationId,
+        requestedRomeSessionId,
+      );
       const replacement = await deps.sessionsRepo.rotateProviderGeneration({
         agentName: key.agentName,
         channelThreadKey: key.channelThreadKey,
         newSessionId: uuidv4(),
+        conversationId: requestedRomeSessionId,
       });
       preparedSessionId = replacement.id;
+      preparedConversationId = replacement.conversationId ?? undefined;
       resumeResult = undefined;
     }
   }
@@ -869,7 +967,13 @@ async function openSession(
   const sessionId = preparedSessionId ?? resumeResult?.id ?? uuidv4();
   const workingDir =
     init.workingDir ?? recordedWorkingDir ?? (await ensureDefaultAgentWorkingDir());
-  const romeSessionId = requestedRomeSessionId;
+  // A caller that names no conversation still serves the one the row recorded.
+  const recordedConversation = requestedRomeSessionId
+    ? undefined
+    : await findRecordedConversation(
+        deps.webchatRepo,
+        resumeResult?.conversationId ?? preparedConversationId,
+      );
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -878,12 +982,17 @@ async function openSession(
     resumeResult?.provider && resumeResult.model
       ? { providerId: resumeResult.provider as ProviderId, model: resumeResult.model }
       : undefined;
-  // The channel-thread-key selection restores a webchat thread's chosen model
+  // The conversation's stored selection restores a webchat chat's chosen model
   // on cold resume. A pinned session no longer needs it (the pin records the
   // model that actually ran), so it only applies to unpinned (legacy) resumes.
+  // Only the chat's own session, keyed `webchat:<conversation id>`, reads it.
+  // Subagent keys carry a suffix, and app sessions use keys of their own.
+  const conversationId = webchatConversationOfKey(key.channelThreadKey);
   const persistedSelection =
-    init.resumeSessionId && !sessionPin
-      ? resolveSelectionFromChannelThreadKey(key.channelThreadKey)
+    init.resumeSessionId && !sessionPin && !init.selectionId && conversationId
+      ? resolveWebchatLargeModelSelection(
+          (await deps.webchatRepo?.getSession(conversationId))?.largeModelSelection,
+        )
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
 
@@ -892,6 +1001,7 @@ async function openSession(
       id: sessionId,
       agentName: key.agentName,
       channelThreadKey: key.channelThreadKey,
+      conversationId: requestedRomeSessionId,
       workingDir,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -900,6 +1010,15 @@ async function openSession(
     await deps.sessionManager.createSession(dbSession);
   } else if (preparedSessionId) {
     await deps.sessionsRepo.setWorkingDir(sessionId, workingDir);
+  } else if (requestedRomeSessionId && !resumeResult?.conversationId) {
+    await deps.sessionsRepo.fillConversationId(sessionId, requestedRomeSessionId);
+  } else {
+    warnOnConversationMismatch(
+      key,
+      sessionId,
+      resumeResult?.conversationId,
+      requestedRomeSessionId,
+    );
   }
 
   if (config.outputSchema && init.handback) {
@@ -936,15 +1055,25 @@ async function openSession(
   }
 
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
-  // agent for a human reply. That only works when (a) the surface can render it
-  // (the webchat surface — dashboard + desktop — does; messaging channels don't),
-  // and (b) this session will actually receive the next user turn. Subagents fail
-  // (b): the parent turn blocks on the child, and the next user turn always routes
-  // to the main agent — so a suspended subagent call would hang forever. Where
-  // this is false, an action that returns `renderComponent` falls back to relaying
-  // its `promptText` as prose; see the executeAction shim below.
+  // agent for a human reply. That only works when (a) the channel's surface can
+  // render it, and (b) this session will actually receive the next user turn.
+  // Subagents fail (b): the parent turn blocks on the child, and the next user
+  // turn always routes to the main agent — so a suspended subagent call would
+  // hang forever. Where this is false, an action that returns `renderComponent`
+  // falls back to relaying its `promptText` as prose; see the executeAction shim
+  // below. The answer feeds the cached system prompt, so the opening caller's
+  // channel decides it for the session's life. An opener without a thread
+  // context falls back to the channel the key names.
+  const keyChannel = sessionKeyChannel(key.channelThreadKey);
+  const openingChannel = init.threadContext?.channel ?? keyChannel;
+  if (keyChannel && openingChannel !== keyChannel && deps.channelSurface(keyChannel) !== null) {
+    log.warn("session opener's channel differs from the channel its key names", {
+      channelThreadKey: key.channelThreadKey,
+      openingChannel,
+    });
+  }
   const supportsInteractiveSurface =
-    key.channelThreadKey.startsWith("webchat:") && !opts.isSubagent;
+    !!openingChannel && channelSurfaceOf(deps, openingChannel).interactiveCards && !opts.isSubagent;
 
   const baseSystemPrompt = [
     deps.promptBuilder.build(config, {
@@ -975,6 +1104,24 @@ async function openSession(
     return deps.actionRegistry
       .getForAgent(allowList)
       .find((action) => action.config.name === requestedAction.config.name);
+  };
+  // `propose_routine` auto-enables only a routine the agent could already
+  // create with `create_routine` itself (the same check, non-throwing), with
+  // args that fit the target action's schema.
+  const routineActivation: RoutineActivationGate = {
+    canCallAction: (name) => {
+      if (!deps.actionRegistry.get(name)) return "unknown";
+      return findPermittedAction(name) ? "permitted" : "denied";
+    },
+    validateArgs: (actionName, args) => {
+      const action = deps.actionRegistry.get(actionName);
+      return validateActionArgs(action?.config.name ?? actionName, args, action?.inputSchema);
+    },
+    // The live turn's id is the one the webchat drain sees on its handle.
+    routineKeyFor: (toolUseId) => {
+      const turnId = impl.currentTurnId;
+      return turnId ? chatRoutineKeyForToolUse(turnId, toolUseId) : undefined;
+    },
   };
   const toActionMcpDefinition = (a: Action): ActionMcpDefinition => ({
     name: a.config.name,
@@ -1382,6 +1529,7 @@ async function openSession(
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    routineActivation,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
   });
@@ -1521,7 +1669,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: `${key.channelThreadKey}#fork:${fork.forkSessionId}`,
+      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
       captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
@@ -1646,7 +1794,8 @@ async function openSession(
   impl = new AgentSessionImpl({
     key,
     sessionId,
-    romeSessionId,
+    romeSessionId: requestedRomeSessionId,
+    recordedConversation,
     modelSession,
     deps,
     config,
@@ -1687,6 +1836,7 @@ interface ImplArgs {
   key: AgentSessionKey;
   sessionId: string;
   romeSessionId?: string;
+  recordedConversation?: RecordedConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
@@ -1902,6 +2052,7 @@ class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly romeSessionId?: string;
+  recordedConversation?: RecordedConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -1982,6 +2133,7 @@ class AgentSessionImpl implements AgentSession {
     this.key = args.key;
     this.sessionId = args.sessionId;
     this.romeSessionId = args.romeSessionId;
+    this.recordedConversation = args.recordedConversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
@@ -2000,6 +2152,11 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
+  }
+
+  /** The caller's conversation, else the recorded one that still exists. */
+  get conversationId(): string | undefined {
+    return this.romeSessionId ?? this.recordedConversation?.id;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind
@@ -2548,6 +2705,8 @@ class AgentSessionImpl implements AgentSession {
         id: forkSessionId,
         agentName: this.key.agentName,
         channelThreadKey,
+        // A persisted fork's conversation is minted under the fork's own id.
+        conversationId: forkSessionId,
         workingDir: this.workingDir,
         createdAt: new Date(),
         lastActiveAt: new Date(),
@@ -3157,7 +3316,7 @@ class AgentSessionImpl implements AgentSession {
     // case); when invoked inside one (channel adapter path), that span
     // becomes the parent.
     const channelName = this.key.channelThreadKey
-      ? getChannelFromThreadKey(this.key.channelThreadKey) || undefined
+      ? sessionKeyChannel(this.key.channelThreadKey)
       : undefined;
 
     // Identifying attrs stamped on every span this turn creates. We pass
@@ -3313,7 +3472,16 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let pendingConversationMessageIds: string[] = [];
-      if (this.deps.webchatRepo && sink.romeSessionType === "channel" && sink.romeSessionId) {
+      // A channel conversation stores lines the agent never saw as turns. The
+      // surface says whether this channel does; webchat, for one, does not.
+      const channel = sink.threadContext?.channel;
+      if (
+        this.deps.webchatRepo &&
+        sink.romeSessionType === "channel" &&
+        sink.romeSessionId &&
+        channel &&
+        channelSurfaceOf(this.deps, channel).promptContext
+      ) {
         const storedContext = await this.deps.webchatRepo.loadConversationContext(
           sink.romeSessionId,
           sink.replyTo?.messageId,

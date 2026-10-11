@@ -1,7 +1,6 @@
 import type { ReasoningEffort } from "./chat-types";
 
 export const DEFAULT_PROJECT_NAME = "default";
-export const SCROLL_BOTTOM_THRESHOLD_PX = 96;
 
 export const DEFAULT_LARGE_MODEL_SELECTION = "auto";
 export const LARGE_MODEL_OPTIONS = [

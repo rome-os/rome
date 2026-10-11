@@ -1,10 +1,10 @@
 /**
- * the standard setup renderers + a per-`(service, state)` custom
- * component registry. The renderers narrate a setup entirely from its
- * server-authored payload (the HARD RULE: payloads are semantically complete).
- * A custom component overrides RENDERING ONLY for a specific `(service, status)`
- * pair — it receives the same complete state and handlers, so any surface can
- * still fall back to the standard renderer.
+ * the standard setup renderers + an optional custom `presenting` component.
+ * The renderers narrate a setup entirely from its server-authored payload (the
+ * HARD RULE: payloads are semantically complete). The custom component
+ * overrides RENDERING ONLY for the `presenting` state — it receives the same
+ * complete state and handlers, so any surface can still fall back to the
+ * standard renderer.
  */
 
 import { useId, useState, type ComponentType, type ReactElement } from "react";
@@ -25,7 +25,6 @@ import type { SetupState, SetupView, SetupViewLink, SetupViewStep } from "@/lib/
 
 /** Everything a renderer (standard or custom) needs. */
 export interface SetupRenderProps {
-  service: string;
   state: SetupState;
   busy: boolean;
   error: string | null;
@@ -55,20 +54,17 @@ const DEFAULT_LABELS: SetupLabels = {
   cancelled: "Cancelled",
 };
 
-/** Key format for the custom-component registry: `"<service>:<status>"`. */
-export type SetupComponentRegistry = Record<string, ComponentType<SetupRenderProps>>;
-
 export interface SetupRendererProps extends SetupRenderProps {
   labels?: Partial<SetupLabels>;
-  registry?: SetupComponentRegistry;
+  /** Custom renderer for the `presenting` state. */
+  renderPresenting?: ComponentType<SetupRenderProps>;
 }
 
-/** Render a setup state: a registered custom component for this
- *  `(service, status)` if one exists, else the standard renderer. */
+/** Render a setup state: the custom `presenting` component when one is given
+ *  and the setup is presenting, else the standard renderer. */
 export function SetupRenderer(props: SetupRendererProps): ReactElement {
-  const { registry, labels, ...rest } = props;
-  const Custom = registry?.[`${rest.service}:${rest.state.status}`];
-  if (Custom) return <Custom {...rest} />;
+  const { renderPresenting: Presenting, labels, ...rest } = props;
+  if (Presenting && rest.state.status === "presenting") return <Presenting {...rest} />;
   return <StandardSetupRenderer {...rest} labels={labels} />;
 }
 

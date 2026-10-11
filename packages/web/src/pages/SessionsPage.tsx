@@ -58,7 +58,11 @@ import {
 } from "@/lib/chat-api";
 import { parseSSEEvents } from "@/lib/chat-sse";
 import { artifactLocalName } from "@/lib/artifact-name";
-import type { ChatMessage, RomeSessionRecord, RomeSessionsPageResult } from "@/lib/chat-types";
+import type {
+  ChatMessage,
+  RomeSessionExplorerRecord,
+  RomeSessionsPageResult,
+} from "@/lib/chat-types";
 import type { TraceSegment, TraceSnapshot } from "@rome/api-types/trace-segments";
 import type {
   RomeSessionDetail,
@@ -92,7 +96,9 @@ function sessionAgentLabel(agentName: string | null | undefined): string {
   return artifactLocalName(agentName ?? "main");
 }
 
-function sessionTriggerLabel(session: RomeSessionRecord | RomeSessionDetail): string | null {
+function sessionTriggerLabel(
+  session: RomeSessionExplorerRecord | RomeSessionDetail,
+): string | null {
   return (
     session.triggerName ??
     (session.triggerActionName ? artifactLocalName(session.triggerActionName) : null)
@@ -249,7 +255,7 @@ function SessionsListFrame({ fullMode, children }: { fullMode: boolean; children
   );
 }
 
-export function sessionsViewportClass(fullMode: boolean): string {
+function sessionsViewportClass(fullMode: boolean): string {
   return fullMode ? "h-dvh pt-safe" : "h-[var(--rome-mobile-content-height)] md:h-dvh";
 }
 
@@ -367,7 +373,7 @@ function SessionsIndexPage({
   const recentInventory = useRomeSessions(recentOptions, view === "overview");
   const { data, loading, error } = inventory;
   const sessions = data?.sessions ?? [];
-  const columns = useMemo<DataTableColumn<RomeSessionRecord>[]>(
+  const columns = useMemo<DataTableColumn<RomeSessionExplorerRecord>[]>(
     () => [
       {
         id: "session",
@@ -595,7 +601,7 @@ function SessionsIndexPage({
   // not the drill-in filters the overview hands over, which the chip row shows.
   const popoverFilterCount = (type ? 1 : 0) + (source ? 1 : 0);
   const openSession = useCallback(
-    (session: RomeSessionRecord) => {
+    (session: RomeSessionExplorerRecord) => {
       navigate(
         view === "overview"
           ? encodeURIComponent(session.id)
@@ -1047,7 +1053,7 @@ function ReadOnlySessionChat({
   messages,
   liveTurn,
 }: {
-  session: RomeSessionRecord;
+  session: RomeSessionExplorerRecord;
   messages: ChatMessage[];
   liveTurn: { turnId: string; snapshot: TraceSnapshot; text: string } | null;
 }) {
@@ -1331,6 +1337,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
   const fullMode = location.pathname.startsWith("/full/apps/sessions");
+  const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const [session, setSession] = useState<RomeSessionDetail | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1369,6 +1376,11 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
           setError("Session not found");
           setSession(null);
           setMessages([]);
+          // A saved workspace tile can outlive its session, so a framed page shows
+          // not-found in place: redirecting would nest chat in the tile.
+          if (window.parent === window) {
+            navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+          }
           return;
         }
         setSession(sessionResult);
@@ -1383,7 +1395,7 @@ function SessionDetailPage({ sessionId }: { sessionId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, navigate, hideSidebar]);
 
   useEffect(() => {
     if (!session) {

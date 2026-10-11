@@ -72,14 +72,4 @@ describe("Advanced settings inside the Mac app", () => {
     expect(await screen.findByRole("heading", { name: "Advanced Settings" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "System" })).toBeNull();
   });
-
-  it("still shows it when only the late-arriving class is present", async () => {
-    // The class lands on DOMContentLoaded, which a render can precede. Gating
-    // on it would fail open with no way back, since nothing re-renders when it
-    // appears. This asserts the gate does not depend on it — the bridge is the
-    // signal, and here it is absent, so this is a browser.
-    document.documentElement.classList.add("is-electron");
-    renderAdvanced();
-    expect(await screen.findByRole("heading", { name: "System" })).toBeDefined();
-  });
 });

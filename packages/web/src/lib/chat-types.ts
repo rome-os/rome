@@ -58,8 +58,7 @@ export interface ChatSearchMessageMatch {
   };
 }
 
-export type RomeSessionRecord = RomeSessionExplorerRecord;
-export type { RomeSessionDetail, RomeSessionsPageResult };
+export type { RomeSessionDetail, RomeSessionExplorerRecord, RomeSessionsPageResult };
 
 export interface AgentMention {
   appId: string;

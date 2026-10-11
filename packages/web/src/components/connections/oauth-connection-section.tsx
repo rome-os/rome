@@ -188,7 +188,6 @@ export function OAuthConnectionSection({
           pendingRedirectControls
         ) : setup.state && setup.state.status !== "cancelled" ? (
           <SetupRenderer
-            service={card.service}
             state={setup.state}
             busy={setup.busy}
             error={setup.error}

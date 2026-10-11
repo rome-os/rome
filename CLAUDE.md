@@ -16,6 +16,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 - Before changing code, follow the [established patterns](DEVELOPMENT.md#established-patterns).
 - Before explaining a concept or asserting how a surface behaves, check [`docs/`](docs/README.md) and link instead of re-deriving.
 - Before building or editing an app, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md).
+- When handling code review on an open PR, use the `/babysit-pr` skill ([`.claude/skills/babysit-pr`](.claude/skills/babysit-pr/SKILL.md)). It answers review feedback through `respond-to-review`, fixes failing CI, and resolves merge conflicts until the PR is clean.
 - When writing prose (docs, PR text), follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
 - When writing or editing code comments, follow [`docs/authoring/comments.md`](docs/authoring/comments.md).
 - When a PR touches `@rome-os/app-runtime`, `@rome-os/app-web-sdk`, or `@rome-os/ui`, choose the Conventional Commit type by consumer impact. Test-only changes use `test:` and do not bump the package; releasable changes use `feat:` / `fix:` / `feat!:` (or `BREAKING CHANGE:` in the body). release-please publishes them to npm from Conventional Commits, with no per-PR changeset file. Full flow in [`docs/releases.md`](docs/releases.md).

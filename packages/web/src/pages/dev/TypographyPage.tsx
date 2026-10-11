@@ -42,7 +42,7 @@ type Role = (typeof ROLES)[number];
 
 // Literal class names so Tailwind's scanner sees them (a computed
 // `text-${role}` template would not be picked up).
-export const ROLE_CLASS: Record<Role, string> = {
+const ROLE_CLASS: Record<Role, string> = {
   display: "text-display",
   title: "text-title",
   section: "text-section",

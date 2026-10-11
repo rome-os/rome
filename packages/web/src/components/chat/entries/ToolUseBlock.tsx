@@ -5,10 +5,10 @@ import { describeBashCall } from "@/lib/bash-call-label";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { TracePayloadView } from "./TracePayload";
 
-export function ToolUseBlock({ tool, input }: { tool?: string; input: unknown }) {
+export function ToolUseBlock({ tool, input }: { tool: string; input: unknown }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
-  const toolLabel = artifactLocalName(tool ?? t("blocks.unknownTool"));
+  const toolLabel = artifactLocalName(tool);
   const actionLabel = tool === "Bash" ? describeBashCall(input, "inProgress") : null;
   const header = actionLabel ?? t("blocks.usingTool", { tool: toolLabel });
   return (

@@ -27,6 +27,7 @@ import type { AppstoreSource } from "./lockfile.js";
 import { AppLifecycleService } from "./lifecycle-service.js";
 import { appIdToPathSegment, packArtifact } from "./packaging/index.js";
 import { createEmptyLegacyArtifactBindings } from "./artifact-id.js";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 const FIXTURES_AGENTS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -519,6 +520,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     skillCatalog: harness.skillCatalog,
     capabilityDiscovery: new CapabilityDiscovery(),
     lifecycleDispatcher: createAgentLifecycleDispatcher(),
+    channelSurface: testChannelSurface,
   });
 
   return { manager, provider, agentName };

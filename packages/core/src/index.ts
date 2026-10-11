@@ -115,7 +115,7 @@ import { createAIToolState } from "./core/ai-tool-state.js";
 import { createModelResolver } from "./core/model-resolver.js";
 import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./core/agent-session.js";
+import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
@@ -549,7 +549,7 @@ async function main() {
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
   let syncRomeCreditsPayer = (): void => {};
-  let refreshRomeCreditsModels = (): void => {};
+  let refreshRomeCredits = (): void => {};
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
@@ -557,14 +557,14 @@ async function main() {
       codexUsage: () => codexAccountService.getUsage(),
     },
     onCodexLoginChanged: () => syncRomeCreditsPayer(),
-    onCodexRefreshed: () => refreshRomeCreditsModels(),
+    onCodexRefreshed: () => refreshRomeCredits(),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
     aiToolState,
     appServerManager: codexAppServerManager,
   });
   syncRomeCreditsPayer = () => romeCreditsPayer.sync();
-  refreshRomeCreditsModels = () => void romeCreditsPayer.refreshServedModels();
+  refreshRomeCredits = () => void romeCreditsPayer.refresh();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
@@ -584,7 +584,7 @@ async function main() {
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
-    onRomeCreditsModelNotServed: () => romeCreditsPayer.refreshServedModels(),
+    onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
       const account = aiToolState.get().codex;
       return codexFunding({
@@ -759,6 +759,10 @@ async function main() {
       resolveProviderSessionReset: async (ref) =>
         (await conversationSettings.get(ref)).effective.session.reset,
       usageRecorder,
+      channelSurface: (channel) => {
+        const talker = connectionRegistry.getDescriptor(channel)?.capabilities.talker;
+        return talker ? talkerChannelSurface(talker) : null;
+      },
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -777,6 +781,7 @@ async function main() {
     agentLoader,
     webchatRepo,
     agentTurnStreamRegistry,
+    actionRegistry,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -1252,21 +1257,9 @@ async function main() {
     systemUpgrade: systemUpgradeService,
     hasAgent: (name) => agentLoader.has(name),
     hasRegisteredAction: (name) => actionRegistry.has(name),
-    // Resolve capability through the same allow-list path the agent session
-    // uses (`getForAgent` honors the agent's `actions` and `*`), so the inbox channel-control cue can't disagree with
-    // what the routed agent is actually allowed to call. Unknown agent → false.
-    hasAction: (agentName, actionName) => {
-      let config;
-      try {
-        const record = agentLoader.getRecord(agentName);
-        config = record.config;
-      } catch {
-        return false;
-      }
-      return actionRegistry
-        .getForAgent(config.actions ?? [])
-        .some((action) => action.config.name === actionName);
-    },
+    isExplicitAction: (name) => actionRegistry.isExplicit(name),
+    // Same allow-list resolution as the agent session's tool gate.
+    hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,

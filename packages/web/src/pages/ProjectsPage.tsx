@@ -124,14 +124,11 @@ export default function ProjectsPage() {
         renderCreateExtra={renderCreateExtra}
         rootLabel={t("projects.rootLabel")}
         rootPanelTrigger
-        selectInitialFolderOnMobile={false}
         searchPlaceholder={t("projects.searchPlaceholder")}
         sidebarHeading={t("projects.title")}
-        title={t("projects.title")}
       />
       {connectProjectPath ? (
         <SourceConnect
-          mode="link"
           projectPath={connectProjectPath}
           open={!!connectProjectPath}
           onClose={() => setConnectProjectPath(null)}

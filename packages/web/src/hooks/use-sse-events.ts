@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
 import { z } from "zod";
 
-export const raw = z.json();
-
 export interface SseEventHandler<Schema extends z.ZodType = z.ZodType> {
   schema: Schema;
   fn: (value: z.output<Schema>) => void | Promise<void>;
@@ -97,14 +95,6 @@ function addEventListener<
   }) as EventListener;
   state.listeners.set(eventName, listener);
   state.source.addEventListener(eventName, listener);
-}
-
-export function useSseEvent<Schema extends z.ZodType>(
-  url: string,
-  handler: SseEventHandler<Schema>,
-  options?: UseSseEventsOptions,
-): void {
-  useSseEvents<{ message: Schema }>(url, { message: handler }, options);
 }
 
 export function useSseEvents<const Schemas extends Record<string, z.ZodType>>(

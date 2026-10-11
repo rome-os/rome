@@ -84,7 +84,7 @@ describe("shared pairing approvals", () => {
             <ActivitySlice />
           </div>
           <div data-testid="connections">
-            <PairingApprovals connectionIds={["telegram"]} />
+            <PairingApprovals />
           </div>
         </QueryClientProvider>
       </MemoryRouter>,
@@ -253,7 +253,7 @@ describe("shared pairing approvals", () => {
             <ActivitySlice />
           </div>
           <div data-testid="connections">
-            <PairingApprovals connectionIds={["telegram"]} />
+            <PairingApprovals />
           </div>
         </QueryClientProvider>
       </MemoryRouter>,

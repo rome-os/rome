@@ -57,7 +57,6 @@ export type AppRemixSource =
   | AppRemixStorePin;
 
 export const PERSISTED_APP_STATES = ["installed", "failed", "broken"] as const;
-export type PersistedAppState = (typeof PERSISTED_APP_STATES)[number];
 
 export const APP_VIEW_STATES = [...PERSISTED_APP_STATES, "installing", "uninstalling"] as const;
 export type AppViewState = (typeof APP_VIEW_STATES)[number];

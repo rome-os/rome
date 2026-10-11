@@ -8,6 +8,7 @@ import {
   createTreeHandler,
   type FileBrowserScope,
 } from "../../lib/file-browser-server.js";
+import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
 import { ensureProjectsRootInitialized } from "../../paths.js";
 import { resolveWebchatProjectPath } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
@@ -15,10 +16,6 @@ import type { StoredSharedChat } from "../../db/repositories/webchat.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");
-
-// Mirror of projects-files.ts; share projects are read-only so writers + the
-// file-watch SSE stream are intentionally omitted.
-const PROJECTS_IGNORED_NAMES = [".next", ".turbo", "build", "coverage", "dist", "node_modules"];
 
 /**
  * Public, login-free surface for shared chats. The auth edge waves through
@@ -116,15 +113,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
     readHandler((scope) =>
       createSearchHandler({
         ...scope,
-        searchGlobs: [
-          "!**/.git/**",
-          "!**/.next/**",
-          "!**/.turbo/**",
-          "!**/build/**",
-          "!**/coverage/**",
-          "!**/dist/**",
-          "!**/node_modules/**",
-        ],
+        searchGlobs: PROJECTS_SEARCH_GLOBS,
       }),
     ),
   );

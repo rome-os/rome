@@ -24,26 +24,32 @@ export interface RomeCreditsPayer {
    */
   servedModels(): readonly string[] | null;
   /**
-   * Re-reads the served models while Rome credits pay, and does nothing
-   * otherwise. Never rejects. A failed read keeps the last snapshot.
+   * Re-reads the account's credits while ChatGPT is disconnected, and does
+   * nothing otherwise. Credits start or stop paying with the answer. Never
+   * rejects. A failed read keeps the current payer and snapshot.
    */
-  refreshServedModels(): Promise<void>;
+  refresh(): Promise<void>;
   /**
-   * Settles once the first read after credits start paying, or after a
+   * Settles once the first read after ChatGPT disconnects, or after a
    * credential change, has finished, and at once otherwise. Later refreshes
    * never make it wait again.
    */
-  servedModelsSettled(): Promise<void>;
+  settled(): Promise<void>;
   close(): void;
 }
 
+/** Credits pay only while the account can spend them. */
+function canSpend(view: RomeCreditsView | null): view is RomeCreditsView {
+  return view !== null && view.enabled && BigInt(view.availableMicros) > 0n;
+}
+
 /**
- * Selects Codex's process-wide payer from login state. The guardian's ChatGPT
- * login wins; Rome credits are only used when ChatGPT is disconnected and this
- * instance has a Rome Cloud origin and credential. `setDefaultProvider`
- * deliberately hard-restarts Codex when this selection changes. Switching to
- * Rome credits, or changing the credential while they pay, also re-reads the
- * models the gateway serves.
+ * Selects Codex's process-wide payer from login state and the account's
+ * credits. The guardian's ChatGPT login wins. Rome credits are only used when
+ * ChatGPT is disconnected, this instance has a Rome Cloud origin and
+ * credential, and the last read found credits the account can spend.
+ * `setDefaultProvider` deliberately hard-restarts Codex when this selection
+ * changes. A read also refreshes the models the gateway serves.
  */
 export function createRomeCreditsPayer(options: {
   aiToolState: Pick<AIToolState, "get">;
@@ -58,26 +64,40 @@ export function createRomeCreditsPayer(options: {
   const fetchCredits = options.fetchRomeCredits ?? (() => fetchRomeCredits());
   let instanceToken = token();
   let closed = false;
+  // Whether ChatGPT is disconnected and a credential could spend credits, as
+  // of the last sync. Reads happen only while it holds.
+  let eligible = false;
   let served: readonly string[] | null = null;
   let inFlight: { promise: Promise<void> } | null = null;
-  // The first read of a credits period or credential; null once it finished.
+  // The first read of an eligible period or credential; null once it finished.
   let firstRead: Promise<void> | null = null;
 
   const isUsingRomeCredits = (): boolean => provider() === ROME_CREDITS_MODEL_PROVIDER_ID;
 
-  const refreshServedModels = (): Promise<void> => {
-    if (closed || !isUsingRomeCredits()) return Promise.resolve();
+  const select = (next: string | null): void => {
+    if (provider() !== next) options.appServerManager.setDefaultProvider(next);
+  };
+
+  const refresh = (): Promise<void> => {
+    if (closed || !eligible) return Promise.resolve();
     if (inFlight) return inFlight.promise;
     const read = { promise: Promise.resolve() };
     inFlight = read;
     read.promise = (async () => {
       try {
         const view = await fetchCredits();
-        // A null view is a rejected credential or an account with no grant,
-        // not a report of what the gateway serves, so it changes nothing.
-        if (inFlight === read && view) served = view.models ? [...view.models] : null;
+        // A sync since this read began changed what it would describe.
+        if (inFlight !== read || closed) return;
+        // A null view is a rejected credential or an account with no grant.
+        if (canSpend(view)) {
+          served = view.models ? [...view.models] : null;
+          select(ROME_CREDITS_MODEL_PROVIDER_ID);
+        } else {
+          served = null;
+          select(null);
+        }
       } catch (err) {
-        log.warn("Rome credits served models unavailable", {
+        log.warn("Rome credits unavailable", {
           error: err instanceof Error ? err.message : String(err),
         });
       } finally {
@@ -88,7 +108,7 @@ export function createRomeCreditsPayer(options: {
   };
 
   const startPeriod = (): void => {
-    const pending: Promise<void> = refreshServedModels().then(() => {
+    const pending: Promise<void> = refresh().then(() => {
       if (firstRead === pending) firstRead = null;
     });
     firstRead = pending;
@@ -102,37 +122,27 @@ export function createRomeCreditsPayer(options: {
       const nextToken = token();
       const tokenChanged = nextToken !== instanceToken;
       instanceToken = nextToken;
-      if (tokenChanged) {
+      const wasEligible = eligible;
+      eligible = !hasChatGptLogin && Boolean(nextToken) && hasRomeCloud();
+      if (tokenChanged || !eligible) {
         // Another credential can belong to another account, so neither the
         // snapshot nor a read still in flight describes it.
         served = null;
         inFlight = null;
         firstRead = null;
       }
-      const next =
-        !hasChatGptLogin && nextToken && hasRomeCloud() ? ROME_CREDITS_MODEL_PROVIDER_ID : null;
-      if (next === provider()) {
-        // Only the credits provider reads the token, and each spawn re-reads it.
-        if (tokenChanged && next === ROME_CREDITS_MODEL_PROVIDER_ID) {
-          options.appServerManager.restart();
-          startPeriod();
-        }
+      if (!eligible) {
+        select(null);
         return;
       }
-      options.appServerManager.setDefaultProvider(next);
-      if (next === ROME_CREDITS_MODEL_PROVIDER_ID) {
-        startPeriod();
-      } else {
-        // A later credits period starts from a fresh read, not this list.
-        served = null;
-        inFlight = null;
-        firstRead = null;
-      }
+      // Only the credits provider reads the token, and each spawn re-reads it.
+      if (tokenChanged && isUsingRomeCredits()) options.appServerManager.restart();
+      if (tokenChanged || !wasEligible) startPeriod();
     },
     isUsingRomeCredits,
     servedModels: () => served,
-    refreshServedModels,
-    servedModelsSettled: () => firstRead ?? Promise.resolve(),
+    refresh,
+    settled: () => firstRead ?? Promise.resolve(),
     close() {
       closed = true;
     },

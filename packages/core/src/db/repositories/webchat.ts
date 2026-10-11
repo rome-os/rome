@@ -30,6 +30,7 @@ import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -1089,6 +1090,9 @@ export class WebChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void> {
+    // Sender-supplied content (send_message, the outbox): only the host may
+    // author routine cards, so a forged one never reaches the transcript.
+    input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {
       const delivered = await this.db
         .select({ id: romeAgentMessages.id })
@@ -1309,6 +1313,26 @@ export class WebChatRepository {
       )
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /** The id of the conversation a channel address names, or null when none
+   *  exists yet. A webchat conversation's address is its own id. Forks and
+   *  subagent runs copy their parent's address, so only conversation types
+   *  match. */
+  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          inArray(romeSessions.type, ["webchat", "webchat_handoff", "channel"]),
+          eq(romeSessions.sourceChannel, channel),
+          eq(romeSessions.sourceThreadId, threadId),
+        ),
+      )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+      .limit(1);
+    return rows[0]?.id ?? null;
   }
 
   async deleteSession(id: string) {
@@ -1743,16 +1767,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1779,6 +1804,19 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {

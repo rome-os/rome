@@ -47,8 +47,8 @@ export interface ChatView {
   interactionResults: Map<string, Record<string, unknown>>;
 }
 
-// Exported for the timeline rail, which labels its dots with the same plain
-// text the transcript renders in the bubble.
+// Shared by the user bubble and the timeline rail, so the rail labels its dots
+// with the same plain text the bubble renders.
 export function userMessageText(content: string): string {
   return parseEntries(content)
     .flatMap((b) => (b.type === "text" ? [b.content] : []))

@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { join } from "node:path";
-import { isRecord, cloudOrigin, validId } from "@rome-os/node-core";
+import { readFile, writeFile } from "node:fs/promises";
+import { isRecord, cloudOrigin, validId, type ActionResponse } from "@rome-os/node-core";
 import { authorizeServer, configureCaller } from "@rome-os/node-core/auth";
 import {
   createNodeClient,
@@ -13,6 +14,44 @@ import {
   stopDaemon,
 } from "@rome-os/node-core/client";
 import { commandHelp } from "./help.js";
+import { copyRequest } from "./copy.js";
+
+const failed = (response: ActionResponse) =>
+  !response.ok ||
+  (isRecord(response.result) &&
+    Object.hasOwn(response.result, "exitCode") &&
+    response.result.exitCode !== 0);
+
+async function readInput(path: string): Promise<Uint8Array> {
+  if (path !== "-") return readFile(path);
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+function write(stream: NodeJS.WriteStream, data: string | Uint8Array): Promise<void> {
+  return new Promise((resolve, reject) =>
+    stream.write(data, (error) => (error ? reject(error) : resolve())),
+  );
+}
+
+function progressPrinter() {
+  const started = Date.now();
+  let last = 0;
+  const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+  return (progress: { bytes: number; total: number }, final = false) => {
+    const now = Date.now();
+    if (!final && now - last < 1000 && progress.bytes !== progress.total) return;
+    last = now;
+    const percent = progress.total ? Math.floor((progress.bytes / progress.total) * 100) : 100;
+    const ms = now - started;
+    const rate = ms ? mib((progress.bytes / ms) * 1000) : "0.0";
+    const line = `${mib(progress.bytes)} / ${mib(progress.total)} MiB (${percent}%) ${rate} MiB/s`;
+    process.stderr.write(
+      process.stderr.isTTY ? `\r${line}\x1b[K${final ? "\n" : ""}` : `${line}\n`,
+    );
+  };
+}
 
 async function withShutdown(run: (signal: AbortSignal) => Promise<void>): Promise<void> {
   const controller = new AbortController();
@@ -38,6 +77,8 @@ async function main(): Promise<void> {
       cloud: { type: "string" },
       name: { type: "string" },
       args: { type: "string" },
+      input: { type: "string" },
+      output: { type: "string" },
       server: { type: "boolean" },
       "device-code": { type: "boolean" },
     },
@@ -54,6 +95,25 @@ async function main(): Promise<void> {
     throw new Error("--server is only supported by rome-node auth.");
   if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
     throw new Error("--device-code is only supported by rome-node connect.");
+  if (
+    (values.input !== undefined || values.output !== undefined) &&
+    !(positionals[0] === "device" && positionals[1] === "run")
+  )
+    throw new Error("--input and --output are only supported by rome-node device run.");
+  if (positionals[0] === "cp") {
+    if (positionals.length !== 3) throw new Error("Usage: rome-node cp <src> <dst>");
+    const request = copyRequest(positionals[1], positionals[2], process.cwd());
+    const client = createNodeClient(config);
+    const print = progressPrinter();
+    try {
+      const summary = await client.copy(request, { onProgress: (progress) => print(progress) });
+      print({ bytes: summary.bytes, total: summary.bytes }, true);
+      process.stdout.write(`${JSON.stringify(summary)}\n`);
+    } finally {
+      client.disconnect();
+    }
+    return;
+  }
   if (positionals[0] === "auth" && positionals[1] === "status" && positionals.length === 2) {
     const credential = await readOptionalCallerCredential(config);
     process.stdout.write(
@@ -203,18 +263,26 @@ async function main(): Promise<void> {
       process.stdout.write(`${JSON.stringify(await client.listDevices())}\n`);
       return;
     }
+    if (values.input !== undefined || values.output !== undefined) {
+      const output = values.output ?? "-";
+      const input = values.input === undefined ? undefined : await readInput(values.input);
+      const { response, body } = await client.runBinary(deviceId, action, args, input);
+      // A failed action leaves an existing output file unchanged.
+      if (output === "-") await write(process.stdout, body);
+      else if (response.ok) await writeFile(output, body);
+      await write(
+        output === "-" ? process.stderr : process.stdout,
+        `${JSON.stringify(response)}\n`,
+      );
+      if (failed(response)) process.exitCode = 1;
+      return;
+    }
     const result =
       command === "describe"
         ? await client.describe(deviceId)
         : await client.run(deviceId, action, args);
     process.stdout.write(`${JSON.stringify(result)}\n`);
-    if (
-      !result.ok ||
-      (isRecord(result.result) &&
-        Object.hasOwn(result.result, "exitCode") &&
-        result.result.exitCode !== 0)
-    )
-      process.exitCode = 1;
+    if (failed(result)) process.exitCode = 1;
   } finally {
     client.disconnect();
   }

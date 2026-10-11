@@ -14,10 +14,11 @@ afterEach(() => {
 });
 
 function ThemeControls() {
-  const { toggle, setTheme } = useTheme();
+  const { setPreference, setTheme } = useTheme();
   return (
     <>
-      <button onClick={toggle}>Toggle mode</button>
+      <button onClick={() => setPreference("light")}>Light mode</button>
+      <button onClick={() => setPreference("dark")}>Dark mode</button>
       <button onClick={() => setTheme("slate")}>Select Slate</button>
     </>
   );
@@ -55,7 +56,7 @@ describe("StyleGuidePage mode scoping", () => {
     ];
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(specimenModes(container)).toEqual(expected("ash"));
-    fireEvent.click(screen.getByRole("button", { name: "Toggle mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Light mode" }));
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(specimenModes(container)).toEqual(expected("ash"));
     fireEvent.click(screen.getByRole("button", { name: "Select Slate" }));
@@ -75,7 +76,7 @@ describe("StyleGuidePage mode scoping", () => {
       { theme: "ash", mode: "light", shadow: false },
       { theme: "ash", mode: "light", shadow: true },
     ]);
-    fireEvent.click(screen.getByRole("button", { name: "Toggle mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dark mode" }));
     fireEvent.click(screen.getByRole("button", { name: "Select Slate" }));
     expect(specimenModes(container)).toEqual([
       { theme: "slate", mode: "dark", shadow: false },

@@ -94,8 +94,8 @@ export interface FileBrowserScope {
     resolvedPath: string;
     type: "directory" | "file";
   }) => Promise<void> | void;
-  ignoredNames?: string[];
-  searchGlobs?: string[];
+  ignoredNames?: readonly string[];
+  searchGlobs?: readonly string[];
   historyTarget?: (resolvedPath: string, logicalPath: string) => GitTarget | null;
   renameCommitTarget?: (
     fromResolvedPath: string,

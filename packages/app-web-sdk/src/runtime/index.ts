@@ -281,15 +281,20 @@ export function getCurrentAppPath(): string {
 }
 
 export function buildAppUrl(path: string = ""): string {
-  const bootstrap = requireBootstrap();
-  const normalizedPath = normalizePath(path);
+  return appUrlFor(normalizePath(path));
+}
+
+function appUrlFor(normalizedPath: string): string {
+  const routeBase = requireBootstrap().routeBase;
   const encodedPath = encodePath(normalizedPath);
-  return encodedPath ? `${bootstrap.routeBase}/${encodedPath}` : bootstrap.routeBase;
+  return encodedPath ? `${routeBase}/${encodedPath}` : routeBase;
 }
 
 export function navigateToApp(path: string = "", options?: { replace?: boolean }): void {
+  // Normalize once: normalizePath decodes each segment, so a second pass would
+  // decode "%2520" twice and write a URL that disagrees with the emitted path.
   const normalizedPath = normalizePath(path);
-  const url = buildAppUrl(normalizedPath);
+  const url = appUrlFor(normalizedPath);
   if (options?.replace) {
     window.history.replaceState(null, "", url);
   } else {

@@ -203,6 +203,7 @@ export interface WorkerRpcServices {
    * presence-only, so validation paths such as `create_routine` ask the eager
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
+  isExplicitAction: (name: string) => boolean;
   /** Capability check bridged to the worker-side `RpcAgentRunner.hasAction`:
    * does the named agent's allow-list resolve the named action? Mirrors the
    * agent session's own gate so the inbox channel-control cue can match what
@@ -266,6 +267,7 @@ export class WorkerRpcServer {
           ),
         "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
+        "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
         "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
         "agent.hasAction": (params) => this.handleAgentHasAction(params),
         "routines.schedule": (params) => this.handleRoutinesSchedule(params),
@@ -424,6 +426,12 @@ export class WorkerRpcServer {
   private handleActionsHas(params: unknown): { hasAction: boolean } {
     const { actionName } = parseParams("actions.has", ActionHasParams, params);
     return { hasAction: this.services.hasRegisteredAction(actionName) };
+  }
+
+  /** Visibility check for the worker-side create_routine explicit-target gate. */
+  private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
+    const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
+    return { explicit: this.services.isExplicitAction(actionName) };
   }
 
   /**

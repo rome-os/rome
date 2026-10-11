@@ -542,5 +542,3 @@ export function FileGridCard({
     </div>
   );
 }
-
-export default FilesPane;

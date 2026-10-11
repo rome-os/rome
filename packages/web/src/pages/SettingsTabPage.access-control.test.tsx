@@ -9,10 +9,6 @@ import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -69,6 +65,7 @@ function mockSettingsBackend(options?: {
         previousVersion: null,
         instance: { auth: "no_token", accountId: null, instanceId: null },
         database: { ok: true },
+        relay: { configured: false, depositUrlConfigured: false },
         channels: [],
         apps: { total: 0, failed: [], broken: [] },
       });

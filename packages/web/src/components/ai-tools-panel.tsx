@@ -680,15 +680,12 @@ export function AiToolsPanel({
     try {
       const res = await fetch("/api/ai-tools/refresh", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
-        claude?: AIToolStatus;
-        codex?: AIToolStatus;
+        claude: AIToolStatus;
+        codex: AIToolStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
-      setToolStatus({
-        ...(data.claude ? { claude: data.claude } : {}),
-        ...(data.codex ? { codex: data.codex } : {}),
-      });
+      setToolStatus({ claude: data.claude, codex: data.codex });
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {

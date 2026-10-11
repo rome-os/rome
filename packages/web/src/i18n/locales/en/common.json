@@ -243,6 +243,7 @@
     "tools": "Apps",
     "toolOpened": "Open",
     "toolUpdated": "New content",
+    "openToolNewTab": "Open {{name}} in new tab",
     "closeTool": "Close {{name}}",
     "allTools": "All open apps",
     "collapseTools": "Hide apps",

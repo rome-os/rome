@@ -68,6 +68,7 @@ import {
   type WorkspaceContextSnapshot,
 } from "../../core/prompt-builder.js";
 import { normalizeRoutineDraftForCard } from "../../core/mcp-facade.js";
+import { chatRoutineKeyForToolUse, mintChatRoutineKey } from "../../routines/chat-routine-key.js";
 import { buildSlashSkillPrompt, expandSlashSkillPrompt } from "../../core/slash-skill-command.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
@@ -78,6 +79,8 @@ import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
+import { webchatSessionKey } from "../../core/agent-session-key.js";
+import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";
 
 const log = createLogger("api:webchat");
 const ENABLE_IMPERSONATION_SETTING_KEY = "enableImpersonation";
@@ -196,6 +199,8 @@ type WebchatEventName =
 // Mirror the agent's propose_routine tool call into a first-class assistant
 // `routine_draft_card` message so the confirm card renders inline. The card
 // carries the full create payload; turning it on POSTs /api/routines directly.
+// `routineKey` is set for an `activate: true` call: the key its routine was
+// created with, so the card's lookup finds it and opens saved.
 async function persistRoutineDraftCard(
   webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
   actionRegistry: import("../../actions/types.js").ActionRegistry,
@@ -203,19 +208,34 @@ async function persistRoutineDraftCard(
   turnId: string,
   toolUseId: string,
   toolInput: unknown,
+  routineKey?: string,
 ): Promise<void> {
   const normalized = normalizeRoutineDraftForCard(toolInput ?? {});
   if (!normalized.ok) return;
   // Render the bound action through its own preview() so the card shows
   // ground truth, not the agent's prose summary. Pure call; absent when the
-  // action implements no preview, in which case the card uses the prose.
-  const preview = await actionRegistry
-    .get(normalized.draft.actionName)
-    ?.preview?.(normalized.draft.args);
+  // action implements no preview, in which case the card uses the prose. The
+  // preview is optional, so a failing one never costs the card — an activated
+  // routine is already live and the card is how the guardian reverses it.
+  let preview: import("@rome-os/app-runtime").PreviewPayload | undefined;
+  try {
+    preview = await actionRegistry
+      .get(normalized.draft.actionName)
+      ?.preview?.(normalized.draft.args);
+  } catch (err) {
+    log.warn("routine card preview failed; showing the card without it", {
+      sessionId,
+      toolUseId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   const part = {
     type: "routine_draft_card" as const,
     toolUseId,
     draft: { ...normalized.draft, ...(preview ? { preview } : {}) },
+    // Minted here, not taken from the agent's input, so it names this card only.
+    // An activated routine's key is derived from its tool call instead.
+    routineKey: routineKey ?? mintChatRoutineKey(),
   };
   try {
     await webchatRepo.addMessage(
@@ -286,6 +306,13 @@ type Suspension =
     };
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
+
+// Tool names don't prove provenance: the Claude provider strips MCP prefixes,
+// so another server's `propose_routine` arrives with the same name. Nothing
+// here trusts the tool's output for identity — an activated card's routine key
+// is derived from the tool-use id — so a look-alike can at most show a draft.
+const isProposeRoutineTool = (tool: unknown): boolean =>
+  typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
 /** Pull a suspension descriptor (`pendingInteraction: true` / `handoff: true`)
  * out of an action's tool_result output, whether it arrived structured or
@@ -652,12 +679,11 @@ export interface WebchatRuntime {
    *
    * The task receives an `emit` helper that pushes `agent_message` events to
    * subscribers and accumulates them into the persisted trace, identical to
-   * the /chat/send code path.
+   * the /chat/send code path. An event emitted as `recorded` already has its
+   * trace saved and its reply delivered by the task, so the stream only shows
+   * it live and mounts its cards.
    */
-  enqueueSessionTask(
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void>;
+  enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -738,7 +764,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const isContinuableFork = async (session: StoredWebchatSession): Promise<boolean> => {
     if (session.type !== "fork") return false;
     const row = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(session.id, null),
+      webchatSessionKey(session.id),
       session.agentName ?? "main",
     );
     return !!row?.providerThreadId;
@@ -1172,15 +1198,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
   const generateShareToken = (): string => randomBytes(32).toString("base64url");
 
-  const buildWebchatChannelThreadKey = (
-    sessionId: string,
-    modelSelection: WebchatLargeModelSelection | null,
-  ): string => {
-    return modelSelection
-      ? `webchat:${sessionId}:large-model:${modelSelection.id}`
-      : `webchat:${sessionId}`;
-  };
-
   const resolveSessionHandback = (
     session: StoredWebchatSession,
   ): { schema: Record<string, unknown>; validate?: string } | undefined => {
@@ -1234,7 +1251,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const agentName = input.session.agentName ?? "main";
     const modelSelection = resolveStoredModelSelection(input.session.largeModelSelection);
-    const channelThreadKey = buildWebchatChannelThreadKey(input.session.id, modelSelection);
+    const channelThreadKey = webchatSessionKey(input.session.id);
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
@@ -1337,12 +1354,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
-        // Keyed by the fork's own id with no model-selection suffix — exactly
-        // what `handleChatSend` will derive for it later, since a fork row
-        // carries no stored selection.
-        ...(input.continuable
-          ? { persistThreadKey: (id: string) => buildWebchatChannelThreadKey(id, null) }
-          : {}),
+        // Keyed by the fork's own id, exactly what `handleChatSend` will
+        // derive for it later.
+        ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
       })
       [Symbol.asyncIterator]();
 
@@ -1680,7 +1694,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
-  const emitTraceEvent = (
+  const emitLiveTraceEvent = (
     stream: ActiveWebchatStream,
     msg: TraceableEvent & { agent?: string },
   ): void => {
@@ -1701,6 +1715,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const snap = stream.segmentBuilder.snapshot();
       emitToStream(stream, "summary_update", snap.summary, "summary");
     }
+  };
+
+  // Show an AgentEvent live and persist it into the stream's trace.
+  const emitTraceEvent = (
+    stream: ActiveWebchatStream,
+    msg: TraceableEvent & { agent?: string },
+  ): void => {
+    emitLiveTraceEvent(stream, msg);
     // Incrementally persist so trace blocks survive a mid-turn crash (e.g.
     // CDP connection closed, long-running tool errors). persistTrace is
     // idempotent + serialized via tracePersistPromise and writes only the
@@ -2224,10 +2246,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionManager.findReusableSession(
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      webchatSessionKey(sessionId),
       session.agentName ?? "main",
     );
     return c.json({
@@ -2242,12 +2261,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
-    const modelSelection = resolveStoredModelSelection(session?.largeModelSelection);
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.peek({
       agentName: session?.agentName ?? "main",
-      channelThreadKey: buildWebchatChannelThreadKey(sessionId, modelSelection),
+      channelThreadKey: webchatSessionKey(sessionId),
     });
     if (sess) {
       await sess.close("user").catch(() => undefined);
@@ -2737,7 +2755,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // cannot cancel the turn currently producing output.
     const agentSess = deps.agentSessionManager.peek({
       agentName: stream.agentName,
-      channelThreadKey: stream.channelThreadKey ?? `webchat:${stream.sessionId}`,
+      channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
     if (!agentSess || agentSess.currentTurnId !== turnId) {
       return c.json({ stopped: false, reason: "turn_not_interruptible" }, 409);
@@ -3007,7 +3025,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // fresh thread and silently drop the branched context — refuse instead.
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionManager.findReusableSession(
-        buildWebchatChannelThreadKey(session.id, null),
+        webchatSessionKey(session.id),
         session.agentName ?? "main",
       );
       if (!branchThread?.providerThreadId) {
@@ -3147,10 +3165,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     const contextSuffix = buildWebchatContextSuffix();
-    // A branch resumes by recomputing its channel-thread key, and
-    // `persistForkThread` stored that key without a model-selection suffix. Pin
-    // the selection to null so the two derivations cannot drift: a suffix here
-    // would open a fresh provider thread and silently lose the branch history.
+    // A branch has no stored selection: it continues the provider thread
+    // `persistForkThread` saved, on whatever model that thread pinned.
     const modelSelection =
       session.parentSessionId !== null
         ? null
@@ -3163,7 +3179,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             body.largeModelSelection,
           );
     const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
-    const channelThreadKey = buildWebchatChannelThreadKey(sessionId, modelSelection);
+    const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
     // re-check here so a stale row from a removed app surfaces a clear error
@@ -3329,6 +3345,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // parent under the agent's trace instead of landing on a stale one.
       void otelContext.with(handle.turnContext, () =>
         runOnStream(stream, "webchat send", async () => {
+          // propose_routine `activate: true` calls, by tool-use id, until their
+          // tool_result says whether to show a card. The card's key is derived
+          // from the tool-use id (the key the handler created the routine
+          // with), never read from the tool's output.
+          const pendingRoutineActivations = new Map<string, unknown>();
+          const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
+            persistRoutineDraftCard(
+              deps.webchatRepo,
+              deps.actionRegistry,
+              sessionId,
+              turnId,
+              toolUseId,
+              toolInput,
+              chatRoutineKeyForToolUse(turnId, toolUseId),
+            );
           try {
             let resultContent = "";
             let lastCompletedText:
@@ -3456,11 +3487,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               }
               if (msg.type === "result") resultContent = msg.content;
               if (msg.type === "error") resultError = msg;
-              // Out-of-band snapshot for the routine draft card.
+              // Out-of-band snapshot for the routine draft card. An
+              // `activate: true` call creates the routine in its handler, so its
+              // card waits for the tool_result, which carries the routine id.
               if (
                 msg.type === "tool_use" &&
-                (msg.tool === "propose_routine" || msg.tool.endsWith("__propose_routine"))
+                isProposeRoutineTool(msg.tool) &&
+                (msg.input as { activate?: unknown } | undefined)?.activate === true
               ) {
+                pendingRoutineActivations.set(msg.id, msg.input);
+              } else if (msg.type === "tool_use" && isProposeRoutineTool(msg.tool)) {
                 await persistRoutineDraftCard(
                   deps.webchatRepo,
                   deps.actionRegistry,
@@ -3522,6 +3558,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     error: err instanceof Error ? err.message : String(err),
                   });
                 }
+              }
+              // An activated propose_routine's card. An error result created no
+              // routine and asks the agent to retry, so it gets no card; any
+              // other result (created, or the draft fallback) does, and the
+              // card's lookup by key settles On vs. draft.
+              if (msg.type === "tool_result" && pendingRoutineActivations.has(msg.toolUseId)) {
+                const toolInput = pendingRoutineActivations.get(msg.toolUseId);
+                pendingRoutineActivations.delete(msg.toolUseId);
+                if (msg.isError !== true) await persistActivatedCard(msg.toolUseId, toolInput);
               }
               // Parked suspension: any action that returned a pending_interaction
               // or handoff result surfaces it on its tool_result. Snapshot a card
@@ -3735,7 +3780,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               reason: resultError?.reason,
             };
           } finally {
-            unsubscribeStatus();
+            // A turn stopped or failed between the handler and its result may
+            // already have created the routine; show its card so it stays
+            // visible and reversible (the lookup shows a draft if it doesn't).
+            try {
+              // One failing card (e.g. a throwing preview) must not hide the rest.
+              for (const [toolUseId, toolInput] of pendingRoutineActivations) {
+                await persistActivatedCard(toolUseId, toolInput).catch((err: unknown) => {
+                  log.warn("failed to persist a pending routine card", {
+                    sessionId,
+                    turnId,
+                    toolUseId,
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                });
+              }
+            } finally {
+              unsubscribeStatus();
+            }
           }
         }),
       );
@@ -3780,10 +3842,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return handleChatSend(c, id, body);
   });
 
-  const runEnqueuedTask = async (
-    sessionId: string,
-    task: (helpers: { emit: (msg: AgentEvent & { agent?: string }) => void }) => Promise<void>,
-  ): Promise<void> => {
+  const runEnqueuedTask = async (sessionId: string, task: BackendSessionTask): Promise<void> => {
     // Wait behind any in-flight user turn before opening our own stream.
     const predecessor = getLastStream(sessionId);
     if (predecessor && !predecessor.finished) {
@@ -3823,10 +3882,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const stream = await createStream(
       sessionId,
       syntheticTurnId,
-      buildWebchatChannelThreadKey(
-        sessionId,
-        resolveStoredModelSelection(session.largeModelSelection),
-      ),
+      webchatSessionKey(sessionId),
       session.agentName ?? "main",
     );
     enqueueStream(sessionId, stream);
@@ -3841,7 +3897,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
     const builtinQuestionCards: PendingInteractionPart[] = [];
-    const emit = (msg: AgentEvent & { agent?: string }) => {
+    // A recorded event's turn delivers its own reply, so its cards are written
+    // as they arrive, ahead of that reply, under the turn's own id.
+    let recordedTurnId: string | undefined;
+    let recordedCardWrites: Promise<void> = Promise.resolve();
+    const emit = (msg: AgentEvent & { agent?: string }, options?: BackendEmitOptions) => {
+      const recorded = options?.recorded === true;
+      if (recorded && msg.type === "turn_start") recordedTurnId = msg.turnId;
       if (msg.type === "turn_start" && stream.channelThreadKey) {
         const owner = deps.agentSessionManager.peek({
           agentName: msg.agent ?? stream.agentName,
@@ -3856,21 +3918,34 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       // Backend turns have no live bubble; drop delta events.
-      if (isTransientDelta(msg) || msg.type === "input_status") return;
-      stream.traceEvents.push(msg);
-      emitTraceEvent(stream, msg);
-      if (msg.type === "result") replyText = msg.content;
+      if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
+      if (recorded) {
+        emitLiveTraceEvent(stream, msg);
+      } else {
+        stream.traceEvents.push(msg);
+        emitTraceEvent(stream, msg);
+        if (msg.type === "result") replyText = msg.content;
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
         if (suspension && suspension.kind === "inline" && suspension.builtin) {
           const card = buildBuiltinCard(msg, suspension, sessionId);
-          if (card) builtinQuestionCards.push(card);
+          if (card && recorded) {
+            const cardTurnId = recordedTurnId ?? syntheticTurnId;
+            recordedCardWrites = recordedCardWrites.then(() =>
+              persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
+            );
+          } else if (card) {
+            builtinQuestionCards.push(card);
+          }
         }
       }
+      return recordedCardWrites;
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
       await task({ emit });
+      await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.

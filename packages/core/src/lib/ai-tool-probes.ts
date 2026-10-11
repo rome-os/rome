@@ -6,8 +6,8 @@ import type { CodexPlanType } from "./codex-cli-auth.js";
 import {
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
-  type AnthropicCompatibleCredentialsSummary,
 } from "./anthropic-compatible-providers.js";
+import type { AnthropicCompatibleCredentialsSummary } from "@rome/api-types/anthropic-compatible-providers";
 import { isAnthropicAuthRevoked, isAnthropicCompatibleAuthRevoked } from "./anthropic-login.js";
 import {
   type AIToolUsageStatus,
