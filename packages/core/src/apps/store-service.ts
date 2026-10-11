@@ -268,13 +268,17 @@ export function createAppStoreService(opts: CreateAppStoreServiceOptions = {}): 
       if (!upstream.ok) {
         // Callers read 404 as "no such listing". Rome Cloud answers that in
         // JSON, so a non-JSON 404 comes from a wrong origin, an edge, or a
-        // missing route, and says nothing about the listing.
-        const listingNotFound =
-          upstream.status === 404 &&
-          (upstream.headers.get("content-type") ?? "").includes("application/json");
+        // missing route, and says nothing about the listing. A non-JSON body
+        // is an error page, and the install dialog shows `error` as copy.
+        const isJson = (upstream.headers.get("content-type") ?? "").includes("application/json");
+        const listingNotFound = upstream.status === 404 && isJson;
         return {
           status: listingNotFound || upstream.status === 410 ? upstream.status : 502,
-          body: { available: true, browseOrigin, error: body || upstream.statusText },
+          body: {
+            available: true,
+            browseOrigin,
+            error: isJson && body ? body : `Rome Cloud returned HTTP ${upstream.status}`,
+          },
         };
       }
 

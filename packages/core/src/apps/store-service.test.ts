@@ -122,6 +122,7 @@ describe("createAppStoreService", () => {
     const result = await service.getListing({ listingId: "calendar" });
 
     expect(result.status).toBe(404);
+    expect(result.body.error).toBe(JSON.stringify({ error: "Listing not found" }));
   });
 
   it("reports a non-JSON 404 as an upstream failure, not a missing listing", async () => {
@@ -140,6 +141,7 @@ describe("createAppStoreService", () => {
     const result = await service.getListing({ listingId: "calendar" });
 
     expect(result.status).toBe(502);
+    expect(result.body.error).toBe("Rome Cloud returned HTTP 404");
   });
 
   it("passes a withdrawn listing's 410 through", async () => {
