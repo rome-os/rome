@@ -100,7 +100,10 @@ export function createSubagentExecutionService(deps: {
             `Subagent session "${input.resumeSessionId}" belongs to a different project`,
           );
         }
+        // Naming the conversation lets the resume fill a row whose record
+        // failed when the subagent was minted.
         child = await context.childManager.acquireBySessionId(input.resumeSessionId, name, {
+          romeSessionId: input.resumeSessionId,
           workingDir: context.workingDir,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
@@ -135,6 +138,15 @@ export function createSubagentExecutionService(deps: {
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });
+        // A subagent's conversation is minted under its own session id.
+        try {
+          await context.childManager.recordConversation(child.sessionId, child.sessionId);
+        } catch (err) {
+          log.warn("failed to record the subagent session's conversation", {
+            sessionId: child.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       const handle = child.sendTurn(

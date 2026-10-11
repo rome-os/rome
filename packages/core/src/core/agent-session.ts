@@ -353,6 +353,12 @@ export interface AgentSessionManager {
    * open session has the id. Never opens a session.
    */
   findWorkingDirBySessionId(sessionId: string): string | undefined;
+  /**
+   * Record the conversation a session serves, for callers that learn it only
+   * after acquire (a subagent's conversation is minted under its own id).
+   * Never overwrites a recorded conversation.
+   */
+  recordConversation(sessionId: string, conversationId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -692,6 +698,9 @@ export function createAgentSessionManager(
         if (nested) return nested;
       }
       return undefined;
+    },
+    async recordConversation(sessionId, conversationId) {
+      await deps.sessionsRepo.fillConversationId(sessionId, conversationId);
     },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
