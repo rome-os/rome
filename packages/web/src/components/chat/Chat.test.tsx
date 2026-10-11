@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import {
   deleteSession,
   interruptTurn,
@@ -44,7 +44,7 @@ rs.mock("@/pages/free/workspace-event-bus", () => ({
 }));
 
 rs.mock("@/pages/free/use-free-cells", () => ({
-  autoPlaceApp: rs.fn(),
+  applyAgentPlacement: rs.fn(),
   useFreeCells: () => ({
     addWidget: rs.fn(),
     placements: [],
@@ -563,7 +563,7 @@ describe("Chat turn stream lifecycle", () => {
       expect(rs.mocked(listSessionMessages).mock.calls.length).toBeGreaterThan(reloadsBeforeDrop);
     });
 
-    it("mounts each widget placement once, without remounting it on the resumed replay", async () => {
+    it("passes each widget placement's id through, so the layout can skip a replay", async () => {
       const placement = (data: Record<string, unknown>) =>
         `event: widget_placement\ndata: ${JSON.stringify(data)}\n\n`;
       rs.mocked(openTurnStream)
@@ -606,7 +606,7 @@ describe("Chat turn stream lifecycle", () => {
           ),
         );
       renderChat(<Chat sessionId="session-1" />);
-      await waitFor(() => expect(autoPlaceApp).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(applyAgentPlacement).toHaveBeenCalledTimes(1));
 
       await act(async () => {
         droppingStreams[0]!.error(new TypeError("network connection was lost"));
@@ -615,10 +615,11 @@ describe("Chat turn stream lifecycle", () => {
       await waitFor(() =>
         expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false"),
       );
-      expect(rs.mocked(autoPlaceApp).mock.calls).toEqual([
-        ["notes", "list", undefined],
-        ["notes", "list", undefined],
-        ["notes", "legacy", undefined],
+      expect(rs.mocked(applyAgentPlacement).mock.calls).toEqual([
+        ["place-live", "notes", "list", undefined],
+        ["place-live", "notes", "list", undefined],
+        ["place-again", "notes", "list", undefined],
+        [undefined, "notes", "legacy", undefined],
       ]);
     });
   });
@@ -837,7 +838,7 @@ describe("Chat turn stream lifecycle", () => {
       expect(onSessionMessage).not.toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: "session-1", segment: expect.anything() }),
       );
-      expect(autoPlaceApp).not.toHaveBeenCalled();
+      expect(applyAgentPlacement).not.toHaveBeenCalled();
     } finally {
       rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
       rs.mocked(openTurnStream).mockReset().mockImplementation(defaultOpen!);

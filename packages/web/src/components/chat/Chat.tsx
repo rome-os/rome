@@ -105,7 +105,7 @@ import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
-import { autoPlaceApp } from "@/pages/free/use-free-cells";
+import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -138,12 +138,6 @@ const TURN_RESUME_MAX_DELAY_MS = 5_000;
 // stream is dead — force-release it so Stop visibly takes effect on the tap
 // that requested it instead of after the next message send.
 const STOP_FORCE_RELEASE_GRACE_MS = 2_500;
-
-// Widget placements this tab has already mounted, by the server's
-// `placementId`. A resumed turn stream replays each app's latest placement;
-// applying it again would remount the widget and drop the guardian's
-// navigation inside it. Module scope so the record outlives a Chat remount.
-const appliedPlacementIds = new Set<string>();
 
 const agentPlanSchema = z.object({
   explanation: z.string().optional(),
@@ -961,9 +955,10 @@ export function Chat({
           }
           if (evt.event === "widget_placement") {
             // An action returned `place_widget`: mount the app's widget on the
-            // freegrid without parking the agent. autoPlaceApp keys by appId, so
-            // a repeat placement retargets the existing tile (to the new
-            // route/params) in place rather than stacking duplicates.
+            // freegrid without parking the agent. Placement keys by appId, so a
+            // repeat placement retargets the existing tile (to the new
+            // route/params) in place rather than stacking duplicates, and a
+            // replayed `placementId` the layout already applied is skipped.
             try {
               const { placementId, appId, route, params } = JSON.parse(evt.data) as {
                 placementId?: string;
@@ -972,16 +967,9 @@ export function Chat({
                 params?: Record<string, string | number | boolean>;
               };
               // The floor owns the workspace; a background turn's replayed
-              // placement would remount (and reset) a widget in use. The
-              // floor's own replay of a placement it already mounted is
-              // skipped by id for the same reason.
-              if (
-                appId &&
-                sessionId === floorSessionIdRef.current &&
-                !(placementId && appliedPlacementIds.has(placementId))
-              ) {
-                autoPlaceApp(appId, route, params);
-                if (placementId) appliedPlacementIds.add(placementId);
+              // placement would remount (and reset) a widget in use.
+              if (appId && sessionId === floorSessionIdRef.current) {
+                applyAgentPlacement(placementId, appId, route, params);
               }
             } catch {
               // ignore parse errors

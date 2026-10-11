@@ -294,6 +294,31 @@ export function autoPlaceApp(
   return next.id;
 }
 
+// Agent placements already applied, keyed by layout session and the server's
+// `placementId`. Module scope so the record outlives a Chat remount; keyed by
+// layout because a placement applied in one session's layout is still missing
+// from another's.
+const appliedAgentPlacements = new Set<string>();
+
+/**
+ * Apply an agent's `widget_placement` to the active layout. A resumed turn
+ * stream replays each app's latest placement, and applying it again would
+ * remount the widget and drop the guardian's navigation inside it, so a
+ * `placementId` this layout already applied is skipped. A placement without
+ * an id always applies.
+ */
+export function applyAgentPlacement(
+  placementId: string | undefined,
+  appId: string,
+  route?: string,
+  params?: Record<string, string | number | boolean>,
+): void {
+  const key = placementId ? JSON.stringify([activeSessionId, placementId]) : null;
+  if (key && appliedAgentPlacements.has(key)) return;
+  autoPlaceApp(appId, route, params);
+  if (key) appliedAgentPlacements.add(key);
+}
+
 export function placeWidgets(widgets: readonly WidgetSeed[]): void {
   if (widgets.length === 0) return;
 
