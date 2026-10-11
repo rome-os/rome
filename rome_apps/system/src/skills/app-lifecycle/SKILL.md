@@ -39,7 +39,7 @@ The daemon derives the app ID from `app.yaml`, runs the workspace's build, and p
 
 The `bundle` source mode accepts an already-packed artifact, not a raw source workspace. A raw workspace fails with "not a packed artifact".
 
-If an install fails with `gyp ERR!`, `not found: make`, or `ERR_PNPM_IGNORED_BUILDS`, read `NATIVE_DEPENDENCIES.md` in the `coding:app_creation` skill directory and follow it.
+If an install fails with `gyp ERR!`, `not found: make`, or `ERR_PNPM_IGNORED_BUILDS`, read `system:custom-dependencies` and follow its section on native code.
 
 For a Rome App Store install, discover the listing with `system:app_store_search` and follow the `appstore` source schema in `system:app_management`.
 
