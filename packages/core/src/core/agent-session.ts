@@ -3542,8 +3542,9 @@ class AgentSessionImpl implements AgentSession {
             }
             return;
           }
-          // Once next() starts the model, the model owns the stream. Only a
-          // middleware that did not await next() can emit here.
+          // Once next() starts the model, the model owns the stream, so any
+          // middleware emit from then on is dropped, whether it comes from an
+          // unawaited next() or from a task the middleware started earlier.
           if (modelRan) {
             if (!droppedDuringModel) {
               droppedDuringModel = true;

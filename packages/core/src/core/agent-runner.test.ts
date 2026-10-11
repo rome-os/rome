@@ -2111,6 +2111,7 @@ describe("AgentRunner", () => {
       middleware:
         | TurnMiddlewareChain
         | ((ctx: TurnMiddlewareContext, next: () => Promise<void>) => Promise<void>),
+      agentName = "test-main",
     ): Promise<AgentSession> {
       let turnMiddleware: TurnMiddlewareChain;
       if (typeof middleware === "function") {
@@ -2129,7 +2130,7 @@ describe("AgentRunner", () => {
         { keepAliveAcrossTurns: true },
       );
       return await manager.acquire({
-        agentName: "test-main",
+        agentName,
         channelThreadKey: "webchat:middleware-terminal",
       });
     }
@@ -2285,7 +2286,26 @@ describe("AgentRunner", () => {
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
     });
 
-    it("publishes no terminal for a middleware turn the user stops", async () => {
+    it("publishes one validation error for an output-schema middleware turn that emits no terminal", async () => {
+      const session = await openMiddlewareSession(async (ctx) => {
+        ctx.emit({ type: "text", content: "Pick one" });
+      }, "test-structured");
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(terminalsOf(events)).toEqual([
+        expect.objectContaining({
+          type: "error",
+          error: expect.stringContaining("without structured output"),
+        }),
+      ]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    it.each([
+      "test-main",
+      "test-structured",
+    ])("publishes no terminal for a middleware turn the user stops (%s)", async (agentName) => {
       let releaseMiddleware!: () => void;
       const middlewareGate = new Promise<void>((resolve) => {
         releaseMiddleware = resolve;
@@ -2297,7 +2317,7 @@ describe("AgentRunner", () => {
       const session = await openMiddlewareSession(async () => {
         entered();
         await middlewareGate;
-      });
+      }, agentName);
 
       const turn = session.sendTurn({ prompt: "hi" });
       const messages = collectMessages(turn.events);
