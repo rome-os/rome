@@ -129,7 +129,7 @@ export function makeAgentsSetup(client: AgentMessagingClient): SetupFn {
       name: self.name,
     });
     return {
-      credential: { material: profile, expiresAt: "never" },
+      credential: { material: {}, expiresAt: "never" },
       profile,
       summary: {
         title: "Agents connected",
