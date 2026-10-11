@@ -1092,6 +1092,37 @@ describe("Routines fire path", () => {
     }
   });
 
+  it("PATCH enabled=true answers 400 for a stored one-off whose tzid no longer parses", async () => {
+    registerStubAction(harness.actionRegistry, "noop_action");
+    const { id } = await createRoutineViaApi(harness.app, {
+      name: "bad-zone",
+      trigger: {
+        type: "schedule",
+        tzid: "UTC",
+        tzMode: "fixed",
+        localTime: "09:00",
+        date: "2099-01-01",
+      },
+      actionName: "noop_action",
+      enabled: false,
+    });
+    const badTrigger = {
+      type: "schedule",
+      tzid: "Not/AZone",
+      tzMode: "fixed",
+      localTime: "09:00",
+      date: "2099-01-01",
+    };
+    await harness.db.update(routines).set({ trigger: badTrigger }).where(eq(routines.id, id));
+
+    const res = await harness.app.request(`/routines/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("PATCH name-only still re-activates (engine deactivates+reactivates on any PATCH)", async () => {
     registerStubAction(harness.actionRegistry, "noop_action");
     const { id } = await createRoutineViaApi(harness.app, {

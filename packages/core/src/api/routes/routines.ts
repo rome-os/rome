@@ -370,7 +370,13 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
       if (trigger?.type === "schedule" && trigger.date) {
-        const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+        // A stored tzid Intl rejects makes the parse throw rather than return NaN.
+        let fireAt: Date;
+        try {
+          fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+        } catch {
+          fireAt = new Date(Number.NaN);
+        }
         if (Number.isNaN(fireAt.getTime())) {
           return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
         }
