@@ -8,7 +8,7 @@ description: Install software that Rome does not ship, such as a system package,
 ## The rules
 
 - Rome runs as the `rome` account. Its `sudo` rights cover two Rome maintenance commands and nothing else, so it cannot run `apt-get` or install into `/usr`.
-- A Rome upgrade replaces the container. Only the volumes carry over. `/home/rome`, the home directory of `rome`, is one of them.
+- A Rome upgrade replaces the container. Of the files you can change, only those under `/home/rome`, `/home/user`, and `/app/memory` carry over. `/home/rome` is the home directory of `rome`.
 - Rome's own processes run with the image's `PATH`: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`. This covers the daemon, app code, and app installs. Login shells also get `~/.local/bin`, which the default `~/.profile` adds when the directory exists.
 
 Install custom software under `/home/rome`, and call it by its absolute path from app code, routines, and scripts.
@@ -29,7 +29,7 @@ Rome publishes a new image every weekday on a schedule, plus manual releases ([r
 
 ## Where each kind of dependency goes
 
-`uname -m` prints the architecture to download for: `x86_64` is `amd64` or `x64`, and `aarch64` is `arm64`.
+`dpkg --print-architecture` prints the architecture to download for, `amd64` or `arm64`. Node packages name `amd64` as `x64`.
 
 ### CLI tools and language runtimes
 
@@ -86,7 +86,7 @@ A dependency with native code needs the steps in [App dependencies with native c
 Rome installs an app's dependencies inside the container, as `rome`, in two steps:
 
 1. A source install runs `pnpm install` and then the app's `build` script in the app repo. Dev dependencies install in this step too.
-2. Every install, including an App Store install, runs `pnpm install --prod` for the packed artifact.
+2. Every install of an app with runtime dependencies, including an App Store install, runs `pnpm install --prod` for the packed artifact.
 
 Both steps run every build script that the app's `pnpm-workspace.yaml` approves under `allowBuilds`. A build that compiles C or C++ fails, because the image has no `make` and no C or C++ compiler. A compiler under `/home/rome` does not help, because installs run with the image's `PATH`. Rome runs step 2 again for every new version of the app, including each App Store update. The app must install on the stock image every time. Step 2 reuses the installed copy when the packed artifact has not changed. So a successful reinstall of an unchanged app does not prove that an install fix works.
 
