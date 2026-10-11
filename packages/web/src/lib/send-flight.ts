@@ -3,7 +3,8 @@
 //
 // The record is keyed by the turn's `inputId`, which the server keeps as the
 // user message id. It is a viewport snapshot taken at send time, not a live
-// element: on a draft send the composer unmounts before the bubble mounts.
+// element: by the time the bubble mounts, the composer has cleared the text box
+// and shrunk it back to one line.
 
 export interface SendOrigin {
   /** Viewport x of the right edge of the composer's text box. */

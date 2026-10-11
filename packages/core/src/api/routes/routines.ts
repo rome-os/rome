@@ -3,7 +3,11 @@ import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
 import { toRoutine } from "../../db/repositories/routines.js";
-import { parseDateAndLocalTime } from "../../routines/schedule-trigger-provider.js";
+import {
+  parseDateAndLocalTime,
+  resolveOneOffDate,
+} from "../../routines/schedule-trigger-provider.js";
+import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
 import type { ApiDeps } from "../deps.js";
 import { validateActionArgs } from "../../actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
@@ -56,11 +60,14 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
     if (h < 0 || h > 23 || m < 0 || m > 59) {
       return "schedule.localTime hour/minute out of range";
     }
+    if (trigger.rrule !== undefined && typeof trigger.rrule !== "string") {
+      return "schedule.rrule must be a string";
+    }
     if (trigger.date !== undefined) {
       if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
         return 'schedule.date must match "YYYY-MM-DD"';
       }
-      if (trigger.rrule) {
+      if (trigger.rrule?.trim()) {
         return "schedule.date and schedule.rrule are mutually exclusive";
       }
     }
@@ -95,15 +102,28 @@ function datedOneOffError(trigger: {
   localTime: string;
   tzid: string;
 }): string | null {
-  if (!trigger.date) return null;
-  const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-  if (Number.isNaN(fireAt.getTime())) {
-    return "schedule.date / localTime is unparseable";
-  }
-  if (fireAt.getTime() < Date.now()) {
-    return "schedule.date is in the past";
-  }
+  const state = datedOneOffState(trigger);
+  if (state === "unparseable") return "schedule.date / localTime is unparseable";
+  if (state === "past") return "schedule.date is in the past";
   return null;
+}
+
+/** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
+ * parse throw rather than return NaN, so that counts as unparseable too. */
+function datedOneOffState(trigger: {
+  date?: string;
+  localTime: string;
+  tzid: string;
+}): "unparseable" | "past" | null {
+  if (!trigger.date) return null;
+  let fireAt: Date;
+  try {
+    fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+  } catch {
+    return "unparseable";
+  }
+  if (Number.isNaN(fireAt.getTime())) return "unparseable";
+  return fireAt.getTime() < Date.now() ? "past" : null;
 }
 
 interface CreateRoutineBody {
@@ -300,6 +320,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (triggerError) {
       return c.json({ error: triggerError }, 400);
     }
+    body.trigger = await resolveOneOffDate(body.trigger, () =>
+      resolveGuardianTimezone(deps.settingsRepo),
+    );
     if (body.trigger.type === "schedule" && body.trigger.date) {
       body.trigger.tzMode = "fixed";
       const datedError = datedOneOffError(body.trigger);
@@ -352,6 +375,35 @@ export function routinesRoutes(deps: ApiDeps): Hono {
         { error: `Only name and enabled can be updated (got ${unsupported.join(", ")})` },
         400,
       );
+    }
+
+    // Turning a one-off back on after its date has passed would leave it
+    // enabled with nothing left to fire.
+    if (body.enabled === true) {
+      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
+      const trigger = current ? toRoutine(current).trigger : undefined;
+      // Writers and migration 0076 date every one-off, so only a malformed row
+      // reaches here with neither date nor rrule, and the scheduler refuses it.
+      if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
+        return c.json(
+          {
+            error: `This one-off at ${trigger.localTime} has no date and can no longer run. Create a new routine to run it.`,
+          },
+          400,
+        );
+      }
+      const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
+      if (state === "past" && trigger?.type === "schedule") {
+        return c.json(
+          {
+            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
+          },
+          400,
+        );
+      }
+      if (state === "unparseable") {
+        return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
+      }
     }
 
     const updates: Record<string, unknown> = {};

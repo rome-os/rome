@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
@@ -24,6 +32,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
+import { usePresentationMode } from "@/lib/presentation-mode";
 import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -89,6 +98,8 @@ import {
   orderChatMessages,
 } from "@/lib/chat-message-ordering";
 import {
+  ChatApiError,
+  createSession,
   deleteSession,
   interruptTurn,
   listChatAgents,
@@ -241,12 +252,30 @@ export interface SessionMessage {
 }
 
 export interface ChatProps {
-  sessionId: string;
+  /**
+   * The session to open. Without one the chat is a draft: it shows
+   * `emptyState`, and its first send creates a session that the same instance
+   * then keeps, so the composer never remounts.
+   */
+  sessionId?: string | null;
   /** Guardian-chosen display name for the default main agent. */
   mainAgentDisplayName?: string;
   onSessionsChanged?: () => void;
   onSessionNotFound?: (sessionId: string) => void;
   onSessionMessage?: (message: SessionMessage) => void;
+  /**
+   * Called once with the id of the session a draft's first send created,
+   * before that turn is posted. A host that navigates to the session must keep
+   * this instance mounted for it.
+   */
+  onSessionCreated?: (sessionId: string) => void;
+  /** Rendered in place of the transcript while the chat has no session. */
+  emptyState?: ReactNode;
+  /** Draft seeds for the composer, read when it mounts. */
+  initialProjectName?: string;
+  initialAgentMention?: AgentMention | null;
+  /** Receives the composer's handle, for a host that seeds or focuses the draft. */
+  composerRef?: RefObject<ChatComposerHandle | null>;
 }
 
 export function Chat({
@@ -255,16 +284,23 @@ export function Chat({
   onSessionsChanged,
   onSessionNotFound,
   onSessionMessage,
+  onSessionCreated,
+  emptyState,
+  initialProjectName,
+  initialAgentMention,
+  composerRef: hostComposerRef,
 }: ChatProps) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
+  const presentationMode = usePresentationMode();
   // `null` outside the workspace shell; sends simply skip injection.
   const workspaceContextRegistry = useWorkspaceContextRegistry();
   const { toolView, setToolsCollapsed } = useFreeCells();
   const isAppsPanelOpen = !toolView.collapsed;
   // Multiple sessions are in scope at once. Pick the right one deliberately:
-  //   • mainSessionId  — the session THIS <Chat> owns (the prop). Use for the
-  //     owned transcript's load / delete / agent lookup / scroll / navigation.
+  //   • mainSessionId  — the session THIS <Chat> owns: the prop, or the one its
+  //     draft created, and null while a draft has none. Use for the owned
+  //     transcript's load / delete / agent lookup / scroll / navigation.
   //   • floorSessionId — the session currently being interacted with / streamed:
   //     the deepest open handoff's child, else main. Use for anything paired
   //     with the running turn or live stream (send, stop, reattach, live trace,
@@ -274,9 +310,10 @@ export function Chat({
   // Never key shared interaction state by a bare toolUseId — provider ids recycle
   // per turn AND across sessions, so namespace by session (interactionResultKey).
   //
-  // ChatPage remounts <Chat> with key={sessionId} on every navigation, so the
-  // prop is effectively the source of truth.
-  const mainSessionId = sessionId;
+  // The host remounts <Chat> with a new key for every other session, so the
+  // main session changes at most once: from null to the one the draft created.
+  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null);
+  const mainSessionId = sessionId || createdSessionId;
   const mainSessionIdRef = useRef(mainSessionId);
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
   const [subagentIconByName, setSubagentIconByName] = useState<ReadonlyMap<string, string | null>>(
@@ -325,8 +362,18 @@ export function Chat({
   // The session's bound agent (`null` ⇒ default "main") and display name. The
   // composer renders the agent as a non-removable chip and the navbar shows the
   // name as the title; the mobile header bar (FreeGrid) reuses the same hook.
-  const { sessionName, model, reasoningEffort, pinnedAgentMention, archivedAt, pinnedAt } =
-    useSessionIdentity(mainSessionId);
+  const {
+    sessionName,
+    model,
+    reasoningEffort,
+    pinnedAgentMention: identityAgentMention,
+    archivedAt,
+    pinnedAt,
+  } = useSessionIdentity(mainSessionId);
+  // The agent a draft's first send picked stands in until the new session's
+  // identity loads, so its chip does not drop out when the composer locks.
+  const [createdAgentMention, setCreatedAgentMention] = useState<AgentMention | null>(null);
+  const pinnedAgentMention = identityAgentMention ?? createdAgentMention;
   // Local override so archive/unarchive from the navbar flips the read-only
   // composer immediately; `undefined` defers to the session read (`archivedAt`).
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
@@ -342,7 +389,9 @@ export function Chat({
     setArchivedOverride(undefined);
   }, [archivedAt]);
 
-  const composerRef = useRef<ChatComposerHandle>(null);
+  const ownComposerRef = useRef<ChatComposerHandle>(null);
+  const composerRef = hostComposerRef ?? ownComposerRef;
+  const creatingSessionRef = useRef(false);
   const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
@@ -359,12 +408,15 @@ export function Chat({
   // on that node preserve the iPad touch feel that an unstyled nested scroller
   // regressed before. The hook re-pins on content resize; we hand it the
   // scroller explicitly via `scrollRef` so it skips ancestor detection.
+  //
+  // A draft's empty state reads from the top, so only a session starts pinned.
+  // The first send pins the draft through runTurnLifecycle's scrollToBottom.
   const {
     contentRef: stickContentRef,
     scrollRef: stickScrollRef,
     isAtBottom,
     scrollToBottom,
-  } = useStickToBottom();
+  } = useStickToBottom({ initialStuck: Boolean(sessionId) });
 
   // The timeline rail measures against these two nodes, so they are held as
   // state rather than refs: its effect has to re-run once they mount. Both
@@ -401,8 +453,10 @@ export function Chat({
     }),
     [mainAgentDisplayName, pinnedAgentMention, t],
   );
+  // A draft builds from the empty id: the view is empty and its floor is falsy,
+  // which every session-keyed effect below already skips.
   const view = useMemo(
-    () => buildChatView(messages, mainSessionId, mainIdentity),
+    () => buildChatView(messages, mainSessionId ?? "", mainIdentity),
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, handoffList, floorSessionId, identityBySession, interactionResults } =
@@ -621,6 +675,7 @@ export function Chat({
   // sidebar list and drop back to a fresh chat.
   const handleDeleteSession = useCallback(async () => {
     setDeleteConfirmOpen(false);
+    if (!mainSessionId) return;
     try {
       await deleteSession(mainSessionId);
     } catch {
@@ -634,6 +689,7 @@ export function Chat({
   // not navigate away — the transcript stays open, read-only. The override flips
   // the composer immediately; the sidebar reconciles via the changed event.
   const handleArchive = useCallback(async () => {
+    if (!mainSessionId) return;
     setArchivedOverride(true);
     try {
       // Archive mutation PATCHes and broadcasts the sessions-changed event.
@@ -644,6 +700,7 @@ export function Chat({
   }, [mainSessionId, setArchived]);
 
   const handleUnarchive = useCallback(async () => {
+    if (!mainSessionId) return;
     setArchivedOverride(false);
     try {
       await setArchived(mainSessionId, false);
@@ -653,6 +710,7 @@ export function Chat({
   }, [mainSessionId, setArchived]);
 
   const handlePin = useCallback(async () => {
+    if (!mainSessionId) return;
     try {
       await setPinned(mainSessionId, !pinnedAt);
     } catch {
@@ -726,7 +784,10 @@ export function Chat({
   // handoff's child streams while it holds the floor; the main session streams
   // again once it resumes. Each child owns one EventSource through useSseEvents.
   const sessionEventIds = useMemo(
-    () => Array.from(new Set([mainSessionId, floorSessionId])).filter(Boolean),
+    () =>
+      Array.from(new Set([mainSessionId, floorSessionId])).filter((id): id is string =>
+        Boolean(id),
+      ),
     [mainSessionId, floorSessionId],
   );
   const handleMessageInsert = useCallback(
@@ -760,7 +821,7 @@ export function Chat({
   // growth (streaming text, late media) is followed by the hook's ResizeObserver
   // — no per-render scroll effect needed.
   useEffect(() => {
-    scrollToBottom("auto");
+    if (mainSessionId) scrollToBottom("auto");
   }, [mainSessionId, scrollToBottom]);
 
   const consumeStream = useCallback(
@@ -1290,10 +1351,40 @@ export function Chat({
     async (snapshot: ChatComposerSnapshot, controls: ChatComposerSendControls) => {
       // The single composer talks to whoever holds the floor — the open
       // handoff's specialist, or the main agent.
-      const sendingSessionId = floorSessionIdRef.current;
+      let sendingSessionId = floorSessionIdRef.current;
       if (!sendingSessionId) {
-        setStreamError(t("stream.errors.sendFallback"));
-        throw new Error("Chat: handleComposerSend called without an active session");
+        // A repeat submit (a double Enter) would otherwise create a second session.
+        if (creatingSessionRef.current) return;
+        creatingSessionRef.current = true;
+        try {
+          const created = await createSession({
+            name: t("sidebar.newChat"),
+            personaId: snapshot.personaId,
+            projectPath: snapshot.projectPath,
+            largeModelSelection: snapshot.largeModelSelection,
+            reasoningEffort: snapshot.reasoningEffort,
+            agentName: snapshot.agentMention?.agentName,
+          });
+          sendingSessionId = created.id;
+        } catch (error) {
+          setStreamError(
+            error instanceof ChatApiError && error.message
+              ? error.message
+              : t("stream.errors.createChatFallback"),
+          );
+          throw error;
+        } finally {
+          creatingSessionRef.current = false;
+        }
+        // The refs normally follow the render that adopts the session. The turn
+        // below starts before that render, and its stream reads them to decide
+        // which session's end counts as read and which may move the workspace.
+        mainSessionIdRef.current = sendingSessionId;
+        floorSessionIdRef.current = sendingSessionId;
+        setCreatedAgentMention(snapshot.agentMention ?? null);
+        setCreatedSessionId(sendingSessionId);
+        onSessionCreated?.(sendingSessionId);
+        notifySessionsChanged();
       }
       const baseOptimisticText = buildOptimisticUserText(snapshot.text, snapshot.uploads);
       // Mirror the server's persisted form for a structured skill turn
@@ -1333,7 +1424,7 @@ export function Chat({
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
       );
     },
-    [runTurnLifecycle, workspaceContextRegistry, t],
+    [runTurnLifecycle, workspaceContextRegistry, t, onSessionCreated, notifySessionsChanged],
   );
 
   // An inline app component submitted its result. Posts an `interaction_result`
@@ -1732,41 +1823,46 @@ export function Chat({
                 </span>
               )}
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  size="sm"
-                  label={t("navbar.more")}
-                  icon={<MoreHorizontal />}
-                  className="text-muted-foreground hover:text-foreground"
-                />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void handlePin()}>
-                  {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                  {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => enterShareMode()}>
-                  <Share2 className="size-4" />
-                  {t("share.title", "Share chat")}
-                </DropdownMenuItem>
-                {isArchived ? (
-                  <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                    <ArchiveRestore className="size-4" />
-                    {t("navbar.unarchive")}
+            {mainSessionId && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    size="sm"
+                    label={t("navbar.more")}
+                    icon={<MoreHorizontal />}
+                    className="text-muted-foreground hover:text-foreground"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => void handlePin()}>
+                    {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                    {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
                   </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onSelect={() => void handleArchive()}>
-                    <Archive className="size-4" />
-                    {t("navbar.archive")}
+                  <DropdownMenuItem onSelect={() => enterShareMode()}>
+                    <Share2 className="size-4" />
+                    {t("share.title", "Share chat")}
                   </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-                  <Trash2 className="size-4" />
-                  {t("navbar.delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  {isArchived ? (
+                    <DropdownMenuItem onSelect={() => void handleUnarchive()}>
+                      <ArchiveRestore className="size-4" />
+                      {t("navbar.unarchive")}
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onSelect={() => void handleArchive()}>
+                      <Archive className="size-4" />
+                      {t("navbar.archive")}
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setDeleteConfirmOpen(true)}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("navbar.delete")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             {toolView.collapsed && (
               <IconButton
                 size="sm"
@@ -1810,36 +1906,40 @@ export function Chat({
               ref={attachScroller}
               className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain @min-[48rem]/transcript:pl-8"
             >
-              <MessageList
-                rows={rows}
-                live={{
-                  isStreaming: displayedStreaming,
-                  runningTurnId,
-                  snapshot: currentSnapshot,
-                  text: liveAssistantText,
-                  blockIx: floorSessionStream?.assistantBlockIx,
-                  sourceText: floorSessionStream?.assistantText,
-                  textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
-                  identity: floorIdentity,
-                }}
-                selection={
-                  shareMode
-                    ? {
-                        selectedTurns: selectedShareTurns,
-                        selectableSessionId: mainSessionId,
-                        onToggleTurn: toggleShareTurn,
-                      }
-                    : undefined
-                }
-                contentRef={attachContent}
-                onOpenLiveTrace={openLiveTraceDrawer}
-                onOpenStoredTrace={setTraceDrawerTarget}
-                onOpenSubagentTrace={openSubagentTraceDrawer}
-                activeTraceTarget={traceDrawerTarget}
-                subagentIconByName={subagentIconByName}
-                actions={blockActions}
-                feedback
-              />
+              {mainSessionId ? (
+                <MessageList
+                  rows={rows}
+                  live={{
+                    isStreaming: displayedStreaming,
+                    runningTurnId,
+                    snapshot: currentSnapshot,
+                    text: liveAssistantText,
+                    blockIx: floorSessionStream?.assistantBlockIx,
+                    sourceText: floorSessionStream?.assistantText,
+                    textThroughOrdinal: floorSessionStream?.textThroughOrdinal,
+                    identity: floorIdentity,
+                  }}
+                  selection={
+                    shareMode
+                      ? {
+                          selectedTurns: selectedShareTurns,
+                          selectableSessionId: mainSessionId,
+                          onToggleTurn: toggleShareTurn,
+                        }
+                      : undefined
+                  }
+                  contentRef={attachContent}
+                  onOpenLiveTrace={openLiveTraceDrawer}
+                  onOpenStoredTrace={setTraceDrawerTarget}
+                  onOpenSubagentTrace={openSubagentTraceDrawer}
+                  activeTraceTarget={traceDrawerTarget}
+                  subagentIconByName={subagentIconByName}
+                  actions={blockActions}
+                  feedback
+                />
+              ) : (
+                emptyState
+              )}
 
               {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
@@ -1847,7 +1947,17 @@ export function Chat({
                 It talks to whoever holds the floor (the open handoff's specialist,
                 or the main agent). In share mode it's swapped for the ShareBar,
                 which configures + mints the link for the turns selected above. */}
-              <div className="pointer-events-none sticky bottom-0 z-10 px-3 pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:px-6 md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]">
+              <div
+                className={cn(
+                  "pointer-events-none sticky bottom-0 z-10 px-3 md:px-6",
+                  // Presentation mode gives the draft's bottom gap 5x its normal
+                  // size so a recording framed on the empty state keeps the
+                  // composer clear of the capture's lower edge.
+                  presentationMode && !mainSessionId
+                    ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
+                    : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
+                )}
+              >
                 {/* Back to the live tail. It rides the sticky floor rather than the
                     scroller, so it tracks a composer whose height changes with the
                     draft, and it sits in every floor state — scrolling has nothing
@@ -1880,11 +1990,11 @@ export function Chat({
                     // rail, has no width gate: it is reachable on a phone, where
                     // the 36px step is under the 44px floor.
                     "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                   )}
                 />
                 <div className="pointer-events-auto mx-auto max-w-5xl">
-                  {shareMode ? (
+                  {shareMode && mainSessionId ? (
                     <ShareBar
                       sessionId={mainSessionId}
                       selectedTurnIds={[...selectedShareTurns]}
@@ -1910,13 +2020,19 @@ export function Chat({
                       // outside it; this mount adds the floating blur/translucency.
                       boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
                       onSend={handleComposerSend}
+                      // A draft picks the session's project, model, and agent;
+                      // a session has them fixed.
+                      showProjectSelector={!mainSessionId}
+                      showModelSelector={!mainSessionId}
+                      initialProjectName={initialProjectName}
+                      initialAgentMention={initialAgentMention}
                       isStreaming={displayedStreaming}
                       onStop={() => void stopMessage()}
                       streamError={streamError}
                       // The chip names the floor agent — the specialist during a
                       // handoff, the main agent otherwise.
                       pinnedAgentMention={floorAgentMention}
-                      lockAgentMention
+                      lockAgentMention={Boolean(mainSessionId)}
                       designingInteraction={
                         floorHandoff
                           ? {

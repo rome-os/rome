@@ -8,6 +8,7 @@ import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import {
+  createSession,
   deleteSession,
   interruptTurn,
   listSessionMessages,
@@ -172,6 +173,7 @@ rs.mock("@/components/chat/entries", () => ({
 rs.mock("@/lib/chat-api", () => {
   return {
     ...chatApiModule,
+    createSession: rs.fn(),
     deleteSession: rs.fn(),
     interruptTurn: rs.fn(),
     listSessionMessages: rs.fn().mockResolvedValue([]),
@@ -957,5 +959,39 @@ describe("Chat jump to latest", () => {
     // the hook's user-gesture window while still short of the bottom, and is read
     // as the user scrolling away — releasing the pin this click just re-engaged.
     expect(stickToBottom.scrollToBottom).toHaveBeenCalledWith("auto");
+  });
+});
+
+describe("Chat draft", () => {
+  it("creates its session on the first send and follows that turn without a reattach", async () => {
+    rs.mocked(createSession).mockResolvedValueOnce({ id: "created-1" } as Awaited<
+      ReturnType<typeof createSession>
+    >);
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    const onSessionCreated = rs.fn();
+    renderChat(<Chat emptyState={<p>Empty home</p>} onSessionCreated={onSessionCreated} />);
+    expect(screen.getByText("Empty home")).toBeTruthy();
+    expect(screen.queryByTestId("message-list")).toBeNull();
+    expect(screen.queryByRole("button", { name: "navbar.more" })).toBeNull();
+    const composer = screen.getByTestId("chat-composer");
+
+    fireEvent.click(screen.getByTestId("send-button"));
+
+    await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(1));
+    expect(onSessionCreated).toHaveBeenCalledWith("created-1");
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "sidebar.newChat", reasoningEffort: "medium" }),
+    );
+    expect(postSessionTurn).toHaveBeenCalledWith(
+      "created-1",
+      expect.any(FormData),
+      expect.anything(),
+    );
+    expect(screen.queryByText("Empty home")).toBeNull();
+    expect(screen.getByTestId("message-list")).toBeTruthy();
+    expect(screen.getByTestId("chat-composer")).toBe(composer);
+    // The send registered its local follow before the render that adopted the
+    // session, so the reattach poll never looks the turn up.
+    expect(listSessionTurns).not.toHaveBeenCalled();
   });
 });
