@@ -7,7 +7,7 @@ import {
   type AppActionRuntimeDeps,
 } from "@rome-os/app-runtime";
 
-import { loadConnectorClient, subscribeTriggerFeed } from "../../shared.js";
+import { composioActionError, loadConnectorClient, subscribeTriggerFeed } from "../../shared.js";
 import { ensureComposioWebhookRegistered } from "../../api/composio-webhook.js";
 import { SettingsStore } from "../../api/settings-store.js";
 
@@ -74,7 +74,15 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("event subscribe failed", { slug, toolkit, error: message });
-        return { status: "error", error: `Composio trigger subscribe failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio trigger subscribe failed",
+            `connector_event_subscribe for "${slug}"`,
+          ),
+        };
       }
     },
   });

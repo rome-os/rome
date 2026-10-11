@@ -12,6 +12,7 @@ import { githubProxyCall, readGithubOAuthToken } from "../../api/github-proxy.js
 import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
 import {
   buildProxyEndpoint,
+  composioActionError,
   isRomeManagedToolkit,
   loadConnectorClient,
   romeManagedConnectHint,
@@ -207,7 +208,15 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("proxy call failed", { toolkit, endpoint, method, error: message });
-        return { status: "error", error: `Composio proxy call failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio proxy call failed",
+            `connector_proxy for "${endpoint}"`,
+          ),
+        };
       }
     },
   });
