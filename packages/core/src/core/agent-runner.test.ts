@@ -24,6 +24,8 @@ import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { actionExecutionContext } from "../actions/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import {
@@ -63,7 +65,7 @@ import {
   subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { createTurnMiddlewareChain } from "./turn-middleware.js";
+import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -2106,10 +2108,17 @@ describe("AgentRunner", () => {
     });
 
     async function openMiddlewareSession(
-      run: (ctx: TurnMiddlewareContext, next: () => Promise<void>) => Promise<void>,
+      middleware:
+        | TurnMiddlewareChain
+        | ((ctx: TurnMiddlewareContext, next: () => Promise<void>) => Promise<void>),
     ): Promise<AgentSession> {
-      const turnMiddleware = createTurnMiddlewareChain();
-      rs.spyOn(turnMiddleware, "run").mockImplementation(run);
+      let turnMiddleware: TurnMiddlewareChain;
+      if (typeof middleware === "function") {
+        turnMiddleware = createTurnMiddlewareChain();
+        rs.spyOn(turnMiddleware, "run").mockImplementation(middleware);
+      } else {
+        turnMiddleware = middleware;
+      }
       recorded = [];
       manager = createAgentSessionManager(
         {
@@ -2157,7 +2166,56 @@ describe("AgentRunner", () => {
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
     });
 
-    it("ends on the emitted terminal when a middleware throws after it", async () => {
+    it("skips the model when a fail-open middleware throws after its terminal", async () => {
+      // Runs the real chain, whose fail-open handling calls next() for the
+      // middleware that threw.
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const dir = await mkdtemp(join(tmpdir(), "rome-turnmw-fail-open-"));
+      try {
+        await writeFile(
+          join(dir, "index.js"),
+          `export function createHook() {
+            return {
+              order: 0,
+              async handle(ctx) {
+                ctx.emit({ type: "result", content: "scripted" });
+                throw new Error("post-processing failed");
+              },
+            };
+          }\n`,
+          "utf-8",
+        );
+        const chain = createTurnMiddlewareChain();
+        const failures = await chain.loadFromCatalog({
+          get: () => null,
+          listArtifacts: (kind: string) =>
+            kind === "hook"
+              ? [
+                  {
+                    kind: "hook",
+                    publicName: "turn-middleware",
+                    aliases: [],
+                    ownerType: "app",
+                    ownerId: "app.fail-open",
+                    absolutePath: dir,
+                  },
+                ]
+              : [],
+        } as unknown as AppCatalog);
+        expect(failures).toEqual([]);
+        const session = await openMiddlewareSession(chain);
+
+        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+        expect(mockProvider.calls).toHaveLength(0);
+        expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
+        expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("ends on the emitted terminal when a fail-closed middleware throws after it", async () => {
       const session = await openMiddlewareSession(async (ctx) => {
         ctx.emit({ type: "result", content: "scripted" });
         throw new Error("post-processing failed");
