@@ -333,6 +333,7 @@ function interruptTurnOnWorkerDisconnect(
   logFields: Record<string, unknown>,
 ): TurnWorkerWatch {
   let watching = true;
+  let offDisconnect: () => void = () => undefined;
   const interrupt = (reason: string): void => {
     if (!watching) return;
     watching = false;
@@ -352,7 +353,7 @@ function interruptTurnOnWorkerDisconnect(
       }
     })();
   };
-  const offDisconnect = rpc.onDisconnect(() => interrupt(WORKER_DISCONNECTED_REASON));
+  offDisconnect = rpc.onDisconnect(() => interrupt(WORKER_DISCONNECTED_REASON));
   return {
     release: () => {
       watching = false;
