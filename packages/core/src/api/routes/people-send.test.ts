@@ -20,6 +20,7 @@ import {
 } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { OutboxRepository } from "../../db/repositories/outbox.js";
+import { outboundSendReceipts } from "../../db/schema.js";
 import { SEND_IDEMPOTENCY_RETENTION_MS } from "@rome/api-types/people";
 
 // Sending to a person, and the outbox a send lives in until it arrives.
@@ -263,9 +264,35 @@ describe("People send API", () => {
     });
     expect(discarded.status).toBe(204);
     expect(await deps.outboxRepo.find(body.id)).toBeNull();
-    expect(await (await send(body)).json()).toEqual(original);
+    // The replay is the same send, except that its row is gone and so is
+    // anything to discard.
+    expect(original).toMatchObject({ state: "failed", dismissable: true });
+    expect(await (await send(body)).json()).toEqual({ ...original, dismissable: false });
     expect(await outbox()).toEqual([]);
     expect(provider).toHaveBeenCalledTimes(1);
+  });
+
+  it("replays a receipt written before rows carried dismissable as not dismissable", async () => {
+    const id = crypto.randomUUID();
+    const { dismissable: _, ...legacy } = {
+      id,
+      channel: "telegram",
+      channelUserId: TG,
+      text: "sent last release",
+      timestamp: Math.floor(Date.now() / 1000),
+      state: "unconfirmed",
+      ref: null,
+      error: null,
+      dismissable: false,
+    } satisfies OutboxMessage;
+    await testDb.db.insert(outboundSendReceipts).values({
+      id,
+      response: legacy as OutboxMessage,
+      expiresAt: new Date(Date.now() + SEND_IDEMPOTENCY_RETENTION_MS),
+    });
+
+    const replayed = await send({ id, channel: "telegram", channelUserId: TG, text: legacy.text });
+    expect(await replayed.json()).toEqual({ ...legacy, dismissable: false });
   });
 
   it("keeps a refused send in the outbox, and retries it under its own id", async () => {
@@ -534,6 +561,104 @@ describe("People send API — delivery bookkeeping", () => {
     expect(res.status).toBe(204);
     const after = await app.request(`/people/${tgPersonId}/outbox`);
     expect(((await after.json()) as OutboxPage).messages).toEqual([]);
+  });
+
+  describe("whether a row is dismissable", () => {
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    const MINUTE = 60_000;
+    const startedAt = Date.UTC(2026, 0, 1);
+    let tgPersonId: string;
+
+    // Telegram keeps no mirror, and with Rome's own record failing an accepted
+    // send never lands: the one case where an unconfirmed row outlives the
+    // window and Discard is its way out.
+    beforeEach(async () => {
+      rs.useFakeTimers({ toFake: ["Date"] });
+      rs.setSystemTime(startedAt);
+      deps.webchatRepo.recordOutboundConversationMessage = async () => {
+        throw new Error("disk is full");
+      };
+      tgPersonId = await deps.personMappingRepo.create({
+        displayName: "Unmirrored",
+        bondLevel: "other",
+        approved: true,
+        channelMappings: [{ channel: "telegram", channelUserId: "tg-unmirrored" }],
+      });
+    });
+
+    const sendUnmirrored = (text: string) =>
+      app.request(`/people/${tgPersonId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ channel: "telegram", channelUserId: "tg-unmirrored", text }),
+      });
+    const readRow = async (): Promise<OutboxMessage | undefined> => {
+      const res = await app.request(`/people/${tgPersonId}/outbox`);
+      return ((await res.json()) as OutboxPage).messages[0];
+    };
+    const discard = async (id: string) =>
+      (await app.request(`/people/${tgPersonId}/outbox/${id}`, { method: "DELETE" })).status;
+
+    it("measures a retried row from its retry, not its first attempt", async () => {
+      const refused = rs
+        .spyOn(deps.transports.get("telegram")!, "send")
+        .mockRejectedValue(new Error("nope"));
+      const failed = (await (await sendUnmirrored("retried")).json()) as OutboxMessage;
+      expect(failed).toMatchObject({ state: "failed", dismissable: true });
+
+      refused.mockRestore();
+      rs.setSystemTime(startedAt + 4 * MINUTE);
+      const retried = await app.request(`/people/${tgPersonId}/outbox/${failed.id}/retry`, {
+        method: "POST",
+      });
+      expect(await retried.json()).toMatchObject({ state: "unconfirmed", dismissable: false });
+
+      // Past the window counted from the first attempt, inside the one counted
+      // from the retry. The row says what DELETE will answer.
+      rs.setSystemTime(startedAt + 6 * MINUTE);
+      expect(await readRow()).toMatchObject({ state: "unconfirmed", dismissable: false });
+      expect(await discard(failed.id)).toBe(404);
+
+      rs.setSystemTime(startedAt + 10 * MINUTE);
+      expect(await readRow()).toMatchObject({ state: "unconfirmed", dismissable: true });
+      expect(await discard(failed.id)).toBe(204);
+    });
+
+    it("measures an accepted row from when the channel answered", async () => {
+      // A slow provider: the row is opened at the start and accepted two
+      // minutes later, and the window starts at the acceptance.
+      const transport = deps.transports.get("telegram")!;
+      const deliver = transport.send.bind(transport);
+      rs.spyOn(transport, "send").mockImplementation(async (...args) => {
+        rs.setSystemTime(startedAt + 2 * MINUTE);
+        return deliver(...args);
+      });
+      const sent = (await (await sendUnmirrored("slow channel")).json()) as OutboxMessage;
+      expect(sent).toMatchObject({ state: "unconfirmed", dismissable: false });
+
+      rs.setSystemTime(startedAt + 6 * MINUTE);
+      expect(await readRow()).toMatchObject({ dismissable: false });
+      expect(await discard(sent.id)).toBe(404);
+
+      rs.setSystemTime(startedAt + 8 * MINUTE);
+      expect(await readRow()).toMatchObject({ dismissable: true });
+      expect(await discard(sent.id)).toBe(204);
+    });
+
+    it("never offers a send the channel has not answered", async () => {
+      const row = await deps.outboxRepo.open({
+        channel: "telegram",
+        channelUserId: "tg-unmirrored",
+        conversationId: "tg-unmirrored",
+        text: "still going",
+      });
+      rs.setSystemTime(startedAt + 4 * MINUTE);
+      expect(await readRow()).toMatchObject({ id: row.id, state: "sending", dismissable: false });
+      expect(await discard(row.id)).toBe(404);
+    });
   });
 
   it("never leaves a delivered message with no record when discard races retry", async () => {
