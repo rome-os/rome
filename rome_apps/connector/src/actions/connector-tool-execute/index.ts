@@ -8,6 +8,7 @@ import {
 } from "@rome-os/app-runtime";
 
 import {
+  composioActionError,
   githubViaRomeHint,
   isRomeManagedToolkit,
   loadConnectorClient,
@@ -104,7 +105,15 @@ export function createAction(config: ActionConfig, _deps: AppActionRuntimeDeps):
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         log.error("tool execution failed", { slug, toolkit, error: message });
-        return { status: "error", error: `Composio tool execution failed: ${message}` };
+        return {
+          status: "error",
+          error: await composioActionError(
+            client,
+            err,
+            "Composio tool execution failed",
+            `connector_tool_execute for "${slug}"`,
+          ),
+        };
       }
     },
   });

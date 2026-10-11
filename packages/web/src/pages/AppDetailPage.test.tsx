@@ -1,9 +1,9 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { InstalledAppCard } from "@rome/api-types/apps";
 import i18n from "@/i18n";
 import AppDetailPage from "./AppDetailPage";
@@ -57,6 +57,10 @@ function mockBackend(initial: {
   readmeByAppId?: Record<string, string | null>;
   /** App Store high-water mark per app id; null means the store has no listing (404). */
   storeVersionByAppId?: Record<string, string | null>;
+  /** When set, every App Store listing read fails: an HTTP 502, or a rejected fetch. */
+  storeFailure?: "http" | "network";
+  /** While `current` is set, App Store listing reads wait for it before answering. */
+  storeReadHold?: { current: Promise<void> | null };
   /** When set, GET /api/apps fails hard with this status. */
   listFailStatus?: number;
   /** POST /apps replaces the target card with this (upgrade lands server-side). */
@@ -117,6 +121,13 @@ function mockBackend(initial: {
       }
     }
     const storeMatch = url.match(/^\/api\/app-store\/listings\/(.+)$/);
+    if (storeMatch && initial.storeReadHold?.current) await initial.storeReadHold.current;
+    if (storeMatch && initial.storeFailure === "network") {
+      throw new TypeError("Failed to fetch");
+    }
+    if (storeMatch && initial.storeFailure === "http") {
+      return { ok: false, status: 502, json: async () => ({ error: "bad gateway" }) } as Response;
+    }
     if (storeMatch && initial.storeVersionByAppId) {
       const id = storeMatch[1].split("/").map(decodeURIComponent).join("/");
       const version = initial.storeVersionByAppId[id];
@@ -165,7 +176,7 @@ function renderPage(appId: string, options?: { seedUpdates?: SeedUpgradeCandidat
   if (options?.seedUpdates) {
     client.setQueryData(["apps", "updates"], { upgradable: options.seedUpdates });
   }
-  return render(
+  const rendered = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/app-details/${encodeURIComponent(appId)}`]}>
         <Routes>
@@ -176,6 +187,7 @@ function renderPage(appId: string, options?: { seedUpdates?: SeedUpgradeCandidat
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...rendered, client };
 }
 
 describe("AppDetailPage", () => {
@@ -462,6 +474,116 @@ describe("AppDetailPage manage section", () => {
     expect(
       await screen.findByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
     ).toBeTruthy();
+  });
+
+  it.each([
+    ["an HTTP error", "http"],
+    ["a network error", "network"],
+  ] as const)("keeps the plain publish hint when the App Store read fails with %s", async (_label, storeFailure) => {
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+      storeFailure,
+    });
+
+    const { client } = renderPage("weather");
+
+    // The plain hint also shows while the read is in flight, so wait for it to settle.
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/app-store/listings/weather",
+        expect.anything(),
+      ),
+    );
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(
+      screen.getByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
+    ).toBeTruthy();
+  });
+
+  it("re-reads the App Store on revisit after a publish made outside the dashboard", async () => {
+    const user = userEvent.setup();
+    const storeVersionByAppId: Record<string, string | null> = { weather: null };
+    const storeReadHold: { current: Promise<void> | null } = { current: null };
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+      storeVersionByAppId,
+      storeReadHold,
+    });
+    // renderPage's client sets gcTime: 0, which would hide a result cached
+    // across visits. Keep the dashboard's default here.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/app-details/weather"]}>
+          <Routes>
+            <Route path="/app-details/:appId" element={<AppDetailPage />} />
+            <Route path="*" element={null} />
+          </Routes>
+          <Link to="/apps">Leave details</Link>
+          <Link to="/app-details/weather">Reopen details</Link>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    try {
+      expect(
+        await screen.findByText(
+          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
+        ),
+      ).toBeTruthy();
+
+      await user.click(screen.getByRole("link", { name: "Leave details" }));
+      await waitFor(() => expect(screen.queryByRole("region", { name: "Manage" })).toBeNull());
+      // An agent or the CLI publishes; the dashboard's publish mutation never runs.
+      storeVersionByAppId.weather = "1.0.0";
+      let releaseStoreRead = () => {};
+      storeReadHold.current = new Promise((resolve) => {
+        releaseStoreRead = resolve;
+      });
+      await user.click(screen.getByRole("link", { name: "Reopen details" }));
+      // While the fresh read is in flight, the first visit's answer must not show.
+      expect(
+        await screen.findByText("Uploads the installed bundle (v1.0.0) to the Rome App Store."),
+      ).toBeTruthy();
+      releaseStoreRead();
+
+      expect(
+        await screen.findByText(
+          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByText(/Not published yet/)).toBeNull();
+    } finally {
+      client.clear();
+    }
+  });
+
+  it("re-reads the App Store when the window regains focus", async () => {
+    const storeVersionByAppId: Record<string, string | null> = { weather: null };
+    mockBackend({
+      installed: [installedCard({ id: "weather", displayName: "Weather", version: "1.0.0" })],
+      storeVersionByAppId,
+    });
+
+    renderPage("weather");
+
+    expect(
+      await screen.findByText(
+        "Uploads the installed bundle (v1.0.0) to the Rome App Store. Not published yet.",
+      ),
+    ).toBeTruthy();
+
+    storeVersionByAppId.weather = "1.0.0";
+    try {
+      act(() => focusManager.setFocused(true));
+
+      expect(
+        await screen.findByText(
+          "Uploads the installed bundle (v1.0.0) to the Rome App Store. Latest published: v1.0.0.",
+        ),
+      ).toBeTruthy();
+    } finally {
+      focusManager.setFocused(undefined);
+    }
   });
 
   it("hides the manage section when no lifecycle action applies", async () => {

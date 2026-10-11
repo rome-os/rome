@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../test/helpers.js";
-import { romeAgentMessages } from "../db/schema.js";
+import { romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SessionQueryService } from "./query-service.js";
@@ -106,6 +106,46 @@ describe("SessionQueryService", () => {
       .set({ createdAt: new Date(input.createdAt) })
       .where(eq(romeAgentMessages.id, input.messageId));
   }
+
+  // A chat reads the same whether it is stored as a webchat row or as a
+  // webchat channel row, so moving the stored type changes nothing here.
+  it.each([
+    ["a webchat row", "webchat"],
+    ["a webchat channel row", "channel"],
+  ])("lists and groups a chat stored as %s as a chat", async (_label, storedType) => {
+    await webchat.createSession("chat-1", "Chat");
+    await testDb.db
+      .update(romeSessions)
+      .set({ type: storedType })
+      .where(eq(romeSessions.id, "chat-1"));
+    await seedRun({
+      messageId: "chat-run",
+      sessionId: "chat-1",
+      turnId: "chat-turn",
+      createdAt: "2026-07-15T10:00:00.000Z",
+      provider: "openai",
+      model: "gpt-5.4",
+      inputTokens: 1,
+      outputTokens: 1,
+      status: "completed",
+    });
+
+    const page = await service.querySessions({
+      scope: { time: { kind: "all" }, timeZone: "UTC", sessions: { types: ["webchat"] } },
+      page: { offset: 0, limit: 10 },
+    });
+    const metrics = await service.queryMetrics({
+      scope: { time: { kind: "all" }, timeZone: "UTC" },
+      projections: [{ id: "types", groupBy: "type", interval: "none", rankBy: "runs", limit: 10 }],
+    });
+
+    expect(page.sessions).toEqual([
+      expect.objectContaining({ id: "chat-1", type: "webchat", displayTitle: "Chat" }),
+    ]);
+    expect(metrics.projections[0]?.groups).toEqual([
+      expect.objectContaining({ key: "type:webchat", runCount: 1 }),
+    ]);
+  });
 
   it("derives model, outcome, and app projections from canonical trace data", async () => {
     await webchat.ensureRomeSession({

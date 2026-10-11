@@ -13,7 +13,7 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { findRecordedConversation, type RecordedConversation } from "./agent-trace-recorder.js";
+import { findRecordedConversation, type SessionConversation } from "./agent-trace-recorder.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
@@ -324,21 +324,14 @@ export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => voi
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
   /**
-   * The conversation this session serves: the caller's, else the recorded one.
-   * For identity and fork lineage only. A turn picks where it records through
+   * The conversation this session serves: the one its opener named, else the
+   * one its row recorded. A turn picks where it records through
    * `resolveTurnConversation`, which leaves channel and webchat ones to their
-   * owners. Transitional: step 5 of the session identity plan merges
-   * `romeSessionId` into it.
+   * owners. Kept on the session so a turn resolves where it records without an
+   * await between acquire and sendTurn.
    */
-  readonly conversationId?: string;
-  /**
-   * The conversation the row recorded, looked up when no caller named one and
-   * only if it still exists. Kept on the session so a turn resolves where it
-   * records without an await between acquire and sendTurn.
-   */
-  readonly recordedConversation?: RecordedConversation;
+  readonly conversation?: SessionConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -732,11 +725,9 @@ export function createAgentSessionManager(
       // still opening is not cached yet and misses this, so callers record
       // only after their acquire has returned.
       for (const session of [...sessions.values()]) {
-        if (session.sessionId !== sessionId || session.conversationId) continue;
-        session.recordedConversation = await findRecordedConversation(
-          deps.webchatRepo,
-          conversationId,
-        );
+        if (session.sessionId !== sessionId || session.conversation) continue;
+        const recorded = await findRecordedConversation(deps.webchatRepo, conversationId);
+        if (recorded) session.conversation = { origin: "recorded", ...recorded };
       }
     },
     async shutdown() {
@@ -974,6 +965,9 @@ async function openSession(
         deps.webchatRepo,
         resumeResult?.conversationId ?? preparedConversationId,
       );
+  const conversation: SessionConversation | undefined = requestedRomeSessionId
+    ? { origin: "named", id: requestedRomeSessionId }
+    : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -1794,8 +1788,7 @@ async function openSession(
   impl = new AgentSessionImpl({
     key,
     sessionId,
-    romeSessionId: requestedRomeSessionId,
-    recordedConversation,
+    conversation,
     modelSession,
     deps,
     config,
@@ -1835,8 +1828,7 @@ async function openSession(
 interface ImplArgs {
   key: AgentSessionKey;
   sessionId: string;
-  romeSessionId?: string;
-  recordedConversation?: RecordedConversation;
+  conversation?: SessionConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
@@ -2051,8 +2043,7 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentEvent> {
 class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
-  recordedConversation?: RecordedConversation;
+  conversation?: SessionConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -2132,8 +2123,7 @@ class AgentSessionImpl implements AgentSession {
   constructor(args: ImplArgs) {
     this.key = args.key;
     this.sessionId = args.sessionId;
-    this.romeSessionId = args.romeSessionId;
-    this.recordedConversation = args.recordedConversation;
+    this.conversation = args.conversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
@@ -2152,11 +2142,6 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
-  }
-
-  /** The caller's conversation, else the recorded one that still exists. */
-  get conversationId(): string | undefined {
-    return this.romeSessionId ?? this.recordedConversation?.id;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind

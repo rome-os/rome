@@ -13,6 +13,9 @@ import type {
 
 const log = createAppLogger("channel-message-hook");
 
+/** Core's `AGENTS_SERVICE`, which an app cannot import. */
+const AGENTS_CHANNEL = "agents";
+
 /**
  * How long a turn may run before the hook reports it as still running: the
  * same ten minutes a channel waits before reporting a stuck handler (R4). The
@@ -70,7 +73,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       return;
     }
 
-    if (isStopCommand(message.text)) {
+    // A program sends on `agents`, not a person, so `/stop` there is text for
+    // the model, and `message_handler` decides whether Rome answers it.
+    if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
       if (addressing === "ambient") {

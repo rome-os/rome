@@ -8,6 +8,7 @@ import {
 } from "@rome-os/app-runtime";
 
 import {
+  composioActionError,
   isRomeManagedToolkit,
   isSupportedToolkit,
   loadConnectorClient,
@@ -128,7 +129,12 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         log.error("connector add failed", { toolkit, error: message });
         return {
           status: "error",
-          error: `Could not prepare "${toolkit}" for connection: ${message}`,
+          error: await composioActionError(
+            client,
+            err,
+            `Could not prepare "${toolkit}" for connection`,
+            `connector_connect with toolkit "${toolkit}"`,
+          ),
         };
       }
     },

@@ -2,28 +2,70 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
+import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
 
 rs.mock("@/components/logo", () => ({
   RomeLogo: (props: Record<string, unknown>) => <div data-testid="rome-logo" {...props} />,
 }));
 
-rs.mock("./Chat", () => ({
-  Chat: ({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) => (
+// Host-wiring tests drive Chat's callbacks through this stub. The draft tests
+// mount the real Chat, because the draft composer lives inside it.
+const chatStub = rs.hoisted(() => ({ enabled: false }));
+
+function StubChat({ sessionId, mainAgentDisplayName, onSessionNotFound }: ChatProps) {
+  return (
     <>
       <div data-testid="session-chat">{mainAgentDisplayName}</div>
-      <button type="button" onClick={() => onSessionNotFound?.(sessionId)}>
+      <button type="button" onClick={() => onSessionNotFound?.(sessionId ?? "")}>
         Missing session
       </button>
       <button type="button" onClick={() => onSessionNotFound?.("missing-child")}>
         Missing child
       </button>
     </>
-  ),
+  );
+}
+
+rs.mock("./Chat", () => ({
+  Chat: (props: ChatProps) =>
+    chatStub.enabled ? <StubChat {...props} /> : <chatModule.Chat {...props} />,
+}));
+
+// jsdom has no element scrolling, which the real hook drives on every send.
+rs.mock("@/hooks/use-stick-to-bottom", () => ({
+  useStickToBottom: () => ({
+    contentRef: rs.fn(),
+    scrollRef: rs.fn(),
+    isAtBottom: true,
+    scrollToBottom: rs.fn(),
+  }),
+}));
+
+rs.mock("@/hooks/use-tab-status", () => ({
+  useChatTabStatus: rs.fn(),
+}));
+
+rs.mock("@/components/agent-trace/TraceDrawer", () => ({
+  TraceDrawer: () => null,
+  traceDrawerContentInsetClass: () => "",
+}));
+
+rs.mock("@/components/chat/entries", () => ({
+  renderFlatEntries: () => null,
+  renderSingleEntry: () => null,
+}));
+
+rs.mock("@/components/chat/MessageList", () => ({
+  MessageList: () => <div data-testid="message-list" />,
+  findActiveSubmission: () => null,
+  findLastSubmission: () => null,
+  hasPendingApprovalConfirmation: () => false,
 }));
 
 function LocationProbe() {
@@ -49,6 +91,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   cleanup();
+  chatStub.enabled = false;
   localStorage.clear();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
@@ -81,12 +124,32 @@ const testNewsFeed = {
   ],
 };
 
+// Passes a created session back as `sessionId`, as FreeGrid does.
+function ChatHost({
+  sessionId: initialSessionId,
+  onSessionCreated,
+  ...props
+}: Partial<ChatComponentProps>) {
+  const [sessionId, setSessionId] = useState(initialSessionId);
+  return (
+    <ChatComponent
+      {...props}
+      sessionId={sessionId}
+      onSessionCreated={(id) => {
+        setSessionId(id);
+        onSessionCreated?.(id);
+      }}
+    />
+  );
+}
+
 function renderChatComponent(
   props: Partial<ChatComponentProps> = {},
   homeData?: {
     sessions: Array<Record<string, unknown>>;
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
+    createSession?: () => Response;
   },
   initialEntry = "/chat",
 ) {
@@ -110,8 +173,17 @@ function renderChatComponent(
         counts: { all: 0, guardian: 0, "inner-circle": 0, acquaintance: 0, other: 0 },
       });
     }
+    if (url === "/api/chat/sessions" && init?.method === "POST") {
+      return homeData?.createSession?.() ?? Response.json({ id: "new-session" });
+    }
     if (url === "/api/chat/sessions") {
       return Response.json(homeData?.sessions ?? []);
+    }
+    if (/\/api\/chat\/sessions\/[^/]+\/messages$/.test(url)) {
+      return Response.json([]);
+    }
+    if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
+      return init?.method === "POST" ? Response.json({ turnId: "turn-1" }) : Response.json([]);
     }
     if (url === "/api/chat/projects") {
       return Response.json({
@@ -137,7 +209,7 @@ function renderChatComponent(
   const result = render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <QueryClientProvider client={queryClient}>
-        <ChatComponent onSessionCreated={() => {}} {...props} />
+        <ChatHost {...props} />
         <LocationProbe />
       </QueryClientProvider>
     </MemoryRouter>,
@@ -174,6 +246,10 @@ describe("ChatComponent draft file drops", () => {
 });
 
 describe("ChatComponent agent identity", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
   it("passes the onboarding agent name from settings into an existing chat", async () => {
     renderChatComponent({ sessionId: "session-1" });
 
@@ -182,6 +258,10 @@ describe("ChatComponent agent identity", () => {
 });
 
 describe("ChatComponent missing sessions", () => {
+  beforeEach(() => {
+    chatStub.enabled = true;
+  });
+
   it.each(["", "?hideSidebar=1"])("replaces a missing chat URL with home%s", (search) => {
     renderChatComponent({ sessionId: "session-1" }, undefined, `/chat/session-1${search}`);
 
@@ -452,5 +532,51 @@ describe("ChatComponent empty home", () => {
 
     await user.click(screen.getByRole("button", { name: "Cloud link" }));
     expect(openSpy).toHaveBeenCalledWith("https://romeos.cc/blog", "_blank", "noopener,noreferrer");
+  });
+});
+
+describe("ChatComponent first send", () => {
+  it("keeps the focused composer through the session the first send creates", async () => {
+    const user = userEvent.setup();
+    const onSessionCreated = rs.fn();
+    const { fetchSpy } = renderChatComponent({ onSessionCreated });
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(composer);
+
+    await user.keyboard("Hello Rome{Enter}");
+
+    expect(await screen.findByTestId("message-list")).toBeTruthy();
+    expect(onSessionCreated).toHaveBeenCalledWith("new-session");
+    const turnPost = fetchSpy.mock.calls.find(
+      ([url, init]) =>
+        String(url) === "/api/chat/sessions/new-session/turns" && init?.method === "POST",
+    );
+    expect((turnPost?.[1]?.body as FormData | undefined)?.get("text")).toBe("Hello Rome");
+    expect(screen.getByRole("textbox")).toBe(composer);
+    expect(document.activeElement).toBe(composer);
+    expect(composer.value).toBe("");
+  });
+
+  it("keeps the draft and restores the input when the session cannot be created", async () => {
+    const user = userEvent.setup();
+    const onSessionCreated = rs.fn();
+    const { fetchSpy } = renderChatComponent(
+      { onSessionCreated },
+      {
+        sessions: [],
+        projects: [],
+        createSession: () => Response.json({ error: "Chat limit reached" }, { status: 500 }),
+      },
+    );
+    const composer = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    await user.keyboard("Hello Rome{Enter}");
+
+    expect(await screen.findByText("Chat limit reached")).toBeTruthy();
+    expect(composer.value).toBe("Hello Rome");
+    expect(screen.getByRole("textbox")).toBe(composer);
+    expect(screen.queryByTestId("message-list")).toBeNull();
+    expect(onSessionCreated).not.toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.some(([url]) => String(url).endsWith("/turns"))).toBe(false);
   });
 });

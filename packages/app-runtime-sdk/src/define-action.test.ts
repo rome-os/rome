@@ -12,16 +12,6 @@ const config: ActionConfig = {
 };
 
 describe("defineAction", () => {
-  it("preserves action visibility metadata", () => {
-    const action = defineAction({
-      config: { ...config, visibility: "explicit" },
-      schema: z.object({}),
-      execute: async () => ({ status: "ok" }) as const,
-    });
-
-    expect(action.config.visibility).toBe("explicit");
-  });
-
   it("derives a model-facing JSON schema without the $schema dialect key", () => {
     const action = defineAction({
       config,

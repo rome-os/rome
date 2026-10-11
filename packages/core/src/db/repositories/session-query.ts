@@ -19,6 +19,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { RunOutcome, SessionsSort } from "@rome/api-types/sessions";
 import type { DrizzleDb } from "../index.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../schema.js";
+import { romeSessionKind, withSessionKind } from "../session-kind.js";
 
 const terminalTraceBlocks = alias(romeAgentTraceBlocks, "session_query_terminal_blocks");
 const turnEndTraceBlocks = alias(romeAgentTraceBlocks, "session_query_turn_end_blocks");
@@ -113,7 +114,7 @@ function sessionPredicates(
     );
   }
   if (scope.types) {
-    predicates.push(scope.types.length > 0 ? inArray(romeSessions.type, scope.types) : sql`0 = 1`);
+    predicates.push(scope.types.length > 0 ? inArray(romeSessionKind, scope.types) : sql`0 = 1`);
   }
   if (scope.agentNames) {
     predicates.push(
@@ -303,6 +304,7 @@ export class SessionQueryRepository {
     const rows = await this.db
       .select({
         ...getTableColumns(romeSessions),
+        type: romeSessionKind,
         messageCount: sql<number>`coalesce(${messageCounts.count}, 0)`.mapWith(Number),
         stats: {
           runCount: runStats.runCount,
@@ -333,12 +335,12 @@ export class SessionQueryRepository {
       .where(and(...predicates));
     const [typeRows, sourceRows] = await Promise.all([
       this.db
-        .select({ value: romeSessions.type, count: count() })
+        .select({ value: romeSessionKind, count: count() })
         .from(romeSessions)
         .innerJoin(runStats, eq(runStats.sessionId, romeSessions.id))
         .where(and(...predicates))
-        .groupBy(romeSessions.type)
-        .orderBy(asc(romeSessions.type)),
+        .groupBy(romeSessionKind)
+        .orderBy(asc(romeSessionKind)),
       this.db
         .select({ value: romeSessions.sourceChannel, count: count() })
         .from(romeSessions)
@@ -392,7 +394,7 @@ export class SessionQueryRepository {
         modelProvider,
         modelName,
         agentName: romeSessions.agentName,
-        sessionType: romeSessions.type,
+        sessionType: romeSessionKind,
         sourceChannel: romeSessions.sourceChannel,
         projectPath: romeSessions.projectPath,
       })
@@ -413,7 +415,7 @@ export class SessionQueryRepository {
         modelProvider,
         modelName,
         romeSessions.agentName,
-        romeSessions.type,
+        romeSessionKind,
         romeSessions.sourceChannel,
         romeSessions.projectPath,
       );
@@ -442,8 +444,8 @@ export class SessionQueryRepository {
 
   async getSessionDetailRows(id: string) {
     const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
-    const session = rows[0];
-    if (!session) return null;
+    if (!rows[0]) return null;
+    const session = withSessionKind(rows[0]);
     const [messageCountRows, parentRows, childRows] = await Promise.all([
       this.db
         .select({ count: count() })
@@ -457,8 +459,8 @@ export class SessionQueryRepository {
     return {
       session,
       messageCount: messageCountRows[0]?.count ?? 0,
-      parent: parentRows[0] ?? null,
-      children: childRows,
+      parent: parentRows[0] ? withSessionKind(parentRows[0]) : null,
+      children: childRows.map(withSessionKind),
     };
   }
 }

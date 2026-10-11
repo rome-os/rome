@@ -54,6 +54,22 @@ describe("Composio credential rejection", () => {
     expect(isComposioAuthenticationError(error)).toBe(status === 401);
   });
 
+  it("reports a failed body read from ping as a result, keeping the status", async () => {
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.error(new Error("body read aborted"));
+      },
+    });
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 401 }));
+    const client = new ComposioClient({ apiKey: "uak_test" });
+
+    await expect(client.ping()).resolves.toEqual({
+      ok: false,
+      status: 401,
+      message: "body read aborted",
+    });
+  });
+
   it("recognizes SDK 401 errors without treating permissions or transport failures as revoked keys", () => {
     expect(isComposioAuthenticationError({ status: 401 })).toBe(true);
     expect(isComposioAuthenticationError({ status: 403 })).toBe(false);

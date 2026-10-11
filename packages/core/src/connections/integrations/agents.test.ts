@@ -299,6 +299,8 @@ describe("agents channel", () => {
       } as never,
     );
     expect(conferral.profile).toEqual(HOME);
+    // The instance token is the credential, so the grant records the agent only in its profile.
+    expect(conferral.credential.material).toEqual({});
     expect(reviveAgentsProfile(HOME).handle).toBe("home-rome");
   });
 

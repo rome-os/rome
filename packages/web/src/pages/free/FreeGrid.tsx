@@ -356,20 +356,6 @@ export function FreeGrid() {
             // route before the link is followed; the href then carries it.
             onOpenIntent={flushAppLink}
           >
-            {!chatSessionId && (
-              <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">
-                {toolView.collapsed && (
-                  <IconButton
-                    size="sm"
-                    data-coach="add-widget"
-                    aria-expanded={false}
-                    onClick={() => setToolsCollapsed(false)}
-                    label={t("chat.expandTools")}
-                    icon={<PanelRightOpen />}
-                  />
-                )}
-              </div>
-            )}
             <ChatWidget
               sessionId={chatSessionId}
               onSessionChosen={handleSessionChosen}

@@ -4,10 +4,12 @@ description: |
   Sign in to Composio so Rome can connect toolkits on the guardian's behalf.
   This is the prerequisite for connector_connect: if connector_connect reports
   that Composio is not signed in, call this once, then re-run connector_connect
-  for each toolkit. Reports immediately if already signed in; otherwise renders
-  the inline sign-in card (the browser login happens in the owner's tab) and
-  resumes once sign-in completes. Sign-in is account-wide, not per-toolkit — call
-  it a single time even when several toolkits need connecting.
+  for each toolkit. Also call it when another connector action reports that
+  Composio rejected Rome's saved sign-in. Reports immediately when the saved
+  sign-in is still valid. Otherwise, including when Composio rejects the saved
+  sign-in, renders the inline sign-in card (the browser login happens in the
+  owner's tab) and resumes once sign-in completes. Sign-in is account-wide, not
+  per-toolkit — call it a single time even when several toolkits need connecting.
 entry: ./index.ts
 complexity: simple
 speed: moderate

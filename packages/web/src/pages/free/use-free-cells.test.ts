@@ -348,3 +348,74 @@ describe("placeChatWidget", () => {
     expect(read()).toHaveLength(2);
   });
 });
+
+describe("applyAgentPlacement", () => {
+  const readLayout = (sessionId: string) =>
+    JSON.parse(localStorage.getItem(`rome:free-layout:${sessionId}`) ?? "[]") as Array<{
+      id: string;
+      targetId?: string;
+      route?: string;
+    }>;
+
+  it("skips a replayed placement the layout already applied, keeping in-widget navigation", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("replay-chat");
+
+    store.applyAgentPlacement("replay-p1", "notes", "list");
+    const [placed] = readLayout("replay-chat");
+    store.updatePlacementLink(placed!.id, "detail", undefined);
+
+    store.applyAgentPlacement("replay-p1", "notes", "list");
+    expect(readLayout("replay-chat")).toEqual([
+      expect.objectContaining({ id: placed!.id, targetId: "notes", route: "detail" }),
+    ]);
+
+    // A new placement of the same route is a live re-placement and retargets.
+    store.applyAgentPlacement("replay-p2", "notes", "list");
+    expect(readLayout("replay-chat")).toEqual([
+      expect.objectContaining({ targetId: "notes", route: "list" }),
+    ]);
+    expect(readLayout("replay-chat")[0]!.id).not.toBe(placed!.id);
+  });
+
+  it("places a replay again when a layout load dropped the tile it mounted", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("hydrate-chat");
+    // The placement's save never reached the server, so a later load of the
+    // session's layout returns the older layout without the tile.
+    store.applyAgentPlacement("hydrate-p1", "notes", "list");
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout: [] }));
+    await store.loadLayoutForSession("hydrate-chat");
+    expect(readLayout("hydrate-chat")).toEqual([]);
+
+    store.applyAgentPlacement("hydrate-p1", "notes", "list");
+    expect(readLayout("hydrate-chat")).toEqual([
+      expect.objectContaining({ targetId: "notes", route: "list" }),
+    ]);
+  });
+
+  it("applies a placement without an id every time", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("legacy-chat");
+
+    store.applyAgentPlacement(undefined, "notes", "list");
+    const [first] = readLayout("legacy-chat");
+    store.applyAgentPlacement(undefined, "notes", "list");
+    expect(readLayout("legacy-chat")[0]!.id).not.toBe(first!.id);
+  });
+
+  it("applies a placement to a session's layout even after another layout applied it", async () => {
+    const store = await import("./use-free-cells");
+    // A pinned chat's turn places into the open workspace, then the guardian
+    // opens that chat while its turn still runs and the stream replays.
+    store.setActiveSession("workspace-a");
+    store.applyAgentPlacement("cross-p1", "notes", "list");
+    store.setActiveSession("pinned-b");
+    store.applyAgentPlacement("cross-p1", "notes", "list");
+
+    expect(readLayout("workspace-a")).toEqual([expect.objectContaining({ targetId: "notes" })]);
+    expect(readLayout("pinned-b")).toEqual([
+      expect.objectContaining({ targetId: "notes", route: "list" }),
+    ]);
+  });
+});

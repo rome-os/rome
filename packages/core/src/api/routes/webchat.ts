@@ -3663,8 +3663,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
                 // the freegrid (no card, no child session, no parked turn). The
-                // replay key is per-app so a reconnecting client re-mounts it once.
-                // Fail closed: the owning app must actually be installed.
+                // replay key is per-app, so a reconnecting client gets the app's
+                // latest placement again; its `placementId` lets a client that
+                // already applied it skip the replay instead of remounting the
+                // widget. Fail closed: the owning app must actually be installed.
                 const place = readPlaceWidgetFromOutput(msg.output);
                 if (place) {
                   const resolvedApp = deps.appCatalog
@@ -3681,6 +3683,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       stream,
                       "widget_placement",
                       {
+                        placementId: randomUUID(),
                         appId: place.appId,
                         ...(place.route !== undefined ? { route: place.route } : {}),
                         ...(place.params !== undefined ? { params: place.params } : {}),

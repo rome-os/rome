@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import {
+  createFileGetHandler,
   createFileWatchEventsHandler,
   createResolveHandler,
   type FileBrowserScope,
@@ -294,5 +295,54 @@ describe("createResolveHandler", () => {
     const { status, body } = await callResolve("memory/notes.md");
     expect(status).toBe(400);
     expect(body).toMatchObject({ error: "Invalid path" });
+  });
+});
+
+describe("confineToRealRoot", () => {
+  let rootDir = "";
+  let outsideDir = "";
+
+  beforeEach(() => {
+    rootDir = mkdtempSync(join(tmpdir(), "rome-confine-root-"));
+    outsideDir = mkdtempSync(join(tmpdir(), "rome-confine-outside-"));
+    writeFileSync(join(outsideDir, "notes.md"), "outside");
+    symlinkSync(outsideDir, join(rootDir, "link"));
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  });
+
+  const getFile = async (scope: FileBrowserScope, path: string) => {
+    const app = new Hono();
+    app.get("/projects/file", createFileGetHandler(scope));
+    const response = await app.request(
+      `http://localhost/projects/file?path=${encodeURIComponent(path)}`,
+    );
+    return { status: response.status, body: await response.json() };
+  };
+
+  it("leaves an owner scope free to follow a symlink out of the root", async () => {
+    const { status, body } = await getFile(
+      { assetBasePath: "/api/projects/asset", logicalRoot: "projects", rootDir },
+      "projects/link/notes.md",
+    );
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ content: "outside" });
+  });
+
+  it("rejects the same symlink on a confined scope", async () => {
+    const { status, body } = await getFile(
+      {
+        assetBasePath: "/api/projects/asset",
+        confineToRealRoot: true,
+        logicalRoot: "projects",
+        rootDir,
+      },
+      "projects/link/notes.md",
+    );
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: "Invalid path" });
   });
 });

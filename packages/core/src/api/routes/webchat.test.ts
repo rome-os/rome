@@ -2270,6 +2270,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "workflow-studio",
       });
 
@@ -2288,6 +2289,61 @@ describe("Webchat API", () => {
         }
       });
       expect(hasCard).toBe(false);
+    });
+
+    it("replays a placement under the id it went out with live, and mints a new id per placement", async () => {
+      deps.appCatalog = {
+        listResolved: () => [{ appId: "orders", manifest: { components: [] } }],
+      } as unknown as typeof deps.appCatalog;
+      const placementIds = (events: Array<{ event: string; data: string }>) =>
+        events
+          .filter((e) => e.event === "widget_placement")
+          .map((e) => (JSON.parse(e.data) as { placementId: string }).placementId);
+      const placeOrders = (toolUseId: string) => ({
+        type: "tool_result",
+        toolUseId,
+        tool: "execute_action",
+        output: [
+          {
+            type: "text",
+            text: JSON.stringify({ placeWidget: true, appId: "orders", route: "orders/123" }),
+          },
+        ],
+      });
+
+      // Hold the placements until the reader is attached, so they go out live.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const { events, app } = await runScriptedStream(
+        () =>
+          (async function* () {
+            yield { type: "text", content: "Placing" };
+            await gate;
+            yield placeOrders("tu-place-1");
+            yield placeOrders("tu-place-2");
+            yield { type: "result", content: "" };
+          })() as AsyncGenerator<never>,
+        (evt) => {
+          if (evt.event === "assistant_text") release();
+        },
+      );
+
+      // Two placements with the same route are two placements, not a replay.
+      const live = placementIds(events);
+      expect(live).toHaveLength(2);
+      expect(live[0]).not.toBe(live[1]);
+
+      // A reconnect inside the terminal grace window replays the app's latest
+      // placement under the same id, so a client can tell it was applied.
+      const resumed = await app.request("/chat/turns/turn-stream-1/stream");
+      expect(resumed.status).toBe(200);
+      const replayed = (await resumed.text())
+        .split("\n\n")
+        .filter((frame) => frame.startsWith("event: widget_placement\n"))
+        .map(
+          (frame) => (JSON.parse(frame.split("data: ")[1]!) as { placementId: string }).placementId,
+        );
+      expect(replayed).toEqual([live[1]]);
     });
 
     it("does not emit widget_placement when the owning app is not installed (fail closed)", async () => {
@@ -2314,6 +2370,7 @@ describe("Webchat API", () => {
       const placement = events.find((event) => event.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "sessions",
         route: "feedback-fork-session",
       });
@@ -2334,6 +2391,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "orders",
         route: "orders/123",
         params: { tab: "history" },
@@ -2354,6 +2412,7 @@ describe("Webchat API", () => {
       const placement = events.find((e) => e.event === "widget_placement");
       expect(placement).toBeDefined();
       expect(JSON.parse(placement!.data)).toEqual({
+        placementId: expect.any(String),
         appId: "orders",
         params: { orderId: 123 },
       });
