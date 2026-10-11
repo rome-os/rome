@@ -974,6 +974,11 @@ export class WebChatRepository {
         .where(eq(romeSessions.id, existing.id));
       return { ...existing, agentName: parent.agentName };
     }
+    // Only the dashboard opens a chat, through `createSession`. A webchat
+    // address that names no chat is a deleted chat or a handoff, not a new one.
+    if (input.channel === "webchat") {
+      throw new Error(`No chat at webchat address ${input.threadId}`);
+    }
 
     const id = channelConversationId(input.channel, input.threadId);
     const now = new Date();
@@ -1332,7 +1337,7 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(
         and(
-          inArray(romeSessions.type, ["webchat", "webchat_handoff", "channel"]),
+          inArray(romeSessions.type, ["webchat_handoff", "channel"]),
           eq(romeSessions.sourceChannel, channel),
           eq(romeSessions.sourceThreadId, threadId),
         ),

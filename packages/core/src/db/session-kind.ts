@@ -15,7 +15,11 @@ export function channelConversationId(channel: string, threadId: string): string
   return channel === "webchat" ? threadId : `channel:${channel}:${threadId}`;
 }
 
-/** Whether a row is a guardian chat. */
+/**
+ * Whether a row is a guardian chat. Every chat writer also sets
+ * `source_thread_id = id`, and the Dream and Showcases raw SQL matches chats on
+ * that, so a writer that breaks it hides the chat from those apps only.
+ */
 export const isWebchatChat: SQL = webchatChatWhere(romeSessions);
 
 /** Whether a row is a conversation on a messaging channel, chats excluded. */

@@ -229,15 +229,18 @@ describe("WebChatRepository", () => {
       expect(await repo.getSession("channel:webchat:chat-1")).toBeNull();
     });
 
-    it("keys a conversation on a webchat address by the thread id itself", async () => {
-      const conversation = await repo.ensureChannelConversation({
-        channel: "webchat",
-        threadId: "chat-new",
-        agentName: "main",
-      });
+    it("refuses a webchat address that names no chat", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+      await repo.deleteSession("chat-1");
 
-      expect(conversation.id).toBe("chat-new");
-      expect((await repo.getSession("chat-new"))?.type).toBe("webchat");
+      await expect(
+        repo.ensureChannelConversation({
+          channel: "webchat",
+          threadId: "chat-1",
+          agentName: "main",
+        }),
+      ).rejects.toThrow("No chat at webchat address chat-1");
+      expect(await repo.getSession("chat-1")).toBeNull();
     });
 
     it("places a chat at its own address whatever thread id the caller names", async () => {
@@ -600,6 +603,7 @@ describe("WebChatRepository", () => {
     // send_message stores the parts it was given here as well as delivering
     // them; a sender-supplied routine card must not reach the transcript.
     it("strips routine cards from recorded outbound content", async () => {
+      await repo.createSession("forged-card-thread", "Webchat chat");
       const conversation = await repo.ensureChannelConversation({
         channel: "webchat",
         threadId: "forged-card-thread",
