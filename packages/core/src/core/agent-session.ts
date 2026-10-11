@@ -3653,10 +3653,11 @@ class AgentSessionImpl implements AgentSession {
         try {
           await chain.run(mwCtx, runModelTerminal);
         } catch (err) {
-          // A fail-closed throw after the terminal cannot change an outcome
-          // consumers have already seen, so the turn ends on that terminal.
-          if (!emittedTerminal) throw err;
-          log.warn("turn middleware threw after its terminal event", {
+          // A fail-closed throw after the terminal, or after next() started
+          // the model, cannot change the outcome, so the turn ends on the
+          // terminal already emitted or on the model's.
+          if (!emittedTerminal && !modelRan) throw err;
+          log.warn("turn middleware threw after its terminal event or after starting the model", {
             sessionId: this.sessionId,
             agentName: this.key.agentName,
             turnId,
@@ -3686,8 +3687,8 @@ class AgentSessionImpl implements AgentSession {
           content: "",
         };
         // A middleware that short-circuits without a terminal, such as a turn
-        // parked on a question card, still publishes one. A user stop
-        // publishes none, as a stop before the model starts does.
+        // parked on a question card, still publishes one. An interrupted turn
+        // publishes none, as an interrupt before the model starts does.
         if (!emittedTerminal && !sink.lifecycleInterrupted) {
           terminal = validateProviderStructuredResult(
             terminal,

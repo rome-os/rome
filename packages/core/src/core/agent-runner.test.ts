@@ -2180,6 +2180,21 @@ describe("AgentRunner", () => {
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
     });
 
+    it("ends on the model's terminal when a fail-closed middleware throws after next()", async () => {
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const session = await openMiddlewareSession(async (_ctx, next) => {
+        void next();
+        throw new Error("post-processing failed");
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(mockProvider.calls).toHaveLength(1);
+      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "from the model" })]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+    });
+
     it("skips the model when a fail-open middleware throws after its terminal", async () => {
       // Runs the real chain, whose fail-open handling calls next() for the
       // middleware that threw.
