@@ -10,9 +10,10 @@
 //
 // The JSON-RPC transport lives in app-server-client.ts; the
 // notification→AgentEvent translation is below. Headless config:
-// sandbox=danger-full-access + approvalPolicy=never, so Rome's per-action
-// approval gate (inside the Rome tool facade) is the only gate and no server→client
-// approval round-trips are needed.
+// approvalPolicy=never, so Rome's per-action approval gate (inside the Rome tool
+// facade) is the only gate and no server→client approval round-trips are
+// needed. The agent's declared builtins pick Codex's own tools and the sandbox
+// (codexToolOverrides).
 
 import type { AgentErrorCode, TurnErrorEvent } from "@rome-os/app-runtime";
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
@@ -129,16 +130,53 @@ function normalizeEffort(effort: ModelReasoningEffort | undefined): ReasoningEff
   return DEFAULT_EFFORT;
 }
 
+const SHELL_BUILTINS = ["Bash", "Read", "Glob", "Grep"];
+
+// Codex has one shell for reading, searching, and running commands, so any
+// shell builtin keeps it.
+const CODEX_TOOL_SWITCHES: ReadonlyArray<
+  readonly [key: string, off: false | "disabled", keptBy: readonly string[]]
+> = [
+  ["features.shell_tool", false, SHELL_BUILTINS],
+  ["features.unified_exec", false, SHELL_BUILTINS],
+  ["features.view_image", false, ["Read"]],
+  ["features.multi_agent", false, ["Task"]],
+  ["features.image_generation", false, ["ImageGeneration"]],
+  ["web_search", "disabled", ["WebSearch"]],
+];
+
+/**
+ * The thread sandbox and config that limit Codex's own tools to an agent's
+ * declared builtins (docs/concepts/agents.md#builtin-tools). The config only
+ * switches tools off, so a declared tool keeps Codex's default. No config key
+ * removes apply_patch, so an agent with no Write, Edit, or shell builtin gets
+ * the read-only sandbox, where Codex rejects every patch.
+ */
+function codexToolOverrides(
+  builtinTools: readonly string[] | undefined,
+): Required<Pick<ThreadConfigurationOverrides, "sandbox" | "config">> {
+  const declared = new Set(builtinTools);
+  const keeps = (names: readonly string[]) => names.some((name) => declared.has(name));
+  const config: Record<string, unknown> = {};
+  for (const [key, off, keptBy] of CODEX_TOOL_SWITCHES) {
+    if (!keeps(keptBy)) config[key] = off;
+  }
+  const writes = keeps([...SHELL_BUILTINS, "Write", "Edit"]);
+  return { sandbox: writes ? "danger-full-access" : "read-only", config };
+}
+
 function buildThreadConfigurationOverrides(
   params: ModelSessionForkOpenParams,
   model: string,
 ): ThreadConfigurationOverrides {
+  const tools = codexToolOverrides(params.builtinTools);
   const config: Record<string, unknown> = {
     model_reasoning_summary: "detailed",
     hide_agent_reasoning: false,
     // Rome turns update_plan calls into plan updates. Codex 0.153.4 made the
     // tool opt-in (openai/codex#41744).
     "tools.update_plan.enabled": true,
+    ...tools.config,
   };
   if (params.externalMcpServers && Object.keys(params.externalMcpServers).length > 0) {
     config.mcp_servers = params.externalMcpServers;
@@ -146,7 +184,7 @@ function buildThreadConfigurationOverrides(
   return {
     model,
     cwd: params.workingDir ?? null,
-    sandbox: "danger-full-access",
+    sandbox: tools.sandbox,
     approvalPolicy: "never",
     baseInstructions: params.systemPrompt,
     config,
@@ -174,13 +212,17 @@ This is an isolated side-channel turn. Do not invoke any tool, even if provider 
  * thread/fork. Make that provider limitation an explicit, read-only degrade:
  * the model is instructed not to call inherited tools and the runtime rejects
  * them, while the fork remains usable for recap/title side-channel turns.
+ * Codex's own tools do follow thread/fork overrides, so the fork drops them
+ * whatever builtins the open params declare.
  */
 function constrainIsolatedFork(
   overrides: ThreadConfigurationOverrides,
 ): ThreadConfigurationOverrides {
+  const noBuiltins = codexToolOverrides([]);
   return {
     ...overrides,
-    sandbox: "read-only",
+    sandbox: noBuiltins.sandbox,
+    config: { ...overrides.config, ...noBuiltins.config },
     baseInstructions: [overrides.baseInstructions, ISOLATED_FORK_INSTRUCTION]
       .filter((value): value is string => typeof value === "string" && value.length > 0)
       .join("\n\n"),
@@ -505,7 +547,8 @@ function classifyCodexFailure(
 export class CodexAppServerProvider implements ModelProvider {
   readonly id: ProviderId = "openai";
   readonly displayName = "Codex (ChatGPT)";
-  // Match the exec provider / Anthropic set so agent yamls are provider-agnostic.
+  // Anthropic's set, so agent yamls stay provider-agnostic, plus ImageGeneration,
+  // which only Codex provides.
   readonly builtinTools: ReadonlySet<string> = new Set([
     "Read",
     "Write",
@@ -517,6 +560,7 @@ export class CodexAppServerProvider implements ModelProvider {
     "WebFetch",
     "TodoWrite",
     "Task",
+    "ImageGeneration",
   ]);
 
   private readonly appServerManager: CodexAppServerManager;

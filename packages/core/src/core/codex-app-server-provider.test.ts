@@ -245,6 +245,89 @@ describe("CodexAppServerProvider", () => {
     expect(provider.builtinTools.has("Task")).toBe(true);
   });
 
+  // Every config value that switches off one of Codex's own tools.
+  const CODEX_TOOLS_OFF = {
+    "features.shell_tool": false,
+    "features.unified_exec": false,
+    "features.view_image": false,
+    "features.multi_agent": false,
+    "features.image_generation": false,
+    web_search: "disabled",
+  };
+  const threadRequest = (method: string) =>
+    requestMock.mock.calls.find((call) => call[0] === method)?.[1] as
+      | { sandbox?: string; approvalPolicy?: string; config: Record<string, unknown> }
+      | undefined;
+  const switchedOff = (config: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.keys(CODEX_TOOLS_OFF).flatMap((key) => (key in config ? [[key, config[key]]] : [])),
+    );
+
+  it.each([
+    { label: "none", builtinTools: [], sandbox: "read-only", off: Object.keys(CODEX_TOOLS_OFF) },
+    {
+      label: "Read, Glob, and Grep",
+      builtinTools: ["Read", "Glob", "Grep"],
+      sandbox: "danger-full-access",
+      off: ["features.multi_agent", "features.image_generation", "web_search"],
+    },
+    {
+      label: "Bash",
+      builtinTools: ["Bash"],
+      sandbox: "danger-full-access",
+      off: [
+        "features.view_image",
+        "features.multi_agent",
+        "features.image_generation",
+        "web_search",
+      ],
+    },
+    {
+      label: "Write and Edit",
+      builtinTools: ["Write", "Edit"],
+      sandbox: "danger-full-access",
+      off: Object.keys(CODEX_TOOLS_OFF),
+    },
+    {
+      label: "ImageGeneration",
+      builtinTools: ["ImageGeneration"],
+      sandbox: "read-only",
+      off: Object.keys(CODEX_TOOLS_OFF).filter((key) => key !== "features.image_generation"),
+    },
+    {
+      label: "every switch",
+      builtinTools: ["Read", "Write", "Bash", "WebSearch", "Task", "ImageGeneration"],
+      sandbox: "danger-full-access",
+      off: [],
+    },
+  ])("limits Codex's own tools to the declared builtins: $label", async ({
+    builtinTools,
+    sandbox,
+    off,
+  }) => {
+    await new CodexAppServerProvider().openSession(buildParams({ builtinTools }));
+
+    const start = threadRequest("thread/start")!;
+    expect(start.sandbox).toBe(sandbox);
+    expect(start.approvalPolicy).toBe("never");
+    expect(switchedOff(start.config)).toEqual(
+      Object.fromEntries(
+        off.map((key) => [key, CODEX_TOOLS_OFF[key as keyof typeof CODEX_TOOLS_OFF]]),
+      ),
+    );
+    expect(start.config).toMatchObject({ "tools.update_plan.enabled": true });
+  });
+
+  it("applies the agent's builtins when it resumes a thread opened with more", async () => {
+    await new CodexAppServerProvider().openSession(
+      buildParams({ builtinTools: [], isNewSession: false, providerThreadId: "old-thread" }),
+    );
+
+    const resume = threadRequest("thread/resume")!;
+    expect(resume).toMatchObject({ threadId: "old-thread", sandbox: "read-only" });
+    expect(switchedOff(resume.config)).toEqual(CODEX_TOOLS_OFF);
+  });
+
   it("handshakes once and starts a thread with Rome dynamic tools", async () => {
     const provider = new CodexAppServerProvider();
     await provider.openSession(buildParams());
@@ -258,7 +341,6 @@ describe("CodexAppServerProvider", () => {
     const startCall = requestMock.mock.calls.find((c) => c[0] === "thread/start");
     expect(startCall).toBeTruthy();
     expect(startCall![1]).toMatchObject({
-      sandbox: "danger-full-access",
       approvalPolicy: "never",
       baseInstructions: "system",
       historyMode: "paginated",
@@ -565,7 +647,7 @@ describe("CodexAppServerProvider", () => {
       }),
     );
     const fork = await source.fork({ sessionId: "isolated-session", mode: "ephemeral" });
-    const forkSession = await fork.open(buildForkOpenParams());
+    const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["Bash", "Write"] }));
     const collected = collectUntilTerminal(forkSession);
     await forkSession.sendUserInput({ text: "try the inherited tool" });
     await collected;
@@ -594,6 +676,8 @@ describe("CodexAppServerProvider", () => {
         baseInstructions: expect.stringContaining("Do not invoke any tool"),
       }),
     );
+    expect(switchedOff(threadRequest("thread/fork")!.config)).toEqual(CODEX_TOOLS_OFF);
+    expect(switchedOff(threadRequest("thread/resume")!.config)).toEqual(CODEX_TOOLS_OFF);
     expect(sourceExecuteSubagent).not.toHaveBeenCalled();
 
     await forkSession.close();
@@ -621,7 +705,7 @@ describe("CodexAppServerProvider", () => {
       configurationMode: "exact",
       sourceCheckpoint: "provider-turn-t2",
     });
-    const forkSession = await fork.open(buildForkOpenParams());
+    const forkSession = await fork.open(buildForkOpenParams({ builtinTools: ["Bash"] }));
 
     expect(requestMock).toHaveBeenCalledWith(
       "thread/fork",

@@ -246,6 +246,12 @@ concrete model based on the current provider.
 selected model should use. It accepts `low`, `high`, or `xhigh` and defaults to
 `high` when omitted.
 
+`tools` lists the builtin tools the model provider runs for the agent, such as
+`Read` or `Bash`. An empty list gives it none, so it acts only through its
+actions. On Codex, any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent a
+shell that can run commands and write files. Leave all four out of an agent
+that reads untrusted input.
+
 #### Structured output: `outputSchema`
 
 When you want the agent to return **structured JSON** rather than free-form
@@ -258,7 +264,7 @@ name: sentinel
 description: Triages incoming messages from untrusted senders
 tier: small
 permissionMode: bypassPermissions
-tools: [Read, Glob, Grep]
+tools: []
 actions: ["*"]
 outputSchema:
   type: object
