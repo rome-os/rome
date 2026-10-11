@@ -4,9 +4,12 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it, rs } from "@rstest/core";
 import { AppServerClient } from "./app-server-client.js";
 
-const { spawnMock } = rs.hoisted(() => ({ spawnMock: rs.fn() }));
+const { spawnMock, warnMock } = rs.hoisted(() => ({ spawnMock: rs.fn(), warnMock: rs.fn() }));
 
 rs.mock("./cli.js", () => ({ spawnCodexAppServer: spawnMock }));
+rs.mock("../../logger.js", () => ({
+  createLogger: () => ({ debug: rs.fn(), info: rs.fn(), warn: warnMock, error: rs.fn() }),
+}));
 
 function fakeProc(): ChildProcessWithoutNullStreams & EventEmitter {
   const proc = new EventEmitter() as EventEmitter & {
@@ -86,11 +89,17 @@ describe("AppServerClient", () => {
 
     const inflight = client.request("turn/start", {});
     proc.stdin.emit("error", new Error("write EPIPE"));
-    proc.emit("exit", 1, null);
+    proc.emit("exit", null, "SIGKILL");
 
     const cause = "codex app-server connection failed: write EPIPE";
     await expect(inflight).rejects.toThrow(cause);
     expect(onExit).toHaveBeenCalledTimes(1);
     expect(onExit).toHaveBeenCalledWith(expect.objectContaining({ message: cause }));
+    // The exit behind the broken pipe still reaches the log.
+    expect(warnMock).toHaveBeenCalledWith("codex app-server exited after its connection failed", {
+      code: null,
+      signal: "SIGKILL",
+      firstCause: cause,
+    });
   });
 });

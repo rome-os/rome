@@ -81,7 +81,7 @@ export class AppServerClient {
     proc.stdin.on("error", (err) => this.handleTransportError(err));
     proc.on("exit", (code, signal) => {
       const status = signal ? `signal ${signal}` : `code ${code ?? "null"}`;
-      this.handleTransportExit(new Error(`codex app-server exited (${status})`));
+      this.handleTransportExit(new Error(`codex app-server exited (${status})`), { code, signal });
     });
     proc.on("error", (err) => this.handleTransportError(err));
   }
@@ -138,12 +138,24 @@ export class AppServerClient {
     this.handleTransportExit(new Error(`codex app-server connection failed: ${err.message}`));
   }
 
-  // The first cause wins, so after an EPIPE the process's later exit code or
-  // signal goes unreported.
-  private handleTransportExit(err: Error): void {
-    if (this.closed || this.exitError) return;
+  private handleTransportExit(
+    err: Error,
+    exit?: { code: number | null; signal: NodeJS.Signals | null },
+  ): void {
+    if (this.closed) return;
+    if (this.exitError) {
+      // Callers keep the first cause. A broken pipe usually comes before the
+      // exit that caused it, so log that exit to tell a crash from a restart.
+      if (exit) {
+        log.warn("codex app-server exited after its connection failed", {
+          ...exit,
+          firstCause: this.exitError.message,
+        });
+      }
+      return;
+    }
     this.exitError = err;
-    log.warn("codex app-server transport exited", { error: err.message });
+    log.warn("codex app-server transport exited", { ...exit, error: err.message });
     for (const [, pending] of this.pending) pending.reject(err);
     this.pending.clear();
     this.opts.onExit?.(err);

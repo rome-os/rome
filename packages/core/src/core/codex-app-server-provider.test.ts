@@ -2686,6 +2686,42 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("finishes marking revoked credentials before reporting them after turn/start fails", async () => {
+    let authStateMarked = false;
+    const provider = new CodexAppServerProvider({
+      onAuthRevoked: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        authStateMarked = true;
+      },
+    });
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        captured.onNotification?.("error", {
+          threadId: "thr-1",
+          error: {
+            message:
+              "Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.",
+          },
+          willRetry: false,
+        });
+        throw new Error("codex app-server exited (code 1)");
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    expect(authStateMarked).toBe(true);
+    expect(error).toMatchObject({ code: "auth_revoked" });
+    await session.close();
+  });
+
   it("tags a server-side turn failure as transient rather than usage_limit", async () => {
     const provider = new CodexAppServerProvider();
     requestMock.mockImplementation(async (method: string) => {
