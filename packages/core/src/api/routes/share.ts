@@ -83,6 +83,7 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // project-relative `selectedPath` (rewritten at share time) stays addressable.
   const scopeFor = (token: string, rootDir: string): FileBrowserScope => ({
     assetBasePath: `/api/share/${encodeURIComponent(token)}/projects/asset`,
+    confineToRealRoot: true,
     ignoredNames: PROJECTS_IGNORED_NAMES,
     logicalRoot: "projects",
     rootDir,
@@ -91,7 +92,9 @@ export function shareRoutes(deps: ApiDeps): Hono {
   // Read-only projects file browser, token-gated AND project-scoped: every
   // request resolves the share, 404s unless it's live with a projects tile and a
   // valid project, then roots the browser at that one project dir — so a link
-  // exposes that project's files read-only, never the whole projects root.
+  // exposes that project's files read-only, never the whole projects root. The
+  // scope confines real paths too, so a symlink inside the project cannot reach
+  // files outside it.
   const readHandler =
     (make: (scope: FileBrowserScope) => Handler): Handler =>
     async (c, next) => {

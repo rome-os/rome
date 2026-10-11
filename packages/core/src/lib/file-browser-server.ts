@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -57,6 +58,11 @@ export interface FileBrowserScope {
   assetBasePath: string;
   logicalRoot: string;
   rootDir: string;
+  /** When set, a path resolves only if its real path, with every symlink
+   * resolved, stays inside `realpath(rootDir)`. Any scope served to a caller
+   * other than the guardian must set it. Owner scopes leave it unset because the
+   * guardian may deliberately symlink content from outside the root. */
+  confineToRealRoot?: boolean;
   /** Optional serializer for git commits. When set, every commit in
    * this scope runs through it, so file-save commits don't interleave with an
    * external writer (e.g. memory sync) on the same repo. Omitted scopes commit
@@ -501,7 +507,47 @@ function resolveScopedFilePath(scope: FileBrowserScope, logicalPath: string): st
   const relativePath =
     logicalPath === scope.logicalRoot ? "" : logicalPath.slice(scope.logicalRoot.length + 1);
   const resolvedPath = resolve(scope.rootDir, relativePath);
-  return isWithinDirectory(resolvedPath, scope.rootDir) ? resolvedPath : null;
+  if (!isWithinDirectory(resolvedPath, scope.rootDir)) return null;
+  if (scope.confineToRealRoot && !isWithinRealRoot(scope.rootDir, resolvedPath)) return null;
+  // Callers derive logical paths and names from the lexical path, so only the
+  // gate above looks at real paths.
+  return resolvedPath;
+}
+
+function isWithinRealRoot(rootDir: string, resolvedPath: string): boolean {
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(rootDir);
+  } catch (error) {
+    // Nothing exists under a missing root, so let the handler report the miss.
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+
+  // A missing path is judged by its nearest existing ancestor, so a miss under an
+  // escaping symlink is rejected rather than answered with a 404 that reveals
+  // what exists outside. lstat, unlike existsSync, finds a dangling link itself,
+  // and realpath then fails on it.
+  let existingPath = resolvedPath;
+  while (!lstatExists(existingPath)) {
+    const parentPath = dirname(existingPath);
+    if (parentPath === existingPath) return false;
+    existingPath = parentPath;
+  }
+
+  try {
+    return isWithinDirectory(realpathSync(existingPath), realRoot);
+  } catch {
+    return false;
+  }
+}
+
+function lstatExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function encodeContentDispositionFileName(
