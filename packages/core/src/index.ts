@@ -545,7 +545,7 @@ async function main() {
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
   let syncRomeCreditsPayer = (): void => {};
-  let refreshRomeCreditsModels = (): void => {};
+  let refreshRomeCredits = (): void => {};
   const aiToolState = createAIToolState({
     settingsRepo,
     probes: {
@@ -553,14 +553,14 @@ async function main() {
       codexUsage: () => codexAccountService.getUsage(),
     },
     onCodexLoginChanged: () => syncRomeCreditsPayer(),
-    onCodexRefreshed: () => refreshRomeCreditsModels(),
+    onCodexRefreshed: () => refreshRomeCredits(),
   });
   const romeCreditsPayer = createRomeCreditsPayer({
     aiToolState,
     appServerManager: codexAppServerManager,
   });
   syncRomeCreditsPayer = () => romeCreditsPayer.sync();
-  refreshRomeCreditsModels = () => void romeCreditsPayer.refreshServedModels();
+  refreshRomeCredits = () => void romeCreditsPayer.refresh();
   const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
   romeCreditsPayer.sync();
   const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
@@ -580,7 +580,7 @@ async function main() {
     onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
     onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
     isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
-    onRomeCreditsModelNotServed: () => romeCreditsPayer.refreshServedModels(),
+    onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
     funding: () => {
       const account = aiToolState.get().codex;
       return codexFunding({

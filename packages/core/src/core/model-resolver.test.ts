@@ -185,12 +185,43 @@ describe("ModelResolver", () => {
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
           servedModels: () => served,
-          servedModelsSettled: () => settled,
+          settled: () => settled,
         },
       });
       const resolution = r.getModelProvider({ tier: "large" });
       finish();
       await expect(resolution).resolves.toMatchObject({ model: "gpt-5.6-terra" });
+    });
+
+    it("waits for the first credits read to decide whether credits pay", async () => {
+      let paying = false;
+      let finish: () => void = () => {};
+      const settled = new Promise<void>((resolve) => {
+        finish = () => {
+          paying = true;
+          resolve();
+        };
+      });
+      const value: AIToolStateValue = {
+        codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
+        claude: { loggedIn: false, quotaExhausted: false },
+      };
+      const r = createModelResolver({
+        aiToolState: { get: () => value, refresh: async () => value },
+        providers: [claude, codex],
+        romeCreditsPayer: {
+          isUsingRomeCredits: () => paying,
+          servedModels: () => (paying ? ["gpt-5.6-terra"] : null),
+          settled: () => settled,
+        },
+      });
+      const resolution = r.getModelProvider({ tier: "large" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      finish();
+      await expect(resolution).resolves.toMatchObject({
+        modelProvider: codex,
+        model: "gpt-5.6-terra",
+      });
     });
 
     it("does not wait for the served list when Claude serves the turn", async () => {
@@ -204,7 +235,7 @@ describe("ModelResolver", () => {
         romeCreditsPayer: {
           isUsingRomeCredits: () => true,
           servedModels: () => null,
-          servedModelsSettled: () => new Promise<void>(() => {}),
+          settled: () => new Promise<void>(() => {}),
         },
       });
       await expect(r.getModelProvider({ tier: "large" })).resolves.toMatchObject({
