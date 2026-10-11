@@ -128,52 +128,6 @@ describe("backend turn delivery", () => {
     });
   });
 
-  it("records nothing beside the chat for a webchat delivery without the session runtime", async () => {
-    const agentRunner = createMockAgentRunner([
-      [
-        { type: "turn_start", turnId: "turn-1", sessionId: "agent-session-1", userPrompt: "Wake" },
-        { type: "result", content: "The deferred check is complete." },
-      ],
-    ]);
-    const send = rs.fn(async (conversationId: string) => ({
-      messageId: "webchat-message-1",
-      conversationId,
-    }));
-    const webchat = {
-      name: "webchat",
-      send: { send, direct: null, activity: null },
-      inbound: null,
-      accounts: null,
-      messages: null,
-      directory: null,
-    } as unknown as Channel;
-    const ensureChannelConversation = rs.fn();
-    const recordOutboundMessage = rs.fn();
-    const runner = createBackendTurnRunner({
-      agentRunner,
-      channel: (name) => (name === "webchat" ? webchat : null),
-      conversations: {
-        ensureChannelConversation,
-        recordOutboundMessage,
-      } as unknown as ConversationRepository,
-    });
-
-    await runner.runAndDeliver({
-      agentName: "main",
-      sessionId: "agent-session-1",
-      channel: "webchat",
-      threadId: "chat-1",
-      prompt: "⏰ Time's up: check deployment",
-    });
-
-    expect(send).toHaveBeenCalledWith("chat-1", {
-      text: "The deferred check is complete.",
-      turnId: "turn-1",
-    });
-    expect(ensureChannelConversation).not.toHaveBeenCalled();
-    expect(recordOutboundMessage).not.toHaveBeenCalled();
-  });
-
   it("refuses to deliver on a channel that cannot send", async () => {
     const agentRunner = createMockAgentRunner([[{ type: "result", content: "Done." }]]);
     const runner = createBackendTurnRunner({
