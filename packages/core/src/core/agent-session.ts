@@ -3577,8 +3577,9 @@ class AgentSessionImpl implements AgentSession {
       };
 
       // The events loop closes the sink on the model's `result`/`error`.
-      const waitForSinkClose = () =>
-        new Promise<void>((resolve) => {
+      const waitForSinkClose = async (): Promise<void> => {
+        if (sink.done) return;
+        await new Promise<void>((resolve) => {
           const checker = setInterval(() => {
             if (sink.done) {
               clearInterval(checker);
@@ -3586,6 +3587,7 @@ class AgentSessionImpl implements AgentSession {
             }
           }, 5);
         });
+      };
 
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
