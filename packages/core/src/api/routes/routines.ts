@@ -67,7 +67,7 @@ function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolea
       if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
         return 'schedule.date must match "YYYY-MM-DD"';
       }
-      if (trigger.rrule) {
+      if (trigger.rrule?.trim()) {
         return "schedule.date and schedule.rrule are mutually exclusive";
       }
     }
