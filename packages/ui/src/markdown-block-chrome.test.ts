@@ -55,8 +55,8 @@ function rule(...fragments: string[]): string {
   return ruleIn(markdownCss, ...fragments);
 }
 
-/** Everything inside every `@media` block whose condition carries `query`, in order. */
-function media(query: string): string {
+/** The body of every `@media` block whose condition carries `query`, in order. */
+function mediaBlocks(query: string): string[] {
   const condition = new RegExp(`@media[^{]*${escapeRegExp(query)}[^{]*\\{`, "g");
   const bodies: string[] = [];
   for (const match of markdownCss.matchAll(condition)) {
@@ -71,12 +71,16 @@ function media(query: string): string {
     }
   }
   if (bodies.length === 0) throw new Error(`No @media block for: ${query}`);
-  return bodies.join("\n");
+  return bodies;
 }
 
-const hoverCapable = media("hover: hover");
-const withoutHoverCapable = markdownCss.replace(hoverCapable, "");
-const withoutHover = media("hover: none");
+const hoverCapableBlocks = mediaBlocks("hover: hover");
+const hoverCapable = hoverCapableBlocks.join("\n");
+const withoutHoverCapable = hoverCapableBlocks.reduce(
+  (css, block) => css.replace(block, ""),
+  markdownCss,
+);
+const withoutHover = mediaBlocks("hover: none").join("\n");
 
 describe("Markdown fenced-block chrome", () => {
   it("frames a code fence once — the card keeps the tint, the body goes flush", () => {
@@ -129,7 +133,7 @@ describe("Markdown fenced-block chrome", () => {
     expect(content).toContain("min-width: 0;");
   });
 
-  it("keeps the band together and reachable down a fence taller than the viewport", () => {
+  it("keeps the band together and reachable down a tall fence where hover can hide it", () => {
     const band = rule(".rome-markdown", CODE_LABEL, DIAGRAM_LABEL, CODE_ACTIONS, DIAGRAM_ACTIONS);
 
     expect(band).toContain("position: sticky;");
