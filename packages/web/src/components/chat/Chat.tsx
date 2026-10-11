@@ -139,6 +139,12 @@ const TURN_RESUME_MAX_DELAY_MS = 5_000;
 // that requested it instead of after the next message send.
 const STOP_FORCE_RELEASE_GRACE_MS = 2_500;
 
+// Widget placements this tab has already mounted, by the server's
+// `placementId`. A resumed turn stream replays each app's latest placement;
+// applying it again would remount the widget and drop the guardian's
+// navigation inside it. Module scope so the record outlives a Chat remount.
+const appliedPlacementIds = new Set<string>();
+
 const agentPlanSchema = z.object({
   explanation: z.string().optional(),
   steps: z.array(
@@ -959,15 +965,23 @@ export function Chat({
             // a repeat placement retargets the existing tile (to the new
             // route/params) in place rather than stacking duplicates.
             try {
-              const { appId, route, params } = JSON.parse(evt.data) as {
+              const { placementId, appId, route, params } = JSON.parse(evt.data) as {
+                placementId?: string;
                 appId?: string;
                 route?: string;
                 params?: Record<string, string | number | boolean>;
               };
               // The floor owns the workspace; a background turn's replayed
-              // placement would remount (and reset) a widget in use.
-              if (appId && sessionId === floorSessionIdRef.current) {
+              // placement would remount (and reset) a widget in use. The
+              // floor's own replay of a placement it already mounted is
+              // skipped by id for the same reason.
+              if (
+                appId &&
+                sessionId === floorSessionIdRef.current &&
+                !(placementId && appliedPlacementIds.has(placementId))
+              ) {
                 autoPlaceApp(appId, route, params);
+                if (placementId) appliedPlacementIds.add(placementId);
               }
             } catch {
               // ignore parse errors

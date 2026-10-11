@@ -562,6 +562,65 @@ describe("Chat turn stream lifecycle", () => {
       ]);
       expect(rs.mocked(listSessionMessages).mock.calls.length).toBeGreaterThan(reloadsBeforeDrop);
     });
+
+    it("mounts each widget placement once, without remounting it on the resumed replay", async () => {
+      const placement = (data: Record<string, unknown>) =>
+        `event: widget_placement\ndata: ${JSON.stringify(data)}\n\n`;
+      rs.mocked(openTurnStream)
+        .mockImplementationOnce(() =>
+          Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  droppingStreams.push(controller);
+                  controller.enqueue(
+                    encoder.encode(
+                      placement({ placementId: "place-live", appId: "notes", route: "list" }),
+                    ),
+                  );
+                },
+              }),
+            ),
+          ),
+        )
+        .mockImplementationOnce(() =>
+          Promise.resolve(
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(
+                    encoder.encode(
+                      // The replay of the placement already mounted, then a
+                      // fresh placement of the same route, then one from a
+                      // server that sends no id.
+                      placement({ placementId: "place-live", appId: "notes", route: "list" }) +
+                        placement({ placementId: "place-again", appId: "notes", route: "list" }) +
+                        placement({ appId: "notes", route: "legacy" }) +
+                        'event: done\ndata: {"success":true}\n\n',
+                    ),
+                  );
+                  controller.close();
+                },
+              }),
+            ),
+          ),
+        );
+      renderChat(<Chat sessionId="session-1" />);
+      await waitFor(() => expect(autoPlaceApp).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        droppingStreams[0]!.error(new TypeError("network connection was lost"));
+      });
+      await waitFor(() => expect(openTurnStream).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-composer").getAttribute("data-streaming")).toBe("false"),
+      );
+      expect(rs.mocked(autoPlaceApp).mock.calls).toEqual([
+        ["notes", "list", undefined],
+        ["notes", "list", undefined],
+        ["notes", "legacy", undefined],
+      ]);
+    });
   });
 
   it("does not start a second follower when a send lands during a reattach lookup", async () => {
