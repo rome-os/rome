@@ -23,7 +23,7 @@ describe("agent session keys", () => {
   });
 
   it("gives each ad-hoc run a fresh key under its agent", () => {
-    expect(adhocSessionKey("main")).toMatch(/^main:[0-9a-f-]{36}$/);
+    expect(adhocSessionKey("main")).toMatch(/^adhoc:main:[0-9a-f-]{36}$/);
     expect(adhocSessionKey("main")).not.toBe(adhocSessionKey("main"));
   });
 });
@@ -72,5 +72,22 @@ describe("parseSessionKey", () => {
   it("treats a webchat key with extra parts as a plain channel key", () => {
     expect(webchatConversationOfKey("webchat:chat-1:extra")).toBeUndefined();
     expect(sessionKeyChannel("webchat:chat-1:extra")).toBe("webchat");
+  });
+});
+
+describe("ad-hoc keys", () => {
+  it("names the agent and run, with no delivery channel", () => {
+    const key = adhocSessionKey("app:helper");
+    expect(parseSessionKey(key)).toMatchObject({ kind: "adhoc", agentName: "app:helper" });
+    expect(sessionKeyChannel(key)).toBeUndefined();
+    expect(sessionKeyChannel(subagentSessionKey(key))).toBeUndefined();
+  });
+
+  it("still reads an unprefixed legacy ad-hoc key as a channel key", () => {
+    expect(parseSessionKey("main:1234")).toEqual({
+      kind: "channel",
+      channel: "main",
+      threadId: "1234",
+    });
   });
 });

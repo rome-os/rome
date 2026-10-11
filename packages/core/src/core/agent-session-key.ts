@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 // resolving. The inbox app still spells messaging-channel and sentinel keys.
 
 const WEBCHAT_KEY_PREFIX = "webchat:";
+const ADHOC_KEY_PREFIX = "adhoc:";
 
 /** A webchat conversation's key. */
 export function webchatSessionKey(conversationId: string): string {
@@ -24,7 +25,7 @@ export function forkSessionKey(parentKey: string, forkSessionId: string): string
 
 /** A one-off key for a run that names no conversation. */
 export function adhocSessionKey(agentName: string): string {
-  return `${agentName}:${uuidv4()}`;
+  return `${ADHOC_KEY_PREFIX}${agentName}:${uuidv4()}`;
 }
 
 const SENTINEL_KEY_PREFIX = "sentinel:";
@@ -32,9 +33,9 @@ const SUBAGENT_SUFFIX = /^(.+):subagent:([^:#]+)$/;
 const FORK_SUFFIX = /^(.+)#fork:([^:#]+)$/;
 
 /**
- * A channelThreadKey's named parts. An ad-hoc key and a messaging channel's
- * key share the `<a>:<b>` shape, so an ad-hoc key parses as `channel` with its
- * agent name in `channel`.
+ * A channelThreadKey's named parts. Ad-hoc keys written before the `adhoc:`
+ * prefix share the `<a>:<b>` shape of a messaging channel's key, so they parse
+ * as `channel` with the agent name in `channel`.
  */
 export type ParsedSessionKey =
   | { kind: "webchat"; conversationId: string }
@@ -42,6 +43,7 @@ export type ParsedSessionKey =
   | { kind: "sentinel"; watched: ParsedSessionKey }
   | { kind: "subagent"; parent: ParsedSessionKey; subagentId: string }
   | { kind: "fork"; parent: ParsedSessionKey; forkSessionId: string }
+  | { kind: "adhoc"; agentName: string; runId: string }
   | { kind: "other"; raw: string };
 
 /** The one reader of a channelThreadKey's parts. */
@@ -57,6 +59,17 @@ export function parseSessionKey(key: string): ParsedSessionKey {
   if (key.startsWith(SENTINEL_KEY_PREFIX)) {
     return { kind: "sentinel", watched: parseSessionKey(key.slice(SENTINEL_KEY_PREFIX.length)) };
   }
+  if (key.startsWith(ADHOC_KEY_PREFIX)) {
+    const rest = key.slice(ADHOC_KEY_PREFIX.length);
+    const runSeparator = rest.lastIndexOf(":");
+    if (runSeparator > 0) {
+      return {
+        kind: "adhoc",
+        agentName: rest.slice(0, runSeparator),
+        runId: rest.slice(runSeparator + 1),
+      };
+    }
+  }
   const separator = key.indexOf(":");
   if (separator <= 0) return { kind: "other", raw: key };
   const head = key.slice(0, separator);
@@ -70,7 +83,7 @@ export function parseSessionKey(key: string): ParsedSessionKey {
 /**
  * The channel a key's turns are delivered on: subagent and fork keys take
  * their parent's. Undefined for a sentinel, which watches a channel without
- * replying on it, and for a key with no channel part.
+ * replying on it, for an ad-hoc run, and for a key with no channel part.
  */
 export function sessionKeyChannel(key: string | ParsedSessionKey): string | undefined {
   const parsed = typeof key === "string" ? parseSessionKey(key) : key;
@@ -83,6 +96,7 @@ export function sessionKeyChannel(key: string | ParsedSessionKey): string | unde
     case "fork":
       return sessionKeyChannel(parsed.parent);
     case "sentinel":
+    case "adhoc":
     case "other":
       return undefined;
   }

@@ -69,7 +69,7 @@ describe("createCodexImageGenerationProvider", () => {
 
       const keys = runner.run.mock.calls.map(([params]) => params.channelThreadKey);
       expect(keys).toHaveLength(2);
-      for (const key of keys) expect(key).toMatch(/^image_gen:/);
+      for (const key of keys) expect(key).toMatch(/^adhoc:image_gen:/);
       expect(keys[0]).not.toBe(keys[1]);
     });
 
