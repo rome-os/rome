@@ -469,14 +469,13 @@ describe("AgentRunner", () => {
   });
 
   describe("a resumed session whose caller names no conversation", () => {
-    function resumedSession(conversationId: string, recordedConversation?: RecordedConversation) {
+    function resumedSession(recorded?: RecordedConversation) {
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const turns: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "telegram:t1" },
         sessionId: "agent-session",
-        conversationId,
-        recordedConversation,
+        conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
         sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
           turns.push({
@@ -522,7 +521,7 @@ describe("AgentRunner", () => {
           name: "Telegram thread",
           agentName: null,
         });
-        const { manager, turns } = resumedSession("channel:telegram:t1", {
+        const { manager, turns } = resumedSession({
           id: "channel:telegram:t1",
           name: "Telegram thread",
           type: "channel",
@@ -551,7 +550,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession("child-chat", {
+        const { manager, turns } = resumedSession({
           id: "child-chat",
           name: "researcher: Parent",
           type: "subagent",
@@ -580,7 +579,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession("child-chat", {
+        const { manager, turns } = resumedSession({
           id: "child-chat",
           name: "researcher: Parent",
           type: "subagent",
@@ -619,7 +618,7 @@ describe("AgentRunner", () => {
           name: "researcher: Telegram thread",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession("child-chat", {
+        const { manager, turns } = resumedSession({
           id: "child-chat",
           name: "researcher: Telegram thread",
           type: "subagent",
@@ -656,7 +655,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession("child-chat", {
+        const { manager, turns } = resumedSession({
           id: "child-chat",
           name: "researcher: Parent",
           type: "subagent",
@@ -693,7 +692,7 @@ describe("AgentRunner", () => {
           name: "Side chat",
           agentName: "main",
         });
-        const { manager, turns } = resumedSession("side-chat", {
+        const { manager, turns } = resumedSession({
           id: "side-chat",
           name: "Side chat",
           type: "fork",
@@ -731,7 +730,7 @@ describe("AgentRunner", () => {
       try {
         const repo = new WebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = resumedSession("user-chat", {
+        const { manager, turns } = resumedSession({
           id: "user-chat",
           name: "User chat",
           type: "webchat",
@@ -754,7 +753,7 @@ describe("AgentRunner", () => {
       try {
         const repo = new WebChatRepository(testDb.db);
         // The lookup at open found no conversation, so none is recorded.
-        const { manager, turns } = resumedSession("deleted-chat");
+        const { manager, turns } = resumedSession();
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -779,7 +778,7 @@ describe("AgentRunner", () => {
       const source = {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
-        conversationId: "stored-chat",
+        conversation: { origin: "named" as const, id: "stored-chat" },
         status: "idle" as const,
         sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {

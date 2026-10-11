@@ -102,9 +102,19 @@ export async function findRecordedConversation(
   return { id, name, type: type as RomeSessionType };
 }
 
+/**
+ * The conversation a session serves. A `named` one was passed in by the
+ * caller that opened the session. A `recorded` one is the conversation the
+ * session's row stored, looked up only when no caller named one and only if it
+ * still exists.
+ */
+export type SessionConversation =
+  | { origin: "named"; id: string }
+  | ({ origin: "recorded" } & RecordedConversation);
+
 export interface TurnConversationInput extends RomeSessionIdInput {
-  /** The conversation the session's row recorded, as it stood when looked up. */
-  recordedConversation?: RecordedConversation;
+  /** The conversation the session serves, as it stood when the turn started. */
+  sessionConversation?: SessionConversation;
 }
 
 // Conversations whose turns only the recorder writes. A webchat conversation
@@ -136,7 +146,10 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   promptPersisted: boolean;
   recorderOwned: boolean;
 } {
-  const found = input.romeSessionId ? undefined : input.recordedConversation;
+  const conversation = input.sessionConversation;
+  // The opener's named conversation wins over the one this turn's caller names.
+  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
+  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
   const ownedByRecorder =
     found !== undefined &&
     RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
@@ -145,11 +158,11 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   return {
     romeSessionId: resolveRomeSessionId({
       ...input,
-      romeSessionId: input.romeSessionId ?? recorded?.id,
+      romeSessionId: named ?? recorded?.id,
     }),
     romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
-    existing: Boolean(input.romeSessionId ?? recorded),
-    promptPersisted: Boolean(input.romeSessionId),
+    existing: Boolean(named ?? recorded),
+    promptPersisted: Boolean(named),
     recorderOwned: Boolean(recorded),
   };
 }

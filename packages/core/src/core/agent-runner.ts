@@ -537,12 +537,11 @@ export class AgentRunner {
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
-    const boundRomeSessionId = session.romeSessionId ?? params.romeSessionId;
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
-      romeSessionId: boundRomeSessionId,
-      recordedConversation: session.recordedConversation,
+      romeSessionId: params.romeSessionId,
+      sessionConversation: session.conversation,
       channelThreadKey,
       threadContext,
     });
@@ -662,7 +661,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversationId);
+          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
