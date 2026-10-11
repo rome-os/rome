@@ -1,8 +1,20 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "@rstest/core";
-import { normalizeUsageStatus, parseUsageText, readLiveOrCachedUsage } from "./provider-usage.js";
+import { describe, expect, it, rs } from "@rstest/core";
+
+const logError = rs.hoisted(() => rs.fn());
+
+rs.mock("../logger.js", () => ({
+  createLogger: () => ({ error: logError, info: rs.fn(), warn: rs.fn(), debug: rs.fn() }),
+}));
+
+import {
+  normalizeUsageStatus,
+  parseUsageText,
+  readClaudeOAuthUsage,
+  readLiveOrCachedUsage,
+} from "./provider-usage.js";
 
 describe("AI tool usage parsing", () => {
   it("normalizes Claude-style usage windows", () => {
@@ -275,5 +287,27 @@ describe("AI tool usage parsing", () => {
       source: "live",
       error: "live probe failed",
     });
+  });
+
+  it("logs a failed Claude usage request with its status and Retry-After", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "secret-token";
+    globalThis.fetch = rs.fn(
+      async () => new Response("{}", { status: 429, headers: { "Retry-After": "3600" } }),
+    ) as unknown as typeof fetch;
+    try {
+      await expect(readClaudeOAuthUsage()).resolves.toMatchObject({
+        error: "Claude usage request failed with HTTP 429",
+      });
+      expect(logError).toHaveBeenCalledWith("Claude usage request failed", {
+        status: 429,
+        retryAfter: "3600",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+    }
   });
 });

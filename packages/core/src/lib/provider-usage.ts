@@ -10,6 +10,9 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("provider-usage");
 
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
@@ -301,6 +304,10 @@ export async function readClaudeOAuthUsage(
       },
     });
     if (!res.ok) {
+      log.error("Claude usage request failed", {
+        status: res.status,
+        retryAfter: res.headers.get("retry-after") ?? undefined,
+      });
       return {
         checkedAt: new Date().toISOString(),
         source: "claude oauth usage",
