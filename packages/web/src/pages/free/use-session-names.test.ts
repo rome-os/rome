@@ -60,6 +60,8 @@ describe("useSessionNames", () => {
     rs.mocked(getSession).mockRejectedValue(new Error("offline"));
     act(() => emitSessionsChanged());
     await waitFor(() => expect(getSession).toHaveBeenCalledTimes(3));
+    // Let the rejected read settle before checking the name survived it.
+    await act(async () => {});
     expect(result.current.get("s1")).toBe("Trip planning");
   });
 });
