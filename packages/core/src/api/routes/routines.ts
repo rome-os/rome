@@ -102,15 +102,28 @@ function datedOneOffError(trigger: {
   localTime: string;
   tzid: string;
 }): string | null {
-  if (!trigger.date) return null;
-  const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-  if (Number.isNaN(fireAt.getTime())) {
-    return "schedule.date / localTime is unparseable";
-  }
-  if (fireAt.getTime() < Date.now()) {
-    return "schedule.date is in the past";
-  }
+  const state = datedOneOffState(trigger);
+  if (state === "unparseable") return "schedule.date / localTime is unparseable";
+  if (state === "past") return "schedule.date is in the past";
   return null;
+}
+
+/** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
+ * parse throw rather than return NaN, so that counts as unparseable too. */
+function datedOneOffState(trigger: {
+  date?: string;
+  localTime: string;
+  tzid: string;
+}): "unparseable" | "past" | null {
+  if (!trigger.date) return null;
+  let fireAt: Date;
+  try {
+    fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
+  } catch {
+    return "unparseable";
+  }
+  if (Number.isNaN(fireAt.getTime())) return "unparseable";
+  return fireAt.getTime() < Date.now() ? "past" : null;
 }
 
 interface CreateRoutineBody {
@@ -369,25 +382,17 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.enabled === true) {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
-      if (trigger?.type === "schedule" && trigger.date) {
-        // A stored tzid Intl rejects makes the parse throw rather than return NaN.
-        let fireAt: Date;
-        try {
-          fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-        } catch {
-          fireAt = new Date(Number.NaN);
-        }
-        if (Number.isNaN(fireAt.getTime())) {
-          return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
-        }
-        if (fireAt.getTime() < Date.now()) {
-          return c.json(
-            {
-              error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
-            },
-            400,
-          );
-        }
+      const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
+      if (state === "past" && trigger?.type === "schedule") {
+        return c.json(
+          {
+            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
+          },
+          400,
+        );
+      }
+      if (state === "unparseable") {
+        return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
       }
     }
 
