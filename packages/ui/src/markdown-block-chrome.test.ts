@@ -207,6 +207,9 @@ describe("Markdown fenced-block chrome", () => {
     expect(stack!.declarations).toContain("order: 1;");
     expect(stack!.declarations).toContain("position: relative;");
     expect(stack!.declarations).toContain("inset: auto;");
+    // The scale token makes the stack a column below the large scale, and a
+    // column in flow would add three buttons of height under every diagram.
+    expect(stack!.declarations).toContain("flex-direction: row;");
     // A fullscreen diagram is portaled out of the prose root and keeps its
     // floating stack.
     expect(stack!.selector.startsWith(".rome-markdown")).toBe(true);

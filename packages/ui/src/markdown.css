@@ -540,10 +540,11 @@
    code fence's first lines and two corners of a diagram, and at the 44px
    control floor the band and the zoom stack overlap on a narrow or short
    diagram. So the band takes the row above the content, as plain icons, and
-   the zoom stack moves below the diagram. The stack stays positioned so its
-   `z-index` keeps it above a zoomed diagram, which overflows its own box. A
-   fullscreen diagram sits outside `.rome-markdown` and keeps its floating
-   stack. */
+   the zoom stack moves below the diagram as a row at every UI scale, since a
+   column there would add its full height under each diagram. The stack stays
+   positioned so its `z-index` keeps it above a zoomed diagram, which overflows
+   its own box. A fullscreen diagram sits outside `.rome-markdown` and keeps
+   its floating stack. */
 @media (hover: none) {
   .rome-markdown
     :is([data-streamdown="code-block-body"], [data-streamdown="mermaid-block"] > :last-child) {
@@ -578,6 +579,7 @@
     inset: auto;
     order: 1;
     align-self: flex-start;
+    flex-direction: row;
     margin: var(--rome-space-2);
   }
 }
