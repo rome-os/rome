@@ -119,6 +119,7 @@ import type {
 } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { evaluateProviderSessionReset } from "../conversation-settings/reset-policy.js";
+import { forkSessionKey } from "./agent-session-key.js";
 
 const log = createLogger("agent-session");
 
@@ -1619,7 +1620,7 @@ async function openSession(
         }
         return forkChildManager;
       },
-      childChannelThreadKey: `${key.channelThreadKey}#fork:${fork.forkSessionId}`,
+      childChannelThreadKey: forkSessionKey(key.channelThreadKey, fork.forkSessionId),
       captureSubmittedOutput: () => false,
       attachSubagentExecution: (toolUseId, execution) => {
         forkSubagentExecutions.set(toolUseId, {
