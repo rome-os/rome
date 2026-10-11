@@ -11,7 +11,7 @@ description: Install software that Rome does not ship, such as a system package,
 - A Rome upgrade replaces the container. Of the files you can change, only those under `/home/rome`, `/home/user`, and `/app/memory` carry over. `/home/rome` is the home directory of `rome`.
 - Rome's processes, app installs, app code, and the `rome` and `user` shells have `~/.local/bin` at the end of `PATH`. Commands there run by name, and an image command wins any name clash.
 
-Install custom software under `/home/rome`. Commands in `~/.local/bin` run by name. Anything elsewhere, such as `~/.local/go/bin/go`, needs a symlink into `~/.local/bin` or its absolute path.
+Install custom software under `/home/rome`. Commands in `~/.local/bin` run by name. Anything elsewhere, such as `~/.local/go/bin/go`, needs a symlink into `~/.local/bin` or its absolute path. Rome and its apps see only `/home/rome/.local/bin`, so a tool the `user` account installs over SSH is not on their `PATH`.
 
 ## What a Rome upgrade keeps
 
@@ -37,8 +37,9 @@ Download a static binary or the official Linux tarball, and unpack it under `~/.
 
 ```bash
 mkdir -p ~/.local/bin
+rm -rf ~/.local/go
 curl -fsSL "https://go.dev/dl/go<version>.linux-$(dpkg --print-architecture).tar.gz" | tar -xz -C ~/.local
-ln -s ~/.local/go/bin/go ~/.local/bin/
+ln -sf ~/.local/go/bin/go ~/.local/bin/
 go version
 ```
 
