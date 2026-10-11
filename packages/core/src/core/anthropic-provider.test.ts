@@ -1242,6 +1242,142 @@ describe("AnthropicProvider", () => {
     await session.close();
   });
 
+  // The SDK ends a turn that hit an API error with a synthetic assistant
+  // message flagged `error`, then a `success` result flagged `is_error` whose
+  // `result` is the error text.
+  describe("turns that end on an API error", () => {
+    const apiErrorText = "API Error: 500 Internal server error";
+    const syntheticApiError = (text: string) => ({
+      type: "assistant",
+      session_id: "sdk-thread-xyz",
+      parent_tool_use_id: null,
+      uuid: "u-error",
+      error: "server_error",
+      message: { role: "assistant", content: [{ type: "text", text }] },
+    });
+    const apiErrorResult = (text: string) => ({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 500,
+      result: text,
+      num_turns: 1,
+      stop_reason: "stop_sequence",
+      total_cost_usd: 0,
+      duration_ms: 1,
+    });
+
+    it("ends the turn with an error terminal and publishes none of its text as the answer", async () => {
+      // The turn's first frame carries the echo of the send it answers.
+      mockQuery([
+        { ...syntheticApiError(apiErrorText), user_message_uuid: SENT },
+        apiErrorResult(apiErrorText),
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "hi", inputId: SENT });
+      const messages = await collectEvents(session);
+
+      expect(messages.filter((m) => m.type === "text")).toEqual([]);
+      expect(messages.filter((m) => m.type === "result")).toEqual([]);
+      expect(messages.at(-1)).toMatchObject({ type: "error", error: apiErrorText });
+      expect(messages.at(-1)).not.toHaveProperty("code");
+      // A failed turn is no fork point and proves nothing about the credential.
+      expect(session.lastCompletedTurnCheckpoint).toBeUndefined();
+      expect(clearAnthropicAuthRevokedMock).not.toHaveBeenCalled();
+
+      await session.close();
+    });
+
+    it("keeps the text written before the API error as commentary", async () => {
+      mockQuery([
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          user_message_uuid: SENT,
+          message: { content: [{ type: "text", text: "Let me update the config." }] },
+        },
+        syntheticApiError(apiErrorText),
+        apiErrorResult(apiErrorText),
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "hi", inputId: SENT });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type === "text")).toEqual([
+        { type: "text", content: "Let me update the config.", turnPhase: "commentary" },
+      ]);
+      expect(messages.at(-1)).toMatchObject({ type: "error", error: apiErrorText });
+    });
+
+    it("names the API error status when the result carries no text", async () => {
+      mockQuery([apiErrorResult("")]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.at(-1)).toMatchObject({ type: "error", error: "Claude API error (500)" });
+    });
+
+    it("publishes the real answer when the SDK skips a trailing error notice", async () => {
+      // The SDK can stream the notice yet still report the turn as a success
+      // whose result is the model's text.
+      mockQuery([
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          user_message_uuid: SENT,
+          message: { content: [{ type: "text", text: "The config is updated." }] },
+        },
+        syntheticApiError(apiErrorText),
+        {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "The config is updated.",
+          num_turns: 1,
+          total_cost_usd: 0,
+          duration_ms: 1,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "hi", inputId: SENT });
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(messages.filter((m) => m.type === "text")).toEqual([
+        { type: "text", content: "The config is updated.", turnPhase: "final" },
+      ]);
+      expect(messages.at(-1)).toMatchObject({ type: "result" });
+    });
+
+    it("classifies the error text like an error result's", async () => {
+      const limitText = "Claude usage limit reached. Please try again later.";
+      mockQuery([apiErrorResult(limitText)]);
+      let quotaMarked = false;
+      const provider = new AnthropicProvider({
+        env: { PATH: "/usr/bin" },
+        onQuotaExhausted: () => {
+          quotaMarked = true;
+        },
+      });
+      const session = await provider.openSession(buildParams());
+      const messages = await collectEvents(session);
+      await session.close();
+
+      expect(quotaMarked).toBe(true);
+      expect(messages.at(-1)).toMatchObject({
+        type: "error",
+        error: limitText,
+        code: "usage_limit",
+      });
+    });
+  });
+
   describe("auth revoked handling", () => {
     it("tags invalid-credential result errors and waits for the revoked marker before terminal error", async () => {
       mockQuery([

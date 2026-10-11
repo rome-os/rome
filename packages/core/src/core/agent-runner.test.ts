@@ -3479,8 +3479,8 @@ describe("AgentRunner", () => {
       });
     });
     it("keeps the turn stop consistent with a completed status when the run reported an error", async () => {
-      // Claude's `success` result flagged `is_error` still reaches Rome as a
-      // `result` terminal, so the turn completes; its stop must not say `error`.
+      // A provider may end a turn with a `result` terminal whose accounting
+      // says `error`. The turn completes, so its stop must not say `error`.
       const lifecycle = createLifecycleRecorder();
       const provider = new MockModelProvider([
         [
