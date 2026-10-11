@@ -144,8 +144,10 @@ chrome_args=(
   # OpenCLI's bridge sends the same tabs.update twice when it opens a fresh tab
   # lease. Chrome 153+ drops the second as a duplicate while the first is still
   # loading, which fails the command with "Navigation rejected."
-  # (jackwener/opencli#2487). Chrome honours only the last --disable-features
-  # switch, so merge any other feature into this one value.
+  # (jackwener/opencli#2487). Remove once the bridge stops sending the second
+  # update, for example by skipping it when tab.pendingUrl already matches.
+  # Chrome honours only the last --disable-features switch, so merge any other
+  # feature into this one value.
   --disable-features=IgnoreDuplicateNavs
 )
 if [[ -n "$CHROME_USER_AGENT" ]]; then
