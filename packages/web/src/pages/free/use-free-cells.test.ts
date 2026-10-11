@@ -378,6 +378,22 @@ describe("applyAgentPlacement", () => {
     expect(readLayout("replay-chat")[0]!.id).not.toBe(placed!.id);
   });
 
+  it("places a replay again when a layout load dropped the tile it mounted", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("hydrate-chat");
+    // The placement's save never reached the server, so a later load of the
+    // session's layout returns the older layout without the tile.
+    store.applyAgentPlacement("hydrate-p1", "notes", "list");
+    rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout: [] }));
+    await store.loadLayoutForSession("hydrate-chat");
+    expect(readLayout("hydrate-chat")).toEqual([]);
+
+    store.applyAgentPlacement("hydrate-p1", "notes", "list");
+    expect(readLayout("hydrate-chat")).toEqual([
+      expect.objectContaining({ targetId: "notes", route: "list" }),
+    ]);
+  });
+
   it("applies a placement without an id every time", async () => {
     const store = await import("./use-free-cells");
     store.setActiveSession("legacy-chat");

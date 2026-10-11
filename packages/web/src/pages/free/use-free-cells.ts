@@ -294,18 +294,20 @@ export function autoPlaceApp(
   return next.id;
 }
 
-// Agent placements already applied, keyed by layout session and the server's
-// `placementId`. Module scope so the record outlives a Chat remount; keyed by
-// layout because a placement applied in one session's layout is still missing
-// from another's.
-const appliedAgentPlacements = new Set<string>();
+// Agent placements already applied: the tile each one mounted, keyed by layout
+// session and the server's `placementId`. Module scope so the record outlives
+// a Chat remount; keyed by layout because a placement applied in one session's
+// layout is still missing from another's.
+const appliedAgentPlacements = new Map<string, string>();
 
 /**
  * Apply an agent's `widget_placement` to the active layout. A resumed turn
  * stream replays each app's latest placement, and applying it again would
- * remount the widget and drop the guardian's navigation inside it, so a
- * `placementId` this layout already applied is skipped. A placement without
- * an id always applies.
+ * remount the widget and drop the guardian's navigation inside it, so a replay
+ * is skipped while the tile it mounted is still in the layout. If the tile is
+ * gone, for example because a layout load replaced a save that never reached
+ * the server, the replay places it again. A placement without an id always
+ * applies.
  */
 export function applyAgentPlacement(
   placementId: string | undefined,
@@ -314,9 +316,10 @@ export function applyAgentPlacement(
   params?: Record<string, string | number | boolean>,
 ): void {
   const key = placementId ? JSON.stringify([activeSessionId, placementId]) : null;
-  if (key && appliedAgentPlacements.has(key)) return;
-  autoPlaceApp(appId, route, params);
-  if (key) appliedAgentPlacements.add(key);
+  const appliedTileId = key ? appliedAgentPlacements.get(key) : undefined;
+  if (appliedTileId && getSnapshot().some((p) => p.id === appliedTileId)) return;
+  const tileId = autoPlaceApp(appId, route, params);
+  if (key) appliedAgentPlacements.set(key, tileId);
 }
 
 export function placeWidgets(widgets: readonly WidgetSeed[]): void {
