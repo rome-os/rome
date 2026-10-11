@@ -683,3 +683,53 @@ describe("composer content height budget", () => {
     expect(textarea.style.maxHeight).toBe("240px");
   });
 });
+
+// On a phone, a blurred textarea closes the soft keyboard. Sending must leave
+// focus where it was so the guardian can type the next turn straight away.
+describe("composer focus on send", () => {
+  it("keeps focus on the textarea when Send is pressed", () => {
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ onSend });
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    const send = screen.getByRole("button", { name: /send/i });
+
+    fireEvent.pointerDown(send);
+    // fireEvent returns false when a handler cancelled the event.
+    expect(fireEvent.mouseDown(send)).toBe(false);
+    fireEvent.click(send);
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it("refocuses the textarea when the press blurred it anyway", () => {
+    renderComposer({ onSend: rs.fn().mockResolvedValue(undefined) });
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    textarea.focus();
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    const send = screen.getByRole("button", { name: /send/i });
+
+    fireEvent.pointerDown(send);
+    textarea.blur();
+    fireEvent.click(send);
+
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it("does not pull focus into the textarea when it was not focused", () => {
+    renderComposer({ onSend: rs.fn().mockResolvedValue(undefined) });
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "hello" } });
+    const send = screen.getByRole("button", { name: /send/i });
+
+    fireEvent.pointerDown(send);
+    fireEvent.click(send);
+
+    expect(document.activeElement).not.toBe(textarea);
+  });
+});
