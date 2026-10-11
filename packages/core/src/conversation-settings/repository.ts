@@ -22,7 +22,7 @@ function rowByAddress(
     .from(romeSessions)
     .where(
       and(
-        eq(romeSessions.type, "channel"),
+        isChannelConversation,
         eq(romeSessions.sourceChannel, service),
         eq(romeSessions.sourceThreadId, conversationId),
       ),
@@ -74,6 +74,10 @@ export class ConversationSettingsRepository {
       agentName: string | null | undefined;
     },
   ): void {
+    // A webchat address is a guardian chat, which has no conversation settings.
+    if (descriptor.service === "webchat") {
+      throw new Error("Webchat chats have no conversation settings");
+    }
     this.db.transaction((tx) => {
       const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
       const parentSessionId = descriptor.parent

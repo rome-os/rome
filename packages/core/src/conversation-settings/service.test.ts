@@ -644,4 +644,24 @@ describe("ConversationSettingsService", () => {
     expect(listKnown).toHaveBeenCalledTimes(1);
     expect(first.nextCursor).toBeTruthy();
   });
+
+  it("keeps guardian chats out of conversation settings", async () => {
+    testDb = createTestDb();
+    await new WebChatRepository(testDb.db).createSession("chat-1", "Chat");
+    const repository = new ConversationSettingsRepository(testDb.db);
+
+    expect(repository.find("webchat", "chat-1" as ConversationId)).toBeNull();
+    expect(() =>
+      repository.mutate(
+        {
+          ref: { connectionId: "webchat", conversationId: "chat-2" as ConversationId },
+          service: "webchat",
+          kind: "channel",
+          displayName: "chat-2",
+        },
+        { settings: null, agentName: undefined },
+      ),
+    ).toThrow("Webchat chats have no conversation settings");
+    expect(await new WebChatRepository(testDb.db).getSession("chat-2")).toBeNull();
+  });
 });
