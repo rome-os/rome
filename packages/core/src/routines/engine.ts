@@ -126,8 +126,8 @@ export class RoutineEngine {
   /** Stop a routine's running run(s), forcing each to a terminal "cancelled".
    * Handles both an in-flight run (best-effort kill of the action's subprocess;
    * dispatch's catch then records it cancelled, not error, and skips retry) and
-   * a run left "running" after a restart (no process to kill — repair the status
-   * directly). Two correctness points:
+   * a "running" run with no live process to kill (repair the status directly).
+   * Two correctness points:
    *  - Cancels EVERY running run, not just the newest row: runs aren't serialized
    *    per routine, so an older run can still be live after a newer one finished.
    *  - Does NOT touch `pending_approval` runs. They have no live process, and

@@ -67,6 +67,20 @@ export class RoutineRunsRepository {
     await this.db.update(routineRuns).set(values).where(eq(routineRuns.id, id));
   }
 
+  /**
+   * Ends every `running` run as `error` with `error`, and returns how many it
+   * ended. Call only at boot, before any routine can fire: every run still
+   * `running` then was left by a process that is gone. `pending_approval` runs
+   * are kept: they wait on a guardian approval, which outlives a restart.
+   */
+  async markRunningInterrupted(error: string): Promise<number> {
+    const result = await this.db
+      .update(routineRuns)
+      .set({ status: "error", error })
+      .where(eq(routineRuns.status, "running"));
+    return Number(result.changes ?? 0);
+  }
+
   /** A single run by id — the trace endpoint uses this to resolve a run's
    * `executionId` (the root of its action-execution tree). */
   async findById(id: string): Promise<RoutineRun | null> {
