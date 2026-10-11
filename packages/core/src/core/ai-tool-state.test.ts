@@ -452,7 +452,7 @@ describe("AIToolState", () => {
       }
     });
 
-    it("lets a runtime quota failure outlast the usage reset", async () => {
+    it("ends at the usage reset after a runtime quota failure before it", async () => {
       rs.useFakeTimers({ shouldAdvanceTime: false });
       rs.setSystemTime(now);
       try {
@@ -460,6 +460,26 @@ describe("AIToolState", () => {
           fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
         });
         await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR - 1);
+        state.markQuotaExhausted("anthropic");
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
+    it("lets a runtime quota failure after the usage reset outlast it", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        rs.setSystemTime(now + HOUR);
         state.markQuotaExhausted("anthropic");
 
         rs.setSystemTime(now + 365 * 24 * HOUR);

@@ -24,8 +24,9 @@ export interface ProviderState
   quotaExhausted: boolean;
   /**
    * When usage-derived exhaustion ends: the latest reset among the exhausted
-   * usage windows. Absent when an exhausted window has no known reset and
-   * after a runtime quota failure, so quotaExhausted holds until the next
+   * usage windows. A runtime quota failure before that reset keeps it. Absent
+   * when an exhausted window has no known reset and after a runtime quota
+   * failure with no reset ahead, so quotaExhausted holds until the next
    * successful usage probe.
    */
   quotaExhaustedUntil?: string;
@@ -272,7 +273,13 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
         target.quotaExhausted = true;
-        delete target.quotaExhaustedUntil;
+        // A failure before the usage reset agrees with the snapshot, so the
+        // reset still ends it. A failure after the reset comes from a limit the
+        // snapshot did not show, so it holds until a successful usage probe.
+        const until = target.quotaExhaustedUntil;
+        if (until !== undefined && Date.parse(until) <= Date.now()) {
+          delete target.quotaExhaustedUntil;
+        }
         return true;
       };
       if (!applyRuntimeSignal()) return;
