@@ -47,7 +47,9 @@ import {
   loadLayoutForSession,
   placeWidgetsIfSessionActive,
   setActiveSession,
+  type PlacementLink,
   updatePlacementLink,
+  updatePlacementLinks,
   type WidgetPlacement,
   type WidgetSeed,
   useFreeCells,
@@ -207,8 +209,14 @@ export function FreeGrid() {
     [workspaceContextRegistry],
   );
   const flushLayout = useCallback(() => {
-    for (const p of placementsRef.current) flushAppLink(p);
-  }, [flushAppLink]);
+    const links: PlacementLink[] = [];
+    for (const p of placementsRef.current) {
+      if (p.type !== "app") continue;
+      const link = workspaceContextRegistry.resolveLink(p.id);
+      if (link) links.push({ placementId: p.id, route: link.route, params: link.params });
+    }
+    updatePlacementLinks(links);
+  }, [workspaceContextRegistry]);
 
   const suppressProjectsRef = useRef(false);
   useEffect(() => {

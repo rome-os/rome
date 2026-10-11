@@ -520,27 +520,40 @@ export function updatePlacementLink(
   route: string | undefined,
   params: Record<string, string | number | boolean> | undefined,
 ): void {
-  const current = getSnapshot();
-  const target = current.find((p) => p.id === placementId);
-  if (!target || target.type !== "app") return;
-  const nextParams = params && Object.keys(params).length > 0 ? params : undefined;
-  if (
-    (target.route ?? undefined) === (route ?? undefined) &&
-    paramsEqual(target.params, nextParams)
-  ) {
-    return;
-  }
-  persist(
-    current.map((p) => {
-      if (p.id !== placementId) return p;
-      const next: WidgetPlacement = { ...p };
-      if (route !== undefined) next.route = route;
-      else delete next.route;
-      if (nextParams) next.params = nextParams;
-      else delete next.params;
-      return next;
-    }),
-  );
+  updatePlacementLinks([{ placementId, route, params }]);
+}
+
+export interface PlacementLink {
+  placementId: string;
+  route: string | undefined;
+  params: Record<string, string | number | boolean> | undefined;
+}
+
+/**
+ * `updatePlacementLink` for several tiles in one save. A teardown flush must
+ * use it: only the first PUT of a burst is sent before the page unloads, and
+ * later ones wait behind it.
+ */
+export function updatePlacementLinks(links: PlacementLink[]): void {
+  const byId = new Map(links.map((link) => [link.placementId, link]));
+  let changed = false;
+  const next = getSnapshot().map((p) => {
+    const link = byId.get(p.id);
+    if (!link || p.type !== "app") return p;
+    const { route } = link;
+    const nextParams = link.params && Object.keys(link.params).length > 0 ? link.params : undefined;
+    if ((p.route ?? undefined) === (route ?? undefined) && paramsEqual(p.params, nextParams)) {
+      return p;
+    }
+    changed = true;
+    const updated: WidgetPlacement = { ...p };
+    if (route !== undefined) updated.route = route;
+    else delete updated.route;
+    if (nextParams) updated.params = nextParams;
+    else delete updated.params;
+    return updated;
+  });
+  if (changed) persist(next);
 }
 
 /**

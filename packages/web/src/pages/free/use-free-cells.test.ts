@@ -644,6 +644,31 @@ describe("layout sync", () => {
     expect(readLayout("quota-chat")).toEqual(saved);
   });
 
+  it("saves several tiles' links in one request", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("flush-chat");
+    store.autoPlaceApp("notes");
+    store.autoPlaceApp("calendar");
+    await settle();
+    const [notes, calendar] = readLayout("flush-chat") as Array<{ id: string }>;
+    rs.mocked(fetch).mockClear();
+
+    store.updatePlacementLinks([
+      { placementId: notes!.id, route: "detail", params: { id: "n1" } },
+      { placementId: calendar!.id, route: "week", params: undefined },
+    ]);
+
+    expect(puts()).toEqual([
+      {
+        url: "/api/chat/sessions/flush-chat/layout",
+        layout: [
+          expect.objectContaining({ targetId: "notes", route: "detail", params: { id: "n1" } }),
+          expect.objectContaining({ targetId: "calendar", route: "week" }),
+        ],
+      },
+    ]);
+  });
+
   it("resends an unsynced layout after a reload", async () => {
     const before = await import("./use-free-cells");
     before.setActiveSession("reload-chat");
