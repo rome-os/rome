@@ -535,6 +535,37 @@ describe("layout sync", () => {
     ]);
   });
 
+  it("does not resend a stored layout older than an edit it failed to store", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("quota-chat");
+    rs.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    store.autoPlaceApp("notes");
+    await settle();
+
+    // Storage is full, so the next edit reaches only the server.
+    const setItem = Storage.prototype.setItem;
+    const full = rs.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key === "rome:free-layout:quota-chat")
+        throw new DOMException("full", "QuotaExceededError");
+      setItem.call(this, key, value);
+    });
+    store.autoPlaceProjects();
+    await settle();
+    full.mockRestore();
+    const saved = puts().at(-1)!.layout;
+    expect(saved).toHaveLength(2);
+
+    rs.mocked(fetch).mockClear();
+    serve(saved);
+    await store.loadLayoutForSession("quota-chat");
+    expect(puts()).toEqual([]);
+    expect(readLayout("quota-chat")).toEqual(saved);
+  });
+
   it("resends an unsynced layout after a reload", async () => {
     const before = await import("./use-free-cells");
     before.setActiveSession("reload-chat");

@@ -170,11 +170,14 @@ function storedLayoutJson(sessionId: string): string | null {
   }
 }
 
-function writeStorage(sessionId: string | null, layout: WidgetPlacement[]) {
-  if (!sessionId) return;
+function writeStorage(sessionId: string | null, layout: WidgetPlacement[]): boolean {
+  if (!sessionId) return false;
   try {
     localStorage.setItem(storageKey(sessionId), JSON.stringify(layout));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function notify() {
@@ -209,8 +212,11 @@ interface LayoutSave {
 
 const layoutSaves = new Map<string, LayoutSave>();
 
-function saveLayout(sessionId: string, layout: WidgetPlacement[]) {
-  setUnsyncedLayout(sessionId, true);
+// `stored` says whether `layout` reached localStorage. When the write failed,
+// for example on a full quota, the stored copy is older than `layout`, so the
+// marker is cleared rather than set to keep a later load from resending it.
+function saveLayout(sessionId: string, layout: WidgetPlacement[], stored: boolean) {
+  setUnsyncedLayout(sessionId, stored);
   const pending = layoutSaves.get(sessionId);
   if (pending) {
     pending.next = layout;
@@ -257,9 +263,9 @@ function persist(next: WidgetPlacement[]) {
   layoutRevisions.set(activeSessionId, (layoutRevisions.get(activeSessionId) ?? 0) + 1);
   reconcileToolView(next);
   snapshot = next;
-  writeStorage(activeSessionId, next);
+  const stored = writeStorage(activeSessionId, next);
   notify();
-  if (activeSessionId) saveLayout(activeSessionId, next);
+  if (activeSessionId) saveLayout(activeSessionId, next, stored);
 }
 
 function subscribe(listener: () => void) {
@@ -582,7 +588,7 @@ export function setActiveSession(sessionId: string | null) {
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
   if (hasUnsyncedLayout(sessionId)) {
     // A save still in flight already carries the newest layout.
-    if (!layoutSaves.has(sessionId)) saveLayout(sessionId, readStorage(sessionId));
+    if (!layoutSaves.has(sessionId)) saveLayout(sessionId, readStorage(sessionId), true);
     return;
   }
   const revision = layoutRevisions.get(sessionId);
