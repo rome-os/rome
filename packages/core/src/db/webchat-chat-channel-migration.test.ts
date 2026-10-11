@@ -103,6 +103,14 @@ describe("webchat chats as channel rows migration", () => {
       sourceThreadId: "handoff-1",
       parentSessionId: "chat-1",
     });
+    // A chat already stored as a channel row at its own address.
+    insertSession(sqlite, {
+      id: "chat-2",
+      type: "channel",
+      sourceChannel: "webchat",
+      sourceThreadId: "chat-2",
+    });
+    insertMessage(sqlite, "chat-2-line", "chat-2");
     insertSession(sqlite, {
       id: "channel:telegram:t-1",
       type: "channel",
@@ -126,6 +134,7 @@ describe("webchat chats as channel rows migration", () => {
         sourceThreadId: "t-1",
       },
       { id: "chat-1", type: "channel", sourceChannel: "webchat", sourceThreadId: "chat-1" },
+      { id: "chat-2", type: "channel", sourceChannel: "webchat", sourceThreadId: "chat-2" },
       { id: "fork-1", type: "fork", sourceChannel: "webchat", sourceThreadId: "chat-1" },
       {
         id: "handoff-1",
@@ -136,6 +145,7 @@ describe("webchat chats as channel rows migration", () => {
       { id: "promoted", type: "channel", sourceChannel: "webchat", sourceThreadId: "promoted" },
     ]);
     expect(sqlite.prepare("SELECT id FROM rome_agent_messages ORDER BY id").all()).toEqual([
+      { id: "chat-2-line" },
       { id: "chat-line" },
     ]);
   });

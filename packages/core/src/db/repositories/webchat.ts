@@ -26,6 +26,7 @@ import {
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import {
+  channelConversationId,
   isWebchatChat,
   romeSessionKind,
   storedSessionType,
@@ -360,9 +361,7 @@ const SEARCH_MESSAGE_SCAN_LIMIT = 400;
 const SEARCH_SNIPPET_CONTEXT = 40;
 const SEARCH_SNIPPET_LENGTH = 160;
 
-export function channelConversationId(channel: string, threadId: string): string {
-  return `channel:${channel}:${threadId}`;
-}
+export { channelConversationId };
 
 /** The row id a recorded outbound message takes when the provider named it.
  *  Derived rather than random so a caller that knows the provider's id can
@@ -925,7 +924,7 @@ export class WebChatRepository {
         agentName: input.agentName,
         type: storedSessionType(input.type),
         sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
-        sourceThreadId: chat ? (input.sourceThreadId ?? input.id) : (input.sourceThreadId ?? null),
+        sourceThreadId: chat ? input.id : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
         triggerKind: input.trigger?.triggerKind ?? null,
@@ -1596,9 +1595,10 @@ export class WebChatRepository {
   /**
    * A branch whose first answer completed on its own provider thread stops
    * being special: it becomes an ordinary chat, listed and managed like any
-   * other. Provenance columns are left in place — only the type and the
-   * unread clock change. Guarded on the current type so a double call, or a
-   * call racing a delete, is a no-op.
+   * other. It takes its own address in place of the parent's it copied, and
+   * the unread clock starts; lineage stays in `parent_session_id` and the
+   * trigger columns. Guarded on the current type so a double call, or a call
+   * racing a delete, is a no-op.
    */
   async promoteForkToChat(id: string): Promise<void> {
     await this.db

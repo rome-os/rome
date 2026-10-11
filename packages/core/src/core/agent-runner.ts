@@ -8,6 +8,7 @@ import type { AgentSessionManager } from "./agent-session.js";
 import type { AgentLoader } from "./agent-loader.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { channelConversationId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
@@ -724,7 +725,7 @@ export class AgentRunner {
       const parentSessionId =
         recorded?.id ??
         thread?.romeSessionId ??
-        (thread ? `channel:${thread.channel}:${thread.threadId}` : null);
+        (thread ? channelConversationId(thread.channel, thread.threadId) : null);
       const parent =
         recorded ?? (parentSessionId ? await this.webchatRepo.getSession(parentSessionId) : null);
       const parentName = parent?.name ?? thread?.threadName ?? params.sourceSessionId;

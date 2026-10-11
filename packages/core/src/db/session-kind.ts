@@ -7,6 +7,14 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { romeSessions, webchatChatWhere } from "./schema.js";
 
+/**
+ * The id of the conversation at a channel address. A webchat thread id is the
+ * chat's own id, so its conversation is the chat itself.
+ */
+export function channelConversationId(channel: string, threadId: string): string {
+  return channel === "webchat" ? threadId : `channel:${channel}:${threadId}`;
+}
+
 /** Whether a row is a guardian chat. */
 export const isWebchatChat: SQL = webchatChatWhere(romeSessions);
 
