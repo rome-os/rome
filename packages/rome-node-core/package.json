@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/node-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "JavaScript APIs for Rome device hosts and shared caller daemons",
   "license": "MIT",
   "type": "module",

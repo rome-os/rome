@@ -1,6 +1,13 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
@@ -126,13 +133,37 @@ const FORK_SESSION = {
   },
 } as const;
 
-function renderDetail() {
+function ChatHomeProbe() {
+  const location = useLocation();
+  const navigationType = useNavigationType();
+  return (
+    <output data-testid="chat-home">
+      {location.pathname}
+      {location.search} {navigationType}
+    </output>
+  );
+}
+
+function OpenMissingTileSession() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate("/full/apps/sessions/missing")}>
+      Open missing session
+    </button>
+  );
+}
+
+function renderDetail(initialEntry = "/sessions/feedback-fork-session", container?: HTMLElement) {
   return render(
-    <MemoryRouter initialEntries={["/sessions/feedback-fork-session"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
+      {container ? <OpenMissingTileSession /> : null}
       <Routes>
         <Route path="/sessions/*" element={<SessionsPage />} />
+        <Route path="/full/apps/sessions/*" element={<SessionsPage />} />
+        <Route path="/chat" element={<ChatHomeProbe />} />
       </Routes>
     </MemoryRouter>,
+    { container },
   );
 }
 
@@ -190,7 +221,73 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  rs.restoreAllMocks();
   rs.clearAllMocks();
+});
+
+describe("SessionsPage missing sessions", () => {
+  it.each([
+    "/sessions/missing",
+    "/full/apps/sessions/missing",
+  ])("replaces %s with the main chat page", async (path) => {
+    rs.mocked(getRomeSession).mockResolvedValue(null);
+    renderDetail(path);
+
+    expect((await screen.findByTestId("chat-home")).textContent).toBe("/chat REPLACE");
+    expect(screen.queryByText("Session not found")).toBeNull();
+  });
+
+  it("returns home when the session disappears before its messages load", async () => {
+    rs.mocked(listRomeSessionMessages).mockResolvedValue(null);
+    renderDetail("/sessions/feedback-fork-session?hideSidebar=1");
+
+    expect((await screen.findByTestId("chat-home")).textContent).toBe(
+      "/chat?hideSidebar=1 REPLACE",
+    );
+  });
+
+  it.each([
+    ["/full/apps/sessions/missing", false],
+    ["/full/apps/sessions/feedback-fork-session", true],
+  ])("keeps a missing workspace tile inside its frame from %s", async (entry, navigatesToMissing) => {
+    const frame = document.createElement("iframe");
+    frame.src = "/full/apps/sessions/missing";
+    document.body.appendChild(frame);
+    frame.contentDocument!.write("<!doctype html><html><body></body></html>");
+    const parentWindow = frame.contentWindow!.parent;
+    const postMessage = rs.spyOn(parentWindow, "postMessage").mockImplementation(() => {});
+    rs.stubGlobal("window", frame.contentWindow!);
+    rs.mocked(getRomeSession).mockImplementation(async (id) =>
+      id === FORK_SESSION.id ? FORK_SESSION : null,
+    );
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+
+    try {
+      const view = renderDetail(entry, frame.contentDocument!.body);
+      if (navigatesToMissing) {
+        expect(await view.findByText("Feedback")).toBeTruthy();
+        fireEvent.click(view.getByRole("button", { name: "Open missing session" }));
+      }
+
+      expect(await view.findByText("Session not found")).toBeTruthy();
+      // An existing-to-missing move must not keep showing the previous session.
+      expect(view.queryByText("Feedback")).toBeNull();
+      expect(view.queryByTestId("chat-home")).toBeNull();
+      expect(postMessage).not.toHaveBeenCalled();
+    } finally {
+      cleanup();
+      rs.unstubAllGlobals();
+      frame.remove();
+    }
+  });
+
+  it("keeps temporary server errors on the session page", async () => {
+    rs.mocked(getRomeSession).mockRejectedValue(new Error("Service unavailable"));
+    renderDetail();
+
+    expect(await screen.findByText("Service unavailable")).toBeTruthy();
+    expect(screen.queryByTestId("chat-home")).toBeNull();
+  });
 });
 
 describe("SessionsPage landmarks", () => {

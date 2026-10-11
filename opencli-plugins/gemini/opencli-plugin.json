@@ -1,0 +1,6 @@
+{
+  "name": "rome-gemini",
+  "description": "Gemini web video generation commands for OpenCLI",
+  "version": "0.1.0",
+  "opencli": ">=1.8.0"
+}

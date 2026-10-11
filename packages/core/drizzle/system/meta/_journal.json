@@ -516,8 +516,22 @@
     {
       "idx": 74,
       "version": "6",
-      "when": 1791648008048,
-      "tag": "0074_webchat_chat_activity_indexes",
+      "when": 1791640000000,
+      "tag": "0074_session_conversation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1791640100000,
+      "tag": "0075_backfill_session_conversation_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1791695201133,
+      "tag": "0076_webchat_chat_activity_indexes",
       "breakpoints": true
     }
   ]

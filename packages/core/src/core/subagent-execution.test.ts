@@ -104,10 +104,12 @@ describe("SubagentExecutionService", () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
+    const recordConversation = rs.fn(async () => undefined);
     const childManager = {
       acquire: rs.fn(async () => children.shift()!),
       acquireBySessionId: rs.fn(),
       peek: rs.fn(),
+      recordConversation,
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const registry = createActiveSubagentRegistry();
@@ -181,6 +183,10 @@ describe("SubagentExecutionService", () => {
     expect(childTrace.some((message) => message.content.includes("working"))).toBe(true);
     await expect(repo.getSession("child-1")).resolves.toMatchObject({ type: "subagent" });
     await expect(repo.getSession("child-2")).resolves.toMatchObject({ type: "subagent" });
+    expect(recordConversation.mock.calls).toEqual([
+      ["child-1", "child-1"],
+      ["child-2", "child-2"],
+    ]);
     const homeChats = await repo.listSessions();
     expect(homeChats.map((session) => session.id)).not.toContain("child-1");
     expect(homeChats.map((session) => session.id)).not.toContain("child-2");
@@ -202,6 +208,7 @@ describe("SubagentExecutionService", () => {
       acquire: rs.fn(),
       acquireBySessionId: rs.fn(async () => resumed.session),
       peek: rs.fn(),
+      recordConversation: rs.fn(async () => undefined),
       shutdown: rs.fn(async () => undefined),
     } as unknown as AgentSessionManager;
     const service = createSubagentExecutionService({
@@ -229,7 +236,7 @@ describe("SubagentExecutionService", () => {
     expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
       "child-resume",
       "researcher",
-      expect.any(Object),
+      expect.objectContaining({ romeSessionId: "child-resume" }),
     );
     resumed.releases[0].resolve();
     await execution.completion;

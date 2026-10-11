@@ -398,7 +398,7 @@ export default function SettingsPage() {
             </Measure>
           )}
           {activeTab === "AI Tools" && (
-            <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? false} />
+            <AiToolsPanel showRomeCredits showUsage={settings.showAiToolUsage ?? true} />
           )}
           {activeTab === "Advanced" && (
             <AdvancedSection
@@ -1549,7 +1549,7 @@ function AiToolUsageAdvancedSection({
   saving: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? false);
+  const [enabled, setEnabled] = useState(settings.showAiToolUsage ?? true);
 
   function toggle(next: boolean) {
     setEnabled(next);

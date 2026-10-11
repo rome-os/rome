@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import type { RecordedConversation } from "./agent-trace-recorder.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -462,6 +463,362 @@ describe("AgentRunner", () => {
         "result",
         "turn_end",
       ]);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  describe("a resumed session whose caller names no conversation", () => {
+    function resumedSession(conversationId: string, recordedConversation?: RecordedConversation) {
+      type TurnRef = { romeSessionId?: string; romeSessionType?: string };
+      const turns: TurnRef[] = [];
+      const session = {
+        key: { agentName: "main", channelThreadKey: "telegram:t1" },
+        sessionId: "agent-session",
+        conversationId,
+        recordedConversation,
+        status: "idle" as const,
+        sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
+          turns.push({
+            romeSessionId: options?.romeSessionId,
+            romeSessionType: options?.romeSessionType,
+          });
+          return {
+            turnId: "resumed-turn",
+            turnContext: context.active(),
+            events: (async function* () {
+              yield {
+                type: "turn_start",
+                turnId: "resumed-turn",
+                sessionId: "agent-session",
+                userPrompt: input.prompt,
+                agent: "main",
+              } as const;
+              yield { type: "result", content: "Done", agent: "main" } as const;
+            })(),
+          };
+        }),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        acquireBySessionId: rs.fn(async () => session),
+        peek: rs.fn(),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      return { manager, turns };
+    }
+
+    it("leaves a recorded channel conversation to the inbox", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "channel:telegram:t1",
+          type: "channel",
+          name: "Telegram thread",
+          agentName: null,
+        });
+        const { manager, turns } = resumedSession("channel:telegram:t1", {
+          id: "channel:telegram:t1",
+          name: "Telegram thread",
+          type: "channel",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        expect(turns[0]?.romeSessionType).toBe("action");
+        await expect(repo.getMessages("channel:telegram:t1")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("writes the prompt into a recorded subagent conversation it alone records", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toContain("user");
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a turn under a webchat thread to that chat", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: {
+              channel: "webchat",
+              threadId: "parent-chat",
+              threadName: "Parent",
+              threadType: "private",
+              romeSessionId: "parent-chat",
+            },
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "parent-chat", romeSessionType: "webchat" }]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a turn under a messaging thread to that thread", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Telegram thread",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Telegram thread",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // A backend turn delivers its reply to the thread and records it in the
+        // thread's conversation under this turn, so the trace stays there too.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
+          }),
+        );
+
+        expect(turns).toEqual([
+          { romeSessionId: "channel:telegram:t1", romeSessionType: "channel" },
+        ]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("writes a recorded subagent transcript when the caller keeps its own", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // A caller that keeps its own transcript keeps it for its channel,
+        // not for this conversation.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toEqual(expect.arrayContaining(["user", "assistant"]));
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a saved side chat to the webchat route on a backend turn", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "side-chat",
+          type: "fork",
+          name: "Side chat",
+          agentName: "main",
+        });
+        const { manager, turns } = resumedSession("side-chat", {
+          id: "side-chat",
+          name: "Side chat",
+          type: "fork",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: {
+              channel: "webchat",
+              threadId: "side-chat",
+              threadName: "Side chat",
+              threadType: "private",
+              romeSessionId: "side-chat",
+            },
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
+        const roles = (await repo.getMessages("side-chat")).map((m) => m.role);
+        expect(roles).not.toContain("user");
+        expect(roles).not.toContain("assistant");
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a recorded webchat conversation to the webchat route", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns } = resumedSession("user-chat", {
+          id: "user-chat",
+          name: "User chat",
+          type: "webchat",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        await expect(repo.getMessages("user-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("does not recreate a recorded conversation that was deleted", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        // The lookup at open found no conversation, so none is recorded.
+        const { manager, turns } = resumedSession("deleted-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        expect(turns[0]?.romeSessionType).toBe("action");
+        await expect(repo.getSession("deleted-chat")).resolves.toBeNull();
+      } finally {
+        testDb.close();
+      }
+    });
+  });
+
+  it("links a fork to the conversation its source serves when no thread names one", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new WebChatRepository(testDb.db);
+      await repo.createSession("stored-chat", "Stored chat");
+
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        sessionId: "source-session",
+        conversationId: "stored-chat",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Fork summary", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+
+      await collectMessages(
+        runner.runForked({
+          agentName: "main",
+          sourceSessionId: "source-session",
+          channelThreadKey: "webchat:stored-chat",
+          prompt: "summarize",
+          label: "recap",
+        }),
+      );
+
+      await expect(repo.getSession("fork-session")).resolves.toMatchObject({
+        type: "fork",
+        name: "recap: Stored chat",
+        parentSessionId: "stored-chat",
+      });
     } finally {
       testDb.close();
     }
@@ -2063,6 +2420,7 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
+        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -5011,27 +5369,48 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
+      let sessionParams: ModelSessionParams | undefined;
+      let keyDuringTurn: string | undefined;
+      const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
+        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
+        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
+          "demo_action",
+          "send_message",
+        ]);
+        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
+          /Unknown action: internal_action/,
+        );
+        executionWasRejected = true;
+        yield { type: "result", content: "Done" };
+      });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (params) {
-          expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-            "demo_action",
-            "send_message",
-          ]);
-          await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-            /Unknown action: internal_action/,
-          );
-          executionWasRejected = true;
-          yield { type: "result", content: "Done" };
-        }),
+        openSession: async (params) => {
+          sessionParams = params;
+          return openFromRun(params);
+        },
       };
       const runner = createRunner(provider);
 
-      await collectMessages(runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }));
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+      );
 
       expect(executionWasRejected).toBe(true);
+      // The activation key is scoped by the same turn id the stream reports,
+      // which is how the webchat drain derives the card's key.
+      const turnStart = messages.find((m) => m.type === "turn_start") as
+        | { turnId: string }
+        | undefined;
+      expect(turnStart).toBeDefined();
+      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
+      // propose_routine's auto-enable gate mirrors the same allow-list.
+      const gate = sessionParams?.routineActivation;
+      expect(gate?.canCallAction("demo_action")).toBe("permitted");
+      expect(gate?.canCallAction("internal_action")).toBe("denied");
+      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {

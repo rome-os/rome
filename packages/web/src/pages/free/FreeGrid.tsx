@@ -39,6 +39,7 @@ import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
+import { getWidgetFullHref } from "./widget-links";
 import {
   autoPlaceApp,
   autoPlaceProjects,
@@ -188,13 +189,17 @@ export function FreeGrid() {
     return JSON.stringify(initialWidgets);
   }, [initialWidgets]);
   const [chatSessionId, setChatSessionId] = useState<string | undefined>(urlSessionId);
-  const flushLayout = useCallback(() => {
-    for (const p of placementsRef.current) {
-      if (p.type !== "app") continue;
+  const flushAppLink = useCallback(
+    (p: WidgetPlacement) => {
+      if (p.type !== "app") return;
       const link = workspaceContextRegistry.resolveLink(p.id);
       if (link) updatePlacementLink(p.id, link.route, link.params);
-    }
-  }, [workspaceContextRegistry]);
+    },
+    [workspaceContextRegistry],
+  );
+  const flushLayout = useCallback(() => {
+    for (const p of placementsRef.current) flushAppLink(p);
+  }, [flushAppLink]);
 
   const suppressProjectsRef = useRef(false);
   useEffect(() => {
@@ -337,6 +342,10 @@ export function FreeGrid() {
             content={(widget, dragging) => (
               <WidgetContent widget={widget} dragging={dragging} sessionId={chatSessionId} />
             )}
+            fullHref={getWidgetFullHref}
+            // App tiles navigate inside a frozen iframe, so persist the live
+            // route before the link is followed; the href then carries it.
+            onOpenIntent={flushAppLink}
           >
             {!chatSessionId && (
               <div className="flex h-12 shrink-0 items-center justify-end border-b border-border px-2 max-md:hidden">

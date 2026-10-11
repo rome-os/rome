@@ -165,7 +165,15 @@ export function renderSingleEntry(
         />
       );
     case "routine_draft_card":
-      return <RoutineDraftCard key={`routine-${block.toolUseId}`} draft={block.draft} />;
+      return (
+        <RoutineDraftCard
+          key={`routine-${block.toolUseId}`}
+          draft={block.draft}
+          // Parts can arrive unvalidated (e.g. via channels.send); a malformed
+          // key falls back to the keyless card rather than failing every create.
+          routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+        />
+      );
     case "submission_card":
       // The borrowed agent's submit_output is not rendered in the conversation
       // flow — the result already lives on the app's own surface beside the

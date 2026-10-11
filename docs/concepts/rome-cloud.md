@@ -8,7 +8,7 @@ It plays six roles:
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
-- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected ([Rome credits](#rome-credits)).
+- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected and the account has credits to spend ([Rome credits](#rome-credits)).
 - **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, and guardian sign-ins ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
@@ -66,14 +66,15 @@ Rome credits are an account-wide allowance that Rome Cloud serves through its in
 
 **Contracts:**
 
-- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login alone. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential. A login whose token was revoked counts as disconnected, so credits pay until the guardian signs in to ChatGPT again. Usage limits and quota probes never change the payer.
+- Codex has one payer for the whole instance, chosen from the guardian's ChatGPT login and the account's credits. A connected login pays. While it is disconnected, Rome credits pay when the instance has a Rome Cloud origin and a credential, and the last read of the account's credits found inference enabled and a positive available balance. An account with no grant, a disabled account, and a used-up balance leave Codex with no payer, so no request reaches the gateway. A login whose token was revoked counts as disconnected. ChatGPT usage limits and quota probes never change the payer.
+- Rome reads the account's credits when ChatGPT disconnects, when the credential changes, on each Codex status refresh, and after the gateway refuses a model. Each read can start or stop credits paying, so a new grant or a used-up balance changes the payer at the next status refresh, which runs hourly. A read that cannot reach Rome Cloud keeps the current payer. A Codex resolution waits for the first read after ChatGPT disconnects or the credential changes.
 - A payer change restarts Codex, which fails the turns running at that moment. A credential change restarts Codex only while Rome credits pay.
 - A Codex turn waiting to start fails if Codex restarts under another payer first.
-- Rome credits and a ChatGPT plan are two ways to pay for Codex. While credits pay, Rome uses only the Codex models the gateway reports serving the account, and needs no plan entitlement for them. The gateway matches a model name exactly, so a dated or differently spelled name of a served model is not served. Rome reads the list when credits start to pay, when the credential changes, on each Codex status refresh, and after the gateway refuses a model. A model the gateway starts serving is therefore picked up at the next status refresh, which runs hourly. While the gateway has reported no list, Rome assumes it serves Sol and Luna.
+- Rome credits and a ChatGPT plan are two ways to pay for Codex. While credits pay, Rome uses only the Codex models the gateway reports serving the account, and needs no plan entitlement for them. The gateway matches a model name exactly, so a dated or differently spelled name of a served model is not served. Each read of the account's credits refreshes the list, so a model the gateway starts serving is picked up at the next status refresh. While the gateway has reported no list, Rome assumes it serves Sol and Luna.
 - A tier resolves under credits as it does under a ChatGPT plan, then falls back to a served model: a tier that would run Sol or Luna runs Terra when the gateway serves only Terra. Credits do not serve a tier when the gateway serves none of its models. A tier prefers a connected Claude login over Rome credits.
 - A custom tier mapping, a [model pin](sessions.md#model-pin), or a selected model that the current payer cannot run fails with `model_unavailable` until the guardian selects another model or the session ends. Under credits that is a model the gateway does not serve. Under a ChatGPT plan it is a model the plan does not include. A pin that one payer runs can therefore fail after the payer changes.
 - An agent pinned to Codex by tier, such as the image generation agent, still needs the ChatGPT login, because the credits gateway rejects ChatGPT's hosted tools.
-- The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before a turn.
+- The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before each turn, so a balance used up between reads fails turns this way until the next read stops credits paying.
 
 ## Usage reporting
 

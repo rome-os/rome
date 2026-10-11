@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/rome-os/rome/compare/node-core-v0.1.1...node-core-v0.1.2) (2026-10-10)
+
+
+### Features
+
+* **node:** send raw bytes between devices and add rome-node cp ([#821](https://github.com/rome-os/rome/issues/821)) ([617a42a](https://github.com/rome-os/rome/commit/617a42abd95dab06e7600ae4e7638dcdb27c5a8c))
+
 ## [0.1.1](https://github.com/rome-os/rome/compare/node-core-v0.1.0...node-core-v0.1.1) (2026-09-25)
 
 

@@ -25,8 +25,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,
-  resolveRomeSessionId,
-  resolveRomeSessionType,
+  resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
 import {
@@ -147,17 +146,16 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         });
 
         const boundRomeSessionId = session.romeSessionId ?? req.init?.romeSessionId;
-        const romeSessionId = resolveRomeSessionId({
+        const conversation = resolveTurnConversation({
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
           romeSessionId: boundRomeSessionId,
+          recordedConversation: session.recordedConversation,
           channelThreadKey: req.key.channelThreadKey,
           threadContext: req.init?.threadContext,
           actionContext: req.actionContext,
         });
-        const romeSessionType = resolveRomeSessionType({
-          threadContext: req.init?.threadContext,
-        });
+        const { romeSessionId, romeSessionType } = conversation;
         const romeSession: RomeSessionRef = {
           _romeSessionId: romeSessionId,
           _type: romeSessionType,
@@ -187,13 +185,13 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 agentName: req.key.agentName,
                 agentSessionId: session.sessionId,
                 romeSessionId,
-                existingSessionId: boundRomeSessionId ? romeSessionId : undefined,
+                existingSessionId: conversation.existing ? romeSessionId : undefined,
                 channelThreadKey: req.key.channelThreadKey,
                 turnId: handle.turnId,
                 threadContext: req.init?.threadContext,
                 actionContext: req.actionContext,
                 persistTranscript: true,
-                persistUserTranscript: !boundRomeSessionId,
+                persistUserTranscript: !conversation.promptPersisted,
               })
             : null;
 

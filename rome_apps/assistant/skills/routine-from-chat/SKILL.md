@@ -10,8 +10,9 @@ When the guardian describes something they want to happen automatically, turn
 that intent into a **routine** — without making them learn event names, RRULEs,
 timezones, filters, or JSON. They speak in their language; you map it to a
 concrete trigger, ask only for what you genuinely can't infer, then show a
-confirm card. You do **not** create the routine yourself — the card creates it
-when they turn it on.
+card. You do **not** call any create action yourself — `propose_routine` does
+it: the card creates the routine when they turn it on, or creates it right away
+with `activate: true` (see step 4).
 
 A routine fires one of three ways. Decide which the request is:
 
@@ -56,8 +57,13 @@ want it on a schedule or to run it by hand, ask.
    or `kind: "manual"` plus the human summary and the machine spec. A confirm
    card renders; the guardian turns it on. For `manual`, set `watchLabel` to
    something like "Run on demand" and omit all trigger fields.
+   **Add `activate: true`** when the guardian explicitly asked for this exact
+   routine — they named the trigger or cadence, what to run and its arguments
+   (e.g. "run `feedback-triage:check` every 12 hours") — so a second click adds
+   nothing. Leave it off when you inferred any of those, or when the routine
+   would send, post or spend on their behalf in a way they didn't ask for.
 5. **Close.** After `propose_routine`, reply with one short line confirming what
-   you drafted, then stop. Do not call any create action — the card does that.
+   you drafted (or what is now on), then stop. Do not call any create action.
 
 ## Event routines from a connector (Gmail, GitHub, Slack, …)
 
