@@ -14,6 +14,8 @@ import type {
 } from "./agent-session.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
+import { WebChatRepository } from "../db/repositories/webchat.js";
+import { createTestDb } from "../test/helpers.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -101,6 +103,82 @@ describe("AgentSessionBridge turn routing", () => {
 
     finishTurn();
     await rs.waitFor(() => expect(turns.getActiveByConversation(ref)).toBeUndefined());
+  });
+});
+
+describe("AgentSessionBridge conversation", () => {
+  it("records a turn with no caller conversation in the one the session recorded", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new WebChatRepository(testDb.db);
+      await repo.ensureRomeSession({
+        id: "child-chat",
+        type: "subagent",
+        name: "researcher: Parent",
+        agentName: "researcher",
+      });
+      type TurnRef = { romeSessionId?: string; romeSessionType?: string };
+      const sent: TurnRef[] = [];
+      const session = {
+        key: { agentName: "main", channelThreadKey: "discord:channel-1" },
+        sessionId: "session-1",
+        recordedConversation: {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        },
+        sendTurn: (_input: unknown, options: TurnRef) => {
+          sent.push({
+            romeSessionId: options.romeSessionId,
+            romeSessionType: options.romeSessionType,
+          });
+          return {
+            turnId: "turn-1",
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {
+              yield {
+                type: "turn_start",
+                turnId: "turn-1",
+                sessionId: "session-1",
+                userPrompt: "follow up",
+                agent: "main",
+              };
+              yield { type: "result", content: "Done", agent: "main" };
+            })(),
+            interrupt: async () => undefined,
+          } as unknown as AgentTurnHandle;
+        },
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+
+      child.emit("message", {
+        type: "rpc_request",
+        reqId: "request-1",
+        method: "agent.session.runTurn",
+        params: {
+          key: session.key,
+          input: { prompt: "follow up" },
+          init: {},
+        },
+      });
+
+      await rs.waitFor(() =>
+        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
+      );
+      await rs.waitFor(async () => {
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toContain("user");
+      });
+    } finally {
+      testDb.close();
+    }
   });
 });
 

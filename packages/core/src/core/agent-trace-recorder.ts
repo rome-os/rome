@@ -11,9 +11,11 @@ import type {
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
-import type { Logger } from "../logger.js";
+import { createLogger, type Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
+
+const log = createLogger("agent-trace-recorder");
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -66,6 +68,90 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
     return `action:${actionContext.executionId}:${input.agentName || "main"}`;
   }
   return `action:${input.channelThreadKey ?? input.agentName}:${input.agentName || "main"}`;
+}
+
+export interface RecordedConversation {
+  id: string;
+  name: string;
+  type: RomeSessionType;
+}
+
+/**
+ * The conversation a session's row recorded, when it still exists. A deleted
+ * conversation leaves its id on the row, and recording under that id would
+ * recreate it.
+ */
+export async function findRecordedConversation(
+  webchatRepo: WebChatRepository | undefined,
+  conversationId: string | undefined,
+): Promise<RecordedConversation | undefined> {
+  if (!webchatRepo || !conversationId) return undefined;
+  let conversation;
+  try {
+    conversation = await webchatRepo.getSession(conversationId);
+  } catch (err) {
+    // The lookup only refines where turns record, so it must not fail the session.
+    log.warn("failed to read a session's recorded conversation", {
+      conversationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+  if (!conversation) return undefined;
+  const { id, name, type } = conversation;
+  return { id, name, type: type as RomeSessionType };
+}
+
+export interface TurnConversationInput extends RomeSessionIdInput {
+  /** The conversation the session's row recorded, as it stood when looked up. */
+  recordedConversation?: RecordedConversation;
+}
+
+// Conversations whose turns only the recorder writes. A webchat conversation
+// belongs to the webchat route, and a channel one to the inbox, which also
+// injects its pending context on a channel turn.
+const RECORDER_OWNED_CONVERSATION_TYPES: ReadonlySet<RomeSessionType> = new Set([
+  "subagent",
+  "fork",
+]);
+
+/**
+ * The conversation a turn records into, and its type. A conversation the
+ * caller named wins. Otherwise a recorded subagent or fork conversation is
+ * used, and the id is derived as before for anything else. `existing` is true
+ * for a named or recorded conversation, which needs no creating.
+ * `promptPersisted` is true only for a named one, whose caller owns the prompt.
+ * `recorderOwned` is true for a recorded one, which only the recorder writes.
+ *
+ * A turn under a thread stays with that thread's conversation, as before. Its
+ * reply is delivered and recorded there under the turn's id, so the trace has
+ * to be found there too, and a webchat card is answered by looking its turn up
+ * in that chat. That covers backend and approval turns on a subagent or side
+ * chat.
+ */
+export function resolveTurnConversation(input: TurnConversationInput): {
+  romeSessionId: string;
+  romeSessionType: RomeSessionType;
+  existing: boolean;
+  promptPersisted: boolean;
+  recorderOwned: boolean;
+} {
+  const found = input.romeSessionId ? undefined : input.recordedConversation;
+  const ownedByRecorder =
+    found !== undefined &&
+    RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
+    !input.threadContext;
+  const recorded = ownedByRecorder ? found : undefined;
+  return {
+    romeSessionId: resolveRomeSessionId({
+      ...input,
+      romeSessionId: input.romeSessionId ?? recorded?.id,
+    }),
+    romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
+    existing: Boolean(input.romeSessionId ?? recorded),
+    promptPersisted: Boolean(input.romeSessionId),
+    recorderOwned: Boolean(recorded),
+  };
 }
 
 export function resolveRomeSessionType(

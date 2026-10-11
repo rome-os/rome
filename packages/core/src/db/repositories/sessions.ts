@@ -120,11 +120,12 @@ export class SessionsRepository {
   }
 
   /** Record the conversation on a row that has none. Never overwrites. */
-  async fillConversationId(id: string, conversationId: string): Promise<void> {
-    await this.db
+  async fillConversationId(id: string, conversationId: string): Promise<boolean> {
+    const result = await this.db
       .update(sessions)
       .set({ conversationId })
       .where(and(eq(sessions.id, id), isNull(sessions.conversationId)));
+    return Number(result.changes ?? 0) > 0;
   }
 
   async setWorkingDir(id: string, workingDir: string): Promise<void> {
