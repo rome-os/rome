@@ -382,8 +382,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.enabled === true) {
       const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
       const trigger = current ? toRoutine(current).trigger : undefined;
-      // A one-off saved before writers dated it has neither date nor rrule, and
-      // the scheduler refuses it.
+      // Writers and migration 0076 date every one-off, so only a malformed row
+      // reaches here with neither date nor rrule, and the scheduler refuses it.
       if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
         return c.json(
           {
