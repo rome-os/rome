@@ -33,42 +33,50 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function rules(): Array<{ selector: string; declarations: string }> {
+function rules(css = markdownCss): Array<{ selector: string; declarations: string }> {
   // Selectors are collapsed onto one line: the formatter wraps the long ones,
   // and a fragment should match a selector, not a line break inside it.
-  return [...markdownCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
+  return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((match) => ({
     selector: match[1].replace(/\s+/g, " ").trim(),
     declarations: match[2],
   }));
 }
 
-/** The declarations of the first rule whose selector carries every fragment. */
-function rule(...fragments: string[]): string {
-  const found = rules().find(({ selector }) =>
+/** The declarations of the first rule in `css` whose selector carries every fragment. */
+function ruleIn(css: string, ...fragments: string[]): string {
+  const found = rules(css).find(({ selector }) =>
     fragments.every((fragment) => selector.includes(fragment)),
   );
   if (!found) throw new Error(`No rule matching: ${fragments.join(" + ")}`);
   return found.declarations;
 }
 
-/** Everything inside the first `@media` block whose condition carries `query`. */
-function media(query: string): string {
-  const start = markdownCss.search(new RegExp(`@media[^{]*${escapeRegExp(query)}[^{]*\\{`));
-  if (start < 0) throw new Error(`No @media block for: ${query}`);
+function rule(...fragments: string[]): string {
+  return ruleIn(markdownCss, ...fragments);
+}
 
-  const open = markdownCss.indexOf("{", start);
-  let depth = 0;
-  for (let index = open; index < markdownCss.length; index += 1) {
-    if (markdownCss[index] === "{") depth += 1;
-    if (markdownCss[index] === "}" && (depth -= 1) === 0) {
-      return markdownCss.slice(open + 1, index);
+/** Everything inside every `@media` block whose condition carries `query`, in order. */
+function media(query: string): string {
+  const condition = new RegExp(`@media[^{]*${escapeRegExp(query)}[^{]*\\{`, "g");
+  const bodies: string[] = [];
+  for (const match of markdownCss.matchAll(condition)) {
+    const open = match.index + match[0].length - 1;
+    let depth = 0;
+    for (let index = open; index < markdownCss.length; index += 1) {
+      if (markdownCss[index] === "{") depth += 1;
+      if (markdownCss[index] === "}" && (depth -= 1) === 0) {
+        bodies.push(markdownCss.slice(open + 1, index));
+        break;
+      }
     }
   }
-  throw new Error(`Unterminated @media block for: ${query}`);
+  if (bodies.length === 0) throw new Error(`No @media block for: ${query}`);
+  return bodies.join("\n");
 }
 
 const hoverCapable = media("hover: hover");
 const withoutHoverCapable = markdownCss.replace(hoverCapable, "");
+const withoutHover = media("hover: none");
 
 describe("Markdown fenced-block chrome", () => {
   it("frames a code fence once — the card keeps the tint, the body goes flush", () => {
@@ -111,7 +119,7 @@ describe("Markdown fenced-block chrome", () => {
     ).toContain("grid-area: 1 / 3;");
   });
 
-  it("costs no height — the content holds the same grid row the band does", () => {
+  it("costs no height where hover can hide the band — the content holds its row", () => {
     const content = rule(".rome-markdown", CODE_BODY, "> :last-child");
 
     expect(content).toContain("grid-row: 1;");
@@ -157,6 +165,47 @@ describe("Markdown fenced-block chrome", () => {
     // The hide lives inside `(hover: hover)` and nowhere else, so a touch
     // surface never lands in a state where a fence cannot be copied.
     expect(withoutHoverCapable).not.toContain("opacity: 0");
+  });
+
+  it("moves the band to its own row above the content where there is no hover", () => {
+    // Visible for good, a floating band would cover the end of a code fence's
+    // first lines and the top of a diagram.
+    const content = ruleIn(withoutHover, ".rome-markdown", CODE_BODY, DIAGRAM_CANVAS);
+    expect(content).toContain("grid-row: 2;");
+
+    const band = ruleIn(
+      withoutHover,
+      ".rome-markdown",
+      CODE_LABEL,
+      DIAGRAM_LABEL,
+      `${CODE_CARD} > :has(> ${CODE_ACTIONS})`,
+      `${DIAGRAM_CARD} > :has(> ${DIAGRAM_ACTIONS})`,
+    );
+    expect(band).toContain("position: static;");
+
+    // In a row of its own the band rests on nothing, so it drops the lift.
+    const parts = ruleIn(
+      withoutHover,
+      ".rome-markdown",
+      `${CODE_LABEL}, ${DIAGRAM_LABEL}, ${CODE_ACTIONS}, ${DIAGRAM_ACTIONS}`,
+    );
+    expect(parts).toContain("border: 0;");
+    expect(parts).toContain("box-shadow: none;");
+  });
+
+  it("drops the zoom stack below the diagram where there is no hover", () => {
+    const stack = rules(withoutHover).find(({ selector }) => selector.includes(ZOOM_STACK));
+
+    expect(stack).toBeDefined();
+    // Streamdown's stack comes before the diagram in a flex column, so `order`
+    // is what puts it below. Positioned, its `z-index` still lifts it above a
+    // zoomed diagram, which overflows its own box.
+    expect(stack!.declarations).toContain("order: 1;");
+    expect(stack!.declarations).toContain("position: relative;");
+    expect(stack!.declarations).toContain("inset: auto;");
+    // A fullscreen diagram is portaled out of the prose root and keeps its
+    // floating stack.
+    expect(stack!.selector.startsWith(".rome-markdown")).toBe(true);
   });
 
   it("reveals with opacity, which keeps the buttons reachable by keyboard", () => {
