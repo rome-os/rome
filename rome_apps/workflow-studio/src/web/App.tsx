@@ -1,6 +1,17 @@
 import "./styles.css";
 import { useCallback, useState } from "react";
 import { startChat, type RomeAppBootstrap } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
+import { Field, FieldLabel, FormError } from "@rome-os/ui/field";
+import {
+  Measure,
+  Page,
+  PageDescription,
+  PageHeader,
+  PageHeading,
+  PageTitle,
+} from "@rome-os/ui/page";
+import { Textarea } from "@rome-os/ui/textarea";
 
 const EXAMPLE_PROMPTS = [
   "Every morning, summarize my unread emails and post the digest to my chat.",
@@ -31,46 +42,59 @@ export default function App({ bootstrap: _bootstrap }: { bootstrap: RomeAppBoots
   }, [draft, starting]);
 
   return (
-    <div className="ws-root">
-      <div className="ws-frontdoor">
-        <h1>Build a workflow</h1>
-        <p className="ws-lede">
-          Describe an automation in plain language. Your guardian shapes it into a short spec you
-          approve, then builds it into a runnable workflow — all in one conversation.
-        </p>
-        <textarea
-          className="ws-input"
-          rows={3}
-          placeholder="e.g. Every morning, summarize my unread emails and post the digest to my chat."
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          disabled={starting}
-        />
-        <div className="ws-cta-row">
-          <button
-            className="ws-cta"
-            onClick={() => void start()}
-            disabled={!draft.trim() || starting}
-          >
+    <Page className="min-h-full">
+      <PageHeader>
+        <PageHeading>
+          <PageTitle>Build a workflow</PageTitle>
+          <PageDescription>
+            Describe an automation in plain language. Your guardian shapes it into a short spec you
+            approve, then builds it into a runnable workflow — all in one conversation.
+          </PageDescription>
+        </PageHeading>
+      </PageHeader>
+      <Measure className="flex flex-col gap-4">
+        <Field>
+          <FieldLabel htmlFor="ws-workflow-description" className="sr-only">
+            Workflow description
+          </FieldLabel>
+          <Textarea
+            id="ws-workflow-description"
+            rows={3}
+            placeholder="e.g. Every morning, summarize my unread emails and post the digest to my chat."
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                void start();
+              }
+            }}
+            disabled={starting}
+          />
+        </Field>
+        <div>
+          <Button onClick={() => void start()} disabled={!draft.trim() || starting}>
             {starting ? "Starting…" : "Design this workflow"}
-          </button>
+          </Button>
         </div>
-        {error && <p className="ws-error-line">{error}</p>}
-        <div className="ws-examples">
-          <span className="ws-examples-label">Try one of these</span>
+        {error ? <FormError>{error}</FormError> : null}
+        <div className="flex flex-col items-start gap-2 pt-2">
+          <span className="text-aux text-muted-foreground">Try one of these</span>
           {EXAMPLE_PROMPTS.map((p) => (
-            <button
+            <Button
               key={p}
               type="button"
-              className="ws-example"
+              variant="secondary"
+              align="start"
               onClick={() => setDraft(p)}
               disabled={starting}
+              className="h-auto w-full text-left whitespace-normal py-2 font-normal leading-relaxed border border-border hover:border-muted-foreground"
             >
               {p}
-            </button>
+            </Button>
           ))}
         </div>
-      </div>
-    </div>
+      </Measure>
+    </Page>
   );
 }
