@@ -33,7 +33,13 @@ export function readSpreadsheetPreview(data: ArrayBuffer): SpreadsheetSheetPrevi
     // it fills (up to column XFD), so converting the whole range first stalls.
     const rows: string[][] = [];
     if (sheet && range) {
-      const lastRow = Math.min(range.e.r, range.s.r + MAX_SPREADSHEET_ROWS - 1);
+      // `sheetRows` keeps rows 1–200 of the sheet, not 200 rows from where the
+      // data starts, so the window must stop there too or read rows show blank.
+      const lastRow = Math.min(
+        range.e.r,
+        range.s.r + MAX_SPREADSHEET_ROWS - 1,
+        MAX_SPREADSHEET_ROWS - 1,
+      );
       const lastColumn = Math.min(range.e.c, range.s.c + MAX_SPREADSHEET_COLUMNS - 1);
       for (let r = range.s.r; r <= lastRow; r++) {
         const row: string[] = [];

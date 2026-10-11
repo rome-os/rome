@@ -50,14 +50,28 @@ describe("readSpreadsheetPreview", () => {
     const sheet = utils.aoa_to_sheet([["Name"], ["Ada"]]);
     sheet["!ref"] = "A1:XFD150";
 
+    const bytes = workbookBytes({ Wide: sheet });
     const startedAt = performance.now();
-    const [preview] = readSpreadsheetPreview(workbookBytes({ Wide: sheet }));
+    const [preview] = readSpreadsheetPreview(bytes);
 
     expect(performance.now() - startedAt).toBeLessThan(1000);
     expect(preview.rows).toHaveLength(150);
     expect(preview.rows[0]).toHaveLength(50);
     expect(preview.rows[1][0]).toBe("Ada");
     expect(preview.totalColumns).toBe(16384);
+  });
+
+  it("stops at the rows actually read when the data starts below row 1", () => {
+    const rows = Array.from({ length: 250 }, (_, index) => [`row ${index + 3}`]);
+    const sheet = utils.aoa_to_sheet(rows, { origin: "B3" });
+    sheet["!ref"] = "B3:B252";
+
+    const [preview] = readSpreadsheetPreview(workbookBytes({ Offset: sheet }));
+
+    // Rows 3–200 of the sheet: no blank rows past what the reader parsed.
+    expect(preview.rows).toHaveLength(198);
+    expect(preview.rows.at(-1)).toEqual(["row 200"]);
+    expect(preview.totalRows).toBe(250);
   });
 
   it("shows a formula error instead of a blank cell", () => {
