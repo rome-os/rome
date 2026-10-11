@@ -6,7 +6,11 @@ import {
   type AIToolStatusProbeResult,
 } from "../lib/ai-tool-probes.js";
 import type { CodexPlanType } from "../lib/codex-cli-auth.js";
-import { getErrorMessage, type AIToolUsageStatus } from "../lib/provider-usage.js";
+import {
+  getErrorMessage,
+  type AIToolUsageStatus,
+  type UsageWindowStatus,
+} from "../lib/provider-usage.js";
 
 const log = createLogger("ai-tool-state");
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
@@ -18,6 +22,13 @@ export interface ProviderState
   /** Undefined means not checked yet and is treated optimistically. */
   loggedIn?: boolean;
   quotaExhausted: boolean;
+  /**
+   * When usage-derived exhaustion ends: the latest reset among the exhausted
+   * usage windows. Absent when an exhausted window has no known reset and
+   * after a runtime quota failure, so quotaExhausted holds until the next
+   * successful usage probe.
+   */
+  quotaExhaustedUntil?: string;
   usage?: AIToolUsageStatus;
 }
 
@@ -30,6 +41,7 @@ export interface AIToolStateValue {
 }
 
 export interface AIToolState {
+  /** Reports quotaExhausted as false once its quotaExhaustedUntil has passed. */
   get(): AIToolStateValue;
   refresh(provider?: AIToolProviderId): Promise<AIToolStateValue>;
   markAuthRevoked(provider: AIToolProviderId): Promise<void>;
@@ -58,12 +70,27 @@ export interface CreateAIToolStateOptions {
   onCodexRefreshed?: () => void;
 }
 
-function usageShowsExhaustion(usage: AIToolUsageStatus): boolean {
-  return [usage.fiveHour, usage.sevenDay].some(
-    (window) =>
-      window?.remainingPercent === 0 ||
-      (typeof window?.usedPercent === "number" && window.usedPercent >= 100),
+function windowExhausted(window: UsageWindowStatus | undefined): window is UsageWindowStatus {
+  return (
+    window?.remainingPercent === 0 ||
+    (typeof window?.usedPercent === "number" && window.usedPercent >= 100)
   );
+}
+
+function latestReset(windows: UsageWindowStatus[]): string | undefined {
+  let latest: number | undefined;
+  for (const window of windows) {
+    const resetMs = Date.parse(window.resetsAt ?? "");
+    if (Number.isNaN(resetMs)) return undefined;
+    latest = Math.max(latest ?? resetMs, resetMs);
+  }
+  return latest === undefined ? undefined : new Date(latest).toISOString();
+}
+
+function readProviderState<T extends ProviderState>(target: T, now: number): T {
+  const expired =
+    target.quotaExhaustedUntil !== undefined && Date.parse(target.quotaExhaustedUntil) <= now;
+  return expired ? { ...target, quotaExhausted: false } : { ...target };
 }
 
 function applyUsage(
@@ -92,7 +119,9 @@ function applyUsage(
     return;
   }
   target.usage = usage;
-  target.quotaExhausted = usageShowsExhaustion(usage);
+  const exhausted = [usage.fiveHour, usage.sevenDay].filter(windowExhausted);
+  target.quotaExhausted = exhausted.length > 0;
+  target.quotaExhaustedUntil = latestReset(exhausted);
 }
 
 const CODEX_FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
@@ -158,6 +187,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       if (claudeUsesApiKey(value.claude)) {
         // Do not leak a stale Claude OAuth usage cache into API-key auth.
         value.claude.quotaExhausted = false;
+        delete value.claude.quotaExhaustedUntil;
         delete value.claude.usage;
       } else {
         applyUsage(value.claude, usage);
@@ -206,7 +236,13 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
 
   const state: AIToolState = {
     get() {
-      return { codex: { ...value.codex }, claude: { ...value.claude } };
+      // Reading the expiry here needs no timer to clear the flag, and a reset
+      // never waits on a usage probe that the endpoint may throttle.
+      const now = Date.now();
+      return {
+        codex: readProviderState(value.codex, now),
+        claude: readProviderState(value.claude, now),
+      };
     },
     async refresh(provider) {
       if (provider) {
@@ -236,6 +272,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
         target.quotaExhausted = true;
+        delete target.quotaExhaustedUntil;
         return true;
       };
       if (!applyRuntimeSignal()) return;
