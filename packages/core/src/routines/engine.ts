@@ -8,6 +8,8 @@ import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
 import { createLogger } from "../logger.js";
 import { withRomeSpan } from "../telemetry.js";
 import { runWithoutHookInvocationContext } from "../core/hook-recursion.js";
+import { actionExecutionContext } from "../actions/context.js";
+import { replayContext } from "../actions/replay.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
 
 const log = createLogger("routine-engine");
@@ -162,10 +164,24 @@ export class RoutineEngine {
     return { stopped: true, killedLiveProcess };
   }
 
-  private async dispatch(
+  /** A routine fire is its own root. Event-bus subscribers run in the
+   * publisher's async context; without exiting it, the run (and any retry timer
+   * it schedules) would nest under the publishing action and inherit its
+   * agentName. */
+  private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
     opts: { manual?: boolean } = {},
+  ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
+    return replayContext.exit(() =>
+      actionExecutionContext.exit(() => this.dispatchAsRoot(routine, payload, opts)),
+    );
+  }
+
+  private async dispatchAsRoot(
+    routine: Routine,
+    payload: Record<string, unknown>,
+    opts: { manual?: boolean },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const startTime = this.clock.now().getTime();
 

@@ -3,6 +3,7 @@ import type {
   Action,
   ActionConfig,
   ActionResult,
+  AgentRunnerInterface,
   AppActionRuntimeDeps,
   Routine,
   RoutineEngine,
@@ -93,6 +94,9 @@ export interface CreateRoutineDeps {
    * fails the `actionEngine.run` lookup on every fire. Both the main process
    * and the action worker put a fully-populated registry in the action deps. */
   actionRegistry: ActionExistenceChecker;
+  /** Answers whether an agent may call an action, with the same resolution as
+   * the agent tool gate. Without it, agents cannot schedule explicit actions. */
+  agentRunner?: Pick<AgentRunnerInterface, "hasAction">;
 }
 
 /** The single capability create_routine needs from the action registry: ask
@@ -101,6 +105,8 @@ export interface CreateRoutineDeps {
  * which satisfies it. */
 export interface ActionExistenceChecker {
   has(name: string): boolean | Promise<boolean>;
+  /** True when the action is `visibility: explicit`. */
+  isExplicit(name: string): boolean | Promise<boolean>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
@@ -401,6 +407,20 @@ export async function createRoutine(
   if (!(await deps.actionRegistry.has(actionName))) {
     return { status: "error", error: unknownActionError(actionName) };
   }
+  // A routine fires its action outside the agent tool gate, so an explicit
+  // target needs a principal that may call it: the app code that owns the call
+  // (callerAppId), or an agent that holds the action. Unattributed calls, such
+  // as one fired by another routine, a webhook or a favor, fail closed.
+  const context = getCurrentActionContext();
+  if (!context?.callerAppId && (await deps.actionRegistry.isExplicit(actionName))) {
+    const agentName = context?.agentName;
+    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
+      return {
+        status: "error",
+        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
+      };
+    }
+  }
 
   // `name` is the human-readable display label; trim and reject blank so a
   // whitespace-only " " isn't persisted as a routine with no visible title.
@@ -433,7 +453,7 @@ export async function createRoutine(
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is
   // managed by that app, and a routine an agent/user creates stays unmanaged.
-  const managedBy = getCurrentActionContext()?.callerAppId;
+  const managedBy = context?.callerAppId;
 
   const enabled = input.enabled ?? true;
   const routineId = await deps.routinesRepo.create({
@@ -487,8 +507,14 @@ export function createAction(
   if (!deps.routinesRepo) {
     throw new Error("create_routine requires a routinesRepo dep");
   }
-  if (typeof deps.actionRegistry?.has !== "function") {
-    throw new Error("create_routine requires an actionRegistry dep with has()");
+  if (
+    typeof deps.actionRegistry?.has !== "function" ||
+    typeof deps.actionRegistry.isExplicit !== "function"
+  ) {
+    throw new Error("create_routine requires an actionRegistry dep with has() and isExplicit()");
+  }
+  if (!deps.agentRunner) {
+    throw new Error("create_routine requires an agentRunner dep");
   }
   return createCreateRoutineAction(config, deps);
 }

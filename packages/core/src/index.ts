@@ -777,6 +777,7 @@ async function main() {
     agentLoader,
     webchatRepo,
     agentTurnStreamRegistry,
+    actionRegistry,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -1250,21 +1251,9 @@ async function main() {
     systemUpgrade: systemUpgradeService,
     hasAgent: (name) => agentLoader.has(name),
     hasRegisteredAction: (name) => actionRegistry.has(name),
-    // Resolve capability through the same allow-list path the agent session
-    // uses (`getForAgent` honors the agent's `actions` and `*`), so the inbox channel-control cue can't disagree with
-    // what the routed agent is actually allowed to call. Unknown agent → false.
-    hasAction: (agentName, actionName) => {
-      let config;
-      try {
-        const record = agentLoader.getRecord(agentName);
-        config = record.config;
-      } catch {
-        return false;
-      }
-      return actionRegistry
-        .getForAgent(config.actions ?? [])
-        .some((action) => action.config.name === actionName);
-    },
+    isExplicitAction: (name) => actionRegistry.isExplicit(name),
+    // Same allow-list resolution as the agent session's tool gate.
+    hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
     notify: notifyClient,
     feedback: feedbackClient,
