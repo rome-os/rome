@@ -669,6 +669,24 @@ describe("layout sync", () => {
     ]);
   });
 
+  it.each([
+    ["missing", null],
+    ["unreadable", "{not json"],
+  ])("loads the server copy when the unsynced layout is %s", async (_case, raw) => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("stray-chat");
+    localStorage.setItem("rome:free-layout-unsynced:stray-chat", "1");
+    if (raw === null) localStorage.removeItem("rome:free-layout:stray-chat");
+    else localStorage.setItem("rome:free-layout:stray-chat", raw);
+    const server = [{ id: "d", type: "desktop", order: 1 }];
+    serve(server);
+    await store.loadLayoutForSession("stray-chat");
+
+    expect(puts()).toEqual([]);
+    expect(readLayout("stray-chat")).toEqual(server);
+    expect(localStorage.getItem("rome:free-layout-unsynced:stray-chat")).toBeNull();
+  });
+
   it("resends an unsynced layout after a reload", async () => {
     const before = await import("./use-free-cells");
     before.setActiveSession("reload-chat");

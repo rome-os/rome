@@ -152,13 +152,18 @@ function storageKey(sessionId: string): string {
 
 function readStorage(sessionId: string | null): WidgetPlacement[] {
   if (!sessionId) return [];
+  return readStoredLayout(sessionId) ?? [];
+}
+
+// Returns null when the session has no stored layout or it does not parse.
+function readStoredLayout(sessionId: string): WidgetPlacement[] | null {
   try {
     const raw = localStorage.getItem(storageKey(sessionId));
-    if (!raw) return [];
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -617,8 +622,15 @@ export function setActiveSession(sessionId: string | null) {
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
   if (hasUnsyncedLayout(sessionId)) {
     // A save still in flight already carries the newest layout.
-    if (!layoutSaves.has(sessionId)) saveLayout(sessionId, readStorage(sessionId), true);
-    return;
+    if (layoutSaves.has(sessionId)) return;
+    const stored = readStoredLayout(sessionId);
+    if (stored) {
+      saveLayout(sessionId, stored, true);
+      return;
+    }
+    // With no readable stored layout there is nothing to resend, and sending an
+    // empty layout would erase the server's copy.
+    setUnsyncedLayout(sessionId, false);
   }
   const revision = layoutRevisions.get(sessionId);
   try {
