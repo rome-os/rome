@@ -49,12 +49,12 @@ The image's Python 3 has no `pip` and no `ensurepip`, and Debian marks it as ext
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-~/.local/bin/uv tool install ruff                     # a CLI tool → ~/.local/bin/ruff
-~/.local/bin/uv venv --python 3.12 ~/.venvs/work      # an environment with a uv-managed Python
+~/.local/bin/uv tool install --managed-python --python 3.12 httpie   # a CLI tool → ~/.local/bin/http
+~/.local/bin/uv venv --managed-python --python 3.12 ~/.venvs/work    # an environment
 ~/.local/bin/uv pip install --python ~/.venvs/work/bin/python requests
 ```
 
-Pass `--python` with a version. A uv-managed Python lives in home. A venv built on the image's `/usr/bin/python3` breaks when an upgrade changes that Python.
+Pass `--managed-python` with `--python <version>` to every `uv tool install` and `uv venv`. The flag makes uv use a Python it installs under home. Without it, uv builds the environment on the image's `/usr/bin/python3`, which an upgrade can replace.
 
 ### Global npm packages
 
@@ -137,7 +137,7 @@ If no package ships a binary for the instance, build the `.node` file once on an
 
 1. Build the addon with N-API. A non-N-API addon loads only on the Node major version it was built for. A Rome upgrade can move to a new Node major.
 2. Build it in the `node:24-bookworm` Docker image, which has the compilers. Pass `--platform linux/amd64` or `--platform linux/arm64` to match the instance. Use a machine with Docker, such as the guardian's computer or a CI runner.
-3. Commit the file under `src/`, for example as `src/native/<name>.node`. `rome build` copies every non-TypeScript file under `src/` into the `appRoot` directory, except `src/web/`. With `includeSource: true`, the published source carries the file too.
+3. Commit the file under `src/`, for example as `src/native/<name>.node`. `rome build` copies the files under `src/` into the `appRoot` directory, except `.ts`, `.tsx`, and `.css` files and `src/web/`. With `includeSource: true`, the published source carries the file too.
 4. Load the file with `createRequire(import.meta.url)` and a path that starts from the loading module's directory. The same path works from `src/` and from the built output.
 
 ### 5. On a self-hosted instance, extend the image
