@@ -180,7 +180,9 @@ sleep 0.1
     expect(chromeArgs).toContain("--use-angle=swiftshader-webgl");
     expect(chromeArgs).toContain("--enable-unsafe-swiftshader");
     expect(chromeArgs).not.toContain("--disable-gpu");
-    expect(chromeArgs).toContain("--disable-features=IgnoreDuplicateNavs");
+    expect(chromeArgs.filter((arg) => arg.startsWith("--disable-features="))).toEqual([
+      "--disable-features=IgnoreDuplicateNavs",
+    ]);
     expect(supervisor.exitCode).toBeNull();
   });
 
@@ -262,7 +264,9 @@ sleep 0.1
     expect(count).toBeGreaterThanOrEqual(2);
     expect(existsSync(wrapperUsedFile)).toBe(false);
     expect(chromeArgs).toContain(`--user-data-dir=${join(tempDir, "profile")}`);
-    expect(chromeArgs).toContain("--disable-features=IgnoreDuplicateNavs");
+    expect(chromeArgs.filter((arg) => arg.startsWith("--disable-features="))).toEqual([
+      "--disable-features=IgnoreDuplicateNavs",
+    ]);
     expect(googleEnv).toBe("");
     expect(supervisor.exitCode).toBeNull();
   });
