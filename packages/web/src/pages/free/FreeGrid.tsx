@@ -40,6 +40,7 @@ import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { getWidgetFullHref } from "./widget-links";
+import { useSessionNames } from "./use-session-names";
 import {
   autoPlaceApp,
   autoPlaceProjects,
@@ -137,7 +138,15 @@ export function FreeGrid() {
   const { placements, addWidget, removeWidget, toolView, selectTool, setToolsCollapsed } =
     useFreeCells();
   const { apps } = useApps();
+  const sessionNames = useSessionNames(
+    placements.flatMap((widget) =>
+      widget.type === "chat" && widget.targetId ? [widget.targetId] : [],
+    ),
+  );
   const widgetLabel = (widget: WidgetPlacement) => {
+    if (widget.type === "chat" && widget.targetId) {
+      return sessionNames.get(widget.targetId) ?? t("nav.chat");
+    }
     if (widget.type === "app")
       return (
         apps?.find((app) => app.id === widget.targetId)?.displayName ??
