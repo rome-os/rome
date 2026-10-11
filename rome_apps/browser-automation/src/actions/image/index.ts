@@ -87,8 +87,6 @@ export async function generateImageWithChatGPT(
         entrypointExpression: "generateChatGPTImage",
         args: [{ prompt: input.prompt, timeout: input.timeoutMs }],
         autorunFlag: "__ROME_CHATGPT_IMAGE_AUTORUN__",
-        missingEntrypointMessage:
-          "generateChatGPTImage is not defined after loading the browser script",
       },
     );
 
@@ -102,8 +100,6 @@ export async function generateImageWithChatGPT(
         scriptUrl: IMAGE_DOWNLOAD_SCRIPT_URL,
         entrypointExpression: "downloadGeneratedChatGPTImage",
         autorunFlag: "__ROME_CHATGPT_IMAGE_DOWNLOAD_AUTORUN__",
-        missingEntrypointMessage:
-          "downloadGeneratedChatGPTImage is not defined after loading the browser script",
       },
     );
 
@@ -287,7 +283,6 @@ async function runBrowserScriptInSession<TResult>(
     entrypointExpression: string;
     args?: unknown[];
     autorunFlag?: string;
-    missingEntrypointMessage?: string;
   },
 ): Promise<TResult> {
   const scriptSource = await loadCachedScriptSource(options.scriptUrl);
@@ -296,7 +291,6 @@ async function runBrowserScriptInSession<TResult>(
     entrypointExpression: options.entrypointExpression,
     args: options.args,
     autorunFlag: options.autorunFlag,
-    missingEntrypointMessage: options.missingEntrypointMessage,
   });
 
   return await session.evaluateByValue<TResult>(expression);

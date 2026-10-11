@@ -80,6 +80,9 @@ async function recordDeliveredConversationMessage(
   delivery: MessageReceipt,
 ): Promise<void> {
   if (!deps.conversations || !threadId) return;
+  // The webchat channel writes the line into the chat itself. Recording it
+  // again would leave a second copy under a separate channel row.
+  if (input.channel === "webchat") return;
   const current = getCurrentActionContext();
   const requestedThreadId = input.threadId;
   const deliveryCreatedThread = !!requestedThreadId && requestedThreadId !== threadId;

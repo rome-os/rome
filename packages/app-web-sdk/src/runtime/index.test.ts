@@ -147,11 +147,13 @@ describe("navigateToApp", () => {
 describe("navigateRome", () => {
   function stubNavHost() {
     const dispatchEvent = rs.fn();
-    rs.stubGlobal("window", {
+    const topWindow: Record<string, unknown> = {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
       location: { origin: "http://localhost" },
-    } as unknown as Window & typeof globalThis);
+    };
+    topWindow.parent = topWindow;
+    rs.stubGlobal("window", topWindow as unknown as Window & typeof globalThis);
     return { dispatchEvent };
   }
 
@@ -356,10 +358,12 @@ describe("navigateRome", () => {
 describe("startChat", () => {
   function stubChatHost() {
     const dispatchEvent = rs.fn();
-    rs.stubGlobal("window", {
+    const topWindow: Record<string, unknown> = {
       __ROME_APP_BOOTSTRAP__: bootstrap,
       dispatchEvent,
-    } as unknown as Window & typeof globalThis);
+    };
+    topWindow.parent = topWindow;
+    rs.stubGlobal("window", topWindow as unknown as Window & typeof globalThis);
     return { dispatchEvent };
   }
 

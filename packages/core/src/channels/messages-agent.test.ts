@@ -132,6 +132,16 @@ describe("agentMessages", () => {
     ]);
   });
 
+  it("answers nothing from a guardian chat, even stored as a channel row", async () => {
+    await session(db, "chat-1", { channel: "webchat", threadId: "chat-1" });
+    await message(db, "m-chat", { sessionId: "chat-1", role: "user", at: 700 });
+    const page = await agentMessages(db).read({
+      accounts: [{ channel: "webchat", addresses: ["chat-1"] }],
+      limit: WHOLE_HISTORY,
+    });
+    expect(page).toEqual([]);
+  });
+
   it("answers nothing to a group's own address, which is no account", async () => {
     const asGroup = await agentMessages(db).read({
       accounts: [{ channel: CHANNEL, addresses: [GROUP] }],

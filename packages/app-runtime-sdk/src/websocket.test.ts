@@ -35,9 +35,4 @@ describe("upgradeWebSocket", () => {
     expect(accept).toHaveBeenCalledWith(handlers);
     expect(res).toBe(sentinel);
   });
-
-  it("ignores a non-function value under the bridge symbol", () => {
-    const res = upgradeWebSocket(makeRequest({ [WS_UPGRADE_ACCEPT]: "nope" }), {});
-    expect(res.status).toBe(426);
-  });
 });

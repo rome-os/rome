@@ -59,7 +59,7 @@ favorRequirement:
   ```
 
 - **Handle every status.** Store the request id on every status that returns one (`requestId`, or `request.id` for `queued`).
-  - `pending_consent`: send the visitor to `authorizationUrl`. It is optional in the type, so treat a missing one as a retryable error.
+  - `pending_consent`: send the visitor to `authorizationUrl`.
   - `queued`: credit the purchase only if `request.status === "settled"`.
   - `declined`: mark the purchase declined.
   - `error` with `visitor_auth_required` or `visitor_favor_auth_required`: return `visitorAuthRequired()`. Any other error leaves the purchase uncredited and retryable.

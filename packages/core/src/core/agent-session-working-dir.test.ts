@@ -206,7 +206,7 @@ describe("AgentSessionManager working dirs", () => {
 
     expect(replacement.sessionId).not.toBe(original.sessionId);
     expect((await sessionsRepo.findById(replacement.sessionId))?.conversationId).toBe("conv-1");
-    expect(replacement.conversationId).toBe("conv-1");
+    expect(replacement.conversation).toMatchObject({ origin: "recorded", id: "conv-1" });
   });
 
   it("runs a reuse or resume that names no conversation in the one the row recorded", async () => {
@@ -218,11 +218,11 @@ describe("AgentSessionManager working dirs", () => {
 
     const byKey = await manager.acquire(key);
     expect(byKey.sessionId).toBe(sessionId);
-    expect(byKey.conversationId).toBe("stored");
+    expect(byKey.conversation).toMatchObject({ origin: "recorded", id: "stored" });
     await byKey.close("idle");
 
     const byId = await manager.acquireBySessionId(sessionId, AGENT);
-    expect(byId.conversationId).toBe("stored");
+    expect(byId.conversation).toMatchObject({ origin: "recorded", id: "stored" });
   });
 
   it("shows a conversation recorded after open on the cached session", async () => {
@@ -230,7 +230,7 @@ describe("AgentSessionManager working dirs", () => {
       agentName: AGENT,
       channelThreadKey: "webchat:late:subagent:1",
     });
-    expect(session.conversationId).toBeUndefined();
+    expect(session.conversation).toBeUndefined();
     await webchatRepo.ensureRomeSession({
       id: session.sessionId,
       type: "subagent",
@@ -240,8 +240,8 @@ describe("AgentSessionManager working dirs", () => {
 
     await manager.recordConversation!(session.sessionId, session.sessionId);
 
-    expect(session.conversationId).toBe(session.sessionId);
-    expect(session.recordedConversation).toMatchObject({
+    expect(session.conversation).toMatchObject({
+      origin: "recorded",
       id: session.sessionId,
       type: "subagent",
     });
@@ -262,12 +262,12 @@ describe("AgentSessionManager working dirs", () => {
     const reopened = await manager.acquire(kept);
     const orphaned = await manager.acquire(gone);
 
-    expect(reopened.recordedConversation).toMatchObject({
+    expect(reopened.conversation).toMatchObject({
+      origin: "recorded",
       id: "channel:telegram:kept",
       type: "channel",
     });
-    expect(orphaned.recordedConversation).toBeUndefined();
-    expect(orphaned.conversationId).toBeUndefined();
+    expect(orphaned.conversation).toBeUndefined();
   });
 
   it("records the conversation on a reused row that had none", async () => {
@@ -290,7 +290,7 @@ describe("AgentSessionManager working dirs", () => {
     const reused = await manager.acquire(key, { romeSessionId: "other" });
 
     expect(reused.sessionId).toBe(original.sessionId);
-    expect(reused.conversationId).toBe("other");
+    expect(reused.conversation).toEqual({ origin: "named", id: "other" });
     expect((await sessionsRepo.findById(original.sessionId))?.conversationId).toBe("kept");
   });
 

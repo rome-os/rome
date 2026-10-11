@@ -52,7 +52,7 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      romeSessionId: "channel:discord:channel-1",
+      conversation: { origin: "named", id: "channel:discord:channel-1" },
       sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
@@ -122,7 +122,8 @@ describe("AgentSessionBridge conversation", () => {
       const session = {
         key: { agentName: "main", channelThreadKey: "discord:channel-1" },
         sessionId: "session-1",
-        recordedConversation: {
+        conversation: {
+          origin: "recorded" as const,
           id: "child-chat",
           name: "researcher: Parent",
           type: "subagent",

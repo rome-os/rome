@@ -300,10 +300,12 @@ describe("CodexAppServerManager", () => {
     const opened = await manager.openThread(config("rome_source"), callbacks);
     const threadId = opened.threadId;
 
-    clients[0].options.onExit?.(137);
-    expect(callbacks.exits).toHaveLength(1);
+    clients[0].options.onExit?.(new Error("codex app-server exited (signal SIGKILL)"));
+    expect(callbacks.exits).toEqual([
+      expect.objectContaining({ message: "codex app-server exited (signal SIGKILL)" }),
+    ]);
     expect(globalExit).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "codex app-server exited (code 137)" }),
+      expect.objectContaining({ message: "codex app-server exited (signal SIGKILL)" }),
     );
 
     await manager.requestForThread(threadId, "turn/start", { threadId, input: [] });
@@ -317,6 +319,20 @@ describe("CodexAppServerManager", () => {
     expect(clients[1].requests[1].params).not.toHaveProperty("dynamicTools");
     expect(clients[1].requests[1].params).not.toHaveProperty("historyMode");
     manager.close();
+  });
+
+  it("tells bound threads that Rome is shutting down when it closes", async () => {
+    const manager = new CodexAppServerManager({
+      createClient: (options) => new FakeConnection(options, () => "thread-1"),
+    });
+    const callbacks = binding("source");
+    await manager.openThread(config("rome_source"), callbacks);
+
+    manager.close();
+
+    expect(callbacks.exits).toEqual([
+      expect.objectContaining({ message: "Rome is shutting down" }),
+    ]);
   });
 
   it("fails closed for a dynamic call whose thread is not bound", async () => {
@@ -342,6 +358,7 @@ describe("CodexAppServerManager", () => {
 });
 
 describe("CodexAppServerManager Rome credits wiring", () => {
+  const PAYER_RESTART = "the model payer or Rome instance credential changed";
   const capture = () => {
     const clients: FakeConnection[] = [];
     const manager = new CodexAppServerManager({
@@ -444,12 +461,8 @@ describe("CodexAppServerManager Rome credits wiring", () => {
 
       expect(clients).toHaveLength(1);
       expect(clients[0].closed).toBe(1);
-      expect(callbacks.exits).toEqual([
-        expect.objectContaining({ message: "codex app-server exited (code null)" }),
-      ]);
-      expect(exited).toHaveBeenCalledWith(
-        expect.objectContaining({ message: "codex app-server exited (code null)" }),
-      );
+      expect(callbacks.exits).toEqual([expect.objectContaining({ message: PAYER_RESTART })]);
+      expect(exited).toHaveBeenCalledWith(expect.objectContaining({ message: PAYER_RESTART }));
 
       await manager.requestForThread(threadId, Method.turnStart, { threadId });
 
@@ -476,7 +489,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
 
       expect(accountService.getLoginState()).toMatchObject({
         running: false,
-        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
+        lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
       });
     } finally {
       accountService.close();
@@ -507,7 +520,7 @@ describe("CodexAppServerManager Rome credits wiring", () => {
       await expect(starting).rejects.toThrow("Codex login was canceled");
       expect(accountService.getLoginState()).toMatchObject({
         running: false,
-        lastError: "Codex sign-in stopped: codex app-server exited (code null)",
+        lastError: `Codex sign-in stopped: ${PAYER_RESTART}`,
       });
     } finally {
       accountService.close();

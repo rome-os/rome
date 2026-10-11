@@ -145,12 +145,11 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - acquireStartedAt,
         });
 
-        const boundRomeSessionId = session.romeSessionId ?? req.init?.romeSessionId;
         const conversation = resolveTurnConversation({
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
-          romeSessionId: boundRomeSessionId,
-          recordedConversation: session.recordedConversation,
+          romeSessionId: req.init?.romeSessionId,
+          sessionConversation: session.conversation,
           channelThreadKey: req.key.channelThreadKey,
           threadContext: req.init?.threadContext,
           actionContext: req.actionContext,
@@ -170,7 +169,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           romeSessionType,
           replyTo: req.replyTo,
         });
-        if (this.webchatRepo && boundRomeSessionId && req.platformMessageId) {
+        if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
           await this.webchatRepo.assignConversationMessageTurn(
             romeSessionId,
             req.platformMessageId,

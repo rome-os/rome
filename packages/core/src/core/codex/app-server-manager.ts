@@ -175,7 +175,7 @@ export class CodexAppServerManager {
     // Do not make a later request join an initialization that has the old
     // process default. Closing that client rejects its own in-flight callers.
     this.connectionPromise = null;
-    const error = new Error("codex app-server exited (code null)");
+    const error = new Error("the model payer or Rome instance credential changed");
     this.failCurrentGeneration(connection?.generation, error);
     connection?.client.close();
     if (!connection && startingConnection) startingConnection.client.close();
@@ -292,7 +292,7 @@ export class CodexAppServerManager {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    const error = new Error("codex app-server manager closed");
+    const error = new Error("Rome is shutting down");
     for (const binding of this.bindings.values()) {
       try {
         binding.callbacks.onExit(error);
@@ -392,10 +392,10 @@ export class CodexAppServerManager {
         if (invalidated) return {};
         return await this.routeServerRequest(method, params);
       },
-      onExit: (code) => {
+      onExit: (error) => {
         exited = true;
         invalidated = true;
-        this.handleExit(client, generation, code);
+        this.handleExit(client, generation, error);
       },
     });
     const connection = {
@@ -478,13 +478,8 @@ export class CodexAppServerManager {
     return await binding.callbacks.onDynamicToolCall(call);
   }
 
-  private handleExit(
-    client: CodexAppServerConnection,
-    generation: number,
-    code: number | null,
-  ): void {
+  private handleExit(client: CodexAppServerConnection, generation: number, error: Error): void {
     if (this.closed || this.connection?.client !== client) return;
-    const error = new Error(`codex app-server exited (code ${code ?? "null"})`);
     this.connection.invalidate();
     this.connection = null;
     this.failCurrentGeneration(generation, error);

@@ -7,8 +7,7 @@ function urlFor(host: string, pathAndQuery: string): string {
       `Invalid host "${host}". Set ROME_STORE_HOST to an absolute URL (e.g. https://romeos.cc) or unset it to use the default.`,
     );
   }
-  const p = pathAndQuery.startsWith("/") ? pathAndQuery : `/${pathAndQuery}`;
-  return `${trimmed}${p}`;
+  return `${trimmed}${pathAndQuery}`;
 }
 
 function authHeaders(bearer: CliBearer): Record<string, string> {
@@ -49,29 +48,16 @@ export async function postJson<T>(
   host: string,
   path: string,
   body: unknown,
-  bearer?: CliBearer,
-): Promise<{ response: Response; body: T; setCookies: string[] }> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json",
-  };
-  if (bearer) Object.assign(headers, authHeaders(bearer));
+): Promise<{ body: T; setCookies: string[] }> {
   const response = await fetch(urlFor(host, path), {
     method: "POST",
-    headers,
+    headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
   });
-  const setCookies = response.headers.getSetCookie ? response.headers.getSetCookie() : [];
-  const json = (await response.json().catch(() => ({}))) as unknown;
   if (!response.ok) {
-    const errField =
-      json && typeof json === "object" && "error" in json
-        ? (json as { error?: unknown }).error
-        : null;
-    const msg = typeof errField === "string" ? errField : `HTTP ${response.status}`;
-    throw new CliError(msg);
+    throw new CliError(`${response.status} ${await readError(response)}`);
   }
-  return { response, body: json as T, setCookies };
+  return { body: (await response.json()) as T, setCookies: response.headers.getSetCookie() };
 }
 
 export async function postMultipart<T>(

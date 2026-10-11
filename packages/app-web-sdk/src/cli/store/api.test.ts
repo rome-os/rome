@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { getJson } from "./api.js";
+import { getJson, postJson } from "./api.js";
 
 afterEach(() => {
   rs.unstubAllGlobals();
@@ -28,6 +28,15 @@ describe("getJson errors", () => {
     stubResponse("", 503, "Service Unavailable");
     await expect(getJson("https://rome.example", "/api/store/me")).rejects.toThrow(
       "503 Service Unavailable",
+    );
+  });
+});
+
+describe("postJson errors", () => {
+  it("shows a non-JSON error body as sent", async () => {
+    stubResponse("<html>Bad Gateway</html>", 502, "Bad Gateway");
+    await expect(postJson("https://rome.example", "/api/auth/login", {})).rejects.toThrow(
+      "502 <html>Bad Gateway</html>",
     );
   });
 });

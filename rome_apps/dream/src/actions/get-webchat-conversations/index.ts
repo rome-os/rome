@@ -113,6 +113,9 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
 
       log.info("fetching webchat conversations", { windowHours, cutoffSeconds, sessionId });
 
+      // A guardian chat is stored either as a webchat row or as a webchat
+      // channel row addressed by its own id; both filters below match either.
+      // Same rule as `isWebchatChat` in packages/core/src/db/session-kind.ts.
       let rows: MessageRow[] = [];
       try {
         if (sessionId) {
@@ -123,7 +126,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.session_id = ${sessionId}
                 AND wm.created_at >= ${cutoffSeconds}
-                AND ws.type IN ('webchat', 'webchat_handoff')
+                AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
               ORDER BY wm.created_at ASC
             `,
           ) as MessageRow[];
@@ -134,7 +137,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
               FROM rome_agent_messages wm
               JOIN rome_sessions ws ON ws.id = wm.session_id
               WHERE wm.created_at >= ${cutoffSeconds}
-                AND ws.type IN ('webchat', 'webchat_handoff')
+                AND (ws.type IN ('webchat', 'webchat_handoff') OR (ws.type = 'channel' AND ws.source_channel = 'webchat' AND ws.source_thread_id = ws.id))
               ORDER BY wm.session_id, wm.created_at ASC
             `,
           ) as MessageRow[];

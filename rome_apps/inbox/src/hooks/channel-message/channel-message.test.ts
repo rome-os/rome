@@ -14,6 +14,12 @@ import { ChannelMessageHook, createHook, MissingChannelsError } from "./index.js
 
 const TELEGRAM_ID = "connection:telegram";
 const WHATSAPP_ID = "connection:whatsapp";
+const AGENTS_ID = "connection:agents";
+const SERVICES: Record<string, string> = {
+  [TELEGRAM_ID]: "telegram",
+  [WHATSAPP_ID]: "whatsapp",
+  [AGENTS_ID]: "agents",
+};
 
 // What a channel's port reads for activity and inbound media, per Connection.
 interface ChannelFeatures {
@@ -45,7 +51,7 @@ function snapshot(
   return {
     conversation: {
       ref: { connectionId, conversationId },
-      service: connectionId === TELEGRAM_ID ? "telegram" : "whatsapp",
+      service: SERVICES[connectionId] ?? "unknown",
       kind: "group" as const,
       displayName: conversationId,
     },
@@ -102,7 +108,11 @@ function createHarness(options: ConstructorParameters<typeof ChannelMessageHook>
       },
     },
   });
-  const channels = [channel("telegram", TELEGRAM_ID), channel("whatsapp", WHATSAPP_ID)];
+  const channels = [
+    channel("telegram", TELEGRAM_ID),
+    channel("whatsapp", WHATSAPP_ID),
+    channel("agents", AGENTS_ID),
+  ];
   const hook = new ChannelMessageHook(
     actionEngine,
     conversationSettings,
@@ -223,6 +233,35 @@ describe("ChannelMessageHook", () => {
     expect(harness.stop).not.toHaveBeenCalled();
     expect(harness.send).not.toHaveBeenCalled();
     expect(harness.run).not.toHaveBeenCalled();
+  });
+
+  it("hands an agent's /stop to message_handler as text, without stopping or answering", async () => {
+    const agentId = "7d3f6a52-1c8e-4b2a-9f0d-5e6a7b8c9d01";
+    await harness.emit(
+      AGENTS_ID,
+      message({
+        channel: "agents",
+        senderId: agentId,
+        conversationId: agentId as ConversationId,
+        senderDisplayName: "Atlas",
+        text: "/stop",
+        thread: { kind: "dm" },
+      }),
+    );
+
+    expect(harness.stop).not.toHaveBeenCalled();
+    expect(harness.send).not.toHaveBeenCalled();
+    expect(harness.get).toHaveBeenCalledWith({ connectionId: AGENTS_ID, conversationId: agentId });
+    expect(harness.run).toHaveBeenCalledWith(
+      "message_handler",
+      expect.objectContaining({
+        connectionId: AGENTS_ID,
+        channel: "agents",
+        channelUserId: agentId,
+        text: "/stop",
+      }),
+      expect.anything(),
+    );
   });
 
   it("honors disabled conversations and routed agents from shared settings", async () => {
