@@ -47,7 +47,8 @@ const CLOSED: SseErrorContext["readyState"] = 2;
  *  - `onReconnect` fires after the socket comes back and the topic is
  *    subscribed again, never on the first subscription.
  *  - `onError` sees `readyState` CONNECTING when the socket drops and CLOSED
- *    when the server refuses the topic, which it then does not retry.
+ *    when the server refuses the topic. The client asks for a refused topic
+ *    again only after the socket reconnects.
  *
  * When the socket never opens, or the browser has no WebSocket, the hook
  * streams `topic.sseUrl` through `useSseEvents` instead.

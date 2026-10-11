@@ -1,7 +1,7 @@
 // Per-tab client for the guardian live-events WebSocket (`/ws/events`). One
 // socket carries every live topic so the dashboard's long-lived streams stay
-// out of the browser's six-connection HTTP/1.1 pool (rome-os/rome#146). The
-// wire protocol is documented in packages/core/src/live-events-server.ts.
+// out of the browser's six-connection HTTP/1.1 pool. The wire protocol is
+// documented in packages/core/src/live-events-server.ts.
 import { z } from "zod";
 
 /**
@@ -21,7 +21,10 @@ export interface LiveTopicListener {
   onReconnect(): void;
   /** The socket dropped. The client reconnects on its own. */
   onDrop(): void;
-  /** The server refused or ended the subscription. The client does not retry it. */
+  /**
+   * The server refused or ended the subscription. The client asks again only
+   * after the socket reconnects or another listener subscribes to the topic.
+   */
   onRejected(message: string): void;
 }
 
@@ -37,6 +40,8 @@ export interface LiveEventsClientOptions {
   idleCloseMs?: number;
   /** Delay before reconnect attempt `attempt` (1-based). */
   reconnectDelayMs?: (attempt: number) => number;
+  /** How long a socket stays open before its drop restarts the backoff at attempt 1. */
+  stableOpenMs?: number;
 }
 
 const serverMessageSchema = z.discriminatedUnion("type", [
@@ -66,6 +71,10 @@ function defaultReconnectDelayMs(attempt: number): number {
   return base / 2 + Math.random() * (base / 2);
 }
 
+// Generations start at 1, so this never matches one. A listener whose topic
+// was rejected holds it, and the next ack on a later socket resyncs it.
+const REJECTED_GENERATION = 0;
+
 interface TopicEntry {
   // The socket generation each listener last saw a `subscribed` ack on, or
   // null before its first one. An ack on a newer generation is a reconnect.
@@ -80,6 +89,7 @@ export class LiveEventsClient {
   private readonly openTimeoutMs: number;
   private readonly idleCloseMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
+  private readonly stableOpenMs: number;
 
   private readonly topics = new Map<string, TopicEntry>();
   private readonly transportListeners = new Set<() => void>();
@@ -92,6 +102,7 @@ export class LiveEventsClient {
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private stableTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: LiveEventsClientOptions = {}) {
     this.WebSocketImpl = options.WebSocket;
@@ -100,6 +111,7 @@ export class LiveEventsClient {
     this.openTimeoutMs = options.openTimeoutMs ?? 10_000;
     this.idleCloseMs = options.idleCloseMs ?? 5_000;
     this.reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelayMs;
+    this.stableOpenMs = options.stableOpenMs ?? 5_000;
   }
 
   getTransport = (): LiveEventsTransport =>
@@ -171,11 +183,14 @@ export class LiveEventsClient {
     this.clearOpenTimer();
     this.socketOpen = true;
     this.everOpened = true;
-    this.failedAttempts = 0;
+    // A server or proxy that accepts and then drops at once would otherwise
+    // reconnect at the shortest delay forever, resyncing every listener each time.
+    this.stableTimer = setTimeout(() => {
+      this.stableTimer = null;
+      this.failedAttempts = 0;
+    }, this.stableOpenMs);
     this.generation += 1;
-    for (const [topic, entry] of this.topics) {
-      if (entry.state !== "rejected") this.sendSubscribe(topic, entry);
-    }
+    for (const [topic, entry] of this.topics) this.sendSubscribe(topic, entry);
   }
 
   private handleMessage(socket: WebSocket, event: MessageEvent): void {
@@ -212,7 +227,10 @@ export class LiveEventsClient {
       }
     } else {
       entry.state = "rejected";
-      for (const listener of [...entry.listeners.keys()]) listener.onRejected(message.message);
+      for (const listener of [...entry.listeners.keys()]) {
+        entry.listeners.set(listener, REJECTED_GENERATION);
+        listener.onRejected(message.message);
+      }
     }
   }
 
@@ -220,12 +238,11 @@ export class LiveEventsClient {
     if (socket !== this.socket) return;
     const opened = this.socketOpen;
     this.clearOpenTimer();
+    this.clearStableTimer();
     this.socket = null;
     this.socketOpen = false;
-    for (const entry of this.topics.values()) {
-      if (entry.state !== "rejected") entry.state = "idle";
-    }
-    if (!opened) this.failedAttempts += 1;
+    for (const entry of this.topics.values()) entry.state = "idle";
+    this.failedAttempts += 1;
     if (!this.everOpened && this.failedAttempts >= this.maxFailedOpens) {
       this.fallBack();
       return;
@@ -236,13 +253,10 @@ export class LiveEventsClient {
       }
     }
     if (this.topics.size === 0) return;
-    this.reconnectTimer = setTimeout(
-      () => {
-        this.reconnectTimer = null;
-        if (this.topics.size > 0) this.ensureSocket();
-      },
-      this.reconnectDelayMs(Math.max(1, this.failedAttempts)),
-    );
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.topics.size > 0) this.ensureSocket();
+    }, this.reconnectDelayMs(this.failedAttempts));
   }
 
   private fallBack(): void {
@@ -277,6 +291,7 @@ export class LiveEventsClient {
       const socket = this.socket;
       if (!socket) return;
       this.clearOpenTimer();
+      this.clearStableTimer();
       this.socket = null;
       this.socketOpen = false;
       socket.close();
@@ -287,6 +302,13 @@ export class LiveEventsClient {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
+    }
+  }
+
+  private clearStableTimer(): void {
+    if (this.stableTimer) {
+      clearTimeout(this.stableTimer);
+      this.stableTimer = null;
     }
   }
 

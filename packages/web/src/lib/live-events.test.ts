@@ -122,24 +122,62 @@ describe("LiveEventsClient", () => {
     expect(status.onReconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("stops retrying a topic the server rejected, until a new listener asks again", () => {
+  it("asks for a rejected topic again only on a later socket, and resyncs once it is accepted", () => {
     const live = client();
     const missing = listener();
-    live.subscribe("chat.session:gone", missing);
+    live.subscribe("chat.session:s1", missing);
     live.subscribe("chat.status", listener());
     const socket = FakeWebSocket.latest();
     socket.open();
-    socket.receive({ type: "error", topic: "chat.session:gone", message: "Not found" });
-    expect(missing.onRejected).toHaveBeenCalledWith("Not found");
+    socket.receive({ type: "error", topic: "chat.session:s1", message: "Subscribe failed" });
+    expect(missing.onRejected).toHaveBeenCalledWith("Subscribe failed");
+    socket.receive({ type: "subscribed", topic: "chat.status" });
+    expect(socket.sent).toEqual([subscribe("chat.session:s1"), subscribe("chat.status")]);
 
     socket.close();
     rs.advanceTimersByTime(100);
     const next = FakeWebSocket.latest();
     next.open();
-    expect(next.sent).toEqual([subscribe("chat.status")]);
+    expect(next.sent).toEqual([subscribe("chat.session:s1"), subscribe("chat.status")]);
+    expect(missing.onReconnect).not.toHaveBeenCalled();
+    next.receive({ type: "subscribed", topic: "chat.session:s1" });
+    expect(missing.onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for a rejected topic again when a new listener subscribes to it", () => {
+    const live = client();
+    live.subscribe("chat.session:gone", listener());
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    socket.receive({ type: "error", topic: "chat.session:gone", message: "Not found" });
 
     live.subscribe("chat.session:gone", listener());
-    expect(next.sent.at(-1)).toEqual(subscribe("chat.session:gone"));
+    expect(socket.sent).toEqual([subscribe("chat.session:gone"), subscribe("chat.session:gone")]);
+  });
+
+  it("grows the backoff while sockets drop right after opening, and restarts it after a stable one", () => {
+    const delays: number[] = [];
+    const live = new LiveEventsClient({
+      WebSocket: asWebSocket,
+      url: () => "ws://rome.test/ws/events",
+      reconnectDelayMs: (attempt) => {
+        delays.push(attempt);
+        return 100;
+      },
+      stableOpenMs: 2_000,
+    });
+    live.subscribe("chat.status", listener());
+    for (let drop = 0; drop < 3; drop++) {
+      FakeWebSocket.latest().open();
+      FakeWebSocket.latest().close();
+      rs.advanceTimersByTime(100);
+    }
+    expect(delays).toEqual([1, 2, 3]);
+
+    FakeWebSocket.latest().open();
+    rs.advanceTimersByTime(2_000);
+    FakeWebSocket.latest().close();
+    expect(delays).toEqual([1, 2, 3, 1]);
   });
 
   it("falls back to SSE when the socket never opens, resyncing the listeners that waited", () => {

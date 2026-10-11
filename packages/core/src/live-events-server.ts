@@ -1,6 +1,6 @@
 // Guardian live-events WebSocket at `/ws/events`. One socket per dashboard tab
 // carries the chat status, chat session, and app catalog streams, so they hold
-// none of the browser's six HTTP/1.1 connections per origin (rome-os/rome#146).
+// none of the browser's six HTTP/1.1 connections per origin.
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md.
@@ -11,7 +11,8 @@
 //                    {type:"error", topic?, message}
 // `subscribed` precedes every event of that subscription, including the
 // snapshot `chat.status` replays. Subscribing to a topic the socket already
-// holds is a no-op. An `error` with a topic means that subscription is gone.
+// holds is a no-op. An `error` with a topic means that subscription is gone,
+// and the client may ask for it again on a later socket.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
