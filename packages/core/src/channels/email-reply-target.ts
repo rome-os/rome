@@ -20,8 +20,8 @@ export interface EmailReplyTarget {
 }
 
 export interface ResolveEmailReplyTargetOptions {
-  /** Whether a listed message is one this inbox sent. Defaults to the `sent` label. */
-  isOutbound?: (item: RomeMailListItem) => boolean;
+  /** Whether a listed message is one this inbox sent. */
+  isOutbound: (item: RomeMailListItem) => boolean;
   budgetMs?: number;
 }
 
@@ -39,9 +39,9 @@ export interface ResolveEmailReplyTargetOptions {
 export async function resolveEmailReplyTarget(
   provider: Pick<MailProvider, "listMessages">,
   threadId: string,
-  options: ResolveEmailReplyTargetOptions = {},
+  options: ResolveEmailReplyTargetOptions,
 ): Promise<EmailReplyTarget> {
-  const isOutbound = options.isOutbound ?? ((item) => item.labels.includes("sent"));
+  const { isOutbound } = options;
   const budgetMs = options.budgetMs ?? REPLY_LOOKUP_BUDGET_MS;
   const state: ScanState = { expired: false };
   const fallback = (): EmailReplyTarget | undefined =>

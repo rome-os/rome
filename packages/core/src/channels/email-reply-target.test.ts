@@ -15,6 +15,8 @@ function item(
   };
 }
 
+const bySentLabel = { isOutbound: (listed: RomeMailListItem) => listed.labels.includes("sent") };
+
 function inbound(messageId: string): EmailReplyTarget {
   return { messageId, outbound: false };
 }
@@ -43,7 +45,7 @@ describe("resolveEmailReplyTarget", () => {
       ],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       inbound("inbound-newest"),
     );
   });
@@ -54,7 +56,7 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [item("wanted", "sent-1")], nextPageToken: "page-2" })
       .mockResolvedValueOnce({ messages: [item("wanted", "inbound", ["received"])] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       inbound("inbound"),
     );
     expect(listMessages).toHaveBeenCalledTimes(2);
@@ -69,7 +71,7 @@ describe("resolveEmailReplyTarget", () => {
       })
       .mockResolvedValueOnce({ messages: [item("wanted", "sent-older")] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       sent("sent-newest"),
     );
     expect(listMessages).toHaveBeenCalledTimes(2);
@@ -98,7 +100,10 @@ describe("resolveEmailReplyTarget", () => {
       return after(400, { messages: [item("other")], nextPageToken: `page-${page}` });
     });
 
-    const result = resolveEmailReplyTarget({ listMessages }, "wanted", { budgetMs: 1_000 }).then(
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", {
+      ...bySentLabel,
+      budgetMs: 1_000,
+    }).then(
       () => new Error("expected a rejection"),
       (err: unknown) => err,
     );
@@ -119,7 +124,10 @@ describe("resolveEmailReplyTarget", () => {
       });
     });
 
-    const result = resolveEmailReplyTarget({ listMessages }, "wanted", { budgetMs: 1_000 });
+    const result = resolveEmailReplyTarget({ listMessages }, "wanted", {
+      ...bySentLabel,
+      budgetMs: 1_000,
+    });
     await rs.advanceTimersByTimeAsync(1_000);
 
     await expect(result).resolves.toEqual(sent("sent-1"));
@@ -131,7 +139,7 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [item("wanted", "sent-1")], nextPageToken: "page-2" })
       .mockRejectedValueOnce(new Error("mail list unavailable"));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       sent("sent-1"),
     );
   });
@@ -141,7 +149,7 @@ describe("resolveEmailReplyTarget", () => {
       messages: [item("other"), item("wanted", "newest"), item("wanted", "older")],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       sent("newest"),
     );
     expect(listMessages).toHaveBeenCalledTimes(1);
@@ -159,7 +167,7 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [], nextPageToken: "page-3" })
       .mockResolvedValueOnce({ messages: [item("wanted", "found")] });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       sent("found"),
     );
     expect(listMessages.mock.calls.map(([params]) => params?.pageToken)).toEqual([
@@ -174,7 +182,7 @@ describe("resolveEmailReplyTarget", () => {
       messages: [item("other")],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).rejects.toThrow(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
       "replyToMessageId",
     );
     expect(listMessages).toHaveBeenCalledTimes(1);
@@ -185,7 +193,7 @@ describe("resolveEmailReplyTarget", () => {
       messages: [item("wanted", "   "), item("wanted", "valid")],
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).resolves.toEqual(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).resolves.toEqual(
       sent("valid"),
     );
   });
@@ -197,7 +205,7 @@ describe("resolveEmailReplyTarget", () => {
       .mockResolvedValueOnce({ messages: [], nextPageToken: "b" })
       .mockResolvedValueOnce({ messages: [], nextPageToken: "a" });
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).rejects.toThrow(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
       "No email was sent",
     );
     expect(listMessages).toHaveBeenCalledTimes(3);
@@ -210,7 +218,7 @@ describe("resolveEmailReplyTarget", () => {
       nextPageToken: `page-${++pages}`,
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).rejects.toThrow(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
       "lookup limits",
     );
     expect(listMessages).toHaveBeenCalledTimes(20);
@@ -223,7 +231,7 @@ describe("resolveEmailReplyTarget", () => {
       nextPageToken: `page-${++pages}`,
     }));
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).rejects.toThrow(
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toThrow(
       "lookup limits",
     );
     expect(listMessages).toHaveBeenCalledTimes(20);
@@ -235,7 +243,7 @@ describe("resolveEmailReplyTarget", () => {
         item(index === position ? "wanted" : "other"),
       );
       const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({ messages }));
-      const result = resolveEmailReplyTarget({ listMessages }, "wanted");
+      const result = resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel);
       if (position === 1999) {
         await expect(result).resolves.toEqual(sent("message"));
       } else {
@@ -249,7 +257,9 @@ describe("resolveEmailReplyTarget", () => {
     const error = new Error("mail list unavailable");
     const listMessages = rs.fn<MailProvider["listMessages"]>().mockRejectedValue(error);
 
-    await expect(resolveEmailReplyTarget({ listMessages }, "wanted")).rejects.toBe(error);
+    await expect(resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel)).rejects.toBe(
+      error,
+    );
     expect(listMessages).toHaveBeenCalledTimes(1);
   });
 });

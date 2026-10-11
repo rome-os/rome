@@ -350,15 +350,21 @@ export class EmailAdapter {
     }
   }
 
-  private async resolveThreadReplyTarget(threadId: string): Promise<string> {
-    const selfAddress = normalizeAddress(this.address);
+  private async threadReplyTargetFor(threadId: string): Promise<EmailReplyTarget> {
+    const cached = this.threadReplyTarget.get(threadId);
+    if (cached) return cached;
     const target = await resolveEmailReplyTarget(this.provider, threadId, {
-      isOutbound: (item) =>
-        item.labels.includes("sent") ||
-        (selfAddress !== "" && normalizeAddress(item.from) === selfAddress),
+      isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
     });
     this.rememberReplyTarget(threadId, target);
-    return target.messageId;
+    return target;
+  }
+
+  // AgentMail labels this inbox's own sends "sent". A `from` equal to the inbox
+  // address also counts, so the rule survives a change in label vocabulary.
+  private isOwnMessage(labels: string[], fromAddress: string): boolean {
+    const selfAddress = normalizeAddress(this.address);
+    return labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
   }
 
   /** Returns undefined only when an empty body was skipped without sending. */
@@ -404,14 +410,22 @@ export class EmailAdapter {
 
     // An explicit message ID wins. A thread miss must not become a fresh send,
     // even when the caller also supplied `to`.
-    let inReplyToMessageId =
-      email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId)?.messageId;
-    const addressTarget = !email && this.resolveRecipients(threadId);
-    if (!inReplyToMessageId && threadId && !addressTarget) {
-      inReplyToMessageId = await this.resolveThreadReplyTarget(threadId);
-    }
-    if (inReplyToMessageId) {
+    if (email?.inReplyToMessageId) {
+      const inReplyToMessageId = email.inReplyToMessageId;
       return this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+    }
+    const addressTarget = !email && this.resolveRecipients(threadId);
+    if (threadId && (this.threadReplyTarget.has(threadId) || !addressTarget)) {
+      const target = await this.threadReplyTargetFor(threadId);
+      if (target.outbound) {
+        // Where the provider delivers a reply to Rome's own message is
+        // unverified, so leave a trace for anyone checking that path.
+        log.info("email reply targets a message Rome sent", {
+          threadId,
+          inReplyToMessageId: target.messageId,
+        });
+      }
+      return this.provider.send({ inReplyToMessageId: target.messageId, text, html, cc, bcc });
     }
 
     // No thread: start a fresh email. Recipients come from `email.to`,
@@ -717,14 +731,11 @@ export class EmailAdapter {
     const fromName = fromContact?.name?.trim() || parseDisplayName(item.from) || fromAddress;
 
     // A thread mixes inbound (counterparty) mail and outbound mail Rome itself
-    // sent. AgentMail labels our own sends "sent"; we also treat a `from` that
-    // matches our own inbox as outbound so attribution survives a label-vocabulary
-    // change. Attributing outbound to Rome (rather than to the recipient) keeps
+    // sent. Attributing outbound to Rome (rather than to the recipient) keeps
     // the transcript a readable two-sided conversation: received lines show the
     // counterparty, sent lines show Rome — mirroring the telegram-user adapter.
     const selfAddress = normalizeAddress(this.address);
-    const isOutbound =
-      item.labels.includes("sent") || (selfAddress !== "" && fromAddress === selfAddress);
+    const isOutbound = this.isOwnMessage(item.labels, fromAddress);
     const senderId = isOutbound ? selfAddress : fromAddress;
     const senderDisplayName = isOutbound ? selfAddress : fromName;
 
