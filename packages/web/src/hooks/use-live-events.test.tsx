@@ -58,6 +58,7 @@ function socketClient(): LiveEventsClient {
     WebSocket: asWebSocket,
     url: () => "ws://rome.test/ws/events",
     reconnectDelayMs: () => 100,
+    minFallbackMs: 0,
   });
 }
 

@@ -180,7 +180,22 @@ describe("LiveEventsClient", () => {
     expect(delays).toEqual([1, 2, 3, 1]);
   });
 
-  it("falls back to SSE when the socket never opens, resyncing the listeners that waited", () => {
+  it("rides out fast failed opens within the window, as while the backend restarts", () => {
+    const live = client();
+    const status = listener();
+    live.subscribe("chat.status", status);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      FakeWebSocket.latest().close();
+      rs.advanceTimersByTime(100);
+    }
+    expect(live.getTransport()).toBe("socket");
+
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    expect(socket.sent).toEqual([subscribe("chat.status")]);
+  });
+
+  it("falls back to SSE once opens keep failing past the window, resyncing the listeners that waited", () => {
     const live = client();
     const status = listener();
     const transportChanged = rs.fn();
@@ -189,19 +204,21 @@ describe("LiveEventsClient", () => {
     expect(live.getTransport()).toBe("socket");
 
     FakeWebSocket.latest().close();
-    rs.advanceTimersByTime(100);
     // A proxy that holds the upgrade open counts as a failed attempt.
-    rs.advanceTimersByTime(5_000);
-    expect(FakeWebSocket.instances).toHaveLength(2);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      rs.advanceTimersByTime(100);
+      rs.advanceTimersByTime(5_000);
+    }
+    expect(FakeWebSocket.instances).toHaveLength(3);
     expect(live.getTransport()).toBe("socket");
     rs.advanceTimersByTime(100);
-    FakeWebSocket.latest().close();
+    rs.advanceTimersByTime(5_000);
 
     expect(live.getTransport()).toBe("fallback");
     expect(transportChanged).toHaveBeenCalledTimes(1);
     expect(status.onReconnect).toHaveBeenCalledTimes(1);
     rs.advanceTimersByTime(60_000);
-    expect(FakeWebSocket.instances).toHaveLength(3);
+    expect(FakeWebSocket.instances).toHaveLength(4);
   });
 
   it("keeps reconnecting rather than falling back once a socket has opened", () => {

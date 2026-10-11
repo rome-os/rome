@@ -35,6 +35,11 @@ export interface LiveEventsClientOptions {
   url?: () => string;
   /** Failed opens before the first success that switch the tab to SSE. */
   maxFailedOpens?: number;
+  /**
+   * How long opens must keep failing, from the first attempt, before the tab
+   * switches to SSE. Fast failures while the backend restarts end within it.
+   */
+  minFallbackMs?: number;
   openTimeoutMs?: number;
   /** How long the socket outlives its last subscription, so route changes reuse it. */
   idleCloseMs?: number;
@@ -86,6 +91,7 @@ export class LiveEventsClient {
   private readonly WebSocketImpl: typeof WebSocket | undefined;
   private readonly url: () => string;
   private readonly maxFailedOpens: number;
+  private readonly minFallbackMs: number;
   private readonly openTimeoutMs: number;
   private readonly idleCloseMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
@@ -99,6 +105,7 @@ export class LiveEventsClient {
   private generation = 0;
   private everOpened = false;
   private failedAttempts = 0;
+  private firstAttemptAt: number | null = null;
   private openTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -108,6 +115,7 @@ export class LiveEventsClient {
     this.WebSocketImpl = options.WebSocket;
     this.url = options.url ?? defaultUrl;
     this.maxFailedOpens = options.maxFailedOpens ?? 3;
+    this.minFallbackMs = options.minFallbackMs ?? 15_000;
     this.openTimeoutMs = options.openTimeoutMs ?? 10_000;
     this.idleCloseMs = options.idleCloseMs ?? 5_000;
     this.reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelayMs;
@@ -172,6 +180,7 @@ export class LiveEventsClient {
     }
     this.socket = socket;
     this.socketOpen = false;
+    this.firstAttemptAt ??= Date.now();
     this.openTimer = setTimeout(() => socket.close(), this.openTimeoutMs);
     socket.addEventListener("open", () => this.handleOpen(socket));
     socket.addEventListener("message", (event) => this.handleMessage(socket, event));
@@ -243,7 +252,11 @@ export class LiveEventsClient {
     this.socketOpen = false;
     for (const entry of this.topics.values()) entry.state = "idle";
     this.failedAttempts += 1;
-    if (!this.everOpened && this.failedAttempts >= this.maxFailedOpens) {
+    if (
+      !this.everOpened &&
+      this.failedAttempts >= this.maxFailedOpens &&
+      Date.now() - (this.firstAttemptAt ?? 0) >= this.minFallbackMs
+    ) {
       this.fallBack();
       return;
     }
