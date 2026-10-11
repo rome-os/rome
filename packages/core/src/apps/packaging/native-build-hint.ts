@@ -31,11 +31,13 @@ export function nativeBuildHint(output: string): string {
     if (!match) continue;
     const [, name, text] = match;
     if (!MISSING_TOOLCHAIN_PATTERNS.some((pattern) => pattern.test(text))) continue;
+    // The key is quoted because YAML rejects a bare key that starts with "@".
+    const allowBuildsKey = JSON.stringify(name);
     return (
       `\nHint: building ${name} needs make and a C or C++ compiler, and Rome's image ships ` +
       `neither. If ${name} bundles a prebuilt binary, declining its build usually works: set ` +
-      `\`${name}: false\` under \`allowBuilds\` in the app's pnpm-workspace.yaml. The ` +
-      `system:custom-dependencies skill covers the other options.`
+      `\`${allowBuildsKey}: false\` under \`allowBuilds\` in the app's pnpm-workspace.yaml. ` +
+      `The system:custom-dependencies skill covers the other options.`
     );
   }
   return "";

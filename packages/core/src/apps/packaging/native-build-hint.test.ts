@@ -17,14 +17,14 @@ describe("nativeBuildHint", () => {
     expect(nativeBuildHint(fixture("pnpm-native-build-no-make.txt"))).toBe(
       "\nHint: building better-sqlite3 needs make and a C or C++ compiler, and Rome's image " +
         "ships neither. If better-sqlite3 bundles a prebuilt binary, declining its build " +
-        "usually works: set `better-sqlite3: false` under `allowBuilds` in the app's " +
+        'usually works: set `"better-sqlite3": false` under `allowBuilds` in the app\'s ' +
         "pnpm-workspace.yaml. The system:custom-dependencies skill covers the other options.",
     );
   });
 
   it("recognizes make running without a compiler", () => {
     expect(nativeBuildHint(fixture("pnpm-native-build-no-compiler.txt"))).toContain(
-      "set `bufferutil: false` under `allowBuilds`",
+      'set `"bufferutil": false` under `allowBuilds`',
     );
   });
 
@@ -36,7 +36,7 @@ describe("nativeBuildHint", () => {
 
   it("takes a scoped package name from the script's output prefix", () => {
     const output = ".../node_modules/@acme/addon install: sh: 1: g++: not found\n";
-    expect(nativeBuildHint(output)).toContain("set `@acme/addon: false`");
+    expect(nativeBuildHint(output)).toContain('set `"@acme/addon": false`');
   });
 
   it("stays silent when the app's own script, not a dependency, lacks make", () => {
