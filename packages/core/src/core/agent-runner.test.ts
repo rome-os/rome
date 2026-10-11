@@ -780,7 +780,6 @@ describe("AgentRunner", () => {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
         conversationId: "stored-chat",
-        recordedConversation: { id: "stored-chat", name: "Stored chat", type: "webchat" as const },
         status: "idle" as const,
         sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {
