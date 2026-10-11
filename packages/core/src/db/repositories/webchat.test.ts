@@ -83,13 +83,9 @@ describe("WebChatRepository", () => {
     ]);
   });
 
-  // Every chat reader goes through the session kind, so a chat reads the same
-  // whichever type it is stored under, and a channel row that merely names a
-  // chat's address is never one.
-  it.each([
-    ["a webchat row", "webchat"],
-    ["a webchat channel row", "channel"],
-  ])("reads a chat stored as %s as a chat", async (_label, storedType) => {
+  // A chat is stored as a channel row, and every chat reader still reports it
+  // as `webchat`.
+  it("stores a chat as a webchat channel row and reads it as a chat", async () => {
     await repo.createSession("chat-1", "Chat", undefined, "Rome", null, "/work/rome");
     await repo.addMessage(
       "m-1",
@@ -97,22 +93,12 @@ describe("WebChatRepository", () => {
       "user",
       JSON.stringify([{ type: "text", content: "find the needle" }]),
     );
-    await testDb.db
-      .update(romeSessions)
-      .set({ type: storedType })
+
+    const [stored] = await testDb.db
+      .select({ type: romeSessions.type, sourceChannel: romeSessions.sourceChannel })
+      .from(romeSessions)
       .where(eq(romeSessions.id, "chat-1"));
-    // A stray row an older outbound send left for the chat's address.
-    await testDb.db.insert(romeSessions).values({
-      id: "channel:webchat:chat-1",
-      name: "stray",
-      projectName: "Rome",
-      projectPath: "/work/rome",
-      type: "channel",
-      sourceChannel: "webchat",
-      sourceThreadId: "chat-1",
-      createdAt: new Date(),
-      activityAt: new Date(),
-    });
+    expect(stored).toEqual({ type: "channel", sourceChannel: "webchat" });
 
     const ids = (rows: Array<{ id: string }>) => rows.map((row) => row.id);
     expect((await repo.getSession("chat-1"))?.type).toBe("webchat");
@@ -230,16 +216,16 @@ describe("WebChatRepository", () => {
       expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
     });
 
-    it("refuses a channel row for a webchat address", async () => {
+    it("finds a chat by its webchat address like any channel conversation", async () => {
       await repo.createSession("chat-1", "Webchat chat");
 
-      await expect(
-        repo.ensureChannelConversation({
-          channel: "webchat",
-          threadId: "chat-1",
-          agentName: "main",
-        }),
-      ).rejects.toThrow("not a channel conversation");
+      const conversation = await repo.ensureChannelConversation({
+        channel: "webchat",
+        threadId: "chat-1",
+        agentName: "main",
+      });
+
+      expect(conversation.id).toBe("chat-1");
       expect(await repo.getSession("channel:webchat:chat-1")).toBeNull();
     });
 
@@ -591,7 +577,7 @@ describe("WebChatRepository", () => {
     // them; a sender-supplied routine card must not reach the transcript.
     it("strips routine cards from recorded outbound content", async () => {
       const conversation = await repo.ensureChannelConversation({
-        channel: "telegram",
+        channel: "webchat",
         threadId: "forged-card-thread",
         agentName: "main",
       });

@@ -25,7 +25,12 @@ import {
   webchatWorkspaceLayouts,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import { isWebchatChat, romeSessionKind, withSessionKind } from "../session-kind.js";
+import {
+  isWebchatChat,
+  romeSessionKind,
+  storedSessionType,
+  withSessionKind,
+} from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
 import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
@@ -892,7 +897,7 @@ export class WebChatRepository {
       projectPath,
       largeModelSelection: largeModelSelection ?? null,
       agentName,
-      type,
+      type: storedSessionType(type),
       sourceChannel: "webchat",
       sourceThreadId: id,
       sourceThreadName: name,
@@ -906,6 +911,8 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
+    // A chat is a channel row on the webchat channel, at its own address.
+    const chat = input.type === "webchat";
     await this.db
       .insert(romeSessions)
       .values({
@@ -916,9 +923,9 @@ export class WebChatRepository {
         projectPath: input.projectPath ?? null,
         largeModelSelection: null,
         agentName: input.agentName,
-        type: input.type,
-        sourceChannel: input.sourceChannel ?? null,
-        sourceThreadId: input.sourceThreadId ?? null,
+        type: storedSessionType(input.type),
+        sourceChannel: chat ? "webchat" : (input.sourceChannel ?? null),
+        sourceThreadId: chat ? (input.sourceThreadId ?? input.id) : (input.sourceThreadId ?? null),
         sourceThreadName: input.sourceThreadName ?? null,
         sourceThreadType: input.sourceThreadType ?? null,
         triggerKind: input.trigger?.triggerKind ?? null,
@@ -932,7 +939,7 @@ export class WebChatRepository {
         handoffSpec: null,
         createdAt: now,
         activityAt: now,
-        lastSeenActivityAt: input.type === "webchat" ? now : null,
+        lastSeenActivityAt: chat ? now : null,
       })
       .onConflictDoNothing({ target: romeSessions.id });
   }
@@ -947,11 +954,6 @@ export class WebChatRepository {
     projectName?: string;
     projectPath?: string;
   }): Promise<{ id: string; agentName: string | null }> {
-    // A chat's row is its own session, keyed by its id. A channel row for a
-    // webchat address would be a second row claiming the same chat.
-    if (input.channel === "webchat") {
-      throw new Error("A webchat thread is a chat session, not a channel conversation");
-    }
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
         ? await this.ensureChannelConversation({
@@ -1602,7 +1604,10 @@ export class WebChatRepository {
     await this.db
       .update(romeSessions)
       .set({
-        type: "webchat",
+        type: storedSessionType("webchat"),
+        // A fork carries its parent's address. As a chat it answers at its own.
+        sourceChannel: "webchat",
+        sourceThreadId: sql`${romeSessions.id}`,
         lastSeenActivityAt: sql`${romeSessions.activityAt}`,
       })
       .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "fork")));

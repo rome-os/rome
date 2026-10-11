@@ -6,6 +6,7 @@ import {
   uniqueIndex,
   real,
   primaryKey,
+  type SQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
@@ -465,6 +466,18 @@ export const projectSyncLinks = sqliteTable("project_sync_links", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
 
+/**
+ * Whether a `rome_sessions` row is a guardian chat: a channel row on the
+ * webchat channel. The chat indexes below use it as their WHERE, and
+ * `isWebchatChat` in `db/session-kind.ts` is the same text, which is what lets
+ * SQLite page the sidebar off them. That needs the constants inlined rather
+ * than bound, and the unary `+` keeps SQLite off the `source_channel` indexes,
+ * which would find the chats but then sort them all.
+ */
+export function webchatChatWhere(table: { type: SQLiteColumn; sourceChannel: SQLiteColumn }) {
+  return sql`(${table.type} = 'channel' and +${table.sourceChannel} = 'webchat')`;
+}
+
 export const romeSessions = sqliteTable(
   "rome_sessions",
   {
@@ -519,19 +532,13 @@ export const romeSessions = sqliteTable(
   },
   (table) => [
     index("idx_rome_sessions_project_path").on(table.projectPath),
-    index("idx_rome_sessions_sidebar_activity").on(
-      table.type,
-      table.activityAt,
-      table.createdAt,
-      table.id,
-    ),
-    index("idx_rome_sessions_project_activity").on(
-      table.projectPath,
-      table.type,
-      table.activityAt,
-      table.createdAt,
-      table.id,
-    ),
+    // Sidebar paging for guardian chats. See `webchatChatWhere`.
+    index("idx_rome_sessions_chat_activity")
+      .on(table.activityAt, table.createdAt, table.id)
+      .where(webchatChatWhere(table)),
+    index("idx_rome_sessions_chat_project_activity")
+      .on(table.projectPath, table.activityAt, table.createdAt, table.id)
+      .where(webchatChatWhere(table)),
     index("idx_rome_sessions_source_channel").on(table.sourceChannel),
     index("idx_rome_sessions_source_thread").on(table.sourceChannel, table.sourceThreadId),
     index("idx_rome_sessions_channel_address")
