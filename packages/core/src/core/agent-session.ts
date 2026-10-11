@@ -3517,6 +3517,7 @@ class AgentSessionImpl implements AgentSession {
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: TurnResultEvent | TurnErrorEvent | undefined;
       let droppedAfterTerminal = false;
+      let droppedDuringModel = false;
       let modelRan = false;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
@@ -3533,6 +3534,20 @@ class AgentSessionImpl implements AgentSession {
             if (!droppedAfterTerminal) {
               droppedAfterTerminal = true;
               log.warn("turn middleware emitted after its terminal event; dropping the rest", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
+          // Once next() starts the model, the model owns the stream. Only a
+          // middleware that did not await next() can emit here.
+          if (modelRan) {
+            if (!droppedDuringModel) {
+              droppedDuringModel = true;
+              log.warn("turn middleware emitted while the model was running; dropping it", {
                 sessionId: this.sessionId,
                 agentName: this.key.agentName,
                 turnId,
@@ -3560,6 +3575,17 @@ class AgentSessionImpl implements AgentSession {
         },
         meta: {},
       };
+
+      // The events loop closes the sink on the model's `result`/`error`.
+      const waitForSinkClose = () =>
+        new Promise<void>((resolve) => {
+          const checker = setInterval(() => {
+            if (sink.done) {
+              clearInterval(checker);
+              resolve();
+            }
+          }, 5);
+        });
 
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
@@ -3617,15 +3643,7 @@ class AgentSessionImpl implements AgentSession {
           this.failTurn(sink, err instanceof Error ? err.message : String(err));
         }
 
-        // Wait for sink to close (events loop closes on `result`/`error`).
-        await new Promise<void>((resolve) => {
-          const checker = setInterval(() => {
-            if (sink.done) {
-              clearInterval(checker);
-              resolve();
-            }
-          }, 5);
-        });
+        await waitForSinkClose();
       };
 
       const chain = this.deps.turnMiddleware;
@@ -3646,6 +3664,9 @@ class AgentSessionImpl implements AgentSession {
       } else {
         await runModelTerminal();
       }
+      // A middleware that did not await next() returns while the model is
+      // still running. The model's terminal ends the turn, not a synthesized one.
+      if (modelRan) await waitForSinkClose();
 
       if (!sink.done) {
         if (!modelRan && input.inputId) {
