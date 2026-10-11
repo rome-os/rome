@@ -36,7 +36,8 @@ const SNAPSHOT_EXCLUDED_TOP_LEVEL_DIRS = new Set([
 
 const TEST_FILE_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const DECLARATION_FILE_PATTERN = /\.d\.[cm]?ts$/;
-const SOURCE_EXCLUDED_SEGMENTS = new Set([
+/** Directory and file names left out of a packed or published source tree. */
+export const SOURCE_EXCLUDED_SEGMENTS: ReadonlySet<string> = new Set([
   "node_modules",
   ".git",
   ".rome",

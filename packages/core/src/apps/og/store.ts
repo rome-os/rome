@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getProfileAppsDir } from "../../paths.js";
-import { appIdToPathSegment } from "../packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 
 /**
  * Bumped whenever the card's look or inputs change. It is part of the on-disk

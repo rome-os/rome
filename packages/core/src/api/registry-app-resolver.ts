@@ -14,7 +14,7 @@ import {
   TOOL_TO_BUILTIN,
 } from "./builtin-tool-apps.js";
 import type { AppResolver } from "./trace-segments.js";
-import { appIdToPathSegment } from "../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 
 export interface RegistryAppResolverDeps {
   appCatalog: AppCatalog;

@@ -99,7 +99,7 @@ import {
   compileOutputSchema,
   formatOutputSchemaErrors,
   type CompiledOutputSchema,
-} from "../apps/packaging/output-schema-validator.js";
+} from "@rome-os/app-runtime/packaging";
 import { translateTurnSpans, type CapturedEvent } from "./turn-span-translator.js";
 import {
   buildRequiredTiming,

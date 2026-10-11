@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { Command, Flags } from "@oclif/core";
 import { createLogger } from "../../../../logger.js";
 import { getFirstPartyArtifactDir, getProjectRoot, getRepoAppsDir } from "../../../../paths.js";
-import { packArtifact } from "../../../packaging/index.js";
+import { packArtifact } from "@rome-os/app-runtime/packaging";
 
 const log = createLogger("apps-cli");
 

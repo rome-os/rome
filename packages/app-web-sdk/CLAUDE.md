@@ -1,6 +1,8 @@
 # `@rome-os/app-web-sdk`
 
-The web runtime SDK apps import, plus the `rome` CLI (`bin/rome.js` → `src/cli/`): `dev` and `build` for the app web bundle, and the Rome App Store commands `login`, `whoami`, and `publish` under `src/cli/store/`.
+The web runtime SDK apps import, plus the `rome` CLI (`bin/rome.js` → `src/cli/`): `dev` and `build` for the app web bundle; `create`, `validate`, and `run` for developing an app outside Rome; and the Rome App Store commands `login`, `whoami`, and `publish` under `src/cli/store/`.
+
+`validate` and `run` reuse the host's own code instead of restating it. `validate` packs through `@rome-os/app-runtime/packaging`, the module the daemon installs with. `run` wires the app through `@rome-os/app-runtime/testing`. `run` mounts the UI the way `packages/web/src/components/rome-app-host.tsx` does, with the dashboard's theme values copied into `assets/host-themes.css`. `packages/web/src/lib/host-themes-css.test.ts` fails when that copy drifts. Run it with `UPDATE_HOST_THEMES=1` to rewrite the copy. `create` copies `packages/app-template/template`, which `prepack` bundles under `templates/app`.
 
 ## Styling contract
 

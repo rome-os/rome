@@ -13,7 +13,7 @@ import {
   parseAppManifest,
   parseManifestObject,
   resolvePathWithinBase,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import { type AppView, type ArtifactRef, isResolvedApp, type ResolvedApp } from "./state.js";
 
 type RuntimeArtifactKind = "action" | "agent" | "skill";

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { getCustomAppAuthoringRoot, getProjectRoot, getRepoAppsDir } from "../paths.js";
-import { appIdToPathSegment } from "./packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 
 export interface AppAuthoringLocation {
   appId: string;

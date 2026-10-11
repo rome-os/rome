@@ -54,10 +54,7 @@ import { isAnthropicUsageLimitError } from "./anthropic-usage-limit.js";
 import { createClaudeQueryProcess } from "./claude-query-process.js";
 import { anthropicFunding } from "../usage/funding.js";
 import type { UsageFunding } from "../usage/events.js";
-import {
-  compileOutputSchema,
-  formatOutputSchemaErrors,
-} from "../apps/packaging/output-schema-validator.js";
+import { compileOutputSchema, formatOutputSchemaErrors } from "@rome-os/app-runtime/packaging";
 
 // Beta content block types are not re-exported from the agent SDK and
 // `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes

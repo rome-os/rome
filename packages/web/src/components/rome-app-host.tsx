@@ -69,7 +69,7 @@ function rewriteCssAssetUrls(cssText: string, sourceUrl: string): string {
     });
 }
 
-function scopeAppCss(cssText: string, sourceUrl: string): string {
+export function scopeAppCss(cssText: string, sourceUrl: string): string {
   return rewriteCssAssetUrls(cssText, sourceUrl).replaceAll(":root", ":host");
 }
 

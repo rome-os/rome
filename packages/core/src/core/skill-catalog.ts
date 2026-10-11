@@ -5,14 +5,14 @@ import type { AppCatalog } from "../apps/catalog.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
 import { loadArtifactRecords } from "../apps/artifact-records.js";
-import { parseSkillFrontmatterResult } from "../apps/packaging/skill-frontmatter.js";
+import { parseSkillFrontmatterResult } from "@rome-os/app-runtime/packaging";
 export {
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,
   type SkillFrontmatter,
   type SkillFrontmatterErrorReason,
   type SkillFrontmatterResult,
-} from "../apps/packaging/skill-frontmatter.js";
+} from "@rome-os/app-runtime/packaging";
 
 export interface LoadedSkill {
   metadata: ArtifactMetadata;

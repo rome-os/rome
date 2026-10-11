@@ -93,6 +93,12 @@ export function dockerBundleOptions(format = "esm") {
           build.onResolve({ filter: /^@rome\/api-types(?:\/|$)/ }, ({ path, resolveDir }) => ({
             path: createRequire(resolve(resolveDir, "package.json")).resolve(path),
           }));
+          // The app-id helpers have no dependencies, and the Caddy script
+          // reaches them through the route helpers. Inline their source so
+          // that script still runs where no workspace package is installed.
+          build.onResolve({ filter: /^@rome-os\/app-runtime\/app-id$/ }, () => ({
+            path: resolve(projectRoot, "packages/app-runtime-sdk/src/packaging/app-id.ts"),
+          }));
         },
       },
     ],

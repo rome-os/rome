@@ -1,4 +1,4 @@
-import { isValidAppId } from "../apps/packaging/app-id.js";
+import { isValidAppId } from "@rome-os/app-runtime/app-id";
 
 export interface PublicAccessConfig {
   enableAccessControl: boolean;

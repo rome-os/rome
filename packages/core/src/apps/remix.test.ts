@@ -6,7 +6,7 @@ import { parse as parseYaml } from "yaml";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
-import { packBundle } from "./packaging/index.js";
+import { packBundle } from "@rome-os/app-runtime/packaging";
 import { remixApp } from "./remix.js";
 
 const tempRoots: string[] = [];

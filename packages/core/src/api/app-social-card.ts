@@ -1,7 +1,7 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import type { OgImageStore } from "../apps/og/store.js";
 import { cardDescription } from "../apps/og/subscriber.js";
-import { appIdToPathSegment } from "../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import { type AppView, isResolvedApp, type ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
 import type { SocialCard } from "../lib/social-meta.js";

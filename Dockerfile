@@ -294,7 +294,7 @@ RUN groupadd --system rome && \
 # default cache lives under HOME, and an empty cache pins whatever pnpm is
 # latest on first use, so each instance would install apps with a different
 # pnpm. App installs run pnpm against this cache instead (runPnpm in
-# packages/core/src/apps/packaging/pack.ts). rome owns it so an app that
+# packages/app-runtime-sdk/src/packaging/pack.ts). rome owns it so an app that
 # declares another packageManager version can still download that version.
 # Such downloads live in the image layer, not the volume, so they repeat after
 # each container recreate (first-party apps all declare this version).

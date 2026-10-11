@@ -1,4 +1,4 @@
-import { isValidAppId } from "./packaging/app-id.js";
+import { isValidAppId } from "@rome-os/app-runtime/packaging";
 export { isCoreMainAgentId } from "@rome-os/app-runtime";
 
 export type NamespacedArtifactKind = "agent" | "action" | "skill";

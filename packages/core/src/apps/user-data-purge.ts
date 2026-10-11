@@ -27,7 +27,7 @@ import {
   appMigrationsTableName,
   isValidAppId,
   parseManifestObject,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 
 const log = createLogger("apps-purge");
 

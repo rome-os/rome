@@ -11,6 +11,7 @@ import {
   type DetachedRunActionOptions,
   type RunActionOptions,
   type RomeAppDefinition as SdkRomeAppDefinition,
+  toActionWireShape,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
 import { callAction } from "../actions/call-action.js";
@@ -99,30 +100,6 @@ export function createAppDbContext(app: ResolvedApp, connection: DrizzleDb): App
   };
 }
 
-/**
- * Force `value` through the same JSON serialization Node's fork IPC applies on
- * the subprocess path, so an in-process invocation observes identical data to
- * a cross-process one: `Date` → ISO string, `undefined` fields
- * dropped, no shared references, circular/BigInt input rejected loudly.
- */
-function toWireShape<T>(
-  value: T,
-  actionName: string,
-  what: "args" | "result" | "dispatch receipt",
-): T {
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch (err) {
-    throw new ActionInvocationError(
-      actionName,
-      "unserializable",
-      `Action ${what} for "${actionName}" cannot cross a process boundary: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-}
-
 const ACTION_EVENT_BUFFER_CAPACITY = 32;
 
 class ActionEventQueue<TEvent extends ActionEvent> implements AsyncIterable<TEvent> {
@@ -208,7 +185,7 @@ export function createRomeAppContext(
     args: Record<string, unknown>,
     actionEventObserver?: ActionInvocationObserver,
   ): Promise<ActionResult> => {
-    const wireArgs = toWireShape(args ?? {}, name, "args");
+    const wireArgs = toActionWireShape(args ?? {}, name, "args");
     let result: ActionResult;
     try {
       const store = actionExecutionContext.getStore();
@@ -248,7 +225,7 @@ export function createRomeAppContext(
       }
       throw new ActionInvocationError(name, "handler_error", message);
     }
-    return toWireShape(result, name, "result");
+    return toActionWireShape(result, name, "result");
   };
 
   async function runAction(
@@ -268,7 +245,7 @@ export function createRomeAppContext(
   ): Promise<ActionResult | ActionDispatchReceipt> {
     if (!options.detached) return await invokeActionResult(name, args);
 
-    const wireArgs = toWireShape(args ?? {}, name, "args");
+    const wireArgs = toActionWireShape(args ?? {}, name, "args");
     try {
       const store = actionExecutionContext.getStore();
       const engine = store?.engine ?? services.actionEngine;
@@ -282,7 +259,7 @@ export function createRomeAppContext(
         agentName: store?.agentName,
         channelThreadKey: store?.channelThreadKey,
       });
-      return toWireShape(receipt, name, "dispatch receipt");
+      return toActionWireShape(receipt, name, "dispatch receipt");
     } catch (err) {
       if (err instanceof Error && err.name === "ActionCancelledError") throw err;
       const message = err instanceof Error ? err.message : String(err);

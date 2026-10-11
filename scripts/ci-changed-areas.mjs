@@ -38,6 +38,8 @@ export const AREA_PATHS = {
     "packages/web-content/",
     "packages/api-types/",
     "packages/app-runtime-sdk/",
+    // The dashboard's host tests compare these copies of its theme and mount code.
+    "packages/app-web-sdk/assets/",
     // Every package launches its suite through this wrapper, so a change to it
     // changes how the web suites run even though nothing else in scripts/ does.
     "scripts/test-env.sh",

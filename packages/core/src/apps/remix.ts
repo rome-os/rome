@@ -33,9 +33,9 @@ import {
   parseListingId,
   parseManifestObject,
   resolvePathWithinBase,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import { normalizeListingId } from "./rome-cloud-urls.js";
-import { isBlockedSourceFile, isExcludedSourceEntry } from "./packaging/pack.js";
+import { isBlockedSourceFile, isExcludedSourceEntry } from "@rome-os/app-runtime/packaging";
 import type { AppEntry } from "./lockfile.js";
 import { fetchVerifiedStoreBundle, type BundleFetcher } from "./store-bundle.js";
 import { parseRemixSource } from "./remix-source.js";

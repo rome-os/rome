@@ -2258,6 +2258,32 @@ export class ActionInvocationError extends Error {
   }
 }
 
+/**
+ * Force an action's args or result through the JSON serialization Node's fork
+ * IPC applies on the subprocess path, so an in-process invocation observes the
+ * same data as a cross-process one: `Date` becomes an ISO string, `undefined`
+ * fields are dropped, and circular or BigInt input fails as `unserializable`.
+ * The host and the test kit both call this.
+ */
+export function toActionWireShape<T>(
+  value: T,
+  actionName: string,
+  what: "args" | "result" | "dispatch receipt",
+): T {
+  try {
+    // JSON.stringify returns no text for `undefined`, so JSON.parse throws.
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch (err) {
+    throw new ActionInvocationError(
+      actionName,
+      "unserializable",
+      `Action ${what} for "${actionName}" cannot cross a process boundary: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared & {
   appContext: RomeAppContext;
 };

@@ -6,7 +6,7 @@ import type { AppStartedEvent } from "@rome-os/app-runtime";
 import type { ActionEngine } from "../actions/engine.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
-import { packArtifact } from "../apps/packaging/index.js";
+import { packArtifact } from "@rome-os/app-runtime/packaging";
 import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
 import { createTestApps } from "../apps/test-helpers.js";
 import { createAppStartedDispatcher } from "./app-started.js";

@@ -9,7 +9,7 @@ import { ActionConfigSchema } from "./artifact-config.js";
 // packaging validator only runs at pack time, so a malformed first-party
 // action.yaml would otherwise pass the unit suite and drop the action at
 // runtime.
-const ROME_APPS = join(dirname(fileURLToPath(import.meta.url)), "../../../../../rome_apps");
+const ROME_APPS = join(dirname(fileURLToPath(import.meta.url)), "../../../../rome_apps");
 
 async function findActionManifests(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });

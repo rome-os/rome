@@ -13,7 +13,7 @@
  */
 import { resolve as resolvePath } from "node:path";
 import { getInternalApiBaseUrl } from "../../internal-api-url.js";
-import { assertValidAppId } from "../packaging/index.js";
+import { assertValidAppId } from "@rome-os/app-runtime/packaging";
 
 /**
  * pnpm sets INIT_CWD to the directory the user invoked the script from,

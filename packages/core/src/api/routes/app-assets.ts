@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { Hono } from "hono";
 import { isResolvedApp } from "../../apps/state.js";
-import { resolvePathWithinBase } from "../../apps/packaging/index.js";
+import { resolvePathWithinBase } from "@rome-os/app-runtime/packaging";
 import type { ApiDeps } from "../deps.js";
 import { contentTypeForPath } from "../../lib/content-types.js";
 

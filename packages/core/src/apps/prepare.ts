@@ -12,7 +12,7 @@ import {
   sourceRootForArtifactPath,
   validateInstalledArtifact,
   type PackageJsonManifest,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 
 const log = createLogger("app-prepare");
 

@@ -4,7 +4,7 @@ import type { ActionResult } from "../actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
-import { isValidAppId } from "../apps/packaging/app-id.js";
+import { isValidAppId } from "@rome-os/app-runtime/packaging";
 import type { TransientDeltaType } from "../core/agent-message.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import type { ApiDeps } from "../deps.js";
 
 /**

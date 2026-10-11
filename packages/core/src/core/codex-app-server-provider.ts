@@ -107,10 +107,7 @@ import {
   createRomeDynamicTools,
   type RomeDynamicTools,
 } from "./codex/rome-dynamic-tools.js";
-import {
-  compileOutputSchema,
-  formatOutputSchemaErrors,
-} from "../apps/packaging/output-schema-validator.js";
+import { compileOutputSchema, formatOutputSchemaErrors } from "@rome-os/app-runtime/packaging";
 
 const log = createLogger("codex-app-server-provider");
 

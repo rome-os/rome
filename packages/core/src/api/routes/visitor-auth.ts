@@ -5,7 +5,7 @@ import { deleteCookie } from "hono/cookie";
 import { Hono, type Context } from "hono";
 import { VISITOR_COOKIE_NAME, issueVisitorSession, shouldSecureCookie } from "../../lib/auth.js";
 import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
-import { isValidAppId } from "../../apps/packaging/app-id.js";
+import { isValidAppId } from "@rome-os/app-runtime/packaging";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";

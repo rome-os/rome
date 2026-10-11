@@ -348,8 +348,11 @@ decide whether to load the skill.
 | --- | --- |
 | `rome build` | Production build. Compiles `src/{api,actions,db,agents,skills,hooks,lib,docs}` with `tsc` into `dist/`, then bundles `src/web/App.tsx` with rslib into `dist/web/` (with `manifest.json`). A `mode: "source"` install runs this for you — run it directly only to catch build errors before installing. |
 | `rome dev`   | Dev server with HMR for the web bundle. Use during heavy UI iteration; otherwise a single `install` (which rebuilds + repacks) is fine. |
+| `rome create <app-id>` | Scaffold a new app from the same template `app_management` `op: "create"` uses. For a coding agent working outside Rome. |
+| `rome validate` | Build, then pack into a temporary directory with the same checks an install runs. It leaves `.rome/artifact`, the installed artifact, alone. Then check that every package the actions, hooks and API import is in `dependencies`, since an install skips dev dependencies. Last, import every action, hook and the API entry from `dist/` and check that each exports the factory the host calls. Exits 1 on the first problem. |
+| `rome run` | Serve the app with no Rome daemon. It runs the migrations into an in-memory SQLite and runs the `app-started` hook. It serves the UI at `/apps/<id>` in a shadow root with the dashboard's theme tokens (`?theme=dark` switches mode), and the API at `/api/apps/<id>/`. `POST /__rome/actions/<name>` with `{"args": {}, "channel": {…}}` runs an action. `--channels <file.json>` seeds fake channel history. |
 
-Both commands read `app.yaml` for `web.displayName`, `web.navLabel`, and `web.entry` (default `App.tsx`). The web entry must default-export a React component — see [Frontend SDK](#frontend-sdk--rome-osapp-web-sdk).
+`build` and `dev` read `app.yaml` for `web.displayName`, `web.navLabel`, and `web.entry` (default `App.tsx`). The web entry must default-export a React component — see [Frontend SDK](#frontend-sdk--rome-osapp-web-sdk).
 
 ---
 
@@ -863,6 +866,52 @@ Takeaways:
   through `system:summon`
   (`appContext.runAction("system:summon", { agentName: "assistant:assistant", prompt, sessionId? })`).
   Do not call `agentRunner.run` directly on agents that aren't yours.
+
+### Testing: `@rome-os/app-runtime/testing`
+
+The test kit runs an app's actions, API handler and `app-started` hook in a plain `rstest` process, with no Rome daemon. Each app is wired the way the host wires it:
+
+- the app's real migrations, run into an in-memory SQLite;
+- a fake `channelsService` over a fixed message history;
+- in-memory settings;
+- an action registry behind `appContext.runAction`.
+
+The database is Node's built-in `node:sqlite` (Node 22.16 or later), so tests need no native addon. Node prints an `ExperimentalWarning` for it.
+
+```ts
+import { channelMessage, createTestApp } from "@rome-os/app-runtime/testing";
+import { createAction as createQuote } from "../src/actions/quote/index.js";
+import { createApiHandler } from "../src/api/index.js";
+import { createHook } from "../src/hooks/app-started/index.js";
+
+const app = await createTestApp({
+  appId: "sales-agent",
+  tablePrefix: "sales_agent",
+  migrationsFolder: new URL("../src/db/migrations", import.meta.url),
+  // conversationId matches the threadId below, so the action's history query finds it.
+  channelHistory: [
+    channelMessage({ channel: "feishu", conversationId: "oc_sales", text: "Acme wants 20 seats" }),
+  ],
+});
+await app.start(createHook);                       // runs onAppStarted
+await app.action("quote", createQuote);            // createAction(config, app.deps)
+
+// A mention in a Feishu group: getCurrentActionContext().channelContext is set inside.
+const result = await app.inChannel(
+  { channel: "feishu", threadId: "oc_sales", channelUserId: "ou_mei", threadType: "group" },
+  () => app.runAction("quote", { lines: [{ sku: "PRO", quantity: 20 }] }),
+);
+
+const state = await app.api(createApiHandler).request("GET", "state"); // { status, body }
+app.close();
+```
+
+- `app.runAction` crosses a JSON boundary like the host does. A `Date` in a result arrives as a string.
+- Calling an action that was never registered rejects with `ActionInvocationError`, as the host does.
+- Inside the app, `appContext.runAction` finds an action only by `"<appId>:<name>"`, as the host does. `app.runAction` also takes the bare name.
+- `app.channels.queries` and `app.channels.sent` record every read and send.
+- Favors, routines, the agent runner and detached `runAction` calls fail with a message that names the service. Pass fake favors or routines through `createTestApp({ appContext })`, and a fake agent runner through `createTestApp({ deps })`.
+- Keep test helpers outside `src/` (for example in `<app-root>/test/`). `rome build` compiles everything under `src/` except `*.test.ts`.
 
 ---
 

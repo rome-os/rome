@@ -27,9 +27,11 @@
     "./tsconfig.app.json": "./tsconfig.app.json"
   },
   "files": [
+    "assets",
     "bin",
     "dist",
     "src",
+    "templates",
     "tsconfig.app.json"
   ],
   "publishConfig": {
@@ -39,12 +41,16 @@
     "build": "tsc",
     "prepare": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "../../scripts/test-env.sh rstest"
+    "test": "../../scripts/test-env.sh rstest",
+    "prepack": "node scripts/copy-template.mjs"
   },
   "dependencies": {
+    "@rome-os/app-runtime": "workspace:^",
     "@rsbuild/plugin-react": "^2.0.0",
     "@rslib/core": "^1.0.0",
+    "@rspack/resolver": "^0.4.0",
     "@tailwindcss/postcss": "^4.1.0",
+    "es-module-lexer": "^1.7.0",
     "lucide-react": "^0.468.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",

@@ -92,6 +92,10 @@ const ignoredFileSuffixes = [
   ".tsbuildinfo",
 ];
 
+// The app template's tests are template content: every app created in Rome
+// gets them, and its `test` script fails when they are missing.
+const keptTestTrees = [path.join("packages", "app-template", "template") + path.sep];
+
 /**
  * On macOS, pnpm guards `node_modules` (and dirs it manages) with a
  * `<user> deny delete` ACL. That ACL survives into this generated workspace and
@@ -261,6 +265,9 @@ function shouldCopy(sourcePath) {
     return false;
   }
 
+  if (keptTestTrees.some((tree) => relativePath.startsWith(tree))) {
+    return !relativePath.endsWith(".tsbuildinfo");
+  }
   return !ignoredFileSuffixes.some((suffix) => relativePath.endsWith(suffix));
 }
 

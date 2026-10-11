@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { appIdToPathSegment } from "./apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/app-id";
 
 const DEFAULT_AGENT_WORKING_DIR_NAME = "default";
 

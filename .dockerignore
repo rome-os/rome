@@ -23,6 +23,8 @@ dist/
 **/*.integration.test.ts
 **/*.e2e.test.ts
 packages/core/src/test/
+# The app template ships a sample test; `app_management create` copies it.
+!packages/app-template/template/**/*.test.ts
 coverage/
 
 # Dev configs

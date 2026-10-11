@@ -5,7 +5,7 @@ import type { ActionConfig } from "./types.js";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
-import { ActionConfigSchema } from "../apps/packaging/index.js";
+import { ActionConfigSchema } from "@rome-os/app-runtime/packaging";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
 import { loadArtifactRecords } from "../apps/artifact-records.js";
 

@@ -65,7 +65,7 @@
   },
   "overrides": [
     {
-      "includes": ["**/src/apps/packaging/**/*.ts"],
+      "includes": ["packages/app-runtime-sdk/src/packaging/**/*.ts"],
       "linter": {
         "rules": {
           "style": {
@@ -75,7 +75,7 @@
                 "patterns": [
                   {
                     "group": ["..", "../*", "../**", "@/*", "@/**"],
-                    "message": "packaging/ must not import from outside packages/core/src/apps/packaging/ — pass values in from the caller instead."
+                    "message": "packaging/ must not import from outside packages/app-runtime-sdk/src/packaging/ — pass values in from the caller instead."
                   }
                 ]
               }

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { createLogger } from "../../logger.js";
-import { appIdToPathSegment } from "../packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import {
   type CatalogEvent,
   isResolvedApp,

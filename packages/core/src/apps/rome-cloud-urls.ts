@@ -12,7 +12,7 @@
  * `AppManager.install` rewrites the listingId on the next successful install.
  */
 import { createLogger } from "../logger.js";
-import { parseListingId, type ParsedListingId } from "./packaging/index.js";
+import { parseListingId, type ParsedListingId } from "@rome-os/app-runtime/packaging";
 
 const log = createLogger("apps-rome-cloud-urls");
 

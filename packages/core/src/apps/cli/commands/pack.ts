@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Args, Command, Flags } from "@oclif/core";
 import { createLogger } from "../../../logger.js";
-import { packArtifact } from "../../packaging/index.js";
+import { packArtifact } from "@rome-os/app-runtime/packaging";
 import { resolveFromInvokerCwd } from "../lib.js";
 
 const log = createLogger("apps-cli");

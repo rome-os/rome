@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { AppManagerError } from "./manager.js";
-import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "./packaging/index.js";
+import { PACKED_ARTIFACT_SENTINEL, packArtifact, packBundle } from "@rome-os/app-runtime/packaging";
 import { remixApp } from "./remix.js";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema, APPS_LOCKFILE_SCHEMA_VERSION, type SpecSource } from "./lockfile.js";

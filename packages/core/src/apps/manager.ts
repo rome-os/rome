@@ -12,7 +12,7 @@ import {
   readManifestIdAndVersion,
   sourceRootForArtifactPath,
   validateInstalledArtifact,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import {
   APPS_LOCKFILE_SCHEMA_VERSION,
   type AppEntry,

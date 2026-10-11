@@ -21,7 +21,7 @@ import {
   hashArtifact,
   PNPM_TIMEOUT_MESSAGE_PREFIX,
   readManifestIdAndVersion,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import type { AppCatalog } from "./catalog.js";
 import type { AppManager } from "./manager.js";
 

@@ -6,7 +6,7 @@ import { AppCatalog } from "./catalog.js";
 import { hydrateCatalogFromLockfile } from "./catalog-hydration.js";
 import { AppInstaller } from "./installer.js";
 import { readLockfileWithEntryIsolation, type SpecSource } from "./lockfile.js";
-import { packArtifact } from "./packaging/index.js";
+import { packArtifact } from "@rome-os/app-runtime/packaging";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 
 const SAMPLE_MANIFEST = `formatVersion: 1

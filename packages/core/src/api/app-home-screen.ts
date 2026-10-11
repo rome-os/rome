@@ -1,7 +1,7 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import { HOME_SCREEN_ICON_SIZE } from "../apps/og/home-screen-icon.js";
 import { hasRenderableIcon } from "../apps/og/subscriber.js";
-import { appIdToPathSegment } from "../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import type { ResolvedApp } from "../apps/state.js";
 import type { AppIdentity } from "../lib/social-meta.js";
 import { getRoutedAppId, isResolvedWebApp } from "./app-social-card.js";

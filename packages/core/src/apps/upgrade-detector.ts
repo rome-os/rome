@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { gt as semverGt, valid as semverValid } from "semver";
 import { createLogger } from "../logger.js";
 import type { AppCatalog } from "./catalog.js";
-import { readManifestIdAndVersion } from "./packaging/index.js";
+import { readManifestIdAndVersion } from "@rome-os/app-runtime/packaging";
 import type { RomeCloudListingClient } from "./rome-cloud-listing-client.js";
 import type { SpecSource } from "./lockfile.js";
 import { isResolvedApp, type ResolvedApp } from "./state.js";

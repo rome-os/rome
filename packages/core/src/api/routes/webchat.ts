@@ -77,7 +77,7 @@ import {
 } from "../../core/conversation-title.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "@rome-os/app-runtime/packaging";
 import { isTransientDelta } from "../../core/agent-message.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import type { BackendEmitOptions, BackendSessionTask } from "../../actions/backend-turn.js";

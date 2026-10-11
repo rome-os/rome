@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { installFirstPartyAppsAtBoot, shouldReinstallFirstPartyAppAtBoot } from "./boot-upgrade.js";
-import { hashArtifact, packArtifact } from "./packaging/index.js";
+import { hashArtifact, packArtifact } from "@rome-os/app-runtime/packaging";
 import { createTestApps, type TestAppsHarness } from "./test-helpers.js";
 import { AppLockfileSchema } from "./lockfile.js";
 import type { AppManager, InstallResult } from "./manager.js";

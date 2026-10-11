@@ -24,9 +24,10 @@ import {
   ArtifactEntrySchema,
   formatZodIssues,
   parseAppManifest,
+  resolveApiEntryPath,
   resolvePathWithinBase,
   safeIsFile,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import type { AppstoreSource, SpecSource } from "./lockfile.js";
 import type { RomeCloudListingClient } from "./rome-cloud-listing-client.js";
 import { gcInstalledCache, prepare } from "./prepare.js";
@@ -607,7 +608,7 @@ export class AppInstaller {
       throw new Error(`App "${appId}" does not declare an API entrypoint`);
     }
     const entry = declaration.entry ?? "api/index";
-    const entryPath = resolveModuleEntryPath(resolveRoot, entry, appId);
+    const entryPath = resolveApiEntryPath(resolveRoot, entry, appId);
     return {
       appId,
       entryPath,
@@ -653,16 +654,4 @@ function defaultPublicName(relPath: string, kind: ArtifactKind): string {
     return basename(relPath);
   }
   return stem;
-}
-
-function resolveModuleEntryPath(resolveRoot: string, entry: string, appId: string): string {
-  const base = resolvePathWithinBase(resolveRoot, entry, `API entrypoint for app "${appId}"`);
-  for (const ext of [".js", ".mjs", ".cjs", ".ts"]) {
-    const candidate = `${base}${ext}`;
-    if (existsSync(candidate)) return candidate;
-  }
-  if (existsSync(base)) return base;
-  throw new Error(
-    `App "${appId}" API entrypoint not found: tried ${base} with .js/.mjs/.cjs/.ts extensions`,
-  );
 }

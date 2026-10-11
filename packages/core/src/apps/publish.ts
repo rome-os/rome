@@ -28,7 +28,7 @@ import {
   resolvePathWithinBase,
   safeIsFile,
   sourceRootForArtifactPath,
-} from "./packaging/index.js";
+} from "@rome-os/app-runtime/packaging";
 import { renderOgSvg, type OgIcon } from "./og/template.js";
 import { svgToPng } from "./og/rasterize.js";
 import type { SpecSource } from "./lockfile.js";

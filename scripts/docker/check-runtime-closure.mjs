@@ -48,6 +48,7 @@ async function main() {
   run("node", ["scripts/docker/prepare-runtime-workspace.mjs"], { cwd: repoRoot });
 
   assertForbiddenPathsAbsent();
+  assertTemplateTestsPresent();
   await assertWorkspaceBoundary();
   await assertImportBoundary();
 
@@ -99,6 +100,15 @@ function assertForbiddenPathsAbsent() {
     throw new Error(
       `Forbidden package path(s) present in runtime workspace: ${present.join(", ")}`,
     );
+  }
+}
+
+// The template's `test` script fails in every app created in Rome when the
+// workspace's test-file filter drops the test it ships.
+function assertTemplateTestsPresent() {
+  const templateTest = "packages/app-template/template/test/app.test.ts";
+  if (!existsSync(path.join(workspace, templateTest))) {
+    throw new Error(`Runtime workspace is missing the app template's test: ${templateTest}`);
   }
 }
 

@@ -3,14 +3,16 @@ import { runDev } from "./dev.js";
 import { CliError } from "./store/config.js";
 import { runLogin } from "./store/login.js";
 import { runWhoami } from "./store/whoami.js";
-import { runPublish } from "./store/publish.js";
 import { runUpgrade } from "./upgrade.js";
 
 const HELP = `rome — Rome app CLI
 
 Develop:
+  rome create     Scaffold a new app from the template
   rome dev        Start the dev server with HMR
   rome build      Build the app web bundle for production
+  rome validate   Build, pack and check the app the way an install does
+  rome run        Serve the app's UI, API and actions locally, no Rome needed
   rome upgrade    Bump app.yaml version by major, minor, or patch
 
 Dev and build read app.yaml (web.displayName, web.navLabel, web.entry)
@@ -28,8 +30,13 @@ Run "rome <command> --help" for command options.
 const ARG_COMMANDS: Record<string, (argv: string[]) => Promise<void>> = {
   login: runLogin,
   whoami: runWhoami,
-  publish: runPublish,
   upgrade: runUpgrade,
+  // Loaded on use: they pull in the test kit or the packaging module, which
+  // the other commands never need.
+  publish: async (argv) => (await import("./store/publish.js")).runPublish(argv),
+  create: async (argv) => (await import("./create.js")).runCreate(argv),
+  validate: async (argv) => (await import("./validate.js")).runValidate(argv),
+  run: async (argv) => (await import("./run.js")).runRun(argv),
 };
 
 async function main(argv: string[]): Promise<void> {

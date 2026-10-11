@@ -1,6 +1,6 @@
 import type { AppCatalog } from "./catalog.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
-import { parseListingId } from "./packaging/index.js";
+import { parseListingId } from "@rome-os/app-runtime/packaging";
 
 export interface AppStoreInstalledState {
   appId: string;

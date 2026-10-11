@@ -65,7 +65,7 @@ export {
   LockfileTopLevelError,
 } from "./lockfile.js";
 
-export { hashWorkspace } from "./packaging/index.js";
+export { hashWorkspace } from "@rome-os/app-runtime/packaging";
 export { hydrateCatalogFromLockfile } from "./catalog-hydration.js";
 
 export interface AppDomain {

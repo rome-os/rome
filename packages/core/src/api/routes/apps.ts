@@ -25,7 +25,7 @@ import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscribe
 import { SpecSourceSchema } from "../../apps/lockfile.js";
 import { type ArtifactRef, isResolvedApp } from "../../apps/state.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
-import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
+import { appIdToPathSegment, assertValidAppId } from "@rome-os/app-runtime/packaging";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
 import { findUpgradeCandidates } from "../../apps/upgrade-detector.js";
 import { parseSkillFrontmatterResult } from "../../core/skill-catalog.js";

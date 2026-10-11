@@ -5,7 +5,7 @@ import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { ActionConfigSchema } from "../apps/packaging/artifact-config.js";
+import { ActionConfigSchema } from "@rome-os/app-runtime/packaging";
 
 // Root-on-host actions must reach only the main agent. A wildcard allow-list
 // (`actions: ["*"]`) is held by triage, validation and exploration agents,

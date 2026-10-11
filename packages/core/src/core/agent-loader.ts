@@ -6,7 +6,7 @@ import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/type
 import type { AppCatalog } from "../apps/catalog.js";
 import { listCoreAgents } from "../apps/core-artifacts.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
-import { AgentConfigSchema } from "../apps/packaging/index.js";
+import { AgentConfigSchema } from "@rome-os/app-runtime/packaging";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../apps/artifact-id.js";
 import { loadArtifactRecords } from "../apps/artifact-records.js";
 import { createLogger } from "../logger.js";

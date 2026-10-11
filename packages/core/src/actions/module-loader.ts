@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import { registerHooks } from "node:module";
-import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  MODULE_RESOLVER_OPTIONS,
+  resolveActionFactory as resolveSharedActionFactory,
+  resolveModuleEntryPath as resolveSharedModuleEntryPath,
+} from "@rome-os/app-runtime/packaging";
 import { ResolverFactory } from "@rspack/resolver";
 import type { Action, ActionConfig } from "./types.js";
 
@@ -64,58 +68,19 @@ registerHooks({
   },
 });
 
-// Apps written in TypeScript declare `entry: ./index.ts` against their `src/`
-// layout; `rome build` emits `.js` into `dist/` and copies the YAML unchanged.
-// `extensionAlias` lets the resolver try the compiled `.js` sibling first and
-// fall back to `.ts` when running against source (e.g. `tsx` on the host).
-// Node's own resolver doesn't know about TypeScript extensions.
-const sharedResolver = new ResolverFactory({
-  extensions: [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".json"],
-  extensionAlias: {
-    ".js": [".js", ".ts"],
-    ".jsx": [".jsx", ".tsx"],
-    ".mjs": [".mjs", ".mts"],
-    ".cjs": [".cjs", ".cts"],
-    ".ts": [".js", ".ts"],
-    ".tsx": [".jsx", ".tsx"],
-    ".mts": [".mjs", ".mts"],
-    ".cts": [".cjs", ".cts"],
-  },
-  mainFiles: ["index"],
-});
+const sharedResolver = new ResolverFactory(MODULE_RESOLVER_OPTIONS);
 
 export type GenericActionFactory<TDeps = unknown> = (config: ActionConfig, deps: TDeps) => Action;
 
-function isActionFactory<TDeps>(value: unknown): value is GenericActionFactory<TDeps> {
-  return typeof value === "function";
-}
-
-function toPascalCase(name: string): string {
-  return name
-    .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join("");
+export function resolveActionFactory<TDeps>(
+  module: Record<string, unknown>,
+  actionName: string,
+): GenericActionFactory<TDeps> {
+  return resolveSharedActionFactory<GenericActionFactory<TDeps>>(module, actionName);
 }
 
 export async function resolveModuleEntryPath(baseDir: string, entry?: string): Promise<string> {
-  const absoluteBaseDir = resolve(baseDir);
-  const specifier = entry ?? "./index";
-  const result = await sharedResolver.async(absoluteBaseDir, specifier);
-  if (!result.path) {
-    throw new Error(
-      `No entry module found for "${baseDir}" (resolving "${specifier}"): ${result.error ?? "no path returned"}`,
-    );
-  }
-  const [realBaseDir, realEntryPath] = await Promise.all([
-    realpath(absoluteBaseDir),
-    realpath(result.path),
-  ]);
-  const relativeEntryPath = relative(realBaseDir, realEntryPath);
-  if (relativeEntryPath.startsWith("..") || isAbsolute(relativeEntryPath)) {
-    throw new Error(`Invalid entry path "${specifier}" for ${baseDir}: escapes base dir`);
-  }
-  return result.path;
+  return resolveSharedModuleEntryPath(sharedResolver, baseDir, entry);
 }
 
 // App modules can read process.env at module scope, and the file-identity
@@ -135,37 +100,6 @@ export async function importModuleWithCacheBuster(path: string): Promise<Record<
   const cacheBuster = `${Math.trunc(fileStat.mtimeMs)}-${fileStat.size}-e${envEpoch}`;
   const url = `${pathToFileURL(path).href}?v=${cacheBuster}`;
   return await import(url);
-}
-
-export function resolveActionFactory<TDeps>(
-  module: Record<string, unknown>,
-  actionName: string,
-): GenericActionFactory<TDeps> {
-  const preferredNamed = `create${toPascalCase(actionName)}Action`;
-
-  if (isActionFactory<TDeps>(module.createAction)) {
-    return module.createAction;
-  }
-  if (isActionFactory<TDeps>(module[preferredNamed])) {
-    return module[preferredNamed];
-  }
-  if (isActionFactory<TDeps>(module.default)) {
-    return module.default;
-  }
-
-  const candidates = Object.entries(module)
-    .filter(
-      ([name, value]) => /^create[A-Za-z0-9_]*Action$/.test(name) && isActionFactory<TDeps>(value),
-    )
-    .map(([, value]) => value as GenericActionFactory<TDeps>);
-
-  if (candidates.length === 1) {
-    return candidates[0];
-  }
-
-  throw new Error(
-    `No action factory found for "${actionName}". Export createAction(config, deps) or a single create*Action function.`,
-  );
 }
 
 export async function instantiateActionFromDirectory<TDeps>(

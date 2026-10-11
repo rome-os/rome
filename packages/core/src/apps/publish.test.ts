@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Parser } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { hashArtifact, packBundle } from "./packaging/index.js";
+import { hashArtifact, packBundle } from "@rome-os/app-runtime/packaging";
 import { isPublishableSource, publishAppBundle } from "./publish.js";
 import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
 

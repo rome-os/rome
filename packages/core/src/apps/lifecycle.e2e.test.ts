@@ -25,7 +25,7 @@ import {
 import type { ModelSessionParams } from "../core/agent-runner.js";
 import type { AppstoreSource } from "./lockfile.js";
 import { AppLifecycleService } from "./lifecycle-service.js";
-import { appIdToPathSegment, packArtifact } from "./packaging/index.js";
+import { appIdToPathSegment, packArtifact } from "@rome-os/app-runtime/packaging";
 import { createEmptyLegacyArtifactBindings } from "./artifact-id.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 

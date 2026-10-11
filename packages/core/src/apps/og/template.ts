@@ -2,7 +2,7 @@
 // 1200x630 social card. Fixed layout with four slots (icon, name, description,
 // link); geometry and budgets match jessie_local_rome_study spec §4.4. SVG has
 // no automatic wrapping, so lines are broken here by a width-unit budget.
-import { widthUnits } from "../packaging/width-units.js";
+import { widthUnits } from "@rome-os/app-runtime/packaging";
 
 export interface OgIcon {
   mime: "image/svg+xml" | "image/png";
