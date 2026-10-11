@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { Cron } from "croner";
-import { ScheduleTriggerProvider } from "./schedule-trigger-provider.js";
+import { nextDateForLocalTime, ScheduleTriggerProvider } from "./schedule-trigger-provider.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import type { SessionActor } from "../lib/session-actor.js";
@@ -323,5 +323,13 @@ describe("ScheduleTriggerProvider", () => {
       rs.doUnmock("croner");
       rs.resetModules();
     }
+  });
+});
+
+describe("nextDateForLocalTime", () => {
+  it("rolls to tomorrow when today's time is only seconds away", () => {
+    const now = new Date("2026-06-23T08:59:58Z");
+    expect(nextDateForLocalTime("09:00", "UTC", now)).toBe("2026-06-24");
+    expect(nextDateForLocalTime("09:01", "UTC", now)).toBe("2026-06-23");
   });
 });

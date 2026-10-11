@@ -240,11 +240,17 @@ export function parseDateAndLocalTime(date: string, localTime: string, tzid: str
   return new Date(guessUtcMs - offsetMs);
 }
 
+// Storing and activating the routine takes time after the date is picked, and
+// croner never fires a Date that has already passed by then.
+const ONE_OFF_LEAD_MS = 5_000;
+
 /** The "YYYY-MM-DD" in `tzid` of the next time the wall clock there reads
- * `localTime`: today if that moment is still ahead of `now`, else tomorrow. */
+ * `localTime`: today if that moment is still more than a few seconds ahead of
+ * `now`, else tomorrow. */
 export function nextDateForLocalTime(localTime: string, tzid: string, now = new Date()): string {
   const today = calendarDate(now, tzid);
-  if (parseDateAndLocalTime(today, localTime, tzid).getTime() > now.getTime()) return today;
+  const todayAt = parseDateAndLocalTime(today, localTime, tzid).getTime();
+  if (todayAt > now.getTime() + ONE_OFF_LEAD_MS) return today;
   const [year, month, day] = today.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
 }
