@@ -548,6 +548,9 @@ function interpretInteractionResult(parts: unknown): {
 interface OpenSuspensionCard {
   handbackHint?: string;
   childSessionId?: string;
+  /** A host-owned built-in card (a question or the connect-AI card) that a
+   * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
+  dismissedByReply?: boolean;
 }
 
 async function findOpenSuspensions(
@@ -575,6 +578,7 @@ async function findOpenSuspensions(
         toolUseId?: unknown;
         handbackHint?: unknown;
         childSessionId?: unknown;
+        render?: { builtin?: unknown; componentId?: unknown };
       };
       if (
         (part.type === "pending_interaction" || part.type === "handoff") &&
@@ -583,6 +587,10 @@ async function findOpenSuspensions(
         cards.set(part.toolUseId, {
           handbackHint: typeof part.handbackHint === "string" ? part.handbackHint : undefined,
           childSessionId: typeof part.childSessionId === "string" ? part.childSessionId : undefined,
+          dismissedByReply:
+            part.type === "pending_interaction" &&
+            part.render?.builtin === true &&
+            BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -3120,10 +3128,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const displayText = skillName
       ? `/${artifactLocalName(skillName)}${basePrompt.trim() ? ` ${basePrompt.trim()}` : ""}`
       : basePrompt;
+    // A typed reply skips any open built-in card (rome-web already shows it as
+    // dismissed): record the dismissal with this message so the card closes
+    // here too, and tell the agent the guardian answered in chat instead.
+    const skippedCardIds =
+      !resolution && displayText.trim()
+        ? [...openSuspensions].filter(([, card]) => card.dismissedByReply).map(([id]) => id)
+        : [];
+    const turnPrompt =
+      skippedCardIds.length > 0
+        ? "(The guardian skipped your open card and replied in chat instead. " +
+          `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
+        : modelPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${modelPrompt}` : modelPrompt;
+    const promptText = workspaceSection ? `${workspaceSection}\n\n${turnPrompt}` : turnPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3208,10 +3228,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A recoverable model-resolution failure is still an accepted user turn:
     // it persists this message and terminates through the normal trace/SSE
     // protocol below rather than leaving an empty session behind.
-    const userParts =
-      Array.isArray(body.parts) && body.parts.length > 0
+    const userParts = [
+      ...(Array.isArray(body.parts) && body.parts.length > 0
         ? body.parts
-        : [{ type: "text", content: displayText }];
+        : [{ type: "text", content: displayText }]),
+      ...skippedCardIds.map((toolUseId) => ({
+        type: "interaction_result",
+        toolUseId,
+        output: { dismissed: true },
+      })),
+    ];
     const userContent = JSON.stringify(userParts);
     const persistUserMessage = (turnId: string) => {
       return deps.webchatRepo.updateUserInput(sessionId, {
