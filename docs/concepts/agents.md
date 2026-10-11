@@ -59,7 +59,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 |---|---|
 | `Read`, `Glob`, `Grep`, or `Bash` | The shell, with write access to the filesystem |
 | `Read` | Viewing a local image |
-| `Write` or `Edit` | Patches that write files |
+| `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
 | `WebSearch` | Web search |
 | `Task` | Codex's multi-agent tools, on models without collaboration tools |
 | `ImageGeneration` | Image generation |

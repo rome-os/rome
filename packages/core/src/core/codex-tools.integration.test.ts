@@ -22,6 +22,33 @@ const CODEX_TOOLS = ["update_plan", "exec_command", "apply_patch"];
 // Codex tools that read the filesystem or run commands, which an agent with
 // no builtins must not get.
 const CODEX_SHELL_TOOLS = ["exec_command", "write_stdin", "view_image"];
+// Every Codex tool an agent with no builtins may get, beside Rome's own. This is
+// an allowlist so that a Codex upgrade adding or renaming a tool fails here
+// until someone decides whether `tools` must switch it off. Code mode's exec
+// and wait run JavaScript that reaches only the tools offered here, and the
+// read-only sandbox rejects apply_patch. Namespace names count as tools.
+const CODEX_TOOLS_WITHOUT_BUILTINS = new Set([
+  "functions",
+  "exec",
+  "wait",
+  "apply_patch",
+  "update_plan",
+  "request_user_input",
+  "request_user_input_async",
+  "create_goal",
+  "get_goal",
+  "update_goal",
+  "clock",
+  "clock__curr_time",
+  "sleep",
+  "collaboration",
+  "spawn_agent",
+  "send_message",
+  "followup_task",
+  "list_agents",
+  "wait_agent",
+  "interrupt_agent",
+]);
 
 interface ResponsesRequest {
   model: string;
@@ -211,6 +238,10 @@ describe("bundled Codex app-server", () => {
     }
 
     expect(tools.filter((tool) => CODEX_SHELL_TOOLS.includes(tool))).toEqual([]);
+    const unexpected = tools.filter(
+      (tool) => !romeTools.includes(tool) && !CODEX_TOOLS_WITHOUT_BUILTINS.has(tool),
+    );
+    expect(unexpected, `Codex offered unreviewed tools to ${model}`).toEqual([]);
     const missing = ["update_plan", ...romeTools].filter((tool) => !tools.includes(tool));
     expect(missing, `Codex dropped Rome tools for ${model}`).toEqual([]);
   }, 30_000);
