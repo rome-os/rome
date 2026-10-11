@@ -205,9 +205,11 @@ function setUnsyncedLayout(sessionId: string, unsynced: boolean) {
 }
 
 // A session's save in flight. `next` holds the newest layout still to send, so
-// edits made during a PUT coalesce into one later PUT.
+// edits made during a PUT coalesce into one later PUT. `stored` says whether
+// `next` reached localStorage.
 interface LayoutSave {
   next: WidgetPlacement[] | null;
+  stored: boolean;
 }
 
 const layoutSaves = new Map<string, LayoutSave>();
@@ -220,20 +222,23 @@ function saveLayout(sessionId: string, layout: WidgetPlacement[], stored: boolea
   const pending = layoutSaves.get(sessionId);
   if (pending) {
     pending.next = layout;
+    pending.stored = stored;
     return;
   }
-  const save: LayoutSave = { next: layout };
+  const save: LayoutSave = { next: layout, stored };
   layoutSaves.set(sessionId, save);
   void drainLayoutSaves(sessionId, save);
 }
 
 // Sends one PUT at a time per session, so an older layout can never land on
-// the server after a newer one. The unsynced marker clears only when the PUT
-// carrying the newest layout succeeds and the stored layout still matches it,
-// since another tab may have stored a newer layout whose own save failed.
+// the server after a newer one. When the PUT carrying the newest layout
+// succeeds, the unsynced marker clears only if the stored layout still matches
+// it. A different stored layout came from another tab, and this PUT may have
+// landed after that tab's, so the marker is set to make a later load resend it.
 async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
   while (save.next) {
     const layout = save.next;
+    const stored = save.stored;
     save.next = null;
     let ok = false;
     try {
@@ -252,8 +257,14 @@ async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
       });
       ok = res.ok;
     } catch {}
-    if (ok && !save.next && storedLayoutJson(sessionId) === JSON.stringify(layout)) {
-      setUnsyncedLayout(sessionId, false);
+    if (ok && !save.next) {
+      // A failed storage write leaves this tab's older layout stored, so it
+      // must not be marked for resending.
+      if (storedLayoutJson(sessionId) === JSON.stringify(layout)) {
+        setUnsyncedLayout(sessionId, false);
+      } else if (stored) {
+        setUnsyncedLayout(sessionId, true);
+      }
     }
   }
   layoutSaves.delete(sessionId);

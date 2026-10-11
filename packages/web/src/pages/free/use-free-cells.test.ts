@@ -535,6 +535,34 @@ describe("layout sync", () => {
     ]);
   });
 
+  it("resends a newer layout another tab saved before this tab's save landed", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("race-chat");
+    let respond!: (response: Response) => void;
+    rs.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    store.autoPlaceApp("notes");
+
+    // Another tab stores a newer layout and its save lands first, clearing the
+    // marker. This tab's older save then overwrites it on the server.
+    const fromOtherTab = [{ id: "t", type: "desktop", order: 1 }];
+    localStorage.setItem("rome:free-layout:race-chat", JSON.stringify(fromOtherTab));
+    localStorage.removeItem("rome:free-layout-unsynced:race-chat");
+    const sent = puts()[0]!.layout;
+    respond(new Response(null, { status: 200 }));
+    await settle();
+
+    rs.mocked(fetch).mockClear();
+    serve(sent);
+    await store.loadLayoutForSession("race-chat");
+    expect(readLayout("race-chat")).toEqual(fromOtherTab);
+    expect(puts()).toEqual([{ url: "/api/chat/sessions/race-chat/layout", layout: fromOtherTab }]);
+  });
+
   it("does not resend a stored layout older than an edit it failed to store", async () => {
     const store = await import("./use-free-cells");
     store.setActiveSession("quota-chat");
