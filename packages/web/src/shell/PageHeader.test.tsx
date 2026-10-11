@@ -12,7 +12,6 @@ describe("PageHeader", () => {
         title="Routines"
         titleAside={<span>Disabled</span>}
         description="3 enabled"
-        leading={<span data-testid="mark" />}
         actions={<button type="button">New</button>}
       />,
     );
@@ -24,19 +23,18 @@ describe("PageHeader", () => {
     expect(screen.getAllByRole("heading")).toHaveLength(1);
   });
 
-  it("places the aside, the caption, the mark, and the actions outside the heading", () => {
+  it("places the aside, the caption, and the actions outside the heading", () => {
     render(
       <PageHeader
         title="Routines"
         titleAside={<span data-testid="aside">Disabled</span>}
         description={<span data-testid="caption">3 enabled</span>}
-        leading={<span data-testid="mark" />}
         actions={<button type="button">New</button>}
       />,
     );
 
     const heading = screen.getByRole("heading", { level: 1 });
-    for (const id of ["aside", "caption", "mark"]) {
+    for (const id of ["aside", "caption"]) {
       expect(heading.contains(screen.getByTestId(id))).toBe(false);
     }
     expect(heading.contains(screen.getByRole("button", { name: "New" }))).toBe(false);

@@ -45,7 +45,7 @@ beforeEach(() => {
   mocks.config.mockResolvedValue("wss://gateway.example/connect");
   mocks.connect.mockImplementation((options: GatewayClientOptions) => {
     queueMicrotask(() => options.onStatus?.("superseded"));
-    return { stop: rs.fn(), send: rs.fn() };
+    return { stop: rs.fn(), send: rs.fn(), sendFrame: rs.fn() };
   });
 });
 afterEach(() => {

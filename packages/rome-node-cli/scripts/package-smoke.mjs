@@ -41,7 +41,7 @@ try {
   assert.deepEqual(await client.listDevices(), { items: [{ id: "target" }] });
   const status = await client.getConnectionStatus();
   assert.equal(status.connection, "stopped");
-  assert.equal(status.protocolVersion, 2);
+  assert.equal(status.protocolVersion, 3);
   assert.notEqual(status.pid, process.pid);
   const events = [];
   const unsubscribe = await client.subscribe("connection", (event) => events.push(event));

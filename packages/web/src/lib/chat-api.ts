@@ -288,8 +288,8 @@ export async function listChatAgents(): Promise<AgentCatalogGroup[]> {
 
 export async function listSkills(): Promise<SkillSummary[]> {
   const res = await fetch("/api/skills", { credentials: "include" });
-  const data = await jsonOrThrow<{ skills?: SkillSummary[] }>(res);
-  return data.skills ?? [];
+  const data = await jsonOrThrow<{ skills: SkillSummary[] }>(res);
+  return data.skills;
 }
 
 export async function createSession(input: CreateSessionInput): Promise<ChatSession> {
@@ -572,6 +572,10 @@ export interface CreateRoutinePayload {
   trigger: unknown;
   actionName: string;
   args: Record<string, unknown>;
+  /** Unique routine key; the route accepts only `chat-routine:<id>` keys
+   * (other prefixes belong to apps' managed routines). A repeat create with
+   * the same key returns the routine that already holds it, not a duplicate. */
+  key?: string;
 }
 
 export interface CreateRoutineResult {
@@ -588,27 +592,71 @@ export async function createRoutine(payload: CreateRoutinePayload): Promise<Crea
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, enabled: true }),
   });
+  const row = (await res.json().catch(() => null)) as { id?: string; error?: string } | null;
   if (res.ok) {
-    const row = (await res.json().catch(() => null)) as { id?: string } | null;
     return { ok: true, status: res.status, routineId: row?.id };
   }
-  const payloadErr = (await res.json().catch(() => null)) as { error?: string } | null;
-  return { ok: false, status: res.status, error: payloadErr?.error };
+  // 409 on a keyed create: this routine was already created (a retried click,
+  // another tab). Treat it as success and hand back the existing id.
+  if (res.status === 409 && payload.key !== undefined && row?.id) {
+    return { ok: true, status: res.status, routineId: row.id };
+  }
+  return { ok: false, status: res.status, error: row?.error };
 }
 
-/** Names of existing routines, used by the draft card to detect a routine it
- * already created (so a reload doesn't offer to create a duplicate). */
-export async function listRoutineNames(): Promise<string[]> {
-  const res = await fetch("/api/routines", { credentials: "include" });
-  if (!res.ok) return [];
-  const rows = (await res.json().catch(() => [])) as Array<{ name?: string }>;
-  return rows.map((r) => r.name ?? "").filter(Boolean);
+/** Identity and state of existing routines, used by the routine card to find
+ * the routine it created (so a reload links to it instead of offering to
+ * create a duplicate) and to show whether it is paused. */
+export interface RoutineRef {
+  id: string;
+  name: string;
+  key: string | null;
+  enabled: boolean;
 }
 
-export async function loadSettings(): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/settings", { credentials: "include" });
-  if (!res.ok) return {};
-  return (await res.json()) as Record<string, unknown>;
+/** Null when the list can't be loaded, so a failed fetch never reads as "the
+ * routine is gone". */
+export async function listRoutineRefs(): Promise<RoutineRef[] | null> {
+  const res = await fetch("/api/routines", { credentials: "include" }).catch(() => null);
+  if (!res?.ok) return null;
+  const rows = (await res.json().catch(() => null)) as Array<Partial<RoutineRef>> | null;
+  if (!Array.isArray(rows)) return null;
+  return rows.flatMap((r) =>
+    typeof r.id === "string"
+      ? [{ id: r.id, name: r.name ?? "", key: r.key ?? null, enabled: r.enabled !== false }]
+      : [],
+  );
+}
+
+export interface RoutineMutationResult {
+  ok: boolean;
+  error?: string;
+}
+
+async function routineMutation(
+  id: string,
+  init: RequestInit,
+  fallback: string,
+): Promise<RoutineMutationResult> {
+  const res = await fetch(`/api/routines/${encodeURIComponent(id)}`, {
+    credentials: "include",
+    ...init,
+  }).catch(() => null);
+  if (res?.ok) return { ok: true };
+  const payload = (await res?.json().catch(() => null)) as { error?: string } | null;
+  return { ok: false, error: payload?.error ?? fallback };
+}
+
+export function setRoutineEnabled(id: string, enabled: boolean): Promise<RoutineMutationResult> {
+  return routineMutation(
+    id,
+    { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify({ enabled }) },
+    enabled ? "Couldn't resume the routine." : "Couldn't pause the routine.",
+  );
+}
+
+export function deleteRoutine(id: string): Promise<RoutineMutationResult> {
+  return routineMutation(id, { method: "DELETE" }, "Couldn't delete the routine.");
 }
 
 export async function saveSetting(key: string, value: unknown): Promise<boolean> {

@@ -124,7 +124,7 @@ export function Composer({
           aria-label={t("detail.composerLabel")}
         />
         <Button type="button" size="sm" disabled={text === ""} onClick={submit}>
-          <SendHorizontal aria-hidden="true" />
+          <SendHorizontal data-icon="inline-start" aria-hidden="true" />
           {t("send.submit")}
         </Button>
       </div>

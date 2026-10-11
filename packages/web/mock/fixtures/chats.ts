@@ -1,4 +1,4 @@
-import type { ChatEntry } from "@/lib/chat-types";
+import type { TranscriptPart } from "@/lib/chat-types";
 import { appBuildingChat } from "./app-building-chat";
 
 export interface DemoChat {
@@ -7,9 +7,9 @@ export interface DemoChat {
   project: string;
   turns: {
     at: string;
-    prompt: string | ChatEntry[];
+    prompt: string | TranscriptPart[];
     reply: string;
-    blocks?: ChatEntry[];
+    blocks?: TranscriptPart[];
   }[];
 }
 

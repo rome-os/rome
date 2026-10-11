@@ -33,13 +33,10 @@ export function getDelimitedSeparator(path: string, mimeType: string): "," | "\t
   return extension === "tsv" || mimeType === "text/tab-separated-values" ? "\t" : ",";
 }
 
-export function parseDelimitedContent(
-  content: string,
-  separator: "," | "\t",
-  options: { maxColumns?: number; maxRows?: number } = {},
-): string[][] {
-  const maxColumns = options.maxColumns ?? 50;
-  const maxRows = options.maxRows ?? 200;
+const MAX_DELIMITED_COLUMNS = 50;
+const MAX_DELIMITED_ROWS = 200;
+
+export function parseDelimitedContent(content: string, separator: "," | "\t"): string[][] {
   const rows: string[][] = [];
   let cell = "";
   let row: string[] = [];
@@ -70,8 +67,8 @@ export function parseDelimitedContent(
         index += 1;
       }
       row.push(cell);
-      rows.push(row.slice(0, maxColumns));
-      if (rows.length >= maxRows) {
+      rows.push(row.slice(0, MAX_DELIMITED_COLUMNS));
+      if (rows.length >= MAX_DELIMITED_ROWS) {
         return rows;
       }
       row = [];
@@ -84,7 +81,7 @@ export function parseDelimitedContent(
 
   if (cell || row.length > 0) {
     row.push(cell);
-    rows.push(row.slice(0, maxColumns));
+    rows.push(row.slice(0, MAX_DELIMITED_COLUMNS));
   }
 
   return rows;

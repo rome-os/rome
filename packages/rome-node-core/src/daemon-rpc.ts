@@ -2,6 +2,9 @@ import WebSocket from "ws";
 import { isRecord } from "./actions.js";
 import {
   DAEMON_PROTOCOL_VERSION,
+  encodeBinaryMessage,
+  MAX_LOCAL_MESSAGE_BYTES,
+  parseBinaryMessage,
   parseDaemonStatus,
   type DaemonStatus,
 } from "./daemon-protocol.js";
@@ -43,7 +46,11 @@ export class RpcConnection {
   private nextId = 0;
   private pending = new Map<
     string,
-    { resolve(value: unknown): void; reject(error: Error): void }
+    {
+      resolve(value: unknown, body: Uint8Array): void;
+      reject(error: Error): void;
+      progress?(params: Record<string, unknown>): void;
+    }
   >();
   onNotification?: (method: string, params: unknown) => void;
   onClose?: () => void;
@@ -72,24 +79,47 @@ export class RpcConnection {
     });
     socket.on("message", (data, binary) => {
       let message: unknown;
-      try {
-        message = JSON.parse(data.toString());
-      } catch {
-        this.close();
-        return;
+      let body: Uint8Array = new Uint8Array();
+      if (binary) {
+        const parsed = parseBinaryMessage(
+          Buffer.isBuffer(data)
+            ? data
+            : Array.isArray(data)
+              ? Buffer.concat(data)
+              : Buffer.from(data),
+        );
+        if (!parsed) {
+          this.close();
+          return;
+        }
+        ({ message, body } = parsed);
+      } else {
+        try {
+          message = JSON.parse(data.toString());
+        } catch {
+          this.close();
+          return;
+        }
       }
-      if (binary || !isRecord(message) || message.jsonrpc !== "2.0") {
+      if (!isRecord(message) || message.jsonrpc !== "2.0") {
         this.close();
         return;
       }
       if (typeof message.method === "string" && !Object.hasOwn(message, "id")) {
-        this.onNotification?.(message.method, message.params);
+        const params = message.params;
+        // Transfer progress belongs to one request on this connection, not to subscribers.
+        if (message.method === "events.transfer") {
+          if (isRecord(params) && typeof params.requestId === "string")
+            this.pending.get(params.requestId)?.progress?.(params);
+          return;
+        }
+        this.onNotification?.(message.method, params);
         return;
       }
       const pending = typeof message.id === "string" ? this.pending.get(message.id) : undefined;
       if (!pending) return;
       if (Object.hasOwn(message, "result") && !Object.hasOwn(message, "error"))
-        pending.resolve(message.result);
+        pending.resolve(message.result, body);
       else if (
         !Object.hasOwn(message, "result") &&
         isRecord(message.error) &&
@@ -105,24 +135,61 @@ export class RpcConnection {
     return this.socket.readyState === WebSocket.OPEN;
   }
 
-  request(method: string, params: unknown = {}, timeoutMs = 85_000): Promise<unknown> {
+  /**
+   * A timeoutMs of Infinity waits until the reply or the connection closes. `progress` receives
+   * the params of `events.transfer` notifications for this request.
+   */
+  async request(
+    method: string,
+    params: unknown = {},
+    timeoutMs = 85_000,
+    progress?: (params: Record<string, unknown>) => void,
+  ): Promise<unknown> {
+    return (await this.submit(method, params, undefined, timeoutMs, progress)).result;
+  }
+
+  /**
+   * Sends one binary message carrying `body`. A text reply resolves with an empty body.
+   * Throws when `params` is not JSON.
+   */
+  async requestBinary(
+    method: string,
+    params: unknown,
+    body: Uint8Array,
+    timeoutMs = 85_000,
+  ): Promise<{ result: unknown; body: Uint8Array }> {
+    return this.submit(method, params, body, timeoutMs);
+  }
+
+  private submit(
+    method: string,
+    params: unknown,
+    body: Uint8Array | undefined,
+    timeoutMs: number,
+    progress?: (params: Record<string, unknown>) => void,
+  ): Promise<{ result: unknown; body: Uint8Array }> {
     if (!this.open) return Promise.reject(new DaemonRequestError());
     const id = String(++this.nextId);
-    const text = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+    const message = { jsonrpc: "2.0", id, method, params };
+    const data = body ? encodeBinaryMessage(message, body) : JSON.stringify(message);
     return new Promise((resolve, reject) => {
-      const finish = (error?: Error, value?: unknown) => {
+      const finish = (error?: Error, value?: { result: unknown; body: Uint8Array }) => {
         clearTimeout(timer);
         this.pending.delete(id);
         if (error) reject(error);
-        else resolve(value);
+        else resolve(value!);
       };
-      const timer = setTimeout(() => finish(new DaemonRequestError()), timeoutMs);
+      // setTimeout treats Infinity as 1 ms, so an unbounded wait needs no timer at all.
+      const timer = Number.isFinite(timeoutMs)
+        ? setTimeout(() => finish(new DaemonRequestError()), timeoutMs)
+        : undefined;
       this.pending.set(id, {
-        resolve: (value) => finish(undefined, value),
+        resolve: (result, body) => finish(undefined, { result, body }),
         reject: (error) => finish(error),
+        progress,
       });
       try {
-        this.socket.send(text, (error) => {
+        this.socket.send(data, { binary: Boolean(body) }, (error) => {
           if (error) finish(new DaemonRequestError());
         });
       } catch {
@@ -136,15 +203,18 @@ export class RpcConnection {
   }
 }
 
+/** Throws DaemonVersionError unless the daemon speaks `protocolVersion`. */
 export async function connectRpc(
   state: DaemonState,
   signal?: AbortSignal,
+  protocolVersion = DAEMON_PROTOCOL_VERSION,
 ): Promise<{ rpc: RpcConnection; status: DaemonStatus }> {
   signal?.throwIfAborted();
   const socket = new WebSocket(`ws://127.0.0.1:${state.port}/rpc`, {
     headers: { authorization: `Bearer ${state.token}` },
     handshakeTimeout: 1500,
     perMessageDeflate: false,
+    maxPayload: MAX_LOCAL_MESSAGE_BYTES,
     followRedirects: false,
   });
   const rpc = new RpcConnection(socket);
@@ -170,12 +240,8 @@ export async function connectRpc(
       socket.once("error", failed);
       if (signal?.aborted) abort();
     });
-    const value = await rpc.request(
-      "daemon.hello",
-      { protocolVersion: DAEMON_PROTOCOL_VERSION },
-      1500,
-    );
-    if (isRecord(value) && value.protocolVersion !== DAEMON_PROTOCOL_VERSION)
+    const value = await rpc.request("daemon.hello", { protocolVersion }, 1500);
+    if (isRecord(value) && value.protocolVersion !== protocolVersion)
       throw new DaemonVersionError();
     const status = parseDaemonStatus(value);
     if (!status || status.pid !== state.pid) throw new DaemonRequestError();

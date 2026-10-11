@@ -9,8 +9,6 @@ interface OAuthRedeemPayload {
   error?: string;
 }
 
-const redeemRequests = new Map<string, Promise<OAuthRedeemPayload>>();
-
 /** The connections list — where a return leg lands when it cannot name the
  *  service it belongs to (nothing matched, or an ambiguous delivery). */
 const SETTINGS_CONNECTIONS_PATH = "/settings/connections";
@@ -79,8 +77,8 @@ async function hasDashboardSession(): Promise<boolean> {
 }
 
 // Dedup by `(state, handoff, providerError)` so React's double-invoked effects
-// deliver each single-use return leg ONCE. Like `redeemRequests`, an entry is
-// pruned only on rejection; a resolved entry is retained for the page's lifetime
+// deliver each single-use return leg ONCE. An entry is pruned only on
+// rejection; a resolved entry is retained for the page's lifetime
 // (deliberate — the dedup must hold for repeat effect runs). `state` is
 // single-use and the callback page is short-lived (it navigates away on
 // success), so the map holds at most a handful of entries and never grows
@@ -154,7 +152,7 @@ function handleOAuthReturnOnce(
 
     // Definitive no-match — the sign-in / lost-session fallback.
     if (!handoff) return { error: fallbackError };
-    const payload = await redeemOAuthHandoffOnce(handoff, state, fallbackError);
+    const payload = await redeemOAuthHandoff(handoff, state, fallbackError);
     // The server names "/" for a plain sign-in; the page the guardian was
     // sent to /login from wins over it. /onboard and connection pages stand.
     const nextPath = payload?.nextPath || "/";
@@ -168,36 +166,23 @@ function handleOAuthReturnOnce(
   return run;
 }
 
-function redeemOAuthHandoffOnce(
+async function redeemOAuthHandoff(
   handoff: string,
   state: string,
   fallbackError: string,
 ): Promise<OAuthRedeemPayload> {
-  const requestKey = `${state}:${handoff}`;
-  const existing = redeemRequests.get(requestKey);
-  if (existing) return existing;
-
-  const request = fetch("/api/oauth/redeem", {
+  const response = await fetch("/api/oauth/redeem", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
     credentials: "include",
     body: JSON.stringify({ handoff, state }),
-  })
-    .then(async (response) => {
-      const payload = (await response.json().catch(() => null)) as OAuthRedeemPayload | null;
-      if (!response.ok) {
-        throw new Error(payload?.error || fallbackError);
-      }
-      return payload ?? {};
-    })
-    .catch((error) => {
-      redeemRequests.delete(requestKey);
-      throw error;
-    });
-
-  redeemRequests.set(requestKey, request);
-  return request;
+  });
+  const payload = (await response.json().catch(() => null)) as OAuthRedeemPayload | null;
+  if (!response.ok) {
+    throw new Error(payload?.error || fallbackError);
+  }
+  return payload ?? {};
 }
 
 export default function CallbackPage() {

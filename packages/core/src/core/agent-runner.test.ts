@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
+import type { RecordedConversation } from "./agent-trace-recorder.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -71,6 +72,7 @@ import type {
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
+import { testChannelSurface } from "../test/channel-surface.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
@@ -238,7 +240,7 @@ describe("AgentRunner", () => {
     // Webchat retains long-lived conversation semantics across reacquires.
     const key = {
       agentName: "test-code-backed",
-      channelThreadKey: "webchat:session-reuse:large-model:opus",
+      channelThreadKey: "webchat:session-reuse",
     };
     const first = await manager.acquire(key);
     const second = await manager.acquire(key);
@@ -275,6 +277,71 @@ describe("AgentRunner", () => {
     expect(row?.agentName).toBe("core:test-main");
 
     await session.close("shutdown");
+  });
+
+  it("fills a re-entry's conversation id from its channel address", async () => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-1", "Webchat chat");
+    const stop = new Error("stop after acquire");
+    const acquireBySessionId = rs.fn(async () => {
+      throw stop;
+    });
+    const manager = { acquireBySessionId } as unknown as AgentSessionManager;
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await expect(
+      collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: "agent-session-1",
+          prompt: "continue",
+          threadContext: { channel: "webchat", threadId: "chat-1" },
+        }),
+      ),
+    ).rejects.toBe(stop);
+
+    expect(acquireBySessionId).toHaveBeenCalledWith(
+      "agent-session-1",
+      "test-main",
+      expect.objectContaining({
+        threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
+      }),
+    );
+  });
+
+  it.each([
+    ["saves", true, ["trace"]],
+    ["leaves", undefined, []],
+  ])("%s a webchat turn's trace when the caller asks, without transcript rows", async (_label, persistTrace, roles) => {
+    const webchatRepo = new WebChatRepository(testDb.db);
+    await webchatRepo.createSession("chat-trace", "Webchat chat");
+    const provider: ModelProvider = {
+      id: "anthropic",
+      displayName: "Claude",
+      builtinTools: new Set<string>(),
+      openSession: makeOpenSessionFromRun("anthropic", async function* () {
+        yield { type: "result", content: "Deferred check done." };
+      }),
+    };
+    const manager = createAgentSessionManager(
+      managerDeps(createTestModelResolver({ providers: [provider] })),
+    );
+    const runner = new AgentRunner(manager, agentLoader, webchatRepo);
+
+    await collectMessages(
+      runner.run({
+        agentName: "test-main",
+        channelThreadKey: "webchat:chat-trace",
+        prompt: "continue",
+        threadContext: { channel: "webchat", threadId: "chat-trace", romeSessionId: "chat-trace" },
+        persistTrace,
+        persistTranscript: false,
+      }),
+    );
+
+    const messages = await webchatRepo.getMessages("chat-trace");
+    expect(messages.map((message) => message.role)).toEqual(roles);
+    await manager.shutdown();
   });
 
   it("runs a forked turn from the matching live source session", async () => {
@@ -364,6 +431,7 @@ describe("AgentRunner", () => {
           threadContext: {
             channel: "webchat",
             threadId: "parent-chat",
+            romeSessionId: "parent-chat",
             threadName: "Fixing the build",
             threadType: "private",
           },
@@ -395,6 +463,362 @@ describe("AgentRunner", () => {
         "result",
         "turn_end",
       ]);
+    } finally {
+      testDb.close();
+    }
+  });
+
+  describe("a resumed session whose caller names no conversation", () => {
+    function resumedSession(conversationId: string, recordedConversation?: RecordedConversation) {
+      type TurnRef = { romeSessionId?: string; romeSessionType?: string };
+      const turns: TurnRef[] = [];
+      const session = {
+        key: { agentName: "main", channelThreadKey: "telegram:t1" },
+        sessionId: "agent-session",
+        conversationId,
+        recordedConversation,
+        status: "idle" as const,
+        sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
+          turns.push({
+            romeSessionId: options?.romeSessionId,
+            romeSessionType: options?.romeSessionType,
+          });
+          return {
+            turnId: "resumed-turn",
+            turnContext: context.active(),
+            events: (async function* () {
+              yield {
+                type: "turn_start",
+                turnId: "resumed-turn",
+                sessionId: "agent-session",
+                userPrompt: input.prompt,
+                agent: "main",
+              } as const;
+              yield { type: "result", content: "Done", agent: "main" } as const;
+            })(),
+          };
+        }),
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        acquireBySessionId: rs.fn(async () => session),
+        peek: rs.fn(),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      return { manager, turns };
+    }
+
+    it("leaves a recorded channel conversation to the inbox", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "channel:telegram:t1",
+          type: "channel",
+          name: "Telegram thread",
+          agentName: null,
+        });
+        const { manager, turns } = resumedSession("channel:telegram:t1", {
+          id: "channel:telegram:t1",
+          name: "Telegram thread",
+          type: "channel",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        expect(turns[0]?.romeSessionType).toBe("action");
+        await expect(repo.getMessages("channel:telegram:t1")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("writes the prompt into a recorded subagent conversation it alone records", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toContain("user");
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a turn under a webchat thread to that chat", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: {
+              channel: "webchat",
+              threadId: "parent-chat",
+              threadName: "Parent",
+              threadType: "private",
+              romeSessionId: "parent-chat",
+            },
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "parent-chat", romeSessionType: "webchat" }]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a turn under a messaging thread to that thread", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Telegram thread",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Telegram thread",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // A backend turn delivers its reply to the thread and records it in the
+        // thread's conversation under this turn, so the trace stays there too.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
+          }),
+        );
+
+        expect(turns).toEqual([
+          { romeSessionId: "channel:telegram:t1", romeSessionType: "channel" },
+        ]);
+        await expect(repo.getMessages("child-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("writes a recorded subagent transcript when the caller keeps its own", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "child-chat",
+          type: "subagent",
+          name: "researcher: Parent",
+          agentName: "researcher",
+        });
+        const { manager, turns } = resumedSession("child-chat", {
+          id: "child-chat",
+          name: "researcher: Parent",
+          type: "subagent",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        // A caller that keeps its own transcript keeps it for its channel,
+        // not for this conversation.
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
+        const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
+        expect(roles).toEqual(expect.arrayContaining(["user", "assistant"]));
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a saved side chat to the webchat route on a backend turn", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.ensureRomeSession({
+          id: "side-chat",
+          type: "fork",
+          name: "Side chat",
+          agentName: "main",
+        });
+        const { manager, turns } = resumedSession("side-chat", {
+          id: "side-chat",
+          name: "Side chat",
+          type: "fork",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({
+            agentName: "main",
+            sessionId: "agent-session",
+            prompt: "continue",
+            threadContext: {
+              channel: "webchat",
+              threadId: "side-chat",
+              threadName: "Side chat",
+              threadType: "private",
+              romeSessionId: "side-chat",
+            },
+            persistTrace: true,
+            persistTranscript: false,
+          }),
+        );
+
+        expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
+        const roles = (await repo.getMessages("side-chat")).map((m) => m.role);
+        expect(roles).not.toContain("user");
+        expect(roles).not.toContain("assistant");
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("leaves a recorded webchat conversation to the webchat route", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns } = resumedSession("user-chat", {
+          id: "user-chat",
+          name: "User chat",
+          type: "webchat",
+        });
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        await expect(repo.getMessages("user-chat")).resolves.toEqual([]);
+      } finally {
+        testDb.close();
+      }
+    });
+
+    it("does not recreate a recorded conversation that was deleted", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new WebChatRepository(testDb.db);
+        // The lookup at open found no conversation, so none is recorded.
+        const { manager, turns } = resumedSession("deleted-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toMatch(/^action:/);
+        expect(turns[0]?.romeSessionType).toBe("action");
+        await expect(repo.getSession("deleted-chat")).resolves.toBeNull();
+      } finally {
+        testDb.close();
+      }
+    });
+  });
+
+  it("links a fork to the conversation its source serves when no thread names one", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new WebChatRepository(testDb.db);
+      await repo.createSession("stored-chat", "Stored chat");
+
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        sessionId: "source-session",
+        conversationId: "stored-chat",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Fork summary", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+
+      await collectMessages(
+        runner.runForked({
+          agentName: "main",
+          sourceSessionId: "source-session",
+          channelThreadKey: "webchat:stored-chat",
+          prompt: "summarize",
+          label: "recap",
+        }),
+      );
+
+      await expect(repo.getSession("fork-session")).resolves.toMatchObject({
+        type: "fork",
+        name: "recap: Stored chat",
+        parentSessionId: "stored-chat",
+      });
     } finally {
       testDb.close();
     }
@@ -542,7 +966,12 @@ describe("AgentRunner", () => {
       appCatalog: opts.appCatalog,
     });
     const first = await collectMessages(
-      runner.run({ agentName, prompt: "Hi", channelThreadKey: "webchat:fork-1" }),
+      runner.run({
+        agentName,
+        prompt: "Hi",
+        channelThreadKey: "webchat:fork-1",
+        threadContext: { channel: "webchat", threadId: "fork-1" },
+      }),
     );
     const start = first.find((m) => m.type === "turn_start") as { sessionId: string };
     return collectMessages(
@@ -1596,6 +2025,7 @@ describe("AgentRunner", () => {
       capabilityDiscovery: new CapabilityDiscovery(),
       skillCatalog: new SkillCatalog(artifactIdentity),
       lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
+      channelSurface: testChannelSurface,
       activeSubagentRegistry,
       subagentExecutionService: createSubagentExecutionService({
         webchatRepo: new WebChatRepository(testDb.db),
@@ -1990,6 +2420,7 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
+        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -2167,13 +2598,6 @@ describe("AgentRunner", () => {
     });
 
     it("reopens the exact requested session instead of reusing a different cached session", async () => {
-      const repo = new SessionsRepository(testDb.db);
-      await repo.create({
-        id: "sess-old",
-        agentName: "test-main",
-        channelThreadKey: "telegram:t-1",
-        status: "active",
-      });
       const provider = new MockModelProvider();
       const modelResolver = createTestModelResolver({
         providers: [provider],
@@ -2182,7 +2606,14 @@ describe("AgentRunner", () => {
         keepAliveAcrossTurns: true,
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
-      const cached = await manager.acquire(key, { forceNewSession: true });
+      const cached = await manager.acquire(key);
+      const repo = new SessionsRepository(testDb.db);
+      await repo.create({
+        id: "sess-old",
+        agentName: "test-main",
+        channelThreadKey: "telegram:t-1",
+        status: "active",
+      });
 
       expect(cached.sessionId).not.toBe("sess-old");
       expect(provider.sessions).toHaveLength(1);
@@ -3254,6 +3685,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "webchat:prompt-surface",
+          threadContext: { channel: "webchat", threadId: "prompt-surface" },
         }),
       );
 
@@ -3264,6 +3696,7 @@ describe("AgentRunner", () => {
           agentName: "test-main",
           prompt: "Build prompt",
           channelThreadKey: "telegram:prompt-surface",
+          threadContext: { channel: "telegram", threadId: "prompt-surface" },
         }),
       );
 
@@ -3408,6 +3841,54 @@ describe("AgentRunner", () => {
       );
 
       expect(initUserPrompt(messages)).not.toContain("<thread_context>");
+      await manager.shutdown();
+    });
+
+    it("skips stored-message context for a channel whose surface needs none", async () => {
+      const webchatRepo = new WebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelConversation({
+        channel: "discord",
+        threadId: "quiet-context",
+        agentName: "main",
+      });
+      await webchatRepo.addConversationMessage({
+        sessionId: conversation.id,
+        role: "notification",
+        content: JSON.stringify([{ type: "text", content: "ambient update" }]),
+        platformMessageId: "ambient-message",
+        senderName: "Bob",
+        createdAt: new Date("2026-08-03T08:01:00.000Z"),
+      });
+
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        displayName: "mock-no-conversation-context",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      // The same channel conversation as above, but its surface says every
+      // message already reaches the agent, as webchat's does.
+      const manager = createAgentSessionManager({
+        ...managerDeps(createTestModelResolver({ providers: [provider] })),
+        channelSurface: () => ({ interactiveCards: false, promptContext: false }),
+      });
+      await collectMessages(
+        new AgentRunner(manager, agentLoader).run({
+          agentName: "test-main",
+          prompt: "current message",
+          channelThreadKey: "discord:quiet-context",
+          romeSessionId: conversation.id,
+          threadContext: { channel: "discord", threadId: "quiet-context" },
+        }),
+      );
+
+      expect(providerPrompts).toHaveLength(1);
+      expect(providerPrompts[0]).not.toContain("<conversation_context>");
+      expect(providerPrompts[0]).not.toContain("ambient update");
       await manager.shutdown();
     });
 
@@ -3835,7 +4316,7 @@ describe("AgentRunner", () => {
       const session = await manager.acquire(
         {
           agentName: "test-main",
-          channelThreadKey: "webchat:session-1:large-model:gpt-5-6-terra",
+          channelThreadKey: "webchat:session-1",
         },
         { selectionId: "gpt-5-6-terra" },
       );
@@ -3847,7 +4328,7 @@ describe("AgentRunner", () => {
       expect(openAiSessions[0].model).toBe("gpt-5.6-terra");
     });
 
-    it("restores the selected model from the persisted session key on explicit cold resume", async () => {
+    it("restores the selected model from the session pin on explicit cold resume", async () => {
       const openAiSessions: ModelSessionParams[] = [];
       const openai: ModelProvider = {
         id: "openai",
@@ -3870,7 +4351,7 @@ describe("AgentRunner", () => {
       const firstManager = createAgentSessionManager(managerDeps(modelResolver));
       const key = {
         agentName: "test-main",
-        channelThreadKey: "webchat:session-cold:large-model:gpt-5-6-terra",
+        channelThreadKey: "webchat:session-cold",
       };
       const firstSession = await firstManager.acquire(key, { selectionId: "gpt-5-6-terra" });
       await collectMessages(firstSession.sendTurn({ prompt: "Start" }).events);
@@ -4575,13 +5056,20 @@ describe("AgentRunner", () => {
       });
 
       const repo = new SessionsRepository(testDb.db);
-      // A pre-cutover row (model NULL) whose webchat key pins a Claude selection,
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
       // while the stored provider thread is Codex. With the resume guard removed,
       // the single precedence rule honors the persisted selection instead of
       // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-mismatch",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
       const legacyId = await repo.create({
         agentName: "test-main",
-        channelThreadKey: "webchat:legacy-mismatch:large-model:claude-opus",
+        channelThreadKey: "webchat:legacy-mismatch",
         status: "active",
       });
       await repo.setProviderInfo(legacyId, "openai", "codex-thread");
@@ -4589,7 +5077,16 @@ describe("AgentRunner", () => {
       const manager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(manager, agentLoader);
       const messages = await collectMessages(
-        runner.run({ agentName: "test-main", sessionId: legacyId, prompt: "Continue" }),
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+          threadContext: {
+            channel: "webchat",
+            threadId: "legacy-mismatch",
+            romeSessionId: "legacy-mismatch",
+          },
+        }),
       );
 
       // The resume opens Claude Opus on a fresh provider thread (provider changed
@@ -4604,6 +5101,114 @@ describe("AgentRunner", () => {
       });
       expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
+      await manager.shutdown();
+    });
+
+    it("a legacy resume without a thread context reads the selection through its key", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const codexOpens: ModelSessionParams[] = [];
+      const claudeOpens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+
+      const repo = new SessionsRepository(testDb.db);
+      // A pre-cutover row (model NULL) whose chat stores a Claude selection,
+      // while the stored provider thread is Codex. With the resume guard removed,
+      // the single precedence rule honors the persisted selection instead of
+      // dropping it on provider mismatch.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-no-context",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
+      const legacyId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-no-context",
+        status: "active",
+      });
+      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+
+      const manager = createAgentSessionManager(managerDeps(modelResolver));
+      const runner = new AgentRunner(manager, agentLoader);
+      const messages = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+        }),
+      );
+
+      // The resume opens Claude Opus on a fresh provider thread (provider changed
+      // from Codex), never the stored-provider tier resolution.
+      expect(messages.find((message) => message.type === "result")).toMatchObject({
+        content: "claude-opus-4-8[1m]",
+      });
+      expect(claudeOpens).toHaveLength(1);
+      expect(claudeOpens[0]).toMatchObject({
+        model: "claude-opus-4-8[1m]",
+        isNewSession: true,
+      });
+      expect(claudeOpens[0].providerThreadId).toBeUndefined();
+      expect(codexOpens).toHaveLength(0);
+      await manager.shutdown();
+    });
+
+    it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
+      const state = {
+        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
+        claude: { loggedIn: true, quotaExhausted: false },
+      };
+      const codexOpens: ModelSessionParams[] = [];
+      const claudeOpens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
+        aiToolState: { get: () => state, refresh: async () => state },
+      });
+
+      const repo = new SessionsRepository(testDb.db);
+      // The parent chat stores a Claude selection. Its subagent's legacy row
+      // (model NULL) ran on Codex, and the subagent opens with the parent's
+      // thread context, so the chat's selection must not reach it.
+      await new WebChatRepository(testDb.db).createSession(
+        "legacy-parent",
+        "Legacy chat",
+        undefined,
+        undefined,
+        "claude-opus",
+      );
+      const legacyId = await repo.create({
+        agentName: "test-main",
+        channelThreadKey: "webchat:legacy-parent:subagent:child-1",
+        status: "active",
+      });
+      await repo.setProviderInfo(legacyId, "openai", "codex-thread");
+
+      const manager = createAgentSessionManager(managerDeps(modelResolver), {
+        isSubagent: true,
+      });
+      const runner = new AgentRunner(manager, agentLoader);
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          sessionId: legacyId,
+          prompt: "Continue",
+          threadContext: {
+            channel: "webchat",
+            threadId: "legacy-parent",
+            romeSessionId: "legacy-parent",
+          },
+        }),
+      );
+
+      expect(claudeOpens).toHaveLength(0);
+      expect(codexOpens).toHaveLength(1);
       await manager.shutdown();
     });
   });
@@ -4764,27 +5369,48 @@ describe("AgentRunner", () => {
       });
 
       let executionWasRejected = false;
+      let sessionParams: ModelSessionParams | undefined;
+      let keyDuringTurn: string | undefined;
+      const openFromRun = makeOpenSessionFromRun("mock", async function* (params) {
+        keyDuringTurn = sessionParams?.routineActivation?.routineKeyFor("tu-1");
+        expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
+          "demo_action",
+          "send_message",
+        ]);
+        await expect(params.executeAction("internal_action", {})).rejects.toThrow(
+          /Unknown action: internal_action/,
+        );
+        executionWasRejected = true;
+        yield { type: "result", content: "Done" };
+      });
       const provider: ModelProvider = {
         id: "mock",
         displayName: "mock-wildcard-actions",
         builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", async function* (params) {
-          expect(params.actionCatalog.map((tool) => tool.name)).toEqual([
-            "demo_action",
-            "send_message",
-          ]);
-          await expect(params.executeAction("internal_action", {})).rejects.toThrow(
-            /Unknown action: internal_action/,
-          );
-          executionWasRejected = true;
-          yield { type: "result", content: "Done" };
-        }),
+        openSession: async (params) => {
+          sessionParams = params;
+          return openFromRun(params);
+        },
       };
       const runner = createRunner(provider);
 
-      await collectMessages(runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }));
+      const messages = await collectMessages(
+        runner.run({ agentName: "test-all-actions", prompt: "Use all tools" }),
+      );
 
       expect(executionWasRejected).toBe(true);
+      // The activation key is scoped by the same turn id the stream reports,
+      // which is how the webchat drain derives the card's key.
+      const turnStart = messages.find((m) => m.type === "turn_start") as
+        | { turnId: string }
+        | undefined;
+      expect(turnStart).toBeDefined();
+      expect(keyDuringTurn).toBe(`chat-routine:${turnStart?.turnId}:tu-1`);
+      // propose_routine's auto-enable gate mirrors the same allow-list.
+      const gate = sessionParams?.routineActivation;
+      expect(gate?.canCallAction("demo_action")).toBe("permitted");
+      expect(gate?.canCallAction("internal_action")).toBe("denied");
+      expect(gate?.canCallAction("no_such_action")).toBe("unknown");
     });
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {

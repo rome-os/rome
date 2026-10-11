@@ -86,7 +86,7 @@ export function useUpgradeCandidates(options?: {
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     queryFn: ({ signal }) =>
-      fetchJson<{ upgradable?: UpgradeCandidate[] }>("/api/apps/updates", {
+      fetchJson<{ upgradable: UpgradeCandidate[] }>("/api/apps/updates", {
         signal,
         fallback: t("installed.errors.loadFailed"),
       }),
@@ -96,8 +96,8 @@ export function useUpgradeCandidates(options?: {
   // For the advisory probe that means a stale upgrade badge would stick after a
   // failed refetch, so drop it on error to honor the "degrade to none" contract.
   const upgradable: Record<string, UpgradeCandidate> = {};
-  if (!updates.isError) {
-    for (const candidate of updates.data?.upgradable ?? []) {
+  if (!updates.isError && updates.data) {
+    for (const candidate of updates.data.upgradable) {
       upgradable[candidate.appId] = candidate;
     }
   }

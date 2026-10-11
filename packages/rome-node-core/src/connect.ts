@@ -80,9 +80,12 @@ export async function connectHost(options: HostOptions): Promise<void> {
   const active = session;
   options.onEvent?.({ type: "device", name: active.name, deviceId: active.deviceId });
   await new Promise<void>((resolve, reject) => {
-    const executor = createExecutor(active.name, (message) => connection.send(message), [
-      active.token,
-    ]);
+    const executor = createExecutor(
+      active.name,
+      (message) => connection.send(message),
+      [active.token],
+      (frame) => connection.sendFrame(frame),
+    );
     let finished = false;
     const finish = (error?: Error) => {
       if (finished) return;
@@ -109,6 +112,7 @@ export async function connectHost(options: HostOptions): Promise<void> {
       onMessage: (message) => {
         if ("from" in message) void executor.receive(message);
       },
+      onFrame: (frame) => void executor.receiveFrame(frame),
       onStatus: (status) => {
         options.onEvent?.({ type: "connection", status });
         if (status !== "online" && status !== "connecting") executor.disconnect();

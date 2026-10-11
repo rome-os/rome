@@ -75,7 +75,6 @@ export function SystemDiagnosisSection() {
       }),
   });
   const d = query.data ?? null;
-  const relay = d?.relay ?? { configured: false, depositUrlConfigured: false };
 
   return (
     <Section>
@@ -156,11 +155,11 @@ export function SystemDiagnosisSection() {
                 </span>
               </DiagRow>
               <DiagRow label={t("advanced.diagnosis.relayDepositUrl")}>
-                {relay.configured ? (
+                {d.relay.configured ? (
                   <span
-                    className={relay.depositUrlConfigured ? "text-success-fg" : "text-warning-fg"}
+                    className={d.relay.depositUrlConfigured ? "text-success-fg" : "text-warning-fg"}
                   >
-                    {relay.depositUrlConfigured
+                    {d.relay.depositUrlConfigured
                       ? t("advanced.diagnosis.relayDepositConfigured")
                       : t("advanced.diagnosis.relayDepositMissing")}
                   </span>

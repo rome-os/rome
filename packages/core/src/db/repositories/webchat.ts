@@ -25,11 +25,13 @@ import {
   webchatWorkspaceLayouts,
 } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import { isWebchatChat, romeSessionKind, withSessionKind } from "../session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
 import type { TurnFeedbackRating } from "@rome/api-types/trace-segments";
 import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -809,7 +811,7 @@ export class WebChatRepository {
       .select({
         agentName: romeSessions.agentName,
         id: romeSessions.id,
-        type: romeSessions.type,
+        type: romeSessionKind,
         largeModelSelection: romeSessions.largeModelSelection,
         projectPath: romeSessions.projectPath,
       })
@@ -1089,6 +1091,9 @@ export class WebChatRepository {
     turnId?: string;
     knownToProvider: boolean;
   }): Promise<void> {
+    // Sender-supplied content (send_message, the outbox): only the host may
+    // author routine cards, so a forged one never reaches the transcript.
+    input = { ...input, content: stripHostOnlyPartsFromContent(input.content) };
     if (input.platformMessageId) {
       const delivered = await this.db
         .select({ id: romeAgentMessages.id })
@@ -1311,6 +1316,26 @@ export class WebChatRepository {
     return rows[0] ?? null;
   }
 
+  /** The id of the conversation a channel address names, or null when none
+   *  exists yet. A webchat conversation's address is its own id. Forks and
+   *  subagent runs copy their parent's address, so only conversation types
+   *  match. */
+  async findConversationIdByAddress(channel: string, threadId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ id: romeSessions.id })
+      .from(romeSessions)
+      .where(
+        and(
+          inArray(romeSessions.type, ["webchat", "webchat_handoff", "channel"]),
+          eq(romeSessions.sourceChannel, channel),
+          eq(romeSessions.sourceThreadId, threadId),
+        ),
+      )
+      .orderBy(asc(romeSessions.createdAt), asc(romeSessions.id))
+      .limit(1);
+    return rows[0]?.id ?? null;
+  }
+
   async deleteSession(id: string) {
     // One transaction so a crash mid-cascade can't leave orphan messages or
     // feedback rows behind. `webchat_turn_feedback` also cascades via its FK,
@@ -1352,7 +1377,7 @@ export class WebChatRepository {
         awaitingGuardian: sessionAwaitingGuardian,
       })
       .from(romeSessions)
-      .where(and(eq(romeSessions.type, "webchat"), archivePredicate))
+      .where(and(isWebchatChat, archivePredicate))
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
   }
 
@@ -1380,7 +1405,7 @@ export class WebChatRepository {
       .innerJoin(romeSessions, eq(romeAgentMessages.sessionId, romeSessions.id))
       .where(
         and(
-          eq(romeSessions.type, "webchat"),
+          isWebchatChat,
           inArray(romeAgentMessages.role, ["user", "assistant", "notification"]),
           ...likePredicates,
         ),
@@ -1426,14 +1451,14 @@ export class WebChatRepository {
     await this.db
       .update(romeSessions)
       .set({ archivedAt: now })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async unarchiveSession(id: string, _options: { now?: Date } = {}) {
     await this.db
       .update(romeSessions)
       .set({ archivedAt: null })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async pinSession(id: string, options: { now?: Date } = {}) {
@@ -1441,14 +1466,14 @@ export class WebChatRepository {
     await this.db
       .update(romeSessions)
       .set({ pinnedAt: now })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async unpinSession(id: string) {
     await this.db
       .update(romeSessions)
       .set({ pinnedAt: null })
-      .where(and(eq(romeSessions.id, id), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.id, id), isWebchatChat));
   }
 
   async listProjectPaths() {
@@ -1477,11 +1502,7 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [
-      eq(romeSessions.projectPath, projectPath),
-      eq(romeSessions.type, "webchat"),
-      cursorPredicate,
-    ];
+    const predicates = [eq(romeSessions.projectPath, projectPath), isWebchatChat, cursorPredicate];
 
     const rows = await this.db
       .select(sessionSelectFields)
@@ -1498,7 +1519,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(and(eq(romeSessions.projectPath, projectPath), eq(romeSessions.type, "webchat")));
+      .where(and(eq(romeSessions.projectPath, projectPath), isWebchatChat));
 
     return {
       nextCursor,
@@ -1525,7 +1546,7 @@ export class WebChatRepository {
           )
         )`
       : undefined;
-    const predicates = [eq(romeSessions.type, "webchat"), cursorPredicate];
+    const predicates = [isWebchatChat, cursorPredicate];
 
     const rows = await this.db
       .select(sessionSelectFields)
@@ -1542,7 +1563,7 @@ export class WebChatRepository {
     const countRows = await this.db
       .select({ count: sql<number>`count(*)`.mapWith(Number) })
       .from(romeSessions)
-      .where(eq(romeSessions.type, "webchat"));
+      .where(isWebchatChat);
 
     return {
       nextCursor,
@@ -1553,7 +1574,7 @@ export class WebChatRepository {
 
   async getSession(id: string) {
     const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
-    return rows[0] ?? null;
+    return rows[0] ? withSessionKind(rows[0]) : null;
   }
 
   async markSessionRead(id: string) {
@@ -1743,16 +1764,17 @@ export class WebChatRepository {
    */
   private async insertBackendMessage(
     sessionId: string,
-    turnId: string,
+    turnId: string | null,
     role: string,
     parts: MessagePart[],
+    id: string = randomUUID(),
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
         .insert(romeAgentMessages)
         .values({
-          id: randomUUID(),
+          id,
           sessionId,
           turnId,
           role,
@@ -1779,6 +1801,19 @@ export class WebChatRepository {
     }
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /**
+   * Persist an assistant message a channel sends into a chat and notify
+   * subscribers, like {@link insertBackendMessage}.
+   */
+  async addSentMessage(
+    id: string,
+    sessionId: string,
+    parts: MessagePart[],
+    turnId: string | null,
+  ): Promise<void> {
+    await this.insertBackendMessage(sessionId, turnId, "assistant", parts, id);
   }
 
   async addTurnRecapMessage(input: AddTurnRecapMessageInput): Promise<StoredWebchatMessage> {
@@ -2044,7 +2079,7 @@ export class WebChatRepository {
     if (threadId !== null) {
       predicates.push(eq(romeAgentMessages.sessionId, threadId));
     } else {
-      predicates.push(eq(romeSessions.type, "webchat"));
+      predicates.push(isWebchatChat);
     }
 
     return this.db

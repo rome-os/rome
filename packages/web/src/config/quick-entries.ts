@@ -4,15 +4,11 @@ import {
   type ResolvedRomeNewsItem,
   type RomeNewsDefinition,
 } from "@rome-os/rome-web-components/news-item/schema";
-import { getActiveLocale } from "@/i18n";
-
-export type QuickEntry = ResolvedRomeNewsItem;
-export type QuickEntryDefinition = RomeNewsDefinition;
 
 export function getQuickEntries(
   definitions: RomeNewsDefinition[],
-  locale: string = getActiveLocale(),
-): QuickEntry[] {
+  locale: string,
+): ResolvedRomeNewsItem[] {
   return definitions.map((definition) => resolveRomeNewsDefinition(definition, locale));
 }
 

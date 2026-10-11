@@ -8,7 +8,7 @@ import {
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import type { ChatMessage, ChatEntry } from "@/lib/chat-types";
+import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
 // Default agent identity for the public feed. The frozen snapshot doesn't carry
@@ -112,13 +112,13 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
           allowSubagentUsage={false}
           readOnly
           renderInlineBlock={(block, key) =>
-            renderSingleEntry(block as ChatEntry, key, {
+            renderSingleEntry(block, key, {
               onApprovalResolved: NO_OP,
               compact: true,
             })
           }
           renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks as ChatEntry[], {
+            renderFlatEntries(blocks, {
               onApprovalResolved: NO_OP,
               compact: true,
               live,

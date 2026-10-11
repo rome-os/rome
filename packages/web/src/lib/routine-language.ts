@@ -36,6 +36,8 @@ export interface Routine {
   // The app that owns this routine, if any. A managed routine can't be deleted
   // from the dashboard (the server refuses too); only the owning app removes it.
   managedBy?: string | null;
+  // Optional unique identity a caller assigned (e.g. the chat card that created it).
+  key?: string | null;
   enabled: boolean;
   trigger: Trigger;
   actionName: string;
@@ -324,14 +326,6 @@ export function relativeTime(dateStr: string | null, now: number = Date.now()): 
     return new Date(target).toLocaleDateString(undefined, { weekday: "long" });
   }
   return new Date(target).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-// Absolute time-of-day for the schedule summary line: "9:00 AM".
-export function formatClock(dateStr: string | null): string {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 // Run history → plain language

@@ -7,7 +7,7 @@ import type {
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import { channelConversationId } from "../db/repositories/webchat.js";
 import { romeAgentMessages, romeSessions } from "../db/schema/system.js";
-import { assertProviderSessionResetPolicy } from "./reset-policy.js";
+import { isChannelConversation } from "../db/session-kind.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
 export type StoredConversationRow = typeof romeSessions.$inferSelect;
@@ -39,7 +39,7 @@ export class ConversationSettingsRepository {
   }
 
   listKnown(input: { service?: string; query?: string }): StoredConversationRow[] {
-    const predicates = [eq(romeSessions.type, "channel")];
+    const predicates = [isChannelConversation];
     if (input.service) {
       predicates.push(eq(romeSessions.sourceChannel, input.service));
     }
@@ -124,15 +124,4 @@ export class ConversationSettingsRepository {
         .run();
     });
   }
-}
-
-export function storedSettings(row: StoredConversationRow): StoredConversationSettings | null {
-  if (!row.channelSettings || typeof row.channelSettings !== "object") return null;
-  const value = row.channelSettings as Partial<StoredConversationSettings>;
-  if (value.schemaVersion !== 1 || !value.overrides || typeof value.updatedAt !== "string") {
-    throw new Error(`Invalid channel_settings payload on conversation "${row.id}"`);
-  }
-  const reset = value.overrides.session?.reset;
-  if (reset !== undefined) assertProviderSessionResetPolicy(reset);
-  return value as StoredConversationSettings;
 }

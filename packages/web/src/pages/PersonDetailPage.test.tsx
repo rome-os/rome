@@ -14,7 +14,7 @@ import {
   type PersonResource,
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
-import PersonDetailPage, { PersonLegacyRedirect } from "./PersonDetailPage";
+import PersonDetailPage from "./PersonDetailPage";
 
 // The person page: who they are on top, the merged timeline below. What is under
 // test is that the page reads the two routes that own it — `GET /api/people/:id`
@@ -24,10 +24,6 @@ import PersonDetailPage, { PersonLegacyRedirect } from "./PersonDetailPage";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -349,7 +345,6 @@ function renderPage(id = "wei-chen", before?: string) {
           <Route path="/people/latest" element={<div>the stream</div>} />
           <Route path="/people/directory" element={<div>the directory</div>} />
           <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-          <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
         </Routes>
         <Address />
         <BrowserBack />
@@ -752,34 +747,13 @@ describe("PersonDetailPage management", () => {
 
 // A person id is a slug of the guardian's own display name, so `latest` and
 // `directory` are ids a guardian can mint. The dossier answers under its own
-// segment for that reason, and the address a person was reached by keeps
-// working.
+// segment for that reason.
 describe("PersonDetailPage is reachable whatever the guardian named the person", () => {
   it("opens a person whose id collides with a view name", async () => {
     mockApi({ person: { ...PERSON, id: "latest", displayName: "Latest" } });
     renderPage("latest");
 
     expect(await screen.findByRole("heading", { name: "Latest" })).toBeTruthy();
-  });
-
-  it("forwards the address a person used to be reached by", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    mockApi();
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/people/wei-chen"]}>
-          <Routes>
-            <Route path="/people/latest" element={<div>the stream</div>} />
-            <Route path="/people/person/:personId" element={<PersonDetailPage />} />
-            <Route path="/people/:personId" element={<PersonLegacyRedirect />} />
-          </Routes>
-          <Address />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(await screen.findByRole("heading", { name: "Wei Chen" })).toBeTruthy();
-    expect(screen.getByTestId("address").textContent).toBe("/people/person/wei-chen");
   });
 });
 

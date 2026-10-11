@@ -165,7 +165,7 @@ function OutboxRowActions({
               : act(() => writes.retry(personId, message.id))
           }
         >
-          <RotateCcw aria-hidden="true" />
+          <RotateCcw data-icon="inline-start" aria-hidden="true" />
           {t("send.retry")}
         </Button>
       )}

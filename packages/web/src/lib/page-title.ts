@@ -23,16 +23,11 @@ function truncate(segment: string): string {
 /**
  * Joins `segments` most-specific-first and appends the site name:
  * composeTitle(["Connections", "Settings"]) returns "Connections · Settings · Rome".
- * Empty and nullish segments are dropped, and a list with no names returns the
- * site name alone, so a route that names nothing still reads as Rome.
+ * Expects trimmed, non-empty segments. An empty list returns the site name
+ * alone, so a route that names nothing still reads as Rome.
  */
-export function composeTitle(segments: readonly (string | null | undefined)[]): string {
-  const named = segments
-    .filter((segment): segment is string => typeof segment === "string")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment.length > 0)
-    .map(truncate);
-  return [...named, SITE_NAME].join(SEPARATOR);
+export function composeTitle(segments: readonly string[]): string {
+  return [...segments.map(truncate), SITE_NAME].join(SEPARATOR);
 }
 
 // The title the server rendered into the shell before React mounted, and the

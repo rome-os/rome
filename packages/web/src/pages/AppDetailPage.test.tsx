@@ -16,11 +16,6 @@ rs.mock("@/components/markdown", () => ({
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
-  // Radix switch + dialog poke pointer-capture and scrollIntoView, which jsdom omits.
-  Element.prototype.hasPointerCapture = () => false;
-  Element.prototype.setPointerCapture = () => {};
-  Element.prototype.releasePointerCapture = () => {};
-  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {

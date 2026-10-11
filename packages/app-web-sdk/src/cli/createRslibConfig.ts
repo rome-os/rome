@@ -1,4 +1,12 @@
-import { copyFileSync, existsSync, globSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { loadConfig, mergeRslibConfig, type LibConfig, type RslibConfig } from "@rslib/core";
@@ -47,7 +55,6 @@ export interface BuildContextOptions {
 }
 
 export interface BuildContext {
-  cwd: string;
   appDir: string;
   srcDir: string;
   outDir: string;
@@ -65,9 +72,21 @@ export interface BuildContext {
 /** `src/` subdirs reserved for the web lib; the backend lib must not touch them. */
 const WEB_DIR = "web";
 
+/** Globs under `src/` the backend lib never compiles: the web lib's tree,
+ *  declarations, and tests. */
+const BACKEND_EXCLUDES = [
+  `${WEB_DIR}/**`,
+  "**/*.d.ts",
+  "**/*.test.ts",
+  "**/*.test.tsx",
+  "**/*.integration.test.ts",
+  "**/*.integration.test.tsx",
+  "**/*.e2e.test.ts",
+  "**/*.e2e.test.tsx",
+];
+
 export async function createBuildContext(options: BuildContextOptions): Promise<BuildContext> {
-  const cwd = resolve(options.cwd);
-  const loaded = loadAppYaml(cwd);
+  const loaded = loadAppYaml(resolve(options.cwd));
   const { appDir, yaml } = loaded;
 
   if (!yaml.appRoot) {
@@ -81,7 +100,7 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
 
   if (!existsSync(srcDir)) {
     throw new Error(
-      `rome: source directory ${srcDir} not found. With the new layout, all sources live under <appRoot>/src/.`,
+      `rome: source directory ${srcDir} not found. App sources live under src/ next to app.yaml.`,
     );
   }
 
@@ -164,19 +183,7 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
   // matches nothing, which fails the whole build with no output — the assets
   // themselves are shipped by copyBackendAssets, not the backend lib.
   const hasBackendSources =
-    globSync("**/*.{ts,tsx}", {
-      cwd: srcDir,
-      exclude: [
-        `${WEB_DIR}/**`,
-        "**/*.d.ts",
-        "**/*.test.ts",
-        "**/*.test.tsx",
-        "**/*.integration.test.ts",
-        "**/*.integration.test.tsx",
-        "**/*.e2e.test.ts",
-        "**/*.e2e.test.tsx",
-      ],
-    }).length > 0;
+    globSync("**/*.{ts,tsx}", { cwd: srcDir, exclude: BACKEND_EXCLUDES }).length > 0;
   if (backendDirs.length > 0 && hasBackendSources) {
     lib.push(createBackendLib({ srcDir, outDir }));
   }
@@ -199,7 +206,7 @@ export async function createBuildContext(options: BuildContextOptions): Promise<
     ? (mergeRslibConfig(baseConfig, userConfig) as RslibConfig)
     : baseConfig;
 
-  return { cwd, appDir, srcDir, outDir, backendDirs, loaded, rslibConfig };
+  return { appDir, srcDir, outDir, backendDirs, loaded, rslibConfig };
 }
 
 function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
@@ -215,14 +222,7 @@ function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
         index: [
           "./src/**/*.ts",
           "./src/**/*.tsx",
-          `!./src/${WEB_DIR}/**`,
-          "!./src/**/*.d.ts",
-          "!./src/**/*.test.ts",
-          "!./src/**/*.test.tsx",
-          "!./src/**/*.integration.test.ts",
-          "!./src/**/*.integration.test.tsx",
-          "!./src/**/*.e2e.test.ts",
-          "!./src/**/*.e2e.test.tsx",
+          ...BACKEND_EXCLUDES.map((glob) => `!./src/${glob}`),
         ],
       },
     },
@@ -250,10 +250,9 @@ function createBackendLib(args: { srcDir: string; outDir: string }): LibConfig {
  */
 export function copyBackendAssets(args: { srcDir: string; outDir: string }): void {
   const { srcDir, outDir } = args;
-  if (!existsSync(srcDir)) return;
   const matches = globSync("**/*", {
     cwd: srcDir,
-    exclude: [`${WEB_DIR}/**`, "**/*.ts", "**/*.tsx", "**/*.d.ts", "**/*.css"],
+    exclude: [`${WEB_DIR}/**`, "**/*.ts", "**/*.tsx", "**/*.css"],
   });
   for (const rel of matches) {
     const srcPath = join(srcDir, rel);
@@ -262,6 +261,19 @@ export function copyBackendAssets(args: { srcDir: string; outDir: string }): voi
     mkdirSync(dirname(destPath), { recursive: true });
     copyFileSync(srcPath, destPath);
   }
+}
+
+/** Remove the backend output trees the next build re-emits. */
+export function cleanBackendOutput(ctx: BuildContext): void {
+  for (const dir of ctx.backendDirs) {
+    rmSync(join(ctx.outDir, dir), { recursive: true, force: true });
+  }
+}
+
+/** Copy the backend's non-source assets and the app icon into the output. */
+export function copyStaticAssets(ctx: BuildContext): void {
+  copyBackendAssets({ srcDir: ctx.srcDir, outDir: ctx.outDir });
+  copyAppIconAsset({ appDir: ctx.appDir, outDir: ctx.outDir, iconPath: ctx.loaded.yaml.icon });
 }
 
 export function copyAppIconAsset(args: {
@@ -275,7 +287,8 @@ export function copyAppIconAsset(args: {
   const sourcePath = resolveWithin(appDir, iconPath, "icon");
   if (!existsSync(sourcePath)) return;
 
-  const targetPath = resolveWithin(outDir, iconPath, "icon output");
+  // resolveWithin above already rejected absolute and escaping paths.
+  const targetPath = resolve(outDir, iconPath);
   if (sourcePath === targetPath) return;
 
   mkdirSync(dirname(targetPath), { recursive: true });

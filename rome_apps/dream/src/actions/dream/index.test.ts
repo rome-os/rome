@@ -29,7 +29,29 @@ beforeEach(() => {
     migrationsFolder: MIGRATIONS_DIR,
     migrationsTable: "__drizzle_migrations_app_dream",
   });
+  // A scheduled dream only runs after a conversation, so most cases start with one.
+  seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 1 });
 });
+
+let seededSessions = 0;
+
+function seedMessage(input: { sessionType: string; role: string; hoursAgo: number }): void {
+  const sessionId = `session-${++seededSessions}`;
+  const createdAt = Math.floor((Date.now() - input.hoursAgo * 60 * 60 * 1000) / 1000);
+  testDb.db.run(sql`
+    INSERT INTO rome_sessions (id, name, type, created_at, activity_at)
+    VALUES (${sessionId}, ${sessionId}, ${input.sessionType}, ${createdAt}, ${createdAt})
+  `);
+  testDb.db.run(sql`
+    INSERT INTO rome_agent_messages (id, session_id, role, content, created_at)
+    VALUES (${`${sessionId}-message`}, ${sessionId}, ${input.role}, '"hi"', ${createdAt})
+  `);
+}
+
+function clearChats(): void {
+  testDb.db.run(sql`DELETE FROM rome_agent_messages`);
+  testDb.db.run(sql`DELETE FROM rome_sessions`);
+}
 
 afterEach(() => {
   testDb.close();
@@ -179,9 +201,95 @@ describe("dream", () => {
     const result = await createAction(actionConfig, deps).execute({});
 
     if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
-    expect(result.data).toMatchObject({ runId: manual, skipped: true });
+    expect(result.data).toMatchObject({ runId: manual, skipped: true, reason: "already_running" });
     expect(run).not.toHaveBeenCalled();
     expect(runs.listRecent({ limit: 10 })).toHaveLength(1);
+  });
+
+  describe("without a conversation in the window", () => {
+    function agentNeverRuns(deps: AppActionRuntimeDeps<DreamDeps>) {
+      const run = rs.fn();
+      (deps.agentRunner as unknown as { run: unknown }).run = run;
+      return run;
+    }
+
+    it("skips a scheduled dream and records no run", async () => {
+      clearChats();
+      const deps = makeDeps([]);
+      const run = agentNeverRuns(deps);
+
+      const result = await createAction(actionConfig, deps).execute({});
+
+      if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+      expect(result.data).toMatchObject({ skipped: true, reason: "no_recent_chat" });
+      expect(run).not.toHaveBeenCalled();
+      expect(createRunsRepository(appDb()).listRecent({ limit: 10 })).toHaveLength(0);
+    });
+
+    it("ignores conversations older than the window", async () => {
+      clearChats();
+      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 30 });
+      const deps = makeDeps([]);
+      const run = agentNeverRuns(deps);
+
+      const result = await createAction(actionConfig, deps).execute({});
+
+      expect(result).toMatchObject({ status: "ok", data: { reason: "no_recent_chat" } });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("counts only messages a person sent in a chat or channel", async () => {
+      clearChats();
+      seedMessage({ sessionType: "webchat", role: "assistant", hoursAgo: 1 });
+      seedMessage({ sessionType: "channel", role: "notification", hoursAgo: 1 });
+      seedMessage({ sessionType: "action", role: "user", hoursAgo: 1 });
+      seedMessage({ sessionType: "subagent", role: "user", hoursAgo: 1 });
+      const deps = makeDeps([]);
+      const run = agentNeverRuns(deps);
+
+      const result = await createAction(actionConfig, deps).execute({});
+
+      expect(result).toMatchObject({ status: "ok", data: { reason: "no_recent_chat" } });
+      expect(run).not.toHaveBeenCalled();
+    });
+
+    it("runs when a person messaged Rome on a channel", async () => {
+      clearChats();
+      seedMessage({ sessionType: "channel", role: "user", hoursAgo: 2 });
+
+      const result = await createAction(
+        actionConfig,
+        makeDeps([{ type: "result", content: "done" }]),
+      ).execute({});
+
+      expect(result).toMatchObject({ status: "ok", data: { summary: "done" } });
+    });
+
+    it("measures the window from windowHours", async () => {
+      clearChats();
+      seedMessage({ sessionType: "webchat", role: "user", hoursAgo: 30 });
+
+      const result = await createAction(
+        actionConfig,
+        makeDeps([{ type: "result", content: "done" }]),
+      ).execute({ windowHours: 48 });
+
+      expect(result).toMatchObject({ status: "ok", data: { summary: "done" } });
+    });
+
+    it("still runs a dream the guardian started from the page", async () => {
+      clearChats();
+      const runs = createRunsRepository(appDb());
+      const { id: runId } = runs.reserveDream(24, "queued");
+
+      const result = await createAction(
+        actionConfig,
+        makeDeps([{ type: "result", content: "done" }]),
+      ).execute({ runId });
+
+      expect(result).toMatchObject({ status: "ok", data: { runId, summary: "done" } });
+      expect(runs.byId(runId)?.status).toBe("completed");
+    });
   });
 
   it("does not let a dream whose owner stopped heartbeating block the next one", async () => {

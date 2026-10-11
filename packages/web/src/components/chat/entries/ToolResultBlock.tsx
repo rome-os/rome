@@ -5,19 +5,11 @@ import { describeBashCall } from "@/lib/bash-call-label";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { TracePayloadView } from "./TracePayload";
 
-export function ToolResultBlock({
-  tool,
-  output,
-  input,
-}: {
-  tool?: string;
-  output: unknown;
-  input?: unknown;
-}) {
+export function ToolResultBlock({ tool, output }: { tool: string; output: unknown }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
-  const toolLabel = artifactLocalName(tool ?? t("blocks.unknownTool"));
-  const actionLabel = tool === "Bash" ? describeBashCall(input ?? output, "completed") : null;
+  const toolLabel = artifactLocalName(tool);
+  const actionLabel = tool === "Bash" ? describeBashCall(output, "completed") : null;
   const header = actionLabel
     ? t("blocks.resultFromAction", { action: actionLabel })
     : t("blocks.resultFromTool", { tool: toolLabel });

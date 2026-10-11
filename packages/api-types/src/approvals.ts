@@ -30,7 +30,6 @@ export const APPROVAL_EXECUTION_STATES = [
   "succeeded",
   "failed",
 ] as const;
-export type ApprovalExecutionState = (typeof APPROVAL_EXECUTION_STATES)[number];
 
 export const PAIRING_CHANNELS = ["telegram", "discord", "feishu"] as const;
 export const PAIRING_HISTORY_PAGE_SIZE = 100;

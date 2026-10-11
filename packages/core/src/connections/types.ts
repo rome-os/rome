@@ -324,6 +324,15 @@ export interface ConnectionDescriptor {
        *  backs answers `messages.query` through it. Absent means it does not:
        *  the channel's messages come from a store, or from nowhere. */
       history?: boolean;
+      /** True when the surface that delivers this channel's next human turn
+       *  renders interactive cards, so an agent may pause on one for a reply.
+       *  Absent means it does not, and a card falls back to prose. */
+      interactiveCards?: boolean;
+      /** False when every message in a conversation already reaches the agent
+       *  as a turn, so a prompt needs no preamble of stored messages the agent
+       *  has not seen. Absent means the channel stores messages the agent
+       *  never saw, such as other people's lines in a group. */
+      promptContext?: boolean;
     };
     actor: {
       needs: readonly GrantName[];

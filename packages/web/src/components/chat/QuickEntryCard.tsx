@@ -1,10 +1,10 @@
 import { NewsItemCard } from "@rome-os/rome-web-components/news-item";
-import type { QuickEntry } from "@/config/quick-entries";
+import type { ResolvedRomeNewsItem } from "@rome-os/rome-web-components/news-item/schema";
 import { RomeLogo } from "@/components/logo";
 
 export interface QuickEntryCardProps {
-  entry: QuickEntry;
-  onActivate: (entry: QuickEntry) => void;
+  entry: ResolvedRomeNewsItem;
+  onActivate: (entry: ResolvedRomeNewsItem) => void;
 }
 
 /**

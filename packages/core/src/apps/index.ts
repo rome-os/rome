@@ -67,11 +67,6 @@ export {
 
 export { hashWorkspace } from "./packaging/index.js";
 export { hydrateCatalogFromLockfile } from "./catalog-hydration.js";
-export {
-  migrateToLockfile,
-  type MigrateOptions,
-  type MigrateResult,
-} from "./migrate-to-lockfile.js";
 
 export interface AppDomain {
   installer: AppInstaller;

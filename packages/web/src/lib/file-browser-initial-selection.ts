@@ -1,21 +1,14 @@
 interface ResolveInitialSelectedFolderPathInput {
   initialSelectedFolderPath?: string;
   isDesktopViewport: boolean;
-  selectInitialFolderOnMobile: boolean;
 }
 
 export function resolveInitialSelectedFolderPath({
   initialSelectedFolderPath,
   isDesktopViewport,
-  selectInitialFolderOnMobile,
 }: ResolveInitialSelectedFolderPathInput): string | null {
-  if (!initialSelectedFolderPath) {
+  if (!initialSelectedFolderPath || !isDesktopViewport) {
     return null;
   }
-
-  if (selectInitialFolderOnMobile || isDesktopViewport) {
-    return initialSelectedFolderPath;
-  }
-
-  return null;
+  return initialSelectedFolderPath;
 }

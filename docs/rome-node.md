@@ -14,6 +14,9 @@ CLI commands and JavaScript clients using the same configuration directory and
 port share that daemon. The CLI owns terminal interaction and exit codes.
 A Web Server can use `createNodeClient(config)` from `@rome-os/node-core/client`
 to list devices, describe them, run actions, and query caller connection status.
+`runBinary()` runs an action with raw input and output bytes, as described in
+[Binary frames](#binary-frames). `copy()` copies a file to or from a device, as
+described in [Copying files](#copying-files).
 
 `getConnectionStatus()` does not start the daemon. It returns `null` when no
 service runs, or `{ pid, protocolVersion, connection }`. The connection status
@@ -77,7 +80,7 @@ Gateway presence protocol is involved.
 Clients connect to `ws://127.0.0.1:<port>/rpc` using the private credential from
 `daemon.json` in an Authorization header. Browser Origin requests are rejected.
 The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
-`{ protocolVersion: 2 }`. This local protocol is separate from Gateway envelopes.
+`{ protocolVersion: 3 }`. This local protocol is separate from Gateway envelopes.
 
 | Method | Purpose |
 | --- | --- |
@@ -87,8 +90,28 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `devices.list` | List authorized devices from Cloud |
 | `devices.status` | Check device reachability with read-only `system.info` requests |
 | `devices.run` | Forward `{ deviceId, action, args }` to a device |
+| `devices.runBinary` | Forward `{ deviceId, action, args }` and input bytes to a device as a binary frame |
+| `files.copy` | Copy `{ direction, localPath, deviceId, remotePath }` between the daemon's computer and a device |
 | `events.subscribe` | Subscribe with `{ topic: "connection" }` |
 | `events.unsubscribe` | Remove the connection's subscription |
+
+Every method except `devices.runBinary` uses text messages. `devices.runBinary`
+uses one binary WebSocket message in each direction, so bytes are never JSON or
+base64 encoded on the local hop either. The message is a 32-bit big-endian JSON
+length, the JSON-RPC message as UTF-8, and then the raw body. The request body
+is the action input. A successful reply carries the `ActionResponse` as `result`
+and the output bytes as the body. A JSON-RPC error comes back as a text message.
+
+`files.copy` returns `{ bytes, ms, sha256 }` as an `ActionResponse` result, or a
+failed `ActionResponse`. While it runs, the daemon sends `events.transfer`
+notifications with `{ requestId, bytes, total }` to the requesting client only,
+at most about four per second. The request has no total wait limit. If the
+requesting client disconnects, the daemon aborts the copy.
+
+The daemon and the client close a local socket with code 1009 when one message
+exceeds 64 MiB. Binary input never gets near this limit, because the client
+first refuses input that cannot fit in one [Gateway frame](#binary-frames). The
+daemon replaces a larger reply with a `message_too_large` failure.
 
 Each client has one full-duplex WebSocket. Responses match request IDs within
 that connection. Independent clients can use the same IDs. Events and concurrent
@@ -108,15 +131,18 @@ daemon with backoff, restore subscriptions, and receive a fresh snapshot. They d
 not restart an explicitly stopped daemon. There is no event history or action replay.
 Protocol mismatch stops reconnection and requires an explicit daemon restart.
 
-Ping/pong detects dead connections. A slow observer exceeding 1 MiB of queued
-outgoing data is disconnected when the next event is sent, without blocking other
-clients. Unsubscribe removes the local listener. Disconnecting a client never
+Ping/pong detects dead connections. A slow observer with more than 1 MiB of
+unsent event notifications is disconnected when the next event is sent, without
+blocking other clients. Action replies, including large binary replies, do not
+count toward this limit. Unsubscribe removes the local listener. Disconnecting a client never
 stops the shared daemon. `rome-node watch` writes newline-delimited JSON and
 exits on Ctrl+C.
 
 The new daemon does not serve HTTP business routes. Upgrade compatibility is
 limited to detecting and explicitly stopping a running HTTP daemon with the
-existing private credential. A client never silently replaces an incompatible daemon.
+existing private credential. An explicit stop also reaches an RPC daemon with an
+older protocol version, using that version for its handshake. A client never
+silently replaces an incompatible daemon.
 
 ## Authorization and transport
 
@@ -243,6 +269,54 @@ It derives `from` from the authenticated connection. Requests carry
 `{ type: "response", ok: false, error: { code, message } }`.
 The CLI daemon accepts a response only from the selected target with the matching request ID.
 
+## Binary frames
+
+Gateway also relays binary WebSocket messages. One binary message is one frame,
+and text envelopes are unchanged. Integers are big-endian.
+
+| Offset | Bytes | Field | Meaning |
+| --- | --- | --- | --- |
+| 0 | 1 | `ver` | Frame version, `1` |
+| 1 | 1 | `type` | `1` request, `2` response, `3` route error from Gateway |
+| 2 | 2 | `flags` | Reserved, `0` |
+| 4 | 16 | `id` | Request ID as raw UUID bytes |
+| 20 | 16 | `peer` | Recipient device ID when sent, sender device ID when received |
+| 36 | 4 | `metaLen` | Length of `meta` |
+| 40 | `metaLen` | `meta` | UTF-8 JSON, opaque to Gateway |
+| 40 + `metaLen` | rest | `body` | Raw bytes, opaque to Gateway |
+
+Gateway rewrites `peer` to the sender's device ID. If the recipient is not
+connected, Gateway returns type `3` with the same `id`, the requested `peer`, meta
+`{"code":"target_unavailable"}`, and an empty body. Gateway closes a socket that
+sends a malformed frame with code 1008.
+
+Cloudflare closes a Gateway socket that receives a message over 32 MiB. That
+drops every request and copy on the connection, so no client sends such a frame.
+The 32 MiB limit covers the whole encoded frame, header and meta included.
+`runBinary` fails with `message_too_large` before sending input that cannot fit.
+If binary `exec` output cannot fit, the host discards it and replies
+`output_too_large` with an empty body. The program has already run by then.
+
+The request format decides the response format. A binary request carries meta
+`{ type: "request", action, args }` and the input bytes as the body. The host
+replies with a type `2` frame to the sender. Its meta is the same `ActionResponse`
+as in text mode, and its body holds the output bytes. Failures have an empty body.
+
+In binary mode, `exec` writes the request body to the program's stdin and then
+closes stdin. An empty body gives the program end of file at once. The response
+body is the program's raw stdout. The result is `{ exitCode, signal, stderr, truncated }`,
+with no `stdout` field. stderr stays UTF-8 text in meta.
+
+The host replaces each occurrence of its communication token in stdout with the
+same number of `*` bytes, so byte offsets stay valid. Text-mode output replaces
+the token with `[redacted]`. `system.info` reports `frameVersion: 1` on hosts
+that handle binary frames, and `transferVersion: 1` on hosts that accept
+[file transfers](#file-transfer-protocol). Its `actions` list names the actions a
+caller can run. `transfer.open` is internal to `rome-node cp` and is not listed, so
+detect it through `transferVersion`. There is no capability handshake with Gateway.
+A host version without frame support drops binary frames. The caller then reports
+`unknown_outcome` after its wait limit.
+
 ## Commands and execution
 
 Run `rome-node help` for the command overview and `rome-node help device run`
@@ -257,6 +331,14 @@ which returns the computer name, platform, and supported actions.
 The arguments are `command`, optional `args: string[]`, and optional `cwd`.
 The executor does not concatenate a shell command. Invoke a shell explicitly
 for redirection, pipelines, or shell builtins.
+In text mode the program gets no stdin.
+
+With `--input <file|->` or `--output <file|->`, `device run` sends a
+[binary frame](#binary-frames). The input file, or the CLI's stdin for `-`,
+becomes the program's stdin. The program's stdout bytes go to the output file,
+or to the CLI's stdout for `-`, which is the default. The JSON response goes to
+stdout, or to stderr when the output is `-`. A failed action leaves the output
+file unchanged.
 
 Examples of action arguments for macOS and Linux:
 
@@ -274,14 +356,108 @@ Examples for Windows:
 {"command":"powershell.exe","args":["-NoProfile","-Command","Set-Content -LiteralPath 'C:\\Work\\example.txt' -Value 'Hello'"]}
 ```
 
-An exec result contains `exitCode`, `signal`, `stdout`, `stderr`, and
-`truncated: { stdout: false, stderr: false }`. Output is collected in memory and
+A text-mode exec result has `exitCode`, `signal`, `stdout`, `stderr`, and
+`truncated: { stdout: false, stderr: false }`. Text mode decodes output as UTF-8,
+so it cannot carry arbitrary bytes. Output is collected in memory and
 returned in full after program exit. Action messages and output use WebSocket library defaults and platform
 limits. Local event observers have the send-buffer limit described above. Cloudflare limits received WebSocket messages to 32 MiB,
 including the envelope. WebSocket fragmentation does not bypass this limit.
 A lost response returns `unknown_outcome` because execution may have occurred.
 Never automatically repeat an operation after an unknown outcome.
 At most eight programs run concurrently on one executor.
+
+## Copying files
+
+`rome-node cp <src> <dst>` copies one regular file between this computer and a
+device. Exactly one side is `<device-id>:<path>`, and the other is a local path.
+A device path that is not absolute starts from the working directory of
+`rome-node connect`. A destination ending in `/` or `\` receives the source file name.
+An existing destination file is replaced.
+
+```sh
+rome-node cp ./video.mp4 <device-id>:/tmp/video.mp4
+rome-node cp <device-id>:/tmp/video.mp4 ./video.mp4
+```
+
+To copy between two devices, run two copies through this computer. The CLI
+rejects two device paths with this advice.
+
+```sh
+rome-node cp <device-a>:/data/video.mp4 ./video.mp4
+rome-node cp ./video.mp4 <device-b>:/data/video.mp4
+```
+
+The CLI resolves the local path and sends `files.copy` to the caller daemon. The
+daemon reads or writes the local file, and the host reads or writes the device
+file. Both sides use Node `fs` streams. No program, shell, or platform-specific
+command runs. The host offers no file action to callers. The daemon first checks
+that `system.info` reports `transferVersion: 1`, and otherwise fails with
+`unsupported_device`.
+
+The source must be a regular file. A directory, FIFO, or device fails with
+`not_a_file` and is never read.
+
+Each copy writes to its own part file next to the destination, named
+`.<name>.<uuid>.rome-part`. The receiver creates it with `O_EXCL` and mode 0600,
+so it never reuses an existing file or follows a symlink. Concurrent copies to
+one destination cannot mix their bytes. The rename to `<dst>` is the
+only step that touches the destination. It happens only after the size and the
+SHA-256 checksum match the sender's, and after the data is flushed to disk.
+
+A replaced file keeps its permission bits. A new file gets the mode a new file
+in that directory gets by default. Setuid, setgid, and sticky bits are not
+carried over. On Windows, file modes are not changed.
+
+Any failure, abort, or Ctrl+C deletes that copy's part file and leaves `<dst>`
+unchanged. A copy that ends with `connection_lost` after the sender finished can
+still have replaced `<dst>`. There is no resume and no automatic retry. Run a
+failed copy again.
+
+Progress goes to stderr. Success prints `{ bytes, ms, sha256 }` to stdout and
+exits 0. A copy failure prints the failed `ActionResponse` to stdout and exits 1.
+Argument errors print to stderr and exit 1.
+
+### File transfer protocol
+
+This protocol is internal to the caller daemon and the host. It travels in
+[binary frames](#binary-frames), and all frames of one transfer use the frame ID
+of its `transfer.open` request as the transfer ID. Meta is UTF-8 JSON, and data
+travels raw in the frame body.
+
+| Message | Frame | Meta | Body |
+| --- | --- | --- | --- |
+| Open | Type 1, caller to host | `{ type: "request", action: "transfer.open", args: { direction, path, size? } }` | Empty |
+| Open reply | Type 2, host to caller | `ActionResponse`, with `result.size` for a pull | Empty |
+| Data | Sender to receiver | `{ type: "transfer", kind: "data", offset }` | File bytes |
+| Ack | Receiver to sender | `{ type: "transfer", kind: "ack", offset }` | Empty |
+| End | Sender to receiver | `{ type: "transfer", kind: "end", size, sha256 }` | Empty |
+| Done | Receiver to sender | `{ type: "transfer", kind: "done", size, sha256 }` | Empty |
+| Abort | Either side | `{ type: "transfer", kind: "abort", code, message }` | Empty |
+
+Frames from the caller are type 1, and frames from the host are type 2.
+`direction` is `push` from caller to host or `pull` from host to caller. A push
+carries the source `size`. The host refuses a directory as the push destination
+and anything other than a regular file as the pull source.
+
+Both sides check a source with `stat` before opening it. Where the platform has
+`O_NONBLOCK`, the open uses it, so a path swapped for a FIFO cannot block. The
+sender then checks the open descriptor and reads only a regular file.
+
+The sender reads in 4 MiB chunks, so each data frame stays within the frame limit. An ack carries the number of bytes the receiver
+has handed to the OS, which it sends only after the write completes. The sender
+keeps at most 16 MiB unacknowledged and pauses reading until acks arrive. Gateway
+has no backpressure, so this window bounds the memory each side buffers.
+
+Both sides hash the data as it passes. After end, the receiver sets the part
+file's mode, flushes it to disk, and closes it. It then checks the size and
+checksum, renames the part file, and replies with done. So a done means
+the data reached the disk.
+
+Either side aborts after 60 seconds without a message sent or received. Connection loss
+aborts every transfer on that side. A host accepts at most four concurrent
+transfers and replies `busy` to more. Each transfer accepts frames only from the
+peer that opened it. Host frames from an earlier connection never go out on a
+replacement connection.
 
 ## Failure and shutdown
 

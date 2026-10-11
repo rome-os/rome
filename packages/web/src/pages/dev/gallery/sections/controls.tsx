@@ -306,7 +306,7 @@ export function ControlsSection() {
                   <Input size={size} icon={<Search aria-hidden />} placeholder={`size="${size}"`} />
                 </div>
                 <Button size={size}>
-                  <Search aria-hidden />
+                  <Search data-icon="inline-start" aria-hidden />
                   Search
                 </Button>
               </div>

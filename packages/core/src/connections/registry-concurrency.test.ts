@@ -15,7 +15,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "./ledger-db.js";
-import type { GrantLedger, GrantPatch, GrantRecord } from "./ledger.js";
+import type { GrantLedger, GrantPatch } from "./ledger.js";
 import { ConnectionRegistry } from "./registry.js";
 import { makePasteTalk, makeTwoGrant } from "./test-fixtures.js";
 import type { GrantName } from "./types.js";
@@ -187,37 +187,5 @@ describe("per-grant lock: independent grants do not serialize", () => {
     release();
     await aConferral;
     expect(connA.auth.grants().bot).toBe("authorized");
-  });
-});
-
-describe("per-grant lock: profile backfill serializes with conferral", () => {
-  // backfillProfile is one of the three serialized mutations. A backfill issued
-  // after a conferral must apply after it (FIFO), leaving the conferral's
-  // credential intact and the backfilled profile on the row.
-  it("a conferral then a profile backfill on the same grant apply in issue order", async () => {
-    const { ledger, release } = makeGatedLedger((_c, _n, patch) => patch.state === "authorized");
-    const registry = new ConnectionRegistry({ ledger });
-    const fx = makePasteTalk();
-    registry.register(fx.descriptor);
-    const conn = await registry.connect("fake-telegram");
-
-    const conferral = registry.importCredential(
-      conn.id,
-      "bot",
-      { material: { token: "tok" }, expiresAt: "never" },
-      { login: "before" },
-    );
-    const backfill = registry.backfillProfile(conn.id, "bot", { login: "after" });
-
-    await flush(); // conferral parks on its authorize write; backfill queued behind it
-    release();
-    await Promise.all([conferral, backfill]);
-
-    const rec: GrantRecord | null = await ledger.getGrant(conn.id, "bot");
-    expect(rec?.state).toBe("authorized");
-    // The backfill ran last: its profile is on the row, the conferral's
-    // credential untouched.
-    expect(rec?.profile).toEqual({ login: "after" });
-    expect(rec?.credential?.material).toEqual({ kind: "inline", record: { token: "tok" } });
   });
 });

@@ -23,7 +23,7 @@ import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
 import type { StoredConversationRow } from "./repository.js";
-import { ConversationSettingsRepository, storedSettings } from "./repository.js";
+import { ConversationSettingsRepository } from "./repository.js";
 import {
   CONVERSATION_SETTING_FIELDS_BY_SERVICE,
   CORE_CONVERSATION_SETTING_FIELDS,
@@ -368,7 +368,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       });
       return snapshot;
     }
-    const stored = row ? storedSettings(row) : null;
+    const stored = row?.channelSettings ?? null;
     const direct = this.directOverrides(row, stored);
     const effective = overlay(defaultConversationSettings(), direct);
     const supportedFields = this.supportedFields(descriptor, row);

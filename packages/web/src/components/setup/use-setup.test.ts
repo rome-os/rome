@@ -9,7 +9,10 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useSetup } from "@/components/setup/use-setup";
 
-afterEach(() => rs.restoreAllMocks());
+afterEach(() => {
+  rs.useRealTimers();
+  rs.restoreAllMocks();
+});
 
 describe("useSetup stale-state handling", () => {
   it("reset() drops cid and state so a fresh Connect is possible", async () => {
@@ -46,6 +49,7 @@ describe("useSetup stale-state handling", () => {
     // entirely. Asking again is the only way this card ever learns it connected
     // — without it the guardian stares at an unchanged card until the
     // connections page's own refresh interval comes round.
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     let polls = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation(async () => {
       polls += 1;
@@ -61,16 +65,18 @@ describe("useSetup stale-state handling", () => {
         idOrService: "github",
         grant: "user",
         activeCid: "cid-parked",
-        pollMs: 10,
         onDone,
       }),
     );
 
+    // Faked setInterval also stalls waitFor's polling, so drive the clock directly.
+    await act(() => rs.advanceTimersByTimeAsync(0));
+    expect(result.current.state?.status).toBe("awaiting-redirect");
     // Reaching `done` with no further input IS the proof: before this polled
     // `awaiting-redirect`, the hook settled on the parked state and stopped
-    // asking, so the second answer could never arrive. Asserting the
-    // intermediate state instead would race the next tick.
-    await waitFor(() => expect(result.current.state?.status).toBe("done"));
+    // asking, so the second answer could never arrive.
+    await act(() => rs.advanceTimersByTimeAsync(2000));
+    expect(result.current.state?.status).toBe("done");
     expect(polls).toBeGreaterThan(1);
     expect(onDone).toHaveBeenCalled();
   });

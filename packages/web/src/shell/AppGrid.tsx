@@ -64,7 +64,7 @@ import {
   SortableItemHandle,
   SortableOverlay,
 } from "@/components/ui/sortable";
-import { chatSearchShortcutForPlatform } from "./ChatSearchDialog";
+import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
   ACTIVE_CLASS,

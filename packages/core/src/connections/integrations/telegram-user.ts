@@ -155,8 +155,7 @@ function telegramUserSession(): AuthScheme {
  * Serialize a `TelegramUserSettings` row into the flat `SecretRecord` the grant
  * ledger stores. Every field is a string (SecretRecord = Record<string,string>);
  * `apiId` is stringified and `username` (nullable) becomes `""` when absent so
- * the round-trip is lossless. Exported so the settings-import row (wire stage)
- * and the connect route build material the same way.
+ * the round-trip is lossless.
  */
 export function telegramUserMaterialFromSettings(settings: TelegramUserSettings): SecretRecord {
   return {

@@ -123,7 +123,11 @@ function DreamPage() {
 
   const dreamButton = (
     <Button onClick={() => dreamNow.mutate()} disabled={dreaming || dreamNow.isPending}>
-      {dreaming || dreamNow.isPending ? <Spinner size="sm" /> : <Moon />}
+      {dreaming || dreamNow.isPending ? (
+        <Spinner data-icon="inline-start" size="sm" />
+      ) : (
+        <Moon data-icon="inline-start" />
+      )}
       {dreaming ? "Dreaming…" : "Dream now"}
     </Button>
   );

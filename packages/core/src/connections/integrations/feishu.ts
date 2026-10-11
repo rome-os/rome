@@ -255,9 +255,8 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       );
     }
 
-    // Same material shape the boot importer's FEISHU_SETTINGS_IMPORT_ROW
-    // extracts: domain (and appType) duplicated into material and profile by
-    // the one atomic write, so the two halves cannot disagree.
+    // Domain (and appType) are duplicated into material and profile by the one
+    // atomic write, so the two halves cannot disagree.
     const material: SecretRecord = {
       appId: pending.appId,
       appSecret: pending.appSecret,

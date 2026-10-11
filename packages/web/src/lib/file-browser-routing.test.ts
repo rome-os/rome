@@ -3,7 +3,6 @@ import {
   getFileBrowserDirectoryAncestors,
   getFileBrowserRouteLogicalPath,
   getFileBrowserUrlPath,
-  shouldSyncRootPanelTriggerUrl,
 } from "./file-browser-routing";
 
 describe("file browser routing", () => {
@@ -40,10 +39,5 @@ describe("file browser routing", () => {
       "projects/app/src",
     ]);
     expect(getFileBrowserDirectoryAncestors("memory/IDENTITY.md", "memory")).toEqual([]);
-  });
-
-  it("syncs the root panel trigger URL only on desktop", () => {
-    expect(shouldSyncRootPanelTriggerUrl(true)).toBe(true);
-    expect(shouldSyncRootPanelTriggerUrl(false)).toBe(false);
   });
 });

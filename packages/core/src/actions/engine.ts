@@ -26,7 +26,7 @@ import { actionExecutionContext } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../logger.js";
 import { currentSessionId } from "../telemetry-context.js";
-import { getChannelFromThreadKey } from "../core/session-manager.js";
+import { sessionKeyChannel } from "../core/agent-session-key.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
   isActionWorkerMessage,
@@ -86,7 +86,7 @@ function buildRomeSpanAttrs(ctx?: ActionRunContext): Record<string, string> {
   if (ctx.turnId) out["turn.id"] = ctx.turnId;
   if (ctx.channelThreadKey) {
     out["channel.thread_key"] = ctx.channelThreadKey;
-    const name = getChannelFromThreadKey(ctx.channelThreadKey);
+    const name = sessionKeyChannel(ctx.channelThreadKey);
     if (name) out["channel.name"] = name;
   }
   return out;

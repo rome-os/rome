@@ -262,9 +262,9 @@ export default function TerminalModal({ preset, onClose }: TerminalModalProps) {
               aria-label={!authUrl ? t("terminal.claudeLogin.preparingUrl") : undefined}
             >
               {authUrl ? (
-                <ExternalLink />
+                <ExternalLink data-icon="inline-start" />
               ) : (
-                <Spinner label={t("terminal.claudeLogin.preparingUrl")} />
+                <Spinner data-icon="inline-start" label={t("terminal.claudeLogin.preparingUrl")} />
               )}
               {t("terminal.claudeLogin.openButton")}
             </Button>

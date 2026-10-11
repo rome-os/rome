@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../apps/types.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { toArtifactMetadata } from "../apps/artifact-ref-adapter.js";
@@ -21,6 +21,10 @@ export interface LoadedSkill {
   description: string;
   tools?: string[];
   content: string;
+  /** Absolute skill directory; set only when the skill ships companion files. */
+  directory?: string;
+  /** Companion files relative to `directory` (everything except SKILL.md). */
+  files?: string[];
 }
 
 export interface SkillMcpDefinition {
@@ -28,6 +32,8 @@ export interface SkillMcpDefinition {
   description: string;
   tools?: string[];
   content: string;
+  directory?: string;
+  files?: string[];
   ownerType: ArtifactMetadata["ownerType"];
   ownerId: string;
 }
@@ -54,7 +60,12 @@ export class SkillCatalog {
         if (!parsed.ok) {
           throw new Error(`Skill ${skillFile} has invalid frontmatter: ${parsed.message}`);
         }
-        return { ...parsed.value, content };
+        const files = await listCompanionFiles(metadata.sourcePath);
+        return {
+          ...parsed.value,
+          content,
+          ...(files.length > 0 ? { directory: metadata.sourcePath, files } : {}),
+        };
       },
     });
 
@@ -65,6 +76,7 @@ export class SkillCatalog {
       description: config.description,
       tools: config.tools,
       content: config.content,
+      ...(config.directory ? { directory: config.directory, files: config.files } : {}),
     })).sort((left, right) => left.name.localeCompare(right.name));
     this.registryLoadFailures = failures;
     return this.getAll();
@@ -89,6 +101,7 @@ export class SkillCatalog {
       description: skill.description,
       tools: skill.tools,
       content: stripSkillStructuredSection(skill.content),
+      ...(skill.directory ? { directory: skill.directory, files: skill.files } : {}),
       ownerType: skill.metadata.ownerType,
       ownerId: skill.metadata.ownerId,
     }));
@@ -105,4 +118,41 @@ export class SkillCatalog {
       return name;
     }
   }
+}
+
+const MAX_COMPANION_FILES = 200;
+const SKIPPED_COMPANION_DIRS = new Set(["node_modules"]);
+
+/**
+ * Lists the files a skill ships beside its SKILL.md (reference docs, assets),
+ * relative to the skill directory. `read_skill` returns only SKILL.md, so
+ * without this list an agent cannot open the companion docs SKILL.md links
+ * to — progressive disclosure stops at the first level.
+ */
+export async function listCompanionFiles(skillDir: string): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    // Code-point order: locale-independent, and upper-case docs lead.
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      if (files.length >= MAX_COMPANION_FILES) return;
+      // Hidden entries (.DS_Store, a stray .env) are never skill docs.
+      if (entry.name.startsWith(".")) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_COMPANION_DIRS.has(entry.name)) await walk(path);
+      } else if (entry.isFile()) {
+        const rel = relative(skillDir, path).split(sep).join("/");
+        if (rel !== "SKILL.md") files.push(rel);
+      }
+    }
+  };
+  await walk(skillDir);
+  return files;
 }

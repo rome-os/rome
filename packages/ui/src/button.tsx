@@ -26,7 +26,7 @@ const SIZE_ICON_MD = "size-[var(--control-h-md)] rounded-[var(--control-r-md)]";
 // it and the reservation shows up as a canvas-colored ring on every filled
 // variant.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-all outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center border border-transparent text-ui whitespace-nowrap transition-[color,background-color,border-color,outline-color,opacity,scale] outline-none select-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-2 aria-invalid:outline-offset-0 aria-invalid:outline-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       // `outline` and `ghost` name their resting foreground, which the page
@@ -110,19 +110,43 @@ const buttonVariants = cva(
         start: "justify-start",
         between: "justify-between",
       },
+      /**
+       * Press feedback. `scale` shrinks the control to 0.96 while held, which
+       * reads as a press, and skips it under `prefers-reduced-motion`. Two
+       * boxes never scale, whatever the caller passes: a popup trigger, whose
+       * popup is its feedback, and a ButtonGroup segment, which would pull
+       * away from the neighbours it shares an edge with.
+       * `none` is for any other box a shrink would break, such as a calendar
+       * day inside a range band.
+       */
+      press: {
+        scale:
+          "motion-safe:active:not-aria-[haspopup]:not-in-data-[slot=button-group]:scale-[0.96]",
+        none: "",
+      },
     },
     compoundVariants: [
-      // A glyph at the edge of a centred label sits one `--control-gap` from
-      // that edge, the distance it sits from the label. The glyph names its
-      // side with `data-icon`, because a bare-text label leaves a lone glyph
-      // both first and last element child. Square members hold no padding,
-      // `xs` keeps symmetric padding, and a start-aligned glyph sits on the alignment
-      // edge, so none of those take it.
+      // A glyph at the edge of a centred label carries less visual weight
+      // than the word at the other edge, so equal padding reads as the glyph
+      // pushed inward. Its side takes `--control-px-icon-*`, 2px under the
+      // label's, which reads as centred. The glyph names its side with
+      // `data-icon`, because a bare-text label leaves a lone glyph both first
+      // and last element child. These variants outrank a caller's `px-*`, so
+      // a button that sets its own padding leaves its glyph unmarked. Square
+      // members hold no padding, `xs` keeps symmetric padding, and a
+      // start-aligned glyph sits on the alignment edge, so none of those take
+      // it.
       {
         align: "center",
-        size: ["sm", "md", "default"],
+        size: "sm",
         className:
-          "has-data-[icon=inline-start]:pl-[var(--control-gap)] has-data-[icon=inline-end]:pr-[var(--control-gap)]",
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-sm)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-sm)]",
+      },
+      {
+        align: "center",
+        size: ["md", "default"],
+        className:
+          "has-data-[icon=inline-start]:pl-[var(--control-px-icon-md)] has-data-[icon=inline-end]:pr-[var(--control-px-icon-md)]",
       },
       { align: "start", size: "sm", className: "px-[var(--control-px-start-sm)]" },
       { align: "start", size: ["md", "default"], className: "px-[var(--control-px-start-md)]" },
@@ -134,6 +158,7 @@ const buttonVariants = cva(
       size: "md",
       shape: "square",
       align: "center",
+      press: "scale",
     },
   },
 );
@@ -144,6 +169,7 @@ function Button({
   size = "md",
   shape = "square",
   align = "center",
+  press = "scale",
   asChild = false,
   ...props
 }: React.ComponentProps<"button"> &
@@ -159,7 +185,7 @@ function Button({
       data-size={canonicalControlSize(size)}
       data-shape={shape}
       data-align={align}
-      className={cn(buttonVariants({ variant, size, shape, align, className }))}
+      className={cn(buttonVariants({ variant, size, shape, align, press, className }))}
       {...props}
     />
   );

@@ -103,6 +103,10 @@ verdict with evidence, issues, gaps, and suggested extra checks. It also fails
 an app whose manifest has no `tagline`, so fill that in before handing off.
 Include that verdict in the final handoff.
 
+## After it works
+
+Installing makes the app usable only by the guardian. To let other people use it through a URL, or to publish it to the Rome App Store, read `system:app-lifecycle`.
+
 ## After setup, before writing code
 
 Read both companion docs before editing any source file. They are split by purpose, not by topic — most features touch both:

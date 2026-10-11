@@ -113,17 +113,12 @@ export function ApprovalHistoryButton() {
   );
 }
 
-export function PairingApprovals({ connectionIds }: { connectionIds?: string[] }) {
+export function PairingApprovals() {
   const query = useApprovals();
   const rows =
     query.data?.filter((approval) => {
       const payload = pairingPayload(approval);
-      return (
-        payload &&
-        approval.status === "pending" &&
-        payload.expiresAt > Date.now() &&
-        (!connectionIds || connectionIds.includes(payload.connectionId))
-      );
+      return payload && approval.status === "pending" && payload.expiresAt > Date.now();
     }) ?? [];
   return (
     <PairingRequestsSection

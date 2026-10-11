@@ -1,10 +1,7 @@
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-export function applyDesktopSafeAreaBottom(
-  iframe: HTMLIFrameElement,
-  safeAreaBottom: string,
-): void {
+function applyDesktopSafeAreaBottom(iframe: HTMLIFrameElement, safeAreaBottom: string): void {
   if (!safeAreaBottom) return;
   iframe.contentDocument?.documentElement?.style.setProperty(
     "--rome-safe-area-bottom",

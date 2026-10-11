@@ -73,7 +73,7 @@ function IdeaPicker({ ctx }: { ctx: AppComponentContext }) {
         className="text-muted-foreground"
         onClick={explore}
       >
-        <Compass /> {copy.ideas.explore}
+        <Compass data-icon="inline-start" /> {copy.ideas.explore}
       </Button>
     </div>
   );

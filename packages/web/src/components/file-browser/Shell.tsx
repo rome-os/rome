@@ -47,6 +47,7 @@ interface ShellProps {
   onStartChatFromFolder?: (path: string) => void;
   onSelectionChange?: (selection: {
     selectedPath: string | null;
+    currentFolderPath: string | null;
     selectedTreePaths: string[];
   }) => void;
   folderPanel?: (props: { path: string }) => ReactNode;
@@ -129,7 +130,7 @@ export function Shell({
   usePageHideKeepalive();
   useAutoSaveOrchestration();
   useExternalSelection(externalSelection);
-  useSelectionChangeBroadcast(onSelectionChange);
+  useSelectionChangeBroadcast(isBelowMd, onSelectionChange);
 
   const handleUploadSelection = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
@@ -228,7 +229,6 @@ export function Shell({
           />
         ) : (
           <Sidebar
-            embedded={embedded}
             rootLabel={rootLabel}
             rootPanelTrigger={rootPanelTrigger}
             sidebarHeading={sidebarHeading}

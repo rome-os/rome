@@ -8,6 +8,7 @@ import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import {
+  createSession,
   deleteSession,
   interruptTurn,
   listSessionMessages,
@@ -178,6 +179,7 @@ rs.mock("@/components/chat/entries", () => ({
 rs.mock("@/lib/chat-api", () => {
   return {
     ...chatApiModule,
+    createSession: rs.fn(),
     deleteSession: rs.fn(),
     interruptTurn: rs.fn(),
     listSessionMessages: rs.fn().mockResolvedValue([]),
@@ -262,6 +264,46 @@ afterEach(() => {
   rs.clearAllMocks();
   rs.unstubAllGlobals();
   MockEventSource.instances = [];
+});
+
+describe("Chat missing-session detection", () => {
+  it("reports a confirmed missing session", async () => {
+    rs.mocked(listSessionMessages).mockResolvedValueOnce(null);
+    const onSessionNotFound = rs.fn();
+    renderChat(<Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />);
+
+    await waitFor(() => expect(onSessionNotFound).toHaveBeenCalledWith("missing"));
+  });
+
+  it("does not report a temporary fetch failure as a missing session", async () => {
+    rs.mocked(listSessionMessages).mockRejectedValueOnce(new Error("Service unavailable"));
+    const onSessionNotFound = rs.fn();
+    await act(async () => {
+      renderChat(<Chat sessionId="session-1" onSessionNotFound={onSessionNotFound} />);
+    });
+
+    expect(listSessionMessages).toHaveBeenCalledWith("session-1");
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late missing-session response after leaving the chat", async () => {
+    let resolveMessages!: (value: null) => void;
+    rs.mocked(listSessionMessages).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMessages = resolve;
+        }),
+    );
+    const onSessionNotFound = rs.fn();
+    const { unmount } = renderChat(
+      <Chat sessionId="missing" onSessionNotFound={onSessionNotFound} />,
+    );
+    unmount();
+
+    await act(async () => resolveMessages(null));
+
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
 });
 
 describe("Chat read marking", () => {

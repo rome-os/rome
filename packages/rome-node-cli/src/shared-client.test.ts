@@ -169,7 +169,7 @@ describe("CLI and JavaScript clients sharing one caller daemon", () => {
       .split("\n")
       .map((line) => JSON.parse(line));
     expect(description).toMatchObject({ ok: true, result: { action: "system.info" } });
-    expect(initialStatus).toMatchObject({ protocolVersion: 2, connection: "online" });
+    expect(initialStatus).toMatchObject({ protocolVersion: 3, connection: "online" });
     const responses = await Promise.all([
       f.cli("device", "run", "target", "exec", "--args", '{"command":"from-cli"}'),
       f.api(

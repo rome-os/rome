@@ -12,8 +12,6 @@ export type AiToolSignInMethod = {
 
 interface Props {
   methods: AiToolSignInMethod[];
-  /** Visual emphasis of the buttons. */
-  variant?: "outline" | "primary";
   className?: string;
 }
 
@@ -21,21 +19,18 @@ interface Props {
  * Equal-weight sign-in options for an AI tool (e.g. ChatGPT browser + terminal).
  * Renders attached buttons when there is more than one method.
  */
-export function AiToolSignInButtons({ methods, variant = "outline", className }: Props) {
+export function AiToolSignInButtons({ methods, className }: Props) {
   if (methods.length === 0) return null;
-
-  const buttonVariant = variant === "primary" ? "default" : "outline";
-  const buttonClassName = variant === "outline" ? AI_TOOL_ACTION_BUTTON_CLASS : undefined;
 
   if (methods.length === 1) {
     const only = methods[0];
     return (
       <Button
         type="button"
-        variant={buttonVariant}
+        variant="outline"
         size="sm"
         onClick={only.onClick}
-        className={cn(buttonClassName, className)}
+        className={cn(AI_TOOL_ACTION_BUTTON_CLASS, className)}
       >
         {only.label}
       </Button>
@@ -48,10 +43,10 @@ export function AiToolSignInButtons({ methods, variant = "outline", className }:
         <Button
           key={method.id}
           type="button"
-          variant={buttonVariant}
+          variant="outline"
           size="sm"
           onClick={method.onClick}
-          className={buttonClassName}
+          className={AI_TOOL_ACTION_BUTTON_CLASS}
         >
           {method.label}
         </Button>

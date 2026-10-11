@@ -47,6 +47,10 @@ export function makeWebchatDescriptor(deps: WebchatDescriptorDeps): ConnectionDe
         // inbound port for the channel-message hook to answer a second time.
         receives: false,
         history: true,
+        // The dashboard renders cards inline and answers them as the next turn.
+        interactiveCards: true,
+        // Every webchat line is a guardian turn or the agent's own reply.
+        promptContext: false,
         build(): Talker {
           const adapter = new WebChatAdapter(deps.webchatRepo);
 

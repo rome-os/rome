@@ -55,9 +55,7 @@ export interface WechatAccountMaterial {
   statePath?: string;
 }
 
-/** Build the `account` grant material from a pairing outcome or settings row.
- *  Single source of the material shape for both conferral paths (the setup
- *  and `WECHAT_SETTINGS_IMPORT_ROW`) so they can never drift: token +
+/** Build the `account` grant material from a pairing outcome: token +
  *  account coordinates, accountId duplicated into material,
  *  sparse fields absent, `connectedAt` out. Null when the secrets are missing. */
 export function wechatAccountMaterial(source: {
@@ -199,7 +197,7 @@ function wechatQrView(qr: string, qrContent: string, scanned: boolean): SetupVie
  *      scan is confirmed (a `scaned` report repaints the view with the scan
  *      step done); an expired QR loops back to 1 (refresh via repeated `show`),
  *   4. return the terminal conferral: the account credential (material built by
- *      `wechatAccountMaterial`, shared with `WECHAT_SETTINGS_IMPORT_ROW`) +
+ *      `wechatAccountMaterial`) +
  *      wechat profile + the bound guardian identity when the login carries one.
  * The runtime performs the single durable write from the returned conferral;
  * abandoning at the QR (or cancelling) leaves zero durable state.

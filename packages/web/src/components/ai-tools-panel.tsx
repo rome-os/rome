@@ -680,15 +680,12 @@ export function AiToolsPanel({
     try {
       const res = await fetch("/api/ai-tools/refresh", { method: "POST" });
       const data = (await res.json().catch(() => ({}))) as {
-        claude?: AIToolStatus;
-        codex?: AIToolStatus;
+        claude: AIToolStatus;
+        codex: AIToolStatus;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || t("aiTools.refreshFailed"));
-      setToolStatus({
-        ...(data.claude ? { claude: data.claude } : {}),
-        ...(data.codex ? { codex: data.codex } : {}),
-      });
+      setToolStatus({ claude: data.claude, codex: data.codex });
     } catch (error) {
       setRefreshError(error instanceof Error ? error.message : t("aiTools.refreshFailed"));
     } finally {
@@ -837,9 +834,9 @@ export function AiToolsPanel({
                   className={`shrink-0 ${AI_TOOL_ACTION_BUTTON_CLASS}`}
                 >
                   {refreshPending ? (
-                    <Spinner size="sm" aria-hidden />
+                    <Spinner data-icon="inline-start" size="sm" aria-hidden />
                   ) : (
-                    <RefreshCw className="size-4" aria-hidden />
+                    <RefreshCw data-icon="inline-start" className="size-4" aria-hidden />
                   )}
                   {refreshPending ? t("aiTools.refreshing") : t("aiTools.refresh")}
                 </Button>
@@ -1057,7 +1054,11 @@ export function AiToolsPanel({
                               >
                                 {logoutProvider === provider.statusKey && logoutPending ? (
                                   <>
-                                    <Spinner size="sm" label={t("aiTools.loggingOut")} />
+                                    <Spinner
+                                      data-icon="inline-start"
+                                      size="sm"
+                                      label={t("aiTools.loggingOut")}
+                                    />
                                     <span aria-hidden>{t("aiTools.loggingOut")}</span>
                                   </>
                                 ) : (
@@ -1278,7 +1279,7 @@ export function AiToolsPanel({
                         setAnthropicEnvError(null);
                       }}
                     >
-                      <Plus />
+                      <Plus data-icon="inline-start" />
                       {t("aiTools.otherProviders.custom.addVariable")}
                     </Button>
                   </div>

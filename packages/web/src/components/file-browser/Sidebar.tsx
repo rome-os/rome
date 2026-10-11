@@ -20,11 +20,9 @@ import {
   MIN_SIDEBAR_WIDTH,
   getIsDesktopViewport,
 } from "./store/utils";
-import { shouldSyncRootPanelTriggerUrl } from "@/lib/file-browser-routing";
 import { SidebarRootContextMenu, type ContextMenuActions } from "./ContextMenu";
 
 interface SidebarProps {
-  embedded: boolean;
   rootLabel: string;
   rootPanelTrigger: boolean;
   sidebarHeading?: string;
@@ -33,7 +31,6 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  embedded,
   rootLabel,
   rootPanelTrigger,
   sidebarHeading,
@@ -90,8 +87,6 @@ export function Sidebar({
     }
   };
 
-  void embedded;
-
   return (
     <aside
       className="relative w-[var(--file-browser-sidebar-width)] flex-shrink-0 border-r border-border bg-surface"
@@ -107,7 +102,7 @@ export function Sidebar({
               size="sm"
               onClick={() => {
                 void store.getState().selection.guardedSelectFolder(logicalRootPath, {
-                  syncUrl: shouldSyncRootPanelTriggerUrl(getIsDesktopViewport()),
+                  syncUrl: getIsDesktopViewport(),
                 });
               }}
               // `shrink` defeats the primitive's base `shrink-0` so a long
