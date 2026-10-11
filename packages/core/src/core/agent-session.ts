@@ -3657,6 +3657,7 @@ class AgentSessionImpl implements AgentSession {
           // the model, cannot change the outcome, so the turn ends on the
           // terminal already emitted or on the model's.
           if (!emittedTerminal && !modelRan) throw err;
+          if (err instanceof Error && this.currentAgentSpan === span) span.recordException(err);
           log.warn("turn middleware threw after its terminal event or after starting the model", {
             sessionId: this.sessionId,
             agentName: this.key.agentName,

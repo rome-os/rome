@@ -2245,16 +2245,29 @@ describe("AgentRunner", () => {
     });
 
     it("ends on the emitted terminal when a fail-closed middleware throws after it", async () => {
-      const session = await openMiddlewareSession(async (ctx) => {
-        ctx.emit({ type: "result", content: "scripted" });
-        throw new Error("post-processing failed");
-      });
+      const harness = installTestSpanHarness();
+      try {
+        const session = await openMiddlewareSession(async (ctx) => {
+          ctx.emit({ type: "result", content: "scripted" });
+          throw new Error("post-processing failed");
+        });
 
-      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
 
-      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
-      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
-      expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+        expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
+        expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+        expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+        const spans = await harness.finishedSpans();
+        const agentSpan = spans.find((s) => s.name.startsWith("agent:"));
+        expect(agentSpan?.events).toContainEqual(
+          expect.objectContaining({
+            name: "exception",
+            attributes: expect.objectContaining({ "exception.message": "post-processing failed" }),
+          }),
+        );
+      } finally {
+        await harness.shutdown();
+      }
     });
 
     it("publishes an empty result for a middleware turn that emits no terminal", async () => {
