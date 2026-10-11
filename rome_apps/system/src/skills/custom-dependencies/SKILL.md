@@ -77,7 +77,7 @@ The stock image has no persistent way to add an `apt` package. Use one of these 
 
 ### App dependencies
 
-Declare every dependency an app uses in its `package.json`. Rome installs it with the app, and the app keeps it across upgrades. Anything the app finds only under `/home/rome` exists on this instance alone, so a shared or published app that relies on it breaks elsewhere.
+Declare every dependency an app uses in its `package.json`. Rome installs it with the app, and the installed copy stays in place across upgrades. Anything the app finds only under `/home/rome` exists on this instance alone, so a shared or published app that relies on it breaks elsewhere.
 
 A dependency with native code needs the steps in [App dependencies with native code](#app-dependencies-with-native-code).
 
@@ -131,14 +131,16 @@ Approve a build only when its install script uses a prebuilt binary for the inst
 
 If no binary matches the instance's architecture, the script compiles and the install fails. bufferutil 4.0.9 ships a `linux-x64` binary and no `linux-arm64` binary, so it installs on x64 and fails on arm64.
 
+Prefer packages whose binaries use N-API, which usually have `napi` in the file name. A binary built for one Node ABI stops loading after a Rome upgrade moves to a new Node major version. The binary that `prebuild-install` downloads for better-sqlite3 12.x is one. Reinstalling the unchanged app reuses that binary. Release a new version of the app to install a matching one.
+
 ### 4. Vendor a binary the app's code loads
 
 If no package ships a binary for the instance, build the `.node` file once on another machine and commit it to the app repo.
 
 1. Build the addon with N-API. A non-N-API addon loads only on the Node major version it was built for. A Rome upgrade can move to a new Node major.
-2. Build it in the `node:24-bookworm` Docker image, which has the compilers. Pass `--platform linux/amd64` or `--platform linux/arm64` to match the instance. Use a machine with Docker, such as the guardian's computer or a CI runner.
-3. Commit the file under `src/`, for example as `src/native/<name>.node`. `rome build` copies the files under `src/` into the `appRoot` directory, except `.ts`, `.tsx`, and `.css` files and `src/web/`. With `includeSource: true`, the published source carries the file too.
-4. Load the file with `createRequire(import.meta.url)` and a path that starts from the loading module's directory. The same path works from `src/` and from the built output.
+2. Build it in the `node:24-bookworm` Docker image, which has the compilers, once with `--platform linux/amd64` and once with `--platform linux/arm64`. Use a machine with Docker, such as the guardian's computer or a CI runner. A build for one architecture is enough only for an app that stays on this instance. A shared or published app runs on both.
+3. Commit the files under `src/`, for example as `src/native/<name>-linux-x64.node` and `src/native/<name>-linux-arm64.node`. `rome build` copies the files under `src/` into the `appRoot` directory, except `.ts`, `.tsx`, and `.css` files and `src/web/`. With `includeSource: true`, the published source carries the files too.
+4. Load the file for `process.arch` with `createRequire(import.meta.url)` and a path that starts from the loading module's directory. The same path works from `src/` and from the built output.
 
 ### 5. On a self-hosted instance, extend the image
 

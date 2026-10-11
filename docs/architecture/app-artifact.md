@@ -15,7 +15,7 @@ Build runs the app's own toolchain. Pack snapshots the build output and the [man
 - Every packed artifact carries positive proof that pack produced it. Classifying a directory as a packed artifact keys on that proof, never on the absence of source markers ([declared install mode](../concepts/apps.md#lifecycle-operations)).
 - Pack is deterministic: identical source packs to an identical artifact hash. Nothing time-, host-, or process-dependent enters the artifact.
 - A packed artifact never ships installed dependency modules. Materialize resolves the declared dependency graph on the install host, so native modules match the host runtime.
-- The production image ships no C or C++ compiler, so a dependency build that compiles fails on the install host. The [`custom-dependencies`](../../rome_apps/system/src/skills/custom-dependencies/SKILL.md) skill covers how an app ships native code instead.
+- A dependency build that compiles fails on the install host.
 - A dependency the artifact does not declare does not exist after materialize. Dependency resolution is fenced from any enclosing workspace, so a reference that resolves only in the author's checkout fails here.
 - Store-page metadata never enters the handoff. Pack excludes the store sidecar from the packed artifact and from every hash that addresses it, so store assets never reach an install.
 - An app can publish its source in the same packed artifact. If `app.yaml#includeSource` is `true`, pack keeps the root `src/` directory. The artifact hash covers that source.
