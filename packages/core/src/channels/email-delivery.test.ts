@@ -305,6 +305,64 @@ describe("email delivery through send_message", () => {
     expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
   });
 
+  it("still finds the inbound message after an explicit reply on an uncached thread", async () => {
+    const h = await harness({
+      listMessages: rs.fn(async () => ({
+        messages: [listItem("sent-1"), listItem("in-1", ["received"])],
+      })),
+    });
+
+    await executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, replyToMessageId: "in-1", text: "explicit" },
+      h.deps,
+    );
+    await executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, text: "thread only" },
+      h.deps,
+    );
+
+    expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ inReplyToMessageId: "in-1", text: "thread only" }),
+    );
+  });
+
+  it("prefers an inbound that arrives during the lookup over an older one it finds", async () => {
+    let releasePage: (page: { messages: RomeMailListItem[] }) => void = () => undefined;
+    const h = await harness({
+      listMessages: rs.fn(
+        () =>
+          new Promise<{ messages: RomeMailListItem[] }>((resolve) => {
+            releasePage = resolve;
+          }),
+      ),
+    });
+
+    const reply = executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, text: "first" },
+      h.deps,
+    );
+    await rs.waitFor(() => expect(h.provider.listMessages).toHaveBeenCalledTimes(1));
+    const raw = inboundEvent("in-2");
+    await h.adapter.ingestInbound(raw, sign(raw));
+    releasePage({ messages: [listItem("in-1", ["received"])] });
+    await reply;
+    await executeSendMessage(h.channels, { channel: "email", threadId: THREAD, text: "second" });
+
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ inReplyToMessageId: "in-2", text: "first" }),
+    );
+    expect(h.provider.send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ inReplyToMessageId: "in-2", text: "second" }),
+    );
+  });
+
   it("uses an explicit reply message before cached state or mailbox lookup", async () => {
     const h = await harness();
     await executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "first" });

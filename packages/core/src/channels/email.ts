@@ -329,9 +329,14 @@ export class EmailAdapter {
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
-    const sent = await this.sendMail(conversationId, message);
-    if (!sent) return { conversationId };
-    this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
+    const outcome = await this.sendMail(conversationId, message);
+    if (!outcome) return { conversationId };
+    const { sent, startedThread } = outcome;
+    // An explicit reply on an uncached thread says nothing about whether the
+    // thread has inbound mail, so only a new or cached thread records the send.
+    if (startedThread || this.threadReplyTarget.has(sent.threadId)) {
+      this.rememberReplyTarget(sent.threadId, { messageId: sent.messageId, outbound: true });
+    }
     log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
     return { conversationId: sent.threadId as ConversationId, messageId: sent.messageId };
   }
@@ -356,6 +361,9 @@ export class EmailAdapter {
     const target = await resolveEmailReplyTarget(this.provider, threadId, {
       isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
     });
+    // An inbound that arrived during the lookup is newer than anything it found.
+    const live = this.threadReplyTarget.get(threadId);
+    if (live && !live.outbound) return live;
     this.rememberReplyTarget(threadId, target);
     return target;
   }
@@ -371,7 +379,7 @@ export class EmailAdapter {
   private async sendMail(
     threadId: string,
     message: OutgoingMessage,
-  ): Promise<SendMailResult | undefined> {
+  ): Promise<{ sent: SendMailResult; startedThread: boolean } | undefined> {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
@@ -412,7 +420,8 @@ export class EmailAdapter {
     // even when the caller also supplied `to`.
     if (email?.inReplyToMessageId) {
       const inReplyToMessageId = email.inReplyToMessageId;
-      return this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+      const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+      return { sent, startedThread: false };
     }
     const addressTarget = !email && this.resolveRecipients(threadId);
     if (threadId && (this.threadReplyTarget.has(threadId) || !addressTarget)) {
@@ -425,7 +434,9 @@ export class EmailAdapter {
           inReplyToMessageId: target.messageId,
         });
       }
-      return this.provider.send({ inReplyToMessageId: target.messageId, text, html, cc, bcc });
+      const inReplyToMessageId = target.messageId;
+      const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
+      return { sent, startedThread: false };
     }
 
     // No thread: start a fresh email. Recipients come from `email.to`,
@@ -435,7 +446,8 @@ export class EmailAdapter {
     const hasRecipient = Array.isArray(recipients) ? recipients.length > 0 : !!recipients;
     if (!hasRecipient) throw new Error(this.noRecipientMessage(to));
     const subject = email?.subject?.trim() || "Message from Rome";
-    return this.provider.send({ to: recipients, cc, bcc, subject, text, html });
+    const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
+    return { sent, startedThread: true };
   }
 
   private noRecipientMessage(to: string | string[]): string {
