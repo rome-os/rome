@@ -12,6 +12,7 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { mapGuardianToChannel } from "./guardian-mapping.js";
 import { InboundDedup } from "./inbound-dedup.js";
+import { resolveEmailReplyTarget } from "./email-reply-target.js";
 import type {
   MailProvider,
   RomeMailEvent,
@@ -140,6 +141,7 @@ const HISTORY_MAX_SCAN = 2000;
 // cursor (0 messages ⇒ scan count never advances). This caps the number of
 // list calls regardless of what each page contains, guaranteeing termination.
 const HISTORY_MAX_PAGES = 50;
+const REPLY_TARGET_CACHE_SIZE = 2000;
 
 function attachmentTypeFromMime(mime: string | undefined): Attachment["type"] {
   const m = (mime ?? "").toLowerCase();
@@ -196,13 +198,9 @@ export class EmailAdapter {
 
   private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  // AgentMail wants a provider message id to keep a reply on-thread, but Rome's
-  // thread key is the (stable) AgentMail thread id. Map the latest inbound
-  // message id per thread so a reply can address the thread correctly. In-memory
-  // is fine: a reply follows its inbound within the same process lifetime, and a
-  // miss falls back to a fresh `to:` send.
+  // An observed message identifies the thread for a reply. This bounded cache
+  // avoids a mailbox scan after a send or inbound, but is not durable state.
   private readonly threadReplyTarget = new Map<string, string>();
-  private readonly threadSubject = new Map<string, string>();
 
   // Per-inbound attachment manifest (provider message id → downloadable body
   // parts), set in ingestInbound and consumed by saveIncomingAttachments to pull
@@ -288,7 +286,6 @@ export class EmailAdapter {
 
   async stop(): Promise<void> {
     this.threadReplyTarget.clear();
-    this.threadSubject.clear();
     this.pendingAttachments.clear();
     log.info("email channel stopped");
   }
@@ -314,22 +311,51 @@ export class EmailAdapter {
     return resolved.includes("@") ? resolved : "";
   }
 
-  /** Send into a conversation. The email replies on-thread when it has a reply
-   *  target: `email.inReplyToMessageId`, or the last inbound this process saw
-   *  in the conversation. Otherwise it starts a fresh email to `email.to`, or
-   *  to the conversation id read as an address. The receipt's
-   *  `conversationId` is the provider's thread id when an email went out, and
-   *  `conversationId` when none did. */
+  /**
+   * A receipt confirms provider acceptance and carries its message and thread IDs.
+   * Unresolved threads, empty bodies, and unsupported attachments throw before
+   * sending. An invalid provider receipt leaves delivery unconfirmed.
+   */
   async send(conversationId: ConversationId, message: OutgoingMessage): Promise<MessageReceipt> {
     const sent = await this.sendMail(conversationId, message);
-    return {
-      conversationId: (sent?.threadId ?? conversationId) as ConversationId,
-      ...(sent?.messageId ? { messageId: sent.messageId } : {}),
-    };
+    if (
+      typeof sent?.messageId !== "string" ||
+      !sent.messageId.trim() ||
+      typeof sent.threadId !== "string" ||
+      !sent.threadId.trim()
+    ) {
+      throw new Error(
+        "Email delivery is unconfirmed: the provider did not return valid message and thread IDs. " +
+          "Check email history before retrying to avoid sending a duplicate.",
+      );
+    }
+    this.rememberReplyTarget(sent.threadId, sent.messageId);
+    log.info("email accepted by provider", { threadId: sent.threadId, messageId: sent.messageId });
+    return { conversationId: sent.threadId as ConversationId, messageId: sent.messageId };
+  }
+
+  private rememberReplyTarget(threadId: string, messageId: string): void {
+    if (!threadId || !messageId) return;
+    this.threadReplyTarget.delete(threadId);
+    this.threadReplyTarget.set(threadId, messageId);
+    if (this.threadReplyTarget.size > REPLY_TARGET_CACHE_SIZE) {
+      const oldest = this.threadReplyTarget.keys().next().value;
+      if (oldest !== undefined) this.threadReplyTarget.delete(oldest);
+    }
   }
 
   private async sendMail(threadId: string, message: OutgoingMessage) {
+    // The mail transport has no attachment field. Reject before sending a body
+    // that would falsely appear to deliver the requested files.
+    if (message.attachments?.length) {
+      throw new Error(
+        "Email attachments are not supported by the mail transport. No email was sent.",
+      );
+    }
     const email = message.kind === "email" ? message : undefined;
+    if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
+      throw new Error("Email replyToMessageId must not be blank. No email was sent.");
+    }
     const bodyText = (message.text ?? textFromParts(message.parts)).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
@@ -347,21 +373,21 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      log.debug("skipping empty outbound email", { threadId: threadId || null });
-      return;
+      throw new Error("Email requires non-empty text or HTML. No email was sent.");
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
     const bcc = email?.bcc?.length ? email.bcc : undefined;
 
-    // Reply on-thread when we have a provider message id — either passed
-    // explicitly (survives restarts) or remembered from the inbound this process
-    // handled. The provider keeps the subject/recipients of the original thread.
-    const inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
+    // An explicit message ID wins. A thread miss must not become a fresh send,
+    // even when the caller also supplied `to`.
+    let inReplyToMessageId = email?.inReplyToMessageId ?? this.threadReplyTarget.get(threadId);
+    const addressTarget = !email && this.resolveRecipients(threadId);
+    if (!inReplyToMessageId && threadId && !addressTarget) {
+      inReplyToMessageId = await resolveEmailReplyTarget(this.provider, threadId);
+    }
     if (inReplyToMessageId) {
-      const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
-      log.info("sent email reply", { threadId: threadId || null });
-      return sent;
+      return this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
     }
 
     // No thread: start a fresh email. Recipients come from `email.to`,
@@ -369,16 +395,10 @@ export class EmailAdapter {
     const recipients = this.resolveRecipients(email?.to ?? threadId);
     const hasRecipient = Array.isArray(recipients) ? recipients.length > 0 : !!recipients;
     if (!hasRecipient) {
-      log.warn("cannot send email: no recipient resolved", { threadId: threadId || null });
-      return;
+      throw new Error("Cannot send email: no recipient resolved. No email was sent.");
     }
-    const subject =
-      email?.subject?.trim() || this.threadSubject.get(threadId) || "Message from Rome";
-    const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
-    log.info("sent new email", {
-      recipients: Array.isArray(recipients) ? recipients.length : 1,
-    });
-    return sent;
+    const subject = email?.subject?.trim() || "Message from Rome";
+    return this.provider.send({ to: recipients, cc, bcc, subject, text, html });
   }
 
   /**
@@ -519,8 +539,7 @@ export class EmailAdapter {
     }
 
     const threadId = event.threadId;
-    this.threadReplyTarget.set(threadId, event.providerMessageId);
-    this.threadSubject.set(threadId, event.subject ? `Re: ${event.subject}` : "Message from Rome");
+    this.rememberReplyTarget(threadId, event.providerMessageId);
 
     // Attachment manifest from the event (bytes pulled lazily by
     // saveIncomingAttachments). Keep the parts list aligned with the surfaced
@@ -561,7 +580,7 @@ export class EmailAdapter {
    * returns ChannelMessages oldest-first. A line this inbox sent has direction
    * `outbound`. Each line's `raw` is the provider's message, or its list item
    * when the body pull failed. This path is pure: unlike `ingestInbound` it
-   * records no dedup, mutates no reply-target/subject/attachment state, and
+   * records no dedup, mutates no reply-target/attachment state, and
    * dispatches nothing — it only reads and shapes.
    */
   async fetchHistory(threadId: string | null, windowHours: number): Promise<ChannelMessage[]> {

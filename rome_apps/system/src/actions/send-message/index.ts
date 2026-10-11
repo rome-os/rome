@@ -340,8 +340,12 @@ export async function executeSendMessage(
   if (channel === "email") {
     const email = input as SendMessageEmailInput;
     const hasHtml = !!email.html?.trim();
-    if (!text && !hasHtml && !hasAttachments) {
-      throw new Error("Email requires `text`, `html`, or `attachments`");
+    const hasText =
+      text !== undefined
+        ? !!text.trim()
+        : !!parts?.some((part) => part.type === "text" && part.content.trim());
+    if (!hasText && !hasHtml && !hasAttachments) {
+      throw new Error("Email requires non-empty `text` or `html`");
     }
     // Reply on a thread, or start a new email to `to` — one must be present.
     const replyTarget = email.replyToMessageId;
@@ -368,11 +372,20 @@ export async function executeSendMessage(
       html: email.html,
       inReplyToMessageId: replyTarget,
     });
+    if (
+      typeof delivery?.messageId !== "string" ||
+      !delivery.messageId.trim() ||
+      typeof delivery.conversationId !== "string" ||
+      !delivery.conversationId.trim()
+    ) {
+      throw new Error(
+        "Email delivery is unconfirmed: the channel did not return valid message and thread IDs. " +
+          "Check email history before retrying to avoid sending a duplicate.",
+      );
+    }
     const deliveredThreadId = delivery.conversationId;
     await recordDeliveredConversationMessageBestEffort(deps, input, deliveredThreadId, delivery);
-    return delivery.messageId
-      ? { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } }
-      : { status: "ok" };
+    return { status: "ok", data: { messageId: delivery.messageId, threadId: deliveredThreadId } };
   }
 
   const chat = input as SendMessageChatInput;
@@ -442,7 +455,7 @@ export function createSendMessageAction(
         text: {
           type: "string",
           description:
-            "The message text to send (supports markdown). Optional when attachments are provided.",
+            "The message text to send (supports markdown). Email requires text or html. Other channels may send attachments without text.",
         },
         channelUserId: {
           type: "string",
@@ -451,7 +464,7 @@ export function createSendMessageAction(
         replyToMessageId: {
           type: "string",
           description:
-            "Optional message ID to reply to. For email this is the inbound message id that keeps the reply on-thread.",
+            "Optional message ID to reply to. For email, use a provider message ID from a received or sent email. It keeps the reply on-thread and bypasses thread lookup.",
         },
         to: {
           type: ["string", "array"],
@@ -481,7 +494,7 @@ export function createSendMessageAction(
         attachments: {
           type: "array",
           description:
-            "Optional file attachments to send. Sources must be absolute paths under a Rome project workspace or channel attachment directory.",
+            "Optional file attachments to send. Email does not support attachments and rejects the entire send when they are provided. Sources must be absolute paths under a Rome project workspace or channel attachment directory.",
           items: {
             type: "object",
             properties: {

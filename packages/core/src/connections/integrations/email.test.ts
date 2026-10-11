@@ -318,18 +318,19 @@ describe("email Talker fault mapping", () => {
     expect(received[0].text).toBe("hello from the full body");
   });
 
-  it("forwards send() to the provider", async () => {
+  it("forwards a new email to the provider", async () => {
     const provider = makeProvider();
     const h = buildTalker(provider);
     h.start();
 
-    const receipt = await h.talker.send("t1" as ConversationId, {
+    const receipt = await h.talker.send("" as ConversationId, {
       kind: "email",
       to: "someone@example.com",
       text: "hi there",
     });
 
     expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0]).toMatchObject({ to: "someone@example.com", text: "hi there" });
     expect(receipt).toStrictEqual({ conversationId: "t_out", messageId: "m_out" });
   });
 

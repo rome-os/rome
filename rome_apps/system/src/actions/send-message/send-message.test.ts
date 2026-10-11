@@ -100,7 +100,12 @@ describe("send_message attachments", () => {
 
 describe("send_message email union", () => {
   function makeEmailAdapter(): ChannelsService {
-    return makeAdapter("email");
+    const adapter = makeAdapter("email");
+    (adapter.send as ReturnType<typeof rs.fn>).mockResolvedValue({
+      conversationId: "t1",
+      messageId: "msg_1",
+    });
+    return adapter;
   }
 
   it("maps email-specific fields into OutgoingMessage.email for a new email", async () => {
