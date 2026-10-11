@@ -20,7 +20,7 @@ Install custom software under `/home/rome`, and call it by its absolute path fro
 | `/home/rome`: `~/.local`, `~/.cache`, `~/.npmrc`, the shell profiles, app repos, installed apps, app data, the database, the pnpm store | Kept |
 | `/home/user` | Kept |
 | `/app` | Rome's own code, replaced by the new image. `/app/memory` is kept. |
-| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` or `npm install -g` | Replaced by the new image |
+| System directories such as `/usr`, `/opt`, and `/etc`, including anything installed with `apt-get` or `npm install -g` | Replaced by the new image, except Rome's SSH host keys and Tailscale state |
 
 Rome publishes a new image every weekday on a schedule, plus manual releases ([release schedule](https://github.com/rome-os/rome/blob/main/docs/releases.md#scheduled-patch-releases)). An instance upgrades at these times:
 
@@ -88,7 +88,7 @@ Rome installs an app's dependencies inside the container, as `rome`, in two step
 1. A source install runs `pnpm install` and then the app's `build` script in the app repo. Dev dependencies install in this step too.
 2. Every install, including an App Store install, runs `pnpm install --prod` for the packed artifact.
 
-Both steps run every build script that the app's `pnpm-workspace.yaml` approves under `allowBuilds`. A build that compiles C or C++ fails, because the image has no `make` and no C or C++ compiler. A compiler under `/home/rome` does not help, because installs run with the image's `PATH`. Rome installs the dependencies again on every reinstall and every App Store update, so the app must install on the stock image every time.
+Both steps run every build script that the app's `pnpm-workspace.yaml` approves under `allowBuilds`. A build that compiles C or C++ fails, because the image has no `make` and no C or C++ compiler. A compiler under `/home/rome` does not help, because installs run with the image's `PATH`. Rome runs step 2 again for every new version of the app, including each App Store update. The app must install on the stock image every time. Step 2 reuses the installed copy when the packed artifact has not changed. So a successful reinstall of an unchanged app does not prove that an install fix works.
 
 Try these options in order.
 
