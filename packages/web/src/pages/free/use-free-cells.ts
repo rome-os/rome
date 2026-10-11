@@ -173,25 +173,82 @@ function notify() {
   for (const l of listeners) l();
 }
 
+// Marks a session whose stored layout the server has not acknowledged. Kept in
+// localStorage beside the layout so a reload or another tab still treats the
+// local copy as newer than the server's.
+const UNSYNCED_PREFIX = "rome:free-layout-unsynced:";
+
+function hasUnsyncedLayout(sessionId: string): boolean {
+  try {
+    return localStorage.getItem(`${UNSYNCED_PREFIX}${sessionId}`) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function setUnsyncedLayout(sessionId: string, unsynced: boolean) {
+  try {
+    if (unsynced) localStorage.setItem(`${UNSYNCED_PREFIX}${sessionId}`, "1");
+    else localStorage.removeItem(`${UNSYNCED_PREFIX}${sessionId}`);
+  } catch {}
+}
+
+// A session's save in flight. `next` holds the newest layout still to send, so
+// edits made during a PUT coalesce into one later PUT.
+interface LayoutSave {
+  next: WidgetPlacement[] | null;
+}
+
+const layoutSaves = new Map<string, LayoutSave>();
+
+function saveLayout(sessionId: string, layout: WidgetPlacement[]) {
+  setUnsyncedLayout(sessionId, true);
+  const pending = layoutSaves.get(sessionId);
+  if (pending) {
+    pending.next = layout;
+    return;
+  }
+  const save: LayoutSave = { next: layout };
+  layoutSaves.set(sessionId, save);
+  void drainLayoutSaves(sessionId, save);
+}
+
+// Sends one PUT at a time per session, so an older layout can never land on
+// the server after a newer one. The unsynced marker clears only when the PUT
+// carrying the newest layout succeeds.
+async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
+  while (save.next) {
+    const layout = save.next;
+    save.next = null;
+    let ok = false;
+    try {
+      const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        // `keepalive` only for teardown-time flushes (document hidden /
+        // unloading), where a normal fetch would be cancelled with the page.
+        // Interactive saves stay plain fetches so they aren't subject to
+        // keepalive's 64 KB cross-request body cap. A teardown save queued
+        // behind an in-flight PUT is not sent before the page unloads, and its
+        // unsynced marker makes the next load send it.
+        keepalive: typeof document !== "undefined" && document.visibilityState === "hidden",
+        body: JSON.stringify({ layout }),
+      });
+      ok = res.ok;
+    } catch {}
+    if (ok && !save.next) setUnsyncedLayout(sessionId, false);
+  }
+  layoutSaves.delete(sessionId);
+}
+
 function persist(next: WidgetPlacement[]) {
   layoutRevisions.set(activeSessionId, (layoutRevisions.get(activeSessionId) ?? 0) + 1);
   reconcileToolView(next);
   snapshot = next;
   writeStorage(activeSessionId, next);
   notify();
-  if (activeSessionId) {
-    void fetch(`/api/chat/sessions/${encodeURIComponent(activeSessionId)}/layout`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      // `keepalive` only for teardown-time flushes (document hidden /
-      // unloading), where a normal fetch would be cancelled with the page.
-      // Interactive saves stay plain fetches so they aren't subject to
-      // keepalive's 64 KB cross-request body cap.
-      keepalive: typeof document !== "undefined" && document.visibilityState === "hidden",
-      body: JSON.stringify({ layout: next }),
-    }).catch(() => {});
-  }
+  if (activeSessionId) saveLayout(activeSessionId, next);
 }
 
 function subscribe(listener: () => void) {
@@ -305,8 +362,8 @@ const appliedAgentPlacements = new Map<string, string>();
  * stream replays each app's latest placement, and applying it again would
  * remount the widget and drop the guardian's navigation inside it, so a replay
  * is skipped while the tile it mounted is still in the layout. If the tile is
- * gone, for example because a layout load replaced a save that never reached
- * the server, the replay places it again. A placement without an id always
+ * gone, for example because a layout load brought in a copy saved on another
+ * device, the replay places it again. A placement without an id always
  * applies.
  */
 export function applyAgentPlacement(
@@ -506,7 +563,17 @@ export function setActiveSession(sessionId: string | null) {
   notify();
 }
 
+/**
+ * Replace the session's cached layout with the server's copy. When the server
+ * has not acknowledged the cached layout, keep it and send it again instead,
+ * so a failed save is retried rather than lost. Never rejects.
+ */
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
+  if (hasUnsyncedLayout(sessionId)) {
+    // A save still in flight already carries the newest layout.
+    if (!layoutSaves.has(sessionId)) saveLayout(sessionId, readStorage(sessionId));
+    return;
+  }
   const revision = layoutRevisions.get(sessionId);
   try {
     const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {

@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { setActiveSession } from "./use-free-cells";
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
+  // Imported per test because a test may reset the module registry.
+  const { setActiveSession } = await import("./use-free-cells");
   setActiveSession("reset");
   setActiveSession(null);
   rs.stubGlobal("fetch", rs.fn().mockResolvedValue(new Response(null, { status: 200 })));
@@ -381,9 +382,9 @@ describe("applyAgentPlacement", () => {
   it("places a replay again when a layout load dropped the tile it mounted", async () => {
     const store = await import("./use-free-cells");
     store.setActiveSession("hydrate-chat");
-    // The placement's save never reached the server, so a later load of the
-    // session's layout returns the older layout without the tile.
     store.applyAgentPlacement("hydrate-p1", "notes", "list");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The server then holds a layout saved on another device without the tile.
     rs.mocked(fetch).mockResolvedValueOnce(Response.json({ layout: [] }));
     await store.loadLayoutForSession("hydrate-chat");
     expect(readLayout("hydrate-chat")).toEqual([]);
@@ -417,5 +418,112 @@ describe("applyAgentPlacement", () => {
     expect(readLayout("pinned-b")).toEqual([
       expect.objectContaining({ targetId: "notes", route: "list" }),
     ]);
+  });
+});
+
+describe("layout sync", () => {
+  const readLayout = (sessionId: string) =>
+    JSON.parse(localStorage.getItem(`rome:free-layout:${sessionId}`) ?? "[]") as unknown[];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const puts = () =>
+    rs
+      .mocked(fetch)
+      .mock.calls.filter(([, init]) => init?.method === "PUT")
+      .map(([url, init]) => ({ url, layout: JSON.parse(String(init?.body)).layout }));
+  // Answers GET with `serverLayout` and accepts every PUT.
+  const serve = (serverLayout: unknown[]) =>
+    rs
+      .mocked(fetch)
+      .mockImplementation(async (_url, init) =>
+        init?.method === "PUT"
+          ? new Response(null, { status: 200 })
+          : Response.json({ layout: serverLayout }),
+      );
+
+  it.each([
+    ["the request is rejected", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["the server answers 500", () => Promise.resolve(new Response(null, { status: 500 }))],
+  ])("keeps and resends an edit whose save failed when %s", async (_case, failure) => {
+    const store = await import("./use-free-cells");
+    const { result } = renderHook(() => store.useFreeCells());
+    act(() => store.setActiveSession("offline-chat"));
+    rs.mocked(fetch).mockImplementationOnce(failure);
+    act(() => result.current.addWidget("app", "notes"));
+    await settle();
+    const local = readLayout("offline-chat");
+
+    act(() => store.setActiveSession("other-chat"));
+    act(() => store.setActiveSession("offline-chat"));
+    rs.mocked(fetch).mockClear();
+    serve([]);
+    await act(() => store.loadLayoutForSession("offline-chat"));
+
+    expect(result.current.placements).toEqual(local);
+    expect(readLayout("offline-chat")).toEqual(local);
+    expect(puts()).toEqual([{ url: "/api/chat/sessions/offline-chat/layout", layout: local }]);
+  });
+
+  it("applies the server copy again once a resent save succeeds", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("retry-chat");
+    rs.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    store.autoPlaceApp("notes");
+    await settle();
+    serve([]);
+    await store.loadLayoutForSession("retry-chat");
+    await settle();
+
+    const fromOtherDevice = [{ id: "d", type: "desktop", order: 1 }];
+    serve(fromOtherDevice);
+    await store.loadLayoutForSession("retry-chat");
+    expect(readLayout("retry-chat")).toEqual(fromOtherDevice);
+  });
+
+  it("sends one save at a time and keeps the local copy until the newest save lands", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("busy-chat");
+    let respond!: (response: Response) => void;
+    rs.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    store.autoPlaceApp("notes");
+    store.autoPlaceProjects();
+    store.autoPlaceApp("calendar");
+    expect(puts()).toHaveLength(1);
+
+    rs.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    respond(new Response(null, { status: 200 }));
+    await settle();
+    const sent = puts();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.layout).toEqual(readLayout("busy-chat"));
+
+    // The first save succeeded but the newest failed, so the server's copy is
+    // still older than the local one.
+    serve(sent[0]!.layout);
+    await store.loadLayoutForSession("busy-chat");
+    expect(readLayout("busy-chat")).toHaveLength(3);
+  });
+
+  it("resends an unsynced layout after a reload", async () => {
+    const before = await import("./use-free-cells");
+    before.setActiveSession("reload-chat");
+    rs.mocked(fetch).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    before.autoPlaceApp("notes");
+    await settle();
+    const local = readLayout("reload-chat");
+
+    rs.resetModules();
+    const store = await import("./use-free-cells");
+    store.setActiveSession("reload-chat");
+    rs.mocked(fetch).mockClear();
+    serve([]);
+    await store.loadLayoutForSession("reload-chat");
+
+    expect(readLayout("reload-chat")).toEqual(local);
+    expect(puts()).toEqual([{ url: "/api/chat/sessions/reload-chat/layout", layout: local }]);
   });
 });
