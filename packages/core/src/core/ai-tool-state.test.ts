@@ -499,6 +499,34 @@ describe("AIToolState", () => {
       }
     });
 
+    it("keeps the reset known at a runtime quota failure when an older probe shows capacity", async () => {
+      rs.useFakeTimers({ shouldAdvanceTime: false });
+      rs.setSystemTime(now);
+      try {
+        const { state, claudeUsage } = exhaustedState({
+          fiveHour: { usedPercent: 100, resetsAt: at(HOUR) },
+        });
+        await state.refresh("anthropic");
+        let releaseUsage!: () => void;
+        claudeUsage.mockImplementationOnce(async () => {
+          await new Promise<void>((resolve) => {
+            releaseUsage = resolve;
+          });
+          return { checkedAt: at(0), source: "test", fiveHour: { usedPercent: 0 } };
+        });
+        const olderRefresh = state.refresh("anthropic");
+        state.markQuotaExhausted("anthropic");
+        releaseUsage();
+        await olderRefresh;
+        expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
+      } finally {
+        rs.useRealTimers();
+      }
+    });
+
     it("lets a runtime quota failure after the usage reset outlast it", async () => {
       rs.useFakeTimers({ shouldAdvanceTime: false });
       rs.setSystemTime(now);

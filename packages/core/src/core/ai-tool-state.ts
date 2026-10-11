@@ -269,20 +269,24 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
       notifyCodexLoginChanged(previousCodexLogin);
     },
     markQuotaExhausted(provider) {
+      // A failure before the usage reset agrees with the snapshot, so the
+      // reset still ends it. A failure after the reset comes from a limit the
+      // snapshot did not show, so it holds until a successful usage probe. The
+      // replay below judges the failure by the reset known when it happened,
+      // unless the older probe recorded a reset still ahead of it.
       const failedAt = Date.now();
+      const resetAhead = (until: string | undefined): string | undefined =>
+        until !== undefined && Date.parse(until) > failedAt ? until : undefined;
+      const resetAtFailure = resetAhead(
+        (provider === "openai" ? value.codex : value.claude).quotaExhaustedUntil,
+      );
       const applyRuntimeSignal = (): boolean => {
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
         target.quotaExhausted = true;
-        // A failure before the usage reset agrees with the snapshot, so the
-        // reset still ends it. A failure after the reset comes from a limit the
-        // snapshot did not show, so it holds until a successful usage probe.
-        // The replay below judges the failure by failedAt, not by when the
-        // older probe settles.
-        const until = target.quotaExhaustedUntil;
-        if (until !== undefined && Date.parse(until) <= failedAt) {
-          delete target.quotaExhaustedUntil;
-        }
+        const until = resetAhead(target.quotaExhaustedUntil) ?? resetAtFailure;
+        if (until === undefined) delete target.quotaExhaustedUntil;
+        else target.quotaExhaustedUntil = until;
         return true;
       };
       if (!applyRuntimeSignal()) return;
