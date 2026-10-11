@@ -992,6 +992,59 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("says Rome is shutting down when the provider closes before turn/start returns", async () => {
+    let provider!: CodexAppServerProvider;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        provider.close();
+        // The real client rejects its pending requests when it closes.
+        throw new Error("app-server client closed");
+      }
+      return {};
+    });
+
+    provider = new CodexAppServerProvider();
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+
+    expect((await collected).find((m) => m.type === "error")).toMatchObject({
+      error: "Codex stopped before the turn finished: Rome is shutting down",
+    });
+    await session.close();
+  });
+
+  it("names the payer change when Codex restarts before turn/start returns", async () => {
+    const appServerManager = new CodexAppServerManager();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method === "turn/start") {
+        appServerManager.restart();
+        throw new Error("app-server client closed");
+      }
+      return {};
+    });
+    const provider = new CodexAppServerProvider({ appServerManager });
+    try {
+      const session = await provider.openSession(buildParams());
+      const collected = collectUntilTerminal(session);
+      await session.sendUserInput({ text: "hi" });
+
+      const error = (await collected).find((m) => m.type === "error");
+      expect(error).toMatchObject({
+        error:
+          "Codex stopped before the turn finished: the model payer or Rome instance credential changed",
+      });
+      expect(error).not.toHaveProperty("code");
+      await session.close();
+    } finally {
+      appServerManager.close();
+    }
+  });
+
   it("says Rome is shutting down when the provider closes during a turn", async () => {
     let provider!: CodexAppServerProvider;
     requestMock.mockImplementation(async (method: string) => {
