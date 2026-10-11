@@ -563,6 +563,56 @@ describe("layout sync", () => {
     expect(puts()).toEqual([{ url: "/api/chat/sessions/race-chat/layout", layout: fromOtherTab }]);
   });
 
+  it("keeps an edit another tab stored during a load whose save failed", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("slow-chat");
+    let respond!: (response: Response) => void;
+    rs.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    const load = store.loadLayoutForSession("slow-chat");
+
+    // Another tab stores an edit while the GET is in flight, and its save fails.
+    const fromOtherTab = [{ id: "t", type: "desktop", order: 1 }];
+    localStorage.setItem("rome:free-layout:slow-chat", JSON.stringify(fromOtherTab));
+    localStorage.setItem("rome:free-layout-unsynced:slow-chat", "1");
+    respond(Response.json({ layout: [] }));
+    await load;
+    expect(readLayout("slow-chat")).toEqual(fromOtherTab);
+
+    rs.mocked(fetch).mockClear();
+    serve([]);
+    await store.loadLayoutForSession("slow-chat");
+    expect(puts()).toEqual([{ url: "/api/chat/sessions/slow-chat/layout", layout: fromOtherTab }]);
+  });
+
+  it("sends a queued save after a save that never settles times out", async () => {
+    const timeout = new AbortController();
+    const timeoutSpy = rs.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    const store = await import("./use-free-cells");
+    store.setActiveSession("stalled-chat");
+    rs.mocked(fetch).mockImplementationOnce(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    );
+    store.autoPlaceApp("notes");
+    store.autoPlaceProjects();
+    expect(puts()).toHaveLength(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(15_000);
+    timeoutSpy.mockRestore();
+
+    timeout.abort(new DOMException("timed out", "TimeoutError"));
+    await settle();
+    const sent = puts();
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.layout).toEqual(readLayout("stalled-chat"));
+  });
+
   it("does not resend a stored layout older than an edit it failed to store", async () => {
     const store = await import("./use-free-cells");
     store.setActiveSession("quota-chat");

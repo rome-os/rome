@@ -213,6 +213,7 @@ interface LayoutSave {
 }
 
 const layoutSaves = new Map<string, LayoutSave>();
+const LAYOUT_SAVE_TIMEOUT_MS = 15_000;
 
 // `stored` says whether `layout` reached localStorage. When the write failed,
 // for example on a full quota, the stored copy is older than `layout`, so the
@@ -253,6 +254,8 @@ async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
         // behind an in-flight PUT is not sent before the page unloads, and its
         // unsynced marker makes the next load send it.
         keepalive: typeof document !== "undefined" && document.visibilityState === "hidden",
+        // A PUT that never settles would hold every later save for the session.
+        signal: AbortSignal.timeout(LAYOUT_SAVE_TIMEOUT_MS),
         body: JSON.stringify({ layout }),
       });
       ok = res.ok;
@@ -611,8 +614,9 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
     const data = (await res.json()) as { layout?: unknown };
     if (!Array.isArray(data.layout)) return;
     const layout = data.layout as WidgetPlacement[];
-    // A delayed load must not erase tools opened or closed since it started.
-    if (layoutRevisions.get(sessionId) !== revision) return;
+    // A delayed load must not erase tools opened or closed since it started,
+    // or an edit another tab stored that the server has not acknowledged.
+    if (layoutRevisions.get(sessionId) !== revision || hasUnsyncedLayout(sessionId)) return;
     writeStorage(sessionId, layout);
     if (sessionId === activeSessionId) {
       snapshot = layout;
