@@ -363,6 +363,58 @@ describe("email delivery through send_message", () => {
     );
   });
 
+  it("uses an inbound that arrives during a lookup when the lookup then fails", async () => {
+    let failPage: (err: Error) => void = () => undefined;
+    const h = await harness({
+      listMessages: rs.fn(
+        () =>
+          new Promise<{ messages: RomeMailListItem[] }>((_resolve, reject) => {
+            failPage = reject;
+          }),
+      ),
+    });
+
+    const reply = executeSendMessage(
+      h.channels,
+      { channel: "email", threadId: THREAD, text: "reply" },
+      h.deps,
+    );
+    await rs.waitFor(() => expect(h.provider.listMessages).toHaveBeenCalledTimes(1));
+    const raw = inboundEvent("in-2");
+    await h.adapter.ingestInbound(raw, sign(raw));
+    failPage(new Error("mail list unavailable"));
+
+    await expect(reply).resolves.toMatchObject({ status: "ok" });
+    expect(h.provider.send).toHaveBeenCalledWith(
+      expect.objectContaining({ inReplyToMessageId: "in-2" }),
+    );
+  });
+
+  it("uses an inbound that arrives during a lookup when the lookup then times out", async () => {
+    rs.useFakeTimers();
+    try {
+      const h = await harness({ listMessages: rs.fn(() => new Promise<never>(() => undefined)) });
+
+      const reply = executeSendMessage(
+        h.channels,
+        { channel: "email", threadId: THREAD, text: "reply" },
+        h.deps,
+      );
+      await rs.advanceTimersByTimeAsync(1);
+      expect(h.provider.listMessages).toHaveBeenCalledTimes(1);
+      const raw = inboundEvent("in-2");
+      await h.adapter.ingestInbound(raw, sign(raw));
+      await rs.advanceTimersByTimeAsync(REPLY_LOOKUP_BUDGET_MS);
+
+      await expect(reply).resolves.toMatchObject({ status: "ok" });
+      expect(h.provider.send).toHaveBeenCalledWith(
+        expect.objectContaining({ inReplyToMessageId: "in-2" }),
+      );
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("uses an explicit reply message before cached state or mailbox lookup", async () => {
     const h = await harness();
     await executeSendMessage(h.channels, { channel: "email", to: "guardian", text: "first" });

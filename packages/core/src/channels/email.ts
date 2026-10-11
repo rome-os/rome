@@ -358,9 +358,17 @@ export class EmailAdapter {
   private async threadReplyTargetFor(threadId: string): Promise<EmailReplyTarget> {
     const cached = this.threadReplyTarget.get(threadId);
     if (cached) return cached;
-    const target = await resolveEmailReplyTarget(this.provider, threadId, {
-      isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
-    });
+    let target: EmailReplyTarget;
+    try {
+      target = await resolveEmailReplyTarget(this.provider, threadId, {
+        isOutbound: (item) => this.isOwnMessage(item.labels, normalizeAddress(item.from)),
+      });
+    } catch (err) {
+      // A target cached while the lookup ran is as good as a cache hit.
+      const live = this.threadReplyTarget.get(threadId);
+      if (live) return live;
+      throw err;
+    }
     // An inbound that arrived during the lookup is newer than anything it found.
     const live = this.threadReplyTarget.get(threadId);
     if (live && !live.outbound) return live;
