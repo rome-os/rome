@@ -162,6 +162,14 @@ function readStorage(sessionId: string | null): WidgetPlacement[] {
   }
 }
 
+function storedLayoutJson(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(storageKey(sessionId));
+  } catch {
+    return null;
+  }
+}
+
 function writeStorage(sessionId: string | null, layout: WidgetPlacement[]) {
   if (!sessionId) return;
   try {
@@ -215,7 +223,8 @@ function saveLayout(sessionId: string, layout: WidgetPlacement[]) {
 
 // Sends one PUT at a time per session, so an older layout can never land on
 // the server after a newer one. The unsynced marker clears only when the PUT
-// carrying the newest layout succeeds.
+// carrying the newest layout succeeds and the stored layout still matches it,
+// since another tab may have stored a newer layout whose own save failed.
 async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
   while (save.next) {
     const layout = save.next;
@@ -237,7 +246,9 @@ async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
       });
       ok = res.ok;
     } catch {}
-    if (ok && !save.next) setUnsyncedLayout(sessionId, false);
+    if (ok && !save.next && storedLayoutJson(sessionId) === JSON.stringify(layout)) {
+      setUnsyncedLayout(sessionId, false);
+    }
   }
   layoutSaves.delete(sessionId);
 }

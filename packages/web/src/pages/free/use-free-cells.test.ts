@@ -508,6 +508,33 @@ describe("layout sync", () => {
     expect(readLayout("busy-chat")).toHaveLength(3);
   });
 
+  it("keeps the marker when another tab stored a newer layout during a save", async () => {
+    const store = await import("./use-free-cells");
+    store.setActiveSession("shared-chat");
+    let respond!: (response: Response) => void;
+    rs.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    store.autoPlaceApp("notes");
+
+    // Another tab stores a newer layout, and its own save fails.
+    const fromOtherTab = [{ id: "t", type: "desktop", order: 1 }];
+    localStorage.setItem("rome:free-layout:shared-chat", JSON.stringify(fromOtherTab));
+    respond(new Response(null, { status: 200 }));
+    await settle();
+
+    rs.mocked(fetch).mockClear();
+    serve([]);
+    await store.loadLayoutForSession("shared-chat");
+    expect(readLayout("shared-chat")).toEqual(fromOtherTab);
+    expect(puts()).toEqual([
+      { url: "/api/chat/sessions/shared-chat/layout", layout: fromOtherTab },
+    ]);
+  });
+
   it("resends an unsynced layout after a reload", async () => {
     const before = await import("./use-free-cells");
     before.setActiveSession("reload-chat");
