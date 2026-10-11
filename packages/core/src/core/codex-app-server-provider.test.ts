@@ -2405,6 +2405,46 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("classifies OpenAI's refusal of a model the ChatGPT login cannot call", async () => {
+    const provider = new CodexAppServerProvider();
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        n("turn/completed", {
+          threadId: "thr-1",
+          turn: {
+            id: "turn-1",
+            status: "failed",
+            error: {
+              message:
+                "The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account.",
+              codexErrorInfo: "badRequest",
+            },
+          },
+        });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const error = (await collected).find((m) => m.type === "error");
+
+    expect(error).toMatchObject({
+      type: "error",
+      error: "The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT account.",
+      code: "model_unavailable",
+      provider: "openai",
+      reason: "model_access_denied",
+    });
+    await session.close();
+  });
+
   it("reports a failed turn's Codex turn id and reads funding when asked", async () => {
     let funding: UsageFunding = "byok";
     const provider = new CodexAppServerProvider({ funding: () => funding });

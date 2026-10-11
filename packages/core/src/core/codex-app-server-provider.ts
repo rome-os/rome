@@ -84,7 +84,11 @@ import {
 } from "./codex/common.js";
 import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../types.js";
 import { classifyCodexErrorInfo } from "./codex-error-info.js";
-import { codexTurnErrorMessage, isCodexUsageLimitError } from "./codex-usage-limit.js";
+import {
+  type CodexTurnError,
+  codexTurnErrorMessage,
+  isCodexUsageLimitError,
+} from "./codex-usage-limit.js";
 import {
   isRomeCreditsExhaustedError,
   isRomeCreditsModelNotServedError,
@@ -419,6 +423,24 @@ async function persistCodexAuthRevoked(
 }
 
 /**
+ * OpenAI's refusal of a model the ChatGPT login cannot call, such as
+ * "The 'gpt-6-luna' model is not supported when using Codex with a ChatGPT
+ * account." The resolver allows models by plan, so a refusal from OpenAI
+ * itself arrives only as this message, with no structured code.
+ */
+const CHATGPT_MODEL_NOT_SUPPORTED_RE =
+  /\bmodel is not supported when using Codex with a ChatGPT account\b/i;
+
+function isChatGptModelNotSupportedError(turnError: unknown): boolean {
+  if (typeof turnError === "string") return CHATGPT_MODEL_NOT_SUPPORTED_RE.test(turnError);
+  if (!turnError || typeof turnError !== "object") return false;
+  const { message, additionalDetails } = turnError as CodexTurnError;
+  return [message, additionalDetails].some(
+    (value) => typeof value === "string" && CHATGPT_MODEL_NOT_SUPPORTED_RE.test(value),
+  );
+}
+
+/**
  * Classify a failed codex turn's error into the terminal `TurnErrorEvent.code`.
  * Usage-limit takes precedence — an exhausted quota is not an auth problem. A
  * revoked credential also persists the marker that downgrades the
@@ -443,6 +465,10 @@ function classifyCodexFailure(
       reason: "model_access_denied",
       ...(refreshed ? { pending: refreshed } : {}),
     };
+  }
+  if (isChatGptModelNotSupportedError(turnError)) {
+    // Matches the resolver's refusal, so clients show the same recovery.
+    return { code: "model_unavailable", provider: "openai", reason: "model_access_denied" };
   }
   // The turn never started; a retry runs under the new payer.
   if (turnError instanceof PayerChangedError) {
