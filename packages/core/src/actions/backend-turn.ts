@@ -195,7 +195,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         text: reply,
         ...(turnId ? { turnId } : {}),
       });
-      if (deps.conversations) {
+      // Webchat's `send` already wrote the reply into the chat.
+      if (deps.conversations && params.channel !== "webchat") {
         try {
           const conversation = await deps.conversations.ensureChannelConversation({
             channel: params.channel,

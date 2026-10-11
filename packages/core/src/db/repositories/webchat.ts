@@ -947,6 +947,11 @@ export class WebChatRepository {
     projectName?: string;
     projectPath?: string;
   }): Promise<{ id: string; agentName: string | null }> {
+    // A chat's row is its own session, keyed by its id. A channel row for a
+    // webchat address would be a second row claiming the same chat.
+    if (input.channel === "webchat") {
+      throw new Error("A webchat thread is a chat session, not a channel conversation");
+    }
     const parent =
       input.parentThreadId && input.parentThreadId !== input.threadId
         ? await this.ensureChannelConversation({

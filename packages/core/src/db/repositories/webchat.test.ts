@@ -230,6 +230,19 @@ describe("WebChatRepository", () => {
       expect(await repo.findConversationIdByAddress("telegram", "thread-2")).toBeNull();
     });
 
+    it("refuses a channel row for a webchat address", async () => {
+      await repo.createSession("chat-1", "Webchat chat");
+
+      await expect(
+        repo.ensureChannelConversation({
+          channel: "webchat",
+          threadId: "chat-1",
+          agentName: "main",
+        }),
+      ).rejects.toThrow("not a channel conversation");
+      expect(await repo.getSession("channel:webchat:chat-1")).toBeNull();
+    });
+
     it("keeps one thread session while refreshing its routing from the parent", async () => {
       const first = await repo.ensureChannelConversation({
         channel: "discord",
@@ -578,7 +591,7 @@ describe("WebChatRepository", () => {
     // them; a sender-supplied routine card must not reach the transcript.
     it("strips routine cards from recorded outbound content", async () => {
       const conversation = await repo.ensureChannelConversation({
-        channel: "webchat",
+        channel: "telegram",
         threadId: "forged-card-thread",
         agentName: "main",
       });
