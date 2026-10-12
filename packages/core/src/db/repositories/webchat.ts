@@ -957,10 +957,11 @@ export class WebChatRepository {
             threadType: "group",
           })
         : null;
-    const existing = await this.findChannelConversation(input.channel, input.threadId);
-    if (existing && input.threadName) {
-      await this.backfillChannelConversationName(existing.id, input, input.threadName);
+    const found = await this.findChannelConversation(input.channel, input.threadId);
+    if (found && input.threadName) {
+      await this.backfillChannelConversationName(found, input, input.threadName);
     }
+    const existing = found && { id: found.id, agentName: found.agentName };
     if (existing) {
       if (!parent) return existing;
       // A native thread has its own model session but not its own routing
@@ -1004,7 +1005,7 @@ export class WebChatRepository {
     if (!conversation) {
       throw new Error(`Failed to resolve conversation ${input.channel}:${input.threadId}`);
     }
-    return conversation;
+    return { id: conversation.id, agentName: conversation.agentName };
   }
 
   async addConversationMessage(input: {
@@ -1305,36 +1306,55 @@ export class WebChatRepository {
    *  rows created before the channel reported a name do. A name already
    *  recorded is kept, so email subjects and guardian renames stay put. */
   private async backfillChannelConversationName(
-    id: string,
+    row: { id: string; name: string; sourceThreadName: string | null },
     address: { channel: string; threadId: string },
     threadName: string,
   ): Promise<void> {
-    const [row] = await this.db
-      .select({ name: romeSessions.name, sourceThreadName: romeSessions.sourceThreadName })
-      .from(romeSessions)
-      .where(eq(romeSessions.id, id))
-      .limit(1);
-    if (!row) return;
-    const placeholders = new Set([address.threadId, `${address.channel}:${address.threadId}`]);
-    const sourceMissing = row.sourceThreadName === null || placeholders.has(row.sourceThreadName);
-    const nameMissing = placeholders.has(row.name);
+    const placeholders = [address.threadId, `${address.channel}:${address.threadId}`];
+    const sourceMissing =
+      row.sourceThreadName === null || placeholders.includes(row.sourceThreadName);
+    const nameMissing = placeholders.includes(row.name);
     if (!sourceMissing && !nameMissing) return;
-    await this.db
+    // Each column is rewritten only while it still holds a placeholder, so a
+    // concurrent message that already filled it in leaves nothing to change.
+    const updated = await this.db
       .update(romeSessions)
       .set({
-        ...(sourceMissing ? { sourceThreadName: threadName } : {}),
-        ...(nameMissing ? { name: threadName } : {}),
+        sourceThreadName: sql`case when ${romeSessions.sourceThreadName} is null or ${inArray(romeSessions.sourceThreadName, placeholders)} then ${threadName} else ${romeSessions.sourceThreadName} end`,
+        name: sql`case when ${inArray(romeSessions.name, placeholders)} then ${threadName} else ${romeSessions.name} end`,
       })
-      .where(eq(romeSessions.id, id));
-    if (nameMissing) this.emitSessionNameChanged(id, threadName);
+      .where(
+        and(
+          eq(romeSessions.id, row.id),
+          or(
+            isNull(romeSessions.sourceThreadName),
+            inArray(romeSessions.sourceThreadName, placeholders),
+            inArray(romeSessions.name, placeholders),
+          ),
+        ),
+      )
+      .returning({ name: romeSessions.name });
+    if (nameMissing && updated[0]?.name === threadName) {
+      this.emitSessionNameChanged(row.id, threadName);
+    }
   }
 
   private async findChannelConversation(
     channel: string,
     threadId: string,
-  ): Promise<{ id: string; agentName: string | null } | null> {
+  ): Promise<{
+    id: string;
+    agentName: string | null;
+    name: string;
+    sourceThreadName: string | null;
+  } | null> {
     const rows = await this.db
-      .select({ id: romeSessions.id, agentName: romeSessions.agentName })
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        name: romeSessions.name,
+        sourceThreadName: romeSessions.sourceThreadName,
+      })
       .from(romeSessions)
       .where(
         and(

@@ -332,6 +332,16 @@ describe("FeishuAdapter", () => {
     }
   });
 
+  it("drops an unaddressed group message without waiting on the name lookup", async () => {
+    channel.chatInfo = () => new Promise(() => {});
+    await channel.emit({ chatType: "group", mentionedBot: false });
+
+    expect(captured).toHaveLength(0);
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+    ]);
+  });
+
   it("carries the replied-to message and a fallback sender name", async () => {
     await channel.emit({ senderName: undefined, replyToMessageId: "om_parent" });
     expect(captured[0].senderDisplayName).toBe("Feishu User");

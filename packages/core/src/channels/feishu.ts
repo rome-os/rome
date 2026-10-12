@@ -261,14 +261,8 @@ export class FeishuAdapter {
     const addressing: MessageAddressing =
       threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
     const directedStop = addressing !== "ambient" && isStopCommand(text);
-    const chatName = threadType === "group" ? await this.resolveChatName(m.chatId) : undefined;
-    if (threadType === "group") {
-      this.observedConversations.set(m.chatId, {
-        id: m.chatId,
-        displayName: chatName ?? m.chatId,
-        kind: "group",
-      });
-    }
+    // Only a delivered message waits on the name; a dropped one starts the lookup.
+    const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
     if (threadType === "group") {
       const configRequest = isSettingsRequest(text);
@@ -294,6 +288,7 @@ export class FeishuAdapter {
       }
     }
 
+    const name = await chatName;
     // The group's agent is not stamped on the message. The inbox reads it
     // from the conversation settings.
     const msg: ChannelMessage = {
@@ -309,7 +304,7 @@ export class FeishuAdapter {
       ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
       thread: {
         kind: threadType === "private" ? "dm" : "group",
-        ...(chatName ? { name: chatName } : {}),
+        ...(name ? { name } : {}),
       },
       addressing,
       raw: m.raw ?? m,
@@ -336,6 +331,18 @@ export class FeishuAdapter {
     if (isFeishuGroupConfigAction(value)) {
       await this.handleGroupConfigAction(evt);
     }
+  }
+
+  /** Record the group for the settings list, under its id until its name arrives. */
+  private observeGroup(chatId: string): Promise<string | undefined> {
+    if (!this.observedConversations.has(chatId)) {
+      this.observedConversations.set(chatId, { id: chatId, displayName: chatId, kind: "group" });
+    }
+    return this.resolveChatName(chatId).then((name) => {
+      if (name)
+        this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
+      return name;
+    });
   }
 
   /** The group's human-facing name, or undefined when Feishu cannot return one. */
