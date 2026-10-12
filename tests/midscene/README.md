@@ -7,7 +7,7 @@ personal data. The browser only loads local synthetic fixtures. The Node-side
 Midscene agent calls the configured model endpoint.
 
 > The companion planning doc is
-> [`docs/midscene-e2e-plan.md`](../../docs/midscene-e2e-plan.md) (case catalog,
+> [`docs/midscene-e2e-plan.md`](../../docs/midscene-e2e-plan.md) (test design,
 > mock contract, CI execution design).
 
 ## How It Works
@@ -29,14 +29,11 @@ Midscene agent calls the configured model endpoint.
 - Every case uses Midscene's `aiAct` for user interaction and `aiAssert` for
   visible outcomes. `app.open` provides the isolated starting route, and
   `wait` covers fixed mock settling time.
-- The suite contains 38 AI-native cases, with CHAT-01/02/03 enabled for the
-  smoke run. Other file entries in `midscene.config.ts` and CHAT-04/05 in
-  `cases/chat-core.yaml` are commented out. Each case starts one isolated product
+- The suite uses AI-native cases. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
-- The collector checks every case name against `case-manifest.json`
-  and the documented catalog. Missing, renamed, or unexpected cases fail CI. Keep
-  those two records independent of YAML so deleting or renaming a case cannot
-  silently change its expected result.
+- YAML under `cases/` is the single source of truth for case definitions.
+  The collector parses these files and checks nodes, duplicate names, and
+  case conventions. Adding or renaming a case requires only its YAML change.
 - The package registers `app.open` for isolated setup and
   `app.expectRenameConflict` for FILE-03's transient response. Run
   `npm run nodes` to generate a local node reference with their parameters.
@@ -67,6 +64,13 @@ cp .env.example .env
 # 4. Run the full suite
 npm test
 ```
+
+### Model verification
+
+`npm run check:model` invokes `midscene-test model verify`. It checks text
+responses, image understanding, and AI locate using the configured models.
+CI runs it before the visual cases. This command makes model API calls and
+returns a nonzero exit code if verification fails.
 
 ### Selecting Cases
 
@@ -105,11 +109,11 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
-The workflow uses `@midscene/test@1.15.2-beta-20261012100626.0` and reads
-its generated `result.md` directly. The requested beta is not yet available
-from the registry used to refresh the lockfile. CI uses `npm install` to resolve
-this exact version when it becomes available. The checked-in lockfile does not
-cover this beta and must be regenerated before using `npm ci`.
+The workflow uses `@midscene/test@1.15.2-beta-20261012123219.0` and reads
+its generated `result.md` directly. Lockfile generation is blocked until
+`@midscene/playground@1.15.2-beta-20261012123219.0` is available from the public
+registry. CI uses `npm install` to resolve the declared versions. Regenerate
+the lockfile once all beta packages are available before using `npm ci`.
 
 Rome resolves relative report links after
 Pages deployment. Each case occupies one line with its title and status.
@@ -120,9 +124,8 @@ capture screenshots or recalculate the Markdown contents.
 - Machine-readable results: `.midscene/test-results/<runId>/summary.json`
 - Markdown results: `.midscene/test-results/<runId>/result.md`
 - These outputs are covered by `.gitignore`.
-- Each run uploads one `midscene-results` artifact. Report preparation checks
-  missing, duplicate, and unexpected cases against `case-manifest.json`, then
-  uploads `midscene-e2e-report` with the original reports and prepared Summary.
+- Each run uploads one `midscene-results` artifact. Report preparation
+  reads the framework results and uploads `midscene-e2e-report` with the original reports and prepared Summary.
   Missing Markdown or HTML fails report preparation while preserving artifacts.
 - A read-only job shows the Markdown before Pages deployment. A second job adds
   hosted report links and publication status after deployment. If native Markdown
@@ -137,15 +140,8 @@ capture screenshots or recalculate the Markdown contents.
   or change the repository's Pages settings. If Pages configuration is
   unavailable, publication is skipped with a warning and reports remain
   available through Actions.
-- To rebuild a report without new model calls, manually dispatch the workflow
-  with `report_source_run_id` set to a completed full-suite Midscene run whose
-  `midscene-results` artifact contains `result.md` and has not expired.
-  Sources and retained Pages history must come
-  from the same repository: upstream `main` scheduled runs, pushes, or manual dispatches,
-  or a fork's manual dispatches. Pull-request artifacts are rejected.
-  On upstream, dispatch `main` to also publish. Set the dispatch input
-  `publish_pages` to `false` to verify the report job and its Actions Summary
-  without a Pages deployment. Scheduled upstream runs also publish when Pages is available.
+- Download reports from the workflow run's Artifacts section. Set
+  `publish_pages` to `false` when only downloadable artifacts are needed.
 - Pull requests run secret-free harness and mock-browser boundary jobs. The
   model-backed test job runs on the upstream `main` branch or by manual
   dispatch in a fork using that fork's model secrets.
@@ -156,7 +152,7 @@ The independent `midscene.yml` workflow runs the full model-backed suite
 nightly against the latest upstream `main` commit. Its daily schedule is
 `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
 It does not depend on the ordinary CI or Nightly workflow, and pushes do not
-trigger it. One visual test job runs all 38 cases with `maxConcurrency: 1`.
+trigger it. One visual test job runs all cases with `maxConcurrency: 1`.
 
 Path-filtered pull requests run only the secret-free harness and mock-browser
 boundary checks. They never receive billable model credentials or run the
@@ -165,8 +161,7 @@ for the path set and trust gates.
 
 Manual `workflow_dispatch` runs the full suite on upstream `main`.
 A fork owner may manually dispatch a fork branch using that fork's model
-secrets. Set the optional `report_source_run_id` input to an existing run ID
-to rebuild its reports from test artifacts without new model calls.
+secrets. Reports are generated from the current run only.
 Pages publication is enabled upstream. Fork publication requires an exact
 `MIDSCENE_PUBLISH_REPO` match.
 
@@ -212,8 +207,8 @@ Pages publication is enabled upstream. Fork publication requires an exact
 3. To publish the HTML report, add the repository-level Actions variable
    `MIDSCENE_PUBLISH_REPO=yuyutaotao/rome`.
 4. Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-5. Open **Actions → E2E Testing by Midscene → Run workflow**. Leave
-   `report_source_run_id` empty to run all cases. Set `publish_pages=false`
+5. Open **Actions → E2E Testing by Midscene → Run workflow** to run all cases.
+   Set `publish_pages=false`
    if you only need downloadable artifacts.
 
 Fork model runs require manual dispatch. The daily schedule runs model tests

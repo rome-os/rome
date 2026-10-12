@@ -17,7 +17,7 @@ const runs = (name, overrides = {}) => {
   assert.ok(condition, `${name} must have an explicit job gate`);
   const context = {
     github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "push" },
-    inputs: { report_source_run_id: "", publish_pages: true },
+    inputs: { publish_pages: true },
     vars: { MIDSCENE_PUBLISH_REPO: "" },
     needs: {
       midscene: { result: "success" },
@@ -81,13 +81,6 @@ test("report aggregation does not depend on the publisher repository", () => {
     }
   }
   assert.equal(runs("report-summary", { needs: { midscene: { result: "skipped" } } }), false);
-  assert.equal(
-    runs("report-summary", {
-      needs: { midscene: { result: "skipped" } },
-      inputs: { report_source_run_id: "123" },
-    }),
-    true,
-  );
   assert.doesNotMatch(
     job("report-summary"),
     /configure-pages|pages: write|--pages-url|MIDSCENE_PUBLISH_REPO/,
@@ -139,7 +132,6 @@ test("missing Pages configuration cannot block aggregation or trigger deployment
 });
 
 test("publication validates artifact sources and isolates the deployment token", () => {
-  assert.match(job("report-summary"), /trusted-report-runs.mjs validate-source/);
   assert.match(job("prepare-pages"), /trusted-report-runs.mjs find-previous/);
   assert.doesNotMatch(job("deploy-report"), /checkout|render-ci-summary|run:/);
   assert.doesNotMatch(job("report-results"), /pages: write|id-token: write|secrets\./);
@@ -147,17 +139,17 @@ test("publication validates artifact sources and isolates the deployment token",
   assert.doesNotMatch(workflow, /published-links-only|published-summary:/);
 });
 
-test("report-only dispatch can generate the Summary without models or Pages", () => {
+test("manual dispatch can run tests and generate the Summary without Pages", () => {
   const context = {
     github: {
       repository: "example/rome",
       ref: "refs/heads/feature",
       event_name: "workflow_dispatch",
     },
-    inputs: { report_source_run_id: "123", publish_pages: false },
+    inputs: { publish_pages: false },
     vars: { MIDSCENE_PUBLISH_REPO: "example/rome" },
   };
-  assert.equal(runs("midscene", context), false);
+  assert.equal(runs("midscene", context), true);
   assert.equal(runs("report-summary", context), true);
   assert.equal(runs("prepare-pages", context), false);
   assert.equal(runs("report-results", context), true);
@@ -191,7 +183,7 @@ test("results are visible before optional deployment and survive its cancellatio
     job("report-results"),
     /name: Write the consolidated run Summary\n        if: always\(\)/,
   );
-  assert.match(job("report-summary"), /case-manifest\.json/);
+  assert.match(job("report-summary"), /--require-report/);
   assert.doesNotMatch(job("midscene"), /strategy:|matrix\.|MIDSCENE_INCLUDE_TAGS/);
   assert.match(job("midscene"), /MIDSCENE_PROJECT_NAME: web/);
   assert.match(job("midscene"), /220m npm test/);
@@ -218,39 +210,17 @@ test("the final Summary survives aggregation and publication failures or skips",
   assert.equal(
     runs("report-results", {
       github: { event_name: "pull_request" },
-      inputs: { report_source_run_id: "123" },
     }),
     false,
   );
 });
 
-test("artifact recovery cannot bypass source validation", () => {
-  const results = job("report-results");
-  assert.match(results, /trusted-report-runs.mjs validate-source/);
-  const downloads = results.match(
-    /      - name: (?:Download combined Midscene report|Recover available test reports)[\s\S]*?(?=      - name:)/g,
-  );
-  assert.equal(downloads.length, 2);
-  for (const download of downloads) {
-    assert.match(
-      download,
-      /inputs.report_source_run_id == '' \|\| steps.source-run.outcome == 'success'/,
-    );
-    assert.match(download, /continue-on-error: true/);
+test("report downloads use the current run and expose no historical rebuild input", () => {
+  assert.doesNotMatch(workflow, /report_source_run_id|REPORT_SOURCE_RUN_ID|validate-source/);
+  for (const name of ["report-summary", "report-results"]) {
+    assert.doesNotMatch(job(name), /run-id:|github-token:/);
   }
-  assert.match(
-    results,
-    /needs.prepare-pages.result == 'failure' && 'failure' \|\| needs.deploy-report.result/,
-  );
-  assert.match(
-    results,
-    /steps.combined-report.outcome == 'success' && 'midscene-combined-report' \|\| 'midscene-reports'/,
-  );
-  assert.match(
-    results,
-    /name: Recover available test reports[\s\S]*?steps.combined-report.outcome != 'success'/,
-  );
-  assert.doesNotMatch(results, /run:.*\$\{\{ inputs.report_source_run_id/);
+  assert.match(job("report-results"), /name: Recover available test reports[\s\S]*?steps.combined-report.outcome != 'success'/);
 });
 
 test("model steps use environment variables and keep the API key in secrets", () => {
@@ -276,5 +246,5 @@ test("uses native result.md and only downloads the full-suite artifact", () => {
     assert.doesNotMatch(content, /render-ci-summary|merge-native-reports|shard-/);
     assert.match(content, /name: midscene-results/);
   }
-  assert.match(job("report-summary"), /case-manifest\.json/);
+  assert.match(job("report-summary"), /--require-report/);
 });

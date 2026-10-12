@@ -2,7 +2,7 @@
 
 > Onboarding attachment for Rome maintainers.
 >
-> Status: all 38 cases run in one CI job. They are defined under
+> Status: all cases run in one CI job. They are defined under
 > `tests/midscene/cases/`. Each case uses `aiAct` for interaction and `aiAssert` for
 > its visible outcome.
 
@@ -70,7 +70,7 @@ GitHub Actions (one test job)
   fixtures reset. Zero shared state between cases.
 - **Pinned English UI**: an init script writes `rome.lang=en`, so a zh-CN CI
   machine locale cannot drift the copy. A localized Chinese-shell case is
-  future coverage. None is included in the current 38-case suite.
+  future coverage. None is included in the current suite.
 - **Full sidebar-pin injection**: the mock guardian pins only Apps/Chat/
   Projects by default. Other entries live behind the "all apps" popover. Cases
   write `rome-sidebar-pins` (the shell's own localStorage contract) so every
@@ -132,18 +132,16 @@ reasons behind them.
   is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
   It does not depend on the ordinary CI or Nightly workflow.
   Pushes do not trigger it. Pull requests use a scoped path set: the workflow
-  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
-  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
+  itself, `tests/midscene/**`, `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
   `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
   A matching PR runs two secret-free jobs. `harness-validation` installs the
-  package, type-checks it, collects YAML cases, checks the catalog, and tests
+  package, type-checks it, validates YAML cases and tests
   report scripts without starting a browser or model.
   `mock-boundary-validation` starts the mock server and checks MSW, browser
   HTTP, and WebSocket blocking without model credentials.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
-  Set `report_source_run_id` to rebuild reports from an existing run's test
-  artifacts without model calls. Report publishing is enabled on upstream `main`. Fork publishing requires
+  Report publishing is enabled on upstream `main`. Fork publishing requires
   the repository to match `MIDSCENE_PUBLISH_REPO`.
   The test job does not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
@@ -180,7 +178,7 @@ reasons behind them.
 - **Mock server**: `pnpm --filter rome-web dev:mock:e2e` starts in the background
   (it runs `build:kit` first, so first-request readiness is polled for several
   minutes). Its log is uploaded as an artifact on failure.
-- **Execution**: one `web` project runs all 38 cases with `maxConcurrency: 1`.
+- **Execution**: one `web` project runs all cases with `maxConcurrency: 1`.
   Each case has up to two retries. The job timeout is 240 minutes, with a
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
@@ -202,9 +200,9 @@ reasons behind them.
 > no YAML).
 
 <!-- CASE-CATALOG -->
-The suite contains **38** active cases in 15 YAML files. The
-[case catalog](midscene-e2e-cases.md#case-catalog) lists their names. `npm run collect` validates the case names
-and expected total against a committed manifest.
+Case names, tags, and steps are defined only in
+[tests/midscene/cases](../tests/midscene/cases/). `npm run collect` parses these
+YAML files and checks case conventions without a separate inventory.
 
 ### ⚠️ Candidates blocked by section 6 mock gaps (no YAML yet)
 

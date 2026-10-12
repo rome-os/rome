@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { caseSetIssues } from "./native-results.mjs";
 import { writeNativeSummary } from "./write-native-summary.mjs";
 
 async function fixture(context) {
@@ -63,9 +62,11 @@ test("rejects malformed or escaping native links rather than silently rebuilding
   }
 });
 
-test("checks missing, duplicate and unexpected cases without shard assignments", () => {
-  const summary = { projects: [{ cases: [{ name: "A" }, { name: "A" }, { name: "C" }] }] };
-  assert.deepEqual(caseSetIssues(summary, ["A", "B"]), [
-    "Duplicate case: A", "Unexpected case: C", "Missing case: B",
-  ]);
+test("requires HTML during preparation while preserving the Markdown output", async (context) => {
+  const input = await fixture(context);
+  await writeFile(path.join(input.resultDirectory, "result.md"), markdown);
+  await writeFile(path.join(input.resultDirectory, "summary.json"), "{}");
+  await assert.rejects(writeNativeSummary({ ...input, requireReport: true }), /HTML report is missing/);
+  assert.match(await readFile(input.output, "utf8"), /A case/);
+  assert.equal(await writeNativeSummary(input), true);
 });

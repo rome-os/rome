@@ -2,11 +2,11 @@ import { writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { caseSetIssues, readNativeResult } from "./native-results.mjs";
+import { readNativeResult } from "./native-results.mjs";
 
 const escapeAttribute = (value) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 
-export async function writeNativeSummary({ reportsDirectory, pagesUrl, output, manifestFile }) {
+export async function writeNativeSummary({ reportsDirectory, pagesUrl, output, requireReport = false }) {
   const root = path.resolve(reportsDirectory);
   const result = await readNativeResult(root);
   if (!result) throw new Error("Native Midscene results are missing");
@@ -38,16 +38,13 @@ export async function writeNativeSummary({ reportsDirectory, pagesUrl, output, m
       return url ? `<img src="${escapeAttribute(url)}" alt="${alt}" width="160">` : "—";
     });
   await writeFile(output, markdown);
-  if (manifestFile) {
-    const issues = caseSetIssues(result.summary, JSON.parse(await readFile(manifestFile, "utf8")));
-    if (!result.reportPath) issues.push("Native HTML report is missing");
-    if (issues.length) throw new Error(issues.join("\n"));
-  }
+  if (requireReport && !result.reportPath) throw new Error("Native HTML report is missing");
   return true;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [reportsDirectory, pagesUrl, output, manifestFile] = process.argv.slice(2);
-  if (!reportsDirectory || !output) throw new Error("Usage: write-native-summary.mjs <reports-dir> <pages-url-or-empty> <output> [case-manifest]");
-  await writeNativeSummary({ reportsDirectory, pagesUrl, output, manifestFile });
+  const [reportsDirectory, pagesUrl, output, option] = process.argv.slice(2);
+  if (!reportsDirectory || !output) throw new Error("Usage: write-native-summary.mjs <reports-dir> <pages-url-or-empty> <output> [--require-report]");
+  if (option && option !== "--require-report") throw new Error(`Unknown option: ${option}`);
+  await writeNativeSummary({ reportsDirectory, pagesUrl, output, requireReport: option === "--require-report" });
 }

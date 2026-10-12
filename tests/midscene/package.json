@@ -9,16 +9,16 @@
     "typecheck": "tsc --noEmit",
     "collect": "node scripts/collect-cases.mjs",
     "check:browser-boundary": "node --experimental-strip-types scripts/check-browser-boundary.mjs",
-    "check:model-vision": "node scripts/check-model-vision.mjs",
+    "check:model": "midscene-test model verify",
     "test:summary": "node --test scripts/write-native-summary.test.mjs scripts/prepare-pages-site.test.mjs scripts/workflow-policy.test.mjs scripts/trusted-report-runs.test.mjs"
   },
   "engines": {
     "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
   },
   "devDependencies": {
-    "@midscene/core": "1.15.2-beta-20261012100626.0",
-    "@midscene/test": "1.15.2-beta-20261012100626.0",
-    "@midscene/web": "1.15.2-beta-20261012100626.0",
+    "@midscene/core": "1.15.2-beta-20261012123219.0",
+    "@midscene/test": "1.15.2-beta-20261012123219.0",
+    "@midscene/web": "1.15.2-beta-20261012123219.0",
     "@types/node": "^20.0.0",
     "dotenv": "^16.4.5",
     "typescript": "^5.8.3",

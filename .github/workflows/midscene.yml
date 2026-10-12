@@ -11,7 +11,6 @@ on:
     paths:
       - ".github/workflows/midscene.yml"
       - "tests/midscene/**"
-      - "docs/midscene-e2e-cases.md"
       - "packages/web/**"
       - "packages/api-types/**"
       - "packages/app-runtime-sdk/**"
@@ -20,10 +19,6 @@ on:
       - "pnpm-lock.yaml"
   workflow_dispatch:
     inputs:
-      report_source_run_id:
-        description: Rebuild the Summary from an existing run's test artifacts without model calls
-        required: false
-        type: string
       publish_pages:
         description: Publish reports to Pages when this repository is enabled
         required: false
@@ -162,7 +157,6 @@ jobs:
     # on main; a fork owner may explicitly dispatch a fork ref with that fork's
     # own secrets.
     if: >-
-      inputs.report_source_run_id == '' &&
       needs.harness-validation.outputs.upstream-repository != '' &&
       (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
       (github.event_name == 'workflow_dispatch' && github.repository != needs.harness-validation.outputs.upstream-repository))
@@ -214,10 +208,10 @@ jobs:
           npm install --strict-allow-scripts
           npx playwright install --with-deps chromium
 
-      - name: Check Midscene model vision
+      - name: Verify Midscene model compatibility
         working-directory: tests/midscene
         env: *model-env
-        run: npm run check:model-vision
+        run: npm run check:model
 
       - name: Type-check Midscene custom nodes
         # npm test loads midscene.config.ts via tsx/esbuild without semantic
@@ -306,7 +300,7 @@ jobs:
     if: >-
       always() && !cancelled() &&
       github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+      needs.midscene.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -324,19 +318,10 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Validate report source run
-        if: inputs.report_source_run_id != ''
-        env:
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
-
       - name: Download Midscene test reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: midscene-results
-          run-id: ${{ inputs.report_source_run_id || github.run_id }}
-          github-token: ${{ github.token }}
           path: ${{ runner.temp }}/midscene-reports/midscene-results
 
       - name: Prepare native Markdown Summary
@@ -346,7 +331,7 @@ jobs:
           node tests/midscene/scripts/write-native-summary.mjs \
             "$RUNNER_TEMP/midscene-reports" "" \
             "$RUNNER_TEMP/midscene-reports/summary.md" \
-            "tests/midscene/case-manifest.json"
+            --require-report
 
       - name: Upload combined Midscene report
         id: upload-report
@@ -370,7 +355,7 @@ jobs:
     needs: [midscene, report-summary]
     if: >-
       always() && !cancelled() && github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+      needs.midscene.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -529,7 +514,7 @@ jobs:
     # This Summary adds publication status and verified report links.
     if: >-
       always() && !cancelled() && github.event_name != 'pull_request' &&
-      (needs.midscene.result != 'skipped' || inputs.report_source_run_id != '')
+      needs.midscene.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -545,20 +530,10 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Validate report source run
-        id: source-run
-        if: inputs.report_source_run_id != ''
-        continue-on-error: true
-        env:
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
-          GH_TOKEN: ${{ github.token }}
-        run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
-
       - name: Download combined Midscene report
         id: combined-report
         if: >-
-          needs.report-summary.outputs.report-artifact-name != '' &&
-          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
+          needs.report-summary.outputs.report-artifact-name != ''
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -567,23 +542,19 @@ jobs:
 
       - name: Recover available test reports
         if: >-
-          steps.combined-report.outcome != 'success' &&
-          (inputs.report_source_run_id == '' || steps.source-run.outcome == 'success')
+          steps.combined-report.outcome != 'success'
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: midscene-results
-          run-id: ${{ inputs.report_source_run_id || github.run_id }}
-          github-token: ${{ github.token }}
           path: ${{ runner.temp }}/midscene-reports/midscene-results
 
       - name: Write the consolidated run Summary
         if: always()
         env:
           PAGE_URL: ${{ needs.deploy-report.result == 'success' && needs.deploy-report.outputs.page-url || '' }}
-          REPORT_SOURCE_RUN_ID: ${{ inputs.report_source_run_id }}
           REPORTS_DIR: ${{ steps.combined-report.outcome == 'success' && 'midscene-combined-report' || 'midscene-reports' }}
-          PRODUCER_RESULT: ${{ needs.report-summary.result == 'success' && (inputs.report_source_run_id != '' || needs.midscene.result == 'success') && 'success' || 'failure' }}
+          PRODUCER_RESULT: ${{ needs.report-summary.result == 'success' && needs.midscene.result == 'success' && 'success' || 'failure' }}
           REPORT_RESULT: ${{ needs.report-summary.result }}
           PUBLICATION_RESULT: ${{ needs.prepare-pages.result == 'failure' && 'failure' || needs.deploy-report.result }}
         run: |
@@ -606,9 +577,6 @@ jobs:
               echo "Native result.md could not be read. Report preparation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT."
               echo
               echo "[Inspect this run and available artifacts]($run_url#artifacts)."
-              if [[ "$REPORT_SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
-                echo "[Inspect source-run artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$REPORT_SOURCE_RUN_ID#artifacts)."
-              fi
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

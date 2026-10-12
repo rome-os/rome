@@ -38,20 +38,3 @@ export async function readNativeResult(reportsDirectory) {
   }
   return { summary, reportPath, markdownPath: path.join(path.dirname(file), "result.md") };
 }
-
-export function caseSetIssues(summary, expectedNames) {
-  if (!Array.isArray(expectedNames)) throw new Error("Expected a case-name array");
-  const reported = new Set();
-  const issues = [];
-  for (const project of summary.projects ?? []) {
-    for (const testCase of project.cases ?? []) {
-      if (!expectedNames.includes(testCase.name)) issues.push(`Unexpected case: ${testCase.name}`);
-      if (reported.has(testCase.name)) issues.push(`Duplicate case: ${testCase.name}`);
-      reported.add(testCase.name);
-    }
-  }
-  for (const name of expectedNames) {
-    if (!reported.has(name)) issues.push(`Missing case: ${name}`);
-  }
-  return issues;
-}
