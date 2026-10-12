@@ -17,7 +17,7 @@ import type {
 } from "@larksuiteoapi/node-sdk";
 import type { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { LarkChannelError } from "@larksuiteoapi/node-sdk";
-import { FeishuAdapter, isFeishuAuthError, resolveMentions } from "./feishu.js";
+import { FeishuAdapter, historyItemText, isFeishuAuthError, resolveMentions } from "./feishu.js";
 
 // The official SDK's LarkChannel is the process edge here, played by a fake
 // through the adapter's createChannel seam. The fake captures the registered
@@ -32,6 +32,22 @@ class FakeLarkChannel {
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
+  /** Pages `im.v1.message.list` answers, newest first, one per call in turn. */
+  historyPages: Array<{ items: HistoryItem[]; has_more?: boolean; page_token?: string }> = [];
+  historyCalls: Array<Record<string, unknown>> = [];
+  rawClient = {
+    im: {
+      v1: {
+        message: {
+          list: async (payload: { params: Record<string, unknown> }) => {
+            this.historyCalls.push(payload.params);
+            const page = this.historyPages[this.historyCalls.length - 1] ?? { items: [] };
+            return { code: 0, data: page };
+          },
+        },
+      },
+    },
+  };
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -83,6 +99,29 @@ class FakeLarkChannel {
     if (!handler) throw new Error("no error handler registered");
     (handler as (e: unknown) => void)(err);
   }
+}
+
+interface HistoryItem {
+  message_id?: string;
+  msg_type?: string;
+  create_time?: string;
+  deleted?: boolean;
+  parent_id?: string;
+  sender?: { id: string; id_type: string; sender_type: string; sender_name?: string };
+  body?: { content: string };
+  mentions?: Array<{ key: string; id: string; id_type: string; name: string }>;
+}
+
+function historyItem(over: Partial<HistoryItem> = {}): HistoryItem {
+  return {
+    message_id: "om_h1",
+    msg_type: "text",
+    create_time: "1700000000000",
+    // `message.list` leaves `sender_name` out unless Feishu chooses to send it.
+    sender: { id: "ou_alice", id_type: "open_id", sender_type: "user" },
+    body: { content: JSON.stringify({ text: "the client wants a volume discount" }) },
+    ...over,
+  };
 }
 
 function makeMessage(over: Partial<LarkMessage> = {}): LarkMessage {
@@ -892,5 +931,292 @@ describe("resolveMentions", () => {
 
   it("is a no-op without mentions", () => {
     expect(resolveMentions("plain text", [])).toBe("plain text");
+  });
+});
+
+describe("FeishuAdapter history", () => {
+  let channel: FakeLarkChannel;
+  let adapter: FeishuAdapter;
+
+  beforeEach(async () => {
+    channel = new FakeLarkChannel();
+    adapter = new FeishuAdapter(
+      { appId: "cli_test", appSecret: "secret" },
+      () => channel as unknown as LarkChannel,
+    );
+    adapter.onInbound(async () => {});
+    await adapter.start();
+  });
+
+  it("reads one chat newest first from Feishu and answers it oldest first", async () => {
+    await channel.emit({ chatId: "oc_other", chatType: "group", mentionedBot: true });
+    channel.historyPages = [
+      {
+        items: [
+          historyItem({ message_id: "om_2", create_time: "1700000060000" }),
+          historyItem({ message_id: "om_1", create_time: "1700000000000" }),
+        ],
+      },
+    ];
+
+    const since = new Date(1_699_999_000_000);
+    const messages = await adapter.fetchHistory("oc_sales", since, 100);
+
+    expect(channel.historyCalls).toStrictEqual([
+      {
+        container_id_type: "chat",
+        container_id: "oc_sales",
+        start_time: "1699999000",
+        sort_type: "ByCreateTimeDesc",
+        page_size: 50,
+      },
+    ]);
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_1", "om_2"]);
+    expect(messages[0]).toMatchObject({
+      channel: "feishu",
+      direction: "inbound",
+      conversationId: "oc_sales",
+      senderId: "ou_alice",
+      senderDisplayName: "Alice",
+      text: "the client wants a volume discount",
+      thread: { kind: "group" },
+      addressing: "ambient",
+      timestamp: new Date(1_700_000_000_000),
+    });
+  });
+
+  it("names a sender from the listed item, else as Feishu User when never heard from", async () => {
+    channel.historyPages = [
+      {
+        items: [
+          historyItem({
+            message_id: "om_named",
+            sender: {
+              id: "ou_carol",
+              id_type: "open_id",
+              sender_type: "user",
+              sender_name: "Carol",
+            },
+          }),
+          historyItem({
+            message_id: "om_unknown",
+            sender: { id: "ou_dave", id_type: "open_id", sender_type: "user" },
+          }),
+        ],
+      },
+    ];
+
+    const messages = await adapter.fetchHistory("oc_sales", new Date(0), 100);
+
+    expect(messages.map((m) => m.senderDisplayName)).toStrictEqual(["Feishu User", "Carol"]);
+  });
+
+  it("follows page tokens and keeps only the newest `limit` messages", async () => {
+    channel.historyPages = [
+      {
+        items: [historyItem({ message_id: "om_4" }), historyItem({ message_id: "om_3" })],
+        has_more: true,
+        page_token: "next",
+      },
+      {
+        items: [historyItem({ message_id: "om_2" }), historyItem({ message_id: "om_1" })],
+        has_more: false,
+      },
+    ];
+
+    const messages = await adapter.fetchHistory("oc_sales", new Date(0), 3);
+
+    expect(channel.historyCalls[1]).toMatchObject({ page_token: "next" });
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_2", "om_3", "om_4"]);
+  });
+
+  it("leaves out app messages, deleted messages and messages with no text", async () => {
+    channel.historyPages = [
+      {
+        items: [
+          historyItem({
+            message_id: "om_app",
+            sender: { id: "cli_test", id_type: "app_id", sender_type: "app" },
+          }),
+          historyItem({ message_id: "om_deleted", deleted: true }),
+          historyItem({
+            message_id: "om_image",
+            msg_type: "image",
+            body: { content: '{"image_key":"k"}' },
+          }),
+          historyItem({ message_id: "om_kept" }),
+        ],
+      },
+    ];
+
+    const messages = await adapter.fetchHistory("oc_sales", new Date(0), 100);
+
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_kept"]);
+  });
+
+  it("marks a message that mentions the bot and carries what it replied to", async () => {
+    channel.historyPages = [
+      {
+        items: [
+          historyItem({
+            parent_id: "om_parent",
+            body: { content: JSON.stringify({ text: "@_user_1 what is the list price?" }) },
+            mentions: [{ key: "@_user_1", id: "ou_bot", id_type: "open_id", name: "Rome" }],
+          }),
+        ],
+      },
+    ];
+
+    const [message] = await adapter.fetchHistory("oc_sales", new Date(0), 100);
+
+    expect(message).toMatchObject({
+      text: "Rome what is the list price?",
+      addressing: "mention",
+      replyTo: { messageId: "om_parent" },
+    });
+  });
+
+  it("reads a private chat it has heard from as a direct conversation", async () => {
+    await channel.emit({ chatId: "oc_dm", chatType: "p2p" });
+    channel.historyPages = [{ items: [historyItem()] }];
+
+    const [message] = await adapter.fetchHistory("oc_dm", new Date(0), 100);
+
+    expect(message).toMatchObject({ thread: { kind: "dm" }, addressing: "direct" });
+  });
+
+  it("reads every group it has heard from when no chat is named", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });
+    channel.historyPages = [
+      { items: [historyItem({ message_id: "om_a", create_time: "1700000060000" })] },
+      { items: [historyItem({ message_id: "om_b", create_time: "1700000000000" })] },
+    ];
+
+    const messages = await adapter.fetchHistory(null, new Date(0), 100);
+
+    expect(channel.historyCalls.map((c) => c.container_id)).toStrictEqual(["oc_a", "oc_b"]);
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b", "om_a"]);
+  });
+
+  it("pages each group at most four times in a read over every group", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    let calls = 0;
+    channel.rawClient.im.v1.message.list = (async () => {
+      calls++;
+      return { code: 0, data: { items: [historyItem()], has_more: true, page_token: "more" } };
+    }) as never;
+
+    await adapter.fetchHistory(null, new Date(0), 1_000);
+
+    expect(calls).toBe(4);
+  });
+
+  it("reads at most three groups at a time", async () => {
+    for (const id of ["oc_a", "oc_b", "oc_c", "oc_d", "oc_e"]) {
+      await channel.emit({ chatId: id, chatType: "group", mentionedBot: true });
+    }
+    let inFlight = 0;
+    let peak = 0;
+    channel.rawClient.im.v1.message.list = (async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return { code: 0, data: { items: [historyItem()] } };
+    }) as never;
+
+    const messages = await adapter.fetchHistory(null, new Date(0), 100);
+
+    expect(messages).toHaveLength(5);
+    expect(peak).toBe(3);
+  });
+
+  it("skips a group it cannot read when another group answers", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });
+    channel.rawClient.im.v1.message.list = (async (payload: {
+      params: { container_id: string };
+    }) =>
+      payload.params.container_id === "oc_a"
+        ? { code: 230027, msg: "no permission", data: { items: [] } }
+        : { code: 0, data: { items: [historyItem({ message_id: "om_b" })] } }) as never;
+
+    const messages = await adapter.fetchHistory(null, new Date(0), 100);
+
+    expect(messages.map((m) => m.messageId)).toStrictEqual(["om_b"]);
+  });
+
+  it("rejects the read of every group when Feishu refuses all of them", async () => {
+    await channel.emit({ chatId: "oc_a", chatType: "group", mentionedBot: true });
+    await channel.emit({ chatId: "oc_b", chatType: "group", mentionedBot: true });
+    channel.rawClient.im.v1.message.list = async () =>
+      ({ code: 99991663, msg: "invalid tenant access token", data: { items: [] } }) as never;
+
+    await expect(adapter.fetchHistory(null, new Date(0), 100)).rejects.toThrow(/99991663/);
+  });
+
+  it("names Feishu's code when the refusal arrives as an HTTP error", async () => {
+    channel.rawClient.im.v1.message.list = async () => {
+      throw Object.assign(new Error("Request failed with status code 400"), {
+        response: { status: 400, data: { code: 230027, msg: "no permission" } },
+      });
+    };
+
+    await expect(adapter.fetchHistory("oc_sales", new Date(0), 100)).rejects.toThrow(
+      "Feishu message list failed (230027): no permission",
+    );
+  });
+
+  it("rejects when Feishu refuses the read of a named chat", async () => {
+    channel.rawClient.im.v1.message.list = async () =>
+      ({ code: 230027, msg: "no permission", data: { items: [] } }) as never;
+
+    await expect(adapter.fetchHistory("oc_sales", new Date(0), 100)).rejects.toThrow(/230027/);
+  });
+});
+
+describe("historyItemText", () => {
+  it("joins a rich-text post's title and runs, mentions included", () => {
+    const content = {
+      zh_cn: {
+        title: "Q3 pipeline",
+        content: [
+          [
+            { tag: "at", user_id: "ou_bob", user_name: "Bob" },
+            { tag: "text", text: " please check pricing" },
+          ],
+          [{ tag: "img", image_key: "k" }],
+          [{ tag: "a", text: "deck", href: "https://example.com" }],
+        ],
+      },
+    };
+
+    expect(historyItemText({ msg_type: "post", body: { content: JSON.stringify(content) } })).toBe(
+      "Q3 pipeline\n@Bob please check pricing\ndeck",
+    );
+  });
+
+  it("names a post mention that carries only its key from the message's mentions", () => {
+    const content = {
+      content: [
+        [
+          { tag: "at", user_id: "@_user_1" },
+          { tag: "text", text: " ping" },
+        ],
+      ],
+    };
+
+    expect(
+      historyItemText({
+        msg_type: "post",
+        body: { content: JSON.stringify(content) },
+        mentions: [{ key: "@_user_1", name: "Bob" }],
+      }),
+    ).toBe("Bob ping");
+  });
+
+  it("answers nothing for content that is not JSON", () => {
+    expect(historyItemText({ msg_type: "text", body: { content: "not json" } })).toBe("");
   });
 });

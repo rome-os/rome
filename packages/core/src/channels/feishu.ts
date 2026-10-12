@@ -25,6 +25,14 @@ const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
 /** Feishu content types whose bot mention can be the whole message. */
 const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
+/** Feishu's largest page for `im.v1.message.list`. */
+const HISTORY_PAGE_SIZE = 50;
+/** Pages one chat's history read may take, which bounds a read at 1,000 messages. */
+const MAX_HISTORY_PAGES = 20;
+// A read over every group pages each chat less deeply, since the merged answer
+// keeps only the newest `limit` messages across all of them.
+const MAX_HISTORY_PAGES_PER_GROUP = 4;
+const HISTORY_CHAT_CONCURRENCY = 3;
 
 export interface FeishuConfig {
   appId: string;
@@ -125,6 +133,13 @@ export class FeishuAdapter {
     string,
     { id: string; displayName: string; kind: "group" | "channel" }
   >();
+  /** Private chats seen inbound, so a history read can tell a DM from a group. */
+  private readonly privateChats = new Set<string>();
+  /**
+   * Names of senders seen inbound, by open_id. `message.list` may leave
+   * `sender_name` out, and a history read falls back to these.
+   */
+  private readonly senderNames = new Map<string, string>();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
@@ -228,6 +243,127 @@ export class FeishuAdapter {
     await this.channel.removeReaction(messageId, reactionId);
   }
 
+  /**
+   * What people said in one chat, or in every group chat seen since the adapter
+   * started when `chatId` is null: the newest `limit` messages created at or
+   * after `since`, oldest first. Messages from apps, this bot included, are left
+   * out, as Discord's read leaves out bots, and so are messages with no text.
+   * Across every chat, one chat that fails is logged and skipped; when all of
+   * them fail the read rejects with the first error.
+   *
+   * Reading a group's messages that do not mention the bot needs the app's
+   * `im:message.group_msg:readonly` scope, which the agent-ready registration
+   * already requests.
+   */
+  async fetchHistory(chatId: string | null, since: Date, limit: number): Promise<ChannelMessage[]> {
+    if (chatId !== null) return this.fetchChatHistory(chatId, since, limit, MAX_HISTORY_PAGES);
+    const chatIds = [...this.observedConversations.keys()];
+    // A few chats at a time, so a bot in many groups stays under Feishu's
+    // per-app rate limit on `message.list`.
+    const perChat = new Array<PromiseSettledResult<ChannelMessage[]>>(chatIds.length);
+    let next = 0;
+    const readers = Array.from(
+      { length: Math.min(HISTORY_CHAT_CONCURRENCY, chatIds.length) },
+      async () => {
+        for (let i = next++; i < chatIds.length; i = next++) {
+          [perChat[i]] = await Promise.allSettled([
+            this.fetchChatHistory(chatIds[i], since, limit, MAX_HISTORY_PAGES_PER_GROUP),
+          ]);
+        }
+      },
+    );
+    await Promise.all(readers);
+    const failures = perChat.flatMap((result, i) =>
+      result.status === "rejected" ? [{ chatId: chatIds[i], reason: result.reason }] : [],
+    );
+    // Every chat failing means Feishu refused the read itself (a missing scope,
+    // revoked credentials), which an empty answer would pass off as silence.
+    if (failures.length > 0 && failures.length === perChat.length) throw failures[0]?.reason;
+    for (const { chatId: id, reason } of failures) {
+      log.warn("failed to read Feishu chat history", {
+        chatId: id,
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
+    return perChat
+      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+      .slice(-limit);
+  }
+
+  private async fetchChatHistory(
+    chatId: string,
+    since: Date,
+    limit: number,
+    maxPages: number,
+  ): Promise<ChannelMessage[]> {
+    const newestFirst: ChannelMessage[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < maxPages && newestFirst.length < limit; page++) {
+      let res: Awaited<ReturnType<typeof this.channel.rawClient.im.v1.message.list>>;
+      try {
+        res = await this.channel.rawClient.im.v1.message.list({
+          params: {
+            container_id_type: "chat",
+            container_id: chatId,
+            start_time: String(Math.floor(since.getTime() / 1000)),
+            sort_type: "ByCreateTimeDesc",
+            page_size: HISTORY_PAGE_SIZE,
+            ...(pageToken ? { page_token: pageToken } : {}),
+          },
+        });
+      } catch (err) {
+        // Feishu answers most refusals with HTTP 400, which the SDK throws with
+        // the Feishu code in the response body.
+        const body = (err as { response?: { data?: { code?: unknown; msg?: unknown } } }).response
+          ?.data;
+        if (typeof body?.code !== "number") throw err;
+        res = { code: body.code, msg: typeof body.msg === "string" ? body.msg : undefined };
+      }
+      if (res.code !== undefined && res.code !== 0) {
+        throw new Error(`Feishu message list failed (${res.code}): ${res.msg ?? "no message"}`);
+      }
+      for (const item of res.data?.items ?? []) {
+        const message = this.historyItemToChannelMessage(item, chatId);
+        if (message) newestFirst.push(message);
+      }
+      if (!res.data?.has_more || !res.data.page_token) break;
+      pageToken = res.data.page_token;
+    }
+    return newestFirst.slice(0, limit).reverse();
+  }
+
+  private historyItemToChannelMessage(
+    item: FeishuHistoryItem,
+    chatId: string,
+  ): ChannelMessage | null {
+    if (!item.message_id || item.deleted) return null;
+    if (item.sender?.sender_type !== "user") return null;
+    const text = historyItemText(item);
+    if (!text) return null;
+    const kind = this.privateChats.has(chatId) ? "dm" : "group";
+    const botOpenId = this.channel.botIdentity?.openId;
+    const mentionedBot =
+      botOpenId !== undefined && (item.mentions ?? []).some((m) => m.id === botOpenId);
+    const createTime = Number(item.create_time);
+    return {
+      channel: "feishu",
+      direction: "inbound",
+      messageId: item.message_id,
+      conversationId: chatId as ConversationId,
+      senderId: item.sender.id,
+      senderDisplayName:
+        item.sender.sender_name ?? this.senderNames.get(item.sender.id) ?? "Feishu User",
+      text,
+      attachments: [],
+      timestamp: new Date(Number.isFinite(createTime) ? createTime : 0),
+      ...(item.parent_id ? { replyTo: { messageId: item.parent_id } } : {}),
+      thread: { kind },
+      addressing: kind === "dm" ? "direct" : mentionedBot ? "mention" : "ambient",
+      raw: item,
+    };
+  }
+
   private async handleMessage(m: LarkMessage): Promise<void> {
     if (!this.handler) return;
 
@@ -251,6 +387,8 @@ export class FeishuAdapter {
           );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
+    if (threadType === "private") this.privateChats.add(m.chatId);
+    if (m.senderName) this.senderNames.set(m.senderId, m.senderName);
     const addressing: MessageAddressing =
       threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
     const directedStop = addressing !== "ambient" && isStopCommand(text);
@@ -549,6 +687,65 @@ export class FeishuAdapter {
     });
     return this.getChannelConfig(chatId).then((saved) => ({ ...current, ...saved }));
   }
+}
+
+/** One item of Feishu's `im.v1.message.list` answer, as far as history reads it. */
+type FeishuHistoryItem = NonNullable<
+  NonNullable<
+    Awaited<ReturnType<LarkChannel["rawClient"]["im"]["v1"]["message"]["list"]>>["data"]
+  >["items"]
+>[number];
+
+/**
+ * The words of a listed message: a text message's text with its mention
+ * placeholders resolved, or a rich-text post's title and runs. Other message
+ * types (images, files, cards) have no text and answer "".
+ */
+export function historyItemText(item: {
+  msg_type?: string;
+  body?: { content: string };
+  mentions?: Array<{ key?: string; name?: string }>;
+}): string {
+  let content: unknown;
+  try {
+    content = JSON.parse(item.body?.content ?? "");
+  } catch {
+    return "";
+  }
+  if (typeof content !== "object" || content === null) return "";
+  if (item.msg_type === "text") {
+    const text = (content as { text?: unknown }).text;
+    return typeof text === "string" ? resolveMentions(text, item.mentions ?? []) : "";
+  }
+  if (item.msg_type === "post") return resolveMentions(postText(content), item.mentions ?? []);
+  return "";
+}
+
+/** A post's body arrives either bare or keyed by locale (`zh_cn`, `en_us`). */
+function postText(content: object): string {
+  const bare = content as { title?: unknown; content?: unknown };
+  const post = Array.isArray(bare.content)
+    ? bare
+    : ((Object.values(content).find(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          Array.isArray((value as { content?: unknown }).content),
+      ) as typeof bare | undefined) ?? bare);
+  const lines: string[] = [];
+  if (typeof post.title === "string" && post.title.trim()) lines.push(post.title.trim());
+  for (const paragraph of Array.isArray(post.content) ? post.content : []) {
+    if (!Array.isArray(paragraph)) continue;
+    const line = paragraph
+      .map((run: { tag?: string; text?: string; user_id?: string; user_name?: string }) => {
+        // Without a name, keep the `@_user_N` key so the message's mentions can name it.
+        if (run.tag === "at") return run.user_name ? `@${run.user_name}` : (run.user_id ?? "");
+        return typeof run.text === "string" ? run.text : "";
+      })
+      .join("");
+    if (line.trim()) lines.push(line);
+  }
+  return lines.join("\n");
 }
 
 /**

@@ -51,6 +51,32 @@ class FakeLarkChannel {
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
   connectError: Error | null = null;
+  historyCalls: Array<Record<string, unknown>> = [];
+  rawClient = {
+    im: {
+      v1: {
+        message: {
+          list: async (payload: { params: Record<string, unknown> }) => {
+            this.historyCalls.push(payload.params);
+            return {
+              code: 0,
+              data: {
+                items: [
+                  {
+                    message_id: "om_h",
+                    msg_type: "text",
+                    create_time: "1700000000000",
+                    sender: { id: "ou_alice", id_type: "open_id", sender_type: "user" },
+                    body: { content: JSON.stringify({ text: "earlier" }) },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      },
+    },
+  };
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -166,6 +192,10 @@ describe("feishu descriptor shape", () => {
     expect(desc.capabilities.talker?.needs).toEqual(["app"]);
     expect(desc.capabilities.actor).toBeUndefined();
     expect(desc.capabilities.watcher).toBeUndefined();
+  });
+
+  it("offers a history read of the platform's own record", () => {
+    expect(makeDescriptor(new FakeLarkChannel()).capabilities.talker?.history).toBe(true);
   });
 
   it("requests permission to add and remove processing reactions", () => {
@@ -296,6 +326,44 @@ describe("feishu inbound delivery", () => {
         raw: wire,
       },
     ]);
+    await talker.stop();
+  });
+});
+
+describe("feishu history", () => {
+  it("reads one chat over the last day when no `since` is named", async () => {
+    const channel = new FakeLarkChannel();
+    const { talker } = buildTalker(channel);
+    await flush();
+
+    const before = Math.floor(Date.now() / 1000) - 24 * 3600;
+    const messages = await talker.history!.query({
+      conversationId: "oc_sales" as ConversationId,
+      limit: 10,
+    });
+
+    expect(messages.map((m) => m.text)).toStrictEqual(["earlier"]);
+    expect(channel.historyCalls).toHaveLength(1);
+    expect(channel.historyCalls[0]?.container_id).toBe("oc_sales");
+    expect(Number(channel.historyCalls[0]?.start_time)).toBeGreaterThanOrEqual(before);
+    await talker.stop();
+  });
+
+  it("reads back to the whole hour the shared-read cache keys", async () => {
+    const channel = new FakeLarkChannel();
+    const { talker } = buildTalker(channel);
+    await flush();
+
+    const before = Math.floor(Date.now() / 1000) - 3 * 3600;
+    await talker.history!.query({
+      conversationId: "oc_sales" as ConversationId,
+      since: new Date(Date.now() - 2.1 * 3_600_000),
+      limit: 10,
+    });
+
+    const startTime = Number(channel.historyCalls[0]?.start_time);
+    expect(startTime).toBeGreaterThanOrEqual(before);
+    expect(startTime).toBeLessThanOrEqual(before + 5);
     await talker.stop();
   });
 });
