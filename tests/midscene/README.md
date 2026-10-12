@@ -15,7 +15,9 @@ Midscene agent calls the configured model endpoint.
 - Project setup starts the strict mock server, waits for readiness, and checks
   mock APIs and network isolation before running cases. Teardown closes the
   browser and the server started by this run. An existing server is reused
-  and checked, but is not stopped.
+  and checked, but is not stopped. For a server started by setup, stdout and
+  stderr go to `midscene_run/rome-devmock.log` and are included in the test
+  artifact. Reused servers keep their existing output destination.
 - `midscene.config.ts` launches Playwright Chromium with a **fresh
   BrowserContext per case**: in-memory MSW state resets with the context, so
   every case starts from the same fixtures.
@@ -126,9 +128,10 @@ capture screenshots or recalculate the Markdown contents.
 - Each run uploads one `midscene-results` artifact. Report preparation
   reads the framework results and uploads `midscene-e2e-report` with the original reports and prepared Summary.
   Missing Markdown or HTML fails report preparation while preserving artifacts.
-- A read-only job shows the Markdown before Pages deployment. A second job adds
-  hosted report links and publication status after deployment. If native Markdown
-  cannot be read, the Summary links to the run artifacts for diagnosis.
+- A single read-only job writes the Markdown Summary after Pages finishes or
+  is skipped, adding hosted report links when deployment succeeds. While Pages
+  is pending, inspect the test logs. If native Markdown cannot be read, the
+  Summary links to the run artifacts for diagnosis.
 - Pages preserves the original HTML and assets at their relative paths. Each run
   has an index linking to its original report. Reports are not merged.
 - Pages publication is enabled for `rome-os/rome` on `main`. A fork can opt in

@@ -1,12 +1,10 @@
 import { spawn } from "node:child_process";
-import { open } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
-export const mockServerLog = path.join(tmpdir(), "rome-devmock.log");
 
 async function isReady(url: string) {
   try {
@@ -18,7 +16,7 @@ async function isReady(url: string) {
   }
 }
 
-export async function startMockServer(baseUrl: string): Promise<() => Promise<void>> {
+export async function startMockServer(baseUrl: string, logPath: string): Promise<() => Promise<void>> {
   const url = new URL(baseUrl);
   if (await isReady(baseUrl)) return async () => {};
   if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
@@ -31,7 +29,8 @@ export async function startMockServer(baseUrl: string): Promise<() => Promise<vo
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   env.MOCK_WEB_PORT = url.port || "80";
-  const log = await open(mockServerLog, "w");
+  await mkdir(path.dirname(logPath), { recursive: true });
+  const log = await open(logPath, "w");
   const child = spawn("pnpm", ["--filter", "rome-web", "dev:mock:e2e"], {
     cwd: repositoryRoot,
     env,
@@ -74,12 +73,12 @@ export async function startMockServer(baseUrl: string): Promise<() => Promise<vo
     while (Date.now() < deadline) {
       if (spawnError) throw spawnError;
       if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error(`Mock server exited before readiness; see ${mockServerLog}`);
+        throw new Error(`Mock server exited before readiness; see ${logPath}`);
       }
       if (await isReady(baseUrl)) return stop;
       await delay(1_000);
     }
-    throw new Error(`Mock server readiness timed out; see ${mockServerLog}`);
+    throw new Error(`Mock server readiness timed out; see ${logPath}`);
   } catch (error) {
     await stop();
     throw error;

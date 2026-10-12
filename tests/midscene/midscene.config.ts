@@ -49,7 +49,10 @@ const getAgent = ({ context }: NodeExecutionContext<unknown, ProjectContext>) =>
 const setup = defineProjectSetup<ProjectContext>({
   name: "web",
   async setup({ env, onTeardown }) {
-    const stopServer = await startMockServer(BASE_URL);
+    const stopServer = await startMockServer(
+      BASE_URL,
+      fileURLToPath(new URL("midscene_run/rome-devmock.log", import.meta.url)),
+    );
     let context: ProjectContext | undefined;
     let cleanup: Promise<void> | undefined;
     const close = () => cleanup ??= (async () => {

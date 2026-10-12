@@ -175,11 +175,10 @@ reasons behind them.
   Each case has up to two retries. The job timeout is 240 minutes, with a
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
-  `.midscene/` test artifacts, including failed runs. A read-only job writes
-  results after report preparation without waiting for Pages approval or deployment.
-  It shows total and per-project counts, abnormal cases first, and passed cases
-  in a collapsed appendix. After Pages completes, a second Summary adds publication
-  status and the native report, screenshot, and exact report-step links when available.
+  `.midscene/` test artifacts, including failed runs. One read-only job writes
+  the framework-generated Markdown Summary after Pages finishes or is skipped.
+  Successful deployment adds hosted report links. While Pages is pending,
+  results can be inspected in the test logs.
   If Pages fails or is skipped, results and artifact links remain available.
   If report preparation fails, the final job recovers available trusted test data.
   Test and publication jobs do not write separate Summaries.
