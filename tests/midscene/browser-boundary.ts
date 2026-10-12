@@ -78,9 +78,9 @@ export async function checkBrowserBoundary(browser: Browser, baseUrl: string) {
         await new Promise((resolve) => {
           const socket = new WebSocket(url);
           const timer = setTimeout(() => { socket.close(); resolve(null); }, 10_000);
-          const done = () => { clearTimeout(timer); resolve(null); };
-          socket.onerror = done;
-          socket.onclose = done;
+          // Named local callbacks acquire tsx helpers unavailable in the browser.
+          socket.onerror = () => { clearTimeout(timer); resolve(null); };
+          socket.onclose = () => { clearTimeout(timer); resolve(null); };
         });
       }, `ws://127.0.0.1:${port}/foreign`);
       assert.equal(externalSockets, 0, "the browser guard allowed an external WebSocket");

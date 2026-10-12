@@ -111,10 +111,8 @@ HEADLESS=false npm test
 ## Reports and Artifacts
 
 The workflow uses `@midscene/test@1.15.3-beta-20261012131523.0` and reads
-its generated `result.md` directly. This beta is being published, so the
-lockfile has not been regenerated. CI uses `npm install` to resolve the
-declared versions. Regenerate the lockfile once all beta packages are
-available before using `npm ci`.
+its generated `result.md` directly. The lockfile is synchronized with this
+published beta. CI installs dependencies with `npm install --strict-allow-scripts`.
 
 Rome resolves relative report links after
 Pages deployment. Each case occupies one line with its title and status.
