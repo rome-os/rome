@@ -711,6 +711,39 @@ describe("/api/auth/cloud — request guards", () => {
     expect(sessionUserId(replay)).toBeNull();
   });
 
+  it("binds the attempt with a __Host- cookie over HTTPS in production", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const savedNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const https = { "x-forwarded-proto": "https" };
+      const startRes = await app.request("/api/auth/cloud/start", {
+        method: "POST",
+        headers: https,
+      });
+      const setCookie = startRes.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/^__Host-rome_cloud_login_state=[^;]+;/);
+      expect(setCookie).toContain("Secure");
+      expect(setCookie).toContain("Path=/");
+      const { authorizeUrl } = (await startRes.json()) as { authorizeUrl: string };
+      const url = new URL(authorizeUrl);
+      romeCloud.setNonce(url.searchParams.get("nonce"));
+
+      const res = await app.request(
+        `/api/auth/cloud/callback?state=${url.searchParams.get("state")}&code=abc&iss=${ISS}`,
+        { headers: { ...https, cookie: setCookie.split(";")[0] } },
+      );
+
+      expect(res.headers.get("location")).toBe("/?cloud=success");
+      expect(sessionUserId(res)).toBe("A");
+    } finally {
+      process.env.NODE_ENV = savedNodeEnv;
+    }
+  });
+
   it("keeps an in-flight attempt's cookie when a stray callback arrives", async () => {
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
