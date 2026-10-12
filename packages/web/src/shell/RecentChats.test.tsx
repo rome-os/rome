@@ -1,9 +1,16 @@
 // @rstest-environment jsdom
-import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import type { LiveEventsClient } from "@/lib/live-events";
+import {
+  acceptLatestSocket,
+  FakeWebSocket,
+  fakeSocketLiveEventsClient,
+} from "@/test/fake-websocket";
 import { RecentChats } from "./RecentChats";
 
 beforeAll(async () => {
@@ -88,12 +95,19 @@ function mockSessions(sessions: MockSession[]) {
   return spy;
 }
 
-function renderRecentChats(initialEntry = "/chat", onSearch = () => {}) {
-  return render(
+function renderRecentChats(initialEntry = "/chat", onSearch = () => {}, live?: LiveEventsClient) {
+  const routed = (
     <MemoryRouter initialEntries={[initialEntry]}>
       <RecentChats onSearch={onSearch} />
       <LocationProbe />
-    </MemoryRouter>,
+    </MemoryRouter>
+  );
+  return render(
+    live ? (
+      <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
+    ) : (
+      routed
+    ),
   );
 }
 
@@ -325,6 +339,65 @@ describe("RecentChats", () => {
       send(true);
       await act(async () => respond());
       expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+    });
+  });
+
+  describe("status over the live-events socket", () => {
+    const live = {
+      id: "live-chat",
+      name: "Live chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: "2026-07-09T10:00:00.000Z",
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+    };
+    const send = (socket: FakeWebSocket, running: boolean) =>
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "session_running",
+          data: { sessionId: "live-chat", running },
+        }),
+      );
+    const listCalls = (spy: { mock: { calls: unknown[][] } }) =>
+      spy.mock.calls.filter(([input]) => String(input).startsWith("/api/chat/sessions")).length;
+
+    beforeEach(() => {
+      FakeWebSocket.instances = [];
+    });
+
+    it("spins on start, refetches on stop, and starts over from the list after a reconnect", async () => {
+      const fetchSpy = mockSessions([live]);
+      renderRecentChats("/chat", () => {}, fakeSocketLiveEventsClient());
+      await screen.findByText("Live chat");
+      let socket!: FakeWebSocket;
+      act(() => {
+        socket = acceptLatestSocket();
+      });
+      expect(socket.sent).toEqual([{ type: "subscribe", topic: "chat.status" }]);
+
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      const beforeStop = listCalls(fetchSpy);
+      send(socket, false);
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeStop + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
+
+      // A start seen before the drop is dropped too, since its stop may have
+      // been missed: the new socket's snapshot names the chats still running.
+      send(socket, true);
+      expect(await screen.findByRole("img", { name: "Replying now" })).toBeTruthy();
+      act(() => socket.close());
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+      const beforeReconnect = listCalls(fetchSpy);
+      act(() => {
+        acceptLatestSocket();
+      });
+      await waitFor(() => expect(listCalls(fetchSpy)).toBe(beforeReconnect + 1));
+      await waitFor(() => expect(screen.queryByRole("img", { name: "Replying now" })).toBeNull());
     });
   });
 

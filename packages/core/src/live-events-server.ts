@@ -1,9 +1,11 @@
-// Guardian live-events WebSocket at `/ws/events`. One socket per dashboard tab
+// Dashboard live-events WebSocket at `/ws/events`. One socket per dashboard tab
 // carries the chat status, chat session, and app catalog streams, so they hold
 // none of the browser's six HTTP/1.1 connections per origin.
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
-// docs/architecture/access-control.md.
+// docs/architecture/access-control.md. Reach mirrors the SSE routes: the
+// guardian gets every topic, and a visitor on the dashboard allow-list gets the
+// chat topics but not `apps.catalog`.
 //
 // Protocol, JSON text frames:
 //   client → server  {type:"subscribe", topic}  {type:"unsubscribe", topic}
@@ -18,7 +20,9 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { z } from "zod";
 import type { DrizzleDb } from "./db/index.js";
-import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
+import type { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import type { LiveEventEmit } from "./lib/live-event.js";
+import { gateUpgrade, type UpgradeCaller } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 
@@ -26,8 +30,6 @@ const log = createLogger("live-events-server");
 
 const LIVE_EVENTS_PATH = "/ws/events";
 
-/** Pushes one event to a subscriber. `data` is the JSON payload the SSE route writes. */
-export type LiveEventEmit = (event: string, data: unknown) => void;
 type Unsubscribe = () => void;
 
 /** The event sources behind each topic. Subscribing replays any snapshot synchronously. */
@@ -77,6 +79,7 @@ function errorMessage(err: unknown): string {
 export function attachLiveEventsServer(
   httpServer: Server,
   db: DrizzleDb,
+  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   sources: LiveEventSources,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
@@ -87,10 +90,10 @@ export function attachLiveEventsServer(
 
     socket.on("error", () => socket.destroy());
 
-    void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
-        if (!allowed || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws));
+    void gateUpgrade(req, socket, db, dashboardAccess)
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, caller));
       })
       .catch((err) => {
         log.error("live events upgrade failed", { error: errorMessage(err) });
@@ -99,7 +102,7 @@ export function attachLiveEventsServer(
   };
   httpServer.on("upgrade", onUpgrade);
 
-  function serve(ws: WebSocket): void {
+  function serve(ws: WebSocket, caller: UpgradeCaller): void {
     // An entry exists from the subscribe message on. `unsubscribe` stays null
     // while the topic check is pending, and the identity check after it drops
     // a result whose topic was unsubscribed (or resubscribed) meanwhile.
@@ -117,7 +120,9 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    const authorize = async (topic: Topic): Promise<boolean> =>
+    // App existence and change timing stay guardian-only, as on `/api/apps/events`.
+    const permitted = (topic: Topic) => caller === "guardian" || topic.kind !== "apps.catalog";
+    const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
 
     const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
@@ -142,9 +147,13 @@ export function attachLiveEventsServer(
         sendError("Unknown topic", name);
         return;
       }
+      if (!permitted(topic)) {
+        sendError("Forbidden", name);
+        return;
+      }
       const entry: { unsubscribe: Unsubscribe | null } = { unsubscribe: null };
       subscriptions.set(name, entry);
-      authorize(topic)
+      exists(topic)
         .then((found) => {
           if (closed || subscriptions.get(name) !== entry) return;
           if (!found) {

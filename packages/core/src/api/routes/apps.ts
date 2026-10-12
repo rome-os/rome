@@ -38,7 +38,7 @@ import {
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import type { LiveEventEmit } from "../../live-events-server.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";

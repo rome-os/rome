@@ -289,13 +289,18 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
-      const liveEvents = attachLiveEventsServer(server as Server, deps.db, {
-        subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-        hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
-        subscribeChatSession: (sessionId, emit) =>
-          webchatRuntime.subscribeSessionEvents(sessionId, emit),
-        subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-      });
+      const liveEvents = attachLiveEventsServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          subscribeChatSession: (sessionId, emit) =>
+            webchatRuntime.subscribeSessionEvents(sessionId, emit),
+          subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+        },
+      );
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {

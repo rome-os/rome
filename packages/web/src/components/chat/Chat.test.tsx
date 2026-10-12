@@ -6,6 +6,13 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import { Chat } from "./Chat";
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import type { LiveEventsClient } from "@/lib/live-events";
+import {
+  acceptLatestSocket,
+  FakeWebSocket,
+  fakeSocketLiveEventsClient,
+} from "@/test/fake-websocket";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import {
   createSession,
@@ -206,8 +213,15 @@ rs.mock("@/lib/chat-api", () => {
   };
 });
 
-function renderChat(children: ReactNode) {
-  return render(<MemoryRouter>{children}</MemoryRouter>);
+function renderChat(children: ReactNode, live?: LiveEventsClient) {
+  const routed = <MemoryRouter>{children}</MemoryRouter>;
+  return render(
+    live ? (
+      <LiveEventsClientContext.Provider value={live}>{routed}</LiveEventsClientContext.Provider>
+    ) : (
+      routed
+    ),
+  );
 }
 
 class MockEventSource {
@@ -470,6 +484,73 @@ describe("Chat session events", () => {
 
     rs.mocked(listSessionMessages).mockClear();
     act(() => source.emitLifecycle("error", MockEventSource.CLOSED));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
+  });
+});
+
+describe("Chat session events over the live-events socket", () => {
+  const sessionTopic = "chat.session:session-1";
+  const sessionEvent = (socket: FakeWebSocket, event: string, data: unknown) =>
+    act(() => socket.receive({ type: "event", topic: sessionTopic, event, data }));
+  const accept = () => {
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    return socket;
+  };
+
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+  });
+
+  it("subscribes to the session topic and delivers inserted messages and names, with no EventSource", async () => {
+    const onSessionMessage = rs.fn();
+    const onSessionsChanged = rs.fn();
+    renderChat(
+      <Chat
+        sessionId="session-1"
+        onSessionMessage={onSessionMessage}
+        onSessionsChanged={onSessionsChanged}
+      />,
+      fakeSocketLiveEventsClient(),
+    );
+    const socket = accept();
+    expect(socket.sent).toEqual([{ type: "subscribe", topic: sessionTopic }]);
+
+    sessionEvent(socket, "message_insert", {
+      id: "message-1",
+      sessionId: "session-1",
+      turnId: "turn-2",
+      role: "assistant",
+      content: "[]",
+      createdAt: "2026-07-18T00:00:00.000Z",
+    });
+    expect(onSessionMessage).toHaveBeenCalledWith({ sessionId: "session-1", turnId: "turn-2" });
+
+    onSessionsChanged.mockClear();
+    sessionEvent(socket, "session_name", { sessionId: "session-1", name: "Q4 Launch Plan" });
+    expect(onSessionsChanged).toHaveBeenCalledOnce();
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+
+  it("resyncs messages once resubscribed after a drop, and when the server refuses the topic", async () => {
+    renderChat(<Chat sessionId="session-1" />, fakeSocketLiveEventsClient());
+    const first = accept();
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
+    rs.mocked(listSessionMessages).mockClear();
+
+    act(() => first.close());
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    const second = FakeWebSocket.latest();
+    act(() => second.open());
+    expect(listSessionMessages).not.toHaveBeenCalled();
+    act(() => second.receive({ type: "subscribed", topic: sessionTopic }));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
+
+    rs.mocked(listSessionMessages).mockClear();
+    act(() => second.receive({ type: "error", topic: sessionTopic, message: "Not found" }));
     await waitFor(() => expect(listSessionMessages).toHaveBeenCalledOnce());
   });
 });

@@ -1,3 +1,5 @@
+import { LiveEventsClient } from "@/lib/live-events";
+
 /** In-memory WebSocket for live-events tests. Every event dispatches synchronously. */
 export class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
@@ -52,3 +54,22 @@ export class FakeWebSocket {
 }
 
 export const asWebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+/** A live-events client on `FakeWebSocket`, for component tests of the socket path. */
+export function fakeSocketLiveEventsClient(): LiveEventsClient {
+  return new LiveEventsClient({
+    WebSocket: asWebSocket,
+    url: () => "ws://rome.test/ws/events",
+    reconnectDelayMs: () => 100,
+  });
+}
+
+/** Opens the latest socket and acknowledges every topic it has asked for. Returns it. */
+export function acceptLatestSocket(): FakeWebSocket {
+  const socket = FakeWebSocket.latest();
+  socket.open();
+  for (const message of socket.sent as Array<{ type: string; topic: string }>) {
+    if (message.type === "subscribe") socket.receive({ type: "subscribed", topic: message.topic });
+  }
+  return socket;
+}

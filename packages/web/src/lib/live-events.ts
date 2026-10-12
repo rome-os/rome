@@ -7,7 +7,9 @@ import { z } from "zod";
 /**
  * Where the client delivers events. `transport` is "socket" while the
  * WebSocket path works, and "fallback" once it never opened: callers then use
- * the topic's SSE route instead, which `useLiveEvents` does.
+ * the topic's SSE route instead, which `useLiveEvents` does. From "fallback"
+ * the client probes the socket again on a slow timer and returns to "socket"
+ * once one opens.
  */
 export type LiveEventsTransport = "socket" | "fallback";
 
@@ -15,8 +17,9 @@ export interface LiveTopicListener {
   onEvent(event: string, data: unknown): void;
   /**
    * Events may have been missed, so resync. Fires after a reconnect once the
-   * topic is subscribed again, and once when the client falls back to SSE.
-   * Never fires for the listener's first subscription.
+   * topic is subscribed again, once when the client falls back to SSE, and
+   * once the topic is subscribed again after the socket comes back from the
+   * fallback. Never fires for the listener's first subscription.
    */
   onReconnect(): void;
   /** The socket dropped. The client reconnects on its own. */
@@ -47,6 +50,8 @@ export interface LiveEventsClientOptions {
   reconnectDelayMs?: (attempt: number) => number;
   /** How long a socket stays open before its drop restarts the backoff at attempt 1. */
   stableOpenMs?: number;
+  /** How often the client tries the socket again while on the SSE fallback. */
+  reprobeMs?: number;
 }
 
 const serverMessageSchema = z.discriminatedUnion("type", [
@@ -76,9 +81,10 @@ function defaultReconnectDelayMs(attempt: number): number {
   return base / 2 + Math.random() * (base / 2);
 }
 
-// Generations start at 1, so this never matches one. A listener whose topic
-// was rejected holds it, and the next ack on a later socket resyncs it.
-const REJECTED_GENERATION = 0;
+// Generations start at 1, so this never matches one. A listener holds it while
+// its topic is rejected or the tab is on the SSE fallback, and the next ack on
+// a later socket resyncs it.
+const RESYNC_GENERATION = 0;
 
 interface TopicEntry {
   // The socket generation each listener last saw a `subscribed` ack on, or
@@ -96,6 +102,7 @@ export class LiveEventsClient {
   private readonly idleCloseMs: number;
   private readonly reconnectDelayMs: (attempt: number) => number;
   private readonly stableOpenMs: number;
+  private readonly reprobeMs: number;
 
   private readonly topics = new Map<string, TopicEntry>();
   private readonly transportListeners = new Set<() => void>();
@@ -110,6 +117,7 @@ export class LiveEventsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private stableTimer: ReturnType<typeof setTimeout> | null = null;
+  private reprobeTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: LiveEventsClientOptions = {}) {
     this.WebSocketImpl = options.WebSocket;
@@ -120,6 +128,7 @@ export class LiveEventsClient {
     this.idleCloseMs = options.idleCloseMs ?? 5_000;
     this.reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelayMs;
     this.stableOpenMs = options.stableOpenMs ?? 5_000;
+    this.reprobeMs = options.reprobeMs ?? 60_000;
   }
 
   getTransport = (): LiveEventsTransport =>
@@ -136,7 +145,8 @@ export class LiveEventsClient {
   /**
    * Adds a listener for one topic and returns its release. Listeners on the
    * same topic share one server subscription, sent on the first add and
-   * withdrawn on the last release. Call only while the transport is "socket".
+   * withdrawn on the last release. While the transport is "fallback" the
+   * listener receives nothing until the socket comes back.
    */
   subscribe(topic: string, listener: LiveTopicListener): () => void {
     let entry = this.topics.get(topic);
@@ -144,7 +154,14 @@ export class LiveEventsClient {
       entry = { listeners: new Map(), state: "idle" };
       this.topics.set(topic, entry);
     }
-    entry.listeners.set(listener, entry.state === "subscribed" ? this.generation : null);
+    entry.listeners.set(
+      listener,
+      entry.state === "subscribed"
+        ? this.generation
+        : this.transport === "fallback"
+          ? RESYNC_GENERATION
+          : null,
+    );
     this.clearIdleTimer();
     if (entry.state === "idle" || entry.state === "rejected") {
       if (this.socketOpen) this.sendSubscribe(topic, entry);
@@ -165,6 +182,10 @@ export class LiveEventsClient {
 
   private ensureSocket(): void {
     if (this.socket || this.reconnectTimer || this.transport === "fallback") return;
+    this.openSocket();
+  }
+
+  private openSocket(): void {
     const SocketImpl = this.WebSocketImpl ?? globalWebSocket();
     if (!SocketImpl) {
       this.fallBack();
@@ -175,7 +196,8 @@ export class LiveEventsClient {
       socket = new SocketImpl(this.url());
     } catch (error) {
       console.error("Live events socket could not be created", { error: String(error) });
-      this.fallBack();
+      if (this.transport === "fallback") this.scheduleReprobe();
+      else this.fallBack();
       return;
     }
     this.socket = socket;
@@ -200,6 +222,11 @@ export class LiveEventsClient {
     }, this.stableOpenMs);
     this.generation += 1;
     for (const [topic, entry] of this.topics) this.sendSubscribe(topic, entry);
+    if (this.transport === "fallback") {
+      this.transport = "socket";
+      for (const listener of [...this.transportListeners]) listener();
+      if (this.topics.size === 0) this.scheduleIdleClose();
+    }
   }
 
   private handleMessage(socket: WebSocket, event: MessageEvent): void {
@@ -237,7 +264,7 @@ export class LiveEventsClient {
     } else {
       entry.state = "rejected";
       for (const listener of [...entry.listeners.keys()]) {
-        entry.listeners.set(listener, REJECTED_GENERATION);
+        entry.listeners.set(listener, RESYNC_GENERATION);
         listener.onRejected(message.message);
       }
     }
@@ -251,6 +278,10 @@ export class LiveEventsClient {
     this.socket = null;
     this.socketOpen = false;
     for (const entry of this.topics.values()) entry.state = "idle";
+    if (this.transport === "fallback") {
+      this.scheduleReprobe();
+      return;
+    }
     this.failedAttempts += 1;
     if (
       !this.everOpened &&
@@ -274,13 +305,27 @@ export class LiveEventsClient {
 
   private fallBack(): void {
     this.transport = "fallback";
-    // Listeners that waited through failed opens may have missed events.
-    if (this.failedAttempts > 0) {
-      for (const entry of this.topics.values()) {
-        for (const listener of entry.listeners.keys()) listener.onReconnect();
+    for (const entry of this.topics.values()) {
+      for (const listener of entry.listeners.keys()) {
+        entry.listeners.set(listener, RESYNC_GENERATION);
+        // Listeners that waited through failed opens may have missed events.
+        if (this.failedAttempts > 0) listener.onReconnect();
       }
     }
     for (const listener of [...this.transportListeners]) listener();
+    if (this.failedAttempts > 0) this.scheduleReprobe();
+  }
+
+  // Leaving the fallback brings the tab's streams back off the HTTP pool after
+  // a proxy starts passing upgrades or a backend restart outlasted the window.
+  private scheduleReprobe(): void {
+    if (this.reprobeTimer) return;
+    this.reprobeTimer = setTimeout(() => {
+      this.reprobeTimer = null;
+      if (this.socket) return;
+      if (this.topics.size === 0) this.scheduleReprobe();
+      else this.openSocket();
+    }, this.reprobeMs);
   }
 
   private sendSubscribe(topic: string, entry: TopicEntry): void {
@@ -296,7 +341,8 @@ export class LiveEventsClient {
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (this.topics.size > 0) return;
+      // A probe in flight on the fallback closes itself once it opens idle.
+      if (this.topics.size > 0 || this.transport === "fallback") return;
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;

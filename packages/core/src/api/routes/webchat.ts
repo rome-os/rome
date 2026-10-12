@@ -52,7 +52,7 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
-import type { LiveEventEmit } from "../../live-events-server.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,

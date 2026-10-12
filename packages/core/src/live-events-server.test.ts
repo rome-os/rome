@@ -10,7 +10,8 @@ import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
 import { guardianAuth } from "./db/schema.js";
-import { createSession } from "./lib/auth.js";
+import { createSession, createVisitorSession } from "./lib/auth.js";
+import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import {
   attachLiveEventsServer,
   type LiveEventSources,
@@ -99,8 +100,8 @@ describe("live events WebSocket", () => {
     for (const handler of catalogHandlers) void handler({ ...event, current: null });
   };
 
-  async function connect(): Promise<TestClient> {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/events`);
+  async function connect(headers: Record<string, string> = {}): Promise<TestClient> {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/events`, { headers });
     await new Promise<void>((resolve, reject) => {
       ws.once("open", () => resolve());
       ws.once("error", reject);
@@ -145,7 +146,9 @@ describe("live events WebSocket", () => {
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
     };
     server = createServer();
-    live = attachLiveEventsServer(server, testDb.db, sources);
+    const dashboardAccess = new DashboardAccessState();
+    dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
+    live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources);
     port = await new Promise<number>((resolve) => {
       server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
     });
@@ -186,6 +189,58 @@ describe("live events WebSocket", () => {
         origin: "http://rome.example",
       }),
     ).toBe(101);
+  });
+
+  it("refuses a loopback upgrade from another site's page and admits the dashboard's own", async () => {
+    // The in-container browser reaches 127.0.0.1 directly with no cookie or
+    // X-Forwarded-For, so only Origin tells the dashboard from a page it visited.
+    expect(await upgradeStatus(port, { origin: "https://evil.example" })).toBe(403);
+    expect(
+      await upgradeStatus(port, { origin: "https://evil.example", "sec-fetch-site": "cross-site" }),
+    ).toBe(403);
+    expect(await upgradeStatus(port, { origin: `http://127.0.0.1:${port}` })).toBe(101);
+    expect(await upgradeStatus(port, {})).toBe(101);
+  });
+
+  it("gives an allow-listed dashboard visitor the chat topics but not the app catalog", async () => {
+    const proxied = {
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+    };
+    const visitorCookie = (email: string) =>
+      `rome_visitor=${createVisitorSession("account-1", email)}`;
+    expect(
+      await upgradeStatus(port, {
+        ...proxied,
+        cookie: visitorCookie("stranger@example.com"),
+        origin: "http://rome.example",
+      }),
+    ).toBe(401);
+    expect(
+      await upgradeStatus(port, {
+        ...proxied,
+        cookie: visitorCookie("visitor@example.com"),
+        origin: "http://other.rome.example",
+      }),
+    ).toBe(403);
+
+    await deps.webchatRepo.createSession("sess-a", "A");
+    const client = await connect({
+      ...proxied,
+      cookie: visitorCookie("visitor@example.com"),
+      origin: "http://rome.example",
+    });
+    await client.subscribe("chat.status");
+    await client.subscribe("chat.session:sess-a");
+    client.send({ type: "subscribe", topic: "apps.catalog" });
+    expect(await client.next((m) => m.type === "error")).toEqual({
+      type: "error",
+      topic: "apps.catalog",
+      message: "Forbidden",
+    });
+    expect(activeSubscriptions).toBe(2);
+    expect(catalogHandlers.size).toBe(0);
   });
 
   it("acknowledges chat.status before replaying the running snapshot, then streams changes", async () => {

@@ -3,9 +3,11 @@ import type { AddressInfo } from "node:net";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "@rstest/core";
 import { attachDesktopProxy } from "./desktop-proxy-server.js";
+import { attachLiveEventsServer, type LiveEventSources } from "./live-events-server.js";
+import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
 import { guardianAuth } from "./db/schema.js";
-import { createTestDb } from "./test/helpers.js";
+import { createTestDb, type TestDb } from "./test/helpers.js";
 import { createSession } from "./lib/auth.js";
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
@@ -18,7 +20,29 @@ function close(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-function upgrade(port: number, path: string, headers: Record<string, string>): Promise<number> {
+const noSources: LiveEventSources = {
+  subscribeChatStatus: () => () => {},
+  hasChatSession: async () => false,
+  subscribeChatSession: () => () => {},
+  subscribeAppCatalog: () => () => {},
+};
+
+function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
+  const handlers = [
+    attachDesktopProxy(server, db),
+    attachTerminalServer(server, db),
+    attachLiveEventsServer(server, db, new DashboardAccessState(), noSources),
+  ];
+  return { close: () => handlers.forEach((handler) => handler.close()) };
+}
+
+/** Sends through a reverse proxy unless `direct`, which connects as a loopback caller. */
+function upgrade(
+  port: number,
+  path: string,
+  headers: Record<string, string>,
+  { direct = false } = {},
+): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = request({
       hostname: "127.0.0.1",
@@ -29,7 +53,7 @@ function upgrade(port: number, path: string, headers: Record<string, string>): P
         upgrade: "websocket",
         "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
         "sec-websocket-version": "13",
-        "x-forwarded-for": "203.0.113.1",
+        ...(direct ? {} : { "x-forwarded-for": "203.0.113.1" }),
         ...headers,
       },
     });
@@ -51,11 +75,11 @@ describe("guardian WebSocket upgrade handlers", () => {
   it.each([
     "/desktop-proxy/websockify",
     "/ws/terminal?preset=claude-login",
+    "/ws/events",
   ])("owns socket errors before checking %s", async (path) => {
     const testDb = createTestDb();
     const server = createServer();
-    const desktop = attachDesktopProxy(server, testDb.db);
-    const terminal = attachTerminalServer(server, testDb.db);
+    const handlers = attachAll(server, testDb.db);
     const socket = new PassThrough();
     const req = {
       url: path,
@@ -70,13 +94,12 @@ describe("guardian WebSocket upgrade handlers", () => {
       socket.destroy(new Error("read ECONNRESET"));
       await closed;
     } finally {
-      desktop.close();
-      terminal.close();
+      handlers.close();
       testDb.close();
     }
   });
 
-  it("blocks anonymous and cross-origin requests before reaching websockify or the terminal", async () => {
+  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, or live events", async () => {
     const testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({
       id: "auth-1",
@@ -96,14 +119,22 @@ describe("guardian WebSocket upgrade handlers", () => {
     const previousPort = process.env.ROME_NOVNC_PORT;
     process.env.ROME_NOVNC_PORT = String(upstreamPort);
     const server = createServer();
-    const desktop = attachDesktopProxy(server, testDb.db);
-    const terminal = attachTerminalServer(server, testDb.db);
+    const handlers = attachAll(server, testDb.db);
+    const paths = ["/desktop-proxy/websockify", "/ws/terminal?preset=claude-login", "/ws/events"];
 
     try {
       const port = await listen(server);
-      expect(await upgrade(port, "/desktop-proxy/websockify", {})).toBe(401);
-      expect(await upgrade(port, "/ws/terminal?preset=claude-login", {})).toBe(401);
+      for (const path of paths) {
+        expect(await upgrade(port, path, {})).toBe(401);
+        // A page the in-container browser visits reaches loopback directly.
+        expect(
+          await upgrade(port, path, { origin: "https://evil.example" }, { direct: true }),
+        ).toBe(403);
+      }
       expect(upstreamConnections).toBe(0);
+      expect(
+        await upgrade(port, "/ws/events", { origin: `http://127.0.0.1:${port}` }, { direct: true }),
+      ).toBe(101);
 
       const cookie = `rome_session=${createSession("guardian-1")}`;
       expect(
@@ -126,8 +157,7 @@ describe("guardian WebSocket upgrade handlers", () => {
       ).toBe(101);
       expect(upstreamConnections).toBe(1);
     } finally {
-      desktop.close();
-      terminal.close();
+      handlers.close();
       await close(server);
       await close(upstream);
       testDb.close();

@@ -217,8 +217,54 @@ describe("LiveEventsClient", () => {
     expect(live.getTransport()).toBe("fallback");
     expect(transportChanged).toHaveBeenCalledTimes(1);
     expect(status.onReconnect).toHaveBeenCalledTimes(1);
-    rs.advanceTimersByTime(60_000);
+    rs.advanceTimersByTime(59_999);
     expect(FakeWebSocket.instances).toHaveLength(4);
+  });
+
+  it("probes the socket again from the fallback and moves back once one opens", () => {
+    const live = client();
+    const status = listener();
+    const transportChanged = rs.fn();
+    live.onTransportChange(transportChanged);
+    live.subscribe("chat.status", status);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      FakeWebSocket.latest().close();
+      rs.advanceTimersByTime(5_000);
+    }
+    expect(live.getTransport()).toBe("fallback");
+    expect(status.onReconnect).toHaveBeenCalledTimes(1);
+    const sockets = FakeWebSocket.instances.length;
+
+    // A failed probe stays on SSE without reporting a drop, and tries again later.
+    rs.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(sockets + 1);
+    FakeWebSocket.latest().close();
+    expect(live.getTransport()).toBe("fallback");
+    expect(status.onDrop).not.toHaveBeenCalled();
+
+    // A listener added on the fallback resyncs too once the socket takes over.
+    const session = listener();
+    live.subscribe("chat.session:s1", session);
+    rs.advanceTimersByTime(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(sockets + 2);
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    expect(live.getTransport()).toBe("socket");
+    expect(transportChanged).toHaveBeenCalledTimes(2);
+    expect(socket.sent).toEqual([subscribe("chat.status"), subscribe("chat.session:s1")]);
+    expect(status.onReconnect).toHaveBeenCalledTimes(1);
+
+    socket.receive({ type: "subscribed", topic: "chat.status" });
+    socket.receive({ type: "subscribed", topic: "chat.session:s1" });
+    expect(status.onReconnect).toHaveBeenCalledTimes(2);
+    expect(session.onReconnect).toHaveBeenCalledTimes(1);
+
+    // Once back on the socket, a drop reconnects rather than falling back.
+    socket.close();
+    expect(status.onDrop).toHaveBeenCalledTimes(1);
+    rs.advanceTimersByTime(100);
+    expect(FakeWebSocket.instances).toHaveLength(sockets + 3);
+    expect(live.getTransport()).toBe("socket");
   });
 
   it("keeps reconnecting rather than falling back once a socket has opened", () => {

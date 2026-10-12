@@ -51,7 +51,9 @@ const CLOSED: SseErrorContext["readyState"] = 2;
  *    again only after the socket reconnects.
  *
  * When the socket never opens, or the browser has no WebSocket, the hook
- * streams `topic.sseUrl` through `useSseEvents` instead.
+ * streams `topic.sseUrl` through `useSseEvents` instead. If the socket opens
+ * later, the hook moves back to it and `onReconnect` fires once the topic is
+ * subscribed there.
  */
 export function useLiveEvents<const Schemas extends Record<string, z.ZodType>>(
   topic: LiveTopic,
@@ -76,8 +78,10 @@ export function useLiveEvents<const Schemas extends Record<string, z.ZodType>>(
   optionsRef.current = options;
   const name = topic.topic;
 
+  // Stays subscribed on the fallback too, so the client can resync this topic
+  // when the socket comes back.
   useEffect(() => {
-    if (!enabled || transport !== "socket") return;
+    if (!enabled) return;
     const reportError = (readyState: SseErrorContext["readyState"]) =>
       invokeObservedCallback(
         () => optionsRef.current?.onError?.({ readyState }),
@@ -100,5 +104,5 @@ export function useLiveEvents<const Schemas extends Record<string, z.ZodType>>(
       onDrop: () => reportError(CONNECTING),
       onRejected: () => reportError(CLOSED),
     });
-  }, [client, name, enabled, transport]);
+  }, [client, name, enabled]);
 }

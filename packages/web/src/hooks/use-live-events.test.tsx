@@ -160,6 +160,34 @@ describe("useLiveEvents", () => {
     expect(fn).toHaveBeenCalledWith({ sessionId: "s1", name: "Over SSE" });
   });
 
+  it("moves back to the socket when a later probe opens, closing the EventSource and resyncing", () => {
+    rs.useFakeTimers();
+    const onReconnect = rs.fn();
+    const live = new LiveEventsClient({
+      WebSocket: asWebSocket,
+      url: () => "ws://rome.test/ws/events",
+      reconnectDelayMs: () => 100,
+      minFallbackMs: 0,
+      reprobeMs: 1_000,
+    });
+    render(live, () => {}, { onReconnect });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      act(() => FakeWebSocket.latest().close());
+      act(() => rs.advanceTimersByTime(100));
+    }
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+
+    act(() => rs.advanceTimersByTime(1_000));
+    const socket = FakeWebSocket.latest();
+    act(() => socket.open());
+    expect(MockEventSource.instances[0].close).toHaveBeenCalled();
+    expect(socket.sent).toEqual([{ type: "subscribe", topic: "chat.session:s1" }]);
+    act(() => socket.receive({ type: "subscribed", topic: topic.topic }));
+    expect(onReconnect).toHaveBeenCalledTimes(2);
+    expect(MockEventSource.instances).toHaveLength(1);
+  });
+
   it("uses SSE from the start without WebSocket, and opens nothing while disabled", () => {
     const live = new LiveEventsClient();
     const { unmount } = render(live, () => {}, { enabled: false });
