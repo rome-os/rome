@@ -711,6 +711,19 @@ describe("/api/auth/cloud — request guards", () => {
     expect(sessionUserId(replay)).toBeNull();
   });
 
+  it("keeps an in-flight attempt's cookie when a stray callback arrives", async () => {
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const { state } = await start(app);
+
+    const res = await app.request("/api/auth/cloud/callback?state=never-issued&code=abc", {
+      headers: { cookie: loginCookies.get(state) as string },
+    });
+
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=state");
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
   it("rejects a callback carrying another attempt's cookie", async () => {
     insertGuardian({ accountId: "A" });
     setInstanceTokenInMemory("romeinst_existing");

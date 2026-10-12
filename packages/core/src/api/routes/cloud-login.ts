@@ -117,18 +117,19 @@ function setLoginStateCookie(c: Context, state: string): void {
   });
 }
 
-// Reads and clears the attempt cookie, so each browser holds at most one.
-function takeLoginStateCookie(c: Context): string | undefined {
-  const secure = shouldSecureCookie(c.req.raw);
-  const value = secure
+function readLoginStateCookie(c: Context): string | undefined {
+  return shouldSecureCookie(c.req.raw)
     ? getCookie(c, LOGIN_STATE_COOKIE, "host")
     : getCookie(c, LOGIN_STATE_COOKIE);
+}
+
+function clearLoginStateCookie(c: Context): void {
+  const secure = shouldSecureCookie(c.req.raw);
   deleteCookie(c, LOGIN_STATE_COOKIE, {
     path: "/",
     secure,
     ...(secure && { prefix: "host" as const }),
   });
-  return value;
 }
 
 function sweepExpired(now: number): void {
@@ -323,18 +324,20 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     const oauthError = c.req.query("error");
 
     // Fail closed on the state echo before trusting anything else.
-    const boundState = takeLoginStateCookie(c);
     const entry = state ? pending.get(state) : undefined;
     if (!state || !entry || entry.channel !== "browser") {
+      // Leaves the attempt cookie alone: a stray or stale callback must not
+      // break a sign-in this browser still has in flight.
       return c.redirect(errorRedirect("state"));
     }
     // Consumed whatever the cookie says: a callback that reached a real
     // attempt from the wrong browser burns it, so it can't be replayed.
     pending.delete(state);
-    if (boundState !== state) {
+    if (readLoginStateCookie(c) !== state) {
       log.warn("cloud login callback state not bound to this browser");
       return c.redirect(errorRedirect("state"));
     }
+    clearLoginStateCookie(c);
     if (entry.expiresAt <= Date.now()) {
       return c.redirect(errorRedirect("expired"));
     }
