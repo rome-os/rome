@@ -125,6 +125,9 @@ export class FeishuAdapter {
     string,
     { id: string; displayName: string; kind: "group" | "channel" }
   >();
+  /** Group names fetched from Feishu, keyed by chat id. A failed lookup is
+   *  dropped so the next message retries it. */
+  private readonly chatNames = new Map<string, Promise<string | undefined>>();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
   private unsubscribes: Array<() => void> = [];
@@ -257,7 +260,7 @@ export class FeishuAdapter {
     if (threadType === "group") {
       this.observedConversations.set(m.chatId, {
         id: m.chatId,
-        displayName: m.chatId,
+        displayName: (await this.resolveChatName(m.chatId)) ?? m.chatId,
         kind: "group",
       });
     }
@@ -325,6 +328,25 @@ export class FeishuAdapter {
     if (isFeishuGroupConfigAction(value)) {
       await this.handleGroupConfigAction(evt);
     }
+  }
+
+  /** The group's human-facing name, or undefined when Feishu cannot return one. */
+  private resolveChatName(chatId: string): Promise<string | undefined> {
+    const cached = this.chatNames.get(chatId);
+    if (cached) return cached;
+    const pending = this.channel.getChatInfo(chatId).then(
+      (info) => info.name?.trim() || undefined,
+      (err) => {
+        this.chatNames.delete(chatId);
+        log.warn("failed to fetch Feishu chat name", {
+          chatId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return undefined;
+      },
+    );
+    this.chatNames.set(chatId, pending);
+    return pending;
   }
 
   listObservedConversations() {

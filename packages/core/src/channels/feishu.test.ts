@@ -32,6 +32,11 @@ class FakeLarkChannel {
   removedReactions: Array<{ messageId: string; reactionId: string }> = [];
   connected = false;
   botIdentity = { openId: "ou_bot", name: "Rome" };
+  chatInfoCalls: string[] = [];
+  chatInfo: (chatId: string) => Promise<{ chatId: string; name?: string }> = async (chatId) => ({
+    chatId,
+    name: "Design Team",
+  });
 
   on(name: string, handler: (arg: unknown) => unknown): () => void {
     this.handlers.set(name, handler);
@@ -53,6 +58,11 @@ class FakeLarkChannel {
 
   async updateCard(messageId: string, card: object) {
     this.updatedCards.push({ messageId, card });
+  }
+
+  async getChatInfo(chatId: string) {
+    this.chatInfoCalls.push(chatId);
+    return this.chatInfo(chatId);
   }
 
   async addReaction(messageId: string, emojiType: string): Promise<string> {
@@ -269,6 +279,33 @@ describe("FeishuAdapter", () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
     expect(captured[0].thread).toStrictEqual({ kind: "group" });
     expect(captured[0].addressing).toBe("mention");
+  });
+
+  it("lists an observed group under its Feishu name, fetched once per chat", async () => {
+    await channel.emit({ chatType: "group", mentionedBot: true });
+    await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "Design Team", kind: "group" },
+    ]);
+    expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+  });
+
+  it("falls back to the chat id when the name lookup fails, and retries it", async () => {
+    channel.chatInfo = async () => {
+      throw new Error("permission denied");
+    };
+    await channel.emit({ chatType: "group", mentionedBot: true });
+
+    expect(captured).toHaveLength(1);
+    expect(adapter.listObservedConversations()).toStrictEqual([
+      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+    ]);
+
+    channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+    await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+    expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
   });
 
   it("carries the replied-to message and a fallback sender name", async () => {
