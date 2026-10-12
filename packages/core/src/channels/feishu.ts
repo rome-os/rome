@@ -338,17 +338,20 @@ export class FeishuAdapter {
     if (!this.observedConversations.has(chatId)) {
       this.observedConversations.set(chatId, { id: chatId, displayName: chatId, kind: "group" });
     }
-    return this.resolveChatName(chatId).then((name) => {
-      if (name)
-        this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
-      return name;
-    });
+    return this.resolveChatName(chatId);
   }
 
   /** The group's human-facing name, or undefined when Feishu cannot return one. */
   private resolveChatName(chatId: string): Promise<string | undefined> {
     const cached = this.chatNames.get(chatId);
     if (cached) return cached;
+    const lookup = this.channel.getChatInfo(chatId).then((info) => {
+      const name = info.name?.trim() || undefined;
+      if (name) {
+        this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
+      }
+      return name;
+    });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -356,19 +359,27 @@ export class FeishuAdapter {
         CHAT_NAME_TIMEOUT_MS,
       );
     });
-    const pending = Promise.race([this.channel.getChatInfo(chatId), timeout])
-      .then(
-        (info) => info.name?.trim() || undefined,
-        (err) => {
-          log.warn("failed to fetch Feishu chat name", {
-            chatId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          // A missing permission fails every lookup, so wait before asking again.
-          setTimeout(() => this.chatNames.delete(chatId), CHAT_NAME_RETRY_MS).unref?.();
-          return undefined;
-        },
-      )
+    const pending: Promise<string | undefined> = Promise.race([lookup, timeout])
+      .catch((err) => {
+        log.warn("failed to fetch Feishu chat name", {
+          chatId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // A missing permission fails every lookup, so wait before asking again.
+        setTimeout(() => {
+          if (this.chatNames.get(chatId) === pending) this.chatNames.delete(chatId);
+        }, CHAT_NAME_RETRY_MS).unref?.();
+        // A lookup that answers after the timeout still names later messages.
+        lookup.then(
+          (name) => {
+            if (name && this.chatNames.get(chatId) === pending) {
+              this.chatNames.set(chatId, Promise.resolve(name));
+            }
+          },
+          () => {},
+        );
+        return undefined;
+      })
       .finally(() => clearTimeout(timer));
     this.chatNames.set(chatId, pending);
     return pending;

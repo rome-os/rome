@@ -332,6 +332,27 @@ describe("FeishuAdapter", () => {
     }
   });
 
+  it("keeps a name that arrives after the lookup timed out", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = (chatId) =>
+        new Promise((resolve) => setTimeout(() => resolve({ chatId, name: "Design Team" }), 6_000));
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      await rs.advanceTimersByTimeAsync(1_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("drops an unaddressed group message without waiting on the name lookup", async () => {
     channel.chatInfo = () => new Promise(() => {});
     await channel.emit({ chatType: "group", mentionedBot: false });
