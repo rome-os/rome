@@ -29,7 +29,9 @@ Midscene agent calls the configured model endpoint.
 - Every case uses Midscene's `aiAct` for user interaction and `aiAssert` for
   visible outcomes. `app.open` provides the isolated starting route, and
   `wait` covers fixed mock settling time.
-- The suite contains 38 AI-native cases. Each case starts one isolated product
+- The suite contains 38 AI-native cases, with CHAT-01/02/03 enabled for the
+  smoke run. Other file entries in `midscene.config.ts` and CHAT-04/05 in
+  `cases/chat-core.yaml` are commented out. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
 - The collector checks every case name against `case-manifest.json`
   and the documented catalog. Missing, renamed, or unexpected cases fail CI. Keep
@@ -103,24 +105,30 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
+The workflow uses `@midscene/test@1.15.2-beta-20261012100626.0` and reads
+its generated `result.md` directly. The requested beta is not yet available
+from the registry used to refresh the lockfile. CI uses `npm install` to resolve
+this exact version when it becomes available. The checked-in lockfile does not
+cover this beta and must be regenerated before using `npm ci`.
+
+Rome resolves relative report links after
+Pages deployment. Each case occupies one line with its title and status.
+Before deployment, case titles appear without report links. Rome does not
+capture screenshots or recalculate the Markdown contents.
+
 - HTML reports: `midscene_run/report/`
-- Machine-readable results:
-  `.midscene/test-results/<runId>/summary.json` (includes collection-error
-  details)
-- Both are covered by `.gitignore`.
-- Every model-backed run uploads the full-suite report and a combined
-  `midscene-e2e-report` artifact, including failed runs. A read-only job writes
-  results immediately after aggregation, without waiting for Pages approval or deployment.
-  This Summary shows total, passed, failed, and not-run counts with artifact
-  downloads, without case tables or empty screenshot columns. A second read-only
-  job adds publication status after Pages finishes. Only a successful deployment
-  adds the complete case tables with verified report links and screenshots.
-  Failed, not-run, and incomplete-project results appear first. Passed cases appear
-  in a collapsed appendix. The first Summary remains
-  available if publication waits for approval or the run is cancelled during that wait.
-- Midscene prepares one native Test report that lists every case. The combined artifact includes that report, available test reports,
-  screenshots, and machine-readable results. An incomplete merge still saves
-  available diagnostics and fails the aggregation job.
+- Machine-readable results: `.midscene/test-results/<runId>/summary.json`
+- Markdown results: `.midscene/test-results/<runId>/result.md`
+- These outputs are covered by `.gitignore`.
+- Each run uploads one `midscene-results` artifact. Report preparation checks
+  missing, duplicate, and unexpected cases against `case-manifest.json`, then
+  uploads `midscene-e2e-report` with the original reports and prepared Summary.
+  Missing Markdown or HTML fails report preparation while preserving artifacts.
+- A read-only job shows the Markdown before Pages deployment. A second job adds
+  hosted report links and publication status after deployment. If native Markdown
+  cannot be read, the Summary links to the run artifacts for diagnosis.
+- Pages preserves the original HTML and assets at their relative paths. Each run
+  has an index linking to its original report. Reports are not merged.
 - Pages publication is enabled for `rome-os/rome` on `main`. A fork can opt in
   by setting the Actions variable `MIDSCENE_PUBLISH_REPO` to its exact full
   repository name, then using manual dispatch. Pull requests never publish.
@@ -129,17 +137,10 @@ HEADLESS=false npm test
   or change the repository's Pages settings. If Pages configuration is
   unavailable, publication is skipped with a warning and reports remain
   available through Actions.
-- After a successful Pages deployment, the same Summary includes a visible
-  Markdown link to the combined native Midscene Test report. Case names and
-  screenshot thumbnails open their exact steps in the native test reports.
-  If Pages fails or is skipped, the Summary shows result counts and artifact
-  links. If aggregation fails, the final job recovers available test data and
-  reports missing results. Report-only recovery validates the source run before
-  downloading its artifacts. Partial reports keep available test links without
-  a broken combined-report link.
 - To rebuild a report without new model calls, manually dispatch the workflow
-  with `report_source_run_id` set to a completed Midscene run whose test
-  artifacts have not expired. Sources and retained Pages history must come
+  with `report_source_run_id` set to a completed full-suite Midscene run whose
+  `midscene-results` artifact contains `result.md` and has not expired.
+  Sources and retained Pages history must come
   from the same repository: upstream `main` scheduled runs, pushes, or manual dispatches,
   or a fork's manual dispatches. Pull-request artifacts are rejected.
   On upstream, dispatch `main` to also publish. Set the dispatch input

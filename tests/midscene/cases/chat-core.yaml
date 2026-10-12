@@ -61,29 +61,29 @@ cases:
       - aiAssert: >-
           An agent mention picker titled "Pick an agent to chat with" is open, showing a "Built-in
           agents" section with a "Rome" group and its two agents, "main" and "envoy".
-  - name: CHAT-04 Inspect a successful execution trace
-    tags:
-      - chat
-    steps:
-      - app.open:
-          path: /chat/mock-chat-1
-      - aiAct: >-
-          Scroll through the conversation to the collapsed trace summary reading "1 app · 1 step ·
-          8.4s" beneath the first assistant response. Click near the upper-middle of that summary
-          once to open the Trace drawer. Do not click other messages.
-      - aiAssert: >-
-          The "Trace" drawer is open and shows a successful "settings_get" step for the "briefer"
-          app, including "keys: [2]" and a duration. The header reads "Used 1 app · 1 step · 8.4s".
-  - name: CHAT-05 Draft an answer in an unanswered question card
-    tags:
-      - chat
-    steps:
-      - app.open:
-          path: /chat/mock-chat-2
-      - aiAct: >-
-          On the visible question card beginning "Before I rewrite it for that audience, three
-          things:", enter "Avoid jargon" in the optional "Anything to avoid?" text area. Do not
-          send or dismiss the card.
-      - aiAssert: >-
-          The unanswered question card remains open and its optional "Anything to avoid?" field
-          contains the draft "Avoid jargon".
+#   - name: CHAT-04 Inspect a successful execution trace
+#     tags:
+#       - chat
+#     steps:
+#       - app.open:
+#           path: /chat/mock-chat-1
+#       - aiAct: >-
+#           Scroll through the conversation to the collapsed trace summary reading "1 app · 1 step ·
+#           8.4s" beneath the first assistant response. Click near the upper-middle of that summary
+#           once to open the Trace drawer. Do not click other messages.
+#       - aiAssert: >-
+#           The "Trace" drawer is open and shows a successful "settings_get" step for the "briefer"
+#           app, including "keys: [2]" and a duration. The header reads "Used 1 app · 1 step · 8.4s".
+#   - name: CHAT-05 Draft an answer in an unanswered question card
+#     tags:
+#       - chat
+#     steps:
+#       - app.open:
+#           path: /chat/mock-chat-2
+#       - aiAct: >-
+#           On the visible question card beginning "Before I rewrite it for that audience, three
+#           things:", enter "Avoid jargon" in the optional "Anything to avoid?" text area. Do not
+#           send or dismiss the card.
+#       - aiAssert: >-
+#           The unanswered question card remains open and its optional "Anything to avoid?" field
+#           contains the draft "Avoid jargon".

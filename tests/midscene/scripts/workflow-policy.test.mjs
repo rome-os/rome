@@ -191,7 +191,7 @@ test("results are visible before optional deployment and survive its cancellatio
     job("report-results"),
     /name: Write the consolidated run Summary\n        if: always\(\)/,
   );
-  assert.match(job("report-results"), /--case-manifest/);
+  assert.match(job("report-summary"), /case-manifest\.json/);
   assert.doesNotMatch(job("midscene"), /strategy:|matrix\.|MIDSCENE_INCLUDE_TAGS/);
   assert.match(job("midscene"), /MIDSCENE_PROJECT_NAME: web/);
   assert.match(job("midscene"), /220m npm test/);
@@ -266,4 +266,15 @@ test("model steps use environment variables and keep the API key in secrets", ()
       assert.ok(binding.includes(`vars.${key} || secrets.${key}`));
     }
   }
+});
+
+
+test("uses native result.md and only downloads the full-suite artifact", () => {
+  for (const name of ["report-summary", "report-results"]) {
+    const content = job(name);
+    assert.match(content, /write-native-summary\.mjs/);
+    assert.doesNotMatch(content, /render-ci-summary|merge-native-reports|shard-/);
+    assert.match(content, /name: midscene-results/);
+  }
+  assert.match(job("report-summary"), /case-manifest\.json/);
 });

@@ -6,10 +6,17 @@ import test from "node:test";
 
 import { preparePagesSite } from "./prepare-pages-site.mjs";
 
-const shard = async (root, label) => {
-  const directory = path.join(root, "midscene-shard-1", "midscene_run", "report", label);
+const report = async (root, label, complete = true) => {
+  const directory = path.join(root, "midscene-results", "midscene_run", "report", label);
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, "index.html"), label);
+  if (complete) {
+    const resultDirectory = path.join(root, "midscene-results", ".midscene", "test-results", "run-1");
+    await mkdir(resultDirectory, { recursive: true });
+    await writeFile(path.join(resultDirectory, "summary.json"), JSON.stringify({
+      report: `../../../midscene_run/report/${label}/index.html`,
+    }));
+  }
 };
 
 test("publishes recent runs at stable paths", async (context) => {
@@ -18,16 +25,10 @@ test("publishes recent runs at stable paths", async (context) => {
   const previous = path.join(root, "previous");
   const reports = path.join(root, "reports");
   const site = path.join(root, "site");
-  await shard(previous, "recent-old");
-  await shard(reports, "new");
-  await mkdir(path.join(previous, "midscene-shard-1/midscene_run/report/screenshots"));
-  await writeFile(
-    path.join(previous, "midscene-shard-1/midscene_run/report/screenshots/recent.jpeg"),
-    "recent",
-  );
-  await mkdir(path.join(reports, "native-report", "screenshots"), { recursive: true });
-  await writeFile(path.join(reports, "native-report", "index.html"), "native report");
-  await writeFile(path.join(reports, "native-report", "screenshots", "new.jpeg"), "new");
+  await report(previous, "recent-old");
+  await report(reports, "new");
+  await mkdir(path.join(reports, "midscene-results/midscene_run/report/new/screenshots"));
+  await writeFile(path.join(reports, "midscene-results/midscene_run/report/new/screenshots/new.jpeg"), "new image");
   await mkdir(path.join(previous, "runs", "100"), { recursive: true });
   await writeFile(path.join(previous, "runs", "100", "index.html"), "older run");
 
@@ -39,8 +40,10 @@ test("publishes recent runs at stable paths", async (context) => {
   });
   assert.deepEqual(first.runIds, ["100", "101"]);
   assert.match(await readFile(path.join(site, "index.html"), "utf8"), /runs\/101\/index\.html/);
-  assert.equal(await readFile(path.join(site, "runs/101/index.html"), "utf8"), "native report");
-  assert.equal(await readFile(path.join(site, "runs/101/screenshots/new.jpeg"), "utf8"), "new");
+  assert.match(await readFile(path.join(site, "runs/101/index.html"), "utf8"), /midscene-results\/midscene_run\/report\/new\/index.html/);
+  assert.equal(await readFile(path.join(site, "runs/101/midscene-results/midscene_run/report/new/index.html"), "utf8"), "new");
+
+  assert.equal(await readFile(path.join(site, "runs/101/midscene-results/midscene_run/report/new/screenshots/new.jpeg"), "utf8"), "new image");
 
   const next = path.join(root, "next");
   await preparePagesSite({ site: next, reports, runId: "102", previous: site });
@@ -48,23 +51,23 @@ test("publishes recent runs at stable paths", async (context) => {
   const result = await preparePagesSite({ site: final, reports, runId: "103", previous: next });
   assert.deepEqual(result.runIds, ["101", "102", "103"]);
   await assert.rejects(stat(path.join(final, "runs", "100")), { code: "ENOENT" });
-  assert.equal(await readFile(path.join(final, "runs/101/index.html"), "utf8"), "native report");
+  assert.match(await readFile(path.join(final, "runs/101/index.html"), "utf8"), /Open the Midscene Test report/);
 });
 
 test("rejects nonnumeric run IDs", async () => {
   await assert.rejects(preparePagesSite({ site: "unused", runId: "../escape" }), /numeric/);
 });
 
-test("publishes shard reports when the native merge is incomplete", async (context) => {
+test("preserves diagnostic reports when the run summary is missing", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-partial-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const reports = path.join(root, "reports");
-  await shard(reports, "partial");
+  await report(reports, "partial", false);
   const site = path.join(root, "site");
   await preparePagesSite({ site, reports, runId: "101" });
   assert.equal(
     await readFile(
-      path.join(site, "runs/101/midscene-shard-1/midscene_run/report/partial/index.html"),
+      path.join(site, "runs/101/midscene-results/midscene_run/report/partial/index.html"),
       "utf8",
     ),
     "partial",
@@ -80,31 +83,27 @@ test("an incomplete rerun replaces the complete attempt without retaining stale 
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-rerun-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const completeReports = path.join(root, "complete-reports");
-  await shard(completeReports, "first-attempt");
-  await mkdir(path.join(completeReports, "native-report", "screenshots"), { recursive: true });
-  await writeFile(path.join(completeReports, "native-report", "index.html"), "complete report");
-  await writeFile(path.join(completeReports, "native-report", "screenshots", "old.jpeg"), "old");
+  await report(completeReports, "first-attempt");
   const previous = path.join(root, "previous-site");
   await preparePagesSite({ site: previous, reports: completeReports, runId: "101" });
   await mkdir(path.join(previous, "runs", "100"), { recursive: true });
   await writeFile(path.join(previous, "runs", "100", "index.html"), "other run");
 
   const partialReports = path.join(root, "partial-reports");
-  await shard(partialReports, "second-attempt");
+  await report(partialReports, "second-attempt", false);
   const site = path.join(root, "rerun-site");
   await preparePagesSite({ site, reports: partialReports, runId: "101", previous });
 
   const current = path.join(site, "runs", "101");
   for (const stale of [
     "index.html",
-    "screenshots/old.jpeg",
-    "midscene-shard-1/midscene_run/report/first-attempt",
+    "midscene-results/midscene_run/report/first-attempt",
   ]) {
     await assert.rejects(stat(path.join(current, stale)), { code: "ENOENT" });
   }
   assert.equal(
     await readFile(
-      path.join(current, "midscene-shard-1/midscene_run/report/second-attempt/index.html"),
+      path.join(current, "midscene-results/midscene_run/report/second-attempt/index.html"),
       "utf8",
     ),
     "second-attempt",
@@ -122,11 +121,9 @@ test("prunes older run directories before exceeding the Pages budget", async (co
   const reports = path.join(root, "reports");
   await mkdir(path.join(previous, "runs", "100"), { recursive: true });
   await writeFile(path.join(previous, "runs", "100", "report.bin"), Buffer.alloc(12_000));
-  await shard(reports, "new");
-  await mkdir(path.join(reports, "native-report"));
-  await writeFile(path.join(reports, "native-report", "index.html"), "native report");
+  await report(reports, "new");
   await writeFile(
-    path.join(reports, "midscene-shard-1/midscene_run/report/new/report.bin"),
+    path.join(reports, "midscene-results/midscene_run/report/new/report.bin"),
     Buffer.alloc(12_000),
   );
 

@@ -74,7 +74,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: tests/midscene/package-lock.json
+          cache-dependency-path: tests/midscene/package.json
 
       - name: Install Midscene test dependencies
         # This job never launches a browser; skip the playwright postinstall
@@ -83,7 +83,7 @@ jobs:
         working-directory: tests/midscene
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm ci --strict-allow-scripts
+        run: npm install --strict-allow-scripts
 
       - name: Type-check custom nodes
         working-directory: tests/midscene
@@ -124,7 +124,7 @@ jobs:
       - name: Install browser test dependencies
         working-directory: tests/midscene
         run: |
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --strict-allow-scripts
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --strict-allow-scripts
           npx playwright install --with-deps chromium
 
       - name: Start Rome mock server
@@ -208,10 +208,10 @@ jobs:
 
       - name: Install Midscene test dependencies
         # allowScripts for esbuild/sharp is declared in this package.json, so
-        # npm ci runs their (approved) install scripts non-interactively.
+        # npm install runs their (approved) install scripts non-interactively.
         working-directory: tests/midscene
         run: |
-          npm ci --strict-allow-scripts
+          npm install --strict-allow-scripts
           npx playwright install --with-deps chromium
 
       - name: Check Midscene model vision
@@ -323,14 +323,6 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: tests/midscene/package-lock.json
-
-      - name: Install Midscene report merger
-        working-directory: tests/midscene
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm ci --strict-allow-scripts
 
       - name: Validate report source run
         if: inputs.report_source_run_id != ''
@@ -339,54 +331,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node tests/midscene/scripts/trusted-report-runs.mjs validate-source
 
-      # Accept both full-suite artifacts and archived split-run artifacts.
       - name: Download Midscene test reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: "midscene-{results,shard-*}"
+          name: midscene-results
           run-id: ${{ inputs.report_source_run_id || github.run_id }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/midscene-reports
-          merge-multiple: false
+          path: ${{ runner.temp }}/midscene-reports/midscene-results
 
-      - name: Merge native Midscene Test reports
-        id: native-report
+      - name: Prepare native Markdown Summary
+        id: native-summary
         continue-on-error: true
-        working-directory: tests/midscene
         run: |
-          node scripts/merge-native-reports.mjs \
-            "$RUNNER_TEMP/midscene-reports" \
-            "" \
-            "case-manifest.json"
-          if [ -f "$RUNNER_TEMP/midscene-reports/native-report/index.html" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Discard output from a failed native merge
-        if: steps.native-report.outcome == 'failure'
-        run: |
-          node --input-type=module <<'NODE'
-          import { rm } from 'node:fs/promises';
-          import path from 'node:path';
-          await rm(path.join(process.env.RUNNER_TEMP, 'midscene-reports', 'native-report'), {
-            recursive: true,
-            force: true,
-          });
-          NODE
-
-      - name: Render case table
-        id: case-table
-        continue-on-error: true
-        env:
-          PRODUCER_RESULT: ${{ inputs.report_source_run_id != '' && 'success' || needs.midscene.result }}
-        run: |
-          node tests/midscene/scripts/render-ci-summary.mjs \
-            --reports-dir "$RUNNER_TEMP/midscene-reports" \
-            --expected-projects "" \
-            --case-manifest "tests/midscene/case-manifest.json" \
-            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --producer-result "$PRODUCER_RESULT" \
-            --output "$RUNNER_TEMP/midscene-reports/summary.md"
+          node tests/midscene/scripts/write-native-summary.mjs \
+            "$RUNNER_TEMP/midscene-reports" "" \
+            "$RUNNER_TEMP/midscene-reports/summary.md" \
+            "tests/midscene/case-manifest.json"
 
       - name: Upload combined Midscene report
         id: upload-report
@@ -400,10 +360,7 @@ jobs:
           retention-days: 14
 
       - name: Require complete native report
-        if: >-
-          steps.native-report.outcome != 'success' ||
-          steps.native-report.outputs.available != 'true' ||
-          steps.case-table.outcome != 'success'
+        if: steps.native-summary.outcome != 'success'
         run: |
           echo "The native Midscene Test report is incomplete; see the run Summary and test artifacts." >&2
           exit 1
@@ -615,11 +572,10 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: "midscene-{results,shard-*}"
+          name: midscene-results
           run-id: ${{ inputs.report_source_run_id || github.run_id }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/midscene-reports
-          merge-multiple: false
+          path: ${{ runner.temp }}/midscene-reports/midscene-results
 
       - name: Write the consolidated run Summary
         if: always()
@@ -636,23 +592,18 @@ jobs:
           if [ -n "$PAGE_URL" ]; then
             pages_url="${PAGE_URL%/}/runs/$GITHUB_RUN_ID/"
           fi
-          if node tests/midscene/scripts/render-ci-summary.mjs \
-            --reports-dir "$RUNNER_TEMP/$REPORTS_DIR" \
-            --expected-projects "" \
-            --case-manifest "tests/midscene/case-manifest.json" \
-            --run-url "$run_url" \
-            --pages-url "$pages_url" \
-            --source-run-id "$REPORT_SOURCE_RUN_ID" \
-            --producer-result "$PRODUCER_RESULT" \
-            --report-result "$REPORT_RESULT" \
-            --publication-result "$PUBLICATION_RESULT" \
-            --output "$RUNNER_TEMP/midscene-summary.md"; then
+          if node tests/midscene/scripts/write-native-summary.mjs \
+            "$RUNNER_TEMP/$REPORTS_DIR" "$pages_url" \
+            "$RUNNER_TEMP/midscene-summary.md"; then
             cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tests: $PRODUCER_RESULT. Report preparation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT." >> "$GITHUB_STEP_SUMMARY"
+            echo "[Download test artifacts]($run_url#artifacts)" >> "$GITHUB_STEP_SUMMARY"
           else
             {
               echo "## Rome × Midscene · Summary unavailable"
               echo
-              echo "Case counts could not be read. Aggregation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT."
+              echo "Native result.md could not be read. Report preparation: $REPORT_RESULT. Pages: $PUBLICATION_RESULT."
               echo
               echo "[Inspect this run and available artifacts]($run_url#artifacts)."
               if [[ "$REPORT_SOURCE_RUN_ID" =~ ^[0-9]+$ ]]; then
