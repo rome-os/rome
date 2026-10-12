@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/rome-os/rome/compare/ui-v0.3.4...ui-v0.3.5) (2026-10-12)
+
+
+### Bug Fixes
+
+* **ui:** give fenced-block chrome its own row where hover does not exist ([#926](https://github.com/rome-os/rome/issues/926)) ([488722b](https://github.com/rome-os/rome/commit/488722b496dbd6933acce2b3a5f454cfb79979bd))
+
 ## [0.3.4](https://github.com/rome-os/rome/compare/ui-v0.3.3...ui-v0.3.4) (2026-10-10)
 
 
