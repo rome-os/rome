@@ -2,8 +2,8 @@
 
 > Onboarding attachment for Rome maintainers.
 >
-> Status: CHAT-01 runs in one CI job. The other 37 cases are commented out
-> under `tests/midscene/cases/`. Each case uses `aiAct` for interaction and `aiAssert` for
+> Status: all 38 cases run in one CI job. They are defined under
+> `tests/midscene/cases/`. Each case uses `aiAct` for interaction and `aiAssert` for
 > its visible outcome.
 
 ## 1. Background and Goals
@@ -180,7 +180,7 @@ reasons behind them.
 - **Mock server**: `pnpm --filter rome-web dev:mock:e2e` starts in the background
   (it runs `build:kit` first, so first-request readiness is polled for several
   minutes). Its log is uploaded as an artifact on failure.
-- **Execution**: one `web` project runs the active case with `maxConcurrency: 1`.
+- **Execution**: one `web` project runs all 38 cases with `maxConcurrency: 1`.
   Each case has up to two retries. The job timeout is 240 minutes, with a
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
@@ -202,7 +202,7 @@ reasons behind them.
 > no YAML).
 
 <!-- CASE-CATALOG -->
-The suite has **1** active case and **37** commented cases in 15 YAML files. The
+The suite contains **38** active cases in 15 YAML files. The
 [case catalog](midscene-e2e-cases.md#case-catalog) lists their names. `npm run collect` validates the case names
 and expected total against a committed manifest.
 

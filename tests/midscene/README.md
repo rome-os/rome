@@ -29,7 +29,7 @@ Midscene agent calls the configured model endpoint.
 - Every case uses Midscene's `aiAct` for user interaction and `aiAssert` for
   visible outcomes. `app.open` provides the isolated starting route, and
   `wait` covers fixed mock settling time.
-- The suite runs CHAT-01, with 37 other cases commented out. Each case starts one isolated product
+- The suite contains 38 AI-native cases. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
 - The collector checks every case name against `case-manifest.json`
   and the documented catalog. Missing, renamed, or unexpected cases fail CI. Keep
@@ -155,7 +155,7 @@ The independent `midscene.yml` workflow runs the full model-backed suite
 nightly against the latest upstream `main` commit. Its daily schedule is
 `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
 It does not depend on the ordinary CI or Nightly workflow, and pushes do not
-trigger it. One visual test job runs the active case with `maxConcurrency: 1`.
+trigger it. One visual test job runs all 38 cases with `maxConcurrency: 1`.
 
 Path-filtered pull requests run only the secret-free harness and mock-browser
 boundary checks. They never receive billable model credentials or run the
@@ -219,14 +219,3 @@ Fork model runs require manual dispatch. The daily schedule runs model tests
 only in `rome-os/rome` on `main`. Pull requests run checks without model secrets.
 `GITHUB_TOKEN` is supplied by Actions. Rome backend credentials are unnecessary
 because the browser uses mock fixtures.
-
-## Restore paused cases
-
-CHAT-01 is the only active case. The remaining 37 cases stay in their YAML
-files as comments.
-
-1. Remove the comment prefixes from the paused YAML case blocks.
-2. Restore the commented full-suite `files` selection in `midscene.config.ts`.
-3. Uncomment the matching catalog rows in `docs/midscene-e2e-cases.md`.
-4. Add the restored full case names to `case-manifest.json`.
-5. Run `npm run collect` to check that the YAML, manifest, and catalog agree.
