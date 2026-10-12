@@ -12,6 +12,10 @@ Midscene agent calls the configured model endpoint.
 
 ## How It Works
 
+- Project setup starts the strict mock server, waits for readiness, and checks
+  mock APIs and network isolation before running cases. Teardown closes the
+  browser and the server started by this run. An existing server is reused
+  and checked, but is not stopped.
 - `midscene.config.ts` launches Playwright Chromium with a **fresh
   BrowserContext per case**: in-memory MSW state resets with the context, so
   every case starts from the same fixtures.
@@ -23,8 +27,7 @@ Midscene agent calls the configured model endpoint.
   - `rome-sidebar-pins`: expands every built-in sidebar entry (the mock user
     pins only Apps/Chat/Projects by default).
 - The strict E2E worker rejects external HTTP requests. A BrowserContext guard also
-  blocks external HTTP and WebSocket traffic. Run `npm run check:browser-boundary`
-  while the strict mock server is running to check both paths. Strict E2E mode
+  blocks external HTTP and WebSocket traffic. Project setup checks both paths automatically. Strict E2E mode
   disables the backend proxy, and unmatched `/api` requests return 503 locally.
 - Every case uses Midscene's `aiAct` for user interaction and `aiAssert` for
   visible outcomes. `app.open` provides the isolated starting route, and
@@ -32,7 +35,7 @@ Midscene agent calls the configured model endpoint.
 - The suite uses AI-native cases. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
 - YAML under `cases/` is the single source of truth for case definitions.
-  The collector parses these files and checks nodes, duplicate names, and
+  The optional local collector parses these files and checks nodes, duplicate names, and
   case conventions. Adding or renaming a case requires only its YAML change.
 - The package registers `app.open` for isolated setup and
   `app.expectRenameConflict` for FILE-03's transient response. Run
@@ -48,20 +51,16 @@ Midscene agent calls the configured model endpoint.
 ## Running Locally
 
 ```bash
-# 1. Start strict Rome E2E mock mode at the repository root
-pnpm start:web:mock:e2e
-# Served at http://localhost:3200; logs default to /tmp/rome-devmock.log
-
-# 2. Install test dependencies (first time only)
+# 1. Install test dependencies (first time only)
 cd tests/midscene
 npm install
 npx playwright install chromium
 
-# 3. Configure model credentials (first time only; .env is gitignored — never commit it)
+# 2. Configure model credentials (first time only; .env is gitignored — never commit it)
 cp .env.example .env
 # Edit .env and fill in MIDSCENE_MODEL_BASE_URL / API_KEY / NAME / FAMILY
 
-# 4. Run the full suite
+# 3. Run the full suite (setup starts and checks the mock server)
 npm test
 ```
 
@@ -142,8 +141,7 @@ capture screenshots or recalculate the Markdown contents.
   available through Actions.
 - Download reports from the workflow run's Artifacts section. Set
   `publish_pages` to `false` when only downloadable artifacts are needed.
-- Pull requests run secret-free harness and mock-browser boundary jobs. The
-  model-backed test job runs on the upstream `main` branch or by manual
+- Pull requests do not trigger this workflow. The model-backed test job runs on the upstream `main` branch or by manual
   dispatch in a fork using that fork's model secrets.
 
 ## GitHub Actions
@@ -154,10 +152,8 @@ nightly against the latest upstream `main` commit. Its daily schedule is
 It does not depend on the ordinary CI or Nightly workflow, and pushes do not
 trigger it. One visual test job runs all cases with `maxConcurrency: 1`.
 
-Path-filtered pull requests run only the secret-free harness and mock-browser
-boundary checks. They never receive billable model credentials or run the
-visual test job. See the [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
-for the path set and trust gates.
+Pull requests do not trigger this workflow. Mock network checks run in the
+Midscene project setup before model-backed cases.
 
 Manual `workflow_dispatch` runs the full suite on upstream `main`.
 A fork owner may manually dispatch a fork branch using that fork's model

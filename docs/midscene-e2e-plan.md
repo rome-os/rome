@@ -131,14 +131,10 @@ reasons behind them.
   suite nightly against the latest upstream `main` commit. Its daily schedule
   is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
   It does not depend on the ordinary CI or Nightly workflow.
-  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
-  itself, `tests/midscene/**`, `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
-  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
-  A matching PR runs two secret-free jobs. `harness-validation` installs the
-  package, type-checks it, validates YAML cases and tests
-  report scripts without starting a browser or model.
-  `mock-boundary-validation` starts the mock server and checks MSW, browser
-  HTTP, and WebSocket blocking without model credentials.
+  Pushes and pull requests do not trigger it. Project setup starts the mock
+  server, waits for readiness, and checks MSW, HTTP, and WebSocket isolation.
+  Setup failure prevents case execution. Teardown closes the browser and
+  stops the server started by this run. Type checks run in the test job.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
   Report publishing is enabled on upstream `main`. Fork publishing requires
@@ -157,16 +153,13 @@ reasons behind them.
   `packageManager` version) **before** `setup-node`, whose `cache: pnpm`
   requires pnpm to already exist on a clean runner. Product dependencies
   install with `pnpm install --frozen-lockfile --ignore-scripts`. The
-  `tests/midscene` package installs with `npm ci --strict-allow-scripts` against a lockfile whose
-  `resolved` URLs all point at the public `registry.npmjs.org`, followed by
-  `playwright install --with-deps chromium`.
-- **Secret handling and trust boundary**: the four `MIDSCENE_MODEL_*` values
-  come from repository secrets and are scoped only to the steps that actually
-  call the model (configuration check, connectivity preflight, test run).
-  Dependency installation and the mock server never see them. The job starts
-  with a non-empty check and a `/chat/completions` connectivity preflight
-  (90-second timeout) so a missing secret or bad endpoint fails in seconds
-  instead of burning the full 45-minute budget.
+  `tests/midscene` package installs with `npm install --strict-allow-scripts`,
+  followed by `playwright install --with-deps chromium`.
+- **Secret handling and trust boundary**: model settings are scoped to the
+  configuration check, `midscene-test model verify`, and test run steps.
+  Dependency installation never sees them. Project setup passes a separate
+  environment without model credentials to the mock server. Model verification
+  checks text responses, image understanding, and AI locate before the suite.
 - **Network reachability (important)**: the preflight dials
   `MIDSCENE_MODEL_BASE_URL` directly from the runner. Hosted GitHub runners can
   only reach public endpoints. If the model gateway lives on an intranet (for
@@ -183,12 +176,12 @@ reasons behind them.
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
   `.midscene/` test artifacts, including failed runs. A read-only job writes
-  results after aggregation without waiting for Pages approval or deployment.
+  results after report preparation without waiting for Pages approval or deployment.
   It shows total and per-project counts, abnormal cases first, and passed cases
   in a collapsed appendix. After Pages completes, a second Summary adds publication
   status and the native report, screenshot, and exact report-step links when available.
   If Pages fails or is skipped, results and artifact links remain available.
-  If aggregation fails, the final job recovers available trusted test data.
+  If report preparation fails, the final job recovers available trusted test data.
   Test and publication jobs do not write separate Summaries.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when

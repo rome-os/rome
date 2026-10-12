@@ -23,7 +23,7 @@ calling a model. The generated Midscene report lists the executed cases.
 - Model calls run from the Node-side Midscene agent, not from the page.
 - Every case gets a fresh BrowserContext, so MSW state is isolated between
   cases while client-side navigation within one case preserves mock writes.
-- CI pull requests run secret-free harness and mock-browser boundary checks. The model-backed
+- Pull requests do not trigger the workflow. The model-backed
   test job runs on the upstream `main` branch or by manual dispatch in a fork
   using that fork's model secrets.
 - Every model-backed run uploads its test reports, including failed runs.
@@ -33,13 +33,8 @@ calling a model. The generated Midscene report lists the executed cases.
 
 ## Local run
 
-Start the strict E2E mock build from the repository root:
-
-```bash
-pnpm start:web:mock:e2e
-```
-
-Then run the suite from another shell:
+Project setup starts or reuses the mock server and checks network isolation.
+Run the suite from the repository root:
 
 ```bash
 cd tests/midscene

@@ -30,10 +30,6 @@ const runs = (name, overrides = {}) => {
     },
     ...overrides,
   };
-  context.needs = {
-    "harness-validation": { outputs: { "upstream-repository": "rome-os/rome" } },
-    ...context.needs,
-  };
   // Evaluate the workflow's actual gate so a policy edit changes these cases.
   const expression = condition
     .replace(/needs\.([\w-]+)\./g, 'needs["$1"].')
@@ -56,19 +52,15 @@ const runs = (name, overrides = {}) => {
   );
 };
 
-test("trust gates share one upstream definition and fail closed without it", () => {
-  assert.equal((workflow.match(/rome-os\/rome/g) ?? []).length, 1);
-  for (const name of ["midscene", "prepare-pages"]) {
-    assert.equal(
-      runs(name, {
-        needs: { "harness-validation": { outputs: { "upstream-repository": "" } } },
-      }),
-      false,
-    );
-  }
+test("model runs retain upstream and fork trust gates without harness dependencies", () => {
+  assert.doesNotMatch(workflow, /harness-validation/);
+  assert.equal(runs("midscene", { github: { repository: "example/rome", ref: "refs/heads/main", event_name: "schedule" } }), false);
+  assert.equal(runs("midscene", { github: { repository: "example/rome", ref: "refs/heads/main", event_name: "workflow_dispatch" } }), true);
+  assert.equal(runs("midscene", { github: { repository: "rome-os/rome", ref: "refs/heads/feature", event_name: "workflow_dispatch" } }), false);
+  assert.equal(runs("midscene", { github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "pull_request" } }), false);
 });
 
-test("report aggregation does not depend on the publisher repository", () => {
+test("report preparation does not depend on the publisher repository", () => {
   for (const repository of ["rome-os/rome", "example/rome"]) {
     for (const result of ["success", "failure"]) {
       assert.equal(
@@ -116,7 +108,7 @@ test("Pages defaults to upstream main and requires explicit fork opt-in", () => 
   }
 });
 
-test("missing Pages configuration cannot block aggregation or trigger deployment", () => {
+test("missing Pages configuration cannot block preparation or trigger deployment", () => {
   const publication = job("prepare-pages");
   assert.match(publication, /id: pages\n        continue-on-error: true/);
   assert.match(publication, /enablement: false/);
@@ -181,7 +173,7 @@ test("results are visible before optional deployment and survive its cancellatio
   );
   assert.match(
     job("report-results"),
-    /name: Write the consolidated run Summary\n        if: always\(\)/,
+    /name: Write the run Summary\n        if: always\(\)/,
   );
   assert.match(job("report-summary"), /--require-report/);
   assert.doesNotMatch(job("midscene"), /strategy:|matrix\.|MIDSCENE_INCLUDE_TAGS/);
@@ -190,7 +182,7 @@ test("results are visible before optional deployment and survive its cancellatio
   assert.match(workflow, /cron: "0 6 \* \* \*"/);
 });
 
-test("the final Summary survives aggregation and publication failures or skips", () => {
+test("the final Summary survives preparation and publication failures or skips", () => {
   for (const reportResult of ["success", "failure", "skipped"]) {
     for (const publicationResult of ["success", "failure", "skipped", "cancelled"]) {
       assert.equal(
@@ -220,7 +212,7 @@ test("report downloads use the current run and expose no historical rebuild inpu
   for (const name of ["report-summary", "report-results"]) {
     assert.doesNotMatch(job(name), /run-id:|github-token:/);
   }
-  assert.match(job("report-results"), /name: Recover available test reports[\s\S]*?steps.combined-report.outcome != 'success'/);
+  assert.match(job("report-results"), /name: Recover available test reports[\s\S]*?steps.prepared-report.outcome != 'success'/);
 });
 
 test("model steps use environment variables and keep the API key in secrets", () => {
@@ -247,4 +239,10 @@ test("uses native result.md and only downloads the full-suite artifact", () => {
     assert.match(content, /name: midscene-results/);
   }
   assert.match(job("report-summary"), /--require-report/);
+});
+
+test("project setup owns mock startup and boundary checks", () => {
+  assert.doesNotMatch(workflow, /mock-boundary-validation|check:browser-boundary|nohup|name: Start Rome mock server/);
+  assert.doesNotMatch(workflow, /^  pull_request:/m);
+  assert.match(job("midscene"), /npm test/);
 });
