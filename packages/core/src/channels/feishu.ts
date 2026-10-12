@@ -23,6 +23,10 @@ import type {
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
+/** How long a group message waits on its name lookup. */
+const CHAT_NAME_TIMEOUT_MS = 5_000;
+/** How long a failed name lookup stands before the next message retries it. */
+const CHAT_NAME_RETRY_MS = 10 * 60_000;
 /** Feishu content types whose bot mention can be the whole message. */
 const TEXT_BEARING_CONTENT_TYPES: ReadonlySet<string> = new Set(["text", "post"]);
 
@@ -125,8 +129,8 @@ export class FeishuAdapter {
     string,
     { id: string; displayName: string; kind: "group" | "channel" }
   >();
-  /** Group names fetched from Feishu, keyed by chat id. A failed lookup is
-   *  dropped so the next message retries it. */
+  /** Group names fetched from Feishu, keyed by chat id. A failed lookup
+   *  stands for {@link CHAT_NAME_RETRY_MS} before a message retries it. */
   private readonly chatNames = new Map<string, Promise<string | undefined>>();
   /** Unsubscribe callbacks from channel.on(), cleared on stop() so handlers
    *  don't accumulate if the adapter is ever started again. */
@@ -338,17 +342,27 @@ export class FeishuAdapter {
   private resolveChatName(chatId: string): Promise<string | undefined> {
     const cached = this.chatNames.get(chatId);
     if (cached) return cached;
-    const pending = this.channel.getChatInfo(chatId).then(
-      (info) => info.name?.trim() || undefined,
-      (err) => {
-        this.chatNames.delete(chatId);
-        log.warn("failed to fetch Feishu chat name", {
-          chatId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return undefined;
-      },
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("chat name lookup timed out")),
+        CHAT_NAME_TIMEOUT_MS,
+      );
+    });
+    const pending = Promise.race([this.channel.getChatInfo(chatId), timeout])
+      .then(
+        (info) => info.name?.trim() || undefined,
+        (err) => {
+          log.warn("failed to fetch Feishu chat name", {
+            chatId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          // A missing permission fails every lookup, so wait before asking again.
+          setTimeout(() => this.chatNames.delete(chatId), CHAT_NAME_RETRY_MS).unref?.();
+          return undefined;
+        },
+      )
+      .finally(() => clearTimeout(timer));
     this.chatNames.set(chatId, pending);
     return pending;
   }

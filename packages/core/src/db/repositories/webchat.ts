@@ -959,7 +959,7 @@ export class WebChatRepository {
         : null;
     const existing = await this.findChannelConversation(input.channel, input.threadId);
     if (existing && input.threadName) {
-      await this.refreshChannelConversationName(existing.id, input, input.threadName);
+      await this.backfillChannelConversationName(existing.id, input, input.threadName);
     }
     if (existing) {
       if (!parent) return existing;
@@ -1301,10 +1301,10 @@ export class WebChatRepository {
       );
   }
 
-  /** Record the provider's current name for a conversation. The session name
-   *  follows it only while it still shows the provider name or the address
-   *  fallback, so a guardian's rename survives. */
-  private async refreshChannelConversationName(
+  /** Fill in a conversation's name when the row holds only its address, as
+   *  rows created before the channel reported a name do. A name already
+   *  recorded is kept, so email subjects and guardian renames stay put. */
+  private async backfillChannelConversationName(
     id: string,
     address: { channel: string; threadId: string },
     threadName: string,
@@ -1314,14 +1314,19 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(eq(romeSessions.id, id))
       .limit(1);
-    if (!row || row.sourceThreadName === threadName) return;
-    const followsProvider =
-      row.name === row.sourceThreadName || row.name === `${address.channel}:${address.threadId}`;
+    if (!row) return;
+    const placeholders = new Set([address.threadId, `${address.channel}:${address.threadId}`]);
+    const sourceMissing = row.sourceThreadName === null || placeholders.has(row.sourceThreadName);
+    const nameMissing = placeholders.has(row.name);
+    if (!sourceMissing && !nameMissing) return;
     await this.db
       .update(romeSessions)
-      .set({ sourceThreadName: threadName, ...(followsProvider ? { name: threadName } : {}) })
+      .set({
+        ...(sourceMissing ? { sourceThreadName: threadName } : {}),
+        ...(nameMissing ? { name: threadName } : {}),
+      })
       .where(eq(romeSessions.id, id));
-    if (followsProvider) this.emitSessionNameChanged(id, threadName);
+    if (nameMissing) this.emitSessionNameChanged(id, threadName);
   }
 
   private async findChannelConversation(

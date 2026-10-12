@@ -271,7 +271,7 @@ describe("WebChatRepository", () => {
       expect(parentRows[0]?.agentName).toBe("release-agent");
     });
 
-    it("follows the provider's conversation name until the guardian renames it", async () => {
+    it("backfills a conversation saved under its address, then keeps the name", async () => {
       const address = { channel: "feishu", threadId: "oc_chat", agentName: "main" };
       const { id } = await repo.ensureChannelConversation(address);
       const read = async () =>
@@ -286,14 +286,40 @@ describe("WebChatRepository", () => {
       expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
 
       await repo.ensureChannelConversation({ ...address, threadName: "Design Guild" });
-      expect(await read()).toEqual({ name: "Design Guild", sourceThreadName: "Design Guild" });
+      expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
+    });
 
-      await repo.updateSessionName(id, "My design chat");
-      await repo.ensureChannelConversation({ ...address, threadName: "Design Crew" });
-      expect(await read()).toEqual({ name: "My design chat", sourceThreadName: "Design Crew" });
+    it("backfills a row the settings page saved under the bare chat id", async () => {
+      const id = channelConversationId("feishu", "oc_chat");
+      await repo.ensureRomeSession({
+        id,
+        name: "oc_chat",
+        type: "channel",
+        agentName: null,
+        sourceChannel: "feishu",
+        sourceThreadId: "oc_chat",
+        sourceThreadName: "oc_chat",
+      });
 
-      await repo.ensureChannelConversation(address);
-      expect(await read()).toEqual({ name: "My design chat", sourceThreadName: "Design Crew" });
+      await repo.ensureChannelConversation({
+        channel: "feishu",
+        threadId: "oc_chat",
+        threadName: "Design Team",
+        agentName: "main",
+      });
+
+      const [row] = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+      expect(row).toMatchObject({ name: "Design Team", sourceThreadName: "Design Team" });
+    });
+
+    it("keeps an email thread named after its first subject", async () => {
+      const address = { channel: "email", threadId: "thread-1", agentName: "main" };
+      const { id } = await repo.ensureChannelConversation({ ...address, threadName: "Budget" });
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Re: Budget" });
+
+      const [row] = await testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id));
+      expect(row).toMatchObject({ name: "Budget", sourceThreadName: "Budget" });
     });
 
     it("deduplicates webhook retries within a conversation but not across conversations", async () => {

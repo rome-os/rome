@@ -291,22 +291,45 @@ describe("FeishuAdapter", () => {
     expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
   });
 
-  it("falls back to the chat id when the name lookup fails, and retries it", async () => {
-    channel.chatInfo = async () => {
-      throw new Error("permission denied");
-    };
-    await channel.emit({ chatType: "group", mentionedBot: true });
+  it("falls back to the chat id when the name lookup fails, and retries it later", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async () => {
+        throw new Error("permission denied");
+      };
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
 
-    expect(captured).toHaveLength(1);
-    expect(captured[0].thread).toStrictEqual({ kind: "group" });
-    expect(adapter.listObservedConversations()).toStrictEqual([
-      { id: "oc_chat", displayName: "oc_chat", kind: "group" },
-    ]);
+      expect(captured).toHaveLength(2);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+      expect(adapter.listObservedConversations()).toStrictEqual([
+        { id: "oc_chat", displayName: "oc_chat", kind: "group" },
+      ]);
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat"]);
 
-    channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
-    await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_789" });
 
-    expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+      expect(adapter.listObservedConversations()[0]?.displayName).toBe("Design Team");
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
+  it("stops waiting on a name lookup that does not answer", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = () => new Promise(() => {});
+      const delivered = channel.emit({ chatType: "group", mentionedBot: true });
+      await rs.advanceTimersByTimeAsync(5_000);
+      await delivered;
+
+      expect(captured).toHaveLength(1);
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("carries the replied-to message and a fallback sender name", async () => {
