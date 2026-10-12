@@ -346,10 +346,10 @@ export class FeishuAdapter {
     const cached = this.chatNames.get(chatId);
     if (cached) return cached;
     const lookup = this.channel.getChatInfo(chatId).then((info) => {
-      const name = info.name?.trim() || undefined;
-      if (name) {
-        this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
-      }
+      const name = info.name?.trim();
+      // The SDK reports some failed calls as a chat with no name.
+      if (!name) throw new Error("Feishu returned no chat name");
+      this.observedConversations.set(chatId, { id: chatId, displayName: name, kind: "group" });
       return name;
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -372,7 +372,7 @@ export class FeishuAdapter {
         // A lookup that answers after the timeout still names later messages.
         lookup.then(
           (name) => {
-            if (name && this.chatNames.get(chatId) === pending) {
+            if (this.chatNames.get(chatId) === pending) {
               this.chatNames.set(chatId, Promise.resolve(name));
             }
           },

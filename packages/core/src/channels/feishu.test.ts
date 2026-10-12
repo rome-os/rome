@@ -317,6 +317,24 @@ describe("FeishuAdapter", () => {
     }
   });
 
+  it("retries a lookup that answered without a name", async () => {
+    rs.useFakeTimers();
+    try {
+      channel.chatInfo = async (chatId) => ({ chatId });
+      await channel.emit({ chatType: "group", mentionedBot: true });
+      expect(captured[0].thread).toStrictEqual({ kind: "group" });
+
+      channel.chatInfo = async (chatId) => ({ chatId, name: "Design Team" });
+      rs.advanceTimersByTime(10 * 60_000);
+      await channel.emit({ chatType: "group", mentionedBot: true, messageId: "om_456" });
+
+      expect(captured[1].thread).toStrictEqual({ kind: "group", name: "Design Team" });
+      expect(channel.chatInfoCalls).toStrictEqual(["oc_chat", "oc_chat"]);
+    } finally {
+      rs.useRealTimers();
+    }
+  });
+
   it("stops waiting on a name lookup that does not answer", async () => {
     rs.useFakeTimers();
     try {
