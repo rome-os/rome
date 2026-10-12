@@ -340,6 +340,8 @@ decide whether to load the skill.
 }
 ```
 
+Before adding a dependency with a build script, read `system:custom-dependencies`.
+
 ### The `rome` CLI
 
 `rome` is the app build CLI shipped by `@rome-os/app-web-sdk`. From `<app-root>`:

@@ -40,7 +40,10 @@ export function useConversationSends(personId: string, serverMessages: readonly 
     setRequests((current) =>
       current.map((request) =>
         request.id === id
-          ? { ...request, message: { ...request.message, state: "sending", error: null } }
+          ? {
+              ...request,
+              message: { ...request.message, state: "sending", error: null, dismissable: false },
+            }
           : request,
       ),
     );
@@ -65,7 +68,10 @@ export function useConversationSends(personId: string, serverMessages: readonly 
       setRequests((current) =>
         current.map((request) =>
           request.id === id
-            ? { ...request, message: { ...request.message, state: "failed", error } }
+            ? {
+                ...request,
+                message: { ...request.message, state: "failed", error, dismissable: true },
+              }
             : request,
         ),
       );
@@ -87,6 +93,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
         state: "sending",
         ref: null,
         error: null,
+        dismissable: false,
       };
       setRequests((current) => [{ id, message }, ...current]);
       void attempt(id, account, text);

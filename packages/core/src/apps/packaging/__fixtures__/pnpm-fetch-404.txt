@@ -1,0 +1,7 @@
+[ERR_PNPM_FETCH_404] GET https://registry.npmjs.org/@rome-os%2Fdoes-not-exist-886: Not Found - 404
+
+This error happened while installing a direct dependency of /tmp/fetch404
+
+@rome-os/does-not-exist-886 is not in the npm registry, or you have no permission to fetch it.
+
+No authorization header was set for the request.

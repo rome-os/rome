@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { installIosVisualViewport, setIosKeyboardTop } from "./ios-visual-viewport";
 
 /**
  * With the on-screen keyboard open, the chat composer sits fully above it, the
@@ -86,33 +87,6 @@ test("Android Chrome: the page shrinking to the keyboard keeps the composer and 
     .toBeCloseTo(before.composerBottom, 0);
 });
 
-// Installed before the bundle runs, so the dashboard tracks this viewport.
-function installIosVisualViewport(page: Page) {
-  return page.addInitScript(() => {
-    // Reads the layout viewport live: at document start it is still the 980px
-    // default page, before the viewport tag narrows it to the phone.
-    let keyboardTop: number | null = null;
-    const fake = new EventTarget();
-    Object.defineProperties(fake, {
-      height: { get: () => keyboardTop ?? window.innerHeight },
-      width: { get: () => window.innerWidth },
-      pageTop: { get: () => window.scrollY },
-      pageLeft: { get: () => window.scrollX },
-      offsetTop: { value: 0 },
-      offsetLeft: { value: 0 },
-      scale: { value: 1 },
-    });
-    window.addEventListener("resize", () => fake.dispatchEvent(new Event("resize")));
-    Object.defineProperty(window, "visualViewport", { configurable: true, value: fake });
-    (window as unknown as { setKeyboardTop: (top: number | null) => void }).setKeyboardTop = (
-      top,
-    ) => {
-      keyboardTop = top;
-      fake.dispatchEvent(new Event("resize"));
-    };
-  });
-}
-
 async function expectIosKeyboardRoundTrip(
   page: Page,
   keyboardTop: number,
@@ -130,18 +104,14 @@ async function expectIosKeyboardRoundTrip(
     homeIndicatorInset + 16,
   );
 
-  await page.evaluate((top) => {
-    (window as unknown as { setKeyboardTop: (top: number) => void }).setKeyboardTop(top);
-  }, keyboardTop);
+  await setIosKeyboardTop(page, keyboardTop);
   await expect.poll(async () => (await measure(page)).composerBottom).toBeLessThan(keyboardTop);
   expectComposerAboveKeyboard(await measure(page), keyboardTop);
   // The layout viewport kept its full height, as on iOS, and the page did not:
   // nothing is left below the composer for iOS to pan to.
   expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(keyboardTop);
 
-  await page.evaluate(() => {
-    (window as unknown as { setKeyboardTop: (top: null) => void }).setKeyboardTop(null);
-  });
+  await setIosKeyboardTop(page, null);
   await expect
     .poll(async () => (await measure(page)).composerBottom)
     .toBeCloseTo(before.composerBottom, 0);

@@ -152,46 +152,141 @@ function storageKey(sessionId: string): string {
 
 function readStorage(sessionId: string | null): WidgetPlacement[] {
   if (!sessionId) return [];
+  return readStoredLayout(sessionId) ?? [];
+}
+
+// Returns null when the session has no stored layout or it does not parse.
+function readStoredLayout(sessionId: string): WidgetPlacement[] | null {
   try {
     const raw = localStorage.getItem(storageKey(sessionId));
-    if (!raw) return [];
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-function writeStorage(sessionId: string | null, layout: WidgetPlacement[]) {
-  if (!sessionId) return;
+function storedLayoutJson(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(storageKey(sessionId));
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(sessionId: string | null, layout: WidgetPlacement[]): boolean {
+  if (!sessionId) return false;
   try {
     localStorage.setItem(storageKey(sessionId), JSON.stringify(layout));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function notify() {
   for (const l of listeners) l();
 }
 
+// Marks a session whose stored layout the server has not acknowledged. Kept in
+// localStorage beside the layout so a reload or another tab still treats the
+// local copy as newer than the server's.
+const UNSYNCED_PREFIX = "rome:free-layout-unsynced:";
+
+function hasUnsyncedLayout(sessionId: string): boolean {
+  try {
+    return localStorage.getItem(`${UNSYNCED_PREFIX}${sessionId}`) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function setUnsyncedLayout(sessionId: string, unsynced: boolean) {
+  try {
+    if (unsynced) localStorage.setItem(`${UNSYNCED_PREFIX}${sessionId}`, "1");
+    else localStorage.removeItem(`${UNSYNCED_PREFIX}${sessionId}`);
+  } catch {}
+}
+
+// A session's save in flight. `next` holds the newest layout still to send, so
+// edits made during a PUT coalesce into one later PUT. `stored` says whether
+// `next` reached localStorage.
+interface LayoutSave {
+  next: WidgetPlacement[] | null;
+  stored: boolean;
+}
+
+const layoutSaves = new Map<string, LayoutSave>();
+const LAYOUT_SAVE_TIMEOUT_MS = 15_000;
+
+// `stored` says whether `layout` reached localStorage. When the write failed,
+// for example on a full quota, the stored copy is older than `layout`, so the
+// marker is cleared rather than set to keep a later load from resending it.
+function saveLayout(sessionId: string, layout: WidgetPlacement[], stored: boolean) {
+  setUnsyncedLayout(sessionId, stored);
+  const pending = layoutSaves.get(sessionId);
+  if (pending) {
+    pending.next = layout;
+    pending.stored = stored;
+    return;
+  }
+  const save: LayoutSave = { next: layout, stored };
+  layoutSaves.set(sessionId, save);
+  void drainLayoutSaves(sessionId, save);
+}
+
+// Sends one PUT at a time per session, so this tab never sends an older layout
+// after a newer one. A timed-out PUT can still land after the next one if the
+// server stalls past the timeout and then applies it. When the PUT carrying the
+// newest layout succeeds, the unsynced marker clears only if the stored layout
+// still matches it. A different stored layout came from another tab, and this
+// PUT may have landed after that tab's, so the marker is set to make a later
+// load resend it.
+async function drainLayoutSaves(sessionId: string, save: LayoutSave) {
+  while (save.next) {
+    const layout = save.next;
+    const stored = save.stored;
+    save.next = null;
+    let ok = false;
+    try {
+      const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        // `keepalive` only for teardown-time flushes (document hidden /
+        // unloading), where a normal fetch would be cancelled with the page.
+        // Interactive saves stay plain fetches so they aren't subject to
+        // keepalive's 64 KB cross-request body cap. A teardown save queued
+        // behind an in-flight PUT is not sent before the page unloads, and its
+        // unsynced marker makes the next load send it.
+        keepalive: typeof document !== "undefined" && document.visibilityState === "hidden",
+        // A PUT that never settles would hold every later save for the session.
+        signal: AbortSignal.timeout(LAYOUT_SAVE_TIMEOUT_MS),
+        body: JSON.stringify({ layout }),
+      });
+      ok = res.ok;
+    } catch {}
+    if (ok && !save.next) {
+      // A failed storage write leaves this tab's older layout stored, so it
+      // must not be marked for resending.
+      if (storedLayoutJson(sessionId) === JSON.stringify(layout)) {
+        setUnsyncedLayout(sessionId, false);
+      } else if (stored) {
+        setUnsyncedLayout(sessionId, true);
+      }
+    }
+  }
+  layoutSaves.delete(sessionId);
+}
+
 function persist(next: WidgetPlacement[]) {
   layoutRevisions.set(activeSessionId, (layoutRevisions.get(activeSessionId) ?? 0) + 1);
   reconcileToolView(next);
   snapshot = next;
-  writeStorage(activeSessionId, next);
+  const stored = writeStorage(activeSessionId, next);
   notify();
-  if (activeSessionId) {
-    void fetch(`/api/chat/sessions/${encodeURIComponent(activeSessionId)}/layout`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      // `keepalive` only for teardown-time flushes (document hidden /
-      // unloading), where a normal fetch would be cancelled with the page.
-      // Interactive saves stay plain fetches so they aren't subject to
-      // keepalive's 64 KB cross-request body cap.
-      keepalive: typeof document !== "undefined" && document.visibilityState === "hidden",
-      body: JSON.stringify({ layout: next }),
-    }).catch(() => {});
-  }
+  if (activeSessionId) saveLayout(activeSessionId, next, stored);
 }
 
 function subscribe(listener: () => void) {
@@ -305,8 +400,8 @@ const appliedAgentPlacements = new Map<string, string>();
  * stream replays each app's latest placement, and applying it again would
  * remount the widget and drop the guardian's navigation inside it, so a replay
  * is skipped while the tile it mounted is still in the layout. If the tile is
- * gone, for example because a layout load replaced a save that never reached
- * the server, the replay places it again. A placement without an id always
+ * gone, for example because a layout load brought in a copy saved on another
+ * device, the replay places it again. A placement without an id always
  * applies.
  */
 export function applyAgentPlacement(
@@ -430,27 +525,40 @@ export function updatePlacementLink(
   route: string | undefined,
   params: Record<string, string | number | boolean> | undefined,
 ): void {
-  const current = getSnapshot();
-  const target = current.find((p) => p.id === placementId);
-  if (!target || target.type !== "app") return;
-  const nextParams = params && Object.keys(params).length > 0 ? params : undefined;
-  if (
-    (target.route ?? undefined) === (route ?? undefined) &&
-    paramsEqual(target.params, nextParams)
-  ) {
-    return;
-  }
-  persist(
-    current.map((p) => {
-      if (p.id !== placementId) return p;
-      const next: WidgetPlacement = { ...p };
-      if (route !== undefined) next.route = route;
-      else delete next.route;
-      if (nextParams) next.params = nextParams;
-      else delete next.params;
-      return next;
-    }),
-  );
+  updatePlacementLinks([{ placementId, route, params }]);
+}
+
+export interface PlacementLink {
+  placementId: string;
+  route: string | undefined;
+  params: Record<string, string | number | boolean> | undefined;
+}
+
+/**
+ * `updatePlacementLink` for several tiles in one save. A teardown flush must
+ * use it: only the first PUT of a burst is sent before the page unloads, and
+ * later ones wait behind it.
+ */
+export function updatePlacementLinks(links: PlacementLink[]): void {
+  const byId = new Map(links.map((link) => [link.placementId, link]));
+  let changed = false;
+  const next = getSnapshot().map((p) => {
+    const link = byId.get(p.id);
+    if (!link || p.type !== "app") return p;
+    const { route } = link;
+    const nextParams = link.params && Object.keys(link.params).length > 0 ? link.params : undefined;
+    if ((p.route ?? undefined) === (route ?? undefined) && paramsEqual(p.params, nextParams)) {
+      return p;
+    }
+    changed = true;
+    const updated: WidgetPlacement = { ...p };
+    if (route !== undefined) updated.route = route;
+    else delete updated.route;
+    if (nextParams) updated.params = nextParams;
+    else delete updated.params;
+    return updated;
+  });
+  if (changed) persist(next);
 }
 
 /**
@@ -506,7 +614,24 @@ export function setActiveSession(sessionId: string | null) {
   notify();
 }
 
+/**
+ * Replace the session's cached layout with the server's copy. When the server
+ * has not acknowledged the cached layout, keep it and send it again instead,
+ * so a failed save is retried rather than lost. Never rejects.
+ */
 export async function loadLayoutForSession(sessionId: string): Promise<void> {
+  if (hasUnsyncedLayout(sessionId)) {
+    // A save still in flight already carries the newest layout.
+    if (layoutSaves.has(sessionId)) return;
+    const stored = readStoredLayout(sessionId);
+    if (stored) {
+      saveLayout(sessionId, stored, true);
+      return;
+    }
+    // With no readable stored layout there is nothing to resend, and sending an
+    // empty layout would erase the server's copy.
+    setUnsyncedLayout(sessionId, false);
+  }
   const revision = layoutRevisions.get(sessionId);
   try {
     const res = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/layout`, {
@@ -516,8 +641,9 @@ export async function loadLayoutForSession(sessionId: string): Promise<void> {
     const data = (await res.json()) as { layout?: unknown };
     if (!Array.isArray(data.layout)) return;
     const layout = data.layout as WidgetPlacement[];
-    // A delayed load must not erase tools opened or closed since it started.
-    if (layoutRevisions.get(sessionId) !== revision) return;
+    // A delayed load must not erase tools opened or closed since it started,
+    // or an edit another tab stored that the server has not acknowledged.
+    if (layoutRevisions.get(sessionId) !== revision || hasUnsyncedLayout(sessionId)) return;
     writeStorage(sessionId, layout);
     if (sessionId === activeSessionId) {
       snapshot = layout;

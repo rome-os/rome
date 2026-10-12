@@ -1352,6 +1352,11 @@ export interface OutboxMessage {
   /** Why the channel refused, for a `failed` row. Provider text, shown as
    *  detail beneath copy the dashboard owns. */
   error: string | null;
+  /** Whether `DELETE /api/people/:id/outbox/:messageId` would take this row
+   *  when it was read. The server answers it from inputs it does not send, so
+   *  a client offers Discard from this and does not re-derive it. Always
+   *  false on a replayed send whose row has already left the outbox. */
+  dismissable: boolean;
 }
 
 /** `GET /api/people/:id/outbox` — every send of this person's that has not

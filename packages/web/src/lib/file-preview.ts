@@ -28,6 +28,12 @@ export function getTextPreviewKind(path: string, mimeType: string): TextPreviewK
   return null;
 }
 
+/** Workbooks the file browser previews as a read-only grid. The server lists
+ *  them as plain binary files, so the extension is the signal. */
+export function isSpreadsheetPath(path: string): boolean {
+  return ["xlsx", "xls", "ods"].includes(getFileExtension(path));
+}
+
 export function getDelimitedSeparator(path: string, mimeType: string): "," | "\t" {
   const extension = getFileExtension(path);
   return extension === "tsv" || mimeType === "text/tab-separated-values" ? "\t" : ",";

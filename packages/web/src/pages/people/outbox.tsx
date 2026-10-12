@@ -4,7 +4,6 @@ import { CircleAlert, Clock, RotateCcw, X } from "lucide-react";
 import type { OutboxMessage } from "@rome/api-types/people";
 import { Button } from "@/components/ui/button";
 import { ChannelPill } from "./channel-meta";
-import { isDismissable } from "./send-model";
 import { usePeopleWrites } from "./use-writes";
 import type { WriteOutcome } from "./writes";
 
@@ -78,11 +77,14 @@ export function Outbox({
  * set. Retry is for a `failed` row alone — the only state a refusal can be tried
  * again from. Discard reaches further: a row Rome accepted and never saw arrive
  * is stuck once the landing window has passed, and on a channel with no mirror
- * of its own, dismissing it is the only way it ever leaves.
+ * of its own, dismissing it is the only way it ever leaves. Which rows those are
+ * is the server's answer, read off `dismissable`, because the window runs from a
+ * time the wire does not carry. The poll keeps an in-flight row fresh, so one
+ * crossing the window grows its Discard within a tick of doing so.
  *
  * A 404 is not reported. It means the row is not what this page thought it was
- * — already discarded, claimed by a retry that won, or not yet stale enough to
- * dismiss — and the outbox read that follows says which. Alarming the loser of a
+ * — already discarded, or claimed by a retry that won — and the outbox read
+ * that follows says which. Alarming the loser of a
  * double-click would be reporting a failure for a message that is being sent.
  *
  * Anything else is. A gesture that never reached the server, or that the server
@@ -129,9 +131,6 @@ function OutboxRowActions({
     };
 
   const failed = message.state === "failed";
-  // The poll keeps this row re-rendering while anything is in flight, so one
-  // crossing the window grows its Discard within a tick of doing so.
-  const dismissable = isDismissable(message, Math.floor(Date.now() / 1000));
 
   // Capped, because a channel's error can be a sentence, and an uncapped
   // auto column would take the message column's width.
@@ -169,7 +168,7 @@ function OutboxRowActions({
           {t("send.retry")}
         </Button>
       )}
-      {dismissable && (
+      {message.dismissable && (
         <Button
           type="button"
           variant="ghost"
