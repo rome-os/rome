@@ -257,10 +257,11 @@ export class FeishuAdapter {
     const addressing: MessageAddressing =
       threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
     const directedStop = addressing !== "ambient" && isStopCommand(text);
+    const chatName = threadType === "group" ? await this.resolveChatName(m.chatId) : undefined;
     if (threadType === "group") {
       this.observedConversations.set(m.chatId, {
         id: m.chatId,
-        displayName: (await this.resolveChatName(m.chatId)) ?? m.chatId,
+        displayName: chatName ?? m.chatId,
         kind: "group",
       });
     }
@@ -302,7 +303,10 @@ export class FeishuAdapter {
       attachments: [],
       timestamp: new Date(m.createTime),
       ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
-      thread: { kind: threadType === "private" ? "dm" : "group" },
+      thread: {
+        kind: threadType === "private" ? "dm" : "group",
+        ...(chatName ? { name: chatName } : {}),
+      },
       addressing,
       raw: m.raw ?? m,
     };

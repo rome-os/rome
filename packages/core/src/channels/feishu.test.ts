@@ -277,7 +277,7 @@ describe("FeishuAdapter", () => {
 
   it("maps group chat type to a group thread", async () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
-    expect(captured[0].thread).toStrictEqual({ kind: "group" });
+    expect(captured[0].thread).toStrictEqual({ kind: "group", name: "Design Team" });
     expect(captured[0].addressing).toBe("mention");
   });
 
@@ -298,6 +298,7 @@ describe("FeishuAdapter", () => {
     await channel.emit({ chatType: "group", mentionedBot: true });
 
     expect(captured).toHaveLength(1);
+    expect(captured[0].thread).toStrictEqual({ kind: "group" });
     expect(adapter.listObservedConversations()).toStrictEqual([
       { id: "oc_chat", displayName: "oc_chat", kind: "group" },
     ]);

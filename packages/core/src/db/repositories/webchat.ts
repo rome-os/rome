@@ -958,6 +958,9 @@ export class WebChatRepository {
           })
         : null;
     const existing = await this.findChannelConversation(input.channel, input.threadId);
+    if (existing && input.threadName) {
+      await this.refreshChannelConversationName(existing.id, input, input.threadName);
+    }
     if (existing) {
       if (!parent) return existing;
       // A native thread has its own model session but not its own routing
@@ -1296,6 +1299,29 @@ export class WebChatRepository {
           isNull(romeAgentMessages.contextInjectedTurnId),
         ),
       );
+  }
+
+  /** Record the provider's current name for a conversation. The session name
+   *  follows it only while it still shows the provider name or the address
+   *  fallback, so a guardian's rename survives. */
+  private async refreshChannelConversationName(
+    id: string,
+    address: { channel: string; threadId: string },
+    threadName: string,
+  ): Promise<void> {
+    const [row] = await this.db
+      .select({ name: romeSessions.name, sourceThreadName: romeSessions.sourceThreadName })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, id))
+      .limit(1);
+    if (!row || row.sourceThreadName === threadName) return;
+    const followsProvider =
+      row.name === row.sourceThreadName || row.name === `${address.channel}:${address.threadId}`;
+    await this.db
+      .update(romeSessions)
+      .set({ sourceThreadName: threadName, ...(followsProvider ? { name: threadName } : {}) })
+      .where(eq(romeSessions.id, id));
+    if (followsProvider) this.emitSessionNameChanged(id, threadName);
   }
 
   private async findChannelConversation(

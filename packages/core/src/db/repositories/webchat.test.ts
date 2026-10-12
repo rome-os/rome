@@ -271,6 +271,31 @@ describe("WebChatRepository", () => {
       expect(parentRows[0]?.agentName).toBe("release-agent");
     });
 
+    it("follows the provider's conversation name until the guardian renames it", async () => {
+      const address = { channel: "feishu", threadId: "oc_chat", agentName: "main" };
+      const { id } = await repo.ensureChannelConversation(address);
+      const read = async () =>
+        (
+          await testDb.db
+            .select({ name: romeSessions.name, sourceThreadName: romeSessions.sourceThreadName })
+            .from(romeSessions)
+            .where(eq(romeSessions.id, id))
+        )[0];
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Design Team" });
+      expect(await read()).toEqual({ name: "Design Team", sourceThreadName: "Design Team" });
+
+      await repo.ensureChannelConversation({ ...address, threadName: "Design Guild" });
+      expect(await read()).toEqual({ name: "Design Guild", sourceThreadName: "Design Guild" });
+
+      await repo.updateSessionName(id, "My design chat");
+      await repo.ensureChannelConversation({ ...address, threadName: "Design Crew" });
+      expect(await read()).toEqual({ name: "My design chat", sourceThreadName: "Design Crew" });
+
+      await repo.ensureChannelConversation(address);
+      expect(await read()).toEqual({ name: "My design chat", sourceThreadName: "Design Crew" });
+    });
+
     it("deduplicates webhook retries within a conversation but not across conversations", async () => {
       const first = await repo.ensureChannelConversation({
         channel: "telegram",
