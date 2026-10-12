@@ -13,7 +13,7 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { findRecordedConversation, type SessionConversation } from "./agent-trace-recorder.js";
+import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,

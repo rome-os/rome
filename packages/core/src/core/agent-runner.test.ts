@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { sessions } from "../db/schema.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import type { RecordedConversation } from "./agent-trace-recorder.js";
+import type { RecordedConversation } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";

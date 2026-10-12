@@ -11,11 +11,11 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
-  findRecordedConversation,
   recordAgentTraceBestEffort,
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
+import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 

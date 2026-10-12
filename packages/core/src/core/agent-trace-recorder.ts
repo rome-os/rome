@@ -14,6 +14,7 @@ import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
+import type { SessionConversation } from "./session-conversation.js";
 
 const log = createLogger("agent-trace-recorder");
 
@@ -69,48 +70,6 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   }
   return `action:${input.channelThreadKey ?? input.agentName}:${input.agentName || "main"}`;
 }
-
-export interface RecordedConversation {
-  id: string;
-  name: string;
-  type: RomeSessionType;
-}
-
-/**
- * The conversation a session's row recorded, when it still exists. A deleted
- * conversation leaves its id on the row, and recording under that id would
- * recreate it.
- */
-export async function findRecordedConversation(
-  webchatRepo: WebChatRepository | undefined,
-  conversationId: string | undefined,
-): Promise<RecordedConversation | undefined> {
-  if (!webchatRepo || !conversationId) return undefined;
-  let conversation;
-  try {
-    conversation = await webchatRepo.getSession(conversationId);
-  } catch (err) {
-    // The lookup only refines where turns record, so it must not fail the session.
-    log.warn("failed to read a session's recorded conversation", {
-      conversationId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return undefined;
-  }
-  if (!conversation) return undefined;
-  const { id, name, type } = conversation;
-  return { id, name, type: type as RomeSessionType };
-}
-
-/**
- * The conversation a session serves. A `named` one was passed in by the
- * caller that opened the session. A `recorded` one is the conversation the
- * session's row stored, looked up only when no caller named one and only if it
- * still exists.
- */
-export type SessionConversation =
-  | { origin: "named"; id: string }
-  | ({ origin: "recorded" } & RecordedConversation);
 
 export interface TurnConversationInput extends RomeSessionIdInput {
   /** The conversation the session serves, as it stood when the turn started. */
