@@ -238,7 +238,7 @@ const tagList = (raw: string | undefined): string[] =>
     .filter(Boolean);
 
 export default defineTestProject<ProjectContext>({
-  test: { maxConcurrency: 1, testTimeout: 8 * 60_000 },
+  test: { maxConcurrency: 2, testTimeout: 8 * 60_000 },
   projects: [
     {
       name: process.env.MIDSCENE_PROJECT_NAME ?? "web",
