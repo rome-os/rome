@@ -7,18 +7,18 @@
 // guardian gets every topic, and a visitor on the dashboard allow-list gets the
 // chat topics but not `apps.catalog`.
 //
-// Protocol, JSON text frames:
-//   client → server  {type:"subscribe", topic}  {type:"unsubscribe", topic}
-//   server → client  {type:"subscribed", topic}  {type:"event", topic, event, data}
-//                    {type:"error", topic?, message}
-// `subscribed` precedes every event of that subscription, including the
-// snapshot `chat.status` replays. Subscribing to a topic the socket already
-// holds is a no-op. An `error` with a topic means that subscription is gone,
-// and the client may ask for it again on a later socket.
+// The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
+// the snapshot `chat.status` replays too.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { z } from "zod";
+import {
+  APP_CATALOG_TOPIC,
+  CHAT_SESSION_TOPIC_PREFIX,
+  CHAT_STATUS_TOPIC,
+  liveEventsClientMessageSchema,
+  type LiveEventsServerMessage,
+} from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
 import type { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
@@ -47,9 +47,9 @@ const PING_INTERVAL_MS = 25_000;
 // A tab that stops reading would otherwise grow this buffer without bound. The
 // client resyncs on reconnect, so closing it loses nothing.
 const MAX_BUFFERED_BYTES = 1024 * 1024;
+const CLOSE_POLICY_VIOLATION = 1008;
 const CLOSE_TRY_AGAIN_LATER = 1013;
 
-const SESSION_TOPIC_PREFIX = "chat.session:";
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 type Topic =
@@ -57,16 +57,11 @@ type Topic =
   | { kind: "apps.catalog" }
   | { kind: "chat.session"; sessionId: string };
 
-const clientMessageSchema = z.object({
-  type: z.enum(["subscribe", "unsubscribe"]),
-  topic: z.string().max(256),
-});
-
 function parseTopic(topic: string): Topic | null {
-  if (topic === "chat.status") return { kind: "chat.status" };
-  if (topic === "apps.catalog") return { kind: "apps.catalog" };
-  if (topic.startsWith(SESSION_TOPIC_PREFIX)) {
-    const sessionId = topic.slice(SESSION_TOPIC_PREFIX.length);
+  if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
+  if (topic === APP_CATALOG_TOPIC) return { kind: "apps.catalog" };
+  if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
+    const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
   }
   return null;
@@ -110,7 +105,7 @@ export function attachLiveEventsServer(
     let closed = false;
     let alive = true;
 
-    const send = (message: unknown) => {
+    const send = (message: LiveEventsServerMessage) => {
       if (ws.readyState !== WebSocket.OPEN) return;
       if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
         ws.close(CLOSE_TRY_AGAIN_LATER, "Client is not reading");
@@ -120,8 +115,13 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
+    // A visitor dropped from the allow-list loses new subscriptions at once and
+    // the socket at the next ping, as the edge probe would refuse a new stream.
+    const visitorAllowed = () =>
+      caller.kind === "guardian" || dashboardAccess.isCloudEmailAllowed(caller.email);
     // App existence and change timing stay guardian-only, as on `/api/apps/events`.
-    const permitted = (topic: Topic) => caller === "guardian" || topic.kind !== "apps.catalog";
+    const permitted = (topic: Topic) =>
+      caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
     const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
 
@@ -190,6 +190,10 @@ export function attachLiveEventsServer(
     };
 
     const ping = setInterval(() => {
+      if (!visitorAllowed()) {
+        ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
+        return;
+      }
       if (!alive) {
         ws.terminate();
         return;
@@ -208,7 +212,7 @@ export function attachLiveEventsServer(
       } catch {
         parsed = undefined;
       }
-      const result = clientMessageSchema.safeParse(parsed);
+      const result = liveEventsClientMessageSchema.safeParse(parsed);
       if (!result.success) {
         sendError("Invalid message");
         return;

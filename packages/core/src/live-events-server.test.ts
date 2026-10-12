@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket } from "ws";
+import type { LiveEventsServerMessage } from "@rome/api-types/live-events";
 import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
@@ -19,10 +20,7 @@ import {
 } from "./live-events-server.js";
 import { buildTestDeps, createTestDb, type TestDb } from "./test/helpers.js";
 
-type ServerMessage =
-  | { type: "subscribed"; topic: string }
-  | { type: "event"; topic: string; event: string; data: unknown }
-  | { type: "error"; topic?: string; message: string };
+type ServerMessage = LiveEventsServerMessage;
 
 class TestClient {
   readonly messages: ServerMessage[] = [];
@@ -92,6 +90,7 @@ describe("live events WebSocket", () => {
   let deps: Awaited<ReturnType<typeof buildTestDeps>>;
   let live: { close(): void };
   let activeSubscriptions: number;
+  let dashboardAccess: DashboardAccessState;
   const catalogHandlers = new Set<SubscriberHandler>();
   const clients: TestClient[] = [];
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -146,7 +145,7 @@ describe("live events WebSocket", () => {
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
     };
     server = createServer();
-    const dashboardAccess = new DashboardAccessState();
+    dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
     live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources);
     port = await new Promise<number>((resolve) => {
@@ -241,6 +240,36 @@ describe("live events WebSocket", () => {
     });
     expect(activeSubscriptions).toBe(2);
     expect(catalogHandlers.size).toBe(0);
+  });
+
+  it("stops serving a visitor dropped from the allow-list: no new topics, then no socket", async () => {
+    rs.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      await deps.webchatRepo.createSession("sess-a", "A");
+      const client = await connect({
+        "x-forwarded-for": "203.0.113.1",
+        "x-forwarded-host": "rome.example",
+        "x-forwarded-proto": "http",
+        cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+        origin: "http://rome.example",
+      });
+      await client.subscribe("chat.status");
+
+      dashboardAccess.setCloudEmailAccess([]);
+      client.send({ type: "subscribe", topic: "chat.session:sess-a" });
+      expect(await client.next((m) => m.type === "error")).toEqual({
+        type: "error",
+        topic: "chat.session:sess-a",
+        message: "Forbidden",
+      });
+
+      const closed = new Promise<number>((resolve) => client.ws.once("close", resolve));
+      rs.advanceTimersByTime(25_000);
+      expect(await closed).toBe(1008);
+      await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("acknowledges chat.status before replaying the running snapshot, then streams changes", async () => {

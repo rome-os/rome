@@ -1,8 +1,11 @@
-// Per-tab client for the guardian live-events WebSocket (`/ws/events`). One
+// Per-tab client for the dashboard live-events WebSocket (`/ws/events`). One
 // socket carries every live topic so the dashboard's long-lived streams stay
 // out of the browser's six-connection HTTP/1.1 pool. The wire protocol is
-// documented in packages/core/src/live-events-server.ts.
-import { z } from "zod";
+// in @rome/api-types/live-events.
+import {
+  type LiveEventsClientMessage,
+  liveEventsServerMessageSchema,
+} from "@rome/api-types/live-events";
 
 /**
  * Where the client delivers events. `transport` is "socket" while the
@@ -53,17 +56,6 @@ export interface LiveEventsClientOptions {
   /** How often the client tries the socket again while on the SSE fallback. */
   reprobeMs?: number;
 }
-
-const serverMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("subscribed"), topic: z.string() }),
-  z.object({
-    type: z.literal("event"),
-    topic: z.string(),
-    event: z.string(),
-    data: z.unknown(),
-  }),
-  z.object({ type: z.literal("error"), topic: z.string().optional(), message: z.string() }),
-]);
 
 const LIVE_EVENTS_PATH = "/ws/events";
 
@@ -146,7 +138,9 @@ export class LiveEventsClient {
    * Adds a listener for one topic and returns its release. Listeners on the
    * same topic share one server subscription, sent on the first add and
    * withdrawn on the last release. While the transport is "fallback" the
-   * listener receives nothing until the socket comes back.
+   * listener receives nothing until the socket comes back. The server replays
+   * a topic's snapshot (the `chat.status` running set) only to the first
+   * listener, so a snapshot topic keeps a single listener per tab.
    */
   subscribe(topic: string, listener: LiveTopicListener): () => void {
     let entry = this.topics.get(topic);
@@ -237,7 +231,7 @@ export class LiveEventsClient {
     } catch {
       raw = undefined;
     }
-    const parsed = serverMessageSchema.safeParse(raw);
+    const parsed = liveEventsServerMessageSchema.safeParse(raw);
     if (!parsed.success) {
       console.error("Invalid live events message");
       return;
@@ -333,7 +327,7 @@ export class LiveEventsClient {
     this.send({ type: "subscribe", topic });
   }
 
-  private send(message: { type: "subscribe" | "unsubscribe"; topic: string }): void {
+  private send(message: LiveEventsClientMessage): void {
     this.socket?.send(JSON.stringify(message));
   }
 

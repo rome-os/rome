@@ -1,5 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from "react";
 import type { z } from "zod";
+import {
+  APP_CATALOG_TOPIC,
+  CHAT_STATUS_TOPIC,
+  chatSessionTopicName,
+} from "@rome/api-types/live-events";
 import { LiveEventsClient } from "@/lib/live-events";
 import {
   dispatchValidatedEvent,
@@ -18,18 +23,18 @@ export interface LiveTopic {
 }
 
 export const chatStatusTopic: LiveTopic = {
-  topic: "chat.status",
+  topic: CHAT_STATUS_TOPIC,
   sseUrl: "/api/chat/status/events",
 };
 
 export const appCatalogTopic: LiveTopic = {
-  topic: "apps.catalog",
+  topic: APP_CATALOG_TOPIC,
   sseUrl: "/api/apps/events",
 };
 
 export function chatSessionTopic(sessionId: string): LiveTopic {
   return {
-    topic: `chat.session:${sessionId}`,
+    topic: chatSessionTopicName(sessionId),
     sseUrl: `/api/chat/sessions/${encodeURIComponent(sessionId)}/events`,
   };
 }

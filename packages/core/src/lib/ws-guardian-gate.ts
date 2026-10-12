@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { isLoopbackHostname } from "@rome-os/libs/net";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
@@ -11,12 +12,21 @@ import { readCookie, rejectUpgrade, toOriginRequest } from "./ws-upgrade.js";
 const log = createLogger("ws-guardian-gate");
 
 /** Who an accepted upgrade belongs to. */
-export type UpgradeCaller = "guardian" | "dashboard-visitor";
+export type UpgradeCaller = { kind: "guardian" } | { kind: "dashboard-visitor"; email: string };
+
+function hasLoopbackHostname(origin: string): boolean {
+  try {
+    return isLoopbackHostname(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Accepts the guardian: a guardian cookie from the dashboard's own origin, or a
- * direct loopback caller. A browser on another origin is refused whatever
- * credential it carries. Writes the 401, 403 or 500 itself and resolves false.
+ * direct loopback caller that is not a browser page on a non-loopback host. A
+ * browser on another origin is refused whatever credential it carries. Writes
+ * the 401, 403 or 500 itself and resolves false.
  */
 export async function gateGuardianUpgrade(
   req: IncomingMessage,
@@ -52,12 +62,18 @@ export async function gateUpgrade(
       // Browsers send Origin on every WebSocket handshake and CORS does not
       // apply, so a page on any site can open one to loopback. The in-container
       // browser visits arbitrary sites, so a loopback caller with an Origin
-      // must still be the dashboard.
-      if ((guardian.via === "cookie" || req.headers.origin) && !sameOrigin()) {
+      // must still be the dashboard. Host does not prove that: a DNS-rebound
+      // name sends a matching Origin and Host, so the name must be loopback too.
+      const origin = req.headers.origin;
+      const refused =
+        guardian.via === "cookie"
+          ? !sameOrigin()
+          : origin !== undefined && (!hasLoopbackHostname(origin) || !sameOrigin());
+      if (refused) {
         rejectUpgrade(socket, 403, "Forbidden");
         return null;
       }
-      return "guardian";
+      return { kind: "guardian" };
     }
     const visitorToken = dashboardAccess
       ? readCookie(req.headers.cookie, VISITOR_COOKIE_NAME)
@@ -68,7 +84,7 @@ export async function gateUpgrade(
         rejectUpgrade(socket, 403, "Forbidden");
         return null;
       }
-      return "dashboard-visitor";
+      return { kind: "dashboard-visitor", email: visitor.email };
     }
     rejectUpgrade(socket, 401, "Unauthorized");
     return null;

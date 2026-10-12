@@ -115,6 +115,17 @@ describe("gateGuardianUpgrade", () => {
     expect(response()).toBe("");
   });
 
+  it("rejects a direct loopback caller whose page sits on a DNS-rebound name", async () => {
+    const { socket, response } = captureSocket();
+    const req = request({
+      host: "evil.example:4141",
+      origin: "http://evil.example:4141",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(response()).toContain("HTTP/1.1 403 Forbidden");
+  });
+
   it("admits an allow-listed dashboard visitor only when dashboard access is passed", async () => {
     const dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
@@ -130,7 +141,7 @@ describe("gateGuardianUpgrade", () => {
     const allowed = captureSocket();
     expect(
       await gateUpgrade(visitor("visitor@example.com"), allowed.socket, testDb.db, dashboardAccess),
-    ).toBe("dashboard-visitor");
+    ).toEqual({ kind: "dashboard-visitor", email: "visitor@example.com" });
     expect(allowed.response()).toBe("");
 
     const guardianOnly = captureSocket();
