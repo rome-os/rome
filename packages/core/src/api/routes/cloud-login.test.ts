@@ -23,6 +23,8 @@
  *     mismatch): fail closed, no cookie.
  *   - token exchange failure, `iss` mismatch, and a state echo that matches no
  *     pending attempt: rejected, no cookie.
+ *   - a callback from a browser that did not start the attempt (no or a
+ *     different attempt cookie): rejected, no cookie, and the attempt is burned.
  *   - flag off: start and callback both 404.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
@@ -183,10 +185,16 @@ async function buildRoute(
   return app;
 }
 
+// The attempt cookie each `start` set, keyed by its state, so `callback` can
+// replay it the way the browser that started the attempt would.
+const loginCookies = new Map<string, string>();
+
 // Run start, return the CSRF state + the nonce minted into the authorize URL.
 async function start(app: Hono): Promise<{ state: string; nonce: string; scope: string }> {
   const res = await app.request("/api/auth/cloud/start", { method: "POST" });
   expect(res.status).toBe(200);
+  const cookie = res.headers.get("set-cookie")?.match(/rome_cloud_login_state=[^;]+/)?.[0];
+  expect(cookie).toBeTruthy();
   const { authorizeUrl } = (await res.json()) as { authorizeUrl: string };
   const url = new URL(authorizeUrl);
   const state = url.searchParams.get("state");
@@ -194,7 +202,15 @@ async function start(app: Hono): Promise<{ state: string; nonce: string; scope: 
   const scope = url.searchParams.get("scope");
   expect(state).toBeTruthy();
   expect(nonce).toBeTruthy();
+  loginCookies.set(state as string, cookie as string);
   return { state: state as string, nonce: nonce as string, scope: scope as string };
+}
+
+// GET the callback from the browser that ran `start` for this state.
+function callback(app: Hono, path: string): Promise<Response> {
+  const state = new URL(path, "http://instance.test").searchParams.get("state");
+  const cookie = state ? loginCookies.get(state) : undefined;
+  return Promise.resolve(app.request(path, cookie ? { headers: { cookie } } : undefined));
 }
 
 async function nativeStart(app: Hono): Promise<{
@@ -361,7 +377,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
@@ -385,7 +401,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/full/apps/welcome-to-rome");
@@ -405,7 +421,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=malformed");
     expect(sessionUserId(res)).toBeNull();
@@ -421,7 +437,7 @@ describe("/api/auth/cloud — bound instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
@@ -439,7 +455,7 @@ describe("/api/auth/cloud — bound instance", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
@@ -466,7 +482,7 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.accountId).toBe("A");
@@ -489,7 +505,7 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.userId).toBe("A");
@@ -509,7 +525,7 @@ describe("/api/auth/cloud — guardian profile from the id_token", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     const [row] = testDb.db.select().from(guardianAuth).all();
     expect(row.email).toBe("kept@example.com");
@@ -532,7 +548,7 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
     return { res, deps };
   }
 
@@ -580,7 +596,7 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.headers.get("location")).toBe("/?cloud=success");
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Kept");
@@ -594,7 +610,7 @@ describe("/api/auth/cloud — id_token verification fails closed", () => {
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=unverified");
     expect(sessionUserId(res)).toBeNull();
   }
@@ -631,7 +647,7 @@ describe("/api/auth/cloud — request guards", () => {
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=exchange");
     expect(sessionUserId(res)).toBeNull();
@@ -644,7 +660,8 @@ describe("/api/auth/cloud — request guards", () => {
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&code=abc&iss=${encodeURIComponent("http://evil")}`,
     );
 
@@ -659,7 +676,7 @@ describe("/api/auth/cloud — request guards", () => {
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
 
     const { state } = await start(app);
-    const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc`);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc`);
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=iss");
     expect(sessionUserId(res)).toBeNull();
@@ -670,6 +687,43 @@ describe("/api/auth/cloud — request guards", () => {
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
 
     const res = await app.request("/api/auth/cloud/callback?state=never-issued&code=abc");
+
+    expect(res.headers.get("location")).toBe("/login?cloud=error&reason=state");
+    expect(sessionUserId(res)).toBeNull();
+  });
+
+  it("rejects a callback from a browser that did not start the attempt", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const path = `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`;
+
+    const noCookie = await app.request(path);
+    expect(noCookie.headers.get("location")).toBe("/login?cloud=error&reason=state");
+    expect(sessionUserId(noCookie)).toBeNull();
+
+    // The mismatch burned the attempt, so the starting browser can't finish it either.
+    const replay = await callback(app, path);
+    expect(replay.headers.get("location")).toBe("/login?cloud=error&reason=state");
+    expect(sessionUserId(replay)).toBeNull();
+  });
+
+  it("rejects a callback carrying another attempt's cookie", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const victim = await start(app);
+    const attacker = await start(app);
+    romeCloud.setNonce(attacker.nonce);
+
+    const res = await app.request(
+      `/api/auth/cloud/callback?state=${attacker.state}&code=abc&iss=${ISS}`,
+      { headers: { cookie: loginCookies.get(victim.state) as string } },
+    );
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=state");
     expect(sessionUserId(res)).toBeNull();
@@ -719,7 +773,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const app = await buildApps({ emails: ["invitee@example.com"] });
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&error=access_denied&iss=${ISS}`,
     );
 
@@ -748,7 +803,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     });
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&error=access_denied&iss=${ISS}`,
     );
     const visitorState = new URL(res.headers.get("location") as string).searchParams.get(
@@ -769,7 +825,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const app = await buildApps();
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&error=access_denied&iss=${ISS}`,
     );
 
@@ -786,7 +843,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const app = await buildApps({ emails: ["invitee@example.com"] });
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&error=access_denied${issQuery}`,
     );
 
@@ -800,7 +858,8 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     const app = await buildApps({ emails: ["invitee@example.com"] });
 
     const { state } = await start(app);
-    const res = await app.request(
+    const res = await callback(
+      app,
       `/api/auth/cloud/callback?state=${state}&error=server_error&iss=${ISS}`,
     );
 
