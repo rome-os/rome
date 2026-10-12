@@ -62,11 +62,13 @@ test("rejects malformed or escaping native links rather than silently rebuilding
   }
 });
 
-test("requires HTML during preparation while preserving the Markdown output", async (context) => {
+test("keeps results readable without links when HTML is unavailable", async (context) => {
   const input = await fixture(context);
   await writeFile(path.join(input.resultDirectory, "result.md"), markdown);
   await writeFile(path.join(input.resultDirectory, "summary.json"), "{}");
-  await assert.rejects(writeNativeSummary({ ...input, requireReport: true }), /HTML report is missing/);
-  assert.match(await readFile(input.output, "utf8"), /A case/);
+  await writeNativeSummary({ ...input, pagesUrl: "https://example.test/" });
+  const result = await readFile(input.output, "utf8");
+  assert.match(result, /A case/);
+  assert.doesNotMatch(result, /https:|<img/);
   assert.equal(await writeNativeSummary(input), true);
 });

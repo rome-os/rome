@@ -110,11 +110,11 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
-The workflow uses `@midscene/test@1.15.2-beta-20261012123219.0` and reads
-its generated `result.md` directly. Lockfile generation is blocked until
-`@midscene/playground@1.15.2-beta-20261012123219.0` is available from the public
-registry. CI uses `npm install` to resolve the declared versions. Regenerate
-the lockfile once all beta packages are available before using `npm ci`.
+The workflow uses `@midscene/test@1.15.3-beta-20261012131523.0` and reads
+its generated `result.md` directly. This beta is being published, so the
+lockfile has not been regenerated. CI uses `npm install` to resolve the
+declared versions. Regenerate the lockfile once all beta packages are
+available before using `npm ci`.
 
 Rome resolves relative report links after
 Pages deployment. Each case occupies one line with its title and status.
@@ -125,9 +125,9 @@ capture screenshots or recalculate the Markdown contents.
 - Machine-readable results: `.midscene/test-results/<runId>/summary.json`
 - Markdown results: `.midscene/test-results/<runId>/result.md`
 - These outputs are covered by `.gitignore`.
-- Each run uploads one `midscene-results` artifact. Report preparation
-  reads the framework results and uploads `midscene-e2e-report` with the original reports and prepared Summary.
-  Missing Markdown or HTML fails report preparation while preserving artifacts.
+- Each run uploads one `midscene-results` artifact containing the original
+  framework reports and mock server log. Pages and the final Summary download
+  this artifact directly, without an intermediate Markdown copy or report upload.
 - A single read-only job writes the Markdown Summary after Pages finishes or
   is skipped, adding hosted report links when deployment succeeds. While Pages
   is pending, inspect the test logs. If native Markdown cannot be read, the
@@ -163,6 +163,8 @@ A fork owner may manually dispatch a fork branch using that fork's model
 secrets. Reports are generated from the current run only.
 Pages publication is enabled upstream. Fork publication requires an exact
 `MIDSCENE_PUBLISH_REPO` match.
+Runs across branches share a workflow concurrency group so history download
+through Pages deployment is serialized. This also serializes test runs.
 
 ## Authoring Conventions
 

@@ -16,15 +16,11 @@ const runs = (name, overrides = {}) => {
   const condition = job(name).match(/^    if: >-\n((?:      .+\n)+)/m)?.[1];
   assert.ok(condition, `${name} must have an explicit job gate`);
   const context = {
-    github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "push" },
+    github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "schedule" },
     inputs: { publish_pages: true },
     vars: { MIDSCENE_PUBLISH_REPO: "" },
     needs: {
-      midscene: { result: "success" },
-      "report-summary": {
-        result: "success",
-        outputs: { "report-artifact-name": "midscene-e2e-report" },
-      },
+      midscene: { result: "success", outputs: { "report-artifact-name": "midscene-results" } },
       "prepare-pages": { result: "success" },
       "deploy-report": { result: "success", outputs: { "page-url": "https://example.test/rome/" } },
     },
@@ -57,40 +53,27 @@ test("model runs retain upstream and fork trust gates without harness dependenci
   assert.equal(runs("midscene", { github: { repository: "example/rome", ref: "refs/heads/main", event_name: "schedule" } }), false);
   assert.equal(runs("midscene", { github: { repository: "example/rome", ref: "refs/heads/main", event_name: "workflow_dispatch" } }), true);
   assert.equal(runs("midscene", { github: { repository: "rome-os/rome", ref: "refs/heads/feature", event_name: "workflow_dispatch" } }), false);
-  assert.equal(runs("midscene", { github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "pull_request" } }), false);
+  assert.equal(runs("midscene"), true);
+  assert.doesNotMatch(workflow, /^  (pull_request|push):/m);
 });
 
-test("report preparation does not depend on the publisher repository", () => {
-  for (const repository of ["rome-os/rome", "example/rome"]) {
-    for (const result of ["success", "failure"]) {
-      assert.equal(
-        runs("report-summary", {
-          github: { repository, ref: "refs/heads/main", event_name: "workflow_dispatch" },
-          needs: { midscene: { result } },
-        }),
-        true,
-      );
-    }
+test("raw artifacts replace the intermediate report job", () => {
+  assert.doesNotMatch(workflow, /report-summary|prepared-report|Prepare native Markdown Summary/);
+  assert.match(job("midscene"), /steps.upload-results.outputs.artifact-id/);
+  assert.match(job("midscene"), /include-hidden-files: true/);
+  for (const name of ["prepare-pages", "report-results"]) {
+    assert.match(job(name), /path: \$\{\{ runner.temp \}\}\/midscene-reports\/midscene-results/);
   }
-  assert.equal(runs("report-summary", { needs: { midscene: { result: "skipped" } } }), false);
-  assert.doesNotMatch(
-    job("report-summary"),
-    /configure-pages|pages: write|--pages-url|MIDSCENE_PUBLISH_REPO/,
-  );
-  assert.match(job("report-summary"), /include-hidden-files: true/);
-  assert.doesNotMatch(job("report-summary"), /GITHUB_STEP_SUMMARY/);
-  assert.doesNotMatch(job("midscene"), /GITHUB_STEP_SUMMARY/);
 });
 
 test("Pages defaults to upstream main and requires explicit fork opt-in", () => {
   assert.equal(runs("prepare-pages"), true);
   assert.equal(runs("prepare-pages", { vars: { MIDSCENE_PUBLISH_REPO: "other/rome" } }), true);
-  for (const event_name of ["push", "workflow_dispatch", "pull_request"]) {
+  for (const event_name of ["schedule", "workflow_dispatch"]) {
     for (const repository of ["rome-os/rome", "example/rome"]) {
-      for (const ref of ["refs/heads/main", "refs/heads/feature", "refs/pull/1/merge"]) {
+      for (const ref of ["refs/heads/main", "refs/heads/feature"]) {
         for (const publisher of ["", repository, "other/rome"]) {
           const expected =
-            event_name !== "pull_request" &&
             (repository === "rome-os/rome"
               ? ref === "refs/heads/main"
               : publisher === repository && event_name === "workflow_dispatch");
@@ -117,7 +100,7 @@ test("missing Pages configuration cannot block preparation or trigger deployment
   assert.match(job("deploy-report"), /needs.prepare-pages.outputs.pages-artifact-name != ''/);
   assert.equal(
     runs("prepare-pages", {
-      needs: { "report-summary": { outputs: { "report-artifact-name": "" } } },
+      needs: { midscene: { result: "failure", outputs: { "report-artifact-name": "" } } },
     }),
     false,
   );
@@ -142,7 +125,6 @@ test("manual dispatch can run tests and generate the Summary without Pages", () 
     vars: { MIDSCENE_PUBLISH_REPO: "example/rome" },
   };
   assert.equal(runs("midscene", context), true);
-  assert.equal(runs("report-summary", context), true);
   assert.equal(runs("prepare-pages", context), false);
   assert.equal(runs("report-results", context), true);
 });
@@ -155,13 +137,12 @@ test("only the final report job writes a Summary", () => {
   assert.doesNotMatch(workflow, /available-results:/);
   assert.match(
     job("report-results"),
-    /needs: \[midscene, report-summary, prepare-pages, deploy-report\]/,
+    /needs: \[midscene, prepare-pages, deploy-report\]/,
   );
   assert.match(
     job("report-results"),
     /name: Write the run Summary\n        if: always\(\)/,
   );
-  assert.match(job("report-summary"), /--require-report/);
   assert.doesNotMatch(job("midscene"), /strategy:|matrix\.|MIDSCENE_INCLUDE_TAGS/);
   assert.match(job("midscene"), /MIDSCENE_PROJECT_NAME: web/);
   assert.match(job("midscene"), /220m npm test/);
@@ -175,7 +156,7 @@ test("the final Summary survives preparation and publication failures or skips",
         runs("report-results", {
           needs: {
             midscene: { result: "failure" },
-            "report-summary": { result: reportResult },
+            "prepare-pages": { result: reportResult },
             "deploy-report": { result: publicationResult },
           },
         }),
@@ -185,20 +166,14 @@ test("the final Summary survives preparation and publication failures or skips",
   }
   assert.equal(runs("report-results", { needs: { midscene: { result: "skipped" } } }), false);
   assert.equal(runs("report-results", { cancelled: true }), false);
-  assert.equal(
-    runs("report-results", {
-      github: { event_name: "pull_request" },
-    }),
-    false,
-  );
 });
 
 test("report downloads use the current run and expose no historical rebuild input", () => {
   assert.doesNotMatch(workflow, /report_source_run_id|REPORT_SOURCE_RUN_ID|validate-source/);
-  for (const name of ["report-summary", "report-results"]) {
+  for (const name of ["report-results"]) {
     assert.doesNotMatch(job(name), /run-id:|github-token:/);
   }
-  assert.match(job("report-results"), /name: Recover available test reports[\s\S]*?steps.prepared-report.outcome != 'success'/);
+  assert.match(job("report-results"), /name: Download Midscene test reports/);
 });
 
 test("model steps use environment variables and keep the API key in secrets", () => {
@@ -218,17 +193,21 @@ test("model steps use environment variables and keep the API key in secrets", ()
 
 
 test("uses native result.md and only downloads the full-suite artifact", () => {
-  for (const name of ["report-summary", "report-results"]) {
+  for (const name of ["report-results"]) {
     const content = job(name);
     assert.match(content, /write-native-summary\.mjs/);
     assert.doesNotMatch(content, /render-ci-summary|merge-native-reports|shard-/);
     assert.match(content, /name: midscene-results/);
   }
-  assert.match(job("report-summary"), /--require-report/);
 });
 
 test("project setup owns mock startup and boundary checks", () => {
   assert.doesNotMatch(workflow, /mock-boundary-validation|check:browser-boundary|nohup|name: Start Rome mock server/);
   assert.doesNotMatch(workflow, /^  pull_request:/m);
   assert.match(job("midscene"), /npm test/);
+});
+
+test("history preparation and deployment share a workflow-wide lock", () => {
+  assert.match(workflow, /^concurrency:\n  group: midscene-e2e\n  cancel-in-progress: false$/m);
+  assert.doesNotMatch(job("deploy-report"), /concurrency:/);
 });

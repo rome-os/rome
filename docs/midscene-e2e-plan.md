@@ -156,7 +156,7 @@ reasons behind them.
   `tests/midscene` package installs with `npm install --strict-allow-scripts`,
   followed by `playwright install --with-deps chromium`.
 - **Secret handling and trust boundary**: model settings are scoped to the
-  configuration check, `midscene-test model verify`, and test run steps.
+  `midscene-test model verify` and test run steps.
   Dependency installation never sees them. Project setup passes a separate
   environment without model credentials to the mock server. Model verification
   checks text responses, image understanding, and AI locate before the suite.
@@ -171,6 +171,9 @@ reasons behind them.
 - **Mock server**: `pnpm --filter rome-web dev:mock:e2e` starts in the background
   (it runs `build:kit` first, so first-request readiness is polled for several
   minutes). Its log is uploaded as an artifact on failure.
+- **Publication ordering**: a workflow-wide concurrency group serializes runs
+  across branches, covering history download through deployment. This prevents
+  concurrent publications from overwriting each other’s report history.
 - **Execution**: one `web` project runs all cases with `maxConcurrency: 1`.
   Each case has up to two retries. The job timeout is 240 minutes, with a
   220-minute limit for the test command.
@@ -180,7 +183,8 @@ reasons behind them.
   Successful deployment adds hosted report links. While Pages is pending,
   results can be inspected in the test logs.
   If Pages fails or is skipped, results and artifact links remain available.
-  If report preparation fails, the final job recovers available trusted test data.
+  Pages and the final Summary read the original `midscene-results` artifact
+  directly. Missing Markdown produces a diagnostic link to the run artifacts.
   Test and publication jobs do not write separate Summaries.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when

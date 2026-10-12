@@ -6,7 +6,7 @@ import { readNativeResult } from "./native-results.mjs";
 
 const escapeAttribute = (value) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 
-export async function writeNativeSummary({ reportsDirectory, pagesUrl, output, requireReport = false }) {
+export async function writeNativeSummary({ reportsDirectory, pagesUrl, output }) {
   const root = path.resolve(reportsDirectory);
   const result = await readNativeResult(root);
   if (!result) throw new Error("Native Midscene results are missing");
@@ -38,13 +38,11 @@ export async function writeNativeSummary({ reportsDirectory, pagesUrl, output, r
       return url ? `<img src="${escapeAttribute(url)}" alt="${alt}" width="160">` : "—";
     });
   await writeFile(output, markdown);
-  if (requireReport && !result.reportPath) throw new Error("Native HTML report is missing");
   return true;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [reportsDirectory, pagesUrl, output, option] = process.argv.slice(2);
-  if (!reportsDirectory || !output) throw new Error("Usage: write-native-summary.mjs <reports-dir> <pages-url-or-empty> <output> [--require-report]");
-  if (option && option !== "--require-report") throw new Error(`Unknown option: ${option}`);
-  await writeNativeSummary({ reportsDirectory, pagesUrl, output, requireReport: option === "--require-report" });
+  const [reportsDirectory, pagesUrl, output] = process.argv.slice(2);
+  if (!reportsDirectory || !output) throw new Error("Usage: write-native-summary.mjs <reports-dir> <pages-url-or-empty> <output>");
+  await writeNativeSummary({ reportsDirectory, pagesUrl, output });
 }
