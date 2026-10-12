@@ -28,12 +28,12 @@ export async function mergeNativeReports(reportsDirectory, expectedProjects, man
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [reportsDirectory, projects, manifestFile] = process.argv.slice(2);
-  if (!reportsDirectory || !projects) {
+  if (!reportsDirectory || projects === undefined) {
     throw new Error(
       "Usage: merge-native-reports.mjs <reports-dir> <comma-separated-projects> [case-manifest]",
     );
   }
-  const report = await mergeNativeReports(reportsDirectory, projects.split(","), manifestFile);
+  const report = await mergeNativeReports(reportsDirectory, projects.split(",").filter(Boolean), manifestFile);
   if (report) process.stdout.write(`${report}\n`);
   else
     process.stderr.write("Native report unavailable; check shard artifacts and case inventory.\n");

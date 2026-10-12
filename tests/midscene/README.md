@@ -8,7 +8,7 @@ Midscene agent calls the configured model endpoint.
 
 > The companion planning doc is
 > [`docs/midscene-e2e-plan.md`](../../docs/midscene-e2e-plan.md) (case catalog,
-> mock contract, CI shard design).
+> mock contract, CI execution design).
 
 ## How It Works
 
@@ -29,17 +29,16 @@ Midscene agent calls the configured model endpoint.
 - Every case uses Midscene's `aiAct` for user interaction and `aiAssert` for
   visible outcomes. `app.open` provides the isolated starting route, and
   `wait` covers fixed mock settling time.
-- The suite contains 38 AI-native cases. Each case starts one isolated product
+- The suite runs CHAT-01, with 37 other cases commented out. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
-- The collector checks every case name and shard against `case-manifest.json`
-  and the documented catalog. Missing, renamed, or moved cases fail CI. Keep
-  those two records independent of YAML so deleting or moving a case cannot
+- The collector checks every case name against `case-manifest.json`
+  and the documented catalog. Missing, renamed, or unexpected cases fail CI. Keep
+  those two records independent of YAML so deleting or renaming a case cannot
   silently change its expected result.
 - The package registers `app.open` for isolated setup and
   `app.expectRenameConflict` for FILE-03's transient response. Run
   `npm run nodes` to generate a local node reference with their parameters.
-- All cases live in `cases/**/*.yaml`, organized by suite file, with tags for
-  shard and topic.
+- All cases live in `cases/**/*.yaml`, organized by suite file, with topic tags.
 
 ## Prerequisites
 
@@ -85,7 +84,7 @@ MIDSCENE_INCLUDE_TAGS=auth,settings npm test
 # Exclude slow cases
 MIDSCENE_EXCLUDE_TAGS=story npm test
 
-# Adjust retries (default 2; CI sets it per shard as needed)
+# Adjust retries (default 2; CI also uses 2)
 MIDSCENE_RETRY=0 npm test
 
 # Headed mode for debugging
@@ -99,7 +98,6 @@ HEADLESS=false npm test
 | `poc` | Accepted PoC storylines (AUTH-01, E2E-01/02/03) |
 | `story` | Cross-page end-to-end storylines (slower) |
 | `auth` / `chat` / `apps` / `sessions` / `routines` / `activity` / `people` / `files` / `settings` / `shell` / `global` | Functional suites |
-| `shard-N` | CI shard ownership (N=1…6), see the planning doc |
 | `zh` | Chinese-UI (i18n) cases |
 | `mobile` | Narrow-viewport cases |
 
@@ -110,18 +108,17 @@ HEADLESS=false npm test
   `.midscene/test-results/<runId>/summary.json` (includes collection-error
   details)
 - Both are covered by `.gitignore`.
-- Every model-backed run uploads each shard report and a combined
+- Every model-backed run uploads the full-suite report and a combined
   `midscene-e2e-report` artifact, including failed runs. A read-only job writes
   results immediately after aggregation, without waiting for Pages approval or deployment.
   This Summary shows total, passed, failed, and not-run counts with artifact
   downloads, without case tables or empty screenshot columns. A second read-only
   job adds publication status after Pages finishes. Only a successful deployment
   adds the complete case tables with verified report links and screenshots.
-  Failed, not-run, and incomplete-shard results appear first. Passed cases appear
+  Failed, not-run, and incomplete-project results appear first. Passed cases appear
   in a collapsed appendix. The first Summary remains
   available if publication waits for approval or the run is cancelled during that wait.
-- Midscene merges the six native Test reports into one report that lists every
-  case. The combined artifact includes that report, available shard reports,
+- Midscene prepares one native Test report that lists every case. The combined artifact includes that report, available test reports,
   screenshots, and machine-readable results. An incomplete merge still saves
   available diagnostics and fails the aggregation job.
 - Pages publication is enabled for `rome-os/rome` on `main`. A fork can opt in
@@ -134,14 +131,14 @@ HEADLESS=false npm test
   available through Actions.
 - After a successful Pages deployment, the same Summary includes a visible
   Markdown link to the combined native Midscene Test report. Case names and
-  screenshot thumbnails open their exact steps in the native shard reports.
+  screenshot thumbnails open their exact steps in the native test reports.
   If Pages fails or is skipped, the Summary shows result counts and artifact
-  links. If aggregation fails, the final job recovers available shard data and
+  links. If aggregation fails, the final job recovers available test data and
   reports missing results. Report-only recovery validates the source run before
-  downloading its artifacts. Partial reports keep available shard links without
+  downloading its artifacts. Partial reports keep available test links without
   a broken combined-report link.
 - To rebuild a report without new model calls, manually dispatch the workflow
-  with `report_source_run_id` set to a completed Midscene run whose shard
+  with `report_source_run_id` set to a completed Midscene run whose test
   artifacts have not expired. Sources and retained Pages history must come
   from the same repository: upstream `main` scheduled runs, pushes, or manual dispatches,
   or a fork's manual dispatches. Pull-request artifacts are rejected.
@@ -149,7 +146,7 @@ HEADLESS=false npm test
   `publish_pages` to `false` to verify the report job and its Actions Summary
   without a Pages deployment. Scheduled upstream runs also publish when Pages is available.
 - Pull requests run secret-free harness and mock-browser boundary jobs. The
-  model-backed shard matrix runs on the upstream `main` branch or by manual
+  model-backed test job runs on the upstream `main` branch or by manual
   dispatch in a fork using that fork's model secrets.
 
 ## GitHub Actions
@@ -158,17 +155,17 @@ The independent `midscene.yml` workflow runs the full model-backed suite
 nightly against the latest upstream `main` commit. Its daily schedule is
 `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
 It does not depend on the ordinary CI or Nightly workflow, and pushes do not
-trigger it. The six visual shards run serially with `max-parallel: 1`.
+trigger it. One visual test job runs the active case with `maxConcurrency: 1`.
 
 Path-filtered pull requests run only the secret-free harness and mock-browser
 boundary checks. They never receive billable model credentials or run the
-visual shard matrix. See the [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
+visual test job. See the [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
 for the path set and trust gates.
 
 Manual `workflow_dispatch` runs the full suite on upstream `main`.
 A fork owner may manually dispatch a fork branch using that fork's model
 secrets. Set the optional `report_source_run_id` input to an existing run ID
-to rebuild its reports from shard artifacts without new model calls.
+to rebuild its reports from test artifacts without new model calls.
 Pages publication is enabled upstream. Fork publication requires an exact
 `MIDSCENE_PUBLISH_REPO` match.
 
@@ -194,3 +191,38 @@ Pages publication is enabled upstream. Fork publication requires an exact
    chat content.
 8. The collector rejects other `app.*` nodes and the `deterministic-assist`
    tag. If a visual step fails, adjust the goal and visible checkpoint.
+
+## Fork setup: yuyutaotao/rome
+
+1. Enable workflows in the repository's **Actions** tab.
+2. Under **Settings → Secrets and variables → Actions → Secrets**, add:
+
+   | Secret | Value |
+   | --- | --- |
+   | `MIDSCENE_MODEL_API_KEY` | The visual model provider's API key |
+   | `MIDSCENE_MODEL_BASE_URL` | An OpenAI-compatible API base URL reachable from GitHub-hosted runners |
+   | `MIDSCENE_MODEL_NAME` | The provider's vision model name or endpoint ID |
+   | `MIDSCENE_MODEL_FAMILY` | The model family, such as `doubao-seed` for Seed |
+
+3. To publish the HTML report, add the Actions variable
+   `MIDSCENE_PUBLISH_REPO=yuyutaotao/rome`.
+4. Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+5. Open **Actions → E2E Testing by Midscene → Run workflow**. Leave
+   `report_source_run_id` empty to run all cases. Set `publish_pages=false`
+   if you only need downloadable artifacts.
+
+Fork model runs require manual dispatch. The daily schedule runs model tests
+only in `rome-os/rome` on `main`. Pull requests run checks without model secrets.
+`GITHUB_TOKEN` is supplied by Actions. Rome backend credentials are unnecessary
+because the browser uses mock fixtures.
+
+## Restore paused cases
+
+CHAT-01 is the only active case. The remaining 37 cases stay in their YAML
+files as comments.
+
+1. Remove the comment prefixes from the paused YAML case blocks.
+2. Restore the commented full-suite `files` selection in `midscene.config.ts`.
+3. Uncomment the matching catalog rows in `docs/midscene-e2e-cases.md`.
+4. Add the restored full case names to `case-manifest.json`.
+5. Run `npm run collect` to check that the YAML, manifest, and catalog agree.

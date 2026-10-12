@@ -192,7 +192,9 @@ test("results are visible before optional deployment and survive its cancellatio
     /name: Write the consolidated run Summary\n        if: always\(\)/,
   );
   assert.match(job("report-results"), /--case-manifest/);
-  assert.match(job("midscene"), /max-parallel: 1/);
+  assert.doesNotMatch(job("midscene"), /strategy:|matrix\.|MIDSCENE_INCLUDE_TAGS/);
+  assert.match(job("midscene"), /MIDSCENE_PROJECT_NAME: web/);
+  assert.match(job("midscene"), /220m npm test/);
   assert.match(workflow, /cron: "0 6 \* \* \*"/);
 });
 
@@ -226,7 +228,7 @@ test("artifact recovery cannot bypass source validation", () => {
   const results = job("report-results");
   assert.match(results, /trusted-report-runs.mjs validate-source/);
   const downloads = results.match(
-    /      - name: (?:Download combined Midscene report|Recover available shard reports)[\s\S]*?(?=      - name:)/g,
+    /      - name: (?:Download combined Midscene report|Recover available test reports)[\s\S]*?(?=      - name:)/g,
   );
   assert.equal(downloads.length, 2);
   for (const download of downloads) {
@@ -242,11 +244,11 @@ test("artifact recovery cannot bypass source validation", () => {
   );
   assert.match(
     results,
-    /steps.combined-report.outcome == 'success' && 'midscene-combined-report' \|\| 'midscene-report-shards'/,
+    /steps.combined-report.outcome == 'success' && 'midscene-combined-report' \|\| 'midscene-reports'/,
   );
   assert.match(
     results,
-    /name: Recover available shard reports[\s\S]*?steps.combined-report.outcome != 'success'/,
+    /name: Recover available test reports[\s\S]*?steps.combined-report.outcome != 'success'/,
   );
   assert.doesNotMatch(results, /run:.*\$\{\{ inputs.report_source_run_id/);
 });

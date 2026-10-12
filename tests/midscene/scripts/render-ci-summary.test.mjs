@@ -7,11 +7,12 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { preparePagesSite } from "./prepare-pages-site.mjs";
 import { mergeNativeReports } from "./merge-native-reports.mjs";
 import { buildSummary, caseSetIssues, renderMarkdown } from "./render-ci-summary.mjs";
 
 const writeShard = async (root, shard, status, caseName, modelName) => {
-  const project = `web-${shard}`;
+  const project = shard === "results" ? "web" : `web-${shard}`;
   const resultRoot = path.join(root, `midscene-${shard}`, ".midscene", "test-results", "run-1");
   const resultFile = path.join(resultRoot, "project-0", "case-1", "attempt.json");
   await mkdir(path.dirname(resultFile), { recursive: true });
@@ -156,7 +157,7 @@ test("builds one combined Markdown Summary for all shards", async (context) => {
   assert.match(markdown, /web-shard-3 \| — \| — \| ❌ missing/);
   assert.match(markdown, /CHAT-09 sends a message.*button missing/);
   assert.match(markdown, /<summary>Appendix: passed cases \(1\)<\/summary>/);
-  assert.match(markdown, /\| Shard \| Case \| Screenshot \| Status \/ reason \| Duration \|/);
+  assert.match(markdown, /\| Project \| Case \| Screenshot \| Status \/ reason \| Duration \|/);
   const appendix = markdown.indexOf("<details>");
   assert.ok(markdown.indexOf("CHAT-09 sends a message") < appendix);
   assert.ok(markdown.indexOf("AUTH-01 opens chat") > appendix);
@@ -489,7 +490,7 @@ test("a complete report without Pages links only to its artifact", () => {
   assert.match(markdown, /Native Midscene Test report included/);
   assert.doesNotMatch(
     markdown,
-    /Open the Midscene|unavailable|<img|runner-step|undefined|\| Shard \||<details>|Appendix:/,
+    /Open the Midscene|unavailable|<img|runner-step|undefined|\| Project \||<details>|Appendix:/,
   );
 });
 
@@ -513,7 +514,7 @@ test("writes counts and downloads without duplicate case tables before publicati
   const markdown = await readFile(summaryFile, "utf8");
   assert.match(markdown, /\*\*Cases:\*\* 6 total · 4 passed · 1 failed · 1 not run/);
   assert.match(markdown, /2 need attention · 4 passed/);
-  assert.doesNotMatch(markdown, /\| Shard \||<details>|Appendix:|CASE-0/);
+  assert.doesNotMatch(markdown, /\| Project \||<details>|Appendix:|CASE-0/);
   assert.match(
     markdown,
     /\[Download the artifact\]\(https:\/\/example.test\/actions\/runs\/1#artifacts\)/,
@@ -555,7 +556,7 @@ test("published Summary exposes the combined native report before collapsed case
     /<img src="https:\/\/example.test\/rome\/runs\/123\/shard\/report\/screenshots\/one.jpeg"/,
   );
   assert.match(markdown, /Cases:\*\* 1 total · 1 passed · 0 failed · 0 not run/);
-  assert.match(markdown, /### Shard results/);
+  assert.match(markdown, /### Test results/);
   assert.match(markdown, /web-shard-1 \| success \| 1 \| 1 \| 0 \| 0/);
   assert.match(markdown, /Appendix: passed/);
   assert.equal(markdown.match(/^## /gm).length, 1);
@@ -655,7 +656,7 @@ for (const scenario of [
     assert.match(markdown, /Source-run artifacts.*runs\/123#artifacts/);
     assert.match(markdown, /Download the artifact.*runs\/456#artifacts/);
     if (scenario.pagesUrl) {
-      assert.match(markdown, /### Shard results/);
+      assert.match(markdown, /### Test results/);
       assert.match(markdown, /web-shard-2 \| failed \| 1 \| 0 \| 1 \| 0/);
       assert.match(markdown, /web-shard-3 \| not-run \| 1 \| 0 \| 0 \| 1/);
       for (let index = 1; index <= 6; index += 1)
@@ -670,7 +671,7 @@ for (const scenario of [
       assert.ok(markdown.includes(`Pages publication: **${scenario.publication}**`));
       assert.doesNotMatch(
         markdown,
-        /Open the Midscene Test report|<img|runner-step|undefined|\| Shard \||<details>|Appendix:|CASE-0/,
+        /Open the Midscene Test report|<img|runner-step|undefined|\| Project \||<details>|Appendix:|CASE-0/,
       );
     }
     if (scenario.report) assert.match(markdown, /Report aggregation: \*\*failure\*\*/);
@@ -696,4 +697,47 @@ test("the final workflow step reports unavailable counts when rendering fails", 
   assert.match(markdown, /runs\/123#artifacts/);
   assert.match(markdown, /runs\/456#artifacts/);
   assert.doesNotMatch(markdown, /All .* cases passed|0 total|<img|runner-step/);
+});
+
+test("publishes a full-suite report with working case and screenshot links", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rome-midscene-full-suite-"));
+  context.after(() =>
+    import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
+  );
+  const reports = path.join(root, "reports");
+  const site = path.join(root, "site");
+  await writeShard(reports, "results", "success", "CHAT-01", "vision-model");
+  const manifest = path.join(root, "manifest.json");
+  await writeFile(manifest, JSON.stringify(["CHAT-01"]));
+  await promisify(execFile)(process.execPath, [
+    fileURLToPath(new URL("./merge-native-reports.mjs", import.meta.url)),
+    reports,
+    "",
+    manifest,
+  ]);
+  const data = await buildSummary({
+    "reports-dir": reports,
+    "case-manifest": manifest,
+    "run-url": "https://example.test/run/123",
+    "pages-url": "https://example.test/reports/runs/123/",
+  });
+  assert.deepEqual(data.caseInventoryIssues, []);
+  assert.deepEqual(data.projects.map((project) => project.name), ["web"]);
+  assert.equal(data.publishedReportPath, "index.html");
+  const markdown = renderMarkdown(data);
+  assert.match(markdown, /1 passed/);
+  assert.doesNotMatch(markdown, /shard/i);
+  await preparePagesSite({ site, reports, runId: "123" });
+  const testCase = data.projects[0].cases[0];
+  for (const relativePath of ["index.html", testCase.reportPath, testCase.screenshotPath]) {
+    assert.ok(relativePath);
+    assert.ok((await readFile(path.join(site, "runs", "123", relativePath))).length);
+  }
+  assert.deepEqual(caseSetIssues(data.projects, ["CHAT-01", "CHAT-02"]), ["Missing case: CHAT-02"]);
+  assert.ok(
+    caseSetIssues([...data.projects, ...data.projects], ["CHAT-01"]).includes("Duplicate case: CHAT-01"),
+  );
+  assert.ok(
+    caseSetIssues(data.projects, []).some((issue) => issue.startsWith("Unexpected case: CHAT-01")),
+  );
 });

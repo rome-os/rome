@@ -111,7 +111,7 @@ test("an incomplete rerun replaces the complete attempt without retaining stale 
   );
   assert.equal(await readFile(path.join(site, "runs/100/index.html"), "utf8"), "other run");
   const index = await readFile(path.join(site, "index.html"), "utf8");
-  assert.match(index, /Run 101: partial shard reports/);
+  assert.match(index, /Run 101: partial test reports/);
   assert.doesNotMatch(index, /runs\/101\/index\.html/);
 });
 

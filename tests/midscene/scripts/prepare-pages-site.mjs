@@ -56,10 +56,10 @@ const mergeReports = async (source, destination) => {
   }
 };
 
-const copyShardReports = async (source, destination) => {
+const copyTestReports = async (source, destination) => {
   if (!(await exists(source))) return;
   for (const entry of await readdir(source, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^midscene-shard-\d+$/.test(entry.name)) continue;
+    if (!entry.isDirectory() || !/^midscene-(?:results|shard-\d+)$/.test(entry.name)) continue;
     const reports = path.join(source, entry.name, "midscene_run", "report");
     if (!(await exists(reports))) continue;
     const destinationReports = path.join(destination, entry.name, "midscene_run", "report");
@@ -92,7 +92,7 @@ export async function preparePagesSite({
       recursive: true,
     });
   }
-  await copyShardReports(reports, current);
+  await copyTestReports(reports, current);
 
   const runsDirectory = path.join(site, "runs");
   const runIds = (await readdir(runsDirectory, { withFileTypes: true }))
@@ -111,7 +111,7 @@ export async function preparePagesSite({
     retainedRunIds.map(async (id) =>
       (await exists(path.join(runsDirectory, id, "index.html")))
         ? `<li><a href="runs/${id}/index.html">Run ${id}</a></li>`
-        : `<li>Run ${id}: partial shard reports are linked from its workflow Summary</li>`,
+        : `<li>Run ${id}: partial test reports are linked from its workflow Summary</li>`,
     ),
   );
   await writeFile(

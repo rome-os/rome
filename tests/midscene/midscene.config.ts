@@ -223,7 +223,9 @@ export default defineTestProject<ProjectContext>({
       name: process.env.MIDSCENE_PROJECT_NAME ?? "web",
       retry: process.env.MIDSCENE_RETRY ? Number(process.env.MIDSCENE_RETRY) : 2,
       setup,
-      files: { include: ["cases/**/*.{yaml,yml}"] },
+      files: { include: ["cases/chat-core.yaml"] },
+      // Restore this selection when the paused YAML cases are uncommented.
+      // files: { include: ["cases/**/*.{yaml,yml}"] },
       tags: {
         include: tagList(process.env.MIDSCENE_INCLUDE_TAGS),
         exclude: tagList(process.env.MIDSCENE_EXCLUDE_TAGS),

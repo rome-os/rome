@@ -322,14 +322,15 @@ const missingNativeReports = (projects) =>
 
 export function caseSetIssues(projects, manifest) {
   if (!manifest) return [];
+  const expectedNames = Array.isArray(manifest) ? manifest : Object.keys(manifest);
   const reported = new Map();
   const issues = [];
   for (const project of projects) {
     for (const testCase of project.cases) {
       const expectedShard = manifest[testCase.name];
       const actualShard = project.name.replace(/^web-/, "");
-      if (!expectedShard) issues.push(`Unexpected case: ${testCase.name} (${actualShard})`);
-      else if (expectedShard !== actualShard) {
+      if (!expectedNames.includes(testCase.name)) issues.push(`Unexpected case: ${testCase.name} (${actualShard})`);
+      else if (!Array.isArray(manifest) && expectedShard !== actualShard) {
         issues.push(
           `Wrong shard: ${testCase.name} (expected ${expectedShard}, found ${actualShard})`,
         );
@@ -338,8 +339,11 @@ export function caseSetIssues(projects, manifest) {
       reported.set(testCase.name, true);
     }
   }
-  for (const name of Object.keys(manifest)) {
-    if (!reported.has(name)) issues.push(`Missing case: ${name} (${manifest[name]})`);
+  for (const name of expectedNames) {
+    if (!reported.has(name)) {
+      const location = Array.isArray(manifest) ? "" : ` (${manifest[name]})`;
+      issues.push(`Missing case: ${name}${location}`);
+    }
   }
   return issues;
 }
@@ -383,7 +387,7 @@ export function renderMarkdown({
   const missingReports = missingNativeReports(projects);
   const reportPath = publishedReportPath ?? (projects.length === 1 ? projects[0].reportPath : null);
   const reportAvailable = Boolean(reportPath);
-  const shardReportsAvailable = Boolean(pagesUrl) && projects.some((project) => project.reportPath);
+  const projectReportsAvailable = Boolean(pagesUrl) && projects.some((project) => project.reportPath);
   const infrastructureFailures = incompleteProjects.filter(
     (project) => !failures.some((testCase) => testCase.project === project.name),
   );
@@ -427,7 +431,7 @@ export function renderMarkdown({
   }
   if (reportResult && reportResult !== "success") {
     sections.push(
-      `Report aggregation: **${markdownCell(reportResult)}**. Results below use the available shard data. [Inspect the workflow run](${runUrl}).`,
+      `Report aggregation: **${markdownCell(reportResult)}**. Results below use the available test data. [Inspect the workflow run](${runUrl}).`,
       "",
     );
   }
@@ -451,9 +455,9 @@ export function renderMarkdown({
     return sections.join("\n");
   }
   sections.push(
-    "### Shard results",
+    "### Test results",
     "",
-    "| Shard | Result | Total | Passed | Failed | Not run | Duration |",
+    "| Project | Result | Total | Passed | Failed | Not run | Duration |",
     "|:--|:--|--:|--:|--:|--:|--:|",
     ...projects.map((project) => {
       const counts = totalsFor([project]);
@@ -468,7 +472,7 @@ export function renderMarkdown({
       "",
       ...caseInventoryIssues.map((issue) => `- ${markdownCell(issue)}`),
       ...(caseInventoryIssues.length ? [""] : []),
-      "| Shard | Case | Screenshot | Status / reason | Duration |",
+      "| Project | Case | Screenshot | Status / reason | Duration |",
       "|:--|:--|:--|:--|--:|",
       ...infrastructureFailures.map(
         (project) =>
@@ -497,7 +501,7 @@ export function renderMarkdown({
             pagesUrl,
             testCase,
             `${testCase.status === "not-run" ? "⏭️ Not run" : "❌ Failed"}: ${testCase.reason}`,
-            shardReportsAvailable,
+            projectReportsAvailable,
           ),
         ),
       "",
@@ -512,17 +516,17 @@ export function renderMarkdown({
     "<details>",
     `<summary>Appendix: passed cases (${passedCases.length})</summary>`,
     "",
-    "| Shard | Case | Screenshot | Status | Duration |",
+    "| Project | Case | Screenshot | Status | Duration |",
     "|:--|:--|:--|:--|--:|",
     ...passedCases.map((testCase) =>
-      caseRow(pagesUrl, testCase, "✅ Passed", shardReportsAvailable),
+      caseRow(pagesUrl, testCase, "✅ Passed", projectReportsAvailable),
     ),
     "",
     "</details>",
     "",
-    ...(shardReportsAvailable
+    ...(projectReportsAvailable
       ? ["Click a screenshot or case name to open its exact step in the native Midscene report."]
-      : ["Download the artifact to inspect available native shard reports."]),
+      : ["Download the artifact to inspect available native test reports."]),
     "",
   );
   return sections.join("\n");
