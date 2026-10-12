@@ -333,14 +333,16 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     // Consumed whatever the cookie says: a callback that reached a real
     // attempt from the wrong browser burns it, so it can't be replayed.
     pending.delete(state);
+    // Expiry first: the attempt cookie expires with the attempt, so checking it
+    // first would report a slow sign-in as a mismatch instead of a timeout.
+    if (entry.expiresAt <= Date.now()) {
+      return c.redirect(errorRedirect("expired"));
+    }
     if (readLoginStateCookie(c) !== state) {
       log.warn("cloud login callback state not bound to this browser");
       return c.redirect(errorRedirect("state"));
     }
     clearLoginStateCookie(c);
-    if (entry.expiresAt <= Date.now()) {
-      return c.redirect(errorRedirect("expired"));
-    }
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.

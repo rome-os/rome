@@ -744,6 +744,23 @@ describe("/api/auth/cloud — request guards", () => {
     }
   });
 
+  it("reports a slow sign-in as expired even after its cookie has lapsed", async () => {
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const { state } = await start(app);
+    const later = Date.now() + 11 * 60_000;
+    const now = rs.spyOn(Date, "now").mockReturnValue(later);
+    try {
+      // No cookie: the browser has already dropped it with the attempt's TTL.
+      const res = await app.request(`/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+      expect(res.headers.get("location")).toBe("/login?cloud=error&reason=expired");
+      expect(sessionUserId(res)).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("keeps an in-flight attempt's cookie when a stray callback arrives", async () => {
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
     const app = await buildRoute({ fetchImpl: romeCloud.fetch });
