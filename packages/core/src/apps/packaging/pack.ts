@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { appIdToPathSegment } from "./app-id.js";
 import { readManifestSummary, type ManifestSummary } from "./manifest.js";
+import { nativeBuildHint } from "./native-build-hint.js";
 import { PACKED_ARTIFACT_SENTINEL } from "./recognition.js";
 import { BuildValidationError, validateInstalledArtifact } from "./validate.js";
 
@@ -305,7 +306,9 @@ function pnpmEnv(): NodeJS.ProcessEnv {
  * Run pnpm in `cwd`. Output still streams to this process's stdout and stderr.
  * On a non-zero exit or a timeout, the rejection's message ends with the tail
  * of pnpm's combined output, since pnpm prints its `ERR_PNPM_*` diagnostics to
- * stdout and the exit code alone does not say why.
+ * stdout and the exit code alone does not say why. When a dependency build
+ * failed for lack of a C or C++ toolchain, a hint (`nativeBuildHint`) precedes
+ * the tail.
  *
  * Settles on pnpm's own `exit`, not on `close`: `close` also waits for every
  * descendant holding the output pipes, which would defeat the timeout and keep
@@ -380,6 +383,7 @@ export function runPnpm(
           rejectPromise(
             new Error(
               `Command failed: ${command} (cwd: ${options.cwd}, exit ${code ?? "null"})` +
+                nativeBuildHint(stripVTControlCharacters(output)) +
                 formatOutputTail(output),
             ),
           );

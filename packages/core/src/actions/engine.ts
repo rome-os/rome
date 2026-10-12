@@ -240,6 +240,18 @@ interface ExecutionInvocation {
   isRoot: boolean;
 }
 
+/** Whether a process with `pid` exists. A zombie still counts, and so does a
+ * reused pid. */
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 function mergeSharedContext(
   parentSharedContext?: Record<string, unknown>,
   childSharedContext?: Record<string, unknown>,
@@ -295,6 +307,8 @@ interface ActionWorkerProcess {
   useCount: number;
   hasBeenReady: boolean;
   attached: boolean;
+  /** Clock time of the fork, in epoch milliseconds. */
+  forkedAt: number;
   rpc?: IpcRpc;
 }
 
@@ -1260,6 +1274,7 @@ export class ActionEngine {
           log.warn("queued root timed out waiting for an action worker", {
             rootExecutionId,
             waitedMs,
+            workers: this.describeLiveWorkers(),
           });
           reject(new ActionWorkerCapacityError(this.maxWorkerProcesses, waitedMs));
         }, this.queuedRootMaxWaitMs),
@@ -1436,6 +1451,10 @@ export class ActionEngine {
       throw new Error("Only the main ActionEngine can fork action workers");
     }
     if (this.liveWorkers.size >= this.maxWorkerProcesses) {
+      log.warn("action worker capacity reached", {
+        maxWorkers: this.maxWorkerProcesses,
+        workers: this.describeLiveWorkers(),
+      });
       throw new ActionWorkerCapacityError(this.maxWorkerProcesses);
     }
     const child = this.actionWorkerFork(WORKER_ENTRY_PATH, {
@@ -1456,6 +1475,7 @@ export class ActionEngine {
       useCount: 0,
       hasBeenReady: false,
       attached: false,
+      forkedAt: this.clock.now().getTime(),
     };
     this.liveWorkers.add(worker);
     this.attachWorkerServices(worker);
@@ -1468,7 +1488,39 @@ export class ActionEngine {
         this.ensureWorkerWarmPool();
       }
     });
+    // A fork that fails to spawn (EAGAIN, EMFILE) emits `error` without a pid
+    // and never emits `exit`. No run listens on a warm worker, so without this
+    // listener that `error` is an uncaught exception that stops main.
+    child.on("error", (err) => {
+      log.warn("action worker process error", {
+        pid: child.pid ?? null,
+        error: err.message,
+      });
+      if (!child.pid) void this.stopWorker(worker);
+    });
     return worker;
+  }
+
+  /** One entry per worker that holds a slot, logged when the cap turns work
+   * away. A pid with `alive: false` marks a slot whose process is gone but
+   * whose `exit` listener never released it. */
+  private describeLiveWorkers() {
+    const rootByWorker = new Map<ActionWorkerProcess, string>();
+    for (const [rootExecutionId, active] of this.activeRootProcesses) {
+      rootByWorker.set(active.worker, rootExecutionId);
+    }
+    const now = this.clock.now().getTime();
+    return [...this.liveWorkers].map((worker) => ({
+      pid: worker.child.pid ?? null,
+      alive: isProcessAlive(worker.child.pid),
+      state: worker.state,
+      pooled: worker.pooled,
+      generation: worker.generation,
+      useCount: worker.useCount,
+      ageMs: now - worker.forkedAt,
+      connected: worker.child.connected,
+      rootExecutionId: rootByWorker.get(worker) ?? null,
+    }));
   }
 
   private attachWorkerServices(worker: ActionWorkerProcess): void {

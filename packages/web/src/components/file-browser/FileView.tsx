@@ -10,12 +10,19 @@ import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import {
   getDelimitedSeparator,
   getTextPreviewKind,
+  isSpreadsheetPath,
   parseDelimitedContent,
 } from "@/lib/file-preview";
 
 const DocxPreviewPane = lazy(() =>
   import("@/components/docx-preview-pane").then((module) => ({
     default: module.DocxPreviewPane,
+  })),
+);
+
+const SpreadsheetPreviewPane = lazy(() =>
+  import("@/components/spreadsheet-preview-pane").then((module) => ({
+    default: module.SpreadsheetPreviewPane,
   })),
 );
 
@@ -423,6 +430,28 @@ export function FileViewBody() {
         }
       >
         <DocxPreviewPane assetUrl={selectedFile.assetUrl} title={selectedPath ?? ""} />
+      </Suspense>
+    );
+  }
+
+  if (
+    selectedFile?.kind === "binary" &&
+    selectedFile.assetUrl &&
+    isSpreadsheetPath(selectedFile.path)
+  ) {
+    return (
+      <Suspense
+        fallback={
+          <div className="flex h-full items-center justify-center bg-surface p-6">
+            <p className="text-ui text-subtle-foreground">{t("view.loadingSpreadsheet")}</p>
+          </div>
+        }
+      >
+        <SpreadsheetPreviewPane
+          assetUrl={selectedFile.assetUrl}
+          size={selectedFile.size}
+          title={selectedPath ?? ""}
+        />
       </Suspense>
     );
   }

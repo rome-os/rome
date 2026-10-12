@@ -237,6 +237,7 @@ function mockApi(
         state: options.send === "fail" ? "failed" : "unconfirmed",
         ref: `sent-${outbox.length + 1}`,
         error: options.send === "fail" ? "the channel rejected this message" : null,
+        dismissable: options.send === "fail",
       };
       outbox.push(row);
       if (options.send === "land") accept(row);
@@ -253,7 +254,7 @@ function mockApi(
       }
       // A retry reuses the row, so it never reads as a second message the
       // guardian did not write.
-      Object.assign(row, { state: "unconfirmed", error: null });
+      Object.assign(row, { state: "unconfirmed", error: null, dismissable: false });
       if (options.send !== "fail") accept(row);
       return json(row, 202);
     }
@@ -1034,6 +1035,7 @@ describe("PersonDetailPage, sending", () => {
           state: "failed",
           ref: null,
           error: stranded,
+          dismissable: true,
         },
       ],
     });
@@ -1133,25 +1135,30 @@ describe("PersonDetailPage, sending", () => {
   });
 
   it("gives a stuck unconfirmed row a way out, and a fresh one none", async () => {
-    const WINDOW = 5 * 60;
-    // Against the real clock, not the fixture's noon anchor: staleness is what
-    // is under test, and the block that renders it reads `Date.now()`. Noon is
-    // in the future for any run that starts before it.
-    const REAL_NOW = Math.floor(Date.now() / 1000);
+    // The server's answer decides, not the row's age. A retried row keeps the
+    // timestamp of its first attempt while the window runs from the retry, so
+    // the fresh row here is the older of the two.
     const stuck = {
       id: "outbox-stuck",
       channel: "whatsapp",
       channelUserId: "6591881123@s.whatsapp.net",
       text: "delivered but never seen",
-      timestamp: REAL_NOW - WINDOW - 10,
+      timestamp: NOW - 60,
       state: "unconfirmed" as const,
       ref: "sent-stuck",
       error: null,
+      dismissable: true,
     };
     mockApi({
       outbox: [
         stuck,
-        { ...stuck, id: "outbox-fresh", text: "just went out", timestamp: REAL_NOW - 5 },
+        {
+          ...stuck,
+          id: "outbox-fresh",
+          text: "just went out",
+          timestamp: NOW - 3600,
+          dismissable: false,
+        },
       ],
     });
     renderPage();

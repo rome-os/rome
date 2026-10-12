@@ -238,7 +238,7 @@ const refFromParams = (params: Record<string, unknown>): AccountRef => ({
  * two waits are what make `sending` and `unconfirmed` visible states rather
  * than a flicker nobody can look at.
  */
-interface OutboxRow extends OutboxMessage {
+interface OutboxRow extends Omit<OutboxMessage, "dismissable"> {
   /** When the current attempt started, in ms. A retry resets it, so the row
    *  walks the same two stages again. */
   attemptedAt: number;
@@ -257,7 +257,8 @@ function pruneSendReceipts(now: number) {
 function retireRow(row: OutboxRow, now: number) {
   pruneSendReceipts(now);
   sendReceipts.set(row.id, {
-    response: outboxMessage(row),
+    // The row is gone, so a replay has nothing to discard.
+    response: { ...outboxMessage(row, now), dismissable: false },
     expiresAt: now + SEND_IDEMPOTENCY_RETENTION_MS,
   });
   outbox.splice(outbox.indexOf(row), 1);
@@ -271,7 +272,7 @@ const LANDS_AFTER_MS = 1_400;
 /** How long a row may sit unconfirmed before it counts as stuck. The route's
  *  five minutes; a mock row lands in under two seconds, so anything still here
  *  after this has been deliberately wedged. */
-const STRANDED_AFTER_MS = 5 * 60_000;
+const SETTLES_WITHIN_MS = 5 * 60_000;
 
 /**
  * Why this attempt stops, or null when it goes through.
@@ -322,7 +323,8 @@ function rowOf(person: PersonFixture, messageId: string): OutboxRow | null {
 
 /**
  * Whether a row can be given up on: the route's rule, kept here so the mock and
- * production never disagree about whether a button works.
+ * production never disagree about whether a button works. Sent on the wire as
+ * `dismissable`, the same as the route sends it.
  *
  * A row is dismissable once nothing is going to happen to it on its own. A
  * `failed` one is finished. An `unconfirmed` one inside the landing window is
@@ -333,7 +335,7 @@ function rowOf(person: PersonFixture, messageId: string): OutboxRow | null {
  */
 function isDismissableRow(row: OutboxRow, now: number): boolean {
   if (row.state === "failed") return true;
-  return row.state === "unconfirmed" && now - row.attemptedAt >= STRANDED_AFTER_MS;
+  return row.state === "unconfirmed" && now - row.attemptedAt >= SETTLES_WITHIN_MS;
 }
 
 function openRow(account: AccountRef, text: string, id: string = crypto.randomUUID()): OutboxRow {
@@ -354,10 +356,11 @@ function openRow(account: AccountRef, text: string, id: string = crypto.randomUU
 }
 
 /** The wire shape: the row minus the bookkeeping that drives the mock's clock,
- *  which is not on the contract. */
-function outboxMessage(row: OutboxRow): OutboxMessage {
+ *  which is not on the contract, plus whether it can be discarded at `now`.
+ *  Computed on the way out rather than stored, so it cannot go stale. */
+function outboxMessage(row: OutboxRow, now = Date.now()): OutboxMessage {
   const { attemptedAt: _at, attempts: _n, ...message } = row;
-  return message;
+  return { ...message, dismissable: isDismissableRow(row, now) };
 }
 
 /**
@@ -390,13 +393,9 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
         // playing server rather than anything a client may rely on.
         row.ref = `${row.channelUserId}:${row.id}`;
         if (wedges(row)) {
-          // Backdated on the wire as well as in the bookkeeping. The row stands
-          // in for one accepted five minutes ago, and a reader decides whether
-          // to offer Discard from `timestamp` — the only age the contract
-          // carries. A row old to the route and fresh to the client would be a
-          // button that looks wrong rather than a state worth looking at.
-          row.attemptedAt = now - STRANDED_AFTER_MS;
-          row.timestamp = Math.floor((now - STRANDED_AFTER_MS) / 1000);
+          // The row stands in for one accepted five minutes ago, so its Discard
+          // shows on this read rather than after a real wait.
+          row.attemptedAt = now - SETTLES_WITHIN_MS;
         }
       }
     }
@@ -418,7 +417,7 @@ function readOutbox(person: PersonFixture): OutboxMessage[] {
     }
   }
 
-  return outbox.filter(held).map(outboxMessage);
+  return outbox.filter(held).map((row) => outboxMessage(row, now));
 }
 
 export const peopleHandlers = [

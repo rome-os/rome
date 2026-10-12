@@ -24,6 +24,8 @@ import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { actionExecutionContext } from "../actions/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import {
@@ -63,7 +65,7 @@ import {
   subagentToolName,
 } from "./agent-session.js";
 import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { createTurnMiddlewareChain } from "./turn-middleware.js";
+import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
 import { CapabilityDiscovery } from "./capability-discovery.js";
 import { SkillCatalog } from "./skill-catalog.js";
 import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
@@ -71,7 +73,9 @@ import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
+  TurnMiddlewareContext,
 } from "@rome-os/app-runtime";
+import type { TurnUsageFacts } from "../usage/recorder.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
@@ -2093,6 +2097,240 @@ describe("AgentRunner", () => {
       },
     };
   }
+
+  describe("turn middleware terminal", () => {
+    let manager: AgentSessionManager | undefined;
+    let recorded: TurnUsageFacts[];
+
+    afterEach(async () => {
+      await manager?.shutdown();
+      manager = undefined;
+    });
+
+    async function openMiddlewareSession(
+      middleware:
+        | TurnMiddlewareChain
+        | ((ctx: TurnMiddlewareContext, next: () => Promise<void>) => Promise<void>),
+      agentName = "test-main",
+    ): Promise<AgentSession> {
+      let turnMiddleware: TurnMiddlewareChain;
+      if (typeof middleware === "function") {
+        turnMiddleware = createTurnMiddlewareChain();
+        rs.spyOn(turnMiddleware, "run").mockImplementation(middleware);
+      } else {
+        turnMiddleware = middleware;
+      }
+      recorded = [];
+      manager = createAgentSessionManager(
+        {
+          ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
+          turnMiddleware,
+          usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      return await manager.acquire({
+        agentName,
+        channelThreadKey: "webchat:middleware-terminal",
+      });
+    }
+
+    const terminalsOf = (events: AgentEvent[]) =>
+      events.filter((event) => event.type === "result" || event.type === "error");
+
+    it("publishes only the first terminal a middleware emits", async () => {
+      const session = await openMiddlewareSession(async (ctx) => {
+        ctx.emit({ type: "result", content: "first" });
+        ctx.emit({ type: "text", content: "late" });
+        ctx.emit({ type: "error", error: "second" });
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "first" })]);
+      expect(events.some((event) => event.type === "text")).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+    });
+
+    it("does not run the model when a middleware continues after its terminal", async () => {
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const session = await openMiddlewareSession(async (ctx, next) => {
+        ctx.emit({ type: "result", content: "scripted" });
+        await next();
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(mockProvider.calls).toHaveLength(0);
+      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+    });
+
+    it("ends on the model's terminal when a middleware does not await next()", async () => {
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const session = await openMiddlewareSession(async (ctx, next) => {
+        void next();
+        ctx.emit({ type: "result", content: "scripted" });
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(mockProvider.calls).toHaveLength(1);
+      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "from the model" })]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+    });
+
+    it("ends on the model's terminal when a fail-closed middleware throws after next()", async () => {
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const session = await openMiddlewareSession(async (_ctx, next) => {
+        void next();
+        throw new Error("post-processing failed");
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(mockProvider.calls).toHaveLength(1);
+      expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "from the model" })]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+    });
+
+    it("skips the model when a fail-open middleware throws after its terminal", async () => {
+      // Runs the real chain, whose fail-open handling calls next() for the
+      // middleware that threw.
+      mockProvider = new MockModelProvider([[{ type: "result", content: "from the model" }]]);
+      const dir = await mkdtemp(join(tmpdir(), "rome-turnmw-fail-open-"));
+      try {
+        await writeFile(
+          join(dir, "index.js"),
+          `export function createHook() {
+            return {
+              order: 0,
+              async handle(ctx) {
+                ctx.emit({ type: "result", content: "scripted" });
+                throw new Error("post-processing failed");
+              },
+            };
+          }\n`,
+          "utf-8",
+        );
+        const chain = createTurnMiddlewareChain();
+        const failures = await chain.loadFromCatalog({
+          get: () => null,
+          listArtifacts: (kind: string) =>
+            kind === "hook"
+              ? [
+                  {
+                    kind: "hook",
+                    publicName: "turn-middleware",
+                    aliases: [],
+                    ownerType: "app",
+                    ownerId: "app.fail-open",
+                    absolutePath: dir,
+                  },
+                ]
+              : [],
+        } as unknown as AppCatalog);
+        expect(failures).toEqual([]);
+        const session = await openMiddlewareSession(chain);
+
+        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+        expect(mockProvider.calls).toHaveLength(0);
+        expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
+        expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("ends on the emitted terminal when a fail-closed middleware throws after it", async () => {
+      const harness = installTestSpanHarness();
+      try {
+        const session = await openMiddlewareSession(async (ctx) => {
+          ctx.emit({ type: "result", content: "scripted" });
+          throw new Error("post-processing failed");
+        });
+
+        const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+        expect(terminalsOf(events)).toEqual([expect.objectContaining({ content: "scripted" })]);
+        expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+        expect(recorded.map((facts) => facts.status)).toEqual(["completed"]);
+        const spans = await harness.finishedSpans();
+        const agentSpan = spans.find((s) => s.name.startsWith("agent:"));
+        expect(agentSpan?.events).toContainEqual(
+          expect.objectContaining({
+            name: "exception",
+            attributes: expect.objectContaining({ "exception.message": "post-processing failed" }),
+          }),
+        );
+      } finally {
+        await harness.shutdown();
+      }
+    });
+
+    it("publishes an empty result for a middleware turn that emits no terminal", async () => {
+      // welcome-to-rome parks a turn on a question card this way.
+      const session = await openMiddlewareSession(async (ctx) => {
+        ctx.emit({ type: "text", content: "Pick one" });
+      });
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(terminalsOf(events)).toEqual([
+        expect.objectContaining({ type: "result", content: "" }),
+      ]);
+      expect(events.at(-2)).toMatchObject({ type: "result" });
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "completed" });
+    });
+
+    it("publishes one validation error for an output-schema middleware turn that emits no terminal", async () => {
+      const session = await openMiddlewareSession(async (ctx) => {
+        ctx.emit({ type: "text", content: "Pick one" });
+      }, "test-structured");
+
+      const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+
+      expect(terminalsOf(events)).toEqual([
+        expect.objectContaining({
+          type: "error",
+          error: expect.stringContaining("without structured output"),
+        }),
+      ]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    it.each([
+      "test-main",
+      "test-structured",
+    ])("publishes no terminal for a middleware turn the user stops (%s)", async (agentName) => {
+      let releaseMiddleware!: () => void;
+      const middlewareGate = new Promise<void>((resolve) => {
+        releaseMiddleware = resolve;
+      });
+      let entered!: () => void;
+      const middlewareEntered = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const session = await openMiddlewareSession(async () => {
+        entered();
+        await middlewareGate;
+      }, agentName);
+
+      const turn = session.sendTurn({ prompt: "hi" });
+      const messages = collectMessages(turn.events);
+      await middlewareEntered;
+      const stopping = turn.interrupt!("user-stop");
+      releaseMiddleware();
+      await stopping;
+      const events = await messages;
+
+      expect(terminalsOf(events)).toEqual([]);
+      expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "interrupted" });
+    });
+  });
 
   describe("session management", () => {
     it("waits for cancellation before ending a turn stopped during middleware", async () => {

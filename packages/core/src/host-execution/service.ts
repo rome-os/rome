@@ -46,6 +46,11 @@ const jobSchema = z.object({
   finishedAt: z.string().nullable(),
 });
 
+/** The id of the host job an execution submits. Each execution submits at most one job, so its id alone finds the job. */
+export function hostJobId(executionId: string): string {
+  return createHash("sha256").update(executionId).digest("hex");
+}
+
 export type RootScriptInput = z.input<typeof inputSchema>;
 export type HostJob = z.infer<typeof jobSchema>;
 
@@ -82,7 +87,7 @@ export class HostExecutionService {
         "Root execution requires trusted Rome action execution context.",
       );
     }
-    const jobId = createHash("sha256").update(context.executionId).digest("hex");
+    const jobId = hostJobId(context.executionId);
     const scriptSha256 = createHash("sha256").update(input.script).digest("hex");
     const capabilities = capabilitiesSchema.parse(await this.send("GET", "/v1/capabilities"));
     if (!capabilities.enabled) {

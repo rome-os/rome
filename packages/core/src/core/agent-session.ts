@@ -3516,6 +3516,8 @@ class AgentSessionImpl implements AgentSession {
       // pipeline can't tell them apart.
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: TurnResultEvent | TurnErrorEvent | undefined;
+      let droppedAfterTerminal = false;
+      let droppedDuringModel = false;
       let modelRan = false;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
@@ -3526,6 +3528,35 @@ class AgentSessionImpl implements AgentSession {
         },
         emit: (event) => {
           if (sink.done) return;
+          // A middleware's first terminal ends its stream, as the model's
+          // terminal does on the model path, so it publishes exactly one.
+          if (emittedTerminal) {
+            if (!droppedAfterTerminal) {
+              droppedAfterTerminal = true;
+              log.warn("turn middleware emitted after its terminal event; dropping the rest", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
+          // Once next() starts the model, the model owns the stream, so any
+          // middleware emit from then on is dropped, whether it comes from an
+          // unawaited next() or from a task the middleware started earlier.
+          if (modelRan) {
+            if (!droppedDuringModel) {
+              droppedDuringModel = true;
+              log.warn("turn middleware emitted while the model was running; dropping it", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
           if (
             this.structuredOutputValidator &&
             event.type === "tool_result" &&
@@ -3546,8 +3577,32 @@ class AgentSessionImpl implements AgentSession {
         meta: {},
       };
 
+      // The events loop closes the sink on the model's `result`/`error`.
+      const waitForSinkClose = async (): Promise<void> => {
+        if (sink.done) return;
+        await new Promise<void>((resolve) => {
+          const checker = setInterval(() => {
+            if (sink.done) {
+              clearInterval(checker);
+              resolve();
+            }
+          }, 5);
+        });
+      };
+
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
+        if (emittedTerminal) {
+          // Reached through next() after an emit, or through the chain's
+          // fail-open next() after a throw. A model run would publish a second
+          // terminal and pay for a second reply.
+          log.warn("turn middleware continued to the model after its terminal event; skipped", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+          });
+          return;
+        }
         if (sink.lifecycleInterrupted) {
           await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
@@ -3591,23 +3646,32 @@ class AgentSessionImpl implements AgentSession {
           this.failTurn(sink, err instanceof Error ? err.message : String(err));
         }
 
-        // Wait for sink to close (events loop closes on `result`/`error`).
-        await new Promise<void>((resolve) => {
-          const checker = setInterval(() => {
-            if (sink.done) {
-              clearInterval(checker);
-              resolve();
-            }
-          }, 5);
-        });
+        await waitForSinkClose();
       };
 
       const chain = this.deps.turnMiddleware;
       if (chain) {
-        await chain.run(mwCtx, runModelTerminal);
+        try {
+          await chain.run(mwCtx, runModelTerminal);
+        } catch (err) {
+          // A fail-closed throw after the terminal, or after next() started
+          // the model, cannot change the outcome, so the turn ends on the
+          // terminal already emitted or on the model's.
+          if (!emittedTerminal && !modelRan) throw err;
+          if (err instanceof Error && this.currentAgentSpan === span) span.recordException(err);
+          log.warn("turn middleware threw after its terminal event or after starting the model", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         await runModelTerminal();
       }
+      // A middleware that did not await next() returns while the model is
+      // still running. The model's terminal ends the turn, not a synthesized one.
+      if (modelRan) await waitForSinkClose();
 
       if (!sink.done) {
         if (!modelRan && input.inputId) {
@@ -3624,7 +3688,10 @@ class AgentSessionImpl implements AgentSession {
           type: "result",
           content: "",
         };
-        if (!emittedTerminal && this.structuredOutputValidator) {
+        // A middleware that short-circuits without a terminal, such as a turn
+        // parked on a question card, still publishes one. An interrupted turn
+        // publishes none, as an interrupt before the model starts does.
+        if (!emittedTerminal && !sink.lifecycleInterrupted) {
           terminal = validateProviderStructuredResult(
             terminal,
             this.structuredOutputValidator,

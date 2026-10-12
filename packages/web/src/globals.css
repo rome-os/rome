@@ -480,7 +480,8 @@
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
     /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
        overrides this inline on <html>; the fallback serves browsers without
-       `visualViewport`. */
+       `visualViewport`. A page sized to the screen reads this rather than
+       `100dvh`, which iOS keeps at full height under the keyboard. */
     --rome-viewport-height: 100dvh;
     --rome-mobile-content-height: calc(
       var(--rome-viewport-height) - var(--rome-mobile-header-height)
