@@ -68,7 +68,7 @@ export default function LoginPage() {
   // hint is read once and dropped from the URL, so Back never restarts it. A
   // failed attempt returns as `?cloud=error`, which shows the button instead.
   const [cloudHint] = useState(() => searchParams.get("via") === "cloud");
-  const autoStartCloud = cloudHint && !cloudCallbackError && !visitorCallbackError;
+  const autoStartCloud = cloudHint && !cloudError && !cloudCallbackError && !visitorCallbackError;
   useEffect(() => {
     if (!searchParams.has("via")) return;
     const next = new URLSearchParams(searchParams);
