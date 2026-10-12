@@ -252,3 +252,18 @@ test("artifact recovery cannot bypass source validation", () => {
   );
   assert.doesNotMatch(results, /run:.*\$\{\{ inputs.report_source_run_id/);
 });
+
+test("model steps use environment variables and keep the API key in secrets", () => {
+  const visual = job("midscene");
+  assert.match(visual, /^    environment: Model$/m);
+  assert.match(visual, /MIDSCENE_MODEL_API_KEY: \$\{\{ secrets\.MIDSCENE_MODEL_API_KEY \}\}/);
+  assert.doesNotMatch(visual, /vars\.MIDSCENE_MODEL_API_KEY/);
+  for (const setting of ["NAME", "BASE_URL", "FAMILY"]) {
+    const key = `MIDSCENE_MODEL_${setting}`;
+    const bindings = visual.split("\n").filter((line) => line.trimStart().startsWith(`${key}:`));
+    assert.ok(bindings.length >= 2);
+    for (const binding of bindings) {
+      assert.ok(binding.includes(`vars.${key} || secrets.${key}`));
+    }
+  }
+});

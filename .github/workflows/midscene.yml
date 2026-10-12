@@ -31,7 +31,7 @@ on:
         default: true
 
 # Credential trust model:
-# The four MIDSCENE_MODEL_* secrets are billable, and a pull_request job runs
+# The model API key authorizes billable calls, and a pull_request job runs
 # contributor-controlled code with the secrets in its environment. Naming a
 # protected environment in the workflow does not create its reviewer gate — an
 # absent environment is provisioned open — so until a maintainer actually
@@ -156,6 +156,7 @@ jobs:
   midscene:
     needs: harness-validation
     name: Midscene visual tests
+    environment: Model
     # Fail-closed trust gate: contributor-controlled pull request code never
     # runs automatically with billable model credentials. Upstream runs only
     # on main; a fork owner may explicitly dispatch a fork ref with that fork's
@@ -193,9 +194,9 @@ jobs:
           # Scoped to the steps that actually call the model; install and the
           # mock server never see these variables.
           MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
-          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
-          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
-          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_MODEL_NAME: ${{ vars.MIDSCENE_MODEL_NAME || secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ vars.MIDSCENE_MODEL_BASE_URL || secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ vars.MIDSCENE_MODEL_FAMILY || secrets.MIDSCENE_MODEL_FAMILY }}
         run: |
           test -n "$MIDSCENE_MODEL_API_KEY"
           test -n "$MIDSCENE_MODEL_NAME"
@@ -250,9 +251,9 @@ jobs:
         working-directory: tests/midscene
         env:
           MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
-          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
-          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
-          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_MODEL_NAME: ${{ vars.MIDSCENE_MODEL_NAME || secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ vars.MIDSCENE_MODEL_BASE_URL || secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ vars.MIDSCENE_MODEL_FAMILY || secrets.MIDSCENE_MODEL_FAMILY }}
           MIDSCENE_PROJECT_NAME: web
           MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
           MIDSCENE_RETRY: "2"
@@ -262,8 +263,8 @@ jobs:
         if: always()
         working-directory: tests/midscene
         env:
-          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
-          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_MODEL_NAME: ${{ vars.MIDSCENE_MODEL_NAME || secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_FAMILY: ${{ vars.MIDSCENE_MODEL_FAMILY || secrets.MIDSCENE_MODEL_FAMILY }}
         run: |
           node --input-type=module <<'NODE'
           import { mkdir, writeFile } from 'node:fs/promises';

@@ -195,16 +195,20 @@ Pages publication is enabled upstream. Fork publication requires an exact
 ## Fork setup: yuyutaotao/rome
 
 1. Enable workflows in the repository's **Actions** tab.
-2. Under **Settings → Secrets and variables → Actions → Secrets**, add:
+2. Under **Settings → Environments → Model**, configure the following values.
+   The visual test job references this environment.
 
-   | Secret | Value |
-   | --- | --- |
-   | `MIDSCENE_MODEL_API_KEY` | The visual model provider's API key |
-   | `MIDSCENE_MODEL_BASE_URL` | An OpenAI-compatible API base URL reachable from GitHub-hosted runners |
-   | `MIDSCENE_MODEL_NAME` | The provider's vision model name or endpoint ID |
-   | `MIDSCENE_MODEL_FAMILY` | The model family, such as `doubao-seed` for Seed |
+   | Setting | Type | Value |
+   | --- | --- | --- |
+   | `MIDSCENE_MODEL_API_KEY` | Secret | The visual model provider's API key |
+   | `MIDSCENE_MODEL_BASE_URL` | Variable | An OpenAI-compatible API base URL reachable from GitHub-hosted runners |
+   | `MIDSCENE_MODEL_NAME` | Variable | The provider's vision model name or endpoint ID |
+   | `MIDSCENE_MODEL_FAMILY` | Variable | The model family, such as `doubao-seed` for Seed |
 
-3. To publish the HTML report, add the Actions variable
+   Model variables take precedence over same-named secrets. Secrets remain
+   supported for repositories that store all model settings there.
+
+3. To publish the HTML report, add the repository-level Actions variable
    `MIDSCENE_PUBLISH_REPO=yuyutaotao/rome`.
 4. Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
 5. Open **Actions → E2E Testing by Midscene → Run workflow**. Leave
