@@ -18,7 +18,7 @@ const runs = (name, overrides = {}) => {
   const context = {
     github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "schedule" },
     inputs: { publish_pages: true },
-    vars: { MIDSCENE_PUBLISH_REPO: "" },
+    vars: {},
     needs: {
       midscene: { result: "success", outputs: { "report-artifact-name": "midscene-results" } },
       "prepare-pages": { result: "success" },
@@ -66,26 +66,18 @@ test("raw artifacts replace the intermediate report job", () => {
   }
 });
 
-test("Pages defaults to upstream main and requires explicit fork opt-in", () => {
-  assert.equal(runs("prepare-pages"), true);
-  assert.equal(runs("prepare-pages", { vars: { MIDSCENE_PUBLISH_REPO: "other/rome" } }), true);
+test("Pages publishes available reports by default with a manual opt-out", () => {
+  assert.match(workflow, /publish_pages:[\s\S]*?default: true/);
   for (const event_name of ["schedule", "workflow_dispatch"]) {
     for (const repository of ["rome-os/rome", "example/rome"]) {
-      for (const ref of ["refs/heads/main", "refs/heads/feature"]) {
-        for (const publisher of ["", repository, "other/rome"]) {
-          const expected =
-            (repository === "rome-os/rome"
-              ? ref === "refs/heads/main"
-              : publisher === repository && event_name === "workflow_dispatch");
-          assert.equal(
-            runs("prepare-pages", {
-              github: { repository, ref, event_name },
-              vars: { MIDSCENE_PUBLISH_REPO: publisher },
-            }),
-            expected,
-            `${repository} ${event_name} ${ref} ${publisher}`,
-          );
-        }
+      for (const publish_pages of [true, false]) {
+        assert.equal(
+          runs("prepare-pages", {
+            github: { repository, ref: "refs/heads/main", event_name },
+            inputs: { publish_pages },
+          }),
+          event_name === "schedule" || publish_pages,
+        );
       }
     }
   }
@@ -122,7 +114,6 @@ test("manual dispatch can run tests and generate the Summary without Pages", () 
       event_name: "workflow_dispatch",
     },
     inputs: { publish_pages: false },
-    vars: { MIDSCENE_PUBLISH_REPO: "example/rome" },
   };
   assert.equal(runs("midscene", context), true);
   assert.equal(runs("prepare-pages", context), false);

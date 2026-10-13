@@ -137,8 +137,8 @@ reasons behind them.
   stops the server started by this run. Type checks run in the test job.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
-  Report publishing is enabled on upstream `main`. Fork publishing requires
-  the repository to match `MIDSCENE_PUBLISH_REPO`.
+  Report publishing defaults on when test artifacts are available, including
+  fork runs. Manual dispatch can disable it with `publish_pages=false`.
   The test job does not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
   environment in the workflow does **not** create its reviewer gate — an

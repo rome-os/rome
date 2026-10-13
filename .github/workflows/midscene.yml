@@ -10,13 +10,13 @@ on:
   workflow_dispatch:
     inputs:
       publish_pages:
-        description: Publish reports to Pages when this repository is enabled
+        description: Publish reports to GitHub Pages
         required: false
         type: boolean
         default: true
 
 # Model runs use upstream main or manually selected fork branches.
-# Pages publication is enabled upstream and opt-in for forks.
+# Pages publication defaults on; manual runs can disable it.
 
 permissions:
   contents: read
@@ -117,12 +117,9 @@ jobs:
   prepare-pages:
     name: Prepare optional Midscene Pages publication
     needs: midscene
-    # Fork publication requires an exact repository-name opt-in.
     if: >-
       always() && !cancelled() &&
       (github.event_name != 'workflow_dispatch' || inputs.publish_pages) &&
-      (github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' ||
-      github.repository != 'rome-os/rome' && github.repository == vars.MIDSCENE_PUBLISH_REPO && github.event_name == 'workflow_dispatch') &&
       needs.midscene.outputs.report-artifact-name != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 10

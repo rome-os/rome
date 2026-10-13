@@ -132,9 +132,8 @@ capture screenshots or recalculate the Markdown contents.
   Summary links to the run artifacts for diagnosis.
 - Pages preserves the original HTML and assets at their relative paths. Each run
   has an index linking to its original report. Reports are not merged.
-- Pages publication is enabled for `rome-os/rome` on `main`. A fork can opt in
-  by setting the Actions variable `MIDSCENE_PUBLISH_REPO` to its exact full
-  repository name, then using manual dispatch. Pull requests never publish.
+- Pages publication defaults on for runs with report artifacts, including
+  manually dispatched fork runs. Pull requests never publish.
   A maintainer must select **Settings → Pages → Build and deployment → Source →
   GitHub Actions** in the publishing repository. The workflow does not enable
   or change the repository's Pages settings. If Pages configuration is
@@ -159,8 +158,7 @@ Midscene project setup before model-backed cases.
 Manual `workflow_dispatch` runs the full suite on upstream `main`.
 A fork owner may manually dispatch a fork branch using that fork's model
 secrets. Reports are generated from the current run only.
-Pages publication is enabled upstream. Fork publication requires an exact
-`MIDSCENE_PUBLISH_REPO` match.
+Pages publication defaults on. Manual runs can disable it with `publish_pages`.
 Runs across branches share a workflow concurrency group so history download
 through Pages deployment is serialized. This also serializes test runs.
 
@@ -203,10 +201,8 @@ through Pages deployment is serialized. This also serializes test runs.
    Model variables take precedence over same-named secrets. Secrets remain
    supported for repositories that store all model settings there.
 
-3. To publish the HTML report, add the repository-level Actions variable
-   `MIDSCENE_PUBLISH_REPO=yuyutaotao/rome`.
-4. Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
-5. Open **Actions → E2E Testing by Midscene → Run workflow** to run all cases.
+3. Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+4. Open **Actions → E2E Testing by Midscene → Run workflow** to run all cases.
    Set `publish_pages=false`
    if you only need downloadable artifacts.
 
