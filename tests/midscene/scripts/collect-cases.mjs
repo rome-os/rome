@@ -15,32 +15,48 @@ import {
 } from "@midscene/test/config";
 
 const projectRoot = process.cwd();
-const configPath = resolve(projectRoot, "midscene.config.ts");
-const expectedCases = JSON.parse(
-  await readFile(resolve(projectRoot, "case-manifest.json"), "utf8"),
-);
-const collectedCases = new Map();
+const readJson = async (path) => JSON.parse(await readFile(resolve(projectRoot, path), "utf8"));
 
-const loaded = await loadTestProject(configPath);
+// The mock suite splits its cases across six CI shards. The backend suite
+// runs as one ordered group against a real instance, so its only "shard" is
+// the `backend` tag, and its setup nodes talk to that instance.
+const suites = [
+  {
+    configPath: "midscene.config.ts",
+    expectedCases: await readJson("case-manifest.json"),
+    shards: [1, 2, 3, 4, 5, 6].map((number) => `shard-${number}`),
+    isInfrastructureNode: (node) => ["app.open", "app.expectRenameConflict"].includes(node),
+  },
+  {
+    configPath: "midscene.backend.config.ts",
+    expectedCases: await readJson("backend/case-manifest.json"),
+    shards: ["backend"],
+    isInfrastructureNode: (node) => node === "app.open" || node.startsWith("backend."),
+  },
+];
+const expectedCases = Object.assign({}, ...suites.map((suite) => suite.expectedCases));
+const collectedCases = new Map();
 
 let fileCount = 0;
 let caseCount = 0;
+let projectCount = 0;
 const failures = [];
 const atomicAiNode = /^ai(?:Tap|Scroll|Input|Hover|Keyboard)/;
-const infrastructureNodes = new Set(["app.open", "app.expectRenameConflict"]);
 const expectedCasesByShard = new Map(
-  [1, 2, 3, 4, 5, 6].map((number) => {
-    const shard = `shard-${number}`;
-    return [shard, Object.values(expectedCases).filter((value) => value === shard).length];
-  }),
+  suites.flatMap((suite) =>
+    suite.shards.map((shard) => [
+      shard,
+      Object.values(suite.expectedCases).filter((value) => value === shard).length,
+    ]),
+  ),
 );
 const collectedCasesByShard = new Map([...expectedCasesByShard.keys()].map((shard) => [shard, 0]));
 
-const validateAiNativeCase = (testCase) => {
+const validateAiNativeCase = (testCase, suite) => {
   const nodes = testCase.definition.steps.map((step) => step.node);
   const tags = new Set(testCase.definition.tags);
   const problems = [];
-  const shardTags = [...tags].filter((tag) => expectedCasesByShard.has(tag));
+  const shardTags = [...tags].filter((tag) => suite.shards.includes(tag));
 
   if (nodes[0] !== "app.open") problems.push("the first step must be app.open");
   if (nodes.filter((node) => node === "app.open").length !== 1) {
@@ -61,7 +77,8 @@ const validateAiNativeCase = (testCase) => {
 
   const forbidden = nodes.filter(
     (node) =>
-      atomicAiNode.test(node) || (node.startsWith("app.") && !infrastructureNodes.has(node)),
+      atomicAiNode.test(node) ||
+      (/^(app|backend)\./.test(node) && !suite.isInfrastructureNode(node)),
   );
   if (forbidden.length > 0) {
     problems.push(`use aiAct instead of ${[...new Set(forbidden)].join(", ")}`);
@@ -73,32 +90,36 @@ const validateAiNativeCase = (testCase) => {
   }
 };
 
-for (const project of loaded.projects) {
-  const selection = project.files ?? DEFAULT_TEST_FILE_SELECTION;
-  const files = discoverTestFiles(projectRoot, selection);
-  console.log(`Project "${project.name}": ${files.length} workflow file(s)`);
+for (const suite of suites) {
+  const loaded = await loadTestProject(resolve(projectRoot, suite.configPath));
+  projectCount += loaded.projects.length;
+  for (const project of loaded.projects) {
+    const selection = project.files ?? DEFAULT_TEST_FILE_SELECTION;
+    const files = discoverTestFiles(projectRoot, selection);
+    console.log(`Project "${project.name}": ${files.length} workflow file(s)`);
 
-  for (const absolutePath of files) {
-    fileCount += 1;
-    const sourcePath = relative(projectRoot, absolutePath).split(sep).join("/");
-    try {
-      const document = collectWorkflowDocument(
-        {
-          projectId: project.projectId,
-          projectName: project.name,
-          sourcePath,
-          absolutePath,
-        },
-        {
-          resolveNode: project.nodes.get.bind(project.nodes),
-          variables: project.variables,
-          env: process.env,
-        },
-      );
-      for (const testCase of document.cases) validateAiNativeCase(testCase);
-      caseCount += document.cases.length;
-    } catch (error) {
-      failures.push({ sourcePath, error });
+    for (const absolutePath of files) {
+      fileCount += 1;
+      const sourcePath = relative(projectRoot, absolutePath).split(sep).join("/");
+      try {
+        const document = collectWorkflowDocument(
+          {
+            projectId: project.projectId,
+            projectName: project.name,
+            sourcePath,
+            absolutePath,
+          },
+          {
+            resolveNode: project.nodes.get.bind(project.nodes),
+            variables: project.variables,
+            env: process.env,
+          },
+        );
+        for (const testCase of document.cases) validateAiNativeCase(testCase, suite);
+        caseCount += document.cases.length;
+      } catch (error) {
+        failures.push({ sourcePath, error });
+      }
     }
   }
 }
@@ -120,7 +141,7 @@ const wrongShards = expectedNames.filter(
 );
 const catalog = await readFile(resolve(projectRoot, "../../docs/midscene-e2e-cases.md"), "utf8");
 const catalogCases = new Map();
-for (const match of catalog.matchAll(/^\| ([A-Z0-9]+-\d+) \| (.+) \| (shard-\d+) \|$/gm)) {
+for (const match of catalog.matchAll(/^\| ([A-Z0-9]+-\d+) \| (.+) \| (shard-\d+|backend) \|$/gm)) {
   if (catalogCases.has(match[1])) throw new Error(`Duplicate catalog ID: ${match[1]}`);
   catalogCases.set(match[1], { name: `${match[1]} ${match[2]}`, shard: match[3] });
 }
@@ -162,7 +183,7 @@ if (manifestMismatches.length > 0) {
 }
 
 console.log(
-  `Collection OK: ${caseCount} cases in ${fileCount} file(s) across ${loaded.projects.length} project(s).`,
+  `Collection OK: ${caseCount} cases in ${fileCount} file(s) across ${projectCount} project(s).`,
 );
 console.log(
   `Shard manifest: ${[...collectedCasesByShard].map(([shard, count]) => `${shard}=${count}`).join(", ")}.`,

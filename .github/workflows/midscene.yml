@@ -3,6 +3,10 @@ name: E2E Testing by Midscene
 # Visual E2E against the strict MSW mock build (pnpm --filter rome-web dev:mock:e2e,
 # port 3200). Every case uses only synthetic in-repo fixtures; no real backend
 # or personal data is involved. Model credentials come from repository secrets.
+#
+# The `backend` job runs the separate backend suite (tests/midscene/backend)
+# against a real Rome container built from this commit's production image,
+# with a real model configured from ROME_E2E_ANTHROPIC_ENV_JSON.
 
 on:
   schedule:
@@ -29,6 +33,12 @@ on:
         required: false
         type: boolean
         default: true
+      suite:
+        description: Which model-backed suite to run
+        required: false
+        type: choice
+        options: [all, mock, backend]
+        default: all
 
 # Credential trust model:
 # The four MIDSCENE_MODEL_* secrets are billable, and a pull_request job runs
@@ -161,7 +171,7 @@ jobs:
     # on main; a fork owner may explicitly dispatch a fork ref with that fork's
     # own secrets.
     if: >-
-      inputs.report_source_run_id == '' &&
+      inputs.report_source_run_id == '' && inputs.suite != 'backend' &&
       needs.harness-validation.outputs.upstream-repository != '' &&
       (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
       (github.event_name == 'workflow_dispatch' && github.repository != needs.harness-validation.outputs.upstream-repository))
@@ -318,6 +328,151 @@ jobs:
         with:
           name: rome-devmock-${{ matrix.shard }}
           path: /tmp/rome-devmock.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  backend:
+    needs: [harness-validation, midscene]
+    name: "Midscene backend: production image with a real model"
+    # The same fail-closed trust gate as the `midscene` matrix. It runs after
+    # the matrix, never beside it, because both share the Midscene endpoint's
+    # tokens-per-minute ceiling; a failed or skipped matrix does not stop it.
+    if: >-
+      always() && !cancelled() && needs.harness-validation.result == 'success' &&
+      inputs.report_source_run_id == '' && inputs.suite != 'mock' &&
+      needs.harness-validation.outputs.upstream-repository != '' &&
+      (github.repository == needs.harness-validation.outputs.upstream-repository && github.ref == 'refs/heads/main' ||
+      (github.event_name == 'workflow_dispatch' && github.repository != needs.harness-validation.outputs.upstream-repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      HEADLESS: "true"
+      NODE_OPTIONS: "--dns-result-order=ipv4first --no-network-family-autoselection"
+      ROME_E2E_IMAGE: rome-e2e:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          lfs: true
+
+      - name: Activate Node.js 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/midscene/package-lock.json
+
+      - name: Require model configuration and mask its values
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: |
+          test -n "$MIDSCENE_MODEL_API_KEY"
+          test -n "$MIDSCENE_MODEL_NAME"
+          test -n "$MIDSCENE_MODEL_BASE_URL"
+          test -n "$MIDSCENE_MODEL_FAMILY"
+          test -n "$ROME_E2E_ANTHROPIC_ENV_JSON"
+          # GitHub masks the secret as a whole, not a token printed on its own.
+          node --input-type=module <<'NODE'
+          const parsed = JSON.parse(process.env.ROME_E2E_ANTHROPIC_ENV_JSON);
+          for (const value of Object.values(parsed.env ?? parsed)) {
+            if (typeof value === "string" && value.length >= 8) console.log(`::add-mask::${value}`);
+          }
+          NODE
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Prepare Docker runtime workspace
+        run: node scripts/docker/prepare-runtime-workspace.mjs
+
+      - name: Build the production image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .docker/rome-runtime-workspace
+          file: .docker/rome-runtime-workspace/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.ROME_E2E_IMAGE }}
+          build-args: |
+            ROME_DOCKER_APP_CODE_MODE=compiled
+            ROME_BUILD_SHA=${{ github.sha }}
+          # Read-only reuse of the test-image cache; this job never writes it.
+          cache-from: type=gha,scope=rome-runtime-test-linux-amd64
+
+      - name: Install Midscene test dependencies
+        working-directory: tests/midscene
+        run: |
+          npm ci --strict-allow-scripts
+          npx playwright install --with-deps chromium
+
+      - name: Check Midscene model vision
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+        run: npm run check:model-vision
+
+      - name: Run the backend suite
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          MIDSCENE_MODEL_NAME: ${{ secrets.MIDSCENE_MODEL_NAME }}
+          MIDSCENE_MODEL_BASE_URL: ${{ secrets.MIDSCENE_MODEL_BASE_URL }}
+          MIDSCENE_MODEL_FAMILY: ${{ secrets.MIDSCENE_MODEL_FAMILY }}
+          MIDSCENE_REPLANNING_CYCLE_LIMIT: "40"
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: timeout --signal=TERM --kill-after=10s 50m tests/midscene/backend/run.sh
+
+      # Uploads are gated on this scan: GitHub masks secrets in step logs but
+      # not inside artifacts.
+      - name: Scan backend output for secrets
+        id: secret-scan
+        if: always()
+        working-directory: tests/midscene
+        env:
+          MIDSCENE_MODEL_API_KEY: ${{ secrets.MIDSCENE_MODEL_API_KEY }}
+          ROME_E2E_ANTHROPIC_ENV_JSON: ${{ secrets.ROME_E2E_ANTHROPIC_ENV_JSON }}
+        run: node scripts/backend-secret-scan.mjs midscene_run .midscene
+
+      - name: Write the backend Summary
+        if: always()
+        working-directory: tests/midscene
+        run: |
+          {
+            echo "## Midscene backend suite"
+            echo
+            node --input-type=module <<'NODE'
+          import { existsSync, readdirSync, readFileSync } from "node:fs";
+          const dir = "midscene_run/backend/results";
+          const runs = existsSync(dir) ? readdirSync(dir).sort() : [];
+          const file = runs.length ? `${dir}/${runs.at(-1)}/summary.json` : "";
+          if (!file || !existsSync(file)) {
+            console.log("No case results: the instance or the runner did not start.");
+          } else {
+            const { summary } = JSON.parse(readFileSync(file, "utf8"));
+            console.log(`${summary.passed}/${summary.total} cases passed, ${summary.failed} failed, ${summary.notRun} not run.`);
+          }
+          NODE
+            echo
+            cat midscene_run/backend/anomalies.md 2>/dev/null || echo "No anomaly report."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Artifacts only: the report holds real model output, so it never joins
+      # the Pages publication of the mock suite.
+      - name: Upload backend report
+        if: always() && steps.secret-scan.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: midscene-backend
+          path: |
+            tests/midscene/midscene_run/
+            tests/midscene/.midscene/
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
 

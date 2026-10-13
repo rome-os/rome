@@ -75,6 +75,27 @@ moving a case fails CI.
 The case names and shard assignments above match the executable YAML. Run
 `npm run collect` from `tests/midscene` to validate the catalog manifest.
 
+## Backend suite
+
+The backend suite runs against a real Rome container built from the
+production image, with a real model. Its cases live in
+`tests/midscene/backend/cases/`, carry the `backend` tag, and are listed in
+`tests/midscene/backend/case-manifest.json`. They run in file order against
+one instance, because BE-01 creates the account that BE-02 signs in with.
+
+| ID | Case | Shard |
+| --- | --- | --- |
+| BE-01 | Finish first-run onboarding with a connected model | backend |
+| BE-02 | Write a project file and have Rome read it back | backend |
+
+Assertions check page state and a per-run token, never model wording. Each
+run also reports anomalies independently of the case results: error-level
+container log lines, browser console and page errors, failed requests, and
+HTTP responses of 400 or more. Unlike the mock suite, the browser has no
+network guard, so CDN assets load as they do for a guardian.
+`tests/midscene/backend/known-noise.json` lists the expected entries, each
+with its reason.
+
 ## Execution contract
 
 - MSW rejects external HTTP requests. A BrowserContext guard blocks external
@@ -111,3 +132,22 @@ MIDSCENE_RETRY=0 HEADLESS=true npm test
 
 Use `MIDSCENE_INCLUDE_TAGS=shard-2` to run one shard. Model settings belong in
 the untracked `tests/midscene/.env`. Never commit credentials.
+
+To run the backend suite, build or pull an image, then run the script from the
+repository root. It starts a throwaway instance on `127.0.0.1:8090` with empty
+volumes, runs the cases, writes the container log and the anomaly report to
+`tests/midscene/midscene_run/backend/`, scans that output for the model
+secrets, and deletes the instance:
+
+```bash
+ROME_E2E_IMAGE=yunfanye/rome:latest \
+ROME_E2E_ANTHROPIC_ENV_FILE=path/to/custom-env.json \
+tests/midscene/backend/run.sh
+```
+
+The model environment file is the JSON that **Settings → AI Tools → Other API
+providers → Custom environment** accepts:
+`{ "env": { "ANTHROPIC_AUTH_TOKEN": "…", … } }`. The suite stores it through
+the same API before onboarding reaches the connect-AI step. No step types it,
+so it never appears in a screenshot or a report. Set `ROME_E2E_KEEP=1` to keep
+the instance running after the cases.

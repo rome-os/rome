@@ -31,7 +31,10 @@ const runs = (name, overrides = {}) => {
     ...overrides,
   };
   context.needs = {
-    "harness-validation": { outputs: { "upstream-repository": "rome-os/rome" } },
+    "harness-validation": {
+      result: "success",
+      outputs: { "upstream-repository": "rome-os/rome" },
+    },
     ...context.needs,
   };
   // Evaluate the workflow's actual gate so a policy edit changes these cases.
@@ -58,7 +61,7 @@ const runs = (name, overrides = {}) => {
 
 test("trust gates share one upstream definition and fail closed without it", () => {
   assert.equal((workflow.match(/rome-os\/rome/g) ?? []).length, 1);
-  for (const name of ["midscene", "prepare-pages"]) {
+  for (const name of ["midscene", "backend", "prepare-pages"]) {
     assert.equal(
       runs(name, {
         needs: { "harness-validation": { outputs: { "upstream-repository": "" } } },
@@ -158,6 +161,7 @@ test("report-only dispatch can generate the Summary without models or Pages", ()
     vars: { MIDSCENE_PUBLISH_REPO: "example/rome" },
   };
   assert.equal(runs("midscene", context), false);
+  assert.equal(runs("backend", context), false);
   assert.equal(runs("report-summary", context), true);
   assert.equal(runs("prepare-pages", context), false);
   assert.equal(runs("report-results", context), true);
@@ -167,7 +171,7 @@ test("results are visible before optional deployment and survive its cancellatio
   const writers = [...workflow.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/gm)]
     .filter((match) => match[2].includes("GITHUB_STEP_SUMMARY"))
     .map((match) => match[1]);
-  assert.deepEqual(writers, ["available-results", "report-results"]);
+  assert.deepEqual(writers, ["backend", "available-results", "report-results"]);
   assert.match(job("available-results"), /needs: \[midscene, report-summary\]/);
   assert.doesNotMatch(job("available-results"), /needs:.*(?:prepare-pages|deploy-report)/);
   for (const result of ["waiting", "cancelled", "failure", "skipped"]) {
@@ -249,4 +253,61 @@ test("artifact recovery cannot bypass source validation", () => {
     /name: Recover available shard reports[\s\S]*?steps.combined-report.outcome != 'success'/,
   );
   assert.doesNotMatch(results, /run:.*\$\{\{ inputs.report_source_run_id/);
+});
+
+test("the backend suite shares the model trust gate and runs after the mock matrix", () => {
+  for (const event_name of ["schedule", "push", "workflow_dispatch", "pull_request"]) {
+    for (const repository of ["rome-os/rome", "example/rome"]) {
+      for (const ref of ["refs/heads/main", "refs/heads/feature", "refs/pull/1/merge"]) {
+        const context = { github: { repository, ref, event_name } };
+        assert.equal(
+          runs("backend", context),
+          runs("midscene", context),
+          `${repository} ${event_name} ${ref}`,
+        );
+      }
+    }
+  }
+  assert.match(job("backend"), /needs: \[harness-validation, midscene\]/);
+  for (const result of ["success", "failure", "skipped"]) {
+    assert.equal(runs("backend", { needs: { midscene: { result } } }), true, `matrix ${result}`);
+  }
+  assert.equal(runs("backend", { cancelled: true }), false);
+  const harnessFailed = {
+    result: "failure",
+    outputs: { "upstream-repository": "rome-os/rome" },
+  };
+  assert.equal(runs("backend", { needs: { "harness-validation": harnessFailed } }), false);
+});
+
+test("the suite input selects the mock matrix, the backend job, or both", () => {
+  const dispatch = (suite) => ({
+    github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "workflow_dispatch" },
+    inputs: { report_source_run_id: "", publish_pages: true, suite },
+  });
+  assert.deepEqual(
+    ["all", "mock", "backend", undefined].map((suite) => [
+      runs("midscene", dispatch(suite)),
+      runs("backend", dispatch(suite)),
+    ]),
+    [
+      [true, true],
+      [true, false],
+      [false, true],
+      [true, true],
+    ],
+  );
+});
+
+test("backend output is scanned for secrets before upload and never published", () => {
+  const backend = job("backend");
+  assert.match(backend, /id: secret-scan\n        if: always\(\)/);
+  assert.match(backend, /if: always\(\) && steps.secret-scan.outcome == 'success'/);
+  assert.match(backend, /name: midscene-backend\n/);
+  assert.match(backend, /::add-mask::/);
+  assert.doesNotMatch(backend, /configure-pages|pages: write|MIDSCENE_PUBLISH_REPO/);
+  // The mock report merge must not pick up the backend artifact.
+  for (const match of workflow.matchAll(/pattern: (\S+)/g)) {
+    assert.ok(!new RegExp(`^${match[1].replace("*", ".*")}$`).test("midscene-backend"));
+  }
 });
