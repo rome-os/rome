@@ -175,7 +175,7 @@
     // Midscene installs with npm outside the pnpm workspace. Its config and
     // CLI/test scripts are invoked by Midscene, npm scripts, or CI.
     "tests/midscene": {
-      "entry": ["midscene.config.ts", "scripts/*.mjs"],
+      "entry": ["midscene.config.ts", "midscene.backend.config.ts", "scripts/*.mjs"],
       // The root CI install omits this package's npm-only binary. The Midscene
       // harness job installs and invokes it with the package lockfile.
       "ignoreBinaries": ["midscene-test"]
