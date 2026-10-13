@@ -52,6 +52,7 @@ import type {
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
+import { randomUUID } from "@/lib/random-uuid";
 
 const RECENT_CHAT_LIMIT = 10;
 const CONTENT_SEARCH_DEBOUNCE_MS = 200;
@@ -478,7 +479,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
       inputId =
         failed && failed.sessionId === sessionId && failed.text === messageText
           ? failed.inputId
-          : crypto.randomUUID();
+          : randomUUID();
       const body = new FormData();
       body.set("text", messageText);
       body.set("inputId", inputId);

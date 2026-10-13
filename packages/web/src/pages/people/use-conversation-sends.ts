@@ -5,6 +5,7 @@ import { channelLabel } from "./channel-meta";
 import { sendRefusalKey } from "./send-copy";
 import { usePeopleWrites } from "./use-writes";
 import type { AccountRef } from "./writes";
+import { randomUUID } from "@/lib/random-uuid";
 
 interface LocalSend {
   id: string;
@@ -83,7 +84,7 @@ export function useConversationSends(personId: string, serverMessages: readonly 
   return {
     messages: requests.map((request) => request.message),
     send(account: AccountRef, text: string) {
-      const id = crypto.randomUUID();
+      const id = randomUUID();
       const message: OutboxMessage = {
         id,
         channel: account.channel,

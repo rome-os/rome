@@ -31,6 +31,7 @@ import type {
 } from "@rome/api-types/sessions";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
+import { randomUUID } from "./random-uuid";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 const SSE_HEADERS = { Accept: "text/event-stream" } as const;
@@ -395,7 +396,7 @@ export async function postSessionTurnJson(
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ inputId: crypto.randomUUID(), ...body }),
+    body: JSON.stringify({ inputId: randomUUID(), ...body }),
   });
   return parseTurnResponse(res);
 }
@@ -519,7 +520,7 @@ export async function postSessionTurn(
   body: FormData,
   options: PostSessionTurnOptions = {},
 ): Promise<PostTurnResult> {
-  if (!body.has("inputId")) body.set("inputId", crypto.randomUUID());
+  if (!body.has("inputId")) body.set("inputId", randomUUID());
   if (options.onUploadProgress) {
     return postSessionTurnWithProgress(sessionId, body, options.onUploadProgress, options.signal);
   }

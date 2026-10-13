@@ -54,6 +54,7 @@ import { SkillCommandChip, type SkillSelection } from "./composer/SkillCommandCh
 import { SlashSkillMenu, type SlashSkillMenuHandle } from "./composer/SlashSkillMenu";
 import { WorkspaceContextChips } from "./composer/WorkspaceContextChips";
 import { useHorizontalScrollRail } from "./HorizontalScrollRail";
+import { randomUUID } from "@/lib/random-uuid";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -443,10 +444,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     // boundary so a file cannot be added to the tray without belonging to the
     // multipart request whose progress it displays.
     if (files.length === 0 || uploadInFlightRef.current) return;
-    setPendingUploads((prev) => [
-      ...prev,
-      ...files.map((file) => ({ id: crypto.randomUUID(), file })),
-    ]);
+    setPendingUploads((prev) => [...prev, ...files.map((file) => ({ id: randomUUID(), file }))]);
   }, []);
 
   const invokeOnSend = useCallback(
@@ -600,7 +598,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     const inputId =
       failed && failed.text === text && failed.uploads === uploads && failed.skill === skill
         ? failed.inputId
-        : crypto.randomUUID();
+        : randomUUID();
     const snapshot: ChatComposerSnapshot = {
       text,
       uploads,

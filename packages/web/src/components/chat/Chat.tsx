@@ -117,6 +117,7 @@ import {
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
+import { randomUUID } from "@/lib/random-uuid";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
@@ -1298,7 +1299,7 @@ export function Chat({
       const turnsForSession = inflightTurnsRef.current.get(sendingSessionId) ?? new Set<string>();
 
       const userMsg: ChatMessage = {
-        id: createResp.inputId ?? immediateInputId ?? crypto.randomUUID(),
+        id: createResp.inputId ?? immediateInputId ?? randomUUID(),
         sessionId: sendingSessionId,
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
