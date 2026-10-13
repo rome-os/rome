@@ -916,8 +916,10 @@ export class WebChatRepository {
 
   async ensureRomeSession(input: EnsureRomeSessionInput): Promise<void> {
     const now = new Date();
-    // A chat is a channel row on the webchat channel, at its own address.
-    const chat = input.type === "webchat";
+    // A chat is a channel row on the webchat channel, at its own address,
+    // whichever of the two types the caller names it by.
+    const chat =
+      input.type === "webchat" || (input.type === "channel" && input.sourceChannel === "webchat");
     await this.db
       .insert(romeSessions)
       .values({

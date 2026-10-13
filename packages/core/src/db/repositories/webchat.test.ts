@@ -406,6 +406,21 @@ describe("WebChatRepository", () => {
       expect((await repo.getSession("chat-1"))?.sourceThreadId).toBe("chat-1");
     });
 
+    it("places a webchat channel row at its own address with an unread clock", async () => {
+      await repo.ensureRomeSession({
+        id: "chat-1",
+        type: "channel",
+        name: "Chat",
+        agentName: null,
+        sourceChannel: "webchat",
+        sourceThreadId: "another-chat",
+      });
+
+      const row = await repo.getSession("chat-1");
+      expect(row?.sourceThreadId).toBe("chat-1");
+      expect(row?.lastSeenActivityAt).not.toBeNull();
+    });
+
     it("keeps one thread session while refreshing its routing from the parent", async () => {
       const first = await repo.ensureChannelConversation({
         channel: "discord",
