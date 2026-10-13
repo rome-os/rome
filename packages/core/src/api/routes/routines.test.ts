@@ -1375,6 +1375,16 @@ describe("Routines fire path", () => {
       expect(logs.map((entry) => entry.message)).not.toContain(
         "routine execution failed, scheduling retry",
       );
+      // The log names the missing action, which may differ from the routine's own.
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "an action the routine runs is not registered, skipping retry",
+          data: expect.objectContaining({
+            error: expect.stringContaining("uninstalled_action"),
+          }),
+        }),
+      );
     } finally {
       retryHarness.routineEngine.stop();
       localDb.close();
@@ -1403,6 +1413,52 @@ describe("Routines fire path", () => {
       const runs = await retryHarness.routineRunsRepo.findByRoutineId(id);
       expect(runs.map((r) => r.status).sort()).toEqual(["error", "success"]);
       expect((await retryHarness.routinesRepo.findById(id))!.enabled).toBe(true);
+    } finally {
+      retryHarness.routineEngine.stop();
+      localDb.close();
+    }
+  });
+
+  it("logs a retry whose action went missing since the first attempt as a warning", async () => {
+    const localDb = createTestDb();
+    const retryHarness = await buildFireHarness(localDb, 30_000);
+    try {
+      retryHarness.actionRegistry.register({
+        config: {
+          name: "flaky_then_uninstalled",
+          type: "system",
+          description: "throws, then gets uninstalled before the retry",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "read-only",
+        },
+        async execute() {
+          throw new Error("first try fails");
+        },
+      });
+      const { id } = await createRoutineViaApi(retryHarness.app, {
+        name: "uninstalled-before-retry",
+        trigger: scheduleTrigger,
+        actionName: "flaky_then_uninstalled",
+      });
+
+      const logs = await captureRoutineEngineLogs(async () => {
+        await retryHarness.manualProvider.triggerNow(id);
+        retryHarness.actionRegistry.unregister("flaky_then_uninstalled");
+        await retryHarness.clock.advance("60s");
+      });
+
+      expect(logs.map((entry) => entry.message)).toContain(
+        "routine execution failed, scheduling retry",
+      );
+      expect(logs.filter((entry) => entry.level === "error")).toEqual([]);
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "routine retry found the action unregistered",
+        }),
+      );
     } finally {
       retryHarness.routineEngine.stop();
       localDb.close();

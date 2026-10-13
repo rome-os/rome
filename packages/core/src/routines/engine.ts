@@ -309,10 +309,13 @@ export class RoutineEngine {
               // fails to load, and it does not come back within the retry
               // delay. The routine stays enabled so it recovers on its next
               // fire once the action is registered again.
-              log.warn("routine action is not registered, skipping retry", {
+              // The error names the missing action, which can be one the
+              // routine's action calls rather than the routine's own.
+              log.warn("an action the routine runs is not registered, skipping retry", {
                 routineId: routine.id,
                 name: routine.name,
                 action: routine.actionName,
+                error: errorMsg,
               });
             } else if (this.retryDelayMs > 0) {
               log.warn("routine execution failed, scheduling retry", {
@@ -352,11 +355,16 @@ export class RoutineEngine {
                         });
                       }
                     } catch (retryErr) {
-                      log.error("routine retry failed", {
+                      const retryFields = {
                         routineId: routine.id,
                         name: routine.name,
                         error: retryErr instanceof Error ? retryErr.message : String(retryErr),
-                      });
+                      };
+                      if (isActionNotFound(retryErr)) {
+                        log.warn("routine retry found the action unregistered", retryFields);
+                      } else {
+                        log.error("routine retry failed", retryFields);
+                      }
                     }
                   },
                 );
