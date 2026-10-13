@@ -838,6 +838,7 @@ interface FireHarness {
   app: Hono;
   manualProvider: ManualTriggerProvider;
   actionRegistry: ActionRegistryImpl;
+  actionEngine: ActionEngine;
   routineEngine: RoutineEngine;
   eventBus: EventBus;
   clock: FakeClock;
@@ -892,6 +893,7 @@ async function buildFireHarness(testDb: TestDb, retryDelayMs = 0): Promise<FireH
     app,
     manualProvider,
     actionRegistry,
+    actionEngine,
     routineEngine,
     eventBus,
     clock,
@@ -1312,6 +1314,141 @@ describe("Routines fire path", () => {
       await retryHarness.clock.advance("31s");
       expect(flaky.calls).toBe(1);
     } finally {
+      localDb.close();
+    }
+  });
+
+  /** Runs `fn` with console output captured and returns the parsed log lines
+   * the routine engine wrote. */
+  async function captureRoutineEngineLogs(
+    fn: () => Promise<void>,
+  ): Promise<Array<{ level: string; message: string }>> {
+    const spies = (["log", "warn", "error"] as const).map((method) =>
+      rs.spyOn(console, method).mockImplementation(() => {}),
+    );
+    // mockRestore clears mock.calls, so copy them first.
+    let calls: unknown[][] = [];
+    try {
+      await fn();
+    } finally {
+      calls = spies.flatMap((spy) => [...spy.mock.calls]);
+      for (const spy of spies) spy.mockRestore();
+    }
+    return calls
+      .flatMap(([entry]) => {
+        try {
+          return [
+            JSON.parse(String(entry)) as { level: string; message: string; component?: string },
+          ];
+        } catch {
+          return [];
+        }
+      })
+      .filter((entry) => entry.component === "routine-engine");
+  }
+
+  it("records a fire whose action is no longer registered as an error and does not retry it", async () => {
+    const localDb = createTestDb();
+    const retryHarness = await buildFireHarness(localDb, 30_000);
+    try {
+      registerStubAction(retryHarness.actionRegistry, "uninstalled_action");
+      const { id } = await createRoutineViaApi(retryHarness.app, {
+        name: "orphaned",
+        trigger: scheduleTrigger,
+        actionName: "uninstalled_action",
+      });
+      retryHarness.actionRegistry.unregister("uninstalled_action");
+      const run = rs.spyOn(retryHarness.actionEngine, "run");
+
+      const logs = await captureRoutineEngineLogs(async () => {
+        await retryHarness.manualProvider.triggerNow(id);
+        await retryHarness.clock.advance("60s");
+      });
+
+      const runs = await retryHarness.routineRunsRepo.findByRoutineId(id);
+      expect(runs).toHaveLength(1);
+      expect(runs[0].status).toBe("error");
+      expect(runs[0].error).toMatch(/not found/);
+      // A missing action stays missing 30 s later, so the retry would only repeat the failure.
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(logs.filter((entry) => entry.level === "error")).toEqual([]);
+      expect(logs.map((entry) => entry.message)).not.toContain(
+        "routine execution failed, scheduling retry",
+      );
+    } finally {
+      retryHarness.routineEngine.stop();
+      localDb.close();
+    }
+  });
+
+  it("keeps a routine whose action went missing enabled, so it runs again once the action is back", async () => {
+    const localDb = createTestDb();
+    const retryHarness = await buildFireHarness(localDb, 30_000);
+    try {
+      registerStubAction(retryHarness.actionRegistry, "reloaded_action");
+      const { id } = await createRoutineViaApi(retryHarness.app, {
+        name: "survives-reload",
+        trigger: scheduleTrigger,
+        actionName: "reloaded_action",
+      });
+      retryHarness.actionRegistry.unregister("reloaded_action");
+      await retryHarness.manualProvider.triggerNow(id);
+      await retryHarness.clock.advance("60s");
+
+      const stub = registerStubAction(retryHarness.actionRegistry, "reloaded_action");
+      expect(retryHarness.manualProvider.isActive(id)).toBe(true);
+      await retryHarness.manualProvider.triggerNow(id);
+
+      expect(stub.calls).toHaveLength(1);
+      const runs = await retryHarness.routineRunsRepo.findByRoutineId(id);
+      expect(runs.map((r) => r.status).sort()).toEqual(["error", "success"]);
+      expect((await retryHarness.routinesRepo.findById(id))!.enabled).toBe(true);
+    } finally {
+      retryHarness.routineEngine.stop();
+      localDb.close();
+    }
+  });
+
+  it("logs a retry that returns a structured error as a failure, not a success", async () => {
+    const localDb = createTestDb();
+    const retryHarness = await buildFireHarness(localDb, 30_000);
+    try {
+      let calls = 0;
+      retryHarness.actionRegistry.register({
+        config: {
+          name: "throws_then_soft_fails",
+          type: "system",
+          description: "throws, then returns an error",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "read-only",
+        },
+        async execute() {
+          calls++;
+          if (calls === 1) throw new Error("first try fails");
+          return { status: "error", error: "still broken" };
+        },
+      });
+      const { id } = await createRoutineViaApi(retryHarness.app, {
+        name: "retry-soft-fails",
+        trigger: scheduleTrigger,
+        actionName: "throws_then_soft_fails",
+      });
+
+      const logs = await captureRoutineEngineLogs(async () => {
+        await retryHarness.manualProvider.triggerNow(id);
+        await retryHarness.clock.advance("60s");
+      });
+
+      expect(calls).toBe(2);
+      const messages = logs.map((entry) => entry.message);
+      expect(messages).not.toContain("routine retry succeeded");
+      expect(logs).toContainEqual(
+        expect.objectContaining({ level: "warn", message: "routine retry returned an error" }),
+      );
+    } finally {
+      retryHarness.routineEngine.stop();
       localDb.close();
     }
   });

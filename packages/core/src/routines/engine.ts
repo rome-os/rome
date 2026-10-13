@@ -14,6 +14,12 @@ import type { Clock, ClockTimer } from "../lib/clock.js";
 
 const log = createLogger("routine-engine");
 
+// Matched by name, as apps/context.ts does, so the routine engine needs no
+// runtime import of the action engine.
+function isActionNotFound(err: unknown): boolean {
+  return err instanceof Error && err.name === "ActionNotFoundError";
+}
+
 export class RoutineEngine {
   private providers = new Map<string, TriggerProvider>();
   private retryTimers = new Set<ClockTimer>();
@@ -298,6 +304,16 @@ export class RoutineEngine {
                 name: routine.name,
                 error: errorMsg,
               });
+            } else if (isActionNotFound(err)) {
+              // An action leaves the registry when its app is uninstalled or
+              // fails to load, and it does not come back within the retry
+              // delay. The routine stays enabled so it recovers on its next
+              // fire once the action is registered again.
+              log.warn("routine action is not registered, skipping retry", {
+                routineId: routine.id,
+                name: routine.name,
+                action: routine.actionName,
+              });
             } else if (this.retryDelayMs > 0) {
               log.warn("routine execution failed, scheduling retry", {
                 routineId: routine.id,
@@ -317,16 +333,24 @@ export class RoutineEngine {
                   },
                   async () => {
                     try {
-                      await runWithoutHookInvocationContext(() =>
+                      const retryResult = await runWithoutHookInvocationContext(() =>
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
                           whenWorkersBusy: "queue",
                         }),
                       );
-                      log.info("routine retry succeeded", {
-                        routineId: routine.id,
-                        name: routine.name,
-                      });
+                      if (retryResult.status === "error") {
+                        log.warn("routine retry returned an error", {
+                          routineId: routine.id,
+                          name: routine.name,
+                          error: retryResult.error,
+                        });
+                      } else {
+                        log.info("routine retry succeeded", {
+                          routineId: routine.id,
+                          name: routine.name,
+                        });
+                      }
                     } catch (retryErr) {
                       log.error("routine retry failed", {
                         routineId: routine.id,
