@@ -303,12 +303,128 @@ describe("AI tool usage parsing", () => {
       expect(logError).toHaveBeenCalledWith("Claude usage request failed", {
         status: 429,
         retryAfter: "3600",
+        errorType: undefined,
       });
     } finally {
       globalThis.fetch = originalFetch;
       if (originalToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
       else process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
     }
+  });
+
+  describe("Claude OAuth usage from the CLI credentials file", () => {
+    // Runs readClaudeOAuthUsage against a temp credentials file holding
+    // `oauth`, with CLAUDE_CODE_OAUTH_TOKEN unset and fetch answering `response`.
+    const readWithCredentials = async (oauth: Record<string, unknown>, response: Response) => {
+      const dir = await fs.mkdtemp(join(tmpdir(), "rome-claude-credentials-"));
+      const credentialsPath = join(dir, ".credentials.json");
+      await fs.writeFile(credentialsPath, JSON.stringify({ claudeAiOauth: oauth }));
+      const originalFetch = globalThis.fetch;
+      const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      const fetchMock = rs.fn(async () => response);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      logError.mockClear();
+      try {
+        const usage = await readClaudeOAuthUsage({ credentialsPath });
+        return { usage, fetchMock };
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    };
+    const unauthorized = () =>
+      new Response(
+        JSON.stringify({
+          type: "error",
+          error: { type: "authentication_error", message: "Invalid bearer token test-token" },
+        }),
+        { status: 401 },
+      );
+    const usagePayload = () =>
+      new Response(
+        JSON.stringify({
+          five_hour: { utilization: 27, resets_at: "2026-05-20T02:50:01Z" },
+          seven_day: { utilization: 42, resets_at: "2026-05-21T09:00:00Z" },
+        }),
+        { status: 200 },
+      );
+
+    it("reports unknown usage without a request once the CLI token has expired", async () => {
+      const { usage, fetchMock } = await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() - 60_000 },
+        unauthorized(),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(usage).toBeNull();
+      expect(logError).not.toHaveBeenCalled();
+    });
+
+    it("treats a token within a minute of expiry as expired", async () => {
+      const { usage, fetchMock } = await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() + 30_000 },
+        unauthorized(),
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(usage).toBeNull();
+    });
+
+    it("sends an unexpired token and reads the usage windows", async () => {
+      const { usage, fetchMock } = await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() + 3_600_000 },
+        usagePayload(),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(usage).toMatchObject({
+        source: "claude oauth usage",
+        fiveHour: { usedPercent: 27 },
+        sevenDay: { usedPercent: 42 },
+      });
+      expect(usage?.error).toBeUndefined();
+    });
+
+    it.each([
+      ["a missing expiresAt", {}],
+      ["a non-numeric expiresAt", { expiresAt: "soon" }],
+      ["an expiresAt in seconds", { expiresAt: Math.floor(Date.now() / 1000) - 60 }],
+    ])("sends the request with %s", async (_label, expiry) => {
+      const { usage, fetchMock } = await readWithCredentials(
+        { accessToken: "test-token", ...expiry },
+        usagePayload(),
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(usage).toMatchObject({ fiveHour: { usedPercent: 27 } });
+    });
+
+    it("logs the error type of a rejected token, not the token or message", async () => {
+      const { usage } = await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() + 3_600_000 },
+        unauthorized(),
+      );
+      expect(usage).toMatchObject({ error: "Claude usage request failed with HTTP 401" });
+      expect(logError).toHaveBeenCalledWith("Claude usage request failed", {
+        status: 401,
+        retryAfter: undefined,
+        errorType: "authentication_error",
+      });
+      expect(JSON.stringify(logError.mock.calls)).not.toContain("test-token");
+    });
+
+    it.each([
+      ["a non-JSON body", "upstream unavailable"],
+      ["a free-text error type", JSON.stringify({ error: { type: "Bearer test-token" } })],
+    ])("logs no error type for %s", async (_label, body) => {
+      await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() + 3_600_000 },
+        new Response(body, { status: 401 }),
+      );
+      expect(logError).toHaveBeenCalledWith("Claude usage request failed", {
+        status: 401,
+        retryAfter: undefined,
+        errorType: undefined,
+      });
+    });
   });
 
   describe("Claude OAuth usage with no reported windows", () => {

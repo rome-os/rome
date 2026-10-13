@@ -110,8 +110,9 @@ function applyUsage(
   }
   const usage = result.value;
   if (!usage) {
-    // Null means no usage source, such as a Claude token held in the macOS
-    // Keychain, so there is nothing to show and no failure to report.
+    // Null means no usable usage source, such as a Claude token held in the
+    // macOS Keychain, or a CLI token past its expiresAt that only the next
+    // Claude turn renews. There is nothing to show and no failure to report.
     delete target.usage;
     return;
   }
