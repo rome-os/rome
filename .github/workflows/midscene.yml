@@ -31,7 +31,7 @@ env:
 
 jobs:
   midscene:
-    name: Midscene visual tests
+    name: Midscene E2E
     outputs:
       report-artifact-name: ${{ steps.upload-results.outputs.artifact-id != '' && 'midscene-results' || '' }}
     environment: Model
