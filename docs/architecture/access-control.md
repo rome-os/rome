@@ -12,6 +12,9 @@ Two policies decide reach, each held as its own setting:
 ### Invariants
 
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
+- Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
+- Chat ownership filters lists, not admission or agent trust. The sidebar defaults to the viewer’s own chats and offers an all-chats view.
+- Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access does not grant approval authority. Approval reads and decisions require a verified guardian identity at the approval API, even after edge authorization.
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.
@@ -28,7 +31,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
 
-`/desktop-proxy/*` and `/ws/terminal` bypass the edge probe. Rome checks guardian identity and browser origin before accepting either WebSocket upgrade, including requests that arrive through Tailnet Serve. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, and `/ws/events` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades, including requests that arrive through Tailnet Serve. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 

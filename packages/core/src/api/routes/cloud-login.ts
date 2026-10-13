@@ -3,7 +3,13 @@ import { hostname } from "node:os";
 import { verifyIdToken } from "@rome-os/libs/oidc";
 import { createPkce } from "@rome-os/libs/pkce";
 import { Hono, type Context } from "hono";
-import { COOKIE_NAME, createGuardianSession, issueGuardianSession } from "../../lib/auth.js";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import {
+  COOKIE_NAME,
+  createGuardianSession,
+  issueGuardianSession,
+  shouldSecureCookie,
+} from "../../lib/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
@@ -43,6 +49,12 @@ const log = createLogger("api:cloud-login");
 
 const CALLBACK_PATH = "/api/auth/cloud/callback";
 const PENDING_TTL_MS = 10 * 60_000;
+// Ties a browser sign-in attempt to the browser that started it. Without it, a
+// callback URL finished under someone else's Rome Cloud account could be handed
+// to a victim and sign them into that account (login CSRF). Over HTTPS the
+// cookie takes the `__Host-` prefix, so a sibling `<slug>` host under the same
+// parent domain cannot plant it.
+const LOGIN_STATE_COOKIE = "rome_cloud_login_state";
 // Must match Rome Cloud's OAUTH_CLIENT_ID. The single OAuth client is "a Rome
 // instance" — every instance runs the same core — so this is a fixed
 // constant, not a per-instance value; it becomes the `id_token` audience.
@@ -90,6 +102,34 @@ function createPendingLogin(
     expiresAt,
   });
   return { state, nonce, challenge: pkce.challenge, expiresAt };
+}
+
+function setLoginStateCookie(c: Context, state: string): void {
+  const secure = shouldSecureCookie(c.req.raw);
+  setCookie(c, LOGIN_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure,
+    // Lax still sends it on Rome Cloud's top-level redirect back to the callback.
+    sameSite: "Lax",
+    path: "/",
+    maxAge: PENDING_TTL_MS / 1000,
+    ...(secure && { prefix: "host" as const }),
+  });
+}
+
+function readLoginStateCookie(c: Context): string | undefined {
+  return shouldSecureCookie(c.req.raw)
+    ? getCookie(c, LOGIN_STATE_COOKIE, "host")
+    : getCookie(c, LOGIN_STATE_COOKIE);
+}
+
+function clearLoginStateCookie(c: Context): void {
+  const secure = shouldSecureCookie(c.req.raw);
+  deleteCookie(c, LOGIN_STATE_COOKIE, {
+    path: "/",
+    secure,
+    ...(secure && { prefix: "host" as const }),
+  });
 }
 
 function sweepExpired(now: number): void {
@@ -145,6 +185,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     const redirectUri = new URL(CALLBACK_PATH, getInstanceOrigin()).toString();
 
     const attempt = createPendingLogin("browser", redirectUri);
+    setLoginStateCookie(c, attempt.state);
 
     const scope = getInstanceToken() === null ? "openid instance:enroll" : "openid";
 
@@ -285,12 +326,23 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     // Fail closed on the state echo before trusting anything else.
     const entry = state ? pending.get(state) : undefined;
     if (!state || !entry || entry.channel !== "browser") {
+      // Leaves the attempt cookie alone: a stray or stale callback must not
+      // break a sign-in this browser still has in flight.
       return c.redirect(errorRedirect("state"));
     }
+    // Consumed whatever the cookie says: a callback that reached a real
+    // attempt from the wrong browser burns it, so it can't be replayed.
     pending.delete(state);
+    // Expiry first: the attempt cookie expires with the attempt, so checking it
+    // first would report a slow sign-in as a mismatch instead of a timeout.
     if (entry.expiresAt <= Date.now()) {
       return c.redirect(errorRedirect("expired"));
     }
+    if (readLoginStateCookie(c) !== state) {
+      log.warn("cloud login callback state not bound to this browser");
+      return c.redirect(errorRedirect("state"));
+    }
+    clearLoginStateCookie(c);
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.

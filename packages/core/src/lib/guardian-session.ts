@@ -26,8 +26,8 @@ export interface GuardianSessionMaterial {
 }
 
 // The single source of truth for "is this request the guardian?" — shared by
-// `/auth/me`, the bootstrap phase, the onboarding-draft endpoint, and the
-// app-api dispatch so they never drift. A valid cookie is the normal path;
+// `/auth/me`, the bootstrap phase, and the app-api dispatch so they never
+// drift. A valid cookie is the normal path;
 // absent that, an in-container loopback caller (agent-driven browser, headless
 // CDP) is reported as the guardian, because the container is the security
 // boundary and such callers already have unrestricted API access (see

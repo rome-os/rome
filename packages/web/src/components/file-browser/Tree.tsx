@@ -11,6 +11,7 @@ import {
   File,
   FileAudio,
   FileImage,
+  FileSpreadsheet,
   FileText,
   FileVideo,
   Folder,
@@ -30,6 +31,7 @@ import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import type { TreeNode } from "./store/types";
 import { TREE_NODE_DRAG_MIME } from "./store/utils";
 import { getUploadEntriesFromDataTransfer } from "@/lib/file-browser-upload";
+import { isSpreadsheetPath } from "@/lib/file-preview";
 import {
   FileActionDropdownMenuItems,
   TreeRowContextMenuItems,
@@ -44,6 +46,7 @@ function getFileIcon(name: string): LucideIcon {
   if (["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav", "weba"].includes(extension))
     return FileAudio;
   if (extension === "pdf" || extension === "docx") return FileText;
+  if (isSpreadsheetPath(name)) return FileSpreadsheet;
   return File;
 }
 

@@ -12,11 +12,11 @@ import { channelConversationId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
   AgentTraceRecorder,
-  findRecordedConversation,
   recordAgentTraceBestEffort,
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
+import { findRecordedConversation } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 
@@ -538,12 +538,11 @@ export class AgentRunner {
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
-    const boundRomeSessionId = session.romeSessionId ?? params.romeSessionId;
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
-      romeSessionId: boundRomeSessionId,
-      recordedConversation: session.recordedConversation,
+      romeSessionId: params.romeSessionId,
+      sessionConversation: session.conversation,
       channelThreadKey,
       threadContext,
     });
@@ -562,7 +561,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
       },
     );
-    if (this.webchatRepo && boundRomeSessionId && params.platformMessageId) {
+    if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
@@ -663,7 +662,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversationId);
+          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through

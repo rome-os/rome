@@ -589,6 +589,7 @@
       "environmentApiKey": "运行环境中的 API 密钥"
     },
     "usage": {
+      "unavailable": "用量暂时不可用。",
       "fiveHour": "5 小时已用",
       "sevenDay": "7 天已用",
       "resetsIn": "<1>{{time}}</1> 后重置"

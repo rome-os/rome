@@ -143,6 +143,7 @@ export function createSubagentExecutionService(deps: {
           await context.childManager.recordConversation(child.sessionId, child.sessionId);
         } catch (err) {
           log.warn("failed to record the subagent session's conversation", {
+            agentName: name,
             sessionId: child.sessionId,
             error: err instanceof Error ? err.message : String(err),
           });

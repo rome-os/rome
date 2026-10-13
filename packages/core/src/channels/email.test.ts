@@ -251,11 +251,10 @@ describe("EmailAdapter.send", () => {
     expect(receipt).toEqual({ conversationId: "t_out", messageId: "m_out" });
   });
 
-  it("starts a fresh email when the thread is unknown", async () => {
+  it("starts a fresh email when a chat-style conversation names an address", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    // An unseen conversation id is read as the recipient's address.
     await adapter.send("zoolsher@gmail.com" as ConversationId, { text: "cold open" });
 
     expect(provider.sent).toHaveLength(1);
@@ -340,7 +339,56 @@ describe("EmailAdapter.send", () => {
     const receipt = await adapter.send("t-empty" as ConversationId, { text: "   " });
 
     expect(provider.sent).toHaveLength(0);
+    expect(provider.listMessages).not.toHaveBeenCalled();
     expect(receipt).toEqual({ conversationId: "t-empty" });
+  });
+
+  it("skips a parts-only approval card without a provider call or an error", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    const receipt = await adapter.send("t-approval" as ConversationId, {
+      parts: [
+        {
+          type: "approval_card",
+          approvalId: "approval-1",
+          actionName: "send_message",
+          preview: { kind: "generic", title: "Send email", summary: "The agent wants to send." },
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(receipt).toEqual({ conversationId: "t-approval" });
+    expect(provider.send).not.toHaveBeenCalled();
+    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("names the rejected recipient and the fix when no address resolves", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "not-an-address", text: "hi" }),
+    ).rejects.toThrow('"not-an-address" is not an email address. No email was sent.');
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "guardian", text: "hi" }),
+    ).rejects.toThrow("Rome has no guardian email address yet");
+    await expect(adapter.send("guardian" as ConversationId, { text: "hi" })).rejects.toThrow(
+      "Rome has no guardian email address yet",
+    );
+    expect(provider.listMessages).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicit email request whose body is empty", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("" as ConversationId, { kind: "email", to: "a@example.com", text: "   " }),
+    ).rejects.toThrow("Email requires non-empty text or HTML. No email was sent.");
+    expect(provider.send).not.toHaveBeenCalled();
   });
 });
 
@@ -732,7 +780,7 @@ describe("EmailAdapter.fetchHistory", () => {
     expect(messages[0].text).toBe("the preview body");
   });
 
-  it("is side-effect free: a later reply does not ride a thread it never ingested", async () => {
+  it("keeps history read-only: a later reply resolves its target independently", async () => {
     const provider = makeProvider({
       listMessages: rs.fn(async () => ({
         messages: [listItem({ providerMessageId: "m1", threadId: "tA" })],
@@ -742,8 +790,10 @@ describe("EmailAdapter.fetchHistory", () => {
     const adapter = makeAdapter(provider);
 
     await adapter.fetchHistory(null, 24);
-    // fetchHistory must not have recorded a reply target for tA — so a send to
-    // that thread starts a fresh email (with `to`) rather than an in-thread reply.
+    expect(provider.sent).toHaveLength(0);
+    (provider.listMessages as ReturnType<typeof rs.fn>).mockResolvedValue({
+      messages: [listItem({ providerMessageId: "m2", threadId: "tA" })],
+    });
     await adapter.send("tA" as ConversationId, {
       kind: "email",
       to: "alice@example.com",
@@ -751,8 +801,10 @@ describe("EmailAdapter.fetchHistory", () => {
     });
 
     expect(provider.sent).toHaveLength(1);
-    expect(provider.sent[0].inReplyToMessageId).toBeUndefined();
-    expect(provider.sent[0].to).toBe("alice@example.com");
+    expect(provider.sent[0].inReplyToMessageId).toBe("m2");
+    expect(provider.sent[0].to).toBeUndefined();
+    expect(provider.listMessages).toHaveBeenCalledTimes(2);
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
   });
 
   it("attributes outbound (sent) messages to Rome, keeping a two-sided transcript", async () => {

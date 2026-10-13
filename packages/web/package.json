@@ -57,6 +57,7 @@
     "recharts": "^3.9.2",
     "sonner": "^2.0.7",
     "streamdown": "^2.6.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.3.6",
     "zustand": "^5.0.2"
   },

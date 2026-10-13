@@ -39,6 +39,8 @@ The daemon derives the app ID from `app.yaml`, runs the workspace's build, and p
 
 The `bundle` source mode accepts an already-packed artifact, not a raw source workspace. A raw workspace fails with "not a packed artifact".
 
+If an install error carries a native-build hint or `ERR_PNPM_IGNORED_BUILDS`, follow the hint and `system:custom-dependencies`.
+
 For a Rome App Store install, discover the listing with `system:app_store_search` and follow the `appstore` source schema in `system:app_management`.
 
 ## First-party apps

@@ -38,6 +38,7 @@ import {
   type PublicAccessConfig,
 } from "../../lib/public-access-config.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
@@ -58,6 +59,21 @@ function deriveAppOrigin(view: ReturnType<AppCatalog["list"]>[number]): AppOrigi
   if (view.firstParty) return "builtin";
   if (view.source.mode === "appstore") return "appstore";
   return "local";
+}
+
+/**
+ * Emits a `catalog-change` event `{ appId, change }` per catalog event, with no
+ * asset or manifest data. Returns the unsubscribe.
+ *
+ * `emit` must not block. The catalog awaits each subscriber inside `fireEvent`,
+ * under the `refreshMutex` that serializes every app install, uninstall,
+ * enable, and disable. This subscriber returns void, so a network write that
+ * hangs on a stalled client cannot stall app lifecycle instance-wide.
+ */
+export function subscribeCatalogChanges(catalog: AppCatalog, emit: LiveEventEmit): () => void {
+  return catalog.subscribe(function catalogEventStream(event) {
+    emit("catalog-change", { appId: event.appId, change: event.change });
+  });
 }
 
 export function deriveAppProjectPath(
@@ -346,28 +362,17 @@ export function appsRoutes(deps: ApiDeps): Hono {
         unsubscribe();
         close();
       };
-      // Fire-and-forget the write; do NOT return its promise. The catalog
-      // awaits each subscriber inside `fireEvent`, which runs under its global
-      // `refreshMutex` — the mutex that serializes every app
-      // install/uninstall/enable/disable. Returning the `writeSSE` promise here
-      // would tie that mutex to a live network write that can hang indefinitely
-      // on a stalled or half-dead client (stream backpressure leaves
-      // `writer.write()` pending), stalling app lifecycle instance-wide.
-      // Returning void keeps refresh decoupled from this connection, and
-      // successive writes stay ordered by the underlying writer.
+      // Fire-and-forget the write: see subscribeCatalogChanges for why it
+      // must not hold up the catalog. Successive writes stay ordered by the
+      // underlying writer.
       //
       // Teardown on a dead client comes from `onAbort` (reader cancel / request
       // abort) → `finish`, below. The `.catch(finish)` here is only a defensive
       // backstop: Hono's StreamingApi.write() swallows write errors and never
       // rejects, so it does not fire on a failed write today — it's kept in case
       // that ever changes, matching the system-upgrade route.
-      unsubscribe = deps.appCatalog.subscribe(function catalogEventStream(event) {
-        sse
-          .writeSSE({
-            event: "catalog-change",
-            data: JSON.stringify({ appId: event.appId, change: event.change }),
-          })
-          .catch(finish);
+      unsubscribe = subscribeCatalogChanges(deps.appCatalog, (event, data) => {
+        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
       });
       heartbeat = setInterval(() => {
         sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);

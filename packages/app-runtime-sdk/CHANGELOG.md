@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.7.3](https://github.com/rome-os/rome/compare/app-runtime-v0.7.2...app-runtime-v0.7.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **app-runtime:** type favor consent results as always carrying their request ([#894](https://github.com/rome-os/rome/issues/894)) ([e8c97fe](https://github.com/rome-os/rome/commit/e8c97feba4ad9409e610e17d60a6d1e7b8bf86d7))
+
 ## [0.7.2](https://github.com/rome-os/rome/compare/app-runtime-v0.7.1...app-runtime-v0.7.2) (2026-10-10)
 
 

@@ -20,3 +20,10 @@ if (typeof window !== "undefined") {
     Element.prototype.releasePointerCapture = () => {};
   }
 }
+
+// jsdom's WebSocket dials real sockets, so the live-events client would reach
+// for whatever listens on the test origin. Without it, components stream over
+// the SSE fallback their tests stub. Live-events tests inject a fake socket.
+if (typeof window !== "undefined") {
+  Reflect.deleteProperty(globalThis, "WebSocket");
+}

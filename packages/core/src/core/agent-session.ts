@@ -13,7 +13,7 @@ import type { AgentLoader } from "./agent-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { SessionManager } from "./session-manager.js";
 import type { SessionsRepository } from "../db/repositories/sessions.js";
-import { findRecordedConversation, type RecordedConversation } from "./agent-trace-recorder.js";
+import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import {
   buildInteractiveSurfaceGuidanceSection,
   buildThreadContextBlock,
@@ -324,21 +324,14 @@ export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => voi
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
   /**
-   * The conversation this session serves: the caller's, else the recorded one.
-   * For identity and fork lineage only. A turn picks where it records through
+   * The conversation this session serves: the one its opener named, else the
+   * one its row recorded. A turn picks where it records through
    * `resolveTurnConversation`, which leaves channel and webchat ones to their
-   * owners. Transitional: step 5 of the session identity plan merges
-   * `romeSessionId` into it.
+   * owners. Kept on the session so a turn resolves where it records without an
+   * await between acquire and sendTurn.
    */
-  readonly conversationId?: string;
-  /**
-   * The conversation the row recorded, looked up when no caller named one and
-   * only if it still exists. Kept on the session so a turn resolves where it
-   * records without an await between acquire and sendTurn.
-   */
-  readonly recordedConversation?: RecordedConversation;
+  readonly conversation?: SessionConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -732,11 +725,9 @@ export function createAgentSessionManager(
       // still opening is not cached yet and misses this, so callers record
       // only after their acquire has returned.
       for (const session of [...sessions.values()]) {
-        if (session.sessionId !== sessionId || session.conversationId) continue;
-        session.recordedConversation = await findRecordedConversation(
-          deps.webchatRepo,
-          conversationId,
-        );
+        if (session.sessionId !== sessionId || session.conversation) continue;
+        const recorded = await findRecordedConversation(deps.webchatRepo, conversationId);
+        if (recorded) session.conversation = { origin: "recorded", ...recorded };
       }
     },
     async shutdown() {
@@ -974,6 +965,9 @@ async function openSession(
         deps.webchatRepo,
         resumeResult?.conversationId ?? preparedConversationId,
       );
+  const conversation: SessionConversation | undefined = requestedRomeSessionId
+    ? { origin: "named", id: requestedRomeSessionId }
+    : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumeResult;
   const providerThreadId = resumeResult?.providerThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -1794,8 +1788,7 @@ async function openSession(
   impl = new AgentSessionImpl({
     key,
     sessionId,
-    romeSessionId: requestedRomeSessionId,
-    recordedConversation,
+    conversation,
     modelSession,
     deps,
     config,
@@ -1835,8 +1828,7 @@ async function openSession(
 interface ImplArgs {
   key: AgentSessionKey;
   sessionId: string;
-  romeSessionId?: string;
-  recordedConversation?: RecordedConversation;
+  conversation?: SessionConversation;
   modelSession: ModelSession;
   deps: ManagerDeps;
   config: ReturnType<AgentLoader["get"]>;
@@ -2051,8 +2043,7 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentEvent> {
 class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  readonly romeSessionId?: string;
-  recordedConversation?: RecordedConversation;
+  conversation?: SessionConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -2132,8 +2123,7 @@ class AgentSessionImpl implements AgentSession {
   constructor(args: ImplArgs) {
     this.key = args.key;
     this.sessionId = args.sessionId;
-    this.romeSessionId = args.romeSessionId;
-    this.recordedConversation = args.recordedConversation;
+    this.conversation = args.conversation;
     this.modelSession = args.modelSession;
     this.deps = args.deps;
     this.config = args.config;
@@ -2152,11 +2142,6 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
-  }
-
-  /** The caller's conversation, else the recorded one that still exists. */
-  get conversationId(): string | undefined {
-    return this.romeSessionId ?? this.recordedConversation?.id;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind
@@ -3531,6 +3516,8 @@ class AgentSessionImpl implements AgentSession {
       // pipeline can't tell them apart.
       const mwInput = { prompt: userPrompt, reasoningEffort: input.reasoningEffort };
       let emittedTerminal: TurnResultEvent | TurnErrorEvent | undefined;
+      let droppedAfterTerminal = false;
+      let droppedDuringModel = false;
       let modelRan = false;
       const mwCtx: TurnMiddlewareContext = {
         input: mwInput,
@@ -3541,6 +3528,35 @@ class AgentSessionImpl implements AgentSession {
         },
         emit: (event) => {
           if (sink.done) return;
+          // A middleware's first terminal ends its stream, as the model's
+          // terminal does on the model path, so it publishes exactly one.
+          if (emittedTerminal) {
+            if (!droppedAfterTerminal) {
+              droppedAfterTerminal = true;
+              log.warn("turn middleware emitted after its terminal event; dropping the rest", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
+          // Once next() starts the model, the model owns the stream, so any
+          // middleware emit from then on is dropped, whether it comes from an
+          // unawaited next() or from a task the middleware started earlier.
+          if (modelRan) {
+            if (!droppedDuringModel) {
+              droppedDuringModel = true;
+              log.warn("turn middleware emitted while the model was running; dropping it", {
+                sessionId: this.sessionId,
+                agentName: this.key.agentName,
+                turnId,
+                eventType: event.type,
+              });
+            }
+            return;
+          }
           if (
             this.structuredOutputValidator &&
             event.type === "tool_result" &&
@@ -3561,8 +3577,32 @@ class AgentSessionImpl implements AgentSession {
         meta: {},
       };
 
+      // The events loop closes the sink on the model's `result`/`error`.
+      const waitForSinkClose = async (): Promise<void> => {
+        if (sink.done) return;
+        await new Promise<void>((resolve) => {
+          const checker = setInterval(() => {
+            if (sink.done) {
+              clearInterval(checker);
+              resolve();
+            }
+          }, 5);
+        });
+      };
+
       const runModelTerminal = async (): Promise<void> => {
         if (sink.done) return;
+        if (emittedTerminal) {
+          // Reached through next() after an emit, or through the chain's
+          // fail-open next() after a throw. A model run would publish a second
+          // terminal and pay for a second reply.
+          log.warn("turn middleware continued to the model after its terminal event; skipped", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+          });
+          return;
+        }
         if (sink.lifecycleInterrupted) {
           await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
@@ -3606,23 +3646,32 @@ class AgentSessionImpl implements AgentSession {
           this.failTurn(sink, err instanceof Error ? err.message : String(err));
         }
 
-        // Wait for sink to close (events loop closes on `result`/`error`).
-        await new Promise<void>((resolve) => {
-          const checker = setInterval(() => {
-            if (sink.done) {
-              clearInterval(checker);
-              resolve();
-            }
-          }, 5);
-        });
+        await waitForSinkClose();
       };
 
       const chain = this.deps.turnMiddleware;
       if (chain) {
-        await chain.run(mwCtx, runModelTerminal);
+        try {
+          await chain.run(mwCtx, runModelTerminal);
+        } catch (err) {
+          // A fail-closed throw after the terminal, or after next() started
+          // the model, cannot change the outcome, so the turn ends on the
+          // terminal already emitted or on the model's.
+          if (!emittedTerminal && !modelRan) throw err;
+          if (err instanceof Error && this.currentAgentSpan === span) span.recordException(err);
+          log.warn("turn middleware threw after its terminal event or after starting the model", {
+            sessionId: this.sessionId,
+            agentName: this.key.agentName,
+            turnId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } else {
         await runModelTerminal();
       }
+      // A middleware that did not await next() returns while the model is
+      // still running. The model's terminal ends the turn, not a synthesized one.
+      if (modelRan) await waitForSinkClose();
 
       if (!sink.done) {
         if (!modelRan && input.inputId) {
@@ -3639,7 +3688,10 @@ class AgentSessionImpl implements AgentSession {
           type: "result",
           content: "",
         };
-        if (!emittedTerminal && this.structuredOutputValidator) {
+        // A middleware that short-circuits without a terminal, such as a turn
+        // parked on a question card, still publishes one. An interrupted turn
+        // publishes none, as an interrupt before the model starts does.
+        if (!emittedTerminal && !sink.lifecycleInterrupted) {
           terminal = validateProviderStructuredResult(
             terminal,
             this.structuredOutputValidator,

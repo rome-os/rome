@@ -27,7 +27,8 @@
     "./people": "./src/people.ts",
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
-    "./wechat-app": "./src/wechat-app.ts"
+    "./wechat-app": "./src/wechat-app.ts",
+    "./live-events": "./src/live-events.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

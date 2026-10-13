@@ -15,6 +15,7 @@ import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import { createLogger, type Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { isTransientDelta } from "./agent-message.js";
+import type { SessionConversation } from "./session-conversation.js";
 
 const log = createLogger("agent-trace-recorder");
 
@@ -71,41 +72,9 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
   return `action:${input.channelThreadKey ?? input.agentName}:${input.agentName || "main"}`;
 }
 
-export interface RecordedConversation {
-  id: string;
-  name: string;
-  type: RomeSessionType;
-}
-
-/**
- * The conversation a session's row recorded, when it still exists. A deleted
- * conversation leaves its id on the row, and recording under that id would
- * recreate it.
- */
-export async function findRecordedConversation(
-  webchatRepo: WebChatRepository | undefined,
-  conversationId: string | undefined,
-): Promise<RecordedConversation | undefined> {
-  if (!webchatRepo || !conversationId) return undefined;
-  let conversation;
-  try {
-    conversation = await webchatRepo.getSession(conversationId);
-  } catch (err) {
-    // The lookup only refines where turns record, so it must not fail the session.
-    log.warn("failed to read a session's recorded conversation", {
-      conversationId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return undefined;
-  }
-  if (!conversation) return undefined;
-  const { id, name, type } = conversation;
-  return { id, name, type: type as RomeSessionType };
-}
-
 export interface TurnConversationInput extends RomeSessionIdInput {
-  /** The conversation the session's row recorded, as it stood when looked up. */
-  recordedConversation?: RecordedConversation;
+  /** The conversation the session serves, as it stood when the turn started. */
+  sessionConversation?: SessionConversation;
 }
 
 // Conversations whose turns only the recorder writes. A webchat conversation
@@ -137,7 +106,10 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   promptPersisted: boolean;
   recorderOwned: boolean;
 } {
-  const found = input.romeSessionId ? undefined : input.recordedConversation;
+  const conversation = input.sessionConversation;
+  // The opener's named conversation wins over the one this turn's caller names.
+  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
+  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
   const ownedByRecorder =
     found !== undefined &&
     RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
@@ -146,11 +118,11 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   return {
     romeSessionId: resolveRomeSessionId({
       ...input,
-      romeSessionId: input.romeSessionId ?? recorded?.id,
+      romeSessionId: named ?? recorded?.id,
     }),
     romeSessionType: recorded?.type ?? resolveRomeSessionType(input),
-    existing: Boolean(input.romeSessionId ?? recorded),
-    promptPersisted: Boolean(input.romeSessionId),
+    existing: Boolean(named ?? recorded),
+    promptPersisted: Boolean(named),
     recorderOwned: Boolean(recorded),
   };
 }

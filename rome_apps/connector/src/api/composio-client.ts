@@ -995,22 +995,25 @@ export class ComposioClient {
    */
   async ping(): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
     const url = `${this.baseURL.replace(/\/$/, "")}/api/v3/connected_accounts?limit=1`;
-    let response: Response;
+    let status = 0;
     try {
-      response = await fetch(url, {
+      const response = await fetch(url, {
         method: "GET",
         headers: { ...authHeaderFor(this.apiKey) },
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       });
+      if (response.ok) return { ok: true };
+      status = response.status;
+      // The timeout also aborts the body read, so it stays inside the try:
+      // callers await ping() from their own catch blocks and expect no throw.
+      const text = await response.text();
+      return { ok: false, status, message: text || response.statusText };
     } catch (err) {
       return {
         ok: false,
-        status: 0,
+        status,
         message: err instanceof Error ? err.message : "network error",
       };
     }
-    if (response.ok) return { ok: true };
-    const text = await response.text();
-    return { ok: false, status: response.status, message: text || response.statusText };
   }
 }

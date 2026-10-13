@@ -10,6 +10,9 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("provider-usage");
 
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
@@ -258,12 +261,35 @@ export function hasUsageWindows(usage: AIToolUsageStatus): boolean {
   return usage.fiveHour !== undefined || usage.sevenDay !== undefined;
 }
 
+const CLAUDE_USAGE_WINDOW_KEYS = ["five_hour", "seven_day"];
+
+// The OAuth usage endpoint types each window as nullable, so it can name a
+// window without reporting it: `seven_day: null`, or `utilization: null` with
+// no reset time. That is a successful answer with no usage to show. A payload
+// with neither key is a shape this parser does not know.
+function claudeReportsNoUsageWindows(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const record = payload as Record<string, unknown>;
+  const present = CLAUDE_USAGE_WINDOW_KEYS.filter((key) => key in record);
+  return (
+    present.length > 0 &&
+    present.every((key) => {
+      const window = record[key];
+      if (window === null) return true;
+      if (typeof window !== "object") return false;
+      const { utilization, resets_at } = window as Record<string, unknown>;
+      return utilization === null && (resets_at === null || resets_at === undefined);
+    })
+  );
+}
+
 /**
  * Live Claude usage via the OAuth `/api/oauth/usage` endpoint, using the token
  * from `CLAUDE_CODE_OAUTH_TOKEN` or `~/.claude/.credentials.json`. Returns null
  * when no token is available; otherwise a status (possibly carrying `error` on a
- * failed/timed-out request). This is the only reliable Claude usage source —
- * nothing persists `~/.claude/{rate,usage}-limits.json` locally.
+ * failed/timed-out request). A status with neither `error` nor a window means
+ * the endpoint reported no usage windows. This is the only reliable Claude
+ * usage source — nothing persists `~/.claude/{rate,usage}-limits.json` locally.
  */
 export async function readClaudeOAuthUsage(
   timeoutMs: number = CLAUDE_USAGE_TIMEOUT_MS,
@@ -301,22 +327,29 @@ export async function readClaudeOAuthUsage(
       },
     });
     if (!res.ok) {
+      log.error("Claude usage request failed", {
+        status: res.status,
+        retryAfter: res.headers.get("retry-after") ?? undefined,
+      });
       return {
         checkedAt: new Date().toISOString(),
         source: "claude oauth usage",
         error: `Claude usage request failed with HTTP ${res.status}`,
       };
     }
-    const usage = normalizeUsageStatus(await res.json(), "claude oauth usage", {
+    const payload: unknown = await res.json();
+    const usage = normalizeUsageStatus(payload, "claude oauth usage", {
       utilizationUnit: "percent",
     });
-    return (
-      usage ?? {
-        checkedAt: new Date().toISOString(),
-        source: "claude oauth usage",
-        error: "Claude usage response did not include usage windows",
-      }
-    );
+    if (usage) return usage;
+    if (claudeReportsNoUsageWindows(payload)) {
+      return { checkedAt: new Date().toISOString(), source: "claude oauth usage" };
+    }
+    return {
+      checkedAt: new Date().toISOString(),
+      source: "claude oauth usage",
+      error: "Claude usage response did not include usage windows",
+    };
   } catch (err) {
     return {
       checkedAt: new Date().toISOString(),

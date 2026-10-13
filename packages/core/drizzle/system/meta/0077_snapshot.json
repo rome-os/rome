@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f8522caf-905b-410b-83f0-f6b5508b8826",
+  "id": "00164728-536e-4634-9204-3a0cab30f8b0",
   "prevId": "37609d6f-8d10-449a-a61c-cba569f6b9fb",
   "tables": {
     "action_executions": {
@@ -1416,6 +1416,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "role": {
           "name": "role",
           "type": "text",
@@ -1677,6 +1684,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "owner_key": {
+          "name": "owner_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "name": {
           "name": "name",
           "type": "text",
@@ -1863,6 +1877,13 @@
         }
       },
       "indexes": {
+        "idx_rome_sessions_owner_key": {
+          "name": "idx_rome_sessions_owner_key",
+          "columns": [
+            "owner_key"
+          ],
+          "isUnique": false
+        },
         "idx_rome_sessions_project_path": {
           "name": "idx_rome_sessions_project_path",
           "columns": [
@@ -1870,26 +1891,26 @@
           ],
           "isUnique": false
         },
-        "idx_rome_sessions_chat_activity": {
-          "name": "idx_rome_sessions_chat_activity",
+        "idx_rome_sessions_sidebar_activity": {
+          "name": "idx_rome_sessions_sidebar_activity",
           "columns": [
+            "type",
             "activity_at",
             "created_at",
             "id"
           ],
-          "isUnique": false,
-          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')"
+          "isUnique": false
         },
-        "idx_rome_sessions_chat_project_activity": {
-          "name": "idx_rome_sessions_chat_project_activity",
+        "idx_rome_sessions_project_activity": {
+          "name": "idx_rome_sessions_project_activity",
           "columns": [
             "project_path",
+            "type",
             "activity_at",
             "created_at",
             "id"
           ],
-          "isUnique": false,
-          "where": "(\"rome_sessions\".\"type\" = 'channel' and +\"rome_sessions\".\"source_channel\" = 'webchat')"
+          "isUnique": false
         },
         "idx_rome_sessions_source_channel": {
           "name": "idx_rome_sessions_source_channel",

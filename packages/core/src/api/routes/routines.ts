@@ -490,8 +490,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   });
 
   // Kills a live execution if one exists in this process, and always repairs
-  // the persisted status to "cancelled" so a run left stuck "running" by a
-  // restart clears.
+  // the persisted status to "cancelled" so a "running" run with no live
+  // process clears.
   app.post("/routines/:id/cancel", async (c) => {
     const id = c.req.param("id");
     const routine = await deps.routinesRepo.findById(id);

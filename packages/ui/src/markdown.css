@@ -386,9 +386,9 @@
   box-shadow: var(--rome-shadow-1);
 }
 
-/* A coarse pointer has no hover, so the button row never hides and would sit
-   over the header cells. There it drops the floating card and takes its own
-   line above the table, as plain icons on the inline end. */
+/* Without hover the button row never hides, and would sit over the header
+   cells. There it drops the floating card and takes its own line above the
+   table, as plain icons on the inline end. */
 @media (hover: none) {
   .rome-markdown [data-streamdown="table-wrapper"] > :first-child:not(:has(> table)) {
     position: static;
@@ -408,9 +408,10 @@
 
    Rome renders one card. The language name and the buttons ride one band at
    the card's inline end, floating over the content instead of holding a row of
-   their own: hidden until the block is hovered or holds keyboard focus, and
-   always shown where hover does not exist. A diagram's zoom stack keeps its
-   own corner and joins the same reveal.
+   their own: hidden until the block is hovered or holds keyboard focus. A
+   diagram's zoom stack keeps its own corner and joins the same reveal. Where
+   hover does not exist nothing can hide the chrome, so there it moves out of
+   the content's way instead, as the table's button row does.
 
    A Mermaid block's parts carry no `data-streamdown` hooks, so its language
    row is addressed as the card's first child and its canvas as the last —
@@ -535,12 +536,59 @@
   box-shadow: var(--rome-shadow-1);
 }
 
+/* Without hover the chrome never hides. Floating, it would cover the end of a
+   code fence's first lines and two corners of a diagram, and at the 44px
+   control floor the band and the zoom stack overlap on a narrow or short
+   diagram. So the band takes the row above the content, as plain icons, and
+   the zoom stack moves below the diagram as a row at every UI scale, since a
+   column there would add its full height under each diagram. The stack stays
+   positioned so its `z-index` keeps it above a zoomed diagram, which overflows
+   its own box. A fullscreen diagram sits outside `.rome-markdown` and keeps
+   its floating stack. */
+@media (hover: none) {
+  .rome-markdown
+    :is([data-streamdown="code-block-body"], [data-streamdown="mermaid-block"] > :last-child) {
+    grid-row: 2;
+  }
+
+  .rome-markdown
+    :is(
+      [data-streamdown="code-block-header"],
+      [data-streamdown="mermaid-block"] > :first-child,
+      [data-streamdown="code-block"] > :has(> [data-streamdown="code-block-actions"]),
+      [data-streamdown="mermaid-block"] > :has(> [data-streamdown="mermaid-block-actions"])
+    ) {
+    position: static;
+    align-self: center;
+  }
+
+  .rome-markdown
+    :is(
+      [data-streamdown="code-block-header"],
+      [data-streamdown="mermaid-block"] > :first-child,
+      [data-streamdown="code-block-actions"],
+      [data-streamdown="mermaid-block-actions"]
+    ) {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .rome-markdown [data-streamdown="mermaid"] :has(> button[title="Zoom in"]) {
+    position: relative;
+    inset: auto;
+    order: 1;
+    align-self: flex-start;
+    flex-direction: row;
+    margin: var(--rome-space-2);
+  }
+}
+
 /* The reveal. Opacity rather than visibility keeps the copy button in the tab
    order, so keyboard focus can bring the chrome back for a pointerless user.
-   A coarse pointer has no hover state to reveal anything with, so there the
-   chrome stays put. Streamdown portals a fullscreen diagram to document.body,
-   outside `.rome-markdown` — its zoom stack is the whole interface at that
-   point, and stays visible. A table's button row rides the same reveal. */
+   Streamdown portals a fullscreen diagram to document.body, outside
+   `.rome-markdown` — its zoom stack is the whole interface at that point, and
+   stays visible. A table's button row rides the same reveal. */
 @media (hover: hover) {
   .rome-markdown
     :is(

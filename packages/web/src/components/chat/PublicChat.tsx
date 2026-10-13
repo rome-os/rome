@@ -79,7 +79,7 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="@container/chat relative flex min-h-full md:min-h-dvh">
+      <div className="@container/chat relative flex min-h-full md:min-h-[var(--rome-viewport-height)]">
         {/* Mirror Chat.tsx: in the wide / no-apps layout (@5xl/chat) the trace
             drawer is `fixed` and out of flow, so reserve its 480px here to keep
             the messages clear of it. */}

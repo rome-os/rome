@@ -10,6 +10,7 @@ import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
+import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -20,7 +21,7 @@ import { sessionActorMiddleware } from "../lib/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
-import { appsRoutes } from "./routes/apps.js";
+import { appsRoutes, subscribeCatalogChanges } from "./routes/apps.js";
 import { agentsRoutes } from "./routes/agents.js";
 import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
@@ -270,6 +271,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           port: info.port,
           close: async () => {
             terminalServer.close();
+            liveEvents.close();
             desktopProxy.close();
             appWebSocket.close();
             await webchatRuntime.flushAll();
@@ -287,6 +289,18 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           void deps.aiToolState.refresh().catch(() => {});
         },
       });
+      const liveEvents = attachLiveEventsServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
+          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          subscribeChatSession: (sessionId, emit) =>
+            webchatRuntime.subscribeSessionEvents(sessionId, emit),
+          subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+        },
+      );
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {

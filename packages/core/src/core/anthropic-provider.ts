@@ -794,6 +794,9 @@ export class AnthropicProvider implements ModelProvider {
                 if (params.outputSchema) continue;
                 partialText = "";
                 partialTextBlockId = undefined;
+                // The SDK's synthetic message for a failed API call. Its text is
+                // an API error notice, never an answer.
+                if (message.error) continue;
                 // A new text block: the previously held one is now confirmed
                 // mid-turn narration. Hold this one until something follows it.
                 if (pendingText !== null) {
@@ -861,6 +864,9 @@ export class AnthropicProvider implements ModelProvider {
               echoed.length === 0 &&
               ownerAtResult !== "rome" &&
               (ownerAtResult === "sdk" || message.origin?.kind === "task-notification");
+            // A `success` result flagged `is_error` is a turn that ended on an
+            // API error, and its `result` is the error text.
+            const apiFailed = isResultSuccess(message) && message.is_error;
             if (!sdkOwned) {
               running = false;
               // The SDK owns these queued messages already. Rebind them to a
@@ -880,9 +886,14 @@ export class AnthropicProvider implements ModelProvider {
                 romeSendIds.delete(id);
                 mintedSendIds.delete(id);
               }
-              // The turn is ending: any text still held was the closing answer.
+              // The turn is ending: any text still held was the closing answer,
+              // unless an API error cut the turn short.
               if (!params.outputSchema && pendingText !== null) {
-                yield textBlock(pendingText, "final", pendingTextBlockId);
+                yield textBlock(
+                  pendingText,
+                  apiFailed ? "commentary" : "final",
+                  pendingTextBlockId,
+                );
                 pendingText = null;
               }
             }
@@ -907,7 +918,7 @@ export class AnthropicProvider implements ModelProvider {
             };
 
             let terminal: AgentEvent;
-            if (isResultSuccess(message)) {
+            if (isResultSuccess(message) && !apiFailed) {
               log.info("agent SDK result", resultData);
               recordModelCallMetrics(effectiveModel, accounting, message, {
                 agentName: params.agentName,
@@ -950,9 +961,18 @@ export class AnthropicProvider implements ModelProvider {
                 };
               }
             } else {
-              const errors = message.errors ?? [];
+              let errors: string[];
+              let fallbackText: string;
+              if (isResultSuccess(message)) {
+                errors = message.result ? [message.result] : [];
+                const status = message.api_error_status;
+                fallbackText = `Claude API error${status ? ` (${status})` : ""}`;
+              } else {
+                errors = message.errors ?? [];
+                fallbackText = `Agent run failed (${message.subtype})`;
+              }
               log.error("agent SDK result", { ...resultData, errors });
-              const errorText = errors.join("; ") || `Agent run failed (${message.subtype})`;
+              const errorText = errors.join("; ") || fallbackText;
               // A 401 here means the credential `claude auth status` reports as
               // valid was rejected server-side. Stamp `auth_revoked` and persist
               // the marker so the next state refresh can downgrade the badge.

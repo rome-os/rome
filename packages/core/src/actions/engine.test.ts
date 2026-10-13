@@ -84,7 +84,7 @@ describe("ActionEngine", () => {
 
   describe("worker warm pool", () => {
     class FakeWorkerChild extends EventEmitter {
-      pid = 12345;
+      pid: number | undefined = 12345;
       connected = true;
       exitCode: number | null = null;
       signalCode: NodeJS.Signals | null = null;
@@ -329,6 +329,74 @@ describe("ActionEngine", () => {
 
       children[0].completeNext();
       await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+    });
+
+    it("logs which workers hold the slots when the cap rejects a root", async () => {
+      const registry = new ActionRegistryImpl();
+      registry.register(buildAction("root"));
+      const { children, actionWorkerFork } = installFakeChildProcessFactory({
+        autoRespond: false,
+      });
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
+        processRole: "main",
+        workerWarmPoolSize: 0,
+        maxWorkerProcesses: 1,
+        actionWorkerFork,
+      });
+      const first = engine.run("root", {}, { rootExecutionId: "busy-root" });
+      await rs.waitFor(() => expect(actionMessages(children[0])).toHaveLength(1));
+      const warn = rs.spyOn(console, "warn").mockImplementation(() => {});
+      let warnings: unknown[][];
+      try {
+        await expect(engine.run("root", {})).rejects.toMatchObject({
+          name: "ActionWorkerCapacityError",
+        });
+      } finally {
+        warnings = [...warn.mock.calls];
+        warn.mockRestore();
+      }
+
+      const line = warnings
+        .map(([entry]) => JSON.parse(String(entry)) as { message: string; data: unknown })
+        .find((entry) => entry.message === "action worker capacity reached");
+      const data = line?.data as { maxWorkers: number; workers: unknown };
+      const workers = typeof data.workers === "string" ? JSON.parse(data.workers) : data.workers;
+      expect(data.maxWorkers).toBe(1);
+      expect(workers).toEqual([
+        expect.objectContaining({
+          pid: 12345,
+          state: "running",
+          pooled: false,
+          connected: true,
+          rootExecutionId: "busy-root",
+        }),
+      ]);
+
+      children[0].completeNext();
+      await expect(first).resolves.toEqual({ status: "ok", data: "root" });
+    });
+
+    // A spawn failure such as EAGAIN emits `error` with no pid and no `exit`.
+    it("frees the slot of a warm worker whose fork fails to spawn", async () => {
+      const registry = new ActionRegistryImpl();
+      registry.register(buildAction("root"));
+      const { children, actionWorkerFork } = installFakeChildProcessFactory();
+      const engine = new ActionEngine(registry, createActionEngineRepos(), {
+        processRole: "main",
+        workerWarmPoolSize: 1,
+        maxWorkerProcesses: 1,
+        actionWorkerFork,
+      });
+
+      engine.startWorkerWarmPool();
+      expect(children).toHaveLength(1);
+      children[0].pid = undefined;
+      children[0].connected = false;
+      expect(() => children[0].emit("error", new Error("spawn EAGAIN"))).not.toThrow();
+
+      await expect(engine.run("root", {})).resolves.toEqual({ status: "ok", data: "root" });
+      expect(actionWorkerFork).toHaveBeenCalledTimes(2);
+      await engine.stopWorkerWarmPool();
     });
 
     describe("queued roots", () => {

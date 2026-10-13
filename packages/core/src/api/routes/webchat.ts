@@ -52,6 +52,7 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import type { AgentTurnHandle } from "../../core/agent-session.js";
 import type { RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
+import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
   ENABLE_MODEL_SELECTOR_SETTING_KEY,
   WEBCHAT_REASONING_EFFORT_SETTING_KEY,
@@ -75,7 +76,7 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
@@ -548,6 +549,9 @@ function interpretInteractionResult(parts: unknown): {
 interface OpenSuspensionCard {
   handbackHint?: string;
   childSessionId?: string;
+  /** A host-owned built-in card (a question or the connect-AI card) that a
+   * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
+  dismissedByReply?: boolean;
 }
 
 async function findOpenSuspensions(
@@ -575,6 +579,7 @@ async function findOpenSuspensions(
         toolUseId?: unknown;
         handbackHint?: unknown;
         childSessionId?: unknown;
+        render?: { builtin?: unknown; componentId?: unknown };
       };
       if (
         (part.type === "pending_interaction" || part.type === "handoff") &&
@@ -583,6 +588,10 @@ async function findOpenSuspensions(
         cards.set(part.toolUseId, {
           handbackHint: typeof part.handbackHint === "string" ? part.handbackHint : undefined,
           childSessionId: typeof part.childSessionId === "string" ? part.childSessionId : undefined,
+          dismissedByReply:
+            part.type === "pending_interaction" &&
+            part.render?.builtin === true &&
+            BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -684,6 +693,16 @@ export interface WebchatRuntime {
    * it live and mounts its cards.
    */
   enqueueSessionTask(sessionId: string, task: BackendSessionTask): Promise<void>;
+  /**
+   * Emits `session_running` whenever a chat starts or stops running a turn,
+   * after first emitting one for every chat running now. Returns the
+   * unsubscribe.
+   */
+  subscribeStatusEvents(emit: LiveEventEmit): () => void;
+  /** Emits `message_insert` and `session_name` for one session. Returns the unsubscribe. */
+  subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
+  /** Whether the id names a session the session events stream serves. */
+  hasStoredSession(sessionId: string): Promise<boolean>;
 }
 
 // A stuck stream (e.g. unhandled error past finishStream) shouldn't block
@@ -725,6 +744,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     for (const listener of runningListeners) listener(event);
   };
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
+  const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
+    const listener = (event: { sessionId: string; running: boolean }) =>
+      emit("session_running", event);
+    runningListeners.add(listener);
+    for (const sessionId of runningSessions) listener({ sessionId, running: true });
+    return () => {
+      runningListeners.delete(listener);
+    };
+  };
+  const subscribeSessionEvents = (sessionId: string, emit: LiveEventEmit): (() => void) => {
+    const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
+      if (message.sessionId === sessionId) emit("message_insert", message);
+    });
+    const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
+      if (event.sessionId === sessionId) emit("session_name", event);
+    });
+    return () => {
+      unsubscribeMessages();
+      unsubscribeSessionName();
+    };
+  };
 
   const getStoredWebchatSession = async (
     c: Context,
@@ -1383,6 +1423,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const forkSessionId = first.value.sessionId;
     const forkTurnId = first.value.turnId;
+    await deps.webchatRepo.attributePersonFork(
+      forkSessionId,
+      forkTurnId,
+      await currentSessionActor(),
+    );
     if (input.continuable) {
       // Born an ordinary chat: createForkTraceRecorder wrote the row when
       // turn_start arrived, and the chat surface can already list and stream
@@ -1944,7 +1989,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const rawStatus = c.req.query("status");
     const status =
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
-    const sessions = await deps.webchatRepo.listSessions(status);
+    const ownerKey =
+      c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
+    const sessions = await deps.webchatRepo.listSessions(status, ownerKey);
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -1972,11 +2019,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const closed = new Promise<void>((resolve) => {
         close = resolve;
       });
-      const listener = (event: { sessionId: string; running: boolean }) => {
-        // Fire-and-forget so a stalled client can't hold up the stream that
-        // is starting or finishing.
-        sse.writeSSE({ event: "session_running", data: JSON.stringify(event) }).catch(finish);
-      };
+      let unsubscribe = () => {};
       const heartbeat = setInterval(() => {
         sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
       }, 20_000);
@@ -1984,11 +2027,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (finished) return;
         finished = true;
         clearInterval(heartbeat);
-        runningListeners.delete(listener);
+        unsubscribe();
         close();
       }
-      runningListeners.add(listener);
-      for (const sessionId of runningSessions) listener({ sessionId, running: true });
+      // Fire-and-forget so a stalled client can't hold up the stream that is
+      // starting or finishing.
+      unsubscribe = subscribeStatusEvents((event, data) => {
+        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+      });
       sse.onAbort(finish);
       await closed;
     }),
@@ -2168,6 +2214,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       modelSelection?.id ?? null,
       project.path,
       storedAgentName,
+      "webchat",
+      null,
+      { ownerKey: sessionOwnerKey(await currentSessionActor()) },
     );
     const createdSession = await deps.webchatRepo.getSession(id);
     if (!createdSession) {
@@ -2481,25 +2530,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         });
       };
 
-      unsubscribe = deps.webchatRepo.onMessageInserted((message) => {
-        if (message.sessionId !== sessionId) return;
-        write({
-          event: "message_insert",
-          data: JSON.stringify(message),
-        });
+      unsubscribe = subscribeSessionEvents(sessionId, (event, data) => {
+        write({ event, data: JSON.stringify(data) });
       });
-      const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
-        if (event.sessionId !== sessionId) return;
-        write({
-          event: "session_name",
-          data: JSON.stringify(event),
-        });
-      });
-      const unsubscribeMessages = unsubscribe;
-      unsubscribe = () => {
-        unsubscribeMessages();
-        unsubscribeSessionName();
-      };
       heartbeat = setInterval(() => {
         write({ event: "keepalive", data: "" });
       }, 20_000);
@@ -3120,10 +3153,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const displayText = skillName
       ? `/${artifactLocalName(skillName)}${basePrompt.trim() ? ` ${basePrompt.trim()}` : ""}`
       : basePrompt;
+    // A typed reply skips any open built-in card (rome-web already shows it as
+    // dismissed): record the dismissal with this message so the card closes
+    // here too, and tell the agent the guardian answered in chat instead.
+    const skippedCardIds =
+      !resolution && displayText.trim()
+        ? [...openSuspensions].filter(([, card]) => card.dismissedByReply).map(([id]) => id)
+        : [];
+    const turnPrompt =
+      skippedCardIds.length > 0
+        ? "(The guardian skipped your open card and replied in chat instead. " +
+          `Treat that card as dismissed and answer this message.)\n\n${modelPrompt}`
+        : modelPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached system prefix in PromptBuilder stays stable.
     const workspaceSection = buildWorkspaceContextSection(body.workspace);
-    const promptText = workspaceSection ? `${workspaceSection}\n\n${modelPrompt}` : modelPrompt;
+    const promptText = workspaceSection ? `${workspaceSection}\n\n${turnPrompt}` : turnPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3208,10 +3253,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A recoverable model-resolution failure is still an accepted user turn:
     // it persists this message and terminates through the normal trace/SSE
     // protocol below rather than leaving an empty session behind.
-    const userParts =
-      Array.isArray(body.parts) && body.parts.length > 0
+    const userParts = [
+      ...(Array.isArray(body.parts) && body.parts.length > 0
         ? body.parts
-        : [{ type: "text", content: displayText }];
+        : [{ type: "text", content: displayText }]),
+      ...skippedCardIds.map((toolUseId) => ({
+        type: "interaction_result",
+        toolUseId,
+        output: { dismissed: true },
+      })),
+    ];
     const userContent = JSON.stringify(userParts);
     const persistUserMessage = (turnId: string) => {
       return deps.webchatRepo.updateUserInput(sessionId, {
@@ -3222,7 +3273,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent))) {
+    if (
+      !(await deps.webchatRepo.recordUserInput(
+        inputId,
+        sessionId,
+        userContent,
+        await currentSessionActor(),
+      ))
+    ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return c.json({ error: "inputId is already in use" }, 409);
       return c.json({
@@ -3629,6 +3687,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // turn of the child conversation (including after a
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
+                        { inheritOwnerFrom: sessionId },
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {
@@ -3663,8 +3722,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
                 // the freegrid (no card, no child session, no parked turn). The
-                // replay key is per-app so a reconnecting client re-mounts it once.
-                // Fail closed: the owning app must actually be installed.
+                // replay key is per-app, so a reconnecting client gets the app's
+                // latest placement again; its `placementId` lets a client that
+                // already applied it skip the replay instead of remounting the
+                // widget. Fail closed: the owning app must actually be installed.
                 const place = readPlaceWidgetFromOutput(msg.output);
                 if (place) {
                   const resolvedApp = deps.appCatalog
@@ -3681,6 +3742,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       stream,
                       "widget_placement",
                       {
+                        placementId: randomUUID(),
                         appId: place.appId,
                         ...(place.route !== undefined ? { route: place.route } : {}),
                         ...(place.params !== undefined ? { params: place.params } : {}),
@@ -3995,6 +4057,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       activeStreams.clear();
     },
     enqueueSessionTask,
+    subscribeStatusEvents,
+    subscribeSessionEvents,
+    async hasStoredSession(sessionId) {
+      const session = await deps.webchatRepo.getSession(sessionId);
+      return Boolean(session && isStoredWebchatSession(session));
+    },
   };
 
   return { routes: app, runtime };

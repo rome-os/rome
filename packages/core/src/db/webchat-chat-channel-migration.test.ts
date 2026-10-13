@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
-const TAG = "0077_webchat_chats_as_channel_rows";
+const TAG = "0078_webchat_chats_as_channel_rows";
 
 function migrationSql(tag: string): string[] {
   return readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8")

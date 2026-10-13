@@ -104,6 +104,7 @@ import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
+import { endInterruptedRuns } from "./actions/restart-recovery.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
@@ -321,6 +322,15 @@ async function main() {
   const webhookInvocationsRepo = new WebhookInvocationsRepository(db);
   const routinesRepo = new RoutinesRepository(db);
   const routineRunsRepo = new RoutineRunsRepository(db);
+  // Runs before the action engine, routine engine, and ingress below exist, so
+  // every `running` row it ends belongs to the stopped process.
+  const interrupted = await endInterruptedRuns(
+    { executions: actionExecutionsRepo, routineRuns: routineRunsRepo },
+    new Date(),
+  );
+  if (interrupted.executions > 0 || interrupted.routineRuns > 0) {
+    log.warn("Ended runs a stopped Rome process left running", interrupted);
+  }
 
   await ensureSentinelPersons(personMappingRepo);
 
