@@ -110,7 +110,7 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
-The workflow uses `@midscene/test@1.15.3-beta-20261012131523.0` and reads
+The workflow uses `@midscene/test@1.15.3-beta-20261013035603.0` and reads
 its generated `result.md` directly. The lockfile is synchronized with this
 published beta. CI installs dependencies with `npm install --strict-allow-scripts`.
 
