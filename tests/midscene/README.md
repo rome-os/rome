@@ -119,10 +119,11 @@ with `npm install --strict-allow-scripts`.
 - These outputs are covered by `.gitignore`.
 - Each run uploads one `midscene-results` artifact containing the original
   framework reports and mock server log. Pages downloads this artifact directly.
-- Actions Summary links to the run's artifacts and, after successful deployment,
-  its online report. It does not read or rewrite native Markdown. Case details
-  remain in the original reports. If Pages fails or is skipped, the artifact
-  link remains available.
+- The test job writes the native `result.md` case list and artifact download
+  link to Actions Summary, omitting the artifact-relative HTML link.
+- The Pages job prepares and deploys the site, then writes its online report
+  link to a separate Summary block. If Pages fails or is skipped, the test
+  results and artifact link remain available.
 - Pages preserves the original HTML and assets at their relative paths. Each run
   has an index linking to its original report. Reports are not merged.
 - Pages publication defaults on for runs with report artifacts, including

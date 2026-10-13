@@ -179,9 +179,10 @@ reasons behind them.
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
   `.midscene/` test artifacts, including failed runs. Pages reads the original
-  `midscene-results` artifact directly. Actions Summary provides an artifact
-  download link and an online report link after successful Pages deployment.
-  It does not read or rewrite native Markdown. Case details remain in the reports.
+  `midscene-results` artifact directly. The test job writes the native `result.md`
+  case list and artifact download link to Actions Summary, omitting the
+  artifact-relative HTML link. A second job prepares and deploys Pages, then
+  writes the online report link to a separate Summary block on success.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.

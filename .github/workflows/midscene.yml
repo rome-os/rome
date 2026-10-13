@@ -114,8 +114,21 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  prepare-pages:
-    name: Prepare optional Midscene Pages publication
+      - name: Write test results to Summary
+        if: always()
+        run: |
+          {
+            for result in tests/midscene/.midscene/test-results/*/result.md; do
+              [ -f "$result" ] || continue
+              # Pages adds an online link after deployment succeeds.
+              sed '/^\[Open the Midscene Test report ↗\](/d' "$result"
+              echo
+            done
+            echo "[Download test artifacts]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-pages:
+    name: Publish Midscene Pages report
     needs: midscene
     if: >-
       always() && !cancelled() &&
@@ -126,9 +139,11 @@ jobs:
     permissions:
       actions: read
       contents: read
-      pages: read
-    outputs:
-      pages-artifact-name: ${{ steps.upload-pages.outcome == 'success' && format('midscene-e2e-report-pages-{0}', github.run_attempt) || '' }}
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -198,55 +213,16 @@ jobs:
           path: ${{ runner.temp }}/midscene-pages
           retention-days: 90
 
-  deploy-report:
-    name: Publish Midscene HTML report
-    needs: prepare-pages
-    if: >-
-      always() && !cancelled() &&
-      needs.prepare-pages.outputs.pages-artifact-name != ''
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      pages: write
-      id-token: write
-    outputs:
-      page-url: ${{ steps.deployment.outputs.page_url }}
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy report to GitHub Pages
         id: deployment
+        if: steps.upload-pages.outcome == 'success'
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
         with:
-          artifact_name: ${{ needs.prepare-pages.outputs.pages-artifact-name }}
+          artifact_name: midscene-e2e-report-pages-${{ github.run_attempt }}
 
-  report-results:
-    name: Midscene results
-    needs: [midscene, prepare-pages, deploy-report]
-    if: >-
-      always() && !cancelled() &&
-      needs.midscene.result != 'skipped'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions: {}
-    steps:
-      - name: Write the run Summary
-        if: always()
+      - name: Add published report link to Summary
+        if: steps.deployment.outcome == 'success'
         env:
-          PAGE_URL: ${{ needs.deploy-report.result == 'success' && needs.deploy-report.outputs.page-url || '' }}
-          PRODUCER_RESULT: ${{ needs.midscene.result }}
-          PUBLICATION_RESULT: ${{ needs.prepare-pages.result == 'failure' && 'failure' || needs.deploy-report.result }}
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
         run: |
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          {
-            echo "## Midscene reports"
-            echo
-            echo "Tests: $PRODUCER_RESULT. Pages: $PUBLICATION_RESULT."
-            echo
-            if [ -n "$PAGE_URL" ]; then
-              echo "[Open the Midscene Test report ↗](${PAGE_URL%/}/runs/$GITHUB_RUN_ID/)"
-              echo
-            fi
-            echo "[Download test artifacts]($run_url#artifacts)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "[Open the Midscene Test report ↗](${PAGE_URL%/}/runs/$GITHUB_RUN_ID/)" >> "$GITHUB_STEP_SUMMARY"
