@@ -36,5 +36,5 @@ export async function readNativeResult(reportsDirectory) {
       if (error.code !== "ENOENT") throw error;
     }
   }
-  return { summary, reportPath, markdownPath: path.join(path.dirname(file), "result.md") };
+  return { reportPath };
 }

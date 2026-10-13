@@ -109,26 +109,20 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
-The workflow uses `@midscene/test@1.15.3-beta-20261013035603.0` and reads
-its generated `result.md` directly. The lockfile is synchronized with this
-published beta. CI installs dependencies with `npm install --strict-allow-scripts`.
-
-Rome resolves relative report links after
-Pages deployment. Each case occupies one line with its title and status.
-Before deployment, case titles appear without report links. Rome does not
-capture screenshots or recalculate the Markdown contents.
+The workflow uses `@midscene/test@1.15.3-beta-20261013035603.0`.
+The lockfile is synchronized with this published beta. CI installs dependencies
+with `npm install --strict-allow-scripts`.
 
 - HTML reports: `midscene_run/report/`
 - Machine-readable results: `.midscene/test-results/<runId>/summary.json`
 - Markdown results: `.midscene/test-results/<runId>/result.md`
 - These outputs are covered by `.gitignore`.
 - Each run uploads one `midscene-results` artifact containing the original
-  framework reports and mock server log. Pages and the final Summary download
-  this artifact directly, without an intermediate Markdown copy or report upload.
-- A single read-only job writes the Markdown Summary after Pages finishes or
-  is skipped, adding hosted report links when deployment succeeds. While Pages
-  is pending, inspect the test logs. If native Markdown cannot be read, the
-  Summary links to the run artifacts for diagnosis.
+  framework reports and mock server log. Pages downloads this artifact directly.
+- Actions Summary links to the run's artifacts and, after successful deployment,
+  its online report. It does not read or rewrite native Markdown. Case details
+  remain in the original reports. If Pages fails or is skipped, the artifact
+  link remains available.
 - Pages preserves the original HTML and assets at their relative paths. Each run
   has an index linking to its original report. Reports are not merged.
 - Pages publication defaults on for runs with report artifacts, including

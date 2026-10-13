@@ -178,14 +178,10 @@ reasons behind them.
   Each case has up to two retries. The job timeout is 240 minutes, with a
   220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
-  `.midscene/` test artifacts, including failed runs. One read-only job writes
-  the framework-generated Markdown Summary after Pages finishes or is skipped.
-  Successful deployment adds hosted report links. While Pages is pending,
-  results can be inspected in the test logs.
-  If Pages fails or is skipped, results and artifact links remain available.
-  Pages and the final Summary read the original `midscene-results` artifact
-  directly. Missing Markdown produces a diagnostic link to the run artifacts.
-  Test and publication jobs do not write separate Summaries.
+  `.midscene/` test artifacts, including failed runs. Pages reads the original
+  `midscene-results` artifact directly. Actions Summary provides an artifact
+  download link and an online report link after successful Pages deployment.
+  It does not read or rewrite native Markdown. Case details remain in the reports.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.

@@ -25,9 +25,9 @@ The generated Midscene report lists the executed cases.
   test job runs on the upstream `main` branch or by manual dispatch in a fork
   using that fork's model secrets.
 - Every model-backed run uploads its test reports, including failed runs.
-  A repository with `MIDSCENE_PUBLISH_REPO` set to its full name also publishes
-  Summary and recent reports through GitHub Pages. Case titles link to the
-  original HTML report, which contains execution details and existing screenshots.
+  Pages publishes recent reports by default. Actions Summary links to the
+  online report and downloadable artifacts. The original HTML report contains
+  execution details and existing screenshots.
 
 ## Local run
 

@@ -61,7 +61,7 @@ test("raw artifacts replace the intermediate report job", () => {
   assert.doesNotMatch(workflow, /report-summary|prepared-report|Prepare native Markdown Summary/);
   assert.match(job("midscene"), /steps.upload-results.outputs.artifact-id/);
   assert.match(job("midscene"), /include-hidden-files: true/);
-  for (const name of ["prepare-pages", "report-results"]) {
+  for (const name of ["prepare-pages"]) {
     assert.match(job(name), /path: \$\{\{ runner.temp \}\}\/midscene-reports\/midscene-results/);
   }
 });
@@ -164,7 +164,7 @@ test("report downloads use the current run and expose no historical rebuild inpu
   for (const name of ["report-results"]) {
     assert.doesNotMatch(job(name), /run-id:|github-token:/);
   }
-  assert.match(job("report-results"), /name: Download Midscene test reports/);
+  assert.doesNotMatch(job("report-results"), /download-artifact/);
 });
 
 test("model steps use environment variables and keep the API key in secrets", () => {
@@ -183,13 +183,13 @@ test("model steps use environment variables and keep the API key in secrets", ()
 });
 
 
-test("uses native result.md and only downloads the full-suite artifact", () => {
-  for (const name of ["report-results"]) {
-    const content = job(name);
-    assert.match(content, /write-native-summary\.mjs/);
-    assert.doesNotMatch(content, /render-ci-summary|merge-native-reports|shard-/);
-    assert.match(content, /name: midscene-results/);
-  }
+test("Summary links to reports without reading or rewriting artifacts", () => {
+  const content = job("report-results");
+  assert.doesNotMatch(content, /checkout|setup-node|download-artifact|write-native-summary|result\.md/);
+  assert.match(content, /if \[ -n "\$PAGE_URL" \]/);
+  assert.match(content, /Open the Midscene Test report/);
+  assert.match(content, /runs\/\$GITHUB_RUN_ID\//);
+  assert.match(content, /Download test artifacts/);
 });
 
 test("project setup owns mock startup and boundary checks", () => {

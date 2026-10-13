@@ -229,26 +229,8 @@ jobs:
       needs.midscene.result != 'skipped'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
+    permissions: {}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Activate Node.js 24
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-
-      - name: Download Midscene test reports
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: midscene-results
-          path: ${{ runner.temp }}/midscene-reports/midscene-results
-
       - name: Write the run Summary
         if: always()
         env:
@@ -257,24 +239,14 @@ jobs:
           PUBLICATION_RESULT: ${{ needs.prepare-pages.result == 'failure' && 'failure' || needs.deploy-report.result }}
         run: |
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          pages_url=""
-          if [ -n "$PAGE_URL" ]; then
-            pages_url="${PAGE_URL%/}/runs/$GITHUB_RUN_ID/"
-          fi
-          if node tests/midscene/scripts/write-native-summary.mjs \
-            "$RUNNER_TEMP/midscene-reports" "$pages_url" \
-            "$RUNNER_TEMP/midscene-summary.md"; then
-            cat "$RUNNER_TEMP/midscene-summary.md" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "Tests: $PRODUCER_RESULT. Pages: $PUBLICATION_RESULT." >> "$GITHUB_STEP_SUMMARY"
-            echo "[Download test artifacts]($run_url#artifacts)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "## Rome × Midscene · Summary unavailable"
+          {
+            echo "## Midscene reports"
+            echo
+            echo "Tests: $PRODUCER_RESULT. Pages: $PUBLICATION_RESULT."
+            echo
+            if [ -n "$PAGE_URL" ]; then
+              echo "[Open the Midscene Test report ↗](${PAGE_URL%/}/runs/$GITHUB_RUN_ID/)"
               echo
-              echo "Native result.md could not be read. Pages: $PUBLICATION_RESULT."
-              echo
-              echo "[Inspect this run and available artifacts]($run_url#artifacts)."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
+            fi
+            echo "[Download test artifacts]($run_url#artifacts)"
+          } >> "$GITHUB_STEP_SUMMARY"
