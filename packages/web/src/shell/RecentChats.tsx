@@ -168,8 +168,8 @@ const DATE_BUCKETS = [
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
 
 function readScope(): SessionScope {
-  if (typeof window === "undefined") return "mine";
-  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
+  if (typeof window === "undefined") return "all";
+  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "mine" ? "mine" : "all";
 }
 
 function readGroupMode(): GroupMode {
@@ -309,18 +309,26 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   // response can be older than an event that arrived while it was in flight,
   // so the stream's word wins over the row's.
   const liveRunning = useRef(new Map<string, boolean>());
+  // Only the latest request may update the list or phase, including event-driven refetches.
+  const listRequest = useRef(0);
   const loadSessions = useCallback(async () => {
+    const request = ++listRequest.current;
     try {
       const data = await listSessions(statusFilter, scope);
+      if (request !== listRequest.current) return;
       setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
       setPhase("ready");
     } catch {
+      if (request !== listRequest.current) return;
       setPhase("error");
     }
   }, [statusFilter, scope]);
 
   useEffect(() => {
     void loadSessions();
+    return () => {
+      listRequest.current += 1;
+    };
   }, [loadSessions]);
 
   useSessionsChanged(() => {
@@ -874,8 +882,8 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
                 {[
-                  { value: "mine" as const, label: t("recentChats.myChats") },
                   { value: "all" as const, label: t("recentChats.allChats") },
+                  { value: "mine" as const, label: t("recentChats.myChats") },
                 ].map(({ value, label }) => (
                   <DropdownMenuItem
                     key={value}
