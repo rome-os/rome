@@ -6,19 +6,23 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 
-async function isReady(url: string) {
+async function isReady(url: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+    const timeout = AbortSignal.timeout(2_000);
+    const response = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
     await response.body?.cancel();
+    signal?.throwIfAborted();
     return response.ok;
   } catch {
+    signal?.throwIfAborted();
     return false;
   }
 }
 
-export async function startMockServer(baseUrl: string, logPath: string): Promise<() => Promise<void>> {
+export async function startMockServer(baseUrl: string, logPath: string, signal?: AbortSignal): Promise<() => Promise<void>> {
   const url = new URL(baseUrl);
-  if (await isReady(baseUrl)) return async () => {};
+  if (await isReady(baseUrl, signal)) return async () => {};
   if (url.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
     throw new Error(`External mock server is unavailable: ${url.origin}`);
   }
@@ -59,24 +63,19 @@ export async function startMockServer(baseUrl: string, logPath: string): Promise
     await Promise.race([closed, delay(5_000, undefined, { ref: false })]);
     signalGroup("SIGKILL");
     process.off("exit", onExit);
-    process.off("SIGINT", onInterrupt);
-    process.off("SIGTERM", onTerminate);
   })();
-  const onInterrupt = () => { void stop().finally(() => process.exit(130)); };
-  const onTerminate = () => { void stop().finally(() => process.exit(143)); };
   process.once("exit", onExit);
-  process.once("SIGINT", onInterrupt);
-  process.once("SIGTERM", onTerminate);
   try {
     // build:kit runs before the dev server, so a cold start can take minutes.
     const deadline = Date.now() + 360_000;
     while (Date.now() < deadline) {
+      signal?.throwIfAborted();
       if (spawnError) throw spawnError;
       if (child.exitCode !== null || child.signalCode !== null) {
         throw new Error(`Mock server exited before readiness; see ${logPath}`);
       }
-      if (await isReady(baseUrl)) return stop;
-      await delay(1_000);
+      if (await isReady(baseUrl, signal)) return stop;
+      await delay(1_000, undefined, { signal });
     }
     throw new Error(`Mock server readiness timed out; see ${logPath}`);
   } catch (error) {
