@@ -67,7 +67,7 @@ export async function preparePagesSite({
     const href = result.reportPath.split(path.sep).map(encodeURIComponent).join("/");
     await writeFile(
       path.join(current, "index.html"),
-      `<!doctype html><html lang="en"><meta charset="utf-8"><title>Midscene report</title><a href="${href}">Open the Midscene Test report</a></html>`,
+      `<!doctype html><html lang="en"><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=${href}"><title>Midscene report</title><a href="${href}">Open the Midscene Test report</a></html>`,
     );
   }
 
