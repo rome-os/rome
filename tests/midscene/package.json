@@ -7,7 +7,6 @@
     "test": "midscene-test",
     "nodes": "midscene-test nodes",
     "typecheck": "tsc --noEmit",
-    "collect": "node scripts/collect-cases.mjs",
     "check:model": "midscene-test model verify",
     "test:setup": "node --experimental-strip-types --test scripts/mock-server.test.mjs scripts/browser-boundary.test.mjs",
     "test:summary": "node --test scripts/write-native-summary.test.mjs scripts/prepare-pages-site.test.mjs scripts/workflow-policy.test.mjs scripts/trusted-report-runs.test.mjs"

@@ -37,8 +37,7 @@ Midscene agent calls the configured model endpoint.
 - The suite uses AI-native cases. Each case starts one isolated product
   goal. Related page states share a case only when they belong to that goal.
 - YAML under `cases/` is the single source of truth for case definitions.
-  The optional local collector parses these files and checks nodes, duplicate names, and
-  case conventions. Adding or renaming a case requires only its YAML change.
+  Adding or renaming a case requires only its YAML change.
 - The package registers `app.open` for isolated setup and
   `app.expectRenameConflict` for FILE-03's transient response. Run
   `npm run nodes` to generate a local node reference with their parameters.
@@ -171,9 +170,8 @@ through Pages deployment is serialized. This also serializes test runs.
    they form one user intent.
 3. Use `aiAssert` after each meaningful state change. Describe the visible
    outcome and quote stable UI text that separates success from nearby states.
-4. Every case must contain at least one `aiAct` and one `aiAssert`. The
-   collection check rejects atomic AI nodes such as `aiTap` and operational
-   `app.*` nodes. `app.open` initializes the page, and
+4. Every case must contain at least one `aiAct` and one `aiAssert`. Avoid
+   atomic AI nodes such as `aiTap`. `app.open` initializes the page, and
    `app.expectRenameConflict` checks the transient HTTP 409 response in FILE-03.
    Keep user interaction and visible outcomes in `aiAct` and `aiAssert`.
 5. Use `wait` only for mock state that settles asynchronously. Do not use fixed
@@ -182,8 +180,8 @@ through Pages deployment is serialized. This also serializes test runs.
    case only when they prove one stateful flow.
 7. Use synthetic fixture data only. Never add real people, accounts, tokens, or
    chat content.
-8. The collector rejects other `app.*` nodes and the `deterministic-assist`
-   tag. If a visual step fails, adjust the goal and visible checkpoint.
+8. Avoid other `app.*` nodes and the `deterministic-assist` tag. If a visual
+   step fails, adjust the goal and visible checkpoint.
 
 ## Fork setup: yuyutaotao/rome
 

@@ -12,9 +12,7 @@ Every case starts with `app.open`, uses `aiAct` for user interaction, and uses
 `aiAssert` for its visible outcome. Navigation checks rely on visible page
 state, not the browser address bar.
 
-Run `npm run collect` from `tests/midscene` to parse YAML and check custom
-nodes, duplicate names, and case conventions without starting a browser or
-calling a model. The generated Midscene report lists the executed cases.
+The generated Midscene report lists the executed cases.
 
 ## Execution contract
 

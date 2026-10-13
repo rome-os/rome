@@ -197,8 +197,7 @@ reasons behind them.
 
 <!-- CASE-CATALOG -->
 Case names, tags, and steps are defined only in
-[tests/midscene/cases](../tests/midscene/cases/). `npm run collect` parses these
-YAML files and checks case conventions without a separate inventory.
+[tests/midscene/cases](../tests/midscene/cases/), without a separate inventory.
 
 ### ⚠️ Candidates blocked by section 6 mock gaps (no YAML yet)
 
