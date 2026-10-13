@@ -109,8 +109,8 @@ HEADLESS=false npm test
 
 ## Reports and Artifacts
 
-The workflow uses `@midscene/test@1.15.3-beta-20261013035603.0`.
-The lockfile is synchronized with this published beta. CI installs dependencies
+The workflow uses `@midscene/test@1.15.3`.
+The lockfile is synchronized with this stable release. CI installs dependencies
 with `npm install --strict-allow-scripts`.
 
 - HTML reports: `midscene_run/report/`
