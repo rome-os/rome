@@ -8,6 +8,7 @@ import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { suppressTracing } from "@opentelemetry/core";
 import {
   type Attributes,
   type Counter,
@@ -15,6 +16,7 @@ import {
   type Span,
   type Tracer,
   metrics as apiMetrics,
+  context,
   diag,
   trace,
   DiagConsoleLogger,
@@ -176,6 +178,20 @@ export function startRomeSpan(name: string, attrs: Attributes = {}): Span {
   const sessionId = currentSessionId();
   if (sessionId) span.setAttribute("session.id", sessionId);
   return span;
+}
+
+/**
+ * Run `fn` with tracing suppressed: no span starts inside it, including the
+ * HTTP, undici and TCP spans auto-instrumentation records for outgoing calls,
+ * and no trace context propagates from it.
+ *
+ * Use only for a readiness poll whose refused attempts are the expected path
+ * while its target starts, and whose caller logs or throws the real failure.
+ * Anything `fn` creates that outlives it, such as a client, socket or timer,
+ * keeps the suppressed context, so its later calls go untraced too.
+ */
+export function withTracingSuppressed<T>(fn: () => Promise<T>): Promise<T> {
+  return context.with(suppressTracing(context.active()), fn);
 }
 
 /**

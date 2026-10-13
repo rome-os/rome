@@ -6,7 +6,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { createLogger } from "../logger.js";
-import { initTelemetry, shutdown as shutdownTelemetry } from "../telemetry.js";
+import {
+  initTelemetry,
+  shutdown as shutdownTelemetry,
+  withTracingSuppressed,
+} from "../telemetry.js";
 import {
   parseDaemonActionRequest,
   type DaemonActionRequest,
@@ -335,7 +339,10 @@ class ManagedServiceRunner {
       if (!this.child) {
         throw new Error(`${this.name} exited before becoming healthy`);
       }
-      if (await this.probeHealth()) {
+      // Refused probes are expected until the child listens, and the timeout
+      // below reports a real failure, so they stay out of the Error spans.
+      // runHealthChecks calls probeHealth traced: a refusal there is an outage.
+      if (await withTracingSuppressed(() => this.probeHealth())) {
         return;
       }
       await delay(2_000);
