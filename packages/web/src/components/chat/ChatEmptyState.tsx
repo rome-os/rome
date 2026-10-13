@@ -39,7 +39,7 @@ export function ChatEmptyState({
     : t("empty.greetingFallback");
 
   return (
-    <main className="mx-auto w-full max-w-5xl flex-1 px-6 pb-12 pt-12 md:pt-16">
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-6 py-12">
       <header className="max-w-3xl">
         <RomeLogo
           className="rome-empty-rise h-9 w-9 text-foreground"
