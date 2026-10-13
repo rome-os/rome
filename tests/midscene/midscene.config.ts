@@ -26,23 +26,9 @@ interface ProjectContext {
   renameResponses?: Array<{ sourcePath: string; targetName: string; status: number }>;
 }
 
-const AI_ACT_CONTEXT = `
-When returning pixel coordinates, keep every coordinate strictly inside the screenshot bounds:
-never use the screenshot width or height itself as a right or bottom coordinate. Prefer a tight
-box around the interactive content instead of the full container or viewport edge. Coordinates
-must be absolute from the full screenshot's top-left corner; include the left sidebar, headers, and
-all surrounding workspace offsets instead of resetting the origin at the main content area. Text-field
-coordinates must tightly enclose the editable line or placeholder text, not the larger rounded
-composer surrounding it. Text-field focus often has no visible indicator; after one accurate
-locate, proceed with Input or ClearInput instead of repeatedly tapping while waiting for a visual
-focus change.
-`.trim();
-
 const getAgent = ({ context }: NodeExecutionContext<unknown, ProjectContext>) => {
   if (!context.page) throw new Error("No page is open; call app.open before AI steps");
-  context.agent ??= new PlaywrightAgent(context.page, {
-    aiContexts: { aiAct: AI_ACT_CONTEXT },
-  });
+  context.agent ??= new PlaywrightAgent(context.page);
   return context.agent;
 };
 
