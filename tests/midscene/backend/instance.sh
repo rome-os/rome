@@ -20,18 +20,24 @@ case "${1:-}" in
     start=$(date +%s)
     until compose logs rome 2>&1 | grep -q "Rome started"; do
       state=$(docker inspect -f '{{.State.Status}}' "$(compose ps -aq rome)")
-      [ "$state" = running ] || { echo "rome container is $state" >&2; exit 1; }
-      (( $(date +%s) - start < 600 )) || { echo "timed out waiting for Rome started" >&2; exit 1; }
+      [ "$state" = running ] || {
+        echo "rome container is $state" >&2
+        exit 1
+      }
+      (($(date +%s) - start < 600)) || {
+        echo "timed out waiting for Rome started" >&2
+        exit 1
+      }
       sleep 5
     done
     phase=$(curl -fsS "http://127.0.0.1:$PORT/api/bootstrap")
-    echo "Rome started after $(( $(date +%s) - start ))s; bootstrap: $phase"
+    echo "Rome started after $(($(date +%s) - start))s; bootstrap: $phase"
     grep -q '"needs-account"' <<<"$phase"
     ;;
   collect)
     out=${2:?output directory}
     mkdir -p "$out"
-    compose logs --no-color --timestamps rome > "$out/rome.log" 2>&1 || true
+    compose logs --no-color --timestamps rome >"$out/rome.log" 2>&1 || true
     ;;
   down)
     compose down -v --remove-orphans

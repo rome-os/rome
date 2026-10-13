@@ -307,7 +307,10 @@ test("backend output is scanned for secrets before upload and never published", 
   assert.match(backend, /::add-mask::/);
   assert.doesNotMatch(backend, /configure-pages|pages: write|MIDSCENE_PUBLISH_REPO/);
   // The mock report merge must not pick up the backend artifact.
-  for (const match of workflow.matchAll(/pattern: (\S+)/g)) {
-    assert.ok(!new RegExp(`^${match[1].replace("*", ".*")}$`).test("midscene-backend"));
+  const patterns = [...workflow.matchAll(/pattern: (\S+)/g)].map((match) => match[1]);
+  assert.ok(patterns.length > 0);
+  for (const pattern of patterns) {
+    assert.ok(pattern.endsWith("*") && !pattern.slice(0, -1).includes("*"), pattern);
+    assert.ok(!"midscene-backend".startsWith(pattern.slice(0, -1)), pattern);
   }
 });

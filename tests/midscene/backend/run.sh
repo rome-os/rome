@@ -14,7 +14,10 @@ suite=$(cd "$here/.." && pwd)
 out=${ROME_E2E_OUT:-$suite/midscene_run/backend}
 rm -rf "$out" && mkdir -p "$out"
 
-"$here/instance.sh" up || { "$here/instance.sh" collect "$out"; exit 1; }
+"$here/instance.sh" up || {
+  "$here/instance.sh" collect "$out"
+  exit 1
+}
 
 export ROME_E2E_BASE_URL="http://127.0.0.1:${ROME_E2E_PORT:-8090}"
 export ROME_E2E_EVENTS_FILE="$out/events.jsonl"
