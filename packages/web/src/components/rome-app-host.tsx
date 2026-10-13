@@ -35,6 +35,9 @@ interface RomeAppModule {
 const APP_ROOT_ID = "root";
 
 function rewriteCssAssetUrls(cssText: string, sourceUrl: string): string {
+  // Stylesheet URLs arrive root-relative (/app-assets/...), and `new URL`
+  // needs an absolute base.
+  const base = new URL(sourceUrl, document.baseURI);
   return cssText
     .replace(
       /@import\s+(url\()?\s*(['"]?)([^'")\s]+)\2\s*\)?/g,
@@ -49,7 +52,7 @@ function rewriteCssAssetUrls(cssText: string, sourceUrl: string): string {
         ) {
           return match;
         }
-        const resolvedUrl = new URL(rawUrl, sourceUrl).toString();
+        const resolvedUrl = new URL(rawUrl, base).toString();
         if (urlPrefix) return `@import url("${resolvedUrl}")`;
         return `@import "${resolvedUrl}"`;
       },
@@ -65,7 +68,7 @@ function rewriteCssAssetUrls(cssText: string, sourceUrl: string): string {
       ) {
         return match;
       }
-      return `url("${new URL(rawUrl, sourceUrl).toString()}")`;
+      return `url("${new URL(rawUrl, base).toString()}")`;
     });
 }
 
