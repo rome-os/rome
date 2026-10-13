@@ -3687,7 +3687,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // turn of the child conversation (including after a
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
-                        { parentSessionId: sessionId },
+                        { inheritOwnerFrom: sessionId },
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {

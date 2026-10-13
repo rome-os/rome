@@ -128,13 +128,14 @@ describe("WebChatRepository", () => {
       parentSessionId: "parent",
     });
     expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
+    expect((await repo.getSession("child"))?.parentSessionId).toBe("parent");
     await repo.ensureRomeSession({ id: "child", name: "Child", type, agentName: null });
     expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
     await repo.ensureRomeSession({ id: "autonomous", name: "Autonomous", type, agentName: null });
     expect(await repo.getSessionOwnerKey("autonomous")).toBeNull();
   });
 
-  it("inherits handoff ownership from its parent, not the request actor", async () => {
+  it("inherits handoff ownership without setting branch lineage", async () => {
     await repo.createSession(
       "parent",
       "Parent",
@@ -157,10 +158,10 @@ describe("WebChatRepository", () => {
       null,
       "webchat_handoff",
       null,
-      { parentSessionId: "parent" },
+      { inheritOwnerFrom: "parent" },
     );
     expect(await repo.getSessionOwnerKey("handoff")).toBe("visitor:a");
-    expect((await repo.getSession("handoff"))?.parentSessionId).toBe("parent");
+    expect((await repo.getSession("handoff"))?.parentSessionId).toBeNull();
   });
 
   it("keeps the first input actor on retries by another person", async () => {

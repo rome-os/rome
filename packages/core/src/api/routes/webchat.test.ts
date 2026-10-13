@@ -2930,6 +2930,57 @@ describe("Webchat API", () => {
       expect(child?.agentName).toBe("workflow-studio:workflow-planner");
     });
 
+    it("inherits handoff ownership without branch lineage and accepts its first send with a model selection", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      const ctl = mockScriptedManager();
+      ctl.setEvents(handoffEvents("tu-owned-child"));
+      const app = createWebchatRuntime(deps).routes;
+      const owner = {
+        kind: "visitor" as const,
+        accountId: "handoff-owner",
+        email: "owner@example.com",
+      };
+      const sessionId = await runWithSessionActor(owner, () => newSession(app));
+      const parentSend = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "design a workflow" }),
+      });
+      expect(parentSend.status).toBe(200);
+      await drainTurn(app, parentSend);
+      const card = await findCard(sessionId, "tu-owned-child");
+      const childSessionId = card?.childSessionId as string;
+      expect(typeof childSessionId).toBe("string");
+      expect(await deps.webchatRepo.getSessionOwnerKey(childSessionId)).toBe(
+        "visitor:handoff-owner",
+      );
+
+      rs.spyOn(deps.agentLoader, "has").mockReturnValue(true);
+      const findReusableSession = rs
+        .spyOn(deps.sessionManager, "findReusableSession")
+        .mockResolvedValue(undefined);
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "Ready to plan." };
+      });
+      const childSend = await app.request(`/chat/sessions/${childSessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "start planning", largeModelSelection: "gpt-5-6-sol" }),
+      });
+      expect(childSend.status).toBe(200);
+      expect(findReusableSession).not.toHaveBeenCalled();
+      expect(deps.agentSessionManager.acquire).toHaveBeenLastCalledWith(
+        expect.objectContaining({ agentName: "workflow-studio:workflow-planner" }),
+        expect.objectContaining({ selectionId: "gpt-5-6-sol" }),
+      );
+      await drainTurn(app, childSend);
+      expect(await deps.webchatRepo.getSession(childSessionId)).toMatchObject({
+        type: "webchat_handoff",
+        parentSessionId: null,
+        largeModelSelection: "gpt-5-6-sol",
+      });
+    });
+
     it("keeps spawned handoff sessions out of the top-level session list", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(handoffEvents("tu-hidden-1"));

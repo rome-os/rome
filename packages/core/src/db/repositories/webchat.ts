@@ -879,7 +879,7 @@ export class WebChatRepository {
     type: "webchat" | "webchat_handoff" = "webchat",
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
-    ownership: { ownerKey?: string | null; parentSessionId?: string } = {},
+    ownership: { ownerKey?: string | null; inheritOwnerFrom?: string } = {},
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -891,8 +891,7 @@ export class WebChatRepository {
       ownerKey:
         ownership.ownerKey !== undefined
           ? ownership.ownerKey
-          : await this.getSessionOwnerKey(ownership.parentSessionId),
-      parentSessionId: ownership.parentSessionId ?? null,
+          : await this.getSessionOwnerKey(ownership.inheritOwnerFrom),
       name,
       personaId: personaId ?? null,
       projectName,
