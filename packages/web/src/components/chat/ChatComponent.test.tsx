@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { romeNewsConfig } from "@/config/quick-entries";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
@@ -92,6 +93,7 @@ beforeAll(async () => {
 afterEach(async () => {
   cleanup();
   chatStub.enabled = false;
+  romeNewsConfig.enabled = false;
   localStorage.clear();
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
@@ -328,6 +330,7 @@ describe("ChatComponent empty home", () => {
   });
 
   it("shows scrollable pinned chats and Rome News", async () => {
+    romeNewsConfig.enabled = true;
     const user = userEvent.setup();
     const homeData = {
       sessions: [
@@ -429,6 +432,7 @@ describe("ChatComponent empty home", () => {
   });
 
   it("uses the complete Rome Cloud feed and resolves locale in the browser", async () => {
+    romeNewsConfig.enabled = true;
     const { fetchSpy } = renderChatComponent(
       {},
       {
@@ -468,7 +472,21 @@ describe("ChatComponent empty home", () => {
     expect(String(newsRequests[0][0])).not.toContain("locale=");
   });
 
+  it("does not fetch or show Rome News while it is disabled", async () => {
+    const { fetchSpy } = renderChatComponent(
+      {},
+      { sessions: [], projects: [], newsFeed: testNewsFeed },
+    );
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Rome News" })).toBeNull();
+    expect(fetchSpy.mock.calls.some(([input]) => String(input).endsWith("/api/rome-news"))).toBe(
+      false,
+    );
+  });
+
   it("hides Rome News when Rome Cloud publishes an empty feed", async () => {
+    romeNewsConfig.enabled = true;
     renderChatComponent(
       {},
       {
@@ -482,6 +500,7 @@ describe("ChatComponent empty home", () => {
   });
 
   it("executes chat, App Store, and link actions from Cloud definitions", async () => {
+    romeNewsConfig.enabled = true;
     const user = userEvent.setup();
     const openSpy = rs.spyOn(window, "open").mockImplementation(() => null);
     const image = "https://public-assets.romeos.cc/assets/daily-summary-2.png";

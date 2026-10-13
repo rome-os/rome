@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Chat, type SessionMessage } from "@/components/chat/Chat";
 import { AppStoreSheet } from "@/components/AppStoreSheet";
-import { fetchRomeNewsDefinitions, getQuickEntries } from "@/config/quick-entries";
+import { fetchRomeNewsDefinitions, getQuickEntries, romeNewsConfig } from "@/config/quick-entries";
 import type {
   ResolvedRomeNewsItem,
   RomeNewsDefinition,
@@ -130,7 +130,7 @@ export function ChatComponent({
   const setSessionPinned = usePinSession();
 
   useEffect(() => {
-    if (sessionId) return;
+    if (sessionId || !romeNewsConfig.enabled) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 3_000);
 
