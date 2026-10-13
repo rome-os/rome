@@ -32,6 +32,7 @@ import type { RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { stripHostOnlyPartsFromContent } from "../../channels/host-only-parts.js";
+import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;
@@ -878,6 +879,7 @@ export class WebChatRepository {
     type: "webchat" | "webchat_handoff" = "webchat",
     // JSON handback contract for a 'webchat_handoff' session (see schema comment).
     handoffSpec: string | null = null,
+    ownership: { ownerKey?: string | null; parentSessionId?: string } = {},
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -886,6 +888,11 @@ export class WebChatRepository {
 
     await this.db.insert(romeSessions).values({
       id,
+      ownerKey:
+        ownership.ownerKey !== undefined
+          ? ownership.ownerKey
+          : await this.getSessionOwnerKey(ownership.parentSessionId),
+      parentSessionId: ownership.parentSessionId ?? null,
       name,
       personaId: personaId ?? null,
       projectName,
@@ -910,6 +917,7 @@ export class WebChatRepository {
       .insert(romeSessions)
       .values({
         id: input.id,
+        ownerKey: await this.getSessionOwnerKey(input.parentSessionId),
         name: input.name,
         personaId: null,
         projectName: input.projectName ?? DEFAULT_WEBCHAT_PROJECT_NAME,
@@ -1410,7 +1418,38 @@ export class WebChatRepository {
     });
   }
 
-  async listSessions(status: "active" | "archived" | "all" = "active") {
+  async getSessionOwnerKey(sessionId?: string | null): Promise<string | null> {
+    if (!sessionId) return null;
+    const [row] = await this.db
+      .select({ ownerKey: romeSessions.ownerKey })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId))
+      .limit(1);
+    return row?.ownerKey ?? null;
+  }
+
+  /** Attributes a person-created fork and its opening input without changing agent context. */
+  async attributePersonFork(sessionId: string, turnId: string, actor: SessionActor | undefined) {
+    await this.db.transaction((tx) => {
+      tx.update(romeSessions)
+        .set({ ownerKey: sessionOwnerKey(actor) })
+        .where(eq(romeSessions.id, sessionId))
+        .run();
+      tx.update(romeAgentMessages)
+        .set({ actor: actor ?? null })
+        .where(
+          and(
+            eq(romeAgentMessages.sessionId, sessionId),
+            eq(romeAgentMessages.turnId, turnId),
+            eq(romeAgentMessages.role, "user"),
+          ),
+        )
+        .run();
+    });
+  }
+
+  /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
+  async listSessions(status: "active" | "archived" | "all" = "active", ownerKey?: string | null) {
     // Only top-level guardian chats. Handoff child sessions are reached through
     // their parent's handoff card, not the sidebar. `status` filters on the
     // reversible archive flag: "active" (default, preserves prior behavior)
@@ -1428,7 +1467,19 @@ export class WebChatRepository {
         awaitingGuardian: sessionAwaitingGuardian,
       })
       .from(romeSessions)
-      .where(and(isWebchatChat, archivePredicate))
+      .where(
+        and(
+          isWebchatChat,
+          archivePredicate,
+          ownerKey === undefined
+            ? undefined
+            : ownerKey === null
+              ? sql`0`
+              : ownerKey === "guardian"
+                ? or(eq(romeSessions.ownerKey, ownerKey), isNull(romeSessions.ownerKey))
+                : eq(romeSessions.ownerKey, ownerKey),
+        ),
+      )
       .orderBy(desc(romeSessions.activityAt), desc(romeSessions.createdAt), desc(romeSessions.id));
   }
 
@@ -1701,7 +1752,12 @@ export class WebChatRepository {
     return rows[0]?.count ?? 0;
   }
 
-  async recordUserInput(id: string, sessionId: string, content: string): Promise<boolean> {
+  async recordUserInput(
+    id: string,
+    sessionId: string,
+    content: string,
+    actor?: SessionActor,
+  ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
       const inserted = tx
@@ -1712,6 +1768,7 @@ export class WebChatRepository {
           content,
           role: "user",
           inputState: "queued",
+          actor: actor ?? null,
           createdAt,
         })
         .onConflictDoNothing()

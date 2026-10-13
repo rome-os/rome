@@ -36,6 +36,8 @@
     "notOpened": "尚未在此设备打开"
   },
   "recentChats": {
+    "myChats": "我的聊天",
+    "allChats": "所有聊天",
     "title": "最近对话",
     "newChat": "新对话",
     "empty": "还没有对话",

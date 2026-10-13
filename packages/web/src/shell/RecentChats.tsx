@@ -28,7 +28,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSession, listSessions, renameSession } from "@/lib/chat-api";
+import { deleteSession, listSessions, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
@@ -153,6 +153,7 @@ interface SessionGroup {
 }
 
 const GROUP_MODE_STORAGE_KEY = "rome-recent-chats-group-mode";
+const SCOPE_STORAGE_KEY = "rome-recent-chats-scope";
 const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
@@ -165,6 +166,11 @@ const DATE_BUCKETS = [
 ] as const;
 
 type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
+
+function readScope(): SessionScope {
+  if (typeof window === "undefined") return "mine";
+  return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
+}
 
 function readGroupMode(): GroupMode {
   if (typeof window === "undefined") return "project";
@@ -283,6 +289,7 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [phase, setPhase] = useState<LoadPhase>("loading");
   const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
+  const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
@@ -304,13 +311,13 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
   const liveRunning = useRef(new Map<string, boolean>());
   const loadSessions = useCallback(async () => {
     try {
-      const data = await listSessions(statusFilter);
+      const data = await listSessions(statusFilter, scope);
       setSessions(data.map((s) => withLiveRunning(s, liveRunning.current)));
       setPhase("ready");
     } catch {
       setPhase("error");
     }
-  }, [statusFilter]);
+  }, [statusFilter, scope]);
 
   useEffect(() => {
     void loadSessions();
@@ -363,6 +370,11 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
       JSON.stringify(Array.from(collapsedGroups)),
     );
   }, [collapsedGroups]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
+  }, [scope]);
 
   const pinnedChats = useMemo(
     () =>
@@ -861,6 +873,23 @@ export function RecentChats({ onSearch }: RecentChatsProps) {
                 />
               </DropdownMenuTrigger>
               <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
+                {[
+                  { value: "mine" as const, label: t("recentChats.myChats") },
+                  { value: "all" as const, label: t("recentChats.allChats") },
+                ].map(({ value, label }) => (
+                  <DropdownMenuItem
+                    key={value}
+                    onSelect={() => setScope(value)}
+                    className={
+                      scope === value ? "text-ui text-foreground" : "text-ui text-foreground/85"
+                    }
+                  >
+                    <span>{label}</span>
+                    {scope === value ? (
+                      <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
+                    ) : null}
+                  </DropdownMenuItem>
+                ))}
                 <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
                   {t("recentChats.groupBy")}
                 </div>

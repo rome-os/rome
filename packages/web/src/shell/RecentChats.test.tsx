@@ -121,6 +121,32 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
+  it("defaults to My chats and persists a scope toggle across remounts", async () => {
+    const fetchSpy = mockSessions([]);
+    const user = userEvent.setup();
+    const view = renderRecentChats();
+    const requestedScope = () =>
+      new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
+        "scope",
+      );
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    const mine = screen.getByRole("menuitem", { name: "My chats" });
+    expect(mine.querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "All chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("all");
+    view.unmount();
+    const remounted = renderRecentChats();
+    await waitFor(() => expect(requestedScope()).toBe("all"));
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    expect(screen.getByRole("menuitem", { name: "All chats" }).querySelector("svg")).not.toBeNull();
+    await user.click(screen.getByRole("menuitem", { name: "My chats" }));
+    await waitFor(() => expect(requestedScope()).toBe("mine"));
+    expect(localStorage.getItem("rome-recent-chats-scope")).toBe("mine");
+    remounted.unmount();
+  });
+
   it("keeps search and list settings visible together", async () => {
     mockSessions([]);
     const onSearch = rs.fn();
@@ -699,7 +725,9 @@ describe("RecentChats", () => {
     await waitFor(() => expect(screen.getByText("Archived chat")).toBeTruthy());
     expect(screen.queryByText("Active chat")).toBeNull();
     expect(
-      spy.mock.calls.some(([url]) => String(url) === "/api/chat/sessions?status=archived"),
+      spy.mock.calls.some(
+        ([url]) => String(url) === "/api/chat/sessions?status=archived&scope=mine",
+      ),
     ).toBe(true);
   });
 

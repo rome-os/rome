@@ -36,6 +36,8 @@
     "notOpened": "Not opened on this device"
   },
   "recentChats": {
+    "myChats": "My chats",
+    "allChats": "All chats",
     "title": "Chats",
     "newChat": "New chat",
     "empty": "No chats yet",

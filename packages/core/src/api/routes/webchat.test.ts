@@ -30,7 +30,7 @@ import type {
 } from "../../core/agent-session.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../core/model-resolver.js";
-import { webchatProjects } from "../../db/schema.js";
+import { webchatProjects, romeAgentMessages } from "../../db/schema.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -58,6 +58,47 @@ describe("Webchat API", () => {
     } else {
       process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
     }
+  });
+
+  it("stamps verified owners and scopes lists without trusting submitted identity", async () => {
+    const app = createWebchatRuntime(deps).routes;
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "a", email: "same@example.com" };
+    const otherVisitor = { ...visitor, accountId: "b" };
+    const create = async (actor: typeof guardian | typeof visitor) => {
+      const response = await runWithSessionActor(actor, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-owner-key": "guardian" },
+          body: JSON.stringify({ name: "Owned", ownerKey: "guardian", actor: guardian }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { id: string }).id;
+    };
+    const guardianId = await create(guardian);
+    const visitorId = await create(visitor);
+    const otherId = await create(otherVisitor);
+    await deps.webchatRepo.createSession("legacy", "Legacy");
+    expect(await deps.webchatRepo.getSessionOwnerKey(guardianId)).toBe("guardian");
+    expect(await deps.webchatRepo.getSessionOwnerKey(visitorId)).toBe("visitor:a");
+    expect(await deps.webchatRepo.getSessionOwnerKey(otherId)).toBe("visitor:b");
+    const list = async (actor: Parameters<typeof runWithSessionActor>[0], scope = "") => {
+      const response = await runWithSessionActor(actor, () =>
+        app.request(`/chat/sessions${scope ? `?scope=${scope}` : ""}`),
+      );
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { id: string }[]).map((s) => s.id).sort();
+    };
+    expect(await list(guardian, "mine")).toEqual([guardianId, "legacy"].sort());
+    expect(await list(visitor, "mine")).toEqual([visitorId]);
+    expect(await list({ ...visitor, email: "changed@example.com" }, "mine")).toEqual([visitorId]);
+    expect(await list(otherVisitor, "mine")).toEqual([otherId]);
+    expect(await list({ kind: "anonymous" }, "mine")).toEqual([]);
+    expect(await (await app.request("/chat/sessions?scope=mine")).json()).toEqual([]);
+    const all = [guardianId, visitorId, otherId, "legacy"].sort();
+    expect(await list(visitor)).toEqual(all);
+    expect(await list(visitor, "all")).toEqual(all);
   });
 
   it("persists appended inputs once and keeps one stream owner", async () => {
@@ -107,18 +148,25 @@ describe("Webchat API", () => {
       shutdown: async () => {},
     };
     const app = createWebchatRuntime(deps).routes;
-    const created = await app.request("/chat/sessions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Inputs" }),
-    });
+    const created = await runWithSessionActor(
+      { kind: "guardian", userId: "seat", via: "cookie" },
+      () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Inputs" }),
+        }),
+    );
     const { id } = (await created.json()) as { id: string };
+    const actor = { kind: "visitor" as const, accountId: "sender", email: "sender@example.com" };
     const post = (inputId: string, text: string) =>
-      app.request(`/chat/sessions/${id}/turns`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ inputId, text }),
-      });
+      runWithSessionActor(actor, () =>
+        app.request(`/chat/sessions/${id}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ inputId, text }),
+        }),
+      );
     const a = "00000000-0000-4000-8000-000000000001";
     const b = "00000000-0000-4000-8000-000000000002";
     try {
@@ -140,6 +188,12 @@ describe("Webchat API", () => {
         (message) => message.role === "user",
       );
       expect(inputs).toHaveLength(2);
+      const stored = await testDb.db
+        .select({ actor: romeAgentMessages.actor })
+        .from(romeAgentMessages)
+        .where(eq(romeAgentMessages.sessionId, id));
+      expect(stored).toEqual([{ actor }, { actor }]);
+      expect(await deps.webchatRepo.getSessionOwnerKey(id)).toBe("guardian");
       expect(inputs.find((message) => message.id === b)).toMatchObject({
         inputState: "consumed",
         turnId: "input-turn",
@@ -4066,7 +4120,7 @@ describe("Webchat API", () => {
       expect(runForked).not.toHaveBeenCalled();
     });
 
-    it("creates the branch as an ordinary chat at 201", async () => {
+    it("creates the branch as an ordinary chat owned by the requesting person at 201", async () => {
       // The mocked runner below skips the real AgentRunner.runForked, which is
       // what creates the fork's Rome session row; seed it so promotion has a
       // row to flip.
@@ -4113,12 +4167,22 @@ describe("Webchat API", () => {
       });
       const app = createWebchatRuntime(deps).routes;
 
-      const res = await app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "What about the other approach?" }),
-      });
+      const actor = {
+        kind: "visitor" as const,
+        accountId: "fork-owner",
+        email: "fork@example.com",
+      };
+      const res = await runWithSessionActor(actor, () =>
+        app.request(`/chat/sessions/${SESSION_ID}/turns/${TURN_ID}/forks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: "What about the other approach?" }),
+        }),
+      );
       expect(res.status).toBe(201);
+      expect(await deps.webchatRepo.getSessionOwnerKey("branch-fork-session")).toBe(
+        "visitor:fork-owner",
+      );
 
       // Promotion happens before the 201 leaves the server — no waiting, no
       // drain involvement, and no resumable-row consultation.

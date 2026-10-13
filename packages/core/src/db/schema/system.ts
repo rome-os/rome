@@ -10,6 +10,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredConversationSettings } from "@rome-os/app-runtime";
 import type { OutboxMessage } from "@rome/api-types/people";
+import type { SessionActor } from "../../lib/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
@@ -469,6 +470,7 @@ export const romeSessions = sqliteTable(
   "rome_sessions",
   {
     id: text("id").primaryKey(),
+    ownerKey: text("owner_key"),
     name: text("name").notNull(),
     personaId: text("persona_id"),
     largeModelSelection: text("large_model_selection"),
@@ -518,6 +520,7 @@ export const romeSessions = sqliteTable(
     lastSeenActivityAt: integer("last_seen_activity_at", { mode: "timestamp" }),
   },
   (table) => [
+    index("idx_rome_sessions_owner_key").on(table.ownerKey),
     index("idx_rome_sessions_project_path").on(table.projectPath),
     index("idx_rome_sessions_sidebar_activity").on(
       table.type,
@@ -679,6 +682,7 @@ export const romeAgentMessages = sqliteTable(
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
     inputState: text("input_state").$type<AgentInputState>(),
+    actor: text("actor", { mode: "json" }).$type<SessionActor>(),
     role: text("role").notNull(), // 'user' | 'assistant' | 'notification' | 'trace'
     content: text("content").notNull(), // JSON array of blocks
     platformMessageId: text("platform_message_id"),

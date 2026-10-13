@@ -52,6 +52,155 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("filters owners before returning chats and preserves the all-owner default", async () => {
+    await repo.createSession("legacy", "Legacy");
+    await repo.createSession(
+      "guardian",
+      "Guardian",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await repo.createSession(
+      "visitor-a",
+      "Visitor A",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.createSession(
+      "visitor-b",
+      "Visitor B",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:b" },
+    );
+    const ids = async (ownerKey?: string | null) =>
+      (await repo.listSessions("all", ownerKey)).map((s) => s.id).sort();
+    expect(await ids()).toEqual(["guardian", "legacy", "visitor-a", "visitor-b"]);
+    expect(await ids("guardian")).toEqual(["guardian", "legacy"]);
+    expect(await ids("visitor:a")).toEqual(["visitor-a"]);
+    expect(await ids("visitor:b")).toEqual(["visitor-b"]);
+    expect(await ids(null)).toEqual([]);
+    await repo.archiveSession("visitor-a");
+    expect(await repo.listSessions("active", "visitor:a")).toEqual([]);
+    expect((await repo.listSessions("archived", "visitor:a")).map((s) => s.id)).toEqual([
+      "visitor-a",
+    ]);
+  });
+
+  it.each([
+    "fork",
+    "subagent",
+  ] as const)("inherits %s ownership without overwriting an existing owner", async (type) => {
+    await repo.createSession(
+      "parent",
+      "Parent",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.ensureRomeSession({
+      id: "child",
+      name: "Child",
+      type,
+      agentName: null,
+      parentSessionId: "parent",
+    });
+    expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
+    await repo.ensureRomeSession({ id: "child", name: "Child", type, agentName: null });
+    expect(await repo.getSessionOwnerKey("child")).toBe("visitor:a");
+    await repo.ensureRomeSession({ id: "autonomous", name: "Autonomous", type, agentName: null });
+    expect(await repo.getSessionOwnerKey("autonomous")).toBeNull();
+  });
+
+  it("inherits handoff ownership from its parent, not the request actor", async () => {
+    await repo.createSession(
+      "parent",
+      "Parent",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await repo.createSession(
+      "handoff",
+      "Handoff",
+      undefined,
+      "default",
+      null,
+      null,
+      null,
+      "webchat_handoff",
+      null,
+      { parentSessionId: "parent" },
+    );
+    expect(await repo.getSessionOwnerKey("handoff")).toBe("visitor:a");
+    expect((await repo.getSession("handoff"))?.parentSessionId).toBe("parent");
+  });
+
+  it("keeps the first input actor on retries by another person", async () => {
+    await repo.createSession("chat", "Chat");
+    const actor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+    expect(await repo.recordUserInput("input", "chat", "[]", actor)).toBe(true);
+    expect(await repo.recordUserInput("input", "chat", "[]", { kind: "anonymous" })).toBe(false);
+    const [message] = await testDb.db
+      .select()
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, "input"));
+    expect(message.actor).toEqual(actor);
+    const guardian = {
+      kind: "guardian" as const,
+      userId: "seat",
+      via: "cookie" as const,
+      accountId: "guardian-account",
+      email: "guardian@example.com",
+    };
+    await repo.recordUserInput("guardian-input", "chat", "[]", guardian);
+    const [guardianMessage] = await testDb.db
+      .select()
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.id, "guardian-input"));
+    expect(guardianMessage.actor).toEqual(guardian);
+    expect(await repo.getSessionOwnerKey("chat")).toBeNull();
+  });
+
+  it("attributes a person-created fork and only its opening user input", async () => {
+    await repo.createSession("fork", "Fork");
+    await repo.addMessage("prompt", "fork", "user", "[]", "fork-turn");
+    await repo.addMessage("reply", "fork", "assistant", "[]", "fork-turn");
+    const actor = { kind: "visitor" as const, accountId: "b", email: "b@example.com" };
+    await repo.attributePersonFork("fork", "fork-turn", actor);
+    expect(await repo.getSessionOwnerKey("fork")).toBe("visitor:b");
+    const messages = await testDb.db.select().from(romeAgentMessages);
+    expect(messages.find((m) => m.id === "prompt")?.actor).toEqual(actor);
+    expect(messages.find((m) => m.id === "reply")?.actor).toBeNull();
+  });
+
   it("pushes every sent message to open chats", async () => {
     await repo.createSession("sent-session", "Sent");
     const pushed: string[] = [];

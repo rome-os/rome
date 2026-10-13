@@ -76,7 +76,7 @@ import {
   conversationTitleLength,
   normalizeConversationTitle,
 } from "../../core/conversation-title.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../core/agent-message.js";
@@ -1423,6 +1423,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const forkSessionId = first.value.sessionId;
     const forkTurnId = first.value.turnId;
+    await deps.webchatRepo.attributePersonFork(
+      forkSessionId,
+      forkTurnId,
+      await currentSessionActor(),
+    );
     if (input.continuable) {
       // Born an ordinary chat: createForkTraceRecorder wrote the row when
       // turn_start arrived, and the chat surface can already list and stream
@@ -1984,7 +1989,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const rawStatus = c.req.query("status");
     const status =
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
-    const sessions = await deps.webchatRepo.listSessions(status);
+    const ownerKey =
+      c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
+    const sessions = await deps.webchatRepo.listSessions(status, ownerKey);
     return c.json(
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
@@ -2207,6 +2214,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       modelSelection?.id ?? null,
       project.path,
       storedAgentName,
+      "webchat",
+      null,
+      { ownerKey: sessionOwnerKey(await currentSessionActor()) },
     );
     const createdSession = await deps.webchatRepo.getSession(id);
     if (!createdSession) {
@@ -3263,7 +3273,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent))) {
+    if (
+      !(await deps.webchatRepo.recordUserInput(
+        inputId,
+        sessionId,
+        userContent,
+        await currentSessionActor(),
+      ))
+    ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return c.json({ error: "inputId is already in use" }, 409);
       return c.json({
@@ -3670,6 +3687,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                         // turn of the child conversation (including after a
                         // backend restart) re-derives its submit_output tool.
                         suspension.handback ? JSON.stringify(suspension.handback) : null,
+                        { parentSessionId: sessionId },
                       );
                     } catch (err) {
                       log.warn("failed to mint handoff child session", {

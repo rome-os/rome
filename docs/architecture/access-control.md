@@ -12,6 +12,9 @@ Two policies decide reach, each held as its own setting:
 ### Invariants
 
 - Guardian and visitor credentials are never interchangeable: neither satisfies the other's check.
+- Chat persistence derives the owner and each user-message actor from verified session material, never from caller-supplied identity.
+- Chat ownership filters lists, not admission or agent trust. The sidebar defaults to the viewer’s own chats and offers an all-chats view.
+- Sessions without an owner count as the guardian’s chats. Agent-created children inherit their parent’s owner, while a person-created fork belongs to that person.
 - Dashboard access does not grant approval authority. Approval reads and decisions require a verified guardian identity at the approval API, even after edge authorization.
 - A guardian seat bound to cloud sign-in has no local password, and password login fails closed for it.
 - Making an app public never exposes the dashboard. The two policies are separate, and the public edge serves only the allow-listed app surfaces.

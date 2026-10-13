@@ -102,6 +102,13 @@ export async function resolveSessionActorFromMaterial(
   return { kind: "anonymous" };
 }
 
+/** NULL owners belong to the guardian for listing, but never match an anonymous viewer. */
+export function sessionOwnerKey(actor: SessionActor | undefined): string | null {
+  if (actor?.kind === "guardian") return "guardian";
+  if (actor?.kind === "visitor") return `visitor:${actor.accountId}`;
+  return null;
+}
+
 interface SessionActorHandle {
   get(): Promise<SessionActor | undefined>;
 }

@@ -75,8 +75,16 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 
 export type SessionStatusFilter = "active" | "archived" | "all";
 
-export async function listSessions(status: SessionStatusFilter = "active"): Promise<ChatSession[]> {
-  const query = status === "active" ? "" : `?status=${status}`;
+export type SessionScope = "mine" | "all";
+
+export async function listSessions(
+  status: SessionStatusFilter = "active",
+  scope?: SessionScope,
+): Promise<ChatSession[]> {
+  const params = new URLSearchParams();
+  if (status !== "active") params.set("status", status);
+  if (scope) params.set("scope", scope);
+  const query = params.size ? `?${params}` : "";
   const res = await fetch(`/api/chat/sessions${query}`, { credentials: "include" });
   return jsonOrThrow<ChatSession[]>(res);
 }
