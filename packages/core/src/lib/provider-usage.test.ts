@@ -1,9 +1,18 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
+import * as osModule from "node:os" with { rstest: "importActual" };
 import { join } from "node:path";
 import { describe, expect, it, rs } from "@rstest/core";
 
 const logError = rs.hoisted(() => rs.fn());
+// The home directory the module under test resolves `~/.claude` against. It
+// points nowhere by default so no test reads the real Claude CLI credentials.
+const fakeHome = rs.hoisted(() => ({ dir: "/nonexistent/rome-provider-usage-home" }));
+
+rs.mock("node:os", () => ({
+  ...osModule,
+  homedir: () => fakeHome.dir,
+}));
 
 rs.mock("../logger.js", () => ({
   createLogger: () => ({ error: logError, info: rs.fn(), warn: rs.fn(), debug: rs.fn() }),
@@ -313,12 +322,18 @@ describe("AI tool usage parsing", () => {
   });
 
   describe("Claude OAuth usage from the CLI credentials file", () => {
-    // Runs readClaudeOAuthUsage against a temp credentials file holding
-    // `oauth`, with CLAUDE_CODE_OAUTH_TOKEN unset and fetch answering `response`.
+    // Runs readClaudeOAuthUsage with `oauth` in `~/.claude/.credentials.json`
+    // under a temp home, CLAUDE_CODE_OAUTH_TOKEN unset and fetch answering
+    // `response`.
     const readWithCredentials = async (oauth: Record<string, unknown>, response: Response) => {
-      const dir = await fs.mkdtemp(join(tmpdir(), "rome-claude-credentials-"));
-      const credentialsPath = join(dir, ".credentials.json");
-      await fs.writeFile(credentialsPath, JSON.stringify({ claudeAiOauth: oauth }));
+      const dir = await fs.mkdtemp(join(tmpdir(), "rome-claude-home-"));
+      await fs.mkdir(join(dir, ".claude"));
+      await fs.writeFile(
+        join(dir, ".claude", ".credentials.json"),
+        JSON.stringify({ claudeAiOauth: oauth }),
+      );
+      const originalHome = fakeHome.dir;
+      fakeHome.dir = dir;
       const originalFetch = globalThis.fetch;
       const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -326,9 +341,10 @@ describe("AI tool usage parsing", () => {
       globalThis.fetch = fetchMock as unknown as typeof fetch;
       logError.mockClear();
       try {
-        const usage = await readClaudeOAuthUsage({ credentialsPath });
+        const usage = await readClaudeOAuthUsage();
         return { usage, fetchMock };
       } finally {
+        fakeHome.dir = originalHome;
         globalThis.fetch = originalFetch;
         if (originalToken !== undefined) process.env.CLAUDE_CODE_OAUTH_TOKEN = originalToken;
         await fs.rm(dir, { recursive: true, force: true });
@@ -359,6 +375,14 @@ describe("AI tool usage parsing", () => {
       expect(fetchMock).not.toHaveBeenCalled();
       expect(usage).toBeNull();
       expect(logError).not.toHaveBeenCalled();
+
+      // Control: the same file with a later expiresAt is read and sent, so the
+      // skip above comes from the expiry and not from a file that went unread.
+      const control = await readWithCredentials(
+        { accessToken: "test-token", expiresAt: Date.now() + 3_600_000 },
+        unauthorized(),
+      );
+      expect(control.fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it("treats a token within a minute of expiry as expired", async () => {

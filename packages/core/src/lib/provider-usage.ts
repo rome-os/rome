@@ -14,7 +14,6 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("provider-usage");
 
-const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_TIMEOUT_MS = 10_000;
 
 export interface UsageWindowStatus {
@@ -311,15 +310,9 @@ async function readErrorType(res: Response): Promise<string | undefined> {
   }
 }
 
-export interface ClaudeOAuthUsageOptions {
-  timeoutMs?: number;
-  /** Defaults to `~/.claude/.credentials.json`. */
-  credentialsPath?: string;
-}
-
 /**
  * Live Claude usage via the OAuth `/api/oauth/usage` endpoint, using the token
- * from `CLAUDE_CODE_OAUTH_TOKEN` or the Claude CLI credentials file. Returns
+ * from `CLAUDE_CODE_OAUTH_TOKEN` or `~/.claude/.credentials.json`. Returns
  * null when no token is available. Also returns null, without a request, when
  * the file's token is at or within a minute of its `expiresAt`: only the Claude
  * CLI renews that token, on its next turn, so usage is unknown until then.
@@ -328,17 +321,16 @@ export interface ClaudeOAuthUsageOptions {
  * endpoint reported no usage windows. This is the only reliable Claude usage
  * source, because nothing persists `~/.claude/{rate,usage}-limits.json` locally.
  */
-export async function readClaudeOAuthUsage({
-  timeoutMs = CLAUDE_USAGE_TIMEOUT_MS,
-  credentialsPath = CLAUDE_CREDENTIALS_PATH,
-}: ClaudeOAuthUsageOptions = {}): Promise<AIToolUsageStatus | null> {
+export async function readClaudeOAuthUsage(
+  timeoutMs: number = CLAUDE_USAGE_TIMEOUT_MS,
+): Promise<AIToolUsageStatus | null> {
   let accessToken =
     typeof process.env.CLAUDE_CODE_OAUTH_TOKEN === "string"
       ? process.env.CLAUDE_CODE_OAUTH_TOKEN
       : undefined;
   if (!accessToken) {
     try {
-      const raw = await fs.readFile(credentialsPath, "utf8");
+      const raw = await fs.readFile(join(homedir(), ".claude", ".credentials.json"), "utf8");
       const parsed = JSON.parse(raw) as {
         claudeAiOauth?: { accessToken?: unknown; expiresAt?: unknown };
       };
