@@ -14,11 +14,11 @@ import {
 
 const log = createLogger("ai-tool-state");
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
-// A runtime quota failure with no reset ahead ends after one 5-hour usage
-// window. Waiting only for a successful usage probe can wait forever: the
-// Claude CLI renews its token only on a Claude turn, and the resolver sends
-// none to an exhausted provider.
-const RUNTIME_QUOTA_FALLBACK_MS = 5 * 60 * 60 * 1000;
+// Exhaustion with no known reset ends after one 5-hour usage window unless a
+// probe or failure confirms it again. Waiting only for a successful usage probe
+// can wait forever: the Claude CLI renews its token only on a Claude turn, and
+// the resolver sends none to an exhausted provider.
+const QUOTA_FALLBACK_MS = 5 * 60 * 60 * 1000;
 
 export type AIToolProviderId = "openai" | "anthropic";
 
@@ -28,12 +28,10 @@ export interface ProviderState
   loggedIn?: boolean;
   quotaExhausted: boolean;
   /**
-   * When usage-derived exhaustion ends: the latest reset among the exhausted
-   * usage windows. A runtime quota failure before that reset keeps it, and one
-   * with no reset ahead ends 5 hours after the failure. Absent when a probe
-   * shows an exhausted window with no known reset, so quotaExhausted holds
-   * until the next successful usage probe or a runtime quota failure, which
-   * caps it at 5 hours.
+   * When exhaustion ends: the latest reset among the exhausted usage windows,
+   * or 5 hours after the probe when one of them has no known reset. A runtime
+   * quota failure before that time keeps it, and one with nothing ahead ends 5
+   * hours after the failure.
    */
   quotaExhaustedUntil?: string;
   usage?: AIToolUsageStatus;
@@ -129,7 +127,9 @@ function applyUsage(
   target.usage = usage;
   const exhausted = [usage.fiveHour, usage.sevenDay].filter(windowExhausted);
   target.quotaExhausted = exhausted.length > 0;
-  target.quotaExhaustedUntil = latestReset(exhausted);
+  target.quotaExhaustedUntil =
+    latestReset(exhausted) ??
+    (exhausted.length > 0 ? new Date(Date.now() + QUOTA_FALLBACK_MS).toISOString() : undefined);
 }
 
 const CODEX_FULL_MODEL_ACCESS_PLANS = new Set<CodexPlanType>([
@@ -288,7 +288,7 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         return until !== undefined && Date.parse(until) > failedAt ? until : undefined;
       };
       const resetAtFailure = resetAhead(provider === "openai" ? value.codex : value.claude);
-      const fallbackUntil = new Date(failedAt + RUNTIME_QUOTA_FALLBACK_MS).toISOString();
+      const fallbackUntil = new Date(failedAt + QUOTA_FALLBACK_MS).toISOString();
       const applyRuntimeSignal = (): boolean => {
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
