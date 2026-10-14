@@ -14,6 +14,11 @@ import {
 
 const log = createLogger("ai-tool-state");
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// A runtime quota failure with no reset ahead ends after one 5-hour usage
+// window. Waiting only for a successful usage probe can wait forever: the
+// Claude CLI renews its token only on a Claude turn, and the resolver sends
+// none to an exhausted provider.
+const RUNTIME_QUOTA_FALLBACK_MS = 5 * 60 * 60 * 1000;
 
 export type AIToolProviderId = "openai" | "anthropic";
 
@@ -24,10 +29,10 @@ export interface ProviderState
   quotaExhausted: boolean;
   /**
    * When usage-derived exhaustion ends: the latest reset among the exhausted
-   * usage windows. A runtime quota failure before that reset keeps it. Absent
-   * when an exhausted window has no known reset and after a runtime quota
-   * failure with no reset ahead, so quotaExhausted holds until the next
-   * successful usage probe.
+   * usage windows. A runtime quota failure before that reset keeps it, and one
+   * with no reset ahead ends 5 hours after the failure. Absent when an
+   * exhausted window has no known reset, so quotaExhausted holds until the
+   * next successful usage probe.
    */
   quotaExhaustedUntil?: string;
   usage?: AIToolUsageStatus;
@@ -272,7 +277,8 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
     markQuotaExhausted(provider) {
       // A failure before the usage reset agrees with the snapshot, so the
       // reset still ends it. A failure after the reset comes from a limit the
-      // snapshot did not show, so it holds until a successful usage probe.
+      // snapshot did not show, so it holds until a successful usage probe or
+      // the fallback expiry, whichever comes first.
       // The replay below judges the failure by failedAt. When the older probe
       // showed capacity, the replay restores the reset known at the failure.
       const failedAt = Date.now();
@@ -281,13 +287,13 @@ export function createAIToolState(options: CreateAIToolStateOptions): AIToolStat
         return until !== undefined && Date.parse(until) > failedAt ? until : undefined;
       };
       const resetAtFailure = resetAhead(provider === "openai" ? value.codex : value.claude);
+      const fallbackUntil = new Date(failedAt + RUNTIME_QUOTA_FALLBACK_MS).toISOString();
       const applyRuntimeSignal = (): boolean => {
         const target = provider === "openai" ? value.codex : value.claude;
         if (provider === "anthropic" && claudeUsesApiKey(target)) return false;
-        const until = target.quotaExhausted ? resetAhead(target) : resetAtFailure;
+        target.quotaExhaustedUntil =
+          (target.quotaExhausted ? resetAhead(target) : resetAtFailure) ?? fallbackUntil;
         target.quotaExhausted = true;
-        if (until === undefined) delete target.quotaExhaustedUntil;
-        else target.quotaExhaustedUntil = until;
         return true;
       };
       if (!applyRuntimeSignal()) return;
