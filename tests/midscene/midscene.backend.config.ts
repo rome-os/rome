@@ -11,8 +11,9 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 
 // Backend suite: the same Midscene cases format, run against a real Rome
 // container started from the production image. Cases share one instance and
-// run in file order, because the first case creates the account the later
-// cases sign in with.
+// run in path order, because the first case creates the account the later
+// cases sign in with. Each case file is named for what it tests, with a
+// numeric prefix that fixes that order: 01-onboarding.yaml, 02-....
 
 const here = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: process.env.ROME_E2E_ENV_FILE ?? resolve(here, ".env") });
