@@ -77,15 +77,15 @@ The case names and suite assignments above match the executable YAML. Run
 The backend suite runs against a real Rome container started from the
 published image, with a real model. Its cases live in
 `tests/midscene/backend/cases/` and carry the `backend` tag. They share one
-instance and run in path order, because BE-01 creates the account that BE-02
-signs in with. Each file is named for what it tests, and its numeric prefix
-fixes that order: `01-onboarding.yaml` holds BE-01, `02-project-files.yaml`
-holds BE-02.
+instance and run in path order, because ONBOARD-01 creates the account that
+PROJECT-01 signs in with. Each file is named for what it tests, and its
+numeric prefix fixes that order: `01-onboarding.yaml` holds ONBOARD-01, and
+`02-project-files.yaml` holds PROJECT-01.
 
 | ID | Case | Suite |
 | --- | --- | --- |
-| BE-01 | Finish first-run onboarding with a connected model | backend |
-| BE-02 | Write a project file and have Rome read it back | backend |
+| ONBOARD-01 | Finish first-run onboarding with a connected model | backend |
+| PROJECT-01 | Write a project file and have Rome read it back | backend |
 
 Assertions check page state and a per-run token, never model wording. Each
 run also reports anomalies independently of the case results: error-level

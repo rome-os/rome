@@ -1,5 +1,5 @@
 cases:
-  - name: BE-02 Write a project file and have Rome read it back
+  - name: PROJECT-01 Write a project file and have Rome read it back
     tags:
       - backend
       - files

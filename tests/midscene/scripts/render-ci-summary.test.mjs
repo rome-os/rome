@@ -699,10 +699,10 @@ test("the final workflow step reports unavailable counts when rendering fails", 
 });
 
 test("checks missing cases only for the suites a run selects", () => {
-  const projects = [{ name: "web-backend", status: "success", cases: [{ name: "BE-01" }] }];
-  assert.deepEqual(caseSetIssues(projects, { "BE-01": "backend", "CHAT-01": "mock" }), []);
-  assert.deepEqual(caseSetIssues(projects, { "BE-01": "backend", "BE-02": "backend" }), [
-    "Missing case: BE-02 (backend)",
+  const projects = [{ name: "web-backend", status: "success", cases: [{ name: "ONBOARD-01" }] }];
+  assert.deepEqual(caseSetIssues(projects, { "ONBOARD-01": "backend", "CHAT-01": "mock" }), []);
+  assert.deepEqual(caseSetIssues(projects, { "ONBOARD-01": "backend", "PROJECT-01": "backend" }), [
+    "Missing case: PROJECT-01 (backend)",
   ]);
 });
 
@@ -711,7 +711,7 @@ test("appends the backend suite summary to the run Summary", async (context) => 
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeSuite(root, "backend", "success", "BE-01", "visual-model");
+  await writeSuite(root, "backend", "success", "ONBOARD-01", "visual-model");
   const backendDirectory = path.join(root, "midscene-backend", "midscene_run", "backend");
   await mkdir(backendDirectory, { recursive: true });
   await writeFile(
