@@ -6,6 +6,7 @@ import {
   MessageReferenceType,
   MessageType,
   AttachmentBuilder,
+  DiscordAPIError,
   REST,
   RESTEvents,
   Routes,
@@ -332,6 +333,39 @@ export interface DiscordAdapterLike {
   executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
 }
 
+function projectDiscordBody(
+  status: number,
+  headers: ResponseLike["headers"],
+  bytes: Uint8Array,
+): ChannelApiResult {
+  if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
+    return {
+      error: {
+        type: "response_too_large",
+        message: "Discord response exceeded the 16 MiB broker limit.",
+      },
+    };
+  }
+
+  const text = new TextDecoder().decode(bytes);
+  let body: unknown = null;
+  if (text.length > 0) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+
+  return {
+    response: {
+      status,
+      headers: filterChannelApiResponseHeaders(headers.entries()),
+      body,
+    },
+  };
+}
+
 /**
  * The Discord bot transport. Inbound gateway messages arrive as the channel's
  * own record, a `ChannelMessage` whose `raw` is the discord.js `Message`, so
@@ -513,7 +547,7 @@ export class DiscordAdapter {
       void queuedRequest.catch(() => undefined);
       const response = await Promise.race([queuedRequest, aborted]);
       return await this.projectDiscordResponse(response);
-    } catch {
+    } catch (error) {
       // A deadline or epoch teardown wins over any Response event emitted by an
       // intermediate discord.js attempt (for example, a 429 it plans to retry).
       if (controller.signal.aborted) {
@@ -543,10 +577,16 @@ export class DiscordAdapter {
         };
       }
       // discord.js parses and throws for non-2xx responses. Its Response event
-      // gives us a clone first, preserving status, safe headers, and the raw
-      // Discord error payload without serializing the thrown request object.
-      if (capturedResponse) {
-        const projected = await this.projectDiscordResponse(capturedResponse);
+      // gives us the status and safe headers. Under the default undici
+      // transport that event object shares its body with the response
+      // discord.js already read for a 4xx, so the Discord error payload comes
+      // from the thrown DiscordAPIError instead of the event body.
+      const observedResponse = capturedResponse as ResponseLike | null;
+      if (observedResponse) {
+        const projected =
+          error instanceof DiscordAPIError
+            ? this.projectDiscordApiError(error, observedResponse)
+            : await this.projectDiscordResponse(observedResponse);
         if (projected.response?.status === 401) {
           this.onGatewayFault?.({
             kind: "credential",
@@ -572,30 +612,20 @@ export class DiscordAdapter {
 
   private async projectDiscordResponse(response: ResponseLike): Promise<ChannelApiResult> {
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
-      return {
-        error: {
-          type: "response_too_large",
-          message: "Discord response exceeded the 16 MiB broker limit.",
-        },
-      };
-    }
+    return projectDiscordBody(response.status, response.headers, bytes);
+  }
 
-    const text = new TextDecoder().decode(bytes);
-    let body: unknown = null;
-    if (text.length > 0) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = text;
-      }
+  private projectDiscordApiError(error: DiscordAPIError, response: ResponseLike): ChannelApiResult {
+    // discord.js keeps parsed JSON, or raw bytes for a non-JSON error body.
+    const raw: unknown = error.rawError;
+    if (raw instanceof ArrayBuffer) {
+      return projectDiscordBody(error.status, response.headers, new Uint8Array(raw));
     }
-
     return {
       response: {
-        status: response.status,
+        status: error.status,
         headers: filterChannelApiResponseHeaders(response.headers.entries()),
-        body,
+        body: raw,
       },
     };
   }
