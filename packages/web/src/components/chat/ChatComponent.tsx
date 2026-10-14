@@ -9,7 +9,7 @@ import type {
   RomeNewsDefinition,
 } from "@rome-os/rome-web-components/news-item/schema";
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
-import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
+import { ChatEmptyState, isGreetingOnly } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged, usePinSession, useSessionsChanged } from "@/lib/session-events";
 import { listSessions } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
@@ -239,6 +239,7 @@ export function ChatComponent({
         initialProjectName={initialProjectName}
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
+        centerDraftComposer={isGreetingOnly({ pinnedChats, quickEntries })}
         emptyState={
           <ChatEmptyState
             guardianName={guardianName}

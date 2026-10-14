@@ -485,6 +485,40 @@ describe("ChatComponent empty home", () => {
     );
   });
 
+  it("centers the composer with a greeting-only home, and docks it beside rails", async () => {
+    const spacer = () => document.querySelector("[data-draft-center-spacer]");
+    renderChatComponent({}, { sessions: [], projects: [] });
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(spacer()).toBeTruthy();
+
+    cleanup();
+    renderChatComponent(
+      {},
+      {
+        sessions: [
+          {
+            id: "session-pinned",
+            name: "Pinned planning chat",
+            personaId: null,
+            projectName: "",
+            projectPath: "",
+            agentName: null,
+            archivedAt: null,
+            pinnedAt: "2026-07-24T12:00:00.000Z",
+            createdAt: "2026-07-24T10:00:00.000Z",
+            activityAt: "2026-07-24T12:00:00.000Z",
+            lastSeenActivityAt: null,
+            unread: false,
+            messageCount: 2,
+          },
+        ],
+        projects: [],
+      },
+    );
+    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
+    expect(spacer()).toBeNull();
+  });
+
   it("hides Rome News when Rome Cloud publishes an empty feed", async () => {
     romeNewsConfig.enabled = true;
     renderChatComponent(
