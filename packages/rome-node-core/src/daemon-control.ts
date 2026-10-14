@@ -119,7 +119,20 @@ export async function startDaemon(config: NodeConfig): Promise<DaemonStatus> {
   return status;
 }
 
-/** Stops the shared service only on explicit request, including the HTTP daemon during an upgrade. */
+function running(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Stops the shared service only on explicit request, including the HTTP daemon during an upgrade.
+ * Resolves once the daemon process has exited, or five seconds after its listener closed, so its
+ * files are released before the caller reuses or removes the configuration directory.
+ */
 export async function stopDaemon(config: NodeConfig): Promise<void> {
   const state = await readDaemonState(config);
   if (!state) return;
@@ -155,7 +168,15 @@ export async function stopDaemon(config: NodeConfig): Promise<void> {
       if (error instanceof DaemonVersionError) return "legacy" as const;
       throw error;
     });
-    if (!found) return;
+    if (!found) {
+      // The listener closes before the daemon closes observe.db and exits. Windows cannot remove
+      // a file another process holds open, so wait for the process too.
+      const exitDeadline = Date.now() + 5000;
+      // A daemon served inside this process (serveDaemon) never exits on its own.
+      while (state.pid !== process.pid && running(state.pid) && Date.now() < exitDeadline)
+        await delay(50);
+      return;
+    }
     if (found !== "legacy") {
       found.rpc.close();
       if (found.status.pid !== state.pid) return;
