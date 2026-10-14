@@ -60,6 +60,28 @@ describe("gateGuardianUpgrade", () => {
     expect(response()).toBe("");
   });
 
+  it("rejects a loopback upgrade addressed to a DNS-rebound name", async () => {
+    // No Origin, so the Origin rule alone would accept this loopback caller.
+    const { socket, response } = captureSocket();
+    expect(
+      await gateGuardianUpgrade(request({ host: "rebind.example:4141" }), socket, testDb.db),
+    ).toBe(false);
+    expect(response()).toContain("HTTP/1.1 421 Misdirected Request");
+  });
+
+  it("rejects a rebound name even when the forwarding headers look like Caddy", async () => {
+    const { socket, response } = captureSocket();
+    const req = request({
+      host: "rebind.example:4141",
+      cookie: `rome_session=${createSession("guardian-1")}`,
+      origin: "http://rebind.example:4141",
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rebind.example:4141",
+    });
+    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(response()).toContain("HTTP/1.1 421 Misdirected Request");
+  });
+
   it("rejects a guardian cookie from another origin on the same site", async () => {
     const { socket, response } = captureSocket();
     const req = request({
@@ -119,6 +141,17 @@ describe("gateGuardianUpgrade", () => {
     const { socket, response } = captureSocket();
     const req = request({
       host: "evil.example:4141",
+      origin: "http://evil.example:4141",
+      "sec-fetch-site": "same-origin",
+    });
+    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(response()).toContain("HTTP/1.1 421 Misdirected Request");
+  });
+
+  it("rejects a loopback-addressed caller whose Origin is another name despite same-origin metadata", async () => {
+    // The Host passes the listener's name check, so only the Origin rule stops it.
+    const { socket, response } = captureSocket();
+    const req = request({
       origin: "http://evil.example:4141",
       "sec-fetch-site": "same-origin",
     });

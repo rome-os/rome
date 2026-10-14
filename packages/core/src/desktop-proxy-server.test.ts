@@ -76,7 +76,9 @@ async function upgradeStatus(path: string): Promise<string> {
     const socket = connect((server.address() as AddressInfo).port, "127.0.0.1");
     await once(socket, "connect");
     socket.write(
-      `GET ${path} HTTP/1.1\r\nHost: rome.local\r\n` +
+      // The shape Caddy forwards: the upstream as Host, the public name in
+      // X-Forwarded-Host.
+      `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1:4141\r\nX-Forwarded-Host: rome.local\r\n` +
         "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
         `Cookie: rome_session=${createSession("guardian")}\r\n` +
         "Origin: http://rome.local\r\nX-Forwarded-For: 203.0.113.1\r\n\r\n",
@@ -109,7 +111,8 @@ describe("attachDesktopProxy", () => {
       const socket = connect((server.address() as AddressInfo).port, "127.0.0.1");
       await once(socket, "connect");
       socket.write(
-        "GET /desktop-proxy/wechat/websockify HTTP/1.1\r\nHost: rome.local\r\n" +
+        "GET /desktop-proxy/wechat/websockify HTTP/1.1\r\n" +
+          "Host: 127.0.0.1:4141\r\nX-Forwarded-Host: rome.local\r\n" +
           "Connection: Upgrade\r\nUpgrade: websocket\r\n" +
           `Cookie: rome_session=${createSession("guardian")}\r\n` +
           "Origin: http://rome.local\r\nX-Forwarded-For: 203.0.113.1\r\n\r\n",

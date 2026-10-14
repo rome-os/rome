@@ -6,6 +6,7 @@ import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
+import { isAllowedInternalHost, MISDIRECTED_REQUEST } from "./host-guard.js";
 import { isSameOriginMutationRequest } from "./mutation-origin.js";
 import { readCookie, rejectUpgrade, toOriginRequest } from "./ws-upgrade.js";
 
@@ -25,8 +26,9 @@ function hasLoopbackHostname(origin: string): boolean {
 /**
  * Accepts the guardian: a guardian cookie from the dashboard's own origin, or a
  * direct loopback caller that is not a browser page on a non-loopback host. A
- * browser on another origin is refused whatever credential it carries. Writes
- * the 401, 403 or 500 itself and resolves false.
+ * browser on another origin is refused whatever credential it carries, and so
+ * is a handshake addressed to a Host `isAllowedInternalHost` refuses. Writes
+ * the 401, 403, 421 or 500 itself and resolves false.
  */
 export async function gateGuardianUpgrade(
   req: IncomingMessage,
@@ -47,6 +49,11 @@ export async function gateUpgrade(
   db: DrizzleDb,
   dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
 ): Promise<UpgradeCaller | null> {
+  if (!isAllowedInternalHost(req.headers.host)) {
+    log.warn("refused upgrade addressed to a non-loopback name", { host: req.headers.host });
+    rejectUpgrade(socket, MISDIRECTED_REQUEST, "Misdirected Request");
+    return null;
+  }
   try {
     const guardian = await resolveGuardianSessionFromMaterial(
       {

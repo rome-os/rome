@@ -140,6 +140,16 @@ describe("attachAppWebSocket", () => {
     expect(err.message).toMatch(/403/);
   });
 
+  it("rejects an upgrade addressed to a DNS-rebound name (421)", async () => {
+    // A rebound page is same-origin with its own name, so Origin matches Host
+    // and only the name itself gives it away.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/apps/echo/live`, {
+      headers: { host: `rebind.example:${port}`, origin: `http://rebind.example:${port}` },
+    });
+    const err = await new Promise<Error>((resolve) => ws.once("error", resolve));
+    expect(err.message).toMatch(/421/);
+  });
+
   it("ignores upgrades on non-app paths (never completes the handshake)", async () => {
     // Path the matcher doesn't own — our listener returns without touching the
     // socket, so with no other handler the upgrade simply never completes.

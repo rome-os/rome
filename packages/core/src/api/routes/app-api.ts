@@ -6,6 +6,7 @@ import { InvalidAppApiPathError, decodeAppApiPath, decodeAppIdPathSegment } from
 import type { ApiDeps } from "../deps.js";
 import { stripInternalHeaders } from "../../relay/protocol.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { restorePublicHost } from "../../lib/host-guard.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 
 type AppApiEnv = Record<string, never>;
@@ -56,6 +57,7 @@ async function dispatchRequest(
   // verbatim. Handlers must never see it — `request.caller` below is the
   // resolved, trustworthy identity.
   delete rawHeaders["x-rome-user-id"];
+  restorePublicHost(rawHeaders);
 
   const url = new URL(c.req.url);
   const method = c.req.method;

@@ -40,6 +40,20 @@ The edge consults the probe on routes configured with `forward_auth` and forward
 - The static surface — the SPA shell and its assets — is public and carries no gated data. Everything gated lives behind the API.
 - The app-API dispatch derives the [caller](../concepts/apps.md#caller-identity) from primary session material and strips inbound identity headers before a handler runs. An external caller cannot forge an identity.
 
+## Listener host names
+
+The [single HTTP listener](api.md#http-surface) answers only to names nobody outside the instance can point at it: loopback names, IP literals, and Tailscale tailnet names. Any other name gets 421 Misdirected Request, on HTTP routes and WebSocket upgrades alike. The health daemon's listener applies the same rule.
+
+The rule exists for the in-container browser. A page there whose name an attacker rebinds to 127.0.0.1 becomes same-origin with the listener. Its requests come from a loopback peer with no forwarding headers, so peer address, forwarding headers, and Origin cannot tell it from the dashboard. Only the name it addressed can.
+
+### Invariants
+
+- Rome reads the addressed name from the `Host` header, never from `X-Forwarded-Host`. A page can set the forwarded header on its own request but cannot set `Host`.
+- Every front proxy addresses the listener by an allowed name. The edge proxy rewrites `Host` to its upstream on every hop, the verify probe included, and carries the public name in `X-Forwarded-Host`.
+- A front proxy that forwards the public name unchanged gets 421 for every request. A new front door has to rewrite `Host` or arrive on an allowed name.
+- Checks that need the public name, such as the same-origin checks on cookie-authenticated requests, read `X-Forwarded-Host` before `Host`.
+- An app handler sees the public name in `host`. The app dispatch copies it from `X-Forwarded-Host` when the edge carried one.
+
 ## Visitor sign-in
 
 A visitor gets their credential by signing in to their [Rome Cloud](../concepts/rome-cloud.md) account through a PKCE-bound authorization round trip. The instance never sees a password — only a one-time code it exchanges with Rome Cloud for the verified account identity. The dashboard arm normally starts by dispatch. When Rome Cloud refuses a guardian sign-in because the account does not own the instance ([ownership enforcement](../concepts/rome-cloud.md#instance-sign-in)), the instance re-routes the refusal into this flow. Without a dashboard allow-list, the refusal surfaces as a not-owner error instead.

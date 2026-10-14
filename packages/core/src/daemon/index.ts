@@ -5,6 +5,7 @@ import { hostname } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { isAllowedInternalHost, MISDIRECTED_REQUEST } from "../lib/host-guard.js";
 import { createLogger } from "../logger.js";
 import { initTelemetry, shutdown as shutdownTelemetry } from "../telemetry.js";
 import {
@@ -450,6 +451,13 @@ export class HealthCheckDaemon {
     req: IncomingMessage,
     res: ServerResponse<IncomingMessage>,
   ): Promise<void> {
+    // Same rule as the core listener: a page in the in-container browser whose
+    // name rebinds to 127.0.0.1 would otherwise be same-origin with these routes.
+    if (!isAllowedInternalHost(req.headers.host)) {
+      this.writeJson(res, MISDIRECTED_REQUEST, { error: "Misdirected Request" });
+      return;
+    }
+
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
 
     if (req.method === "GET" && url.pathname === "/") {

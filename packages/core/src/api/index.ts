@@ -18,6 +18,7 @@ import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../lib/session-actor.js";
+import { internalHostGuard } from "../lib/host-guard.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -88,6 +89,10 @@ export function buildApp(
   const app = new Hono();
   app.onError(errorHandler);
 
+  // First, ahead of every route: a page whose name rebinds to 127.0.0.1 is
+  // same-origin with this listener, so the name it addressed decides reach.
+  app.use("*", internalHostGuard());
+
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
   app.route("/", discordCliRoutes(deps, config.host));
@@ -111,12 +116,14 @@ export function buildApp(
   app.route("/", appHomeScreenRoutes(deps));
 
   // Internal dashboard/app routes — mounted under /api. No global auth gate
-  // here on purpose: the Hono server binds to loopback (`INTERNAL_API_HOST`),
-  // so the only callers are (1) internal Rome processes inside the container
-  // and (2) Caddy after `forward_auth` clears the request at the public edge.
-  // A Rome instance is single-tenant by design, so route handlers do not need
-  // to derive a userId — the instance itself is the user. See
-  // `scripts/generate-caddyfile.ts` for the edge-side enforcement.
+  // here on purpose: the Hono server binds to loopback (`internalApi.host`)
+  // and `internalHostGuard` above refuses any name that could be rebound to
+  // it, so the only callers are (1) internal Rome processes inside the
+  // container and (2) a front proxy (Caddy after `forward_auth`, tailscale
+  // serve) addressing it by a loopback or tailnet Host. A Rome instance is
+  // single-tenant by design, so route handlers do not need to derive a
+  // userId — the instance itself is the user. See
+  // `lib/caddyfile-generator.ts` for the edge-side enforcement.
   const api = new Hono();
 
   // Dynamic API responses are mutable single-tenant state; default them to

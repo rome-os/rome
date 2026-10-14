@@ -97,7 +97,13 @@ async function buildTestHost() {
   return { app: buildApp(deps, config).app, deps };
 }
 
-const HEADERS = { host: "jessie.romeos.cc", "x-forwarded-proto": "https" };
+// The shape Caddy forwards: the upstream as Host, the public name in
+// X-Forwarded-Host.
+const HEADERS = {
+  host: "127.0.0.1:4141",
+  "x-forwarded-host": "jessie.romeos.cc",
+  "x-forwarded-proto": "https",
+};
 
 describe("app document routes through buildApp", () => {
   it("swaps the shell's social meta for a routed app on /full/apps/:id", async () => {

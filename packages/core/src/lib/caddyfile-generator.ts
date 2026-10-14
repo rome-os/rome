@@ -36,9 +36,16 @@ export function generateCaddyfile(config: PublicAccessConfig): string {
   // the shell + Vite bundle, and the SPA does its own redirect-to-login.
   const webRoot = resolveWebRoot();
 
-  const proxy = `reverse_proxy ${upstream}`;
+  // Rome refuses a request whose Host is not a loopback name (lib/host-guard.ts),
+  // so both proxies address it as the upstream. Caddy sets X-Forwarded-Host
+  // from the original Host before applying header_up, so the public name still
+  // reaches the handlers that read it.
+  const proxy = `reverse_proxy ${upstream} {
+\theader_up Host {upstream_hostport}
+}`;
   const forwardAuth = `forward_auth ${upstream} {
 \turi /api/auth/verify
+\theader_up Host {upstream_hostport}
 \tcopy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email
 \t# App WebSocket upgrades live under /api/apps/* and /api/app-api/*, so they
 \t# stay in @dynamic to inherit the cookie gate. forward_auth otherwise
@@ -98,12 +105,12 @@ handle /${RUNTIME_CONFIG_FILENAME} {
 root * ${webRoot}
 @wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*
 handle @wsUpgrade {
-\t${proxy}
+${indent(proxy, 1)}
 }
 @dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
 handle @dynamic {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 ${runtimeConfigHandle}
 @spaAssets {
@@ -123,7 +130,7 @@ handle @missingSpaAssets {
 @appDocs path /apps /apps/* /full/apps /full/apps/*
 handle @appDocs {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle {
 \troot * ${webRoot}
@@ -142,44 +149,44 @@ handle {
         const appIdSegment = encodeURIComponent(appId);
         return `
 handle /api/apps/${appIdSegment} {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/apps/${appIdSegment}/* {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/app-api/${appIdSegment} {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/app-api/${appIdSegment}/* {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-assets/${appIdSegment}/* {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-og/${appIdSegment}.png {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-manifest/${appIdSegment}.webmanifest {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-icon/${appIdSegment}.png {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getFullAppHref(appId)} {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getFullAppHref(appId)}/* {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 `.trim();
       })
@@ -191,52 +198,52 @@ handle ${getFullAppHref(appId)}/* {
         const appIdSegment = encodeURIComponent(appId);
         return `
 handle /api/apps/${appIdSegment}/manifest {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/apps/${appIdSegment} {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/apps/${appIdSegment}/* {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/app-api/${appIdSegment} {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /api/app-api/${appIdSegment}/* {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-assets/${appIdSegment}/* {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-og/${appIdSegment}.png {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-manifest/${appIdSegment}.webmanifest {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle /app-icon/${appIdSegment}.png {
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getEmbeddedAppHref(appId)} {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getEmbeddedAppHref(appId)}/* {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getFullAppHref(appId)} {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle ${getFullAppHref(appId)}/* {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 `.trim();
       })
@@ -245,7 +252,7 @@ handle ${getFullAppHref(appId)}/* {
 root * ${webRoot}
 @publicApi path /api/auth/visitor /api/auth/visitor/* /api/health /api/health/* /api/tailnet /api/tailnet/*
 handle @publicApi {
-\t${proxy}
+${indent(proxy, 1)}
 }
 ${runtimeConfigHandle}
 ${publicAppBlocks}

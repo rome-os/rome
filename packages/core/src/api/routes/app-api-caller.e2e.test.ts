@@ -81,6 +81,7 @@ async function buildHost(appId: string = APP_ID) {
             leakedViewer: request.viewer ?? null,
             userIdHeader: request.headers["x-rome-user-id"] ?? null,
             visitorEmailHeader: request.headers["x-rome-visitor-email"] ?? null,
+            hostHeader: request.headers.host ?? null,
           }), { headers: { "content-type": "application/json" } });
         }
       };
@@ -105,6 +106,7 @@ interface EchoBody {
   leakedViewer: unknown;
   userIdHeader: string | null;
   visitorEmailHeader: string | null;
+  hostHeader: string | null;
 }
 
 async function echo(
@@ -173,6 +175,16 @@ describe("request.caller resolution on app-api dispatch", () => {
     expect(body.caller).toEqual({ kind: "anonymous" });
     expect(body.userIdHeader).toBeNull();
     expect(body.visitorEmailHeader).toBeNull();
+  });
+
+  it("hands the handler the public name the edge carried in X-Forwarded-Host as host", async () => {
+    // Caddy addresses the listener as 127.0.0.1:4141 and carries the public
+    // name separately. Apps keep reading `host` as the name the client used.
+    const host = await buildHost();
+    const res = await host.request(`/api/apps/${APP_ID}/state`, {
+      headers: { host: "127.0.0.1:4141", "x-forwarded-host": "rome.example" },
+    });
+    expect(((await res.json()) as EchoBody).hostHeader).toBe("rome.example");
   });
 
   it("ignores a garbage session cookie", async () => {

@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { request as httpRequest, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 const spawnMock = rs.fn();
@@ -156,6 +158,54 @@ describe("HealthCheckDaemon", () => {
           cwd: "/tmp/rome",
         }),
       );
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("refuses a request addressed to a name that could be DNS-rebound to it", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(JSON.stringify({ status: "ok" }), { status: 200 })),
+    );
+
+    const { HealthCheckDaemon } = await import("./index.js");
+    const { HostFilesystemManager } = await import("./host-filesystem.js");
+    rs.spyOn(HostFilesystemManager.prototype, "restore").mockResolvedValue(undefined);
+    const configure = rs.spyOn(HostFilesystemManager.prototype, "configure");
+
+    const daemon = new HealthCheckDaemon({
+      appDir: "/tmp/rome",
+      healthCheckIntervalMs: 60_000,
+      healthRetryDelayMs: 100,
+      healthTimeoutMs: 1_000,
+      actionHost: "127.0.0.1",
+      actionPort: 0,
+      romePort: 4141,
+    });
+
+    await daemon.start();
+
+    try {
+      const { port } = (daemon as never as { server: Server }).server.address() as AddressInfo;
+      const send = (method: string, path: string, host: string) =>
+        new Promise<number>((resolve, reject) => {
+          const req = httpRequest(
+            { host: "127.0.0.1", port, method, path, headers: { host } },
+            (res) => {
+              res.resume();
+              resolve(res.statusCode ?? 0);
+            },
+          );
+          req.on("error", reject);
+          req.end(method === "PUT" ? JSON.stringify({}) : undefined);
+        });
+
+      expect(await send("GET", "/health", `rebind.example:${port}`)).toBe(421);
+      expect(await send("PUT", "/host-filesystem/config", `rebind.example:${port}`)).toBe(421);
+      expect(configure).not.toHaveBeenCalled();
+      expect(await send("GET", "/health", `127.0.0.1:${port}`)).toBe(200);
+      expect(await send("GET", "/health", `localhost:${port}`)).toBe(200);
     } finally {
       await daemon.stop();
     }

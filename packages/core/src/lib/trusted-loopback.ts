@@ -21,6 +21,15 @@
 // INVARIANT: every proxy that fronts the Hono listener must set
 // `X-Forwarded-For` (Caddy and Traefik do by default). A proxy layer that
 // drops it would make external traffic look in-container.
+//
+// Neither signal says which name the caller addressed. A page in the
+// in-container browser whose name rebinds to 127.0.0.1 passes both. So
+// lib/host-guard.ts first refuses any Host that is not a loopback, IP-literal
+// or tailnet name.
+//
+// INVARIANT: every proxy that fronts the Hono listener must address it by a
+// Host lib/host-guard.ts allows. Caddy rewrites Host to the upstream; a proxy
+// that forwards the public Host gets 421 for every request.
 
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;

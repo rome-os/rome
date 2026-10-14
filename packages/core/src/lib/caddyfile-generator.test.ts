@@ -160,3 +160,37 @@ describe("generateCaddyfile home-screen manifests and icons", () => {
     }
   });
 });
+
+// Rome answers 421 to a request whose Host is not a loopback name
+// (lib/host-guard.ts), so every hop Caddy makes to it, the forward_auth probe
+// included, must address it as the upstream.
+describe("generateCaddyfile upstream Host", () => {
+  const HOST_REWRITE = "header_up Host {upstream_hostport}";
+
+  function blocksStartingWith(caddyfile: string, opener: string): string[] {
+    const blocks: string[] = [];
+    let at = caddyfile.indexOf(opener);
+    while (at !== -1) {
+      blocks.push(caddyfile.slice(at, caddyfile.indexOf("\n\t\t}", at)));
+      at = caddyfile.indexOf(opener, at + opener.length);
+    }
+    return blocks;
+  }
+
+  const modes: Array<[string, PublicAccessConfig]> = [
+    ["open", openConfig],
+    ["public-access", { ...publicConfig, cloudEmailAccess: { "night-brief": ["a@b.co"] } }],
+  ];
+  for (const [mode, config] of modes) {
+    it(`rewrites Host on every reverse_proxy and forward_auth in ${mode} mode`, () => {
+      const caddyfile = generateCaddyfile(config);
+      const proxies = blocksStartingWith(caddyfile, "reverse_proxy 127.0.0.1:4141 {");
+      const probes = blocksStartingWith(caddyfile, "forward_auth 127.0.0.1:4141 {");
+      expect(proxies.length).toBeGreaterThan(0);
+      expect(probes.length).toBeGreaterThan(0);
+      for (const block of [...proxies, ...probes]) expect(block).toContain(HOST_REWRITE);
+      // A one-line reverse_proxy would forward the public Host unchanged.
+      expect(caddyfile).not.toMatch(/reverse_proxy 127\.0\.0\.1:4141\s*\n/);
+    });
+  }
+});
