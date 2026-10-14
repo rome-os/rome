@@ -21,7 +21,9 @@ async function fixture(
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
-  cleanup.push(() => rm(root, { force: true, recursive: true }));
+  // A daemon process can still hold observe.db open for a moment, and Windows refuses to
+  // remove an open file.
+  cleanup.push(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   const token = `romedev_${"a".repeat(43)}`;
   const instanceToken = "romeinst_test";
   let lists = 0;

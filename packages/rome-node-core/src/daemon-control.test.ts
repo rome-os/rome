@@ -13,7 +13,11 @@ afterEach(async () => {
 
 it("retries an exited launcher while the previous listener releases its port", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rome-node-restart-"));
-  cleanup.push(() => rm(directory, { recursive: true, force: true }));
+  // A daemon process can still hold observe.db open for a moment, and Windows refuses to
+  // remove an open file.
+  cleanup.push(() =>
+    rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }),
+  );
   const previous = createServer((_req, res) => res.writeHead(503).end());
   await new Promise<void>((resolve) => previous.listen(0, "127.0.0.1", resolve));
   cleanup.push(() => new Promise<void>((resolve) => previous.close(() => resolve())));

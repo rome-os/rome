@@ -84,8 +84,7 @@ the OS listener bind before writing discovery state or connecting to Gateway.
 
 `disconnect()` closes the local client handle. It does not stop the shared daemon,
 cancel submitted operations, or interrupt other clients. `startDaemon(config)`
-and `stopDaemon(config)` explicitly manage the shared service. `stopDaemon`
-resolves after the daemon process exits, so its files are closed. An incompatible
+and `stopDaemon(config)` explicitly manage the shared service. An incompatible
 protocol requires an explicit stop before restart. Requests are never replayed
 after a lost response.
 
