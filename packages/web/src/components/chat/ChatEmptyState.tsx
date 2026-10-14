@@ -19,14 +19,11 @@ export interface ChatEmptyStateProps {
   onOpenPinnedChat: (id: string) => void;
   onUnpinChat: (id: string) => void;
   onActivateQuickEntry: (entry: ResolvedRomeNewsItem) => void;
-}
-
-/** True when the home has nothing to show below the greeting. */
-export function isGreetingOnly({
-  pinnedChats,
-  quickEntries,
-}: Pick<ChatEmptyStateProps, "pinnedChats" | "quickEntries">): boolean {
-  return pinnedChats.length === 0 && quickEntries.length === 0;
+  /**
+   * From `md` up, sit at the bottom of the area so the greeting hugs the
+   * composer, which Chat centers with it (see `centerDraftComposer`).
+   */
+  hugComposer?: boolean;
 }
 
 /**
@@ -40,6 +37,7 @@ export function ChatEmptyState({
   onOpenPinnedChat,
   onUnpinChat,
   onActivateQuickEntry,
+  hugComposer = false,
 }: ChatEmptyStateProps) {
   const { t } = useTranslation("chat");
   const firstName = guardianName.trim().split(/\s+/)[0];
@@ -47,15 +45,11 @@ export function ChatEmptyState({
     ? t("empty.greeting", { name: firstName })
     : t("empty.greetingFallback");
 
-  // With no rails, the greeting is the whole page: from `md` up it hugs the
-  // composer, which Chat then centers with it (see `centerDraftComposer`).
-  const greetingOnly = isGreetingOnly({ pinnedChats, quickEntries });
-
   return (
     <main
       className={cn(
         "mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-6 py-12",
-        greetingOnly && "md:flex-auto md:justify-end md:pb-8 md:pt-0",
+        hugComposer && "md:flex-auto md:justify-end md:pb-8 md:pt-0",
       )}
     >
       <header className="max-w-3xl">

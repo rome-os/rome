@@ -7,7 +7,7 @@ import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeNewsConfig } from "@/config/quick-entries";
 import i18n from "@/i18n";
-import { ChatComponent, type ChatComponentProps } from "./ChatComponent";
+import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
 
@@ -152,6 +152,8 @@ function renderChatComponent(
     projects: Array<Record<string, unknown>>;
     newsFeed?: unknown;
     createSession?: () => Response;
+    // Holds the session list back until it resolves.
+    sessionsGate?: Promise<void>;
   },
   initialEntry = "/chat",
 ) {
@@ -179,6 +181,7 @@ function renderChatComponent(
       return homeData?.createSession?.() ?? Response.json({ id: "new-session" });
     }
     if (url === "/api/chat/sessions") {
+      await homeData?.sessionsGate;
       return Response.json(homeData?.sessions ?? []);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/messages$/.test(url)) {
@@ -485,38 +488,53 @@ describe("ChatComponent empty home", () => {
     );
   });
 
-  it("centers the composer with a greeting-only home, and docks it beside rails", async () => {
-    const spacer = () => document.querySelector("[data-draft-center-spacer]");
-    renderChatComponent({}, { sessions: [], projects: [] });
-    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
-    expect(spacer()).toBeTruthy();
+  const pinnedSession = {
+    id: "session-pinned",
+    name: "Pinned planning chat",
+    personaId: null,
+    projectName: "",
+    projectPath: "",
+    agentName: null,
+    archivedAt: null,
+    pinnedAt: "2026-07-24T12:00:00.000Z",
+    createdAt: "2026-07-24T10:00:00.000Z",
+    activityAt: "2026-07-24T12:00:00.000Z",
+    lastSeenActivityAt: null,
+    unread: false,
+    messageCount: 2,
+  };
+  const centerSpacer = () => document.querySelector("[data-draft-center-spacer]");
 
-    cleanup();
-    renderChatComponent(
-      {},
-      {
-        sessions: [
-          {
-            id: "session-pinned",
-            name: "Pinned planning chat",
-            personaId: null,
-            projectName: "",
-            projectPath: "",
-            agentName: null,
-            archivedAt: null,
-            pinnedAt: "2026-07-24T12:00:00.000Z",
-            createdAt: "2026-07-24T10:00:00.000Z",
-            activityAt: "2026-07-24T12:00:00.000Z",
-            lastSeenActivityAt: null,
-            unread: false,
-            messageCount: 2,
-          },
-        ],
-        projects: [],
-      },
-    );
+  it("centers the composer with a greeting-only home and remembers it", async () => {
+    renderChatComponent({}, { sessions: [], projects: [] });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeTruthy();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("true"));
+  });
+
+  it("docks the composer beside pinned chats and remembers it", async () => {
+    renderChatComponent({}, { sessions: [pinnedSession], projects: [] });
+
     expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
-    expect(spacer()).toBeNull();
+    expect(centerSpacer()).toBeNull();
+    await waitFor(() => expect(localStorage.getItem(GREETING_ONLY_HOME_KEY)).toBe("false"));
+  });
+
+  it("keeps the remembered docked layout while the sessions load", async () => {
+    localStorage.setItem(GREETING_ONLY_HOME_KEY, "false");
+    let releaseSessions = () => {};
+    const sessionsGate = new Promise<void>((resolve) => {
+      releaseSessions = resolve;
+    });
+    renderChatComponent({}, { sessions: [pinnedSession], projects: [], sessionsGate });
+
+    expect(await screen.findByText("Hi Ada,")).toBeTruthy();
+    expect(centerSpacer()).toBeNull();
+
+    releaseSessions();
+    expect(await screen.findByText("Pinned planning chat")).toBeTruthy();
+    expect(centerSpacer()).toBeNull();
   });
 
   it("hides Rome News when Rome Cloud publishes an empty feed", async () => {

@@ -9,7 +9,7 @@ import type {
   RomeNewsDefinition,
 } from "@rome-os/rome-web-components/news-item/schema";
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
-import { ChatEmptyState, isGreetingOnly } from "@/components/chat/ChatEmptyState";
+import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
 import { emitSessionsChanged, usePinSession, useSessionsChanged } from "@/lib/session-events";
 import { listSessions } from "@/lib/chat-api";
 import { useSettings } from "@/hooks/use-settings";
@@ -17,6 +17,18 @@ import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention, ChatSession } from "@/lib/chat-types";
 
 export type { SessionMessage };
+
+// The home's last known layout, so a reload starts where the previous visit
+// ended instead of moving the composer once its sessions arrive.
+export const GREETING_ONLY_HOME_KEY = "rome.chat.greeting-only-home";
+
+function readGreetingOnlyHome(): boolean {
+  try {
+    return window.localStorage.getItem(GREETING_ONLY_HOME_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 export interface ChatComponentProps {
   sessionId?: string | null;
@@ -127,6 +139,8 @@ export function ChatComponent({
     [cloudQuickEntryDefinitions, i18n.language],
   );
   const [homeSessions, setHomeSessions] = useState<ChatSession[]>([]);
+  const [sessionsSettled, setSessionsSettled] = useState(false);
+  const [newsSettled, setNewsSettled] = useState(!romeNewsConfig.enabled);
   const setSessionPinned = usePinSession();
 
   useEffect(() => {
@@ -140,7 +154,10 @@ export function ChatComponent({
         // Rome News content is Cloud-owned. Keep the section hidden when the
         // feed is unavailable or invalid instead of carrying a second copy.
       })
-      .finally(() => window.clearTimeout(timeout));
+      .finally(() => {
+        window.clearTimeout(timeout);
+        setNewsSettled(true);
+      });
 
     return () => {
       window.clearTimeout(timeout);
@@ -154,6 +171,8 @@ export function ChatComponent({
       setHomeSessions(await listSessions());
     } catch {
       // Keep the empty state usable when recent chats cannot be loaded.
+    } finally {
+      setSessionsSettled(true);
     }
   }, [sessionId]);
 
@@ -177,6 +196,21 @@ export function ChatComponent({
         })),
     [homeSessions],
   );
+
+  // Center the greeting with the composer when the home has nothing else to
+  // show. Until the home data settles, keep the last known layout.
+  const homeSettled = sessionsSettled && newsSettled;
+  const loadedGreetingOnly = pinnedChats.length === 0 && quickEntries.length === 0;
+  const [rememberedGreetingOnly] = useState(readGreetingOnlyHome);
+  const greetingOnlyHome = homeSettled ? loadedGreetingOnly : rememberedGreetingOnly;
+  useEffect(() => {
+    if (!homeSettled) return;
+    try {
+      window.localStorage.setItem(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
+    } catch {
+      // Storage can be unavailable; the layout then just starts centered.
+    }
+  }, [homeSettled, loadedGreetingOnly]);
 
   const handleUnpinChat = useCallback(
     async (id: string) => {
@@ -239,7 +273,7 @@ export function ChatComponent({
         initialProjectName={initialProjectName}
         initialAgentMention={initialAgentMention}
         composerRef={composerRef}
-        centerDraftComposer={isGreetingOnly({ pinnedChats, quickEntries })}
+        centerDraftComposer={greetingOnlyHome}
         emptyState={
           <ChatEmptyState
             guardianName={guardianName}
@@ -248,6 +282,7 @@ export function ChatComponent({
             onUnpinChat={(id) => void handleUnpinChat(id)}
             quickEntries={quickEntries}
             onActivateQuickEntry={handleActivateQuickEntry}
+            hugComposer={greetingOnlyHome}
           />
         }
       />
