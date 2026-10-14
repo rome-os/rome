@@ -1497,6 +1497,13 @@ async function openSession(
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
 
+  // `isNewSession` tells the provider that `sessionId` was never handed to it.
+  // An existing row may already own a transcript under that id even with no
+  // recorded provider (a first turn cut off by a restart), and so does a
+  // session that already opened once (a switch away and back), so only a new
+  // row's first open is new.
+  let sessionIdUnused = isNewSession;
+
   const buildSessionParams = (
     resolution: ModelResolution,
     resumeProviderId?: string | null,
@@ -1517,7 +1524,7 @@ async function openSession(
     workingDir,
     externalMcpServers,
     sessionId,
-    isNewSession: resumeProviderId !== resolution.modelProvider.id,
+    isNewSession: sessionIdUnused,
     providerThreadId: resumeProviderId === resolution.modelProvider.id ? resumeThreadId : undefined,
     executeAction,
     executeSubagent,
@@ -1540,6 +1547,7 @@ async function openSession(
     resumeThreadId?: string,
   ): Promise<ModelSession> => {
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
+    sessionIdUnused = false;
     const resumed = params.isNewSession === false;
     const openStartMs = Date.now();
     const session = await withRomeSpan(

@@ -2863,9 +2863,12 @@ describe("AgentRunner", () => {
       expect(provider.sessions[1]).toMatchObject({
         sessionId: "sess-old",
         // The row has no stored provider identity, so its native thread is not
-        // resumed into whichever provider happens to resolve now.
-        isNewSession: true,
+        // resumed into whichever provider happens to resolve now. The id is not
+        // new either: a first turn cut off by a restart leaves a transcript
+        // under it with no provider recorded (#1045).
+        isNewSession: false,
       });
+      expect(provider.sessions[1].providerThreadId).toBeUndefined();
 
       await manager.shutdown();
     });
@@ -4691,7 +4694,7 @@ describe("AgentRunner", () => {
       });
       expect(codexTurns).toBe(1);
       expect(claudeTurns).toBe(1);
-      expect(claudeOpens[0]).toMatchObject({ isNewSession: true });
+      expect(claudeOpens[0]).toMatchObject({ isNewSession: false });
       expect(claudeOpens[0].providerThreadId).toBeUndefined();
       await manager.shutdown();
     });
@@ -5334,7 +5337,7 @@ describe("AgentRunner", () => {
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
         model: "claude-opus-4-8[1m]",
-        isNewSession: true,
+        isNewSession: false,
       });
       expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
@@ -5390,7 +5393,7 @@ describe("AgentRunner", () => {
       expect(claudeOpens).toHaveLength(1);
       expect(claudeOpens[0]).toMatchObject({
         model: "claude-opus-4-8[1m]",
-        isNewSession: true,
+        isNewSession: false,
       });
       expect(claudeOpens[0].providerThreadId).toBeUndefined();
       expect(codexOpens).toHaveLength(0);
