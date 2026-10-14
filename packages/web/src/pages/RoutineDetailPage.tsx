@@ -13,6 +13,7 @@ import {
   describeTrigger,
   hasOwnName,
   isScheduleTrigger,
+  lastRunFailed,
   relativeTime,
   routineDisplayName,
   type Routine,
@@ -76,7 +77,16 @@ function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
   return (
     <PageHeader
       title={title}
-      titleAside={!routine.enabled && <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>}
+      titleAside={
+        !routine.enabled ? (
+          <Badge variant="muted">{t("routine.badgeDisabled")}</Badge>
+        ) : lastRunFailed(routine) ? (
+          <Badge variant="destructive">
+            <X aria-hidden />
+            {t("status.failed")}
+          </Badge>
+        ) : null
+      }
       description={
         <span className="flex items-center gap-1">
           <TriggerIcon className="size-3.5 flex-shrink-0" aria-hidden />

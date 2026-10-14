@@ -481,6 +481,30 @@ describe("RoutinesPage", () => {
     expect(screen.getByText("Inventory sync")).toBeTruthy();
   });
 
+  it("marks an enabled routine whose last run failed, and leaves a paused one unmarked", async () => {
+    mockBackend({
+      routines: [
+        scheduleRoutine({
+          id: "s1",
+          name: "Inventory sync",
+          lastRun: { status: "error", firedAt: new Date().toISOString() },
+        }),
+        scheduleRoutine({
+          id: "s2",
+          name: "Old report",
+          enabled: false,
+          lastRun: { status: "error", firedAt: new Date().toISOString() },
+        }),
+      ],
+    });
+    renderPage();
+
+    const failing = await screen.findByRole("link", { name: "Inventory sync, last run failed" });
+    expect(within(failing).getByText("Failed")).toBeTruthy();
+    const paused = screen.getByRole("link", { name: "Old report" });
+    expect(within(paused).queryByText("Failed")).toBeNull();
+  });
+
   it("does not show a page-level failure badge for a completed failed one-off", async () => {
     mockBackend({
       routines: [
@@ -512,6 +536,7 @@ describe("RoutinesPage", () => {
     expect(screen.getByRole("link", { name: "Image test" }).getAttribute("href")).toBe(
       "/routines/s1",
     );
+    expect(screen.queryByText("Failed")).toBeNull();
   });
 
   it("deletes a routine after the guardian confirms removal", async () => {

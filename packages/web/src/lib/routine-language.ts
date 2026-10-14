@@ -58,6 +58,12 @@ export function isEventTrigger(tr: Trigger): tr is EventBusTrigger {
   return tr.type === "event-bus";
 }
 
+/** True when an enabled routine's most recent run errored. A paused routine
+ * returns false: no fire will replace that run, so the mark would never clear. */
+export function lastRunFailed(routine: Pick<Routine, "enabled" | "lastRun">): boolean {
+  return routine.enabled && routine.lastRun?.status === "error";
+}
+
 // Schedule → trigger phrase
 
 const WEEKDAY_ORDER = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
