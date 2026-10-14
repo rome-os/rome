@@ -1,10 +1,8 @@
-// @rstest-environment jsdom
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { NodeActionRow, NodeStatus } from "@rome/api-types/node-console";
-import i18n from "@/i18n";
-import { NodeConsoleSection, scriptOf, summarize } from "./node-console-section";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { NodeConsole, scriptOf, summarize } from "./node-console.js";
+import type { NodeActionRow, NodeStatus } from "./protocol.js";
 
 const status: NodeStatus = {
   version: "0.1.3",
@@ -92,9 +90,6 @@ function serve(history: NodeActionRow[]) {
   };
 }
 
-beforeAll(async () => {
-  await i18n.changeLanguage("en");
-});
 beforeEach(() => {
   FakeSocket.instances = [];
   rs.stubGlobal("WebSocket", FakeSocket);
@@ -108,13 +103,13 @@ const devices = [
   { id: "dev-1", name: "Workstation", platform: "linux", status: "connected" as const },
 ];
 
-describe("NodeConsoleSection", () => {
+describe("NodeConsole", () => {
   it("shows the connection, history, and a script as code", async () => {
     serve([
       row(2, { command: "bash", args: ["-lc", "cd ~/rome\npnpm test"], exitCode: 1 }),
       row(1),
     ]);
-    render(<NodeConsoleSection devices={devices} />);
+    render(<NodeConsole url="ws://rome.test/ws/node" devices={devices} />);
     expect(await screen.findByText("Connected")).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
     const history = await screen.findByRole("list", { name: "Sent commands" });
@@ -127,7 +122,7 @@ describe("NodeConsoleSection", () => {
 
   it("queries the daemon for a search and adds finished actions live", async () => {
     serve([row(1)]);
-    render(<NodeConsoleSection devices={devices} />);
+    render(<NodeConsole url="ws://rome.test/ws/node" devices={devices} />);
     await screen.findByRole("list", { name: "Sent commands" });
     const socket = FakeSocket.instances[0]!;
     await userEvent.type(screen.getByRole("searchbox", { name: "Search commands" }), "sta");
@@ -157,9 +152,17 @@ describe("NodeConsoleSection", () => {
     ).toBeTruthy();
   });
 
+  it("connects to the given URL and shows Chinese for a zh locale", async () => {
+    serve([row(1)]);
+    render(<NodeConsole url="wss://example.test/console" devices={devices} locale="zh-CN" />);
+    expect(await screen.findByText("已连接")).toBeTruthy();
+    expect(FakeSocket.instances[0]!.url).toBe("wss://example.test/console");
+    expect(await screen.findByRole("list", { name: "已发送的命令" })).toBeTruthy();
+  });
+
   it("explains a missing daemon", async () => {
     FakeSocket.reply = () => {};
-    render(<NodeConsoleSection devices={devices} />);
+    render(<NodeConsole url="ws://rome.test/ws/node" devices={devices} />);
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
     const socket = FakeSocket.instances[0]!;
     act(() => {

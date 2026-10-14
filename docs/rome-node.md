@@ -194,6 +194,10 @@ header, so it never connects to the daemon directly. Other methods, such as
 `devices.run` and `daemon.stop`, do not pass. The socket admits only the
 guardian, as [access control](architecture/access-control.md) describes.
 
+The console UI lives in `@rome-os/node-ui` (`packages/rome-node-ui`), separate
+from the dashboard. A host mounts `<NodeConsole url devices locale />` with the
+WebSocket URL of a forwarding backend, and supplies the section heading.
+
 ## Authorization and transport
 
 After startup and either browser enrollment flow, Rome calls `authorizeServer()`

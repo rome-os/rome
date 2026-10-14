@@ -1,0 +1,57 @@
+{
+  "name": "@rome-os/node-ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React console for the activity of a local rome-node daemon",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "files": [
+    "dist",
+    "src/styles.css"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "../../scripts/test-env.sh rstest"
+  },
+  "dependencies": {
+    "@rome-os/ui": "workspace:^",
+    "zod": "^4.3.6"
+  },
+  "peerDependencies": {
+    "lucide-react": ">=0.468.0",
+    "react": ">=19",
+    "react-dom": ">=19"
+  },
+  "devDependencies": {
+    "@rsbuild/plugin-react": "^2.0.1",
+    "@rstest/core": "^0.11.11",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "jsdom": "^29.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/rome-node-ui"
+  }
+}

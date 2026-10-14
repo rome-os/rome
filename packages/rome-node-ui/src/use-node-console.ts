@@ -1,8 +1,7 @@
-// State of the local rome-node daemon, read over the `/ws/node` console socket. The socket
-// carries the daemon's JSON-RPC unchanged. Wire contract: @rome/api-types/node-console.
+// State of a rome-node daemon, read over a console socket that carries the daemon's JSON-RPC
+// unchanged. Wire contract: ./protocol.ts.
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  NODE_CONSOLE_PATH,
   nodeActionRowSchema,
   nodeConsoleDaemonStateSchema,
   nodeEventSchema,
@@ -13,7 +12,7 @@ import {
   type NodeConsoleDaemonState,
   type NodeOutcome,
   type NodeStatus,
-} from "@rome/api-types/node-console";
+} from "./protocol.js";
 
 const PAGE_SIZE = 50;
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -40,11 +39,6 @@ export interface NodeConsoleState {
 }
 
 const actionsResultSchema = nodeLogResultSchema(nodeActionRowSchema);
-
-function consoleUrl(): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}${NODE_CONSOLE_PATH}`;
-}
 
 export function activeTextFilter(text: string | undefined): string | undefined {
   const trimmed = text?.trim();
@@ -81,13 +75,16 @@ class ConsoleSocket {
   private pending = new Map<number, Pending>();
   readonly socket: WebSocket;
 
-  constructor(handlers: {
-    open(): void;
-    event(value: unknown): void;
-    daemon(state: NodeConsoleDaemonState): void;
-    close(): void;
-  }) {
-    this.socket = new WebSocket(consoleUrl());
+  constructor(
+    url: string,
+    handlers: {
+      open(): void;
+      event(value: unknown): void;
+      daemon(state: NodeConsoleDaemonState): void;
+      close(): void;
+    },
+  ) {
+    this.socket = new WebSocket(url);
     this.socket.onopen = () => handlers.open();
     this.socket.onmessage = (message) => {
       let value: Record<string, unknown>;
@@ -149,10 +146,11 @@ class ConsoleSocket {
 }
 
 /**
- * Follows the daemon while mounted. The socket reconnects with backoff, and each connection
- * reloads the first history page, which fills any gap the disconnect left.
+ * Follows the daemon behind `url` while mounted. A new `url` opens a new socket. The socket
+ * reconnects with backoff, and each connection reloads the first history page, which fills any
+ * gap the disconnect left.
  */
-export function useNodeConsole(filters: NodeConsoleFilters): NodeConsoleState {
+export function useNodeConsole(url: string, filters: NodeConsoleFilters): NodeConsoleState {
   const [link, setLink] = useState<NodeConsoleLink>("connecting");
   const [status, setStatus] = useState<NodeStatus | null>(null);
   const [running, setRunning] = useState<Map<number, NodeActionRow>>(new Map());
@@ -174,7 +172,7 @@ export function useNodeConsole(filters: NodeConsoleFilters): NodeConsoleState {
     const connect = () => {
       setLink("connecting");
       let daemonState: NodeConsoleDaemonState | null = null;
-      const socket: ConsoleSocket = new ConsoleSocket({
+      const socket: ConsoleSocket = new ConsoleSocket(url, {
         open: () => {
           setLink("open");
           void socket
@@ -246,7 +244,7 @@ export function useNodeConsole(filters: NodeConsoleFilters): NodeConsoleState {
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, []);
+  }, [url]);
 
   // Reloads the first page for each connection and each filter change. A response that arrives
   // after a newer reload started is dropped, so pages never mix filters.

@@ -906,60 +906,7 @@
     },
     "console": {
       "title": "活动",
-      "description": "此 Rome 实例上的 agent 和工具发送到你已关联电脑的命令。历史保留 30 天。",
-      "link": {
-        "connecting": "正在连接设备服务…",
-        "not_running": "设备服务未运行，因此没有记录活动。",
-        "not_configured": "尚未配置设备访问，因此没有记录活动。",
-        "incompatible": "设备服务版本较旧。重启后即可显示活动。",
-        "disconnected": "设备服务已停止。正在重新连接…"
-      },
-      "callerLabel": "Gateway 连接",
-      "since": "持续",
-      "reconnects": "重连次数",
-      "runningCount": "运行中",
-      "service": "服务版本 {{version}}，启动于 {{time}}。",
-      "running": "正在你的电脑上运行",
-      "history": "已发送的命令",
-      "search": "搜索命令",
-      "searchPlaceholder": "搜索命令、参数和目录",
-      "searchHint": "至少输入三个字符才能搜索。",
-      "device": "设备",
-      "allDevices": "全部设备",
-      "outcomeFilter": "结果",
-      "allOutcomes": "全部结果",
-      "direction": "方向",
-      "allDirections": "发送和接收",
-      "sent": "发送",
-      "received": "接收",
-      "loading": "正在加载历史…",
-      "empty": "没有匹配的命令。",
-      "loadMore": "加载更早的记录",
-      "exitCode": "退出码 {{code}}",
-      "output": "输出 {{size}}",
-      "copied": "已复制 {{size}}",
-      "bytes": "stdin {{stdin}}，stdout {{stdout}}，stderr {{stderr}}",
-      "truncated": "较长的文本在此处被截短。完整文本保存在此实例的历史文件中。",
-      "outcome": {
-        "running": "运行中",
-        "ok": "成功",
-        "error": "失败",
-        "unknown_outcome": "结果未知",
-        "interrupted": "已中断",
-        "aborted": "已取消"
-      },
-      "detail": {
-        "device": "设备",
-        "action": "操作",
-        "started": "开始时间",
-        "duration": "耗时",
-        "cwd": "目录",
-        "error": "错误",
-        "exit": "退出码",
-        "bytes": "字节数"
-      },
-      "to": "发往 {{device}}",
-      "from": "来自 {{device}}"
+      "description": "此 Rome 实例上的 agent 和工具发送到你已关联电脑的命令。历史保留 30 天。"
     }
   }
 }

@@ -129,6 +129,11 @@
       "rstest": false,
       "entry": ["src/**/*.test.{ts,tsx}", "src/test/setup.ts", "rstest.config.mts"]
     },
+    "packages/rome-node-ui": {
+      // Same rstest plugin crash as packages/web.
+      "rstest": false,
+      "entry": ["src/**/*.test.{ts,tsx}", "src/test/setup.ts", "rstest.config.mts"]
+    },
     "packages/desktop": {
       "entry": ["src/preload/index.ts", "src/**/*.test.ts", "build/*.mjs", "scripts/*.mjs"],
       // Built by a `pnpm --filter` step in this package's own build script,

@@ -1,5 +1,5 @@
 import { ws } from "msw";
-import type { NodeActionRow, NodeEvent, NodeStatus } from "@rome/api-types/node-console";
+import type { NodeActionRow, NodeEvent, NodeStatus } from "@rome-os/node-ui";
 
 // The rome-node console socket. It answers node.status, log.query, and a `node` subscription
 // from the fixtures below, and sends no live events after the snapshot. Device ids match the
