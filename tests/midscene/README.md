@@ -161,9 +161,9 @@ HEADLESS=false npm test
 - The backend suite's report also carries its container log and a
   `backend-summary.md` (image revision and anomalies), which the run Summary
   includes. Pages publishes only the Midscene reports, not the container log.
-- Pull requests run secret-free harness and mock-browser boundary jobs. The
-  model-backed suite jobs run on the upstream `main` branch or by manual
-  dispatch in a fork using that fork's model secrets.
+- Pull requests do not run this workflow. The model-backed suite jobs run on
+  the upstream `main` branch or by manual dispatch in a fork using that fork's
+  model secrets.
 
 ## GitHub Actions
 
@@ -175,10 +175,11 @@ trigger it. The `mock` job runs first and the `backend` job after it, because
 both share the Midscene endpoint's rate limit. The `backend` job tests
 `zoolsher/rome:latest`, the image published from `main` twice a day.
 
-Path-filtered pull requests run only the secret-free harness and mock-browser
-boundary checks. They never receive billable model credentials or run the
-suite jobs. See the [CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
-for the path set and trust gates.
+Pull requests do not trigger the workflow. Before changing this package, run
+`npm run typecheck && npm run collect && npm run test:summary` locally; the
+nightly `harness-validation` job runs the same checks. See the
+[CI design](../../docs/midscene-e2e-plan.md#4-ci-design-githubworkflowsmidsceneyml)
+for the trust gates.
 
 Manual `workflow_dispatch` runs both suites on upstream `main`; set `suite` to
 `mock` or `backend` to run one. A fork owner may manually dispatch a fork

@@ -2,8 +2,8 @@
 // Secret- and browser-free validation: load the Midscene project config,
 // discover every workflow YAML, and run the same collection the runner uses
 // (YAML parse, schema/unknown-key checks, custom-node resolution) without
-// launching Chromium or calling the model. The pull_request CI job runs this
-// so a malformed case or a broken node reference fails before merge.
+// launching Chromium or calling the model. CI runs this before the suites,
+// so a malformed case or a broken node reference fails before any model call.
 
 import { readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";

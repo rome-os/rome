@@ -102,9 +102,9 @@ with its reason.
   BrowserContext, so MSW state is isolated between cases while client-side
   navigation within one case preserves mock writes.
 - Model calls run from the Node-side Midscene agent, not from the page.
-- CI pull requests run secret-free harness and mock-browser boundary checks.
-  The two suite jobs, `mock` and then `backend`, run on the upstream `main`
-  branch or by manual dispatch in a fork using that fork's model secrets.
+- Pull requests do not run the Midscene workflow. The two suite jobs, `mock`
+  and then `backend`, run on the upstream `main` branch or by manual dispatch
+  in a fork using that fork's model secrets.
 - Each suite job uploads its report as `midscene-suite-<suite>`, including
   failed runs. One report flow merges both into the combined report and the
   run Summary. A repository with `MIDSCENE_PUBLISH_REPO` set to its full name

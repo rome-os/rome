@@ -134,15 +134,12 @@ reasons behind them.
   suite nightly against the latest upstream `main` commit. Its daily schedule
   is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
   It does not depend on the ordinary CI or Nightly workflow.
-  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
-  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
-  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
-  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
-  A matching PR runs two secret-free jobs. `harness-validation` installs the
-  package, type-checks it, collects YAML cases, checks the catalog, and tests
-  report scripts without starting a browser or model.
-  `mock-boundary-validation` starts the mock server and checks MSW, browser
-  HTTP, and WebSocket blocking without model credentials.
+  Pushes and pull requests do not trigger it. Every run starts with
+  `harness-validation`, which installs the package, type-checks it, collects
+  YAML cases, checks the catalog, and tests report scripts without starting a
+  browser or model. The `mock` job then checks MSW, browser HTTP, and
+  WebSocket blocking before its cases run. A broken harness or mock boundary
+  fails the next nightly run, so a PR check would only report it a day earlier.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
   Set `report_source_run_id` to rebuild reports from an existing run's suite
@@ -157,7 +154,7 @@ reasons behind them.
   and runs only against code on the protected default branch. To enable
   model-backed PR runs later, create the protected environment in Settings
   first, then add environment-gated `pull_request` suite jobs back to
-  the workflow.
+  the workflow under a `pull_request` trigger.
 - **Runtime**: Ubuntu + Node.js 24. Pnpm is enabled (reading the root
   `packageManager` version) **before** `setup-node`, whose `cache: pnpm`
   requires pnpm to already exist on a clean runner. Product dependencies

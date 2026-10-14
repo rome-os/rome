@@ -11,17 +11,6 @@ name: E2E Testing by Midscene
 on:
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC / 14:00 Beijing daily
-  pull_request:
-    paths:
-      - ".github/workflows/midscene.yml"
-      - "tests/midscene/**"
-      - "docs/midscene-e2e-cases.md"
-      - "packages/web/**"
-      - "packages/api-types/**"
-      - "packages/app-runtime-sdk/**"
-      - "packages/ui/**"
-      - "packages/web-content/**"
-      - "pnpm-lock.yaml"
   workflow_dispatch:
     inputs:
       report_source_run_id:
@@ -48,8 +37,9 @@ on:
 # configures a protected environment with required reviewers, the secret-
 # bearing path (the `mock` and `backend` jobs) is restricted to the protected main
 # branch in the upstream repository. Fork owners may explicitly dispatch a
-# fork branch with their fork's own secrets. Pull requests run secret-free
-# harness and mock-browser boundary jobs. Reports are always aggregated after
+# fork branch with their fork's own secrets. Pull requests do not trigger
+# this workflow; the gates below still keep pull_request runs out of the
+# secret-bearing and publishing jobs. Reports are always aggregated after
 # model runs. Pages publication is enabled upstream and opt-in for forks.
 
 permissions:
@@ -68,11 +58,10 @@ jobs:
     outputs:
       upstream-repository: ${{ env.MIDSCENE_UPSTREAM_REPOSITORY }}
       projects: ${{ steps.plan.outputs.projects }}
-    # Runs on path-filtered PRs, nightly, and manual dispatch: validates the package
-    # without model secrets, a browser download, the Rome workspace install,
-    # or the mock server. Loading the config and collecting YAML cases never
-    # calls chromium.launch or the model, so contributor-controlled PR code
-    # reaches no credentials here.
+    # Runs nightly and on manual dispatch, before the suites: validates the
+    # package without model secrets, a browser download, the Rome workspace
+    # install, or the mock server. Loading the config and collecting YAML
+    # cases never calls chromium.launch or the model.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -123,60 +112,6 @@ jobs:
             *) projects=web-mock,web-backend ;;
           esac
           echo "projects=$projects" >> "$GITHUB_OUTPUT"
-
-  mock-boundary-validation:
-    name: Midscene mock browser boundary (no secrets)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-
-      - name: Enable pnpm
-        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-
-      - name: Activate Node.js 24 and pnpm
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: "24"
-          cache: pnpm
-
-      - name: Install Rome workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Install browser test dependencies
-        working-directory: tests/midscene
-        run: |
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --strict-allow-scripts
-          npx playwright install --with-deps chromium
-
-      - name: Start Rome mock server
-        run: |
-          nohup pnpm --filter rome-web dev:mock:e2e > /tmp/rome-devmock.log 2>&1 &
-          for _ in $(seq 1 180); do
-            if curl -sf http://localhost:3200/ -o /dev/null; then
-              echo "dev:mock:e2e is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "dev:mock:e2e failed to become ready" >&2
-          tail -n 100 /tmp/rome-devmock.log >&2
-          exit 1
-
-      - name: Check browser network boundary
-        working-directory: tests/midscene
-        run: npm run check:browser-boundary
-
-      - name: Upload mock server log on failure
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rome-devmock-pr
-          path: /tmp/rome-devmock.log
-          if-no-files-found: ignore
 
   # The two model-backed suites. Both jobs follow the same step order and each
   # uploads one `midscene-suite-<suite>` artifact for the shared report jobs
