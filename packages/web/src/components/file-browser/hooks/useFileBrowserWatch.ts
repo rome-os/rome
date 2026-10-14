@@ -1,11 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
+import { useLiveEvents } from "@/hooks/use-live-events";
 import { useSseEvents } from "@/hooks/use-sse-events";
 import { useFileBrowserStoreApi } from "../store/context";
 import {
   createFileBrowserEventsUrl,
   getAbsentDeletedWatchPaths,
-  getFileBrowserWatchPaths,
+  getFileBrowserWatchTopic,
   shouldReloadSelectedWatchFile,
   type FileBrowserWatchEvent,
   type FileBrowserWatchPathExists,
@@ -24,15 +25,49 @@ const fileWatchReadySchema = z.object({
   logicalRoot: z.string(),
 });
 
+// `onError`'s readyState once the server refuses or ends the topic.
+const SOURCE_CLOSED = 2;
+const WATCH_RETRY_BASE_MS = 3_000;
+const WATCH_RETRY_MAX_MS = 60_000;
+
 /**
- * SSE reconciler. Subscribes to `/events` with the currently expanded watch
- * paths and replays mutations into the tree + selected file. Self-originated
- * writes (writes we initiated ourselves via the file slice) are suppressed
- * for ≤3 events / 5 s so our own saves don't trigger a reload race.
+ * Watch reconciler. Watches `watchPaths` over the tab's live-events socket,
+ * or the `/events` route where the API has no topic, and replays mutations
+ * into the tree + selected file. Every `ready`, including the one after a
+ * reconnect, rebaselines. Self-originated writes (writes we initiated
+ * ourselves via the file slice) are suppressed for ≤3 events / 5 s so our own
+ * saves don't trigger a reload race.
  */
-export function useFileBrowserWatch(opts: { watchEventsUrl: string }) {
+export function useFileBrowserWatch(opts: { apiBasePath: string; watchPaths: string[] }) {
   const store = useFileBrowserStoreApi();
-  const { watchEventsUrl } = opts;
+  const { apiBasePath, watchPaths } = opts;
+  const watchEventsUrl = createFileBrowserEventsUrl(apiBasePath, watchPaths);
+  // The URL encodes the path set, so it keys the topic as well.
+  const baseTopic = useMemo(
+    () => getFileBrowserWatchTopic(apiBasePath, watchPaths),
+    [apiBasePath, watchEventsUrl],
+  );
+  // The server ends a watch whose watcher fails to start, and the client asks
+  // for a refused topic again only after the socket reconnects. EventSource
+  // retries the route on its own, so retry here with backoff, under a new
+  // topic name because the refused one stays refused.
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const retryFailuresRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const watchTopic =
+    baseTopic && retryAttempt > 0
+      ? { ...baseTopic, topic: `${baseTopic.topic}-${retryAttempt}` }
+      : baseTopic;
+
+  // A new path set subscribes a new topic at once, so a pending retry is moot.
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current != null) window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    },
+    [watchEventsUrl],
+  );
+
   const changeHandlerRef = useRef<(event: FileBrowserWatchEvent) => void>(() => {});
   const readyHandlerRef = useRef<(event: z.infer<typeof fileWatchReadySchema>) => void>(() => {});
 
@@ -198,14 +233,37 @@ export function useFileBrowserWatch(opts: { watchEventsUrl: string }) {
     };
   }, [store, watchEventsUrl]);
 
-  useSseEvents(watchEventsUrl, {
+  const handlers = {
     change: {
       schema: fileWatchChangeSchema,
-      fn: (event) => changeHandlerRef.current(event),
+      fn: (event: FileBrowserWatchEvent) => changeHandlerRef.current(event),
     },
     ready: {
       schema: fileWatchReadySchema,
-      fn: (event) => readyHandlerRef.current(event),
+      fn: (event: z.infer<typeof fileWatchReadySchema>) => {
+        retryFailuresRef.current = 0;
+        readyHandlerRef.current(event);
+      },
     },
-  });
+  };
+  useLiveEvents(
+    { topic: watchTopic?.topic ?? "", params: watchTopic?.params, sseUrl: watchEventsUrl },
+    handlers,
+    {
+      enabled: watchTopic !== null,
+      onError: ({ readyState }) => {
+        if (readyState !== SOURCE_CLOSED || retryTimerRef.current != null) return;
+        const delay = Math.min(
+          WATCH_RETRY_BASE_MS * 2 ** retryFailuresRef.current,
+          WATCH_RETRY_MAX_MS,
+        );
+        retryFailuresRef.current += 1;
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null;
+          setRetryAttempt((attempt) => attempt + 1);
+        }, delay);
+      },
+    },
+  );
+  useSseEvents(watchEventsUrl, handlers, { enabled: watchTopic === null });
 }

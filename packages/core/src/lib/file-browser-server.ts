@@ -31,6 +31,7 @@ import { createGzip } from "node:zlib";
 import { watch, type FSWatcher } from "chokidar";
 import type { Context } from "hono";
 import { createLogger } from "../logger.js";
+import type { LiveEventEmit } from "./live-event.js";
 
 const log = createLogger("file-browser");
 
@@ -431,10 +432,9 @@ interface WatchDirectory {
 
 function getRequestedWatchDirectories(
   scope: FileBrowserScope,
-  requestUrl: string,
+  requested: readonly string[],
 ): WatchDirectory[] {
-  const searchParams = new URL(requestUrl).searchParams;
-  const candidates = [scope.logicalRoot, ...searchParams.getAll("watch")];
+  const candidates = [scope.logicalRoot, ...requested];
   const directoriesByLogicalPath = new Map<string, WatchDirectory>();
 
   for (const candidate of candidates) {
@@ -1045,10 +1045,48 @@ export function createResolveHandler(scope: FileBrowserScope): Handler {
   };
 }
 
-export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
+export interface FileWatchChange {
+  at: number;
+  kind: "add" | "addDir" | "change" | "unlink" | "unlinkDir";
+  logicalRoot: string;
+  path: string;
+}
+
+export interface FileWatchSubscription {
+  /** Resolves once the watcher is ready, and rejects when it fails to start. */
+  readonly ready: Promise<void>;
+  /** Idempotent. The watcher closes when its last subscriber releases. */
+  release(): void;
+}
+
+/**
+ * One scope's file watchers, shared by the SSE route and the live-events
+ * socket so both transports reuse one chokidar watcher per directory set.
+ */
+export interface FileWatchHub {
+  readonly logicalRoot: string;
+  /**
+   * Watches the scope root and each requested logical directory, one level
+   * deep. A requested path outside the scope, ignored, missing, or not a
+   * directory is dropped. Subscribers with the same directory set share a
+   * watcher. An `onChange` that throws or rejects releases its subscription.
+   */
+  subscribe(
+    requested: readonly string[],
+    onChange: (change: FileWatchChange) => void | Promise<void>,
+  ): FileWatchSubscription;
+  watcherCount(): number;
+}
+
+interface WatchSubscriber {
+  onChange(change: FileWatchChange): void | Promise<void>;
+  release(): void;
+}
+
+export function createFileWatchHub(scope: FileBrowserScope): FileWatchHub {
   interface WatchState {
     key: string;
-    subscribers: Set<FileWatchSseStream>;
+    subscribers: Set<WatchSubscriber>;
     watcher: FSWatcher | null;
     watcherReady: boolean;
     watcherReadyPromise: Promise<void> | null;
@@ -1093,7 +1131,7 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
     if (!state) {
       state = {
         key,
-        subscribers: new Set<FileWatchSseStream>(),
+        subscribers: new Set<WatchSubscriber>(),
         watcher: null,
         watcherReady: false,
         watcherReadyPromise: null,
@@ -1140,19 +1178,15 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
       const resolvedPath = isAbsolute(rawPath) ? rawPath : resolve(scope.rootDir, rawPath);
       if (isIgnoredWatchPath(scope, resolvedPath)) return;
 
-      const event = {
+      const change: FileWatchChange = {
         at: Date.now(),
-        kind,
+        kind: kind as FileWatchChange["kind"],
         logicalRoot: scope.logicalRoot,
         path: toLogicalPath(scope, resolvedPath),
       };
-      const payload = JSON.stringify(event);
 
       for (const subscriber of state.subscribers) {
-        subscriber.writeSSE({ data: payload, event: "change" }).catch(() => {
-          state.subscribers.delete(subscriber);
-          closeWatcherIfIdle(state);
-        });
+        void (async () => subscriber.onChange(change))().catch(() => subscriber.release());
       }
     });
 
@@ -1170,12 +1204,74 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
     return { readyPromise: state.watcherReadyPromise, state };
   };
 
+  return {
+    logicalRoot: scope.logicalRoot,
+    subscribe(requested, onChange) {
+      const { readyPromise, state } = ensureWatcher(getRequestedWatchDirectories(scope, requested));
+      // A subscriber that releases before a failed start leaves no one awaiting it.
+      readyPromise.catch(() => {});
+      let released = false;
+      const subscriber: WatchSubscriber = {
+        onChange,
+        release() {
+          if (released) return;
+          released = true;
+          state.subscribers.delete(subscriber);
+          closeWatcherIfIdle(state);
+        },
+      };
+      state.subscribers.add(subscriber);
+      return { ready: readyPromise, release: subscriber.release };
+    },
+    watcherCount() {
+      let count = 0;
+      for (const state of watchStates.values()) if (state.watcher) count += 1;
+      return count;
+    },
+  };
+}
+
+/**
+ * The live-events counterpart of the watch route: `ready` once the watcher is
+ * ready, then a `change` per change, with the payloads the route writes.
+ * `fail` ends the subscription when the watcher cannot start.
+ */
+export function subscribeFileWatchEvents(
+  hub: FileWatchHub,
+  requested: readonly string[],
+  emit: LiveEventEmit,
+  fail: (message: string) => void,
+): () => void {
+  let released = false;
+  const subscription = hub.subscribe(requested, (change) => {
+    if (!released) emit("change", change);
+  });
+  const release = () => {
+    if (released) return;
+    released = true;
+    subscription.release();
+  };
+  subscription.ready.then(
+    () => {
+      if (!released) emit("ready", { at: Date.now(), logicalRoot: hub.logicalRoot });
+    },
+    () => {
+      if (released) return;
+      release();
+      fail("Watch failed");
+    },
+  );
+  return release;
+}
+
+export function createFileWatchEventsHandler(hub: FileWatchHub): Handler {
   return (c) => {
     const sse = createFileWatchSseStream();
     void (async () => {
-      const directories = getRequestedWatchDirectories(scope, c.req.url);
-      const { readyPromise, state } = ensureWatcher(directories);
-      state.subscribers.add(sse);
+      const subscription = hub.subscribe(
+        new URL(c.req.url).searchParams.getAll("watch"),
+        (change) => sse.writeSSE({ data: JSON.stringify(change), event: "change" }),
+      );
       let closed = false;
       let heartbeatFailures = 0;
       let heartbeatInFlight = false;
@@ -1190,8 +1286,7 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
         }
-        state.subscribers.delete(sse);
-        closeWatcherIfIdle(state);
+        subscription.release();
         removeRequestAbortListener?.();
         removeRequestAbortListener = null;
         sse.abort();
@@ -1227,7 +1322,7 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
           void Promise.resolve()
             .then(() =>
               sse.writeSSE({
-                data: JSON.stringify({ at: Date.now(), logicalRoot: scope.logicalRoot }),
+                data: JSON.stringify({ at: Date.now(), logicalRoot: hub.logicalRoot }),
                 event: "ping",
               }),
             )
@@ -1249,13 +1344,13 @@ export function createFileWatchEventsHandler(scope: FileBrowserScope): Handler {
 
       const writeReady = () =>
         sse.writeSSE({
-          data: JSON.stringify({ at: Date.now(), logicalRoot: scope.logicalRoot }),
+          data: JSON.stringify({ at: Date.now(), logicalRoot: hub.logicalRoot }),
           event: "ready",
         });
 
       try {
         try {
-          await Promise.race([readyPromise, abortPromise]);
+          await Promise.race([subscription.ready, abortPromise]);
         } catch {
           cleanup();
           return;

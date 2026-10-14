@@ -25,6 +25,7 @@ const noSources: LiveEventSources = {
   hasChatSession: async () => false,
   subscribeChatSession: () => () => {},
   subscribeAppCatalog: () => () => {},
+  subscribeFileWatch: () => () => {},
 };
 
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {

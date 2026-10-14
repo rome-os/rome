@@ -83,6 +83,7 @@ interface TopicEntry {
   // null before its first one. An ack on a newer generation is a reconnect.
   listeners: Map<LiveTopicListener, number | null>;
   state: "idle" | "pending" | "subscribed" | "rejected";
+  params: unknown;
 }
 
 export class LiveEventsClient {
@@ -140,12 +141,14 @@ export class LiveEventsClient {
    * withdrawn on the last release. While the transport is "fallback" the
    * listener receives nothing until the socket comes back. The server replays
    * a topic's snapshot (the `chat.status` running set) only to the first
-   * listener, so a snapshot topic keeps a single listener per tab.
+   * listener, so a snapshot topic keeps a single listener per tab. `params`
+   * go out with every subscribe frame for the topic, and the first listener's
+   * win, so a topic that takes params names them in the topic.
    */
-  subscribe(topic: string, listener: LiveTopicListener): () => void {
+  subscribe(topic: string, listener: LiveTopicListener, params?: unknown): () => void {
     let entry = this.topics.get(topic);
     if (!entry) {
-      entry = { listeners: new Map(), state: "idle" };
+      entry = { listeners: new Map(), state: "idle", params };
       this.topics.set(topic, entry);
     }
     entry.listeners.set(
@@ -324,7 +327,11 @@ export class LiveEventsClient {
 
   private sendSubscribe(topic: string, entry: TopicEntry): void {
     entry.state = "pending";
-    this.send({ type: "subscribe", topic });
+    this.send(
+      entry.params === undefined
+        ? { type: "subscribe", topic }
+        : { type: "subscribe", topic, params: entry.params },
+    );
   }
 
   private send(message: LiveEventsClientMessage): void {

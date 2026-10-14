@@ -16,7 +16,7 @@ import type {
   ProjectDashboardChatsResponse,
   ProjectDashboardResponse,
 } from "@rome/api-types/projects";
-import { projectsFilesRoutes } from "./projects-files.js";
+import { createProjectsFiles } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/helpers.js";
@@ -31,7 +31,7 @@ import { readArchivePaths } from "../../test/file-browser.js";
 // — the outbound contract of the search subprocess — and answers with a
 // canned match) and the wall clock (fake timers pin usage-bucketing dates).
 
-type RouteDeps = Parameters<typeof projectsFilesRoutes>[0];
+type RouteDeps = Parameters<typeof createProjectsFiles>[0];
 
 // Suite-scoped real repos (created fresh per test in `beforeEach`). Hoisted to
 // module scope so `buildApp` can default to them.
@@ -46,7 +46,7 @@ const ENV_KEYS = [
 ] as const;
 
 function buildApp(deps: RouteDeps = { settingsRepo, webchatRepo }) {
-  return new Hono().route("/", projectsFilesRoutes(deps));
+  return new Hono().route("/", createProjectsFiles(deps).routes);
 }
 
 function textMessage(content: string): string {

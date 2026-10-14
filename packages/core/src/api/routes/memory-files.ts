@@ -8,11 +8,13 @@ import {
   createFilePutHandler,
   createFileRenameHandler,
   createFileWatchEventsHandler,
+  createFileWatchHub,
   createHistoryHandler,
   createResolveHandler,
   createSearchHandler,
   createTreeHandler,
   type FileBrowserScope,
+  type FileWatchHub,
 } from "../../lib/file-browser-server.js";
 import { ensureProfileMemoryInitialized } from "../../profile-memory.js";
 import { withMemoryGitLock } from "../../sync/memory-git-lock.js";
@@ -23,7 +25,8 @@ function toRepoPath(logicalPath: string): string {
   return logicalPath === "memory" ? "." : logicalPath.replace(/^memory\//, "");
 }
 
-export function memoryFilesRoutes(): Hono {
+/** The memory file routes, and the watch hub the live-events socket shares with them. */
+export function createMemoryFiles(): { routes: Hono; fileWatch: FileWatchHub } {
   const app = new Hono();
   const rootDir = ensureProfileMemoryInitialized();
 
@@ -88,7 +91,8 @@ export function memoryFilesRoutes(): Hono {
     },
   };
 
-  app.get("/memory/events", createFileWatchEventsHandler(baseScope));
+  const fileWatch = createFileWatchHub(baseScope);
+  app.get("/memory/events", createFileWatchEventsHandler(fileWatch));
   app.get("/memory/tree", createTreeHandler(baseScope));
   app.get("/memory/resolve", createResolveHandler(baseScope));
   app.get("/memory/file", createFileGetHandler(fileScope));
@@ -102,5 +106,5 @@ export function memoryFilesRoutes(): Hono {
   app.get("/memory/history", createHistoryHandler(fileScope));
   app.get("/memory/search", createSearchHandler({ ...baseScope, searchGlobs: ["*.md"] }));
 
-  return app;
+  return { routes: app, fileWatch };
 }

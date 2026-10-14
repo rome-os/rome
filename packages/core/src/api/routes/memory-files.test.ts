@@ -51,10 +51,10 @@ rs.mock("../../profile-memory.js", () => ({
   ensureProfileMemoryInitialized: rs.fn(() => state.memoryDir),
 }));
 
-import { memoryFilesRoutes } from "./memory-files.js";
+import { createMemoryFiles } from "./memory-files.js";
 
 function buildApp() {
-  return new Hono().route("/", memoryFilesRoutes());
+  return new Hono().route("/", createMemoryFiles().routes);
 }
 
 async function readTarGzEntries(res: Response): Promise<Record<string, string>> {

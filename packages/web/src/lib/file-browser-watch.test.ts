@@ -4,6 +4,7 @@ import {
   findFileBrowserTreeNode,
   getAbsentDeletedWatchPaths,
   getFileBrowserWatchPaths,
+  getFileBrowserWatchTopic,
   shouldReloadSelectedWatchFile,
   type FileBrowserWatchTreeNode,
 } from "./file-browser-watch";
@@ -48,6 +49,30 @@ describe("file browser watch reconciliation", () => {
     expect(createFileBrowserEventsUrl("/api/memory", ["memory", "memory/Research Notes"])).toBe(
       "/api/memory/events?watch=memory&watch=memory%2FResearch+Notes",
     );
+  });
+
+  it("names a watch topic after its scope and path set, and keeps other APIs and oversized sets on SSE", () => {
+    const projects = getFileBrowserWatchTopic("/api/projects", ["projects", "projects/app"]);
+    expect(projects).toEqual({
+      topic: expect.stringMatching(/^files\.watch:projects:[a-z0-9]+$/),
+      params: { watch: ["projects", "projects/app"] },
+    });
+    expect(getFileBrowserWatchTopic("/api/projects", ["projects", "projects/app"])).toEqual(
+      projects,
+    );
+    expect(getFileBrowserWatchTopic("/api/projects", ["projects"])?.topic).not.toBe(
+      projects?.topic,
+    );
+    expect(getFileBrowserWatchTopic("/api/memory", ["memory"])?.topic).toMatch(
+      /^files\.watch:memory:/,
+    );
+
+    expect(getFileBrowserWatchTopic("/api/share/token/projects", ["projects"])).toBeNull();
+    expect(getFileBrowserWatchTopic("/api/toString", ["projects"])).toBeNull();
+    const many = Array.from({ length: 257 }, (_, i) => `projects/${i}`);
+    expect(getFileBrowserWatchTopic("/api/projects", many)).toBeNull();
+    const long = Array.from({ length: 64 }, (_, i) => `projects/${i}-${"x".repeat(600)}`);
+    expect(getFileBrowserWatchTopic("/api/projects", long)).toBeNull();
   });
 
   it("does not clear a deleted path that is replaced in the same batch", async () => {

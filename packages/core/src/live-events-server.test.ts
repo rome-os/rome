@@ -1,11 +1,11 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket } from "ws";
-import type { LiveEventsServerMessage } from "@rome/api-types/live-events";
+import type { FileWatchScope, LiveEventsServerMessage } from "@rome/api-types/live-events";
 import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
@@ -13,6 +13,11 @@ import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./lib/auth.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import {
+  createFileWatchHub,
+  type FileWatchHub,
+  subscribeFileWatchEvents,
+} from "./lib/file-browser-server.js";
 import {
   attachLiveEventsServer,
   type LiveEventSources,
@@ -52,8 +57,8 @@ class TestClient {
     }
   }
 
-  async subscribe(topic: string): Promise<void> {
-    this.send({ type: "subscribe", topic });
+  async subscribe(topic: string, params?: unknown): Promise<void> {
+    this.send({ type: "subscribe", topic, params });
     await this.next((m) => m.type === "subscribed" && m.topic === topic);
   }
 
@@ -84,6 +89,9 @@ function upgradeStatus(port: number, headers: Record<string, string>): Promise<n
 describe("live events WebSocket", () => {
   let testDb: TestDb;
   let projectsRoot: string;
+  let memoryRoot: string;
+  let fileWatch: Record<FileWatchScope, FileWatchHub>;
+  let subscribeFileWatch: LiveEventSources["subscribeFileWatch"];
   let server: Server;
   let port: number;
   let runtime: WebchatRuntime;
@@ -112,7 +120,22 @@ describe("live events WebSocket", () => {
 
   beforeEach(async () => {
     projectsRoot = mkdtempSync(join(tmpdir(), "rome-live-events-"));
+    memoryRoot = mkdtempSync(join(tmpdir(), "rome-live-events-memory-"));
     process.env.ROME_PROJECTS_ROOT = projectsRoot;
+    fileWatch = {
+      projects: createFileWatchHub({
+        assetBasePath: "/api/projects/asset",
+        logicalRoot: "projects",
+        rootDir: projectsRoot,
+      }),
+      memory: createFileWatchHub({
+        assetBasePath: "/api/memory/asset",
+        logicalRoot: "memory",
+        rootDir: memoryRoot,
+      }),
+    };
+    subscribeFileWatch = (scope, paths, emit, fail) =>
+      subscribeFileWatchEvents(fileWatch[scope], paths, emit, fail);
     testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({
       id: "auth-1",
@@ -143,6 +166,8 @@ describe("live events WebSocket", () => {
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
+      subscribeFileWatch: (scope, paths, emit, fail) =>
+        track(subscribeFileWatch(scope, paths, emit, fail)),
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -161,7 +186,9 @@ describe("live events WebSocket", () => {
     live.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     testDb.close();
+    await rs.waitFor(() => expect(fileWatch.projects.watcherCount()).toBe(0));
     rmSync(projectsRoot, { recursive: true, force: true });
+    rmSync(memoryRoot, { recursive: true, force: true });
     if (originalProjectsRoot === undefined) delete process.env.ROME_PROJECTS_ROOT;
     else process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
   });
@@ -201,7 +228,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives an allow-listed dashboard visitor the chat topics but not the app catalog", async () => {
+  it("gives an allow-listed dashboard visitor every topic but the app catalog", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -232,13 +259,15 @@ describe("live events WebSocket", () => {
     });
     await client.subscribe("chat.status");
     await client.subscribe("chat.session:sess-a");
+    // The edge admits this visitor to the projects watch route too.
+    await client.subscribe("files.watch:projects:k1", { watch: ["projects"] });
     client.send({ type: "subscribe", topic: "apps.catalog" });
     expect(await client.next((m) => m.type === "error")).toEqual({
       type: "error",
       topic: "apps.catalog",
       message: "Forbidden",
     });
-    expect(activeSubscriptions).toBe(2);
+    expect(activeSubscriptions).toBe(3);
     expect(catalogHandlers.size).toBe(0);
   });
 
@@ -355,6 +384,88 @@ describe("live events WebSocket", () => {
     });
     expect(client.messages.some((m) => m.type === "subscribed")).toBe(false);
     expect(activeSubscriptions).toBe(0);
+  });
+
+  it("streams file changes under the watched directories only, after ready", async () => {
+    mkdirSync(join(projectsRoot, "a"));
+    mkdirSync(join(projectsRoot, "b"));
+    const client = await connect();
+    const topic = "files.watch:projects:k1";
+    await client.subscribe(topic, { watch: ["projects/a", "projects/../../outside"] });
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === topic && m.event === "ready"),
+    ).toMatchObject({ data: { logicalRoot: "projects" } });
+
+    writeFileSync(join(projectsRoot, "b", "unwatched.txt"), "b\n");
+    writeFileSync(join(projectsRoot, "a", "watched.txt"), "a\n");
+    expect(await client.next((m) => m.type === "event" && m.event === "change")).toMatchObject({
+      topic,
+      data: { kind: "add", logicalRoot: "projects", path: "projects/a/watched.txt" },
+    });
+    expect(JSON.stringify(client.messages)).not.toContain("unwatched");
+    expect(fileWatch.projects.watcherCount()).toBe(1);
+    expect(fileWatch.memory.watcherCount()).toBe(0);
+  });
+
+  it("closes the file watcher on unsubscribe and on socket close", async () => {
+    const first = await connect();
+    const topic = "files.watch:memory:k1";
+    await first.subscribe(topic, { watch: ["memory"] });
+    await first.next((m) => m.type === "event" && m.event === "ready");
+    expect(fileWatch.memory.watcherCount()).toBe(1);
+
+    first.send({ type: "unsubscribe", topic });
+    await rs.waitFor(() => expect(fileWatch.memory.watcherCount()).toBe(0));
+    expect(activeSubscriptions).toBe(0);
+
+    const second = await connect();
+    await second.subscribe(topic, { watch: ["memory"] });
+    await second.next((m) => m.type === "event" && m.event === "ready");
+    expect(fileWatch.memory.watcherCount()).toBe(1);
+    await second.close();
+    await rs.waitFor(() => expect(fileWatch.memory.watcherCount()).toBe(0));
+    await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
+  });
+
+  it("rejects file watches with bad params or names, and ends one whose watcher fails", async () => {
+    const client = await connect();
+    client.send({ type: "subscribe", topic: "files.watch:projects:k1" });
+    client.send({
+      type: "subscribe",
+      topic: "files.watch:projects:k2",
+      params: { watch: Array.from({ length: 257 }, () => "projects") },
+    });
+    client.send({ type: "subscribe", topic: "files.watch:home:k1", params: { watch: [] } });
+    client.send({ type: "subscribe", topic: "files.watch:projects:a:b", params: { watch: [] } });
+    for (const [topic, message] of [
+      ["files.watch:projects:k1", "Invalid params"],
+      ["files.watch:projects:k2", "Invalid params"],
+      ["files.watch:home:k1", "Unknown topic"],
+      ["files.watch:projects:a:b", "Unknown topic"],
+    ]) {
+      expect(await client.next((m) => m.type === "error" && m.topic === topic)).toMatchObject({
+        message,
+      });
+    }
+
+    const working = subscribeFileWatch;
+    subscribeFileWatch = (_scope, _paths, _emit, fail) => {
+      queueMicrotask(() => fail("Watch failed"));
+      return () => {};
+    };
+    const topic = "files.watch:projects:k3";
+    await client.subscribe(topic, { watch: [] });
+    expect(await client.next((m) => m.type === "error" && m.topic === topic)).toMatchObject({
+      message: "Watch failed",
+    });
+    await rs.waitFor(() => expect(activeSubscriptions).toBe(0));
+
+    // The server forgot the failed topic, so asking again subscribes anew.
+    subscribeFileWatch = working;
+    client.send({ type: "subscribe", topic, params: { watch: [] } });
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === topic && m.event === "ready"),
+    ).toMatchObject({ data: { logicalRoot: "projects" } });
   });
 
   it("caps subscriptions per socket", async () => {

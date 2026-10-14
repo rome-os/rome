@@ -11,6 +11,8 @@ import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
+import type { FileWatchScope } from "@rome/api-types/live-events";
+import { type FileWatchHub, subscribeFileWatchEvents } from "../lib/file-browser-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -59,8 +61,8 @@ import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
 import { integrationsRoutes } from "./routes/integrations.js";
-import { memoryFilesRoutes } from "./routes/memory-files.js";
-import { projectsFilesRoutes } from "./routes/projects-files.js";
+import { createMemoryFiles } from "./routes/memory-files.js";
+import { createProjectsFiles } from "./routes/projects-files.js";
 import { syncRoutes } from "./routes/sync.js";
 import { publicAccessRoutes } from "./routes/public-access.js";
 import { dashboardAccessRoutes } from "./routes/dashboard-access.js";
@@ -84,7 +86,11 @@ const log = createLogger("api");
 export function buildApp(
   deps: ApiDeps,
   config: ApiConfig,
-): { app: Hono; webchatRuntime: WebchatRuntime } {
+): {
+  app: Hono;
+  webchatRuntime: WebchatRuntime;
+  fileWatch: Record<FileWatchScope, FileWatchHub>;
+} {
   const app = new Hono();
   app.onError(errorHandler);
 
@@ -178,8 +184,10 @@ export function buildApp(
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
   api.route("/", tailscaleRoutes(deps));
-  api.route("/", memoryFilesRoutes());
-  api.route("/", projectsFilesRoutes(deps));
+  const memoryFiles = createMemoryFiles();
+  api.route("/", memoryFiles.routes);
+  const projectsFiles = createProjectsFiles(deps);
+  api.route("/", projectsFiles.routes);
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
   const sessionQueries = new SessionQueryService({
@@ -213,7 +221,11 @@ export function buildApp(
     mountSpa(app, config.webRoot, deps);
   }
 
-  return { app, webchatRuntime };
+  return {
+    app,
+    webchatRuntime,
+    fileWatch: { memory: memoryFiles.fileWatch, projects: projectsFiles.fileWatch },
+  };
 }
 
 function mountSpa(
@@ -260,7 +272,7 @@ function readIndexHtml(webRoot: string): string {
 }
 
 export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHandle> {
-  const { app, webchatRuntime } = buildApp(deps, config);
+  const { app, webchatRuntime, fileWatch } = buildApp(deps, config);
 
   return await new Promise<ApiHandle>((resolve, reject) => {
     let server: ServerType;
@@ -299,6 +311,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
+          subscribeFileWatch: (scope, paths, emit, fail) =>
+            subscribeFileWatchEvents(fileWatch[scope], paths, emit, fail),
         },
       );
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);

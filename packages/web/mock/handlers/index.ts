@@ -952,6 +952,7 @@ const projectFileHandlers = fileBrowserHandlers({
   apiBasePath: "/api/projects",
   logicalRoot: "projects",
   tree: projectsTree,
+  watchScope: "projects",
 });
 
 /**

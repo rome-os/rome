@@ -1,4 +1,5 @@
 import { http, HttpResponse, type HttpHandler } from "msw";
+import type { FileWatchScope } from "@rome/api-types/live-events";
 import type {
   BrowserFile,
   HistoryEntry,
@@ -7,6 +8,7 @@ import type {
 } from "@/components/file-browser/store/types";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import type { FileBrowserWatchEvent } from "@/lib/file-browser-watch";
+import { registerFileWatchSource } from "./live-events";
 
 /**
  * The in-memory filesystem behind a file-browser surface — `/api/projects` and
@@ -106,12 +108,15 @@ export interface FileBrowserFixtureOptions {
   /** e.g. "memory" — the path prefix every node in `tree` carries. */
   logicalRoot: string;
   tree: MockFsNode[];
+  /** The live-events file watch scope this surface answers, as core's does. */
+  watchScope?: FileWatchScope;
 }
 
 export function fileBrowserHandlers({
   apiBasePath,
   logicalRoot,
   tree,
+  watchScope,
 }: FileBrowserFixtureOptions): HttpHandler[] {
   /** The list a path's node lives in, or would live in once created. */
   const siblingsOf = (path: string): MockFsNode[] | null => {
@@ -142,28 +147,41 @@ export function fileBrowserHandlers({
   const notFound = () => HttpResponse.json({ error: "not found" }, { status: 404 });
 
   /**
-   * Active `/events` streams. The real backend pushes chokidar watches over
-   * this channel; the browser's SSE reconciler reloads the root tree (and the
-   * selected file) on every change. Without it the mock's own POST/PATCH /
-   * DELETE writes would land in the fixture but never reappear in the tree
-   * until a full refresh, because the tree slice short-circuits already
-   * loaded folders from its in-memory cache.
+   * Active watches, over the `/events` stream or the live-events socket. The
+   * real backend pushes chokidar watches over these; the browser's watch
+   * reconciler reloads the root tree (and the selected file) on every change.
+   * Without them the mock's own POST/PATCH / DELETE writes would land in the
+   * fixture but never reappear in the tree until a full refresh, because the
+   * tree slice short-circuits already loaded folders from its in-memory cache.
    */
-  const subscribers = new Map<ReadableStreamDefaultController<Uint8Array>, Set<string>>();
+  const subscribers = new Map<(change: FileBrowserWatchEvent) => void, Set<string>>();
   const encoder = new TextEncoder();
   const emit = (kind: FileBrowserWatchEventKind, path: string): void => {
-    const payload = JSON.stringify({ at: Date.now(), kind, logicalRoot, path });
-    const frame = encoder.encode(`event: change\ndata: ${payload}\n\n`);
-    for (const [controller, watchedDirectories] of subscribers) {
+    const change = { at: Date.now(), kind, logicalRoot, path };
+    for (const [deliver, watchedDirectories] of subscribers) {
       if (!watchedDirectories.has(path) && !watchedDirectories.has(parentPathOf(path))) continue;
-      try {
-        controller.enqueue(frame);
-      } catch {
-        // A closed stream drops on enqueue; the cancel handler removes it.
-        subscribers.delete(controller);
-      }
+      deliver(change);
     }
   };
+  const watchedDirectoriesFor = (requested: Iterable<string>): Set<string> => {
+    const watchedDirectories = new Set([logicalRoot]);
+    for (const path of requested) {
+      if (path === logicalRoot) continue;
+      const node = findNode(tree, path);
+      if (node?.type === "directory") watchedDirectories.add(path);
+    }
+    return watchedDirectories;
+  };
+  if (watchScope) {
+    registerFileWatchSource(watchScope, (watch, send) => {
+      const deliver = (change: FileBrowserWatchEvent) => send("change", change);
+      subscribers.set(deliver, watchedDirectoriesFor(watch));
+      send("ready", { at: Date.now(), logicalRoot });
+      return () => {
+        subscribers.delete(deliver);
+      };
+    });
+  }
 
   return [
     http.get(`${apiBasePath}/tree`, ({ request }) => {
@@ -291,30 +309,31 @@ export function fileBrowserHandlers({
     // initial rebaseline, and writes elsewhere in these handlers enqueue
     // `change` frames so the tree reconciles the way it does against core.
     http.get(`${apiBasePath}/events`, ({ request }) => {
-      const watchedDirectories = new Set([logicalRoot]);
-      for (const path of new URL(request.url).searchParams.getAll("watch")) {
-        if (path === logicalRoot) continue;
-        const node = findNode(tree, path);
-        if (node?.type === "directory") watchedDirectories.add(path);
-      }
+      const watchedDirectories = watchedDirectoriesFor(
+        new URL(request.url).searchParams.getAll("watch"),
+      );
       // `cancel()` receives the cancellation reason, not the controller, so
-      // keep the controller in the stream closure to unsubscribe reliably.
-      let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+      // keep the subscriber in the stream closure to unsubscribe reliably.
+      let deliver: ((change: FileBrowserWatchEvent) => void) | undefined;
       const stream = new ReadableStream<Uint8Array>({
-        start(c) {
-          controller = c;
-          subscribers.set(controller, watchedDirectories);
-          const ready = encoder.encode(
-            `event: ready\ndata: ${JSON.stringify({ at: Date.now(), logicalRoot })}\n\n`,
-          );
-          try {
-            controller.enqueue(ready);
-          } catch {
-            subscribers.delete(controller);
-          }
+        start(controller) {
+          const enqueue = (event: string, data: unknown): void => {
+            try {
+              controller.enqueue(
+                encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
+              );
+            } catch {
+              // A closed stream drops on enqueue; the cancel handler removes it.
+              if (deliver) subscribers.delete(deliver);
+            }
+          };
+          const subscriber = (change: FileBrowserWatchEvent) => enqueue("change", change);
+          deliver = subscriber;
+          subscribers.set(subscriber, watchedDirectories);
+          enqueue("ready", { at: Date.now(), logicalRoot });
         },
         cancel() {
-          if (controller) subscribers.delete(controller);
+          if (deliver) subscribers.delete(deliver);
         },
       });
       return new HttpResponse(stream, {

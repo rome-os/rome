@@ -1,11 +1,11 @@
 // Dashboard live-events WebSocket at `/ws/events`. One socket per dashboard tab
-// carries the chat status, chat session, and app catalog streams, so they hold
-// none of the browser's six HTTP/1.1 connections per origin.
+// carries the chat status, chat session, app catalog, and file watch streams,
+// so they hold none of the browser's six HTTP/1.1 connections per origin.
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
-// guardian gets every topic, and a visitor on the dashboard allow-list gets the
-// chat topics but not `apps.catalog`.
+// guardian gets every topic, and a visitor on the dashboard allow-list gets
+// every topic but `apps.catalog`.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too.
@@ -16,7 +16,12 @@ import {
   APP_CATALOG_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
+  FILE_WATCH_SCOPES,
+  FILE_WATCH_TOPIC_PREFIX,
+  type FileWatchScope,
+  fileWatchParamsSchema,
   liveEventsClientMessageSchema,
+  MAX_SUBSCRIBE_PARAMS_BYTES,
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
@@ -39,10 +44,21 @@ export interface LiveEventSources {
   hasChatSession(sessionId: string): Promise<boolean>;
   subscribeChatSession(sessionId: string, emit: LiveEventEmit): Unsubscribe;
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
+  /**
+   * Watches logical directories under one scope's root. `ready` follows the
+   * watcher's start, and `fail` ends the subscription if it cannot start.
+   */
+  subscribeFileWatch(
+    scope: FileWatchScope,
+    paths: readonly string[],
+    emit: LiveEventEmit,
+    fail: (message: string) => void,
+  ): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
-const MAX_PAYLOAD_BYTES = 4 * 1024;
+// Room for the largest subscribe params plus the frame around them.
+const MAX_PAYLOAD_BYTES = MAX_SUBSCRIBE_PARAMS_BYTES + 4 * 1024;
 const PING_INTERVAL_MS = 25_000;
 // A tab that stops reading would otherwise grow this buffer without bound. The
 // client resyncs on reconnect, so closing it loses nothing.
@@ -51,20 +67,31 @@ const CLOSE_POLICY_VIOLATION = 1008;
 const CLOSE_TRY_AGAIN_LATER = 1013;
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const FILE_WATCH_KEY_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
-  | { kind: "chat.session"; sessionId: string };
+  | { kind: "chat.session"; sessionId: string }
+  | { kind: "files.watch"; scope: FileWatchScope; paths: string[] };
 
-function parseTopic(topic: string): Topic | null {
+function parseTopic(topic: string, params: unknown): Topic | "unknown" | "invalid params" {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
   if (topic === APP_CATALOG_TOPIC) return { kind: "apps.catalog" };
   if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
   }
-  return null;
+  if (topic.startsWith(FILE_WATCH_TOPIC_PREFIX)) {
+    const [scope, key, ...rest] = topic.slice(FILE_WATCH_TOPIC_PREFIX.length).split(":");
+    const known = FILE_WATCH_SCOPES.find((name) => name === scope);
+    if (known && rest.length === 0 && FILE_WATCH_KEY_PATTERN.test(key ?? "")) {
+      const parsed = fileWatchParamsSchema.safeParse(params);
+      if (!parsed.success) return "invalid params";
+      return { kind: "files.watch", scope: known, paths: parsed.data.watch };
+    }
+  }
+  return "unknown";
 }
 
 function errorMessage(err: unknown): string {
@@ -125,7 +152,11 @@ export function attachLiveEventsServer(
     const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
 
-    const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
+    const open = (
+      topic: Topic,
+      emit: LiveEventEmit,
+      fail: (message: string) => void,
+    ): Unsubscribe => {
       switch (topic.kind) {
         case "chat.status":
           return sources.subscribeChatStatus(emit);
@@ -133,18 +164,24 @@ export function attachLiveEventsServer(
           return sources.subscribeAppCatalog(emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
+        case "files.watch":
+          return sources.subscribeFileWatch(topic.scope, topic.paths, emit, fail);
       }
     };
 
-    const subscribe = (name: string) => {
+    const subscribe = (name: string, params: unknown) => {
       if (subscriptions.has(name)) return;
       if (subscriptions.size >= MAX_SUBSCRIPTIONS_PER_SOCKET) {
         sendError("Too many subscriptions", name);
         return;
       }
-      const topic = parseTopic(name);
-      if (!topic) {
+      const topic = parseTopic(name, params);
+      if (topic === "unknown") {
         sendError("Unknown topic", name);
+        return;
+      }
+      if (topic === "invalid params") {
+        sendError("Invalid params", name);
         return;
       }
       if (!permitted(topic)) {
@@ -162,9 +199,18 @@ export function attachLiveEventsServer(
             return;
           }
           send({ type: "subscribed", topic: name });
-          entry.unsubscribe = open(topic, (event, data) =>
-            send({ type: "event", topic: name, event, data }),
+          entry.unsubscribe = open(
+            topic,
+            (event, data) => send({ type: "event", topic: name, event, data }),
+            (message) => {
+              if (closed || subscriptions.get(name) !== entry) return;
+              subscriptions.delete(name);
+              entry.unsubscribe?.();
+              sendError(message, name);
+            },
           );
+          // A source that failed before returning has no release to call yet.
+          if (subscriptions.get(name) !== entry) entry.unsubscribe();
         })
         .catch((err) => {
           log.error("live events subscribe failed", { topic: name, error: errorMessage(err) });
@@ -217,7 +263,7 @@ export function attachLiveEventsServer(
         sendError("Invalid message");
         return;
       }
-      if (result.data.type === "subscribe") subscribe(result.data.topic);
+      if (result.data.type === "subscribe") subscribe(result.data.topic, result.data.params);
       else unsubscribe(result.data.topic);
     });
     ws.on("close", teardown);

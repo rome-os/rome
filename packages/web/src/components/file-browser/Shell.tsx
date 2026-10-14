@@ -27,7 +27,7 @@ import type { ExternalSelection } from "./store/types";
 import { useSelectionChangeBroadcast } from "./hooks/useSelectionChangeBroadcast";
 import { useContainerBelowWidth } from "@/lib/useContainerBelowWidth";
 import { FILE_BROWSER_TWO_PANE_MIN_WIDTH } from "./store/utils";
-import { createFileBrowserEventsUrl, getFileBrowserWatchPaths } from "@/lib/file-browser-watch";
+import { getFileBrowserWatchPaths } from "@/lib/file-browser-watch";
 import {
   getUploadEntriesFromDataTransfer,
   getUploadEntriesFromFileList,
@@ -87,7 +87,6 @@ export function Shell({
     selectedFolderPath,
     filesPaneDrillPath: isBelowMd ? filesPaneDrillPath : null,
   });
-  const watchEventsUrl = createFileBrowserEventsUrl(apiBasePath, watchEventPaths);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
@@ -124,7 +123,7 @@ export function Shell({
   }, [store]);
 
   useUrlSelectionSync({ embedded });
-  useFileBrowserWatch({ watchEventsUrl });
+  useFileBrowserWatch({ apiBasePath, watchPaths: watchEventPaths });
   useBeforeUnloadGuard();
   useDocumentLinkInterceptor();
   usePageHideKeepalive();

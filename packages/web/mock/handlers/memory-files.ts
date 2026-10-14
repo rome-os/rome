@@ -184,4 +184,5 @@ export const memoryFileHandlers = fileBrowserHandlers({
   apiBasePath: "/api/memory",
   logicalRoot: "memory",
   tree: memoryTree,
+  watchScope: "memory",
 });

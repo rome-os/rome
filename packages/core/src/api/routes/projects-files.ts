@@ -19,12 +19,14 @@ import {
   createFilePutHandler,
   createFileRenameHandler,
   createFileWatchEventsHandler,
+  createFileWatchHub,
   createHistoryHandler,
   createResolveHandler,
   createSearchHandler,
   createTreeHandler,
   resolveNearestGitTarget,
   type FileBrowserScope,
+  type FileWatchHub,
 } from "../../lib/file-browser-server.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { PROJECTS_IGNORED_NAMES, PROJECTS_SEARCH_GLOBS } from "../../lib/project-entry-policy.js";
@@ -705,7 +707,11 @@ function calculateCacheHitRate(cacheReadTokens = 0, inputTokens = 0, cacheWriteT
   return promptTokens > 0 ? cacheReadTokens / promptTokens : 0;
 }
 
-export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
+/** The projects file routes, and the watch hub the live-events socket shares with them. */
+export function createProjectsFiles(deps: ProjectsRouteDeps): {
+  routes: Hono;
+  fileWatch: FileWatchHub;
+} {
   const app = new Hono();
   const projectsRoot = ensureProjectsRootInitialized();
 
@@ -739,7 +745,8 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     },
   };
 
-  app.get("/projects/events", createFileWatchEventsHandler(baseScope));
+  const fileWatch = createFileWatchHub(baseScope);
+  app.get("/projects/events", createFileWatchEventsHandler(fileWatch));
   app.get("/projects/tree", createTreeHandler(baseScope));
   app.get("/projects/resolve", createResolveHandler(baseScope));
   app.get("/projects/file", createFileGetHandler(fileScope));
@@ -905,5 +912,5 @@ export function projectsFilesRoutes(deps: ProjectsRouteDeps): Hono {
     return c.json(response);
   });
 
-  return app;
+  return { routes: app, fileWatch };
 }

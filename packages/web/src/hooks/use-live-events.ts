@@ -16,10 +16,15 @@ import {
   useSseEvents,
 } from "./use-sse-events";
 
-/** A live-events topic and the SSE route that serves the same events. */
+/**
+ * A live-events topic and the SSE route that serves the same events. `params`
+ * go out with the subscribe frame and must not change while `topic` stays the
+ * same.
+ */
 export interface LiveTopic {
   topic: string;
   sseUrl: string;
+  params?: unknown;
 }
 
 export const chatStatusTopic: LiveTopic = {
@@ -81,6 +86,8 @@ export function useLiveEvents<const Schemas extends Record<string, z.ZodType>>(
   handlersRef.current = handlers;
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const paramsRef = useRef(topic.params);
+  paramsRef.current = topic.params;
   const name = topic.topic;
 
   // Stays subscribed on the fallback too, so the client can resync this topic
@@ -93,21 +100,28 @@ export function useLiveEvents<const Schemas extends Record<string, z.ZodType>>(
         { rejected: "Live error handler rejected", failed: "Live error handler failed" },
         { topic: name, readyState },
       );
-    return client.subscribe(name, {
-      onEvent(eventName, data) {
-        const current: Record<string, SseEventHandler> = handlersRef.current;
-        if (!Object.hasOwn(current, eventName)) return;
-        dispatchValidatedEvent(current[eventName], data, "Live", { topic: name, eventName });
+    return client.subscribe(
+      name,
+      {
+        onEvent(eventName, data) {
+          const current: Record<string, SseEventHandler> = handlersRef.current;
+          if (!Object.hasOwn(current, eventName)) return;
+          dispatchValidatedEvent(current[eventName], data, "Live", { topic: name, eventName });
+        },
+        onReconnect() {
+          invokeObservedCallback(
+            () => optionsRef.current?.onReconnect?.(),
+            {
+              rejected: "Live reconnect handler rejected",
+              failed: "Live reconnect handler failed",
+            },
+            { topic: name },
+          );
+        },
+        onDrop: () => reportError(CONNECTING),
+        onRejected: () => reportError(CLOSED),
       },
-      onReconnect() {
-        invokeObservedCallback(
-          () => optionsRef.current?.onReconnect?.(),
-          { rejected: "Live reconnect handler rejected", failed: "Live reconnect handler failed" },
-          { topic: name },
-        );
-      },
-      onDrop: () => reportError(CONNECTING),
-      onRejected: () => reportError(CLOSED),
-    });
+      paramsRef.current,
+    );
   }, [client, name, enabled]);
 }
