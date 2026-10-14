@@ -2078,9 +2078,11 @@ export function Chat({
                   )}
                 </div>
               </div>
-              {/* Pairs with the empty state's own flex-1 so the greeting and the
-                  composer sit together, centered. Phones keep the docked composer,
-                  where the keyboard owns the bottom of the screen. */}
+              {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
+                  so the free space splits evenly above and below the greeting and
+                  composer; a 0 basis (`flex-1`) on either side puts them off-center.
+                  Phones keep the docked composer, where the keyboard owns the
+                  bottom of the screen. */}
               {centerDraftComposer && !mainSessionId ? (
                 <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
               ) : null}
