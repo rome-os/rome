@@ -2,7 +2,6 @@ cases:
   - name: CHAT-01 Draft and clear a message from the home composer
     tags:
       - chat
-      - shard-1
     steps:
       - app.open:
           path: /chat
@@ -25,7 +24,6 @@ cases:
   - name: CHAT-02 Open the skill picker after a failed send
     tags:
       - chat
-      - shard-1
     steps:
       - app.open:
           path: /chat
@@ -54,7 +52,6 @@ cases:
   - name: CHAT-03 Open the agent mention picker
     tags:
       - chat
-      - shard-1
     steps:
       - app.open:
           path: /chat
@@ -67,7 +64,6 @@ cases:
   - name: CHAT-04 Inspect a successful execution trace
     tags:
       - chat
-      - shard-1
     steps:
       - app.open:
           path: /chat/mock-chat-1
@@ -81,7 +77,6 @@ cases:
   - name: CHAT-05 Draft an answer in an unanswered question card
     tags:
       - chat
-      - shard-1
     steps:
       - app.open:
           path: /chat/mock-chat-2

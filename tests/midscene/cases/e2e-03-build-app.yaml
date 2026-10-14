@@ -4,7 +4,6 @@ cases:
       - poc
       - story
       - apps
-      - shard-2
     steps:
       - app.open:
           path: /chat/mock-chat-build-app

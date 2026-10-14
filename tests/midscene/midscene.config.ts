@@ -6,6 +6,8 @@ import { defineProjectSetup, defineTestProject } from "@midscene/test/config";
 import { createMidsceneNodes } from "@midscene/test/midscene";
 import { PlaywrightAgent } from "@midscene/web/playwright/agent";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { checkBrowserBoundary } from "./browser-boundary.js";
+import { startMockServer } from "./mock-server.js";
 import { installBrowserNetworkGuard } from "./browser-network-guard.js";
 
 loadEnv({ path: fileURLToPath(new URL(".env", import.meta.url)) });
@@ -24,37 +26,43 @@ interface ProjectContext {
   renameResponses?: Array<{ sourcePath: string; targetName: string; status: number }>;
 }
 
-const AI_ACT_CONTEXT = `
-When returning pixel coordinates, keep every coordinate strictly inside the screenshot bounds:
-never use the screenshot width or height itself as a right or bottom coordinate. Prefer a tight
-box around the interactive content instead of the full container or viewport edge. Coordinates
-must be absolute from the full screenshot's top-left corner; include the left sidebar, headers, and
-all surrounding workspace offsets instead of resetting the origin at the main content area. Text-field
-coordinates must tightly enclose the editable line or placeholder text, not the larger rounded
-composer surrounding it. Text-field focus often has no visible indicator; after one accurate
-locate, proceed with Input or ClearInput instead of repeatedly tapping while waiting for a visual
-focus change.
-`.trim();
-
 const getAgent = ({ context }: NodeExecutionContext<unknown, ProjectContext>) => {
   if (!context.page) throw new Error("No page is open; call app.open before AI steps");
-  context.agent ??= new PlaywrightAgent(context.page, {
-    aiContexts: { aiAct: AI_ACT_CONTEXT },
-  });
+  context.agent ??= new PlaywrightAgent(context.page);
   return context.agent;
 };
 
 const setup = defineProjectSetup<ProjectContext>({
   name: "web",
-  async setup({ env, onTeardown }) {
-    const browser = await chromium.launch({ headless: env.HEADLESS !== "false" });
-    const context: ProjectContext = { browser };
-    onTeardown(async () => {
-      await context.agent?.destroy();
-      await context.browserContext?.close().catch(() => undefined);
-      await browser.close();
-    });
-    return context;
+  async setup({ env, onTeardown, signal }) {
+    const stopServer = await startMockServer(
+      BASE_URL,
+      fileURLToPath(new URL("midscene_run/rome-devmock.log", import.meta.url)),
+      signal,
+    );
+    let context: ProjectContext | undefined;
+    let cleanup: Promise<void> | undefined;
+    const close = () => cleanup ??= (async () => {
+      try {
+        await context?.agent?.destroy();
+      } finally {
+        try {
+          await context?.browser.close();
+        } finally {
+          await stopServer();
+        }
+      }
+    })();
+    onTeardown(close);
+    try {
+      const browser = await chromium.launch({ headless: env.HEADLESS !== "false" });
+      context = { browser };
+      await checkBrowserBoundary(browser, BASE_URL);
+      return context;
+    } catch (error) {
+      await close();
+      throw error;
+    }
   },
 });
 
@@ -217,7 +225,7 @@ const tagList = (raw: string | undefined): string[] =>
     .filter(Boolean);
 
 export default defineTestProject<ProjectContext>({
-  test: { maxConcurrency: 1, testTimeout: 8 * 60_000 },
+  test: { maxConcurrency: 2, testTimeout: 8 * 60_000 },
   projects: [
     {
       name: process.env.MIDSCENE_PROJECT_NAME ?? "web",

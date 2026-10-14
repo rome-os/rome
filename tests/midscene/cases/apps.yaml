@@ -2,7 +2,6 @@ cases:
   - name: APPS-01 Search the installed-app catalog
     tags:
       - apps
-      - shard-2
     steps:
       - app.open:
           path: /apps
@@ -15,7 +14,6 @@ cases:
   - name: APPS-02 Disable an app from its tile menu
     tags:
       - apps
-      - shard-2
     steps:
       - app.open:
           path: /apps
@@ -30,7 +28,6 @@ cases:
   - name: APPS-03 Open Issue Triage from its details page
     tags:
       - apps
-      - shard-2
     steps:
       - app.open:
           path: /app-details/issue-triage

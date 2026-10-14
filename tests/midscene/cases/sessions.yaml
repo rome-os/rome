@@ -2,7 +2,6 @@ cases:
   - name: SES-01 Search for a missing session
     tags:
       - sessions
-      - shard-3
     steps:
       - app.open:
           path: /sessions/all
@@ -14,7 +13,6 @@ cases:
   - name: SES-02 Open the session filter panel
     tags:
       - sessions
-      - shard-3
     steps:
       - app.open:
           path: /sessions/all
@@ -26,7 +24,6 @@ cases:
   - name: SES-03 Open a channel session detail
     tags:
       - sessions
-      - shard-3
     steps:
       - app.open:
           path: /sessions/all

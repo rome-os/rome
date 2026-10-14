@@ -2,9 +2,8 @@
 
 > Onboarding attachment for Rome maintainers.
 >
-> Status: all 38 cases catalogued in section 5 are defined as AI-native YAML
-> workflows under `tests/midscene/cases/`. Six CI shards split them
-> 5/8/7/7/6/5. Each case uses `aiAct` for interaction and `aiAssert` for
+> Status: all cases run in one CI job. They are defined under
+> `tests/midscene/cases/`. Each case uses `aiAct` for interaction and `aiAssert` for
 > its visible outcome.
 
 ## 1. Background and Goals
@@ -33,18 +32,18 @@ Goals:
 - Establish a long-lived AI-native E2E baseline for Rome's core product
   stories.
 - Serve as a reference implementation for offering Midscene CI to open-source
-  projects (deterministic fixtures + visual-semantic assertions + sharded CI).
+  projects (deterministic fixtures + visual-semantic assertions + full-suite CI).
 - Keep browser traffic local, repeatable and mutually non-polluting. The
   Node-side Midscene agent still calls the configured model endpoint.
 
 ## 2. Architecture
 
 ```
-GitHub Actions (6 shards)
+GitHub Actions (one test job)
   └─ pnpm --filter rome-web dev:mock:e2e    # strict MSW mode, localhost:3200
        └─ tests/midscene (standalone npm package)
             ├─ midscene.config.ts           # Playwright + Midscene config
-            ├─ cases/**.yaml                # cases (suite + shard tags)
+            ├─ cases/**.yaml                # cases (topic tags)
             └─ Playwright Chromium (1440×900, en-US)
                  └─ fresh BrowserContext per case
                       ├─ localStorage: rome.lang=en
@@ -71,7 +70,7 @@ GitHub Actions (6 shards)
   fixtures reset. Zero shared state between cases.
 - **Pinned English UI**: an init script writes `rome.lang=en`, so a zh-CN CI
   machine locale cannot drift the copy. A localized Chinese-shell case is
-  future coverage. None is included in the current 38-case suite.
+  future coverage. None is included in the current suite.
 - **Full sidebar-pin injection**: the mock guardian pins only Apps/Chat/
   Projects by default. Other entries live behind the "all apps" popover. Cases
   write `rome-sidebar-pins` (the shell's own localStorage contract) so every
@@ -81,7 +80,7 @@ GitHub Actions (6 shards)
   outcomes. `app.open` handles isolated setup.
 - **Env-driven selection**: `MIDSCENE_INCLUDE_TAGS` / `MIDSCENE_EXCLUDE_TAGS`
   (comma-separated, OR semantics), `MIDSCENE_RETRY`, `HEADLESS` — the same
-  entry point serves local single-case iteration and CI sharding.
+  entry point serves local single-case iteration and full-suite CI.
 
 The harness registers two custom nodes used by committed cases. Each case
 uses one `app.open`. Run `npm run nodes` in `tests/midscene` to generate a
@@ -132,44 +131,35 @@ reasons behind them.
   suite nightly against the latest upstream `main` commit. Its daily schedule
   is `0 6 * * *` (06:00 UTC / 14:00 Beijing), matching `nightly.yml`.
   It does not depend on the ordinary CI or Nightly workflow.
-  Pushes do not trigger it. Pull requests use a scoped path set: the workflow
-  itself, `tests/midscene/**`, the [case catalog](midscene-e2e-cases.md),
-  `packages/web/**`, `packages/ui/**`, `packages/web-content/**`,
-  `packages/api-types/**`, `packages/app-runtime-sdk/**`, and `pnpm-lock.yaml`.
-  A matching PR runs two secret-free jobs. `harness-validation` installs the
-  package, type-checks it, collects YAML cases, checks the catalog, and tests
-  report scripts without starting a browser or model.
-  `mock-boundary-validation` starts the mock server and checks MSW, browser
-  HTTP, and WebSocket blocking without model credentials.
+  Pushes and pull requests do not trigger it. Project setup starts the mock
+  server, waits for readiness, and checks MSW, HTTP, and WebSocket isolation.
+  Setup failure prevents case execution. Teardown closes the browser and
+  stops the server started by this run. Type checks run in the test job.
   Manual `workflow_dispatch` also runs the full suite on upstream `main`.
   A fork owner may manually dispatch a fork branch using that fork's secrets.
-  Set `report_source_run_id` to rebuild reports from an existing run's shard
-  artifacts without model calls. Report publishing requires the repository to
-  match `MIDSCENE_PUBLISH_REPO`.
-  The matrix does not run on `pull_request`: model calls are billable and a PR job checks out
+  Report publishing defaults on when test artifacts are available, including
+  fork runs. Manual dispatch can disable it with `publish_pages=false`.
+  The test job does not run on `pull_request`: model calls are billable and a PR job checks out
   contributor-controlled code. Note that merely naming a protected
   environment in the workflow does **not** create its reviewer gate — an
   absent environment is provisioned open — so until a maintainer actually
   configures a protected environment with required reviewers (ideally with
-  environment-scoped secrets), the secret-bearing matrix stays fail-closed
+  environment-scoped secrets), the secret-bearing test job stays fail-closed
   and runs only against code on the protected default branch. To enable
   model-backed PR runs later, create the protected environment in Settings
-  first, then add an environment-gated `pull_request` matrix job back to
+  first, then add an environment-gated `pull_request` test job back to
   the workflow.
 - **Runtime**: Ubuntu + Node.js 24. Pnpm is enabled (reading the root
   `packageManager` version) **before** `setup-node`, whose `cache: pnpm`
   requires pnpm to already exist on a clean runner. Product dependencies
   install with `pnpm install --frozen-lockfile --ignore-scripts`. The
-  `tests/midscene` package installs with `npm ci --strict-allow-scripts` against a lockfile whose
-  `resolved` URLs all point at the public `registry.npmjs.org`, followed by
-  `playwright install --with-deps chromium`.
-- **Secret handling and trust boundary**: the four `MIDSCENE_MODEL_*` values
-  come from repository secrets and are scoped only to the steps that actually
-  call the model (configuration check, connectivity preflight, shard run).
-  Dependency installation and the mock server never see them. The job starts
-  with a non-empty check and a `/chat/completions` connectivity preflight
-  (90-second timeout) so a missing secret or bad endpoint fails in seconds
-  instead of burning the full 45-minute budget.
+  `tests/midscene` package installs with `npm install --strict-allow-scripts`,
+  followed by `playwright install --with-deps chromium`.
+- **Secret handling and trust boundary**: model settings are scoped to the
+  `midscene-test model verify` and test run steps.
+  Dependency installation never sees them. Project setup passes a separate
+  environment without model credentials to the mock server. Model verification
+  checks text responses, image understanding, and AI locate before the suite.
 - **Network reachability (important)**: the preflight dials
   `MIDSCENE_MODEL_BASE_URL` directly from the runner. Hosted GitHub runners can
   only reach public endpoints. If the model gateway lives on an intranet (for
@@ -181,35 +171,21 @@ reasons behind them.
 - **Mock server**: `pnpm --filter rome-web dev:mock:e2e` starts in the background
   (it runs `build:kit` first, so first-request readiness is polled for several
   minutes). Its log is uploaded as an artifact on failure.
-- **Sharding**: a 6-entry matrix selected by `MIDSCENE_INCLUDE_TAGS=shard-N`.
-  Every case carries exactly one `shard-N` tag. `fail-fast: false`,
-  `max-parallel: 1`, a 45-minute per-job timeout, and 2 case-level retries.
+- **Publication ordering**: a workflow-wide concurrency group serializes runs
+  across branches, covering history download through deployment. This prevents
+  concurrent publications from overwriting each other’s report history.
+- **Execution**: one `web` project runs all cases with `maxConcurrency: 1`.
+  Each case has up to two retries. The job timeout is 240 minutes, with a
+  220-minute limit for the test command.
 - **Evidence**: every model-backed run uploads the `midscene_run/` and
-  `.midscene/` shard artifacts, including failed runs. A read-only job writes
-  results after aggregation without waiting for Pages approval or deployment.
-  It shows total and per-shard counts, abnormal cases first, and passed cases
-  in a collapsed appendix. After Pages completes, a second Summary adds publication
-  status and the native report, screenshot, and exact report-step links when available.
-  If Pages fails or is skipped, results and artifact links remain available.
-  If aggregation fails, the final job recovers available trusted shard data.
-  Shard and publication jobs do not write separate Summaries.
+  `.midscene/` test artifacts, including failed runs. Pages reads the original
+  `midscene-results` artifact directly. The test job writes the native `result.md`
+  case list and artifact download link to Actions Summary, omitting the
+  artifact-relative HTML link. A second job prepares and deploys Pages, then
+  writes the online report link to a separate Summary block on success.
 - **Network stability**: `NODE_OPTIONS=--dns-result-order=ipv4first
   --no-network-family-autoselection` works around runner-side IPv6 racing when
   the model endpoint is only stable over IPv4.
-Shard split:
-
-| Shard | Cases | CI job topic |
-| --- | --- | --- |
-| shard-1 | 5 | Chat interactions |
-| shard-2 | 8 | Apps and chat cards |
-| shard-3 | 7 | Routines and sessions |
-| shard-4 | 7 | Files, people and activity |
-| shard-5 | 6 | Account and settings |
-| shard-6 | 5 | Recorded apps and navigation |
-
-The PoC stories also carry their shard tags (E2E-01/02 → shard-3, E2E-03 →
-shard-2, AUTH-01 → shard-5).
-
 ## 5. Case Catalog
 
 > Case ID convention: `<SUITE>-<number>`. ✅ = mock-drivable (all drafted in
@@ -217,10 +193,8 @@ shard-2, AUTH-01 → shard-5).
 > no YAML).
 
 <!-- CASE-CATALOG -->
-The suite contains **38** ✅ mock-drivable cases in 15 YAML files. The
-[case catalog](midscene-e2e-cases.md#case-catalog) lists their names and shard
-assignments. `npm run collect` validates the expected total and each shard
-count against a committed manifest.
+Case names, tags, and steps are defined only in
+[tests/midscene/cases](../tests/midscene/cases/), without a separate inventory.
 
 ### ⚠️ Candidates blocked by section 6 mock gaps (no YAML yet)
 
@@ -338,8 +312,7 @@ MIDSCENE_INCLUDE_TAGS=poc npm test   # PoC stories only
 3. Write each `aiAct` as a user goal. Combine related clicks, typing,
    scrolling, and navigation when they serve one intent.
 4. Write `aiAssert` prompts against visible outcomes and stable product text.
-5. A case carries exactly one `shard-N` tag. Add functional tags such as
-   `chat` or `routines` as needed.
+5. Add functional tags such as `chat` or `routines` for local case selection.
 6. New cases must pass repeatedly in a fresh context. Inter-case dependencies
    are forbidden.
 7. When fixtures change, update case assertions in lockstep. When a new product
