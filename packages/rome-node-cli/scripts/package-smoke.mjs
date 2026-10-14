@@ -56,7 +56,9 @@ try {
   await stopDaemon(config);
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
-  // The stopped daemon can still hold observe.db open for a moment, and Windows refuses to
-  // remove an open file.
-  await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  await rm(directory, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+    // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+    // an open file. A leftover temporary directory is harmless there.
+    if (process.platform !== "win32") throw error;
+  });
 }

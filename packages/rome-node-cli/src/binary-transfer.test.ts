@@ -41,9 +41,13 @@ async function until(check: () => boolean) {
  */
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "rome-node-transfer-"));
-  // A daemon process can still hold observe.db open for a moment, and Windows refuses to
-  // remove an open file.
-  cleanup.push(() => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+  cleanup.push(() =>
+    rm(root, { recursive: true, force: true, maxRetries: 5 }).catch((error) => {
+      // A stopped daemon can hold observe.db open a little longer, and Windows refuses to remove
+      // an open file. A leftover temporary directory is harmless there.
+      if (process.platform !== "win32") throw error;
+    }),
+  );
   const identities = new Map<string, string>();
   const tokenFor = (letter: string) => `romedev_${letter.repeat(43)}`;
   const callerId = randomUUID();
