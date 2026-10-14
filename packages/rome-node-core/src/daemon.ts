@@ -1,7 +1,13 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
+import { createRequire } from "node:module";
+import { arch, platform } from "node:os";
+import { join } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
-import { actionError, isRecord } from "./actions.js";
+import { actionError, isRecord, type ActionResponse } from "./actions.js";
+import type { ConnectionStatus } from "./client.js";
+import { ObserveStore, QueryError, type ActionEnd, type ActionStart } from "./observe.js";
+import type { LogQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
 import { DeviceConnector } from "./connector.js";
 import { daemonStatePath, readCallerCredential, type NodeConfig } from "./local.js";
 import { writePrivateJson } from "./storage.js";
@@ -19,10 +25,17 @@ import { isUuid } from "./frame.js";
 import { copyWithDevice, TRANSFER_VERSION, TransferError } from "./transfer.js";
 import type { CopyRequest } from "./daemon-protocol.js";
 
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const { version: NODE_CORE_VERSION } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
+
 interface Peer {
   socket: WebSocket;
   ready: boolean;
   subscribed: boolean;
+  /** Subscribed to the `node` topic. */
+  observing: boolean;
   alive: boolean;
   pending: Set<string | number>;
   /** Event notification bytes handed to the socket and not yet flushed. */
@@ -46,6 +59,62 @@ function copyRequest(params: Record<string, unknown>): CopyRequest | null {
     return null;
   return { direction, localPath, deviceId: deviceId.toLowerCase(), remotePath };
 }
+function byteCount(value: unknown): number {
+  return typeof value === "string" ? Buffer.byteLength(value) : 0;
+}
+
+/** What the observation log stores about a device action when it starts. */
+function actionStart(
+  deviceId: string,
+  action: string,
+  args: unknown,
+  mode: "json" | "binary",
+  stdinBytes = 0,
+): ActionStart {
+  const exec = action === "exec" && isRecord(args) && typeof args.command === "string";
+  let text: string | null = null;
+  if (!exec)
+    try {
+      text = JSON.stringify(args ?? {});
+    } catch {}
+  return {
+    direction: "out",
+    peer: deviceId.toLowerCase(),
+    action,
+    mode,
+    command: exec ? (args.command as string) : null,
+    args: exec ? (Array.isArray(args.args) ? args.args.map(String) : []) : text,
+    cwd: exec && typeof args.cwd === "string" ? args.cwd : null,
+    stdinBytes,
+  };
+}
+
+/** Maps an action response to its stored outcome. Program output is counted, never stored. */
+function actionEnd(response: ActionResponse, stdoutBytes?: number): ActionEnd {
+  if (!response.ok) {
+    const code = response.error.code;
+    return {
+      outcome:
+        code === "unknown_outcome" ? "unknown_outcome" : code === "canceled" ? "aborted" : "error",
+      errorCode: code,
+    };
+  }
+  const result = isRecord(response.result) ? response.result : {};
+  return {
+    outcome: "ok",
+    exitCode: Number.isSafeInteger(result.exitCode) ? (result.exitCode as number) : null,
+    signal: typeof result.signal === "string" ? result.signal : null,
+    stdoutBytes: stdoutBytes ?? byteCount(result.stdout),
+    stderrBytes: byteCount(result.stderr),
+  };
+}
+
+function logQuery(params: Record<string, unknown>): LogQuery {
+  if (!["actions", "lifecycle", "summary"].includes(String(params.kind)))
+    throw new RpcError(-32602, "log.query requires kind actions, lifecycle, or summary.");
+  return params as unknown as LogQuery;
+}
+
 /** A JSON-RPC response. A body makes it one binary message. */
 interface Reply {
   message: unknown;
@@ -62,12 +131,36 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     protocolVersion: DAEMON_PROTOCOL_VERSION,
     token: `romenode_${randomBytes(32).toString("base64url")}`,
   };
+  const startedAt = Date.now();
   let closing = false;
+  let stopReason = "signal";
+  // The store opens only after the listener binds, so a losing daemon never touches the file.
+  const store = new ObserveStore({
+    path: join(config.directory, "observe.db"),
+    secrets: [credential.token, state.token],
+  });
+  const caller = {
+    connection: "stopped" as ConnectionStatus,
+    since: startedAt,
+    onlineOnce: false,
+    reconnects: 0,
+    running: 0,
+  };
   const connector = new DeviceConnector({
     credential,
-    onStatus: () => {
+    onStatus: (status) => {
       deviceStatus.invalidate();
       for (const peer of peers) if (peer.subscribed) notify(peer);
+      if (status === caller.connection) return;
+      const at = Date.now();
+      caller.connection = status;
+      caller.since = at;
+      if (status === "online") {
+        if (caller.onlineOnce) caller.reconnects++;
+        caller.onlineOnce = true;
+      }
+      if (!closing) store.recordLifecycle("caller", "connection", status, at);
+      broadcast({ type: "connection", role: "caller", status, at });
     },
   });
   const deviceStatus = new DeviceStatusReader(connector);
@@ -76,6 +169,40 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     protocolVersion: DAEMON_PROTOCOL_VERSION,
     connection: connector.getStatus(),
   });
+  const nodeStatus = (): NodeStatus => ({
+    version: NODE_CORE_VERSION,
+    startedAt,
+    roles: {
+      caller: {
+        auth: caller.connection === "revoked" ? "revoked" : "authorized",
+        connection: caller.connection,
+        since: caller.since,
+        reconnects: caller.reconnects,
+        running: caller.running,
+      },
+    },
+  });
+  /** Records a device action around `work`, unless the action is a probe. */
+  async function observed<T>(
+    start: ActionStart | null,
+    work: () => Promise<T>,
+    end: (value: T) => ActionEnd,
+  ): Promise<T> {
+    if (!start) return work();
+    caller.running++;
+    const row = store.startAction(start);
+    if (row) broadcast({ type: "action", id: row.id, phase: "start", row });
+    let ended: ActionEnd = { outcome: "error", errorCode: "daemon_error" };
+    try {
+      const value = await work();
+      ended = end(value);
+      return value;
+    } finally {
+      caller.running--;
+      const done = row && store.endAction(row.id, ended);
+      if (done) broadcast({ type: "action", id: done.id, phase: "end", row: done });
+    }
+  }
   function authorized(req: IncomingMessage) {
     const actual = Buffer.from(req.headers.authorization ?? "");
     const expected = Buffer.from(`Bearer ${state.token}`);
@@ -129,6 +256,12 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     });
   }
   function notify(peer: Peer) {
+    emit(peer, "events.connection", snapshot());
+  }
+  function broadcast(event: NodeEvent) {
+    for (const peer of peers) if (peer.observing) emit(peer, "events.node", event);
+  }
+  function emit(peer: Peer, method: string, params: unknown) {
     // A slow observer must not accumulate unbounded event data or block other clients.
     // Only event bytes count, so a large binary response in flight does not trip the limit.
     if (peer.eventBytes > 1024 * 1024) {
@@ -136,11 +269,7 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
       return;
     }
     if (peer.socket.readyState !== WebSocket.OPEN) return;
-    const text = JSON.stringify({
-      jsonrpc: "2.0",
-      method: "events.connection",
-      params: snapshot(),
-    });
+    const text = JSON.stringify({ jsonrpc: "2.0", method, params });
     const size = Buffer.byteLength(text);
     peer.eventBytes += size;
     peer.socket.send(text, (error) => {
@@ -161,6 +290,54 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     }, 1000);
     timer.unref();
   };
+  async function copyFile(
+    peer: Peer,
+    id: string | number | null,
+    request: CopyRequest,
+  ): Promise<ActionResponse> {
+    // The controller exists before the first await. A client that disconnects during the
+    // capability probe below then cancels the copy instead of leaving it to run unowned.
+    const controller = new AbortController();
+    peer.copies.add(controller);
+    if (peer.socket.readyState !== WebSocket.OPEN) controller.abort();
+    const canceled = () =>
+      actionError("canceled", "The client disconnected. The copy did not start.");
+    let last = 0;
+    try {
+      if (controller.signal.aborted) return canceled();
+      const info = await connector.run(request.deviceId, "system.info", {});
+      if (controller.signal.aborted) return canceled();
+      if (!info.ok) return info;
+      if (!isRecord(info.result) || info.result.transferVersion !== TRANSFER_VERSION)
+        return actionError(
+          "unsupported_device",
+          "The device runs a rome-node version without file transfers. Update rome-node on that device.",
+        );
+      const summary = await copyWithDevice(
+        (events) => connector.openChannel(request.deviceId, events),
+        request,
+        {
+          signal: controller.signal,
+          onProgress: ({ bytes, total }) => {
+            const now = Date.now();
+            if (now - last < 250 && bytes !== total) return;
+            last = now;
+            send(peer, {
+              jsonrpc: "2.0",
+              method: "events.transfer",
+              params: { requestId: id, bytes, total },
+            });
+          },
+        },
+      );
+      return { type: "response", ok: true, result: summary };
+    } catch (cause) {
+      if (!(cause instanceof TransferError)) throw cause;
+      return actionError(cause.code, cause.message);
+    } finally {
+      peer.copies.delete(controller);
+    }
+  }
   function error(id: unknown, code: number, message: string) {
     return { jsonrpc: "2.0", id, error: { code, message } };
   }
@@ -210,7 +387,19 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
             break;
           case "daemon.stop":
             result = { stopped: true };
+            stopReason = "stop";
             setImmediate(close);
+            break;
+          case "node.status":
+            result = nodeStatus();
+            break;
+          case "log.query":
+            try {
+              result = store.query(logQuery(params));
+            } catch (cause) {
+              if (cause instanceof QueryError) throw new RpcError(-32602, cause.message);
+              throw cause;
+            }
             break;
           case "devices.status":
             result = await deviceStatus.read();
@@ -221,16 +410,26 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
           case "devices.run":
             if (typeof params.deviceId !== "string" || typeof params.action !== "string")
               throw new RpcError(-32602, "A device ID and action are required.");
-            result = await connector.run(params.deviceId, params.action, params.args ?? {});
+            {
+              const { deviceId, action } = params;
+              const args = params.args ?? {};
+              result = await observed(
+                action === "system.info" ? null : actionStart(deviceId, action, args, "json"),
+                () => connector.run(deviceId, action, args),
+                (response) => actionEnd(response),
+              );
+            }
             break;
           case "devices.runBinary": {
             if (typeof params.deviceId !== "string" || typeof params.action !== "string")
               throw new RpcError(-32602, "A device ID and action are required.");
-            const reply = await connector.runBinary(
-              params.deviceId,
-              params.action,
-              params.args ?? {},
-              input ?? new Uint8Array(),
+            const { deviceId, action } = params;
+            const args = params.args ?? {};
+            const stdin = input ?? new Uint8Array();
+            const reply = await observed(
+              actionStart(deviceId, action, args, "binary", stdin.byteLength),
+              () => connector.runBinary(deviceId, action, args, stdin),
+              ({ response, body }) => actionEnd(response, body.byteLength),
             );
             result = reply.response;
             body = reply.body;
@@ -243,69 +442,49 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
                 -32602,
                 "files.copy requires direction push or pull, an absolute localPath, a device UUID, and remotePath.",
               );
-            // The controller exists before the first await. A client that disconnects during the
-            // capability probe below then cancels the copy instead of leaving it to run unowned.
-            const controller = new AbortController();
-            peer.copies.add(controller);
-            if (peer.socket.readyState !== WebSocket.OPEN) controller.abort();
-            const canceled = () =>
-              actionError("canceled", "The client disconnected. The copy did not start.");
-            let last = 0;
-            try {
-              if (controller.signal.aborted) {
-                result = canceled();
-                break;
-              }
-              const info = await connector.run(request.deviceId, "system.info", {});
-              if (controller.signal.aborted) {
-                result = canceled();
-                break;
-              }
-              if (!info.ok) {
-                result = info;
-                break;
-              }
-              if (!isRecord(info.result) || info.result.transferVersion !== TRANSFER_VERSION) {
-                result = actionError(
-                  "unsupported_device",
-                  "The device runs a rome-node version without file transfers. Update rome-node on that device.",
-                );
-                break;
-              }
-              const summary = await copyWithDevice(
-                (events) => connector.openChannel(request.deviceId, events),
-                request,
-                {
-                  signal: controller.signal,
-                  onProgress: ({ bytes, total }) => {
-                    const now = Date.now();
-                    if (now - last < 250 && bytes !== total) return;
-                    last = now;
-                    send(peer, {
-                      jsonrpc: "2.0",
-                      method: "events.transfer",
-                      params: { requestId: id, bytes, total },
-                    });
-                  },
+            result = await observed(
+              {
+                direction: "out",
+                peer: request.deviceId,
+                action: "copy",
+                mode: "copy",
+                transfer: {
+                  direction: request.direction,
+                  localPath: request.localPath,
+                  remotePath: request.remotePath,
                 },
-              );
-              result = { type: "response", ok: true, result: summary };
-            } catch (cause) {
-              if (!(cause instanceof TransferError)) throw cause;
-              result = actionError(cause.code, cause.message);
-            } finally {
-              peer.copies.delete(controller);
-            }
+              },
+              () => copyFile(peer, id, request),
+              (response): ActionEnd => {
+                const summary = response.ok && isRecord(response.result) ? response.result : {};
+                return {
+                  ...actionEnd(response),
+                  transferBytes: typeof summary.bytes === "number" ? summary.bytes : null,
+                  sha256: typeof summary.sha256 === "string" ? summary.sha256 : null,
+                };
+              },
+            );
             break;
           }
           case "events.subscribe":
-          case "events.unsubscribe":
-            if (params.topic !== "connection") throw new RpcError(-32602, "Unknown event topic.");
-            peer.subscribed = value.method === "events.subscribe";
+          case "events.unsubscribe": {
+            const on = value.method === "events.subscribe";
             // Register and send the first snapshot in one turn, before yielding or acknowledging.
-            if (peer.subscribed) notify(peer);
-            result = { subscribed: peer.subscribed };
+            if (params.topic === "connection") {
+              peer.subscribed = on;
+              if (on) notify(peer);
+            } else if (params.topic === "node") {
+              peer.observing = on;
+              if (on)
+                emit(peer, "events.node", {
+                  type: "snapshot",
+                  status: nodeStatus(),
+                  running: store.running(),
+                } satisfies NodeEvent);
+            } else throw new RpcError(-32602, "Unknown event topic.");
+            result = { subscribed: on };
             break;
+          }
           default:
             throw new RpcError(-32601, "Method not found");
         }
@@ -328,6 +507,7 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
       socket,
       ready: false,
       subscribed: false,
+      observing: false,
       alive: true,
       pending: new Set(),
       eventBytes: 0,
@@ -388,6 +568,15 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
       resolve();
     });
   });
+  store.open();
+  store.recordBoot({
+    version: NODE_CORE_VERSION,
+    platform: platform(),
+    arch: arch(),
+    pid: state.pid,
+  });
+  const pruner = setInterval(() => store.prune(), PRUNE_INTERVAL_MS);
+  pruner.unref();
   const heartbeat = setInterval(() => {
     for (const peer of peers) {
       if (!peer.alive) {
@@ -408,6 +597,9 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
   } finally {
     close();
     clearInterval(heartbeat);
+    clearInterval(pruner);
+    store.recordLifecycle("daemon", "shutdown", stopReason);
+    store.close();
     signal.removeEventListener("abort", close);
     // A successor replaces discovery after binding. Removing it here could erase the new owner.
   }

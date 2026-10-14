@@ -11,6 +11,7 @@ import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
+import { attachNodeConsoleServer } from "../node-console-server.js";
 import { attachDesktopProxy } from "../desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
@@ -272,6 +273,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           close: async () => {
             terminalServer.close();
             liveEvents.close();
+            nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
             await webchatRuntime.flushAll();
@@ -301,6 +303,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
         },
       );
+      const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
       server.on("error", (err) => {

@@ -903,6 +903,63 @@
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"
+    },
+    "console": {
+      "title": "Activity",
+      "description": "Commands that agents and tools on this Rome instance sent to your linked computers. History keeps 30 days.",
+      "link": {
+        "connecting": "Connecting to the device service…",
+        "not_running": "The device service is not running, so no activity is recorded.",
+        "not_configured": "Device access is not configured, so no activity is recorded.",
+        "incompatible": "The device service runs an older version. Restart it to show activity.",
+        "disconnected": "The device service stopped. Reconnecting…"
+      },
+      "callerLabel": "Gateway connection",
+      "since": "For",
+      "reconnects": "Reconnects",
+      "runningCount": "Running",
+      "service": "Service version {{version}}, started {{time}}.",
+      "running": "Running on your computers",
+      "history": "Sent commands",
+      "search": "Search commands",
+      "searchPlaceholder": "Search commands, arguments, and folders",
+      "searchHint": "Type at least three characters to search.",
+      "device": "Device",
+      "allDevices": "All devices",
+      "outcomeFilter": "Result",
+      "allOutcomes": "All results",
+      "direction": "Direction",
+      "allDirections": "Sent and received",
+      "sent": "Sent",
+      "received": "Received",
+      "loading": "Loading history…",
+      "empty": "No commands match.",
+      "loadMore": "Load older",
+      "exitCode": "Exit {{code}}",
+      "output": "{{size}} output",
+      "copied": "{{size}} copied",
+      "bytes": "stdin {{stdin}}, stdout {{stdout}}, stderr {{stderr}}",
+      "truncated": "Long text is shortened here. The full text stays in the history file on this instance.",
+      "outcome": {
+        "running": "Running",
+        "ok": "Succeeded",
+        "error": "Failed",
+        "unknown_outcome": "Unknown result",
+        "interrupted": "Interrupted",
+        "aborted": "Canceled"
+      },
+      "detail": {
+        "device": "Device",
+        "action": "Action",
+        "started": "Started",
+        "duration": "Duration",
+        "cwd": "Folder",
+        "error": "Error",
+        "exit": "Exit code",
+        "bytes": "Bytes"
+      },
+      "to": "To {{device}}",
+      "from": "From {{device}}"
     }
   }
 }

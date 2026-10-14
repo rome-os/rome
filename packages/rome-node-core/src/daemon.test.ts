@@ -236,7 +236,7 @@ describe("caller daemon binary requests", () => {
     });
   });
 
-  it("negotiates protocol 3, rejects older clients, and keeps other methods text-only", async () => {
+  it("negotiates protocol 4, rejects older clients, and keeps other methods text-only", async () => {
     const f = await fixture();
     const raw = await rawRpc(f.config.port, f.token);
     expect(
@@ -244,7 +244,7 @@ describe("caller daemon binary requests", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "daemon.hello",
-        params: { protocolVersion: 2 },
+        params: { protocolVersion: 3 },
       }),
     ).toMatchObject({ id: 1, error: { code: -32002 } });
     expect(
@@ -254,7 +254,7 @@ describe("caller daemon binary requests", () => {
         method: "daemon.hello",
         params: { protocolVersion: DAEMON_PROTOCOL_VERSION },
       }),
-    ).toMatchObject({ id: 2, result: { protocolVersion: 3 } });
+    ).toMatchObject({ id: 2, result: { protocolVersion: 4 } });
     expect(
       await raw.call({
         jsonrpc: "2.0",
@@ -373,7 +373,8 @@ describe("caller daemon binary requests", () => {
     expect(await copying).toMatchObject({ code: "unknown_outcome" });
     const until = Date.now() + 5000;
     while ((await hasPart()) && Date.now() < until) await delay(20);
-    expect((await readdir(f.directory)).sort()).toEqual(
+    const files = await readdir(f.directory);
+    expect(files.filter((name) => !name.startsWith("observe.db")).sort()).toEqual(
       ["caller.json", "daemon.json", "large.bin"].sort(),
     );
   });
@@ -404,5 +405,130 @@ describe("caller daemon binary requests", () => {
     await delay(300);
     expect(f.received.filter((message) => message.binary)).toEqual([]);
     expect((await readdir(f.directory)).some((name) => name.includes("pushed.bin"))).toBe(false);
+  });
+});
+
+describe("caller daemon observation", () => {
+  async function observer(f: Awaited<ReturnType<typeof fixture>>) {
+    const raw = await rawRpc(f.config.port, f.token);
+    await raw.call({
+      jsonrpc: "2.0",
+      id: 0,
+      method: "daemon.hello",
+      params: { protocolVersion: DAEMON_PROTOCOL_VERSION },
+    });
+    return raw;
+  }
+
+  it("records sent actions and skips system.info", async () => {
+    const f = await fixture();
+    const raw = await observer(f);
+    expect(
+      await raw.call({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "events.subscribe",
+        params: { topic: "node" },
+      }),
+    ).toMatchObject({
+      method: "events.node",
+      params: {
+        type: "snapshot",
+        status: { roles: { caller: { auth: "authorized", running: 0 } } },
+        running: [],
+      },
+    });
+    expect(JSON.parse((await raw.next()).data.toString())).toMatchObject({
+      id: 1,
+      result: { subscribed: true },
+    });
+    expect((await f.client.describe(device)).ok).toBe(true);
+    const response = await f.client.run(device, "exec", {
+      command: process.execPath,
+      args: ["-e", `process.stdout.write("hello ${f.token}")`],
+    });
+    expect(response.ok).toBe(true);
+    const events: { type: string; phase?: string; row?: Record<string, unknown> }[] = [];
+    while (!events.some((event) => event.type === "action" && event.phase === "end")) {
+      const message = JSON.parse((await raw.next()).data.toString());
+      if (message.method === "events.node") events.push(message.params);
+    }
+    const actions = events.filter((event) => event.type === "action");
+    expect(actions.map((event) => event.phase)).toEqual(["start", "end"]);
+    const end = actions[1]!.row!;
+    expect(end).toMatchObject({
+      direction: "out",
+      peer: device,
+      action: "exec",
+      mode: "json",
+      command: process.execPath,
+      outcome: "ok",
+      exitCode: 0,
+      stdoutBytes: 6 + f.token.length,
+    });
+    // The daemon's own token is masked in stored arguments.
+    expect((end.args as string[])[1]).toContain("*".repeat(f.token.length));
+    const result = await raw.call({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "log.query",
+      params: { kind: "actions" },
+    });
+    expect(result.result.rows.map((row: { action: string }) => row.action)).toEqual(["exec"]);
+  });
+
+  it("records unknown outcomes and copies", async () => {
+    const f = await fixture();
+    const raw = await observer(f);
+    expect((await f.client.run(offline, "exec", { command: "true" })).ok).toBe(false);
+    const missing = join(f.directory, "missing.bin");
+    await f.client
+      .copy({ direction: "push", localPath: missing, deviceId: device, remotePath: "x" })
+      .catch(() => {});
+    const result = await raw.call({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "log.query",
+      params: { kind: "actions" },
+    });
+    expect(result.result.rows).toMatchObject([
+      {
+        action: "copy",
+        mode: "copy",
+        outcome: "error",
+        transfer: { direction: "push", localPath: missing, remotePath: "x" },
+      },
+      { action: "exec", peer: offline, outcome: "error", errorCode: "target_unavailable" },
+    ]);
+  });
+
+  it("reports node.status and rejects invalid queries", async () => {
+    const f = await fixture();
+    const raw = await observer(f);
+    const status = await raw.call({ jsonrpc: "2.0", id: 1, method: "node.status" });
+    expect(status.result).toMatchObject({
+      version: expect.any(String),
+      startedAt: expect.any(Number),
+      roles: { caller: { connection: "stopped", reconnects: 0, running: 0 } },
+    });
+    expect(status.result.roles.host).toBeUndefined();
+    expect(
+      await raw.call({ jsonrpc: "2.0", id: 2, method: "log.query", params: { kind: "sql" } }),
+    ).toMatchObject({ error: { code: -32602 } });
+    expect(
+      await raw.call({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "log.query",
+        params: { kind: "actions", text: "ab" },
+      }),
+    ).toMatchObject({ error: { code: -32602 } });
+    const lifecycle = await raw.call({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "log.query",
+      params: { kind: "lifecycle" },
+    });
+    expect(lifecycle.result.rows).toMatchObject([{ role: "daemon", event: "start" }]);
   });
 });

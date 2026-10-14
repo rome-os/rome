@@ -306,10 +306,10 @@ describe("standalone CLI daemon processes", () => {
       expect(await request("daemon.hello", { protocolVersion })).toMatchObject({
         error: { code: -32002 },
       });
-    expect(await request("daemon.hello", { protocolVersion: 3 })).toEqual({
+    expect(await request("daemon.hello", { protocolVersion: 4 })).toEqual({
       jsonrpc: "2.0",
       id: "test",
-      result: { pid: state.pid, protocolVersion: 3, connection: "stopped" },
+      result: { pid: state.pid, protocolVersion: 4, connection: "stopped" },
     });
     expect(await request("devices.run")).toMatchObject({ error: { code: -32602 } });
     expect(await request("events.subscribe", { topic: "unknown" })).toMatchObject({

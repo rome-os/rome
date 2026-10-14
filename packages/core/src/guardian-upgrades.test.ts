@@ -4,11 +4,15 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "@rstest/core";
 import { attachDesktopProxy } from "./desktop-proxy-server.js";
 import { attachLiveEventsServer, type LiveEventSources } from "./live-events-server.js";
+import { attachNodeConsoleServer } from "./node-console-server.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/helpers.js";
 import { createSession } from "./lib/auth.js";
+import { createNodeConfig } from "@rome-os/node-core/client";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
   return new Promise((resolve) => {
@@ -32,6 +36,9 @@ function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
     attachDesktopProxy(server, db),
     attachTerminalServer(server, db),
     attachLiveEventsServer(server, db, new DashboardAccessState(), noSources),
+    attachNodeConsoleServer(server, db, () =>
+      createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
+    ),
   ];
   return { close: () => handlers.forEach((handler) => handler.close()) };
 }
@@ -76,6 +83,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     "/desktop-proxy/websockify",
     "/ws/terminal?preset=claude-login",
     "/ws/events",
+    "/ws/node",
   ])("owns socket errors before checking %s", async (path) => {
     const testDb = createTestDb();
     const server = createServer();
@@ -99,7 +107,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     }
   });
 
-  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, or live events", async () => {
+  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, live events, or the node console", async () => {
     const testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({
       id: "auth-1",
@@ -120,7 +128,12 @@ describe("guardian WebSocket upgrade handlers", () => {
     process.env.ROME_NOVNC_PORT = String(upstreamPort);
     const server = createServer();
     const handlers = attachAll(server, testDb.db);
-    const paths = ["/desktop-proxy/websockify", "/ws/terminal?preset=claude-login", "/ws/events"];
+    const paths = [
+      "/desktop-proxy/websockify",
+      "/ws/terminal?preset=claude-login",
+      "/ws/events",
+      "/ws/node",
+    ];
 
     try {
       const port = await listen(server);
@@ -134,6 +147,9 @@ describe("guardian WebSocket upgrade handlers", () => {
       expect(upstreamConnections).toBe(0);
       expect(
         await upgrade(port, "/ws/events", { origin: `http://127.0.0.1:${port}` }, { direct: true }),
+      ).toBe(101);
+      expect(
+        await upgrade(port, "/ws/node", { origin: `http://127.0.0.1:${port}` }, { direct: true }),
       ).toBe(101);
 
       const cookie = `rome_session=${createSession("guardian-1")}`;

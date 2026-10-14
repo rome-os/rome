@@ -42,6 +42,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
+import { nodeConsoleHandlers } from "./node-console";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
@@ -1292,6 +1293,7 @@ export const handlers = [
   ...recordedAppHandlers,
   ...appKeysHandlers,
   ...liveEventsHandlers,
+  ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects
   // dir and the memory dir a person's dossier links into.
   ...projectFileHandlers,

@@ -44,6 +44,24 @@ export type {
   CopySummary,
 } from "./daemon-protocol.js";
 export type { DevicesStatus, DeviceStatus } from "./devices-status.js";
+export {
+  openConsoleBridge,
+  MAX_CONSOLE_MESSAGE_BYTES,
+  type ConsoleBridge,
+  type ConsoleDaemonState,
+  type ConsoleTransport,
+} from "./console.js";
+export type {
+  ActionRow,
+  ActionSummary,
+  LifecycleRow,
+  LogQuery,
+  LogResult,
+  NodeEvent,
+  NodeStatus,
+  Outcome,
+  RoleStatus,
+} from "./observe-protocol.js";
 export type { ActionResponse, BinaryActionResult } from "./actions.js";
 
 export class DeviceActionError extends Error {

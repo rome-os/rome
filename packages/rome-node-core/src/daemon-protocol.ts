@@ -1,7 +1,7 @@
 import { isRecord } from "./actions.js";
 import type { ConnectionStatus } from "./client.js";
 
-export const DAEMON_PROTOCOL_VERSION = 3;
+export const DAEMON_PROTOCOL_VERSION = 4;
 /** Both local ends close the socket with 1009 when one message exceeds this many bytes. */
 export const MAX_LOCAL_MESSAGE_BYTES = 64 * 1024 * 1024;
 

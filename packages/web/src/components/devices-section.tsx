@@ -13,6 +13,7 @@ import { Monitor, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { NodeConsoleSection } from "@/components/node-console/node-console-section";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
 
@@ -186,6 +187,7 @@ export function DevicesSection() {
           </Card>
         )}
       </Section>
+      <NodeConsoleSection devices={devices} />
       <Section aria-labelledby="connect-computer-title">
         <SectionHeader>
           <SectionHeading>

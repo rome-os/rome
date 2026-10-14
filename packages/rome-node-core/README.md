@@ -121,6 +121,30 @@ same environment to `nodeConfigFromEnvironment()` as the CLI to honor
 `ROME_NODE_CONFIG_DIR`, `ROME_NODE_DAEMON_PORT`, and platform defaults.
 The library does not select an environment implicitly.
 
+## Activity console
+
+The daemon records the actions it sends and its connection changes in
+`observe.db`. Read them with `node.status`, `log.query`, and the `node`
+event topic of the [local protocol](../../docs/rome-node.md#activity-log).
+
+A backend that serves a browser console puts `openConsoleBridge` between the
+browser socket and the daemon:
+
+```ts
+import { nodeConfigFromEnvironment, openConsoleBridge } from "@rome-os/node-core/client";
+
+const bridge = openConsoleBridge(nodeConfigFromEnvironment(process.env), {
+  send: (text) => socket.send(text),
+  close: () => socket.close(),
+});
+socket.on("message", (data) => bridge.receive(data.toString()));
+socket.on("close", () => bridge.close());
+```
+
+The bridge never starts the daemon. It forwards only the observation methods.
+When no daemon answers, it sends `console.daemon` with state `not_configured`,
+`not_running`, `incompatible`, or `disconnected`, then closes.
+
 ## Caller authorization
 
 ```ts

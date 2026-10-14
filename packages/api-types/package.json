@@ -27,6 +27,7 @@
     "./people": "./src/people.ts",
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
+    "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
     "./live-events": "./src/live-events.ts"
   },
