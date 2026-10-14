@@ -527,7 +527,7 @@ describe("AIToolState", () => {
       }
     });
 
-    it("keeps holding when an older probe settles with an exhausted window and no reset", async () => {
+    it("caps a replayed failure over an exhausted window with no reset at one window", async () => {
       rs.useFakeTimers({ shouldAdvanceTime: false });
       rs.setSystemTime(now);
       try {
@@ -552,8 +552,11 @@ describe("AIToolState", () => {
         releaseUsage();
         await olderRefresh;
 
-        rs.setSystemTime(now + HOUR);
+        rs.setSystemTime(now + 5 * HOUR - 1);
         expect(state.get().claude.quotaExhausted).toBe(true);
+
+        rs.setSystemTime(now + 5 * HOUR);
+        expect(state.get().claude.quotaExhausted).toBe(false);
       } finally {
         rs.useRealTimers();
       }

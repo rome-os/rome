@@ -30,9 +30,10 @@ export interface ProviderState
   /**
    * When usage-derived exhaustion ends: the latest reset among the exhausted
    * usage windows. A runtime quota failure before that reset keeps it, and one
-   * with no reset ahead ends 5 hours after the failure. Absent when an
-   * exhausted window has no known reset, so quotaExhausted holds until the
-   * next successful usage probe.
+   * with no reset ahead ends 5 hours after the failure. Absent when a probe
+   * shows an exhausted window with no known reset, so quotaExhausted holds
+   * until the next successful usage probe or a runtime quota failure, which
+   * caps it at 5 hours.
    */
   quotaExhaustedUntil?: string;
   usage?: AIToolUsageStatus;
