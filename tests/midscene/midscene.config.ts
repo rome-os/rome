@@ -220,7 +220,8 @@ export default defineTestProject<ProjectContext>({
   test: { maxConcurrency: 1, testTimeout: 8 * 60_000 },
   projects: [
     {
-      name: process.env.MIDSCENE_PROJECT_NAME ?? "web",
+      // The report scripts map a project to its suite by the `web-` prefix.
+      name: "web-mock",
       retry: process.env.MIDSCENE_RETRY ? Number(process.env.MIDSCENE_RETRY) : 2,
       setup,
       files: { include: ["cases/**/*.{yaml,yml}"] },

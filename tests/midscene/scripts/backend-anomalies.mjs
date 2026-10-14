@@ -6,9 +6,11 @@
 // Entries matching backend/known-noise.json are dropped; each noise entry
 // states why it is expected.
 //
-//   node scripts/backend-anomalies.mjs --rome-log <file> --events <file> --out <dir>
+//   node scripts/backend-anomalies.mjs --rome-log <file> --events <file> \
+//     [--image <name@revision>] --out <dir>
 //
-// Writes <dir>/anomalies.json and <dir>/anomalies.md and prints the Markdown.
+// Writes <dir>/anomalies.json and <dir>/backend-summary.md, which the run
+// Summary includes, and prints the Markdown.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -19,6 +21,7 @@ const { values: args } = parseArgs({
     "rome-log": { type: "string" },
     events: { type: "string" },
     noise: { type: "string", default: resolve(import.meta.dirname, "../backend/known-noise.json") },
+    image: { type: "string" },
     out: { type: "string", default: "." },
   },
 });
@@ -92,9 +95,10 @@ const describe = (a) =>
         ? `${a.component ? `[${a.component}] ` : ""}${a.message}`
         : a.text;
 const markdown = [
-  "## Backend anomalies",
+  "### Backend suite",
   "",
-  `${anomalies.length} distinct anomal${anomalies.length === 1 ? "y" : "ies"}; ${noiseCount} known-noise entr${noiseCount === 1 ? "y" : "ies"} dropped.`,
+  ...(args.image ? [`Image: \`${args.image}\``, ""] : []),
+  `Anomalies: ${anomalies.length} distinct anomal${anomalies.length === 1 ? "y" : "ies"}; ${noiseCount} known-noise entr${noiseCount === 1 ? "y" : "ies"} dropped.`,
   "",
   ...(anomalies.length
     ? [
@@ -111,5 +115,5 @@ const markdown = [
 
 mkdirSync(args.out, { recursive: true });
 writeFileSync(resolve(args.out, "anomalies.json"), `${JSON.stringify(anomalies, null, 2)}\n`);
-writeFileSync(resolve(args.out, "anomalies.md"), markdown);
+writeFileSync(resolve(args.out, "backend-summary.md"), markdown);
 process.stdout.write(markdown);

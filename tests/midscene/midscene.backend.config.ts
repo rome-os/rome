@@ -217,7 +217,7 @@ export default defineTestProject<BackendContext>({
   test: { maxConcurrency: 1, testTimeout: 15 * 60_000, bail: 1 },
   projects: [
     {
-      name: "backend",
+      name: "web-backend",
       retry: process.env.MIDSCENE_RETRY ? Number(process.env.MIDSCENE_RETRY) : 0,
       setup,
       files: { include: ["backend/cases/**/*.{yaml,yml}"] },

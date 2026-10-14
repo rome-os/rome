@@ -36,5 +36,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const report = await mergeNativeReports(reportsDirectory, projects.split(","), manifestFile);
   if (report) process.stdout.write(`${report}\n`);
   else
-    process.stderr.write("Native report unavailable; check shard artifacts and case inventory.\n");
+    process.stderr.write("Native report unavailable; check suite artifacts and case inventory.\n");
 }

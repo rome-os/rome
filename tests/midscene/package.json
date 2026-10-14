@@ -5,6 +5,7 @@
   "description": "Product-flow E2E for rome-web against the MSW mock dev server, driven by Midscene.",
   "scripts": {
     "test": "midscene-test",
+    "test:backend": "midscene-test --config midscene.backend.config.ts",
     "nodes": "midscene-test nodes",
     "typecheck": "tsc --noEmit",
     "collect": "node scripts/collect-cases.mjs",

@@ -15,26 +15,27 @@ import {
 } from "@midscene/test/config";
 
 const projectRoot = process.cwd();
-const readJson = async (path) => JSON.parse(await readFile(resolve(projectRoot, path), "utf8"));
+const expectedCases = JSON.parse(
+  await readFile(resolve(projectRoot, "case-manifest.json"), "utf8"),
+);
 
-// The mock suite splits its cases across six CI shards. The backend suite
-// runs as one ordered group against a real instance, so its only "shard" is
-// the `backend` tag, and its setup nodes talk to that instance.
+// Each suite is one Midscene project and one CI job. A case names its suite
+// with exactly one suite tag, and case-manifest.json records the same suite.
+// The backend suite runs against a real instance, so its setup nodes talk to
+// that instance.
 const suites = [
   {
+    tag: "mock",
     configPath: "midscene.config.ts",
-    expectedCases: await readJson("case-manifest.json"),
-    shards: [1, 2, 3, 4, 5, 6].map((number) => `shard-${number}`),
     isInfrastructureNode: (node) => ["app.open", "app.expectRenameConflict"].includes(node),
   },
   {
+    tag: "backend",
     configPath: "midscene.backend.config.ts",
-    expectedCases: await readJson("backend/case-manifest.json"),
-    shards: ["backend"],
     isInfrastructureNode: (node) => node === "app.open" || node.startsWith("backend."),
   },
 ];
-const expectedCases = Object.assign({}, ...suites.map((suite) => suite.expectedCases));
+const suiteTags = new Set(suites.map((suite) => suite.tag));
 const collectedCases = new Map();
 
 let fileCount = 0;
@@ -42,21 +43,12 @@ let caseCount = 0;
 let projectCount = 0;
 const failures = [];
 const atomicAiNode = /^ai(?:Tap|Scroll|Input|Hover|Keyboard)/;
-const expectedCasesByShard = new Map(
-  suites.flatMap((suite) =>
-    suite.shards.map((shard) => [
-      shard,
-      Object.values(suite.expectedCases).filter((value) => value === shard).length,
-    ]),
-  ),
-);
-const collectedCasesByShard = new Map([...expectedCasesByShard.keys()].map((shard) => [shard, 0]));
 
 const validateAiNativeCase = (testCase, suite) => {
   const nodes = testCase.definition.steps.map((step) => step.node);
   const tags = new Set(testCase.definition.tags);
   const problems = [];
-  const shardTags = [...tags].filter((tag) => suite.shards.includes(tag));
+  const caseSuiteTags = [...tags].filter((tag) => suiteTags.has(tag));
 
   if (nodes[0] !== "app.open") problems.push("the first step must be app.open");
   if (nodes.filter((node) => node === "app.open").length !== 1) {
@@ -64,16 +56,11 @@ const validateAiNativeCase = (testCase, suite) => {
   }
   if (!nodes.includes("aiAct")) problems.push("at least one aiAct is required");
   if (!nodes.includes("aiAssert")) problems.push("at least one aiAssert is required");
-  if (shardTags.length !== 1) {
-    problems.push(`exactly one shard tag is required, found ${shardTags.length}`);
-  } else {
-    const shard = shardTags[0];
-    collectedCasesByShard.set(shard, (collectedCasesByShard.get(shard) ?? 0) + 1);
-    if (collectedCases.has(testCase.definition.name)) {
-      problems.push("duplicate case name");
-    }
-    collectedCases.set(testCase.definition.name, shard);
+  if (caseSuiteTags.length !== 1 || caseSuiteTags[0] !== suite.tag) {
+    problems.push(`exactly one suite tag, "${suite.tag}", is required`);
   }
+  if (collectedCases.has(testCase.definition.name)) problems.push("duplicate case name");
+  collectedCases.set(testCase.definition.name, suite.tag);
 
   const forbidden = nodes.filter(
     (node) =>
@@ -136,24 +123,24 @@ if (failures.length > 0) {
 const expectedNames = Object.keys(expectedCases);
 const unexpectedNames = [...collectedCases.keys()].filter((name) => !(name in expectedCases));
 const missingNames = expectedNames.filter((name) => !collectedCases.has(name));
-const wrongShards = expectedNames.filter(
+const wrongSuites = expectedNames.filter(
   (name) => collectedCases.has(name) && collectedCases.get(name) !== expectedCases[name],
 );
 const catalog = await readFile(resolve(projectRoot, "../../docs/midscene-e2e-cases.md"), "utf8");
 const catalogCases = new Map();
-for (const match of catalog.matchAll(/^\| ([A-Z0-9]+-\d+) \| (.+) \| (shard-\d+|backend) \|$/gm)) {
+for (const match of catalog.matchAll(/^\| ([A-Z0-9]+-\d+) \| (.+) \| (mock|backend) \|$/gm)) {
   if (catalogCases.has(match[1])) throw new Error(`Duplicate catalog ID: ${match[1]}`);
-  catalogCases.set(match[1], { name: `${match[1]} ${match[2]}`, shard: match[3] });
+  catalogCases.set(match[1], { name: `${match[1]} ${match[2]}`, suite: match[3] });
 }
 const catalogMismatch = expectedNames.filter((name) => {
   const id = name.split(" ")[0];
   const row = catalogCases.get(id);
-  return !row || row.name !== name || row.shard !== expectedCases[name];
+  return !row || row.name !== name || row.suite !== expectedCases[name];
 });
 if (
   unexpectedNames.length ||
   missingNames.length ||
-  wrongShards.length ||
+  wrongSuites.length ||
   catalogMismatch.length ||
   catalogCases.size !== expectedNames.length
 ) {
@@ -161,7 +148,7 @@ if (
   for (const [label, names] of Object.entries({
     unexpectedNames,
     missingNames,
-    wrongShards,
+    wrongSuites,
     catalogMismatch,
   })) {
     if (names.length) console.error(`${label}: ${names.join(", ")}`);
@@ -169,22 +156,11 @@ if (
   process.exit(1);
 }
 
-const manifestMismatches = [...expectedCasesByShard].filter(
-  ([shard, expected]) => collectedCasesByShard.get(shard) !== expected,
+const counts = suites.map(
+  (suite) =>
+    `${suite.tag}=${[...collectedCases.values()].filter((tag) => tag === suite.tag).length}`,
 );
-if (manifestMismatches.length > 0) {
-  for (const [shard, expected] of manifestMismatches) {
-    console.error(
-      `x ${shard}: expected ${expected} cases, collected ${collectedCasesByShard.get(shard) ?? 0}`,
-    );
-  }
-  console.error("\nCollection failed: the committed shard manifest is out of date.");
-  process.exit(1);
-}
-
 console.log(
   `Collection OK: ${caseCount} cases in ${fileCount} file(s) across ${projectCount} project(s).`,
 );
-console.log(
-  `Shard manifest: ${[...collectedCasesByShard].map(([shard, count]) => `${shard}=${count}`).join(", ")}.`,
-);
+console.log(`Suites: ${counts.join(", ")}.`);

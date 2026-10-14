@@ -2,7 +2,7 @@ cases:
   - name: SHELL-02 Search global chat history
     tags:
       - shell
-      - shard-6
+      - mock
     steps:
       - app.open:
           path: /chat
@@ -19,7 +19,7 @@ cases:
     tags:
       - shell
       - mobile
-      - shard-6
+      - mock
     steps:
       - app.open:
           path: /chat

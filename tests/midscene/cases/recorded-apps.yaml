@@ -2,7 +2,7 @@ cases:
   - name: RAPP-01 Inspect recent Issue Triage activity
     tags:
       - apps
-      - shard-6
+      - mock
     steps:
       - app.open:
           path: /apps/issue-triage
@@ -14,7 +14,7 @@ cases:
   - name: RAPP-02 Inspect a completed Code Review record
     tags:
       - apps
-      - shard-6
+      - mock
     steps:
       - app.open:
           path: /apps/code-review
@@ -27,7 +27,7 @@ cases:
   - name: RAPP-03 Inspect a completed Stock Daily report
     tags:
       - apps
-      - shard-6
+      - mock
     steps:
       - app.open:
           path: /apps/stock-daily

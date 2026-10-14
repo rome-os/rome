@@ -20,7 +20,8 @@ const runs = (name, overrides = {}) => {
     inputs: { report_source_run_id: "", publish_pages: true },
     vars: { MIDSCENE_PUBLISH_REPO: "" },
     needs: {
-      midscene: { result: "success" },
+      mock: { result: "success" },
+      backend: { result: "success" },
       "report-summary": {
         result: "success",
         outputs: { "report-artifact-name": "midscene-e2e-report" },
@@ -61,7 +62,7 @@ const runs = (name, overrides = {}) => {
 
 test("trust gates share one upstream definition and fail closed without it", () => {
   assert.equal((workflow.match(/rome-os\/rome/g) ?? []).length, 1);
-  for (const name of ["midscene", "backend", "prepare-pages"]) {
+  for (const name of ["mock", "backend", "prepare-pages"]) {
     assert.equal(
       runs(name, {
         needs: { "harness-validation": { outputs: { "upstream-repository": "" } } },
@@ -77,16 +78,24 @@ test("report aggregation does not depend on the publisher repository", () => {
       assert.equal(
         runs("report-summary", {
           github: { repository, ref: "refs/heads/main", event_name: "workflow_dispatch" },
-          needs: { midscene: { result } },
+          needs: { mock: { result }, backend: { result } },
         }),
         true,
       );
     }
   }
-  assert.equal(runs("report-summary", { needs: { midscene: { result: "skipped" } } }), false);
+  const bothSkipped = { mock: { result: "skipped" }, backend: { result: "skipped" } };
+  assert.equal(runs("report-summary", { needs: bothSkipped }), false);
+  for (const suite of ["mock", "backend"]) {
+    // A single-suite run still produces the report.
+    assert.equal(
+      runs("report-summary", { needs: { ...bothSkipped, [suite]: { result: "success" } } }),
+      true,
+    );
+  }
   assert.equal(
     runs("report-summary", {
-      needs: { midscene: { result: "skipped" } },
+      needs: bothSkipped,
       inputs: { report_source_run_id: "123" },
     }),
     true,
@@ -97,7 +106,9 @@ test("report aggregation does not depend on the publisher repository", () => {
   );
   assert.match(job("report-summary"), /include-hidden-files: true/);
   assert.doesNotMatch(job("report-summary"), /GITHUB_STEP_SUMMARY/);
-  assert.doesNotMatch(job("midscene"), /GITHUB_STEP_SUMMARY/);
+  for (const suite of ["mock", "backend"]) {
+    assert.doesNotMatch(job(suite), /GITHUB_STEP_SUMMARY/);
+  }
 });
 
 test("Pages defaults to upstream main and requires explicit fork opt-in", () => {
@@ -160,7 +171,7 @@ test("report-only dispatch can generate the Summary without models or Pages", ()
     inputs: { report_source_run_id: "123", publish_pages: false },
     vars: { MIDSCENE_PUBLISH_REPO: "example/rome" },
   };
-  assert.equal(runs("midscene", context), false);
+  assert.equal(runs("mock", context), false);
   assert.equal(runs("backend", context), false);
   assert.equal(runs("report-summary", context), true);
   assert.equal(runs("prepare-pages", context), false);
@@ -171,14 +182,15 @@ test("results are visible before optional deployment and survive its cancellatio
   const writers = [...workflow.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/gm)]
     .filter((match) => match[2].includes("GITHUB_STEP_SUMMARY"))
     .map((match) => match[1]);
-  assert.deepEqual(writers, ["backend", "available-results", "report-results"]);
-  assert.match(job("available-results"), /needs: \[midscene, report-summary\]/);
+  assert.deepEqual(writers, ["available-results", "report-results"]);
+  assert.match(job("available-results"), /needs: \[mock, backend, report-summary\]/);
   assert.doesNotMatch(job("available-results"), /needs:.*(?:prepare-pages|deploy-report)/);
   for (const result of ["waiting", "cancelled", "failure", "skipped"]) {
     assert.equal(
       runs("available-results", {
         needs: {
-          midscene: { result: "success" },
+          mock: { result: "success" },
+          backend: { result: "success" },
           "report-summary": { result: "success" },
           "deploy-report": { result },
         },
@@ -189,14 +201,14 @@ test("results are visible before optional deployment and survive its cancellatio
   assert.equal(runs("available-results", { github: { event_name: "pull_request" } }), false);
   assert.match(
     job("report-results"),
-    /needs: \[midscene, report-summary, prepare-pages, deploy-report\]/,
+    /needs: \[harness-validation, mock, backend, report-summary, prepare-pages, deploy-report\]/,
   );
   assert.match(
     job("report-results"),
     /name: Write the consolidated run Summary\n        if: always\(\)/,
   );
   assert.match(job("report-results"), /--case-manifest/);
-  assert.match(job("midscene"), /max-parallel: 1/);
+  assert.doesNotMatch(workflow, /matrix|strategy:/);
   assert.match(workflow, /cron: "0 6 \* \* \*"/);
 });
 
@@ -206,7 +218,8 @@ test("the final Summary survives aggregation and publication failures or skips",
       assert.equal(
         runs("report-results", {
           needs: {
-            midscene: { result: "failure" },
+            mock: { result: "failure" },
+            backend: { result: "skipped" },
             "report-summary": { result: reportResult },
             "deploy-report": { result: publicationResult },
           },
@@ -215,7 +228,12 @@ test("the final Summary survives aggregation and publication failures or skips",
       );
     }
   }
-  assert.equal(runs("report-results", { needs: { midscene: { result: "skipped" } } }), false);
+  assert.equal(
+    runs("report-results", {
+      needs: { mock: { result: "skipped" }, backend: { result: "skipped" } },
+    }),
+    false,
+  );
   assert.equal(runs("report-results", { cancelled: true }), false);
   assert.equal(
     runs("report-results", {
@@ -230,7 +248,7 @@ test("artifact recovery cannot bypass source validation", () => {
   const results = job("report-results");
   assert.match(results, /trusted-report-runs.mjs validate-source/);
   const downloads = results.match(
-    /      - name: (?:Download combined Midscene report|Recover available shard reports)[\s\S]*?(?=      - name:)/g,
+    /      - name: (?:Download combined Midscene report|Recover available suite reports)[\s\S]*?(?=      - name:)/g,
   );
   assert.equal(downloads.length, 2);
   for (const download of downloads) {
@@ -246,31 +264,31 @@ test("artifact recovery cannot bypass source validation", () => {
   );
   assert.match(
     results,
-    /steps.combined-report.outcome == 'success' && 'midscene-combined-report' \|\| 'midscene-report-shards'/,
+    /steps.combined-report.outcome == 'success' && 'midscene-combined-report' \|\| 'midscene-reports'/,
   );
   assert.match(
     results,
-    /name: Recover available shard reports[\s\S]*?steps.combined-report.outcome != 'success'/,
+    /name: Recover available suite reports[\s\S]*?steps.combined-report.outcome != 'success'/,
   );
   assert.doesNotMatch(results, /run:.*\$\{\{ inputs.report_source_run_id/);
 });
 
-test("the backend suite shares the model trust gate and runs after the mock matrix", () => {
+test("both suites share the model trust gate, and backend runs after mock", () => {
   for (const event_name of ["schedule", "push", "workflow_dispatch", "pull_request"]) {
     for (const repository of ["rome-os/rome", "example/rome"]) {
       for (const ref of ["refs/heads/main", "refs/heads/feature", "refs/pull/1/merge"]) {
         const context = { github: { repository, ref, event_name } };
         assert.equal(
           runs("backend", context),
-          runs("midscene", context),
+          runs("mock", context),
           `${repository} ${event_name} ${ref}`,
         );
       }
     }
   }
-  assert.match(job("backend"), /needs: \[harness-validation, midscene\]/);
+  assert.match(job("backend"), /needs: \[harness-validation, mock\]/);
   for (const result of ["success", "failure", "skipped"]) {
-    assert.equal(runs("backend", { needs: { midscene: { result } } }), true, `matrix ${result}`);
+    assert.equal(runs("backend", { needs: { mock: { result } } }), true, `mock ${result}`);
   }
   assert.equal(runs("backend", { cancelled: true }), false);
   const harnessFailed = {
@@ -280,14 +298,14 @@ test("the backend suite shares the model trust gate and runs after the mock matr
   assert.equal(runs("backend", { needs: { "harness-validation": harnessFailed } }), false);
 });
 
-test("the suite input selects the mock matrix, the backend job, or both", () => {
+test("the suite input selects mock, backend, or both, and the report expects the same", () => {
   const dispatch = (suite) => ({
     github: { repository: "rome-os/rome", ref: "refs/heads/main", event_name: "workflow_dispatch" },
     inputs: { report_source_run_id: "", publish_pages: true, suite },
   });
   assert.deepEqual(
     ["all", "mock", "backend", undefined].map((suite) => [
-      runs("midscene", dispatch(suite)),
+      runs("mock", dispatch(suite)),
       runs("backend", dispatch(suite)),
     ]),
     [
@@ -297,20 +315,46 @@ test("the suite input selects the mock matrix, the backend job, or both", () => 
       [true, true],
     ],
   );
+  const plan = job("harness-validation");
+  assert.match(plan, /mock\) projects=web-mock ;;/);
+  assert.match(plan, /backend\) projects=web-backend ;;/);
+  assert.match(plan, /\*\) projects=web-mock,web-backend ;;/);
+  for (const name of ["report-summary", "report-results"]) {
+    assert.match(job(name), /needs.harness-validation.outputs.projects/);
+    assert.doesNotMatch(job(name), /web-shard|web-mock,web-backend/);
+  }
 });
 
-test("backend output is scanned for secrets before upload and never published", () => {
+test("both suites follow one step order and upload one suite artifact each", () => {
+  const steps = (name) =>
+    [...job(name).matchAll(/^      - name: (.+)$/gm)].map((match) => match[1]);
+  const shared = [
+    "Install Midscene test dependencies",
+    "Check Midscene model vision",
+    "Type-check Midscene custom nodes",
+    "Start the target",
+    "Run the suite",
+    "Record report model",
+    "Upload the suite report",
+  ];
+  for (const name of ["mock", "backend"]) {
+    const order = shared.map((step) => steps(name).findIndex((item) => item.startsWith(step)));
+    assert.ok(
+      order.every((index, position) => index > (order[position - 1] ?? -1)),
+      name,
+    );
+    assert.match(job(name), new RegExp(`name: midscene-suite-${name}\n`));
+  }
+  for (const match of workflow.matchAll(/pattern: (\S+)/g)) {
+    assert.equal(match[1], "midscene-suite-*");
+  }
+});
+
+test("the backend report is scanned for secrets before upload", () => {
   const backend = job("backend");
   assert.match(backend, /id: secret-scan\n        if: always\(\)/);
   assert.match(backend, /if: always\(\) && steps.secret-scan.outcome == 'success'/);
-  assert.match(backend, /name: midscene-backend\n/);
   assert.match(backend, /::add-mask::/);
-  assert.doesNotMatch(backend, /configure-pages|pages: write|MIDSCENE_PUBLISH_REPO/);
-  // The mock report merge must not pick up the backend artifact.
-  const patterns = [...workflow.matchAll(/pattern: (\S+)/g)].map((match) => match[1]);
-  assert.ok(patterns.length > 0);
-  for (const pattern of patterns) {
-    assert.ok(pattern.endsWith("*") && !pattern.slice(0, -1).includes("*"), pattern);
-    assert.ok(!"midscene-backend".startsWith(pattern.slice(0, -1)), pattern);
-  }
+  assert.match(backend, /docker pull "\$ROME_E2E_IMAGE"/);
+  assert.doesNotMatch(backend, /build-push-action|setup-buildx/);
 });

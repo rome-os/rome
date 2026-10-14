@@ -3,7 +3,7 @@
 # self-hosters use. Only isolation settings change here.
 services:
   rome:
-    image: ${ROME_E2E_IMAGE:-yunfanye/rome}
+    image: ${ROME_E2E_IMAGE:-zoolsher/rome:latest}
     # Loopback only, on its own port, beside any dev stack on the same host.
     ports: !override
       - "127.0.0.1:${ROME_E2E_PORT:-8090}:8080"

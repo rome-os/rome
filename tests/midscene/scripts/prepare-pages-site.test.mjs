@@ -6,8 +6,8 @@ import test from "node:test";
 
 import { preparePagesSite } from "./prepare-pages-site.mjs";
 
-const shard = async (root, label) => {
-  const directory = path.join(root, "midscene-shard-1", "midscene_run", "report", label);
+const suite = async (root, label, name = "midscene-suite-mock") => {
+  const directory = path.join(root, name, "midscene_run", "report", label);
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, "index.html"), label);
 };
@@ -18,11 +18,11 @@ test("publishes recent runs at stable paths", async (context) => {
   const previous = path.join(root, "previous");
   const reports = path.join(root, "reports");
   const site = path.join(root, "site");
-  await shard(previous, "recent-old");
-  await shard(reports, "new");
-  await mkdir(path.join(previous, "midscene-shard-1/midscene_run/report/screenshots"));
+  await suite(previous, "recent-old");
+  await suite(reports, "new");
+  await mkdir(path.join(previous, "midscene-suite-mock/midscene_run/report/screenshots"));
   await writeFile(
-    path.join(previous, "midscene-shard-1/midscene_run/report/screenshots/recent.jpeg"),
+    path.join(previous, "midscene-suite-mock/midscene_run/report/screenshots/recent.jpeg"),
     "recent",
   );
   await mkdir(path.join(reports, "native-report", "screenshots"), { recursive: true });
@@ -55,16 +55,16 @@ test("rejects nonnumeric run IDs", async () => {
   await assert.rejects(preparePagesSite({ site: "unused", runId: "../escape" }), /numeric/);
 });
 
-test("publishes shard reports when the native merge is incomplete", async (context) => {
+test("publishes suite reports when the native merge is incomplete", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-partial-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const reports = path.join(root, "reports");
-  await shard(reports, "partial");
+  await suite(reports, "partial");
   const site = path.join(root, "site");
   await preparePagesSite({ site, reports, runId: "101" });
   assert.equal(
     await readFile(
-      path.join(site, "runs/101/midscene-shard-1/midscene_run/report/partial/index.html"),
+      path.join(site, "runs/101/midscene-suite-mock/midscene_run/report/partial/index.html"),
       "utf8",
     ),
     "partial",
@@ -80,7 +80,7 @@ test("an incomplete rerun replaces the complete attempt without retaining stale 
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-rerun-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   const completeReports = path.join(root, "complete-reports");
-  await shard(completeReports, "first-attempt");
+  await suite(completeReports, "first-attempt");
   await mkdir(path.join(completeReports, "native-report", "screenshots"), { recursive: true });
   await writeFile(path.join(completeReports, "native-report", "index.html"), "complete report");
   await writeFile(path.join(completeReports, "native-report", "screenshots", "old.jpeg"), "old");
@@ -90,7 +90,7 @@ test("an incomplete rerun replaces the complete attempt without retaining stale 
   await writeFile(path.join(previous, "runs", "100", "index.html"), "other run");
 
   const partialReports = path.join(root, "partial-reports");
-  await shard(partialReports, "second-attempt");
+  await suite(partialReports, "second-attempt");
   const site = path.join(root, "rerun-site");
   await preparePagesSite({ site, reports: partialReports, runId: "101", previous });
 
@@ -98,20 +98,20 @@ test("an incomplete rerun replaces the complete attempt without retaining stale 
   for (const stale of [
     "index.html",
     "screenshots/old.jpeg",
-    "midscene-shard-1/midscene_run/report/first-attempt",
+    "midscene-suite-mock/midscene_run/report/first-attempt",
   ]) {
     await assert.rejects(stat(path.join(current, stale)), { code: "ENOENT" });
   }
   assert.equal(
     await readFile(
-      path.join(current, "midscene-shard-1/midscene_run/report/second-attempt/index.html"),
+      path.join(current, "midscene-suite-mock/midscene_run/report/second-attempt/index.html"),
       "utf8",
     ),
     "second-attempt",
   );
   assert.equal(await readFile(path.join(site, "runs/100/index.html"), "utf8"), "other run");
   const index = await readFile(path.join(site, "index.html"), "utf8");
-  assert.match(index, /Run 101: partial shard reports/);
+  assert.match(index, /Run 101: partial suite reports/);
   assert.doesNotMatch(index, /runs\/101\/index\.html/);
 });
 
@@ -122,11 +122,11 @@ test("prunes older run directories before exceeding the Pages budget", async (co
   const reports = path.join(root, "reports");
   await mkdir(path.join(previous, "runs", "100"), { recursive: true });
   await writeFile(path.join(previous, "runs", "100", "report.bin"), Buffer.alloc(12_000));
-  await shard(reports, "new");
+  await suite(reports, "new");
   await mkdir(path.join(reports, "native-report"));
   await writeFile(path.join(reports, "native-report", "index.html"), "native report");
   await writeFile(
-    path.join(reports, "midscene-shard-1/midscene_run/report/new/report.bin"),
+    path.join(reports, "midscene-suite-mock/midscene_run/report/new/report.bin"),
     Buffer.alloc(12_000),
   );
 
@@ -142,4 +142,30 @@ test("prunes older run directories before exceeding the Pages budget", async (co
   assert.ok(result.bytes < 20_000);
   await assert.rejects(stat(path.join(site, "runs", "100")), { code: "ENOENT" });
   assert.doesNotMatch(await readFile(path.join(site, "index.html"), "utf8"), /Run 100/);
+});
+
+test("publishes the backend suite report beside the mock report", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rome-pages-backend-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const reports = path.join(root, "reports");
+  const site = path.join(root, "site");
+  await suite(reports, "mock-run");
+  await suite(reports, "backend-run", "midscene-suite-backend");
+  await mkdir(path.join(reports, "midscene-suite-backend", "midscene_run", "backend"), {
+    recursive: true,
+  });
+  await writeFile(
+    path.join(reports, "midscene-suite-backend", "midscene_run", "backend", "rome.log"),
+    "container log",
+  );
+  await preparePagesSite({ site, reports, runId: "101" });
+  const current = path.join(site, "runs", "101");
+  await stat(path.join(current, "midscene-suite-mock/midscene_run/report/mock-run/index.html"));
+  await stat(
+    path.join(current, "midscene-suite-backend/midscene_run/report/backend-run/index.html"),
+  );
+  // Only the Midscene report is published; the container log stays in the artifact.
+  await assert.rejects(stat(path.join(current, "midscene-suite-backend/midscene_run/backend")), {
+    code: "ENOENT",
+  });
 });

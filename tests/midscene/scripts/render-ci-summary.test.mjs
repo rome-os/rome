@@ -10,9 +10,9 @@ import { promisify } from "node:util";
 import { mergeNativeReports } from "./merge-native-reports.mjs";
 import { buildSummary, caseSetIssues, renderMarkdown } from "./render-ci-summary.mjs";
 
-const writeShard = async (root, shard, status, caseName, modelName) => {
-  const project = `web-${shard}`;
-  const resultRoot = path.join(root, `midscene-${shard}`, ".midscene", "test-results", "run-1");
+const writeSuite = async (root, suite, status, caseName, modelName) => {
+  const project = `web-${suite}`;
+  const resultRoot = path.join(root, `midscene-${suite}`, ".midscene", "test-results", "run-1");
   const resultFile = path.join(resultRoot, "project-0", "case-1", "attempt.json");
   await mkdir(path.dirname(resultFile), { recursive: true });
   await writeFile(
@@ -55,7 +55,7 @@ const writeShard = async (root, shard, status, caseName, modelName) => {
   );
   const reportRoot = path.join(
     root,
-    `midscene-${shard}`,
+    `midscene-${suite}`,
     "midscene_run",
     "report",
     "midscene-e2e-run-1",
@@ -68,7 +68,7 @@ const writeShard = async (root, shard, status, caseName, modelName) => {
       {
         schemaVersion: 1,
         kind: "test-runner",
-        runId: `run-${shard}`,
+        runId: `run-${suite}`,
         status,
         startedAt: "2026-09-22T01:00:00Z",
         endedAt: "2026-09-22T01:00:13Z",
@@ -127,22 +127,22 @@ const writeShard = async (root, shard, status, caseName, modelName) => {
   );
   await writeFile(path.join(reportRoot, "screenshots", "screenshot-1.jpeg"), "image bytes");
   await writeFile(
-    path.join(root, `midscene-${shard}`, "midscene_run", "model.json"),
+    path.join(root, `midscene-${suite}`, "midscene_run", "model.json"),
     JSON.stringify({ modelName, modelFamily: "deepseek" }),
   );
 };
 
-test("builds one combined Markdown Summary for all shards", async (context) => {
+test("builds one combined Markdown Summary for all suites", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-midscene-summary-"));
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "success", "AUTH-01 opens chat", "deepseek-v3.2");
-  await writeShard(root, "shard-2", "failed", "CHAT-09 sends a message", "deepseek-v3.2");
+  await writeSuite(root, "suite-1", "success", "AUTH-01 opens chat", "deepseek-v3.2");
+  await writeSuite(root, "suite-2", "failed", "CHAT-09 sends a message", "deepseek-v3.2");
   const markdownFile = path.join(root, "summary.md");
   const data = await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1,web-shard-2,web-shard-3",
+    "expected-projects": "web-suite-1,web-suite-2,web-suite-3",
     "run-url": "https://github.com/quanru/rome/actions/runs/1",
     "pages-url": "https://quanru.github.io/rome/",
     "producer-result": "failure",
@@ -153,10 +153,10 @@ test("builds one combined Markdown Summary for all shards", async (context) => {
   const markdown = await readFile(markdownFile, "utf8");
   assert.match(markdown, /Rome × Midscene · failure captured/);
   assert.match(markdown, /2 need attention · 1 passed/);
-  assert.match(markdown, /web-shard-3 \| — \| — \| ❌ missing/);
+  assert.match(markdown, /web-suite-3 \| — \| — \| ❌ missing/);
   assert.match(markdown, /CHAT-09 sends a message.*button missing/);
   assert.match(markdown, /<summary>Appendix: passed cases \(1\)<\/summary>/);
-  assert.match(markdown, /\| Shard \| Case \| Screenshot \| Status \/ reason \| Duration \|/);
+  assert.match(markdown, /\| Suite \| Case \| Screenshot \| Status \/ reason \| Duration \|/);
   const appendix = markdown.indexOf("<details>");
   assert.ok(markdown.indexOf("CHAT-09 sends a message") < appendix);
   assert.ok(markdown.indexOf("AUTH-01 opens chat") > appendix);
@@ -169,9 +169,9 @@ test("escapes Markdown table content", () => {
   const markdown = renderMarkdown({
     projects: [
       {
-        name: "web|shard",
+        name: "web|suite",
         status: "failed",
-        reportPath: "web-shard/report/index.html",
+        reportPath: "web-suite/report/index.html",
         durationMs: 1000,
         cases: [
           {
@@ -179,8 +179,8 @@ test("escapes Markdown table content", () => {
             status: "failed",
             durationMs: 1000,
             reason: "line 1\nline 2",
-            reportPath: "web-shard/report/index.html",
-            screenshotPath: "web-shard/previews/case.jpg",
+            reportPath: "web-suite/report/index.html",
+            screenshotPath: "web-suite/previews/case.jpg",
           },
         ],
       },
@@ -190,24 +190,24 @@ test("escapes Markdown table content", () => {
     pagesUrl: "https://example.test/reports/",
     producerResult: "failure",
   });
-  assert.match(markdown, /web\\\|shard/);
+  assert.match(markdown, /web\\\|suite/);
   assert.match(markdown, /Case \\\| name/);
   assert.match(markdown, /line 1 line 2/);
   assert.match(markdown, /alt="Case &#124; name"/);
 });
 
-test("reports a missing expected shard as an overall failure", () => {
+test("reports a missing expected suite as an overall failure", () => {
   const markdown = renderMarkdown({
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "success",
-        reportPath: "web-shard-1/report/index.html",
+        reportPath: "web-suite-1/report/index.html",
         durationMs: 1000,
         cases: [{ name: "AUTH-01", status: "success", durationMs: 1000, reason: "" }],
       },
       {
-        name: "web-shard-2",
+        name: "web-suite-2",
         status: "missing",
         durationMs: null,
         cases: [],
@@ -221,29 +221,29 @@ test("reports a missing expected shard as an overall failure", () => {
 
   assert.match(markdown, /Rome × Midscene · failure captured/);
   assert.match(markdown, /### Needs attention/);
-  assert.match(markdown, /web-shard-2.*missing/);
+  assert.match(markdown, /web-suite-2.*missing/);
   assert.doesNotMatch(markdown, /All 1 cases passed/);
 });
 
-test("keeps shard screenshots linked when the combined report is incomplete", () => {
+test("keeps suite screenshots linked when the combined report is incomplete", () => {
   const markdown = renderMarkdown({
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "failed",
-        reportPath: "midscene-shard-1/midscene_run/report/test-run.html",
+        reportPath: "midscene-suite-1/midscene_run/report/test-run.html",
         cases: [
           {
             name: "CHAT-01",
             status: "failed",
             reason: "Assertion failed",
-            reportPath: "midscene-shard-1/midscene_run/report/test-run.html",
-            screenshotPath: "midscene-shard-1/midscene_run/report/screenshots/one.jpeg",
+            reportPath: "midscene-suite-1/midscene_run/report/test-run.html",
+            screenshotPath: "midscene-suite-1/midscene_run/report/screenshots/one.jpeg",
             stepId: "step-1",
           },
         ],
       },
-      { name: "web-shard-2", status: "missing", cases: [] },
+      { name: "web-suite-2", status: "missing", cases: [] },
     ],
     models: [],
     runUrl: "https://example.test/run",
@@ -259,10 +259,10 @@ test("keeps a failed case when its native report is missing", async (context) =>
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "failed", "CHAT-09 sends a message", "deepseek-v3.2");
+  await writeSuite(root, "suite-1", "failed", "CHAT-09 sends a message", "deepseek-v3.2");
   const report = path.join(
     root,
-    "midscene-shard-1",
+    "midscene-suite-1",
     "midscene_run",
     "report",
     "midscene-e2e-run-1",
@@ -271,7 +271,7 @@ test("keeps a failed case when its native report is missing", async (context) =>
   await import("node:fs/promises").then(({ rm }) => rm(report));
   const data = await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1",
+    "expected-projects": "web-suite-1",
     "run-url": "https://example.test/run",
     "pages-url": "https://example.test/reports/",
     "producer-result": "failure",
@@ -284,15 +284,15 @@ test("keeps a failed case when its native report is missing", async (context) =>
   assert.match(markdown, /CHAT-09 sends a message.*button missing/);
 });
 
-test("marks a successful shard incomplete when its native report is missing", async (context) => {
+test("marks a successful suite incomplete when its native report is missing", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-midscene-missing-report-"));
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "success", "AUTH-01 opens chat", "deepseek-v3.2");
+  await writeSuite(root, "suite-1", "success", "AUTH-01 opens chat", "deepseek-v3.2");
   const report = path.join(
     root,
-    "midscene-shard-1",
+    "midscene-suite-1",
     "midscene_run",
     "report",
     "midscene-e2e-run-1",
@@ -302,7 +302,7 @@ test("marks a successful shard incomplete when its native report is missing", as
   const markdownFile = path.join(root, "summary.md");
   await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1",
+    "expected-projects": "web-suite-1",
     "run-url": "https://example.test/run",
     "pages-url": "https://example.test/reports/",
     "producer-result": "success",
@@ -312,18 +312,18 @@ test("marks a successful shard incomplete when its native report is missing", as
   const markdown = await readFile(markdownFile, "utf8");
   assert.match(markdown, /Rome × Midscene · failure captured/);
   assert.match(markdown, /1 need attention · 1 passed/);
-  assert.match(markdown, /web-shard-1.*Native report missing/);
+  assert.match(markdown, /web-suite-1.*Native report missing/);
   assert.doesNotMatch(markdown, /All 1 cases passed/);
 });
 
-test("merges shard reports with the native Midscene Test reporter", async (context) => {
+test("merges suite reports with the native Midscene Test reporter", async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "rome-midscene-native-"));
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "success", "CHAT-01", "deepseek-v3.2");
-  await writeShard(root, "shard-2", "success", "CHAT-02", "deepseek-v3.2");
-  const report = await mergeNativeReports(root, ["web-shard-1", "web-shard-2"]);
+  await writeSuite(root, "suite-1", "success", "CHAT-01", "deepseek-v3.2");
+  await writeSuite(root, "suite-2", "success", "CHAT-02", "deepseek-v3.2");
+  const report = await mergeNativeReports(root, ["web-suite-1", "web-suite-2"]);
   assert.equal(report, path.join(root, "native-report", "index.html"));
   const html = await readFile(report, "utf8");
   const dump = JSON.parse(
@@ -338,7 +338,7 @@ test("merges shard reports with the native Midscene Test reporter", async (conte
   );
   const data = await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1,web-shard-2",
+    "expected-projects": "web-suite-1,web-suite-2",
     "run-url": "https://example.test/run",
     "pages-url": "https://example.test/reports/",
     "producer-result": "success",
@@ -356,13 +356,13 @@ test("does not publish a partial native report", async (context) => {
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "success", "CHAT-01", "deepseek-v3.2");
-  const expected = ["web-shard-1", "web-shard-2"];
+  await writeSuite(root, "suite-1", "success", "CHAT-01", "deepseek-v3.2");
+  const expected = ["web-suite-1", "web-suite-2"];
   assert.equal(await mergeNativeReports(root, expected), null);
 
-  await writeShard(root, "shard-2", "success", "CHAT-02", "deepseek-v3.2");
+  await writeSuite(root, "suite-2", "success", "CHAT-02", "deepseek-v3.2");
   const manifest = path.join(root, "case-manifest.json");
-  await writeFile(manifest, JSON.stringify({ "CHAT-01": "shard-1", "CHAT-03": "shard-2" }));
+  await writeFile(manifest, JSON.stringify({ "CHAT-01": "suite-1", "CHAT-03": "suite-2" }));
   assert.equal(await mergeNativeReports(root, expected, manifest), null);
   await assert.rejects(readFile(path.join(root, "native-report", "index.html")), {
     code: "ENOENT",
@@ -373,17 +373,17 @@ test("celebrates a complete run and keeps passed cases in the appendix", () => {
   const markdown = renderMarkdown({
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "success",
-        reportPath: "web-shard-1/report/index.html",
+        reportPath: "web-suite-1/report/index.html",
         durationMs: 1000,
         cases: [
           {
             name: "AUTH-01",
             status: "success",
             durationMs: 1000,
-            reportPath: "web-shard-1/report/index.html",
-            screenshotPath: "web-shard-1/screenshots/one.jpeg",
+            reportPath: "web-suite-1/report/index.html",
+            screenshotPath: "web-suite-1/screenshots/one.jpeg",
             stepId: "step-1",
           },
         ],
@@ -403,7 +403,7 @@ test("celebrates a complete run and keeps passed cases in the appendix", () => {
 test("missing, unexpected, moved, and duplicate cases prevent a complete Summary", () => {
   const projects = [
     {
-      name: "web-shard-1",
+      name: "web-suite-1",
       status: "success",
       cases: [
         { name: "CHAT-01", status: "success" },
@@ -412,21 +412,21 @@ test("missing, unexpected, moved, and duplicate cases prevent a complete Summary
       ],
     },
     {
-      name: "web-shard-2",
+      name: "web-suite-2",
       status: "success",
       cases: [{ name: "CHAT-03", status: "success" }],
     },
   ];
   const issues = caseSetIssues(projects, {
-    "CHAT-01": "shard-1",
-    "CHAT-02": "shard-1",
-    "CHAT-03": "shard-1",
+    "CHAT-01": "suite-1",
+    "CHAT-02": "suite-1",
+    "CHAT-03": "suite-1",
   });
   assert.deepEqual(issues, [
     "Duplicate case: CHAT-01",
-    "Unexpected case: EXTRA-01 (shard-1)",
-    "Wrong shard: CHAT-03 (expected shard-1, found shard-2)",
-    "Missing case: CHAT-02 (shard-1)",
+    "Unexpected case: EXTRA-01 (suite-1)",
+    "Wrong suite: CHAT-03 (expected suite-1, found suite-2)",
+    "Missing case: CHAT-02 (suite-1)",
   ]);
   const markdown = renderMarkdown({
     projects,
@@ -445,20 +445,20 @@ test("buildSummary checks the committed case manifest", async (context) => {
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  await writeShard(root, "shard-1", "success", "CHAT-01", "deepseek-v3.2");
+  await writeSuite(root, "suite-1", "success", "CHAT-01", "deepseek-v3.2");
   const manifest = path.join(root, "case-manifest.json");
-  await writeFile(manifest, JSON.stringify({ "CHAT-01": "shard-1", "CHAT-02": "shard-1" }));
+  await writeFile(manifest, JSON.stringify({ "CHAT-01": "suite-1", "CHAT-02": "suite-1" }));
   const output = path.join(root, "summary.md");
   const data = await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1",
+    "expected-projects": "web-suite-1",
     "case-manifest": manifest,
     "run-url": "https://example.test/run",
     "pages-url": "https://example.test/reports/",
     "producer-result": "success",
     output,
   });
-  assert.deepEqual(data.caseInventoryIssues, ["Missing case: CHAT-02 (shard-1)"]);
+  assert.deepEqual(data.caseInventoryIssues, ["Missing case: CHAT-02 (suite-1)"]);
   assert.match(await readFile(output, "utf8"), /failure captured/);
 });
 
@@ -466,9 +466,9 @@ test("a complete report without Pages links only to its artifact", () => {
   const markdown = renderMarkdown({
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "success",
-        reportPath: "midscene-shard-1/report/index.html",
+        reportPath: "midscene-suite-1/report/index.html",
         cases: [
           {
             name: "CHAT-01",
@@ -489,7 +489,7 @@ test("a complete report without Pages links only to its artifact", () => {
   assert.match(markdown, /Native Midscene Test report included/);
   assert.doesNotMatch(
     markdown,
-    /Open the Midscene|unavailable|<img|runner-step|undefined|\| Shard \||<details>|Appendix:/,
+    /Open the Midscene|unavailable|<img|runner-step|undefined|\| Suite \||<details>|Appendix:/,
   );
 });
 
@@ -500,12 +500,12 @@ test("writes counts and downloads without duplicate case tables before publicati
   );
   const statuses = ["success", "failed", "not-run", "success", "success", "success"];
   for (const [index, status] of statuses.entries()) {
-    await writeShard(root, `shard-${index + 1}`, status, `CASE-0${index + 1}`, "visual-model");
+    await writeSuite(root, `suite-${index + 1}`, status, `CASE-0${index + 1}`, "visual-model");
   }
   const summaryFile = path.join(root, "GITHUB_STEP_SUMMARY");
   await buildSummary({
     "reports-dir": root,
-    "expected-projects": "web-shard-1,web-shard-2,web-shard-3,web-shard-4,web-shard-5,web-shard-6",
+    "expected-projects": "web-suite-1,web-suite-2,web-suite-3,web-suite-4,web-suite-5,web-suite-6",
     "run-url": "https://example.test/actions/runs/1",
     "producer-result": "failure",
     output: summaryFile,
@@ -513,7 +513,7 @@ test("writes counts and downloads without duplicate case tables before publicati
   const markdown = await readFile(summaryFile, "utf8");
   assert.match(markdown, /\*\*Cases:\*\* 6 total · 4 passed · 1 failed · 1 not run/);
   assert.match(markdown, /2 need attention · 4 passed/);
-  assert.doesNotMatch(markdown, /\| Shard \||<details>|Appendix:|CASE-0/);
+  assert.doesNotMatch(markdown, /\| Suite \||<details>|Appendix:|CASE-0/);
   assert.match(
     markdown,
     /\[Download the artifact\]\(https:\/\/example.test\/actions\/runs\/1#artifacts\)/,
@@ -526,15 +526,15 @@ test("published Summary exposes the combined native report before collapsed case
     models: [],
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "success",
-        reportPath: "shard/report/index.html",
+        reportPath: "suite/report/index.html",
         cases: [
           {
             name: "CHAT-01",
             status: "success",
-            reportPath: "shard/report/index.html",
-            screenshotPath: "shard/report/screenshots/one.jpeg",
+            reportPath: "suite/report/index.html",
+            screenshotPath: "suite/report/screenshots/one.jpeg",
             stepId: "case-1:steps:4",
           },
         ],
@@ -552,39 +552,39 @@ test("published Summary exposes the combined native report before collapsed case
   assert.match(markdown, /index.html#runner-step=case-1%3Asteps%3A4/);
   assert.match(
     markdown,
-    /<img src="https:\/\/example.test\/rome\/runs\/123\/shard\/report\/screenshots\/one.jpeg"/,
+    /<img src="https:\/\/example.test\/rome\/runs\/123\/suite\/report\/screenshots\/one.jpeg"/,
   );
   assert.match(markdown, /Cases:\*\* 1 total · 1 passed · 0 failed · 0 not run/);
-  assert.match(markdown, /### Shard results/);
-  assert.match(markdown, /web-shard-1 \| success \| 1 \| 1 \| 0 \| 0/);
+  assert.match(markdown, /### Suite results/);
+  assert.match(markdown, /web-suite-1 \| success \| 1 \| 1 \| 0 \| 0/);
   assert.match(markdown, /Appendix: passed/);
   assert.equal(markdown.match(/^## /gm).length, 1);
 });
 
-test("incomplete publication keeps shard links without claiming a combined native report", () => {
+test("incomplete publication keeps suite links without claiming a combined native report", () => {
   const markdown = renderMarkdown({
     models: [],
     projects: [
       {
-        name: "web-shard-1",
+        name: "web-suite-1",
         status: "failed",
-        reportPath: "shard/report/index.html",
+        reportPath: "suite/report/index.html",
         cases: [
           {
             name: "CHAT-01",
             status: "failed",
-            reportPath: "shard/report/index.html",
+            reportPath: "suite/report/index.html",
             stepId: "step-1",
           },
         ],
       },
-      { name: "web-shard-2", status: "missing", cases: [] },
+      { name: "web-suite-2", status: "missing", cases: [] },
     ],
     pagesUrl: "https://example.test/rome/runs/123/",
     runUrl: "https://example.test/run",
   });
   assert.match(markdown, /Native Midscene Test report unavailable/);
-  assert.match(markdown, /shard\/report\/index.html#runner-step=step-1/);
+  assert.match(markdown, /suite\/report\/index.html#runner-step=step-1/);
   assert.doesNotMatch(markdown, /Open the Midscene Test report/);
 });
 
@@ -610,7 +610,7 @@ const runWorkflowSummary = async (root, overrides = {}) => {
       GITHUB_REPOSITORY: "example/rome",
       GITHUB_RUN_ID: "456",
       REPORT_SOURCE_RUN_ID: "123",
-      REPORTS_DIR: "midscene-report-shards",
+      REPORTS_DIR: "midscene-reports",
       PRODUCER_RESULT: "failure",
       REPORT_RESULT: "success",
       PUBLICATION_RESULT: "skipped",
@@ -631,10 +631,10 @@ for (const scenario of [
     context.after(() =>
       import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
     );
-    const reports = path.join(root, "midscene-report-shards");
+    const reports = path.join(root, "midscene-reports");
     const statuses = ["success", "failed", "not-run", "success", "success", "success"];
     for (const [index, status] of statuses.entries()) {
-      await writeShard(reports, `shard-${index + 1}`, status, `CASE-0${index + 1}`, "visual-model");
+      await writeSuite(reports, `suite-${index + 1}`, status, `CASE-0${index + 1}`, "visual-model");
     }
     if (!scenario.report) {
       await mkdir(path.join(reports, "native-report"));
@@ -655,9 +655,9 @@ for (const scenario of [
     assert.match(markdown, /Source-run artifacts.*runs\/123#artifacts/);
     assert.match(markdown, /Download the artifact.*runs\/456#artifacts/);
     if (scenario.pagesUrl) {
-      assert.match(markdown, /### Shard results/);
-      assert.match(markdown, /web-shard-2 \| failed \| 1 \| 0 \| 1 \| 0/);
-      assert.match(markdown, /web-shard-3 \| not-run \| 1 \| 0 \| 0 \| 1/);
+      assert.match(markdown, /### Suite results/);
+      assert.match(markdown, /web-suite-2 \| failed \| 1 \| 0 \| 1 \| 0/);
+      assert.match(markdown, /web-suite-3 \| not-run \| 1 \| 0 \| 0 \| 1/);
       for (let index = 1; index <= 6; index += 1)
         assert.match(markdown, new RegExp(`CASE-0${index}`));
       assert.match(
@@ -670,7 +670,7 @@ for (const scenario of [
       assert.ok(markdown.includes(`Pages publication: **${scenario.publication}**`));
       assert.doesNotMatch(
         markdown,
-        /Open the Midscene Test report|<img|runner-step|undefined|\| Shard \||<details>|Appendix:|CASE-0/,
+        /Open the Midscene Test report|<img|runner-step|undefined|\| Suite \||<details>|Appendix:|CASE-0/,
       );
     }
     if (scenario.report) assert.match(markdown, /Report aggregation: \*\*failure\*\*/);
@@ -682,10 +682,10 @@ test("the final workflow step reports unavailable counts when rendering fails", 
   context.after(() =>
     import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
   );
-  const reports = path.join(root, "midscene-report-shards");
-  await writeShard(reports, "shard-1", "success", "CHAT-01", "visual-model");
+  const reports = path.join(root, "midscene-reports");
+  await writeSuite(reports, "suite-1", "success", "CHAT-01", "visual-model");
   await writeFile(
-    path.join(reports, "midscene-shard-1", ".midscene", "test-results", "run-1", "summary.json"),
+    path.join(reports, "midscene-suite-1", ".midscene", "test-results", "run-1", "summary.json"),
     "invalid JSON",
   );
   await assert.rejects(runWorkflowSummary(root), { code: 1 });
@@ -696,4 +696,36 @@ test("the final workflow step reports unavailable counts when rendering fails", 
   assert.match(markdown, /runs\/123#artifacts/);
   assert.match(markdown, /runs\/456#artifacts/);
   assert.doesNotMatch(markdown, /All .* cases passed|0 total|<img|runner-step/);
+});
+
+test("checks missing cases only for the suites a run selects", () => {
+  const projects = [{ name: "web-backend", status: "success", cases: [{ name: "BE-01" }] }];
+  assert.deepEqual(caseSetIssues(projects, { "BE-01": "backend", "CHAT-01": "mock" }), []);
+  assert.deepEqual(caseSetIssues(projects, { "BE-01": "backend", "BE-02": "backend" }), [
+    "Missing case: BE-02 (backend)",
+  ]);
+});
+
+test("appends the backend suite summary to the run Summary", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "rome-midscene-backend-summary-"));
+  context.after(() =>
+    import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true })),
+  );
+  await writeSuite(root, "backend", "success", "BE-01", "visual-model");
+  const backendDirectory = path.join(root, "midscene-backend", "midscene_run", "backend");
+  await mkdir(backendDirectory, { recursive: true });
+  await writeFile(
+    path.join(backendDirectory, "backend-summary.md"),
+    "### Backend suite\n\nAnomalies: 0 distinct anomalies.\n",
+  );
+  const output = path.join(root, "summary.md");
+  await buildSummary({
+    "reports-dir": root,
+    "expected-projects": "web-backend",
+    "run-url": "https://example.test/run",
+    output,
+  });
+  const markdown = await readFile(output, "utf8");
+  assert.match(markdown, /Rome × Midscene/);
+  assert.match(markdown, /### Backend suite\n\nAnomalies: 0 distinct anomalies\./);
 });
