@@ -288,7 +288,20 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
     return (tx) => {
       deps.approvalsRepo.supersedePairings(conn.id, tx);
-      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+      // Guardian links are keyed by service, so they stay while another
+      // Connection of the service still has every Talk grant conferred: the
+      // guardian can still reach Rome through that bot. A degraded grant
+      // counts, since its credential is still held and the link is needed when
+      // it recovers. Backing a channel does not count, because a channel stays
+      // bound to its Connection after Talk is revoked and hears no one then.
+      const stillTalks = registry
+        .find(conn.service)
+        .some(
+          (other) =>
+            other.id !== conn.id &&
+            talker.needs.every((need) => other.auth.grants()[need] !== "unauthorized"),
+        );
+      if (!stillTalks) deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
     };
   };
 
