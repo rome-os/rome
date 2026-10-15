@@ -877,8 +877,8 @@ export const connections = sqliteTable("connections", {
 
 // One row per channel a Connection backs: Rome's presence on a platform, named
 // once and never renamed. The first channel of a service is named after it,
-// and later ones `<service>-<n>`. A row outlives its Connection, unbacked, so
-// the service's next Connection takes the name back. `platform` is stored, not
+// and later ones get an opaque id. A row outlives its Connection, unbacked, and
+// its name is never given to another Connection. `platform` is stored, not
 // derived on read, so a database index can hold the one-agent-per-platform
 // rule; a row keeps the platform it was minted on.
 export const channels = sqliteTable(

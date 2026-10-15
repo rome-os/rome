@@ -354,8 +354,8 @@ async function main() {
   });
   const channelOf: ChannelOf = (connection) =>
     channelRecords.byConnection(connection.id)?.name ?? connection.service;
-  // The service a channel name belongs to (`feishu-2` is on `feishu`). Whatever
-  // is keyed by service, such as a descriptor or a channel policy, reads it.
+  // The service a channel name belongs to. Whatever is keyed by service, such
+  // as a descriptor or a channel policy, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
   const pairingAdmission = createPairingAdmission({
     approvalsRepo,

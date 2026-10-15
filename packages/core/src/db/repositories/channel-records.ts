@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { asc, eq, isNotNull } from "drizzle-orm";
 import { platformOf } from "../../channels/platform.js";
 import { channels } from "../schema.js";
@@ -28,20 +29,14 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   };
 }
 
-/** The order a service's channels are named in: the service's own name, then
- *  `<service>-2`, `<service>-3` and on. Null for a name outside that series. */
-function seriesIndex(service: string, name: string): number | null {
-  if (name === service) return 1;
-  const suffix = name.startsWith(`${service}-`) ? name.slice(service.length + 1) : "";
-  return /^[1-9][0-9]*$/.test(suffix) && Number(suffix) >= 2 ? Number(suffix) : null;
-}
-
 /**
  * The channels the Connections back.
  *
  * A channel's name is minted once and never changes, since every stored row
- * spells it. A row stays when its Connection goes, and the service's next
- * Connection takes it back before a new name is minted.
+ * spells it. It is an opaque id, except that a service's first channel carries
+ * the service's name, which is what data stored before channels were recorded
+ * spells. A row stays when its Connection goes, and its name is never given to
+ * another Connection, so a new Connection never inherits an old one's history.
  */
 export class ChannelRecordsRepository {
   constructor(private readonly db: DrizzleDb) {}
@@ -73,43 +68,22 @@ export class ChannelRecordsRepository {
   /**
    * The channel `connection` backs, recorded in `exec` (the transaction that
    * mints the Connection). A Connection that already has one keeps it. Else
-   * it takes the service's first unbacked channel in naming order, and
-   * failing that, the first unused name in the series.
+   * it gets the service's name if no channel has ever held it, and a fresh
+   * opaque id otherwise.
    */
   claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
 
     const service = connection.service;
-    const ofService = exec.select().from(channels).where(eq(channels.service, service)).all();
-    const vacant = ofService
-      .filter((row) => row.connectionId === null)
-      .map((row) => ({ row, index: seriesIndex(service, row.name) ?? Number.MAX_SAFE_INTEGER }))
-      .sort((a, b) => a.index - b.index || a.row.name.localeCompare(b.row.name))[0];
-    if (vacant) {
-      exec
-        .update(channels)
-        .set({ connectionId: connection.id })
-        .where(eq(channels.name, vacant.row.name))
-        .run();
-      return toRecord({ ...vacant.row, connectionId: connection.id });
-    }
-
-    const taken = new Set(
+    const serviceNameTaken =
       exec
         .select({ name: channels.name })
         .from(channels)
-        .all()
-        .map((r) => r.name),
-    );
-    let index = 1;
-    let name = service;
-    while (taken.has(name)) {
-      index += 1;
-      name = `${service}-${index}`;
-    }
+        .where(eq(channels.name, service))
+        .get() !== undefined;
     const row = {
-      name,
+      name: serviceNameTaken ? randomUUID() : service,
       service,
       platform: platformOf(service),
       connectionId: connection.id,

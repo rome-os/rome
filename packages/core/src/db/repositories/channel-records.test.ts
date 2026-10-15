@@ -3,6 +3,7 @@ import { createTestDb, type TestDb } from "../../test/helpers.js";
 import { ChannelRecordsRepository } from "./channel-records.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 describe("ChannelRecordsRepository", () => {
   let testDb: TestDb | undefined;
@@ -16,13 +17,16 @@ describe("ChannelRecordsRepository", () => {
     return new ChannelRecordsRepository(testDb.db);
   }
 
-  it("names a service's first channel after it and later ones by number", () => {
+  it("names a service's first channel after it and later ones by an opaque id", () => {
     const records = repository();
     const db = testDb!.db;
 
     expect(records.claim(db, { id: "c1", service: "feishu" }, NOW).name).toBe("feishu");
-    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).name).toBe("feishu-2");
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).name).toBe("feishu-3");
+    const second = records.claim(db, { id: "c2", service: "feishu" }, NOW).name;
+    const third = records.claim(db, { id: "c3", service: "feishu" }, NOW).name;
+    expect(second).toMatch(UUID);
+    expect(third).toMatch(UUID);
+    expect(third).not.toBe(second);
     expect(records.claim(db, { id: "c4", service: "telegram_user" }, NOW)).toMatchObject({
       name: "telegram_user",
       platform: "telegram",
@@ -38,25 +42,24 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("gives a released name back to the service's next Connection", () => {
+  it("never gives a released name to another Connection", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    records.claim(db, { id: "c2", service: "feishu" }, NOW);
 
     records.vacate(db, "c1");
     expect(records.byName("feishu")).toMatchObject({ connectionId: null });
 
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).name).toBe("feishu");
-    expect(records.byConnection("c3")?.name).toBe("feishu");
+    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).name).toMatch(UUID);
+    expect(records.byName("feishu")).toMatchObject({ connectionId: null });
   });
 
   it("names the service behind a channel, and passes an unrecorded name through", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "telegram" }, NOW);
-    records.claim(testDb!.db, { id: "c2", service: "telegram" }, NOW);
+    const second = records.claim(testDb!.db, { id: "c2", service: "telegram" }, NOW).name;
 
-    expect(records.serviceOf("telegram-2")).toBe("telegram");
+    expect(records.serviceOf(second)).toBe("telegram");
     expect(records.serviceOf("webchat")).toBe("webchat");
   });
 
