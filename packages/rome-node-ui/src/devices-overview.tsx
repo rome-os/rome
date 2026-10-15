@@ -184,7 +184,7 @@ function LatestCommands({
           <NavLink
             to={navigation.href(device.id, row.id)}
             navigation={navigation}
-            className="grid grid-cols-[0.75rem_auto_minmax(0,1fr)_auto] items-center gap-2 px-4 py-1.5 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="grid grid-cols-[0.75rem_auto_minmax(0,1fr)_auto] items-center gap-2 px-4 py-2 outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             <span className="flex justify-center">
               <ResultMark row={row} m={m} label={false} />
@@ -228,7 +228,7 @@ function DeviceCard({
       >
         <Identity device={device} m={m} />
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <span className="flex items-baseline gap-1.5">
+          <span className="flex items-baseline gap-2">
             <span className="font-mono text-title tabular-nums text-foreground">
               {stats.counts.all.toLocaleString(locale)}
             </span>

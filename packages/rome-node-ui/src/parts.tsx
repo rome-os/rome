@@ -125,7 +125,7 @@ export function ResultMark({
   return (
     <span
       className={cn(
-        "inline-flex min-w-0 items-center gap-1.5 font-mono text-aux",
+        "inline-flex min-w-0 items-center gap-2 font-mono text-aux",
         result === "failed" ? "text-destructive" : "text-muted-foreground",
       )}
     >

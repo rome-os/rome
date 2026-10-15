@@ -10,13 +10,14 @@ const HOUR_MS = 60 * 60 * 1000;
 /** The stacked bar of one bucket: the failed, no-result, and running shares sit on top. */
 function Bar({ bucket, max, dim }: { bucket: Bucket; max: number; dim: boolean }) {
   const { counts } = bucket;
-  if (!counts.all) return <span className="h-full flex-1" />;
+  // The transparent right border is the 1px gap between bars: the parts paint the content box.
+  if (!counts.all) return <span className="h-full flex-1 border-r border-transparent" />;
   const height = Math.max(2, (counts.all / max) * 100);
   const part = (value: number) => `${(value / counts.all) * 100}%`;
   return (
     <span
       className={cn(
-        "flex flex-1 flex-col justify-end overflow-hidden rounded-t-[1px] transition-opacity",
+        "flex flex-1 flex-col justify-end overflow-hidden border-r border-transparent bg-clip-content transition-opacity",
         dim && "opacity-40",
       )}
       style={{ height: `${height}%` }}
@@ -126,7 +127,7 @@ export function LoadChart({
         ];
 
   return (
-    <div className="@container flex flex-col gap-1.5">
+    <div className="@container flex flex-col gap-2">
       {interactive && (
         <p
           className="h-[1lh] truncate text-right font-mono text-aux text-muted-foreground"
@@ -140,7 +141,7 @@ export function LoadChart({
       <div
         role={interactive ? "toolbar" : "img"}
         aria-label={m.chart.label}
-        className={cn("relative flex items-end gap-px", size === "lg" ? "h-28" : "h-14")}
+        className={cn("relative flex items-end", size === "lg" ? "h-28" : "h-14")}
         onKeyDown={interactive ? move : undefined}
         onMouseLeave={() => setHover(null)}
       >
@@ -175,7 +176,7 @@ export function LoadChart({
                 if (bucket.counts.all) onSelect!(index === selectedIndex ? null : bucket.start);
               }}
               className={cn(
-                "relative flex h-full flex-1 cursor-pointer items-end rounded-[2px] outline-none outline-1 outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-disabled:cursor-default",
+                "relative flex h-full flex-1 cursor-pointer items-end rounded-4 outline-none outline-1 outline-offset-1 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 aria-disabled:cursor-default",
                 index === hover && "bg-surface-hover",
               )}
             >

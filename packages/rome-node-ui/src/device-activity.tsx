@@ -315,7 +315,7 @@ export function NodeDeviceActivity({
         value === "all" ? (
           m.result.all
         ) : (
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-2">
             <span className={cn("size-1.5 rounded-full", resultPaint[value])} aria-hidden />
             {m.result[value]}
           </span>
@@ -465,7 +465,7 @@ export function NodeDeviceActivity({
           ) : (
             groups.map((group) => (
               <section key={group.day} aria-label={dayLabel(group.day)}>
-                <h3 className="border-b border-border-subtle bg-surface-muted px-[var(--row-px-sm)] py-1.5 text-aux font-medium text-muted-foreground">
+                <h3 className="border-b border-border-subtle bg-surface-muted px-[var(--row-px-sm)] py-2 text-aux font-medium text-muted-foreground">
                   {dayLabel(group.day)}
                 </h3>
                 <List asChild>
