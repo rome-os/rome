@@ -1060,7 +1060,7 @@ const ASK_QUESTION_APP_ID = "core";
 const ASK_QUESTION_COMPONENT_ID = "question-card";
 
 const ASK_QUESTION_PARK_DIRECTIVE =
-  "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt — do not call any further tools or send another message until then. When you reply, describe only what this step does; do not claim a later step has already happened.";
+  "The question card has been shown to the guardian. Their answers will arrive as the next turn's prompt. End your turn now: do not call any further tools, and do not repeat or reword what you wrote before the card. Add at most one short line, and do not claim a later step has already happened.";
 
 /** Shape the `ask_question` tool input into a `pendingInteraction` payload that
  * the webchat drain renders as the host built-in question-card component
