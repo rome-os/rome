@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ConversationId } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { tokenPaste } from "../connections/schemes.js";
@@ -70,7 +70,10 @@ describe("a channel's Connection across epochs", () => {
       async (_id: string, _service: string, message: ChannelMessage) =>
         message.senderId === "guardian",
     );
-    const ports = connectionPorts({ registry, ...(gated ? { admit } : {}) }, "discord")!;
+    const ports = connectionPorts(
+      { registry, channelOf: serviceChannelOf, ...(gated ? { admit } : {}) },
+      "discord",
+    )!;
     const sibling: string[] = [];
     const unsubscribe = ports.inbound!.subscribe(async (event) => {
       sibling.push(event.message.messageId);
@@ -169,7 +172,7 @@ describe("a channel's Connection across epochs", () => {
       },
     });
     const admit = rs.fn(async () => false);
-    connectionPorts({ registry, admit }, "telegram");
+    connectionPorts({ registry, admit, channelOf: serviceChannelOf }, "telegram");
     const connection = await registry.connect("telegram");
     await registry.importCredential(connection.id, "bot", {
       material: { token: "t" },

@@ -80,7 +80,7 @@ import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
 import { claimChannels } from "./channels/claim-channels.js";
-import type { ChannelOf } from "./channels/connection-ports.js";
+import { recordedChannelOf } from "./channels/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { backingConnection, createChannelsService } from "./channels/channels-service.js";
@@ -352,8 +352,7 @@ async function main() {
     },
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
-  const channelOf: ChannelOf = (connection) =>
-    channelRecords.idOf(connection.id) ?? connection.service;
+  const channelOf = recordedChannelOf(channelRecords, talks);
   // The service a channel name belongs to. Whatever is keyed by service, such
   // as a descriptor or a channel policy, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
@@ -914,7 +913,7 @@ async function main() {
     // runs in the main process or a worker (where it gets the RPC proxy instead).
     emailInbound: {
       async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
-        const email = backingConnection(connectionRegistry, "email");
+        const email = backingConnection(connectionRegistry, "email", channelOf);
         if (!email) return { status: "skipped", reason: "channel_inactive" };
         return (await connectionRegistry.ingest(email.id, {
           rawBody,
@@ -1291,6 +1290,7 @@ async function main() {
   const workerRpcServer = new WorkerRpcServer({
     channelsService,
     connectionRegistry,
+    channelOf,
     conversationSettings,
     routinesRepo,
     routineEngine,

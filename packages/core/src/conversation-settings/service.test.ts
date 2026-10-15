@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConversationDescriptor, ConversationId, ConversationRef } from "@rome-os/app-runtime";
 import type { TalkDirectory } from "../connections/types.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import type { Channels } from "../channels/channel.js";
@@ -53,7 +53,8 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
   const built = new Map<string, ReturnType<typeof connectionPorts>>();
   return () =>
     registry.registeredServices().flatMap((name) => {
-      if (!built.has(name)) built.set(name, connectionPorts({ registry }, name));
+      if (!built.has(name))
+        built.set(name, connectionPorts({ registry, channelOf: serviceChannelOf }, name));
       const ports = built.get(name);
       return ports ? [{ name, accounts: null, ...ports }] : [];
     });
@@ -95,6 +96,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => ["pm-assistant"],
       onChanged,
@@ -521,6 +523,36 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("discord", "parent" as ConversationId)?.channelSettings).not.toBeNull();
   });
 
+  it("reads no row for, and refuses updates on, a Connection that backs no channel", async () => {
+    const { registry, service, discord, parent } = await setup();
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    // discord has lost its channel record, as while `registry.remove` evicts it.
+    const unrecorded = new ConversationSettingsService({
+      repository: new ConversationSettingsRepository(testDb!.db),
+      connections: registry,
+      channelOf: (connection) => (connection.id === discord.id ? null : connection.service),
+      channels: () => [],
+      listAgents: () => [],
+      onChanged: () => {},
+    });
+
+    expect((await unrecorded.get(parent)).overrides).toEqual({});
+    expect((await unrecorded.list({ connectionId: discord.id })).items).toEqual([]);
+    await expect(
+      unrecorded.update({
+        ref: parent,
+        set: { enabled: true },
+        clear: [],
+        actor: { kind: "guardian" },
+      }),
+    ).rejects.toThrow(`Connection "${discord.id}" backs no channel`);
+  });
+
   it("still reads a seen conversation and its settings once its connection is removed", async () => {
     const { registry, service, wechat } = await setup();
     const ref: ConversationRef = {
@@ -592,6 +624,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository: new ConversationSettingsRepository(testDb.db),
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},
@@ -646,6 +679,7 @@ describe("ConversationSettingsService", () => {
     const service = new ConversationSettingsService({
       repository,
       connections: registry,
+      channelOf: serviceChannelOf,
       channels: channelsOver(registry),
       listAgents: () => [],
       onChanged: () => {},

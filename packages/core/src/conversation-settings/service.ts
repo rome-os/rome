@@ -209,8 +209,9 @@ export interface ConversationSettingsServiceDeps {
   repository: ConversationSettingsRepository;
   connections: ConnectionRegistry;
   /** The channel a Connection backs, which names its conversations' rows.
-   *  Absent, every Connection backs the channel named after its service. */
-  channelOf?: ChannelOf;
+   *  A Connection that backs none has no rows, and its conversations refuse
+   *  updates. */
+  channelOf: ChannelOf;
   /** The channels whose directories list live conversations. Undefined until
    *  the channel list is built, and until then only persisted rows list. */
   channels: () => Channels | undefined;
@@ -260,11 +261,14 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     const selectedConnection = input.connectionId
       ? this.deps.connections.all().find((connection) => connection.id === input.connectionId)
       : undefined;
+    const selectedChannel = selectedConnection
+      ? this.deps.channelOf(selectedConnection)
+      : undefined;
     const known =
-      input.connectionId && !selectedConnection
+      input.connectionId && !selectedChannel
         ? []
         : this.deps.repository.listKnown({
-            service: selectedConnection ? this.channelOf(selectedConnection) : undefined,
+            service: selectedChannel ?? undefined,
             query: input.query,
           });
     const byRef = new Map<
@@ -451,7 +455,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
           updatedAt: new Date().toISOString(),
           updatedBy: input.actor,
         };
-        this.deps.repository.mutate(descriptor, this.channelName(input.ref), {
+        this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
           settings: stored,
           agentName: supported.has("routing.agentName")
             ? typeof routing === "string"
@@ -491,7 +495,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
         const { descriptor, row } = this.resolveConversation(input.ref);
         this.assertSettingsOwner(descriptor, row);
         const fields = [...this.supportedFields(descriptor, row)];
-        this.deps.repository.mutate(descriptor, this.channelName(input.ref), {
+        this.deps.repository.mutate(descriptor, this.storedChannel(input.ref), {
           settings: null,
           agentName: fields.includes("routing.agentName") ? null : undefined,
         });
@@ -529,7 +533,7 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       : undefined;
     if (input.connectionId && !selected) return [];
     const channels = (this.deps.channels() ?? []).filter(
-      (channel) => !selected || channel.name === this.channelOf(selected),
+      (channel) => !selected || channel.name === this.deps.channelOf(selected),
     );
     const conversations: ConversationDescriptor[] = [];
     await Promise.all(
@@ -610,14 +614,13 @@ export class ConversationSettingsService implements ConversationSettingsControl 
       // its row under the channel it was last seen on.
       if (!this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
         const channel = this.rememberedChannels.get(this.key(ref));
-        const row = channel ? this.deps.repository.find(channel, ref.conversationId) : null;
-        return { descriptor: remembered, row };
+        return { descriptor: remembered, row: this.find(channel, ref) };
       }
-      const row = this.deps.repository.find(this.channelName(ref), ref.conversationId);
+      const row = this.find(this.channelName(ref), ref);
       return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };
     }
     const connection = this.deps.connections.get(ref.connectionId);
-    const row = this.deps.repository.find(this.channelOf(connection), ref.conversationId);
+    const row = this.find(this.deps.channelOf(connection), ref);
     if (row) return { descriptor: this.descriptorFromRow(row), row };
     const descriptor: ConversationDescriptor = {
       ref,
@@ -633,7 +636,8 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     const key = this.key(descriptor.ref);
     this.descriptors.set(key, descriptor);
     if (this.deps.connections.all().some((c) => c.id === descriptor.ref.connectionId)) {
-      this.rememberedChannels.set(key, this.channelName(descriptor.ref));
+      const channel = this.channelName(descriptor.ref);
+      if (channel !== null) this.rememberedChannels.set(key, channel);
     }
   }
 
@@ -684,24 +688,40 @@ export class ConversationSettingsService implements ConversationSettingsControl 
     return `${ref.connectionId}\0${ref.conversationId}`;
   }
 
+  /** A conversation on no channel stores nothing, so it locks on its own
+   *  key, which no channel's conversation shares. */
   private storageKey(ref: ConversationRef): string {
-    return `${this.channelName(ref)}\0${ref.conversationId}`;
+    const channel = this.channelName(ref);
+    return channel === null ? this.key(ref) : `${channel}\0${ref.conversationId}`;
   }
 
-  private channelOf(connection: Pick<Connection, "id" | "service">): string {
-    return this.deps.channelOf?.(connection) ?? connection.service;
+  /** The channel the conversation `ref` addresses belongs to, or null when
+   *  its Connection backs none. */
+  private channelName(ref: ConversationRef): string | null {
+    return this.deps.channelOf(this.deps.connections.get(ref.connectionId));
   }
 
-  /** The channel the conversation `ref` addresses belongs to. */
-  private channelName(ref: ConversationRef): string {
-    return this.channelOf(this.deps.connections.get(ref.connectionId));
+  /** The channel the row of the conversation `ref` is stored under. Throws
+   *  when its Connection backs none. */
+  private storedChannel(ref: ConversationRef): string {
+    const channel = this.channelName(ref);
+    if (channel === null) throw new Error(`Connection "${ref.connectionId}" backs no channel`);
+    return channel;
+  }
+
+  /** The row of the conversation `ref` on `channel`, and none on no channel. */
+  private find(
+    channel: string | null | undefined,
+    ref: ConversationRef,
+  ): StoredConversationRow | null {
+    return channel ? this.deps.repository.find(channel, ref.conversationId) : null;
   }
 
   /** The Connections backing the channel named `channel`. */
   private connectionsOf(channel: string): Connection[] {
     return this.deps.connections
       .all()
-      .filter((connection) => this.channelOf(connection) === channel);
+      .filter((connection) => this.deps.channelOf(connection) === channel);
   }
 
   private logRejected(ref: ConversationRef, err: unknown): void {

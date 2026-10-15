@@ -13,6 +13,7 @@ import {
   channelNamed,
   createTestConnections,
   noAccounts,
+  serviceChannelOf,
   type TestConnections,
 } from "../helpers.js";
 import type { Channels } from "../../channels/channel.js";
@@ -303,7 +304,7 @@ async function buildHarness(
     db,
     whatsAppAccounts: noAccounts,
     linkedInAccounts: noAccounts,
-    connections: { registry: connections },
+    connections: { registry: connections, channelOf: serviceChannelOf },
   });
 
   const backendTurnRunner = createBackendTurnRunner({
