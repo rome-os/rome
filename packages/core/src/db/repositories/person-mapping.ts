@@ -1,7 +1,7 @@
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { persons, channelMappings } from "../schema.js";
-import { ChannelRecordsRepository } from "./channel-records.js";
+import type { ServiceOfChannel } from "./channel-records.js";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
@@ -97,13 +97,14 @@ export interface NewPersonData {
  * for one thing rather than one.
  */
 export class PersonMappingRepository {
-  constructor(private db: DrizzleDb) {}
-
-  /** The service a link is keyed by: People keys an account by service, so a
-   *  later channel of a service reads and writes the service's links. */
-  private serviceOf(channel: string): string {
-    return new ChannelRecordsRepository(this.db).serviceOf(channel);
-  }
+  /** `serviceOf` maps a channel to the service a link is keyed by: People keys
+   *  an account by service, so a later channel of a service reads and writes
+   *  the service's links. The default maps every channel to itself, which is
+   *  right only while no service has a later channel. */
+  constructor(
+    private db: DrizzleDb,
+    private readonly serviceOf: ServiceOfChannel = (channel) => channel,
+  ) {}
 
   private async generatePersonId(displayName: string): Promise<string> {
     const base = generatePersonSlug(displayName);

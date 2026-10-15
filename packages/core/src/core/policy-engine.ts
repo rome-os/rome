@@ -3,6 +3,7 @@ import type { PolicyContext } from "@rome-os/app-runtime";
 import type { Policy, PolicyRule, PolicyScope } from "../types.js";
 import type { PoliciesRepository } from "../db/repositories/policies.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 
 export type { PolicyContext } from "@rome-os/app-runtime";
 
@@ -27,10 +28,6 @@ function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: M
     "policy.bond_level": context.bondLevel,
   });
 }
-
-/** The service a channel belongs to. A service's first channel carries the
- *  service's name, so a name with no record answers for itself. */
-export type ServiceOfChannel = (channel: string) => string;
 
 export class PolicyEngine {
   constructor(

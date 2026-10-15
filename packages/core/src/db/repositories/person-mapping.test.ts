@@ -128,6 +128,7 @@ describe("PersonMappingRepository", () => {
 
   it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, (channel) => records.serviceOf(channel));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
     const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
@@ -143,6 +144,7 @@ describe("PersonMappingRepository", () => {
 
   it("writes a later channel's links under its service", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, (channel) => records.serviceOf(channel));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
     const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
