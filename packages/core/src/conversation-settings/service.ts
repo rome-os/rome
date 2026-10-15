@@ -226,6 +226,9 @@ export interface ConversationSettingsServiceDeps {
 export class ConversationSettingsService implements ConversationSettingsControl {
   private readonly mutex = new KeyedMutex();
   private readonly descriptors = new Map<string, ConversationDescriptor>();
+  /** The channel each remembered conversation was last seen on, so it still
+   *  reads its row once its Connection is removed. */
+  private readonly rememberedChannels = new Map<string, string>();
 
   constructor(private readonly deps: ConversationSettingsServiceDeps) {}
 
@@ -603,10 +606,12 @@ export class ConversationSettingsService implements ConversationSettingsControl 
   } {
     const remembered = this.descriptors.get(this.key(ref));
     if (remembered) {
-      // A removed Connection has no channel to read a row under, so the
-      // conversation answers with what was last seen of it.
+      // A removed Connection backs no channel now, so the conversation reads
+      // its row under the channel it was last seen on.
       if (!this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
-        return { descriptor: remembered, row: null };
+        const channel = this.rememberedChannels.get(this.key(ref));
+        const row = channel ? this.deps.repository.find(channel, ref.conversationId) : null;
+        return { descriptor: remembered, row };
       }
       const row = this.deps.repository.find(this.channelName(ref), ref.conversationId);
       return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };
@@ -625,7 +630,11 @@ export class ConversationSettingsService implements ConversationSettingsControl 
   }
 
   private remember(descriptor: ConversationDescriptor): void {
-    this.descriptors.set(this.key(descriptor.ref), descriptor);
+    const key = this.key(descriptor.ref);
+    this.descriptors.set(key, descriptor);
+    if (this.deps.connections.all().some((c) => c.id === descriptor.ref.connectionId)) {
+      this.rememberedChannels.set(key, this.channelName(descriptor.ref));
+    }
   }
 
   private supportedFields(
