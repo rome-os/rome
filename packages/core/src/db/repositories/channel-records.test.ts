@@ -51,6 +51,15 @@ describe("ChannelRecordsRepository", () => {
     expect(records.byConnection("c3")?.name).toBe("feishu");
   });
 
+  it("names the service behind a channel, and passes an unrecorded name through", () => {
+    const records = repository();
+    records.claim(testDb!.db, { id: "c1", service: "telegram" }, NOW);
+    records.claim(testDb!.db, { id: "c2", service: "telegram" }, NOW);
+
+    expect(records.serviceOf("telegram-2")).toBe("telegram");
+    expect(records.serviceOf("webchat")).toBe("webchat");
+  });
+
   it("lists the Connections no channel records yet", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "feishu" }, NOW);

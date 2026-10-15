@@ -1,6 +1,7 @@
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { persons, channelMappings, channels } from "../schema.js";
+import { persons, channelMappings } from "../schema.js";
+import { ChannelRecordsRepository } from "./channel-records.js";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
@@ -124,12 +125,7 @@ export class PersonMappingRepository {
    * on a second Feishu bot pairs once there.
    */
   async findByChannelUser(channel: string, channelUserId: string) {
-    channel =
-      this.db
-        .select({ service: channels.service })
-        .from(channels)
-        .where(eq(channels.name, channel))
-        .get()?.service ?? channel;
+    channel = new ChannelRecordsRepository(this.db).serviceOf(channel);
     const rows = await this.db
       .select({
         person: persons,

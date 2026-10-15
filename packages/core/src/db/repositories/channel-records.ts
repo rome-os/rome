@@ -55,6 +55,12 @@ export class ChannelRecordsRepository {
     return row ? toRecord(row) : null;
   }
 
+  /** The service behind channel `name`, or `name` itself when no channel
+   *  records it: a service's first channel carries the service's name. */
+  serviceOf(name: string): string {
+    return this.byName(name)?.service ?? name;
+  }
+
   byConnection(connectionId: string): ChannelRecord | null {
     const row = this.db
       .select()
