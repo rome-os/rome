@@ -99,6 +99,12 @@ export interface NewPersonData {
 export class PersonMappingRepository {
   constructor(private db: DrizzleDb) {}
 
+  /** The service a link is keyed by: People keys an account by service, so a
+   *  later channel of a service reads and writes the service's links. */
+  private serviceOf(channel: string): string {
+    return new ChannelRecordsRepository(this.db).serviceOf(channel);
+  }
+
   private async generatePersonId(displayName: string): Promise<string> {
     const base = generatePersonSlug(displayName);
     if (!base) return uuid();
@@ -119,13 +125,13 @@ export class PersonMappingRepository {
 
   /**
    * The person `channelUserId` on `channel` is linked to. A later channel of a
-   * service (`telegram-2`) reads the service's links, which is where pairing
+   * service reads the service's links, which is where pairing
    * writes them: People keys an account by service. Telegram and Discord give a
    * person one id across bots. Feishu's open_id is issued per app, so a sender
    * on a second Feishu bot pairs once there.
    */
   async findByChannelUser(channel: string, channelUserId: string) {
-    channel = new ChannelRecordsRepository(this.db).serviceOf(channel);
+    channel = this.serviceOf(channel);
     const rows = await this.db
       .select({
         person: persons,
@@ -357,6 +363,7 @@ export class PersonMappingRepository {
    *  or null when nobody holds it. The join loses nothing — every mapping
    *  references a person row. */
   private async findChannelMapping(channel: string, channelUserId: string) {
+    channel = this.serviceOf(channel);
     const rows = await this.db
       .select({ mapping: channelMappings, personName: persons.displayName })
       .from(channelMappings)
@@ -408,6 +415,7 @@ export class PersonMappingRepository {
     channelUserId: string,
     displayName: string,
   ): boolean {
+    channel = this.serviceOf(channel);
     const holder = exec
       .select()
       .from(channelMappings)
@@ -433,6 +441,7 @@ export class PersonMappingRepository {
     channelUserId: string,
     displayName?: string,
   ): string {
+    channel = this.serviceOf(channel);
     // Claiming an account is one statement, not a read followed by a write:
     // `(channel, channel_user_id)` is unique, so a second writer re-points the
     // mapping instead of adding a rival one, whatever order the two arrive in.
@@ -481,6 +490,7 @@ export class PersonMappingRepository {
     channelUserIds: readonly string[],
   ): number {
     if (channelUserIds.length === 0) return 0;
+    channel = this.serviceOf(channel);
     return exec
       .delete(channelMappings)
       .where(
@@ -518,6 +528,7 @@ export class PersonMappingRepository {
     from: string,
     to: string,
   ): boolean {
+    channel = this.serviceOf(channel);
     // The row this call re-points, as a subquery so the guard runs inside the
     // caller's transaction rather than as a read before it (see
     // {@link writeDeleteGuardianChannelMappings}).
@@ -596,6 +607,7 @@ export class PersonMappingRepository {
   }
 
   async deleteChannelMapping(channel: string, channelUserId: string) {
+    channel = this.serviceOf(channel);
     await this.db
       .delete(channelMappings)
       .where(
@@ -648,7 +660,8 @@ export class PersonMappingRepository {
     channelUserId: string;
     transferFrom?: string | null;
   }): Promise<LinkAccountResult> {
-    const { personId, channel, channelUserId } = params;
+    const { personId, channelUserId } = params;
+    const channel = this.serviceOf(params.channel);
     const expected = params.transferFrom ?? null;
 
     return this.db.transaction((tx): LinkAccountResult => {

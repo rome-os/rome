@@ -28,14 +28,15 @@ function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: M
   });
 }
 
-/** The service a channel belongs to, or null for a name with no record. */
-export type ServiceOfChannel = (channel: string) => string | null;
+/** The service a channel belongs to. A service's first channel carries the
+ *  service's name, so a name with no record answers for itself. */
+export type ServiceOfChannel = (channel: string) => string;
 
 export class PolicyEngine {
   constructor(
     private policiesRepo: PoliciesRepository,
     private settingsRepo: SettingsRepository,
-    private serviceOf: ServiceOfChannel = () => null,
+    private serviceOf: ServiceOfChannel = (channel) => channel,
   ) {}
 
   /**
@@ -108,10 +109,10 @@ export class PolicyEngine {
       }
     }
 
-    // A policy on a later channel's own name (`telegram-2`) wins; one on its
+    // A policy on a later channel's own name wins; one on its
     // service covers it otherwise, as People keys an account by service.
     const service = this.serviceOf(context.channel);
-    for (const name of service && service !== context.channel
+    for (const name of service !== context.channel
       ? [context.channel, service]
       : [context.channel]) {
       for (const policy of channel) {

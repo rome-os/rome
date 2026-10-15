@@ -117,10 +117,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
   const channelRecords = new ChannelRecordsRepository(db);
-  const policyEngine = new PolicyEngine(
-    policiesRepo,
-    settingsRepo,
-    (name) => channelRecords.byName(name)?.service ?? null,
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, (name) =>
+    channelRecords.serviceOf(name),
   );
 
   const actionEngine = new ActionEngine(

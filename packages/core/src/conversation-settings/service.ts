@@ -603,6 +603,11 @@ export class ConversationSettingsService implements ConversationSettingsControl 
   } {
     const remembered = this.descriptors.get(this.key(ref));
     if (remembered) {
+      // A removed Connection has no channel to read a row under, so the
+      // conversation answers with what was last seen of it.
+      if (!this.deps.connections.all().some((c) => c.id === ref.connectionId)) {
+        return { descriptor: remembered, row: null };
+      }
       const row = this.deps.repository.find(this.channelName(ref), ref.conversationId);
       return { descriptor: row ? this.descriptorFromRow(row) : remembered, row };
     }

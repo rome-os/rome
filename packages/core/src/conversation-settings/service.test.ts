@@ -521,6 +521,20 @@ describe("ConversationSettingsService", () => {
     expect(repository.find("discord", "parent" as ConversationId)?.channelSettings).not.toBeNull();
   });
 
+  it("still reads a seen conversation once its connection is removed", async () => {
+    const { registry, service, wechat } = await setup();
+    const ref: ConversationRef = {
+      connectionId: wechat.id,
+      conversationId: "wechat-group" as ConversationId,
+    };
+    service.observe({ ref, service: "wechat", kind: "group", displayName: "WeChat group" });
+
+    await registry.remove(wechat.id);
+
+    const snapshot = await service.get(ref);
+    expect(snapshot.conversation.displayName).toBe("WeChat group");
+  });
+
   it("serializes concurrent writers per conversation", async () => {
     let releaseFirst!: () => void;
     const onChanged = rs.fn(

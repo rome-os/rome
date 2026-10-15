@@ -130,15 +130,36 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
-    records.claim(testDb.db, { id: "c2", service: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).name;
     const personId = await repo.create({
       displayName: "Erin",
       bondLevel: "guardian",
       channelMappings: [{ channel: "telegram", channelUserId: "tg-erin" }],
     });
 
-    const found = await repo.findByChannelUser("telegram-2", "tg-erin");
+    const found = await repo.findByChannelUser(second, "tg-erin");
     expect(found?.id).toBe(personId);
+  });
+
+  it("writes a later channel's links under its service", async () => {
+    const records = new ChannelRecordsRepository(testDb.db);
+    const now = new Date();
+    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).name;
+    const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
+
+    await repo.addChannelMapping(personId, second, "tg-erin");
+    expect((await repo.findByChannelUser("telegram", "tg-erin"))?.id).toBe(personId);
+
+    await repo.deleteChannelMapping(second, "tg-erin");
+    expect(await repo.findByChannelUser("telegram", "tg-erin")).toBeNull();
+
+    await expect(
+      repo.linkAccount({ personId, channel: second, channelUserId: "tg-erin" }),
+    ).resolves.toEqual({ linked: true });
+    expect((await repo.findById(personId))?.channelMappings).toEqual([
+      expect.objectContaining({ channel: "telegram", channelUserId: "tg-erin" }),
+    ]);
   });
 
   it("findByChannelUser() returns person for channel+userId", async () => {
