@@ -30,6 +30,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: null,
+      linkedAgent: null,
       severalAccounts: false,
     },
     ...[
@@ -53,6 +54,7 @@ export const connections: { connections: ApiConnection[] } = {
         connect: null,
         setups: {},
         channel: service,
+        linkedAgent: null,
         severalAccounts: SEVERAL_ACCOUNT_SERVICES.has(service),
       }),
     ),
@@ -72,6 +74,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "discord",
+      linkedAgent: null,
       severalAccounts: true,
     },
     {
@@ -90,6 +93,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "telegram",
+      linkedAgent: null,
       severalAccounts: true,
     },
     {
@@ -112,6 +116,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "whatsapp",
+      linkedAgent: null,
       severalAccounts: false,
     },
     {
@@ -130,6 +135,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "linkedin",
+      linkedAgent: null,
       severalAccounts: false,
     },
   ],

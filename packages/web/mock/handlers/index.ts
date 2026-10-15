@@ -43,6 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
+import { platformOf } from "@rome/api-types/platform";
 import { SEVERAL_ACCOUNT_SERVICES } from "@rome/api-types/several-accounts";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -801,6 +802,10 @@ const chatAgents: AgentCatalogGroup[] = [
   },
 ];
 
+/** The loaded agents `GET /api/agents` lists, which the account link picker
+ *  offers and its PUT accepts. */
+const mockAgentNames = ["build", "sales:agent"];
+
 // Long enough to overflow the project picker's 260px list, so the pinned
 // "no project selected" row can be exercised against a scrolling list.
 const projectCatalog: ProjectCatalog = {
@@ -1221,7 +1226,9 @@ export const handlers = [
     return HttpResponse.json({ status: "set", tzid: body.timezone });
   }),
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
-  http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
+  http.get("/api/agents", () =>
+    HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
+  ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
   // "Add another account": mint an unauthorized Connection under a fresh
   // opaque channel id, as core does for every account after a service's first.
@@ -1254,10 +1261,49 @@ export const handlers = [
       connect: null,
       setups: {},
       channel,
+      linkedAgent: null,
       severalAccounts: true,
     };
     connections.connections.push(connection);
     return HttpResponse.json({ connection }, { status: 201 });
+  }),
+  // Link an agent to an account. On one platform an agent links to at most
+  // one account, so linking it here takes the link off the other one.
+  http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
+    const id = String(params.id);
+    const { agent } = (await request.json()) as { agent: string | null };
+    const target = connections.connections.find((candidate) => candidate.channel === id);
+    if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
+    if (agent !== null && !mockAgentNames.includes(agent)) {
+      return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
+    }
+    if (target.service === "webchat" || target.capabilities.talk.state !== "unlocked") {
+      return HttpResponse.json(
+        { error: "This account does not receive messages." },
+        { status: 409 },
+      );
+    }
+    const platform = platformOf(target.service);
+    let unlinkedFrom: string | null = null;
+    if (agent !== null) {
+      for (const other of connections.connections) {
+        if (other === target || other.linkedAgent !== agent) continue;
+        if (platformOf(other.service) !== platform) continue;
+        other.linkedAgent = null;
+        unlinkedFrom = other.channel ?? null;
+      }
+    }
+    target.linkedAgent = agent;
+    return HttpResponse.json({
+      account: {
+        id,
+        service: target.service,
+        platform,
+        connectionId: target.id,
+        agent,
+      },
+      unlinkedFrom,
+    });
   }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.

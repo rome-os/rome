@@ -7,7 +7,11 @@
  * `connection-cards.ts`, not here.
  */
 
-import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
+import type {
+  ConnectionAccountFields,
+  LinkAccountAgentRequest,
+  LinkAccountAgentResult,
+} from "@rome/api-types/channel-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -101,4 +105,17 @@ export async function createConnection(service: string): Promise<ApiConnection> 
     fallback: "Failed to add an account.",
   });
   return payload.connection;
+}
+
+/** Link an agent to an account by its channel id, or pass null so main
+ *  answers there. */
+export async function linkAccountAgent(
+  id: string,
+  agent: string | null,
+): Promise<LinkAccountAgentResult> {
+  const body: LinkAccountAgentRequest = { agent };
+  return fetchJson<LinkAccountAgentResult>(
+    `/api/channels/accounts/${encodeURIComponent(id)}/agent`,
+    { method: "PUT", json: body, fallback: "Failed to link the agent." },
+  );
 }
