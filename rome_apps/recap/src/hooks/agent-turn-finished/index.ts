@@ -46,6 +46,7 @@ export class RecapTurnFinishedHook implements AgentTurnFinishedHook {
 
     try {
       const settings = await getRecapSettings(this.deps.settingsRepo);
+      if (!settings.enabled) return;
       if (!meetsRecapThreshold(event, settings.threshold)) return;
 
       const webchatSessionId = resolveWebchatSessionId(event);
