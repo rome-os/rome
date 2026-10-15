@@ -4,7 +4,7 @@
 // the browser. Design record: rome-os/rome#1031.
 import { z } from "zod";
 
-export const nodeConnectionStatusSchema = z.enum([
+const nodeConnectionStatusSchema = z.enum([
   "stopped",
   "connecting",
   "online",
@@ -14,13 +14,7 @@ export const nodeConnectionStatusSchema = z.enum([
 ]);
 export type NodeConnectionStatus = z.infer<typeof nodeConnectionStatusSchema>;
 
-export const nodeOutcomeSchema = z.enum([
-  "ok",
-  "error",
-  "aborted",
-  "unknown_outcome",
-  "interrupted",
-]);
+const nodeOutcomeSchema = z.enum(["ok", "error", "aborted", "unknown_outcome", "interrupted"]);
 export type NodeOutcome = z.infer<typeof nodeOutcomeSchema>;
 
 export const nodeActionRowSchema = z.object({
@@ -54,7 +48,7 @@ export const nodeActionRowSchema = z.object({
 });
 export type NodeActionRow = z.infer<typeof nodeActionRowSchema>;
 
-export const nodeRoleStatusSchema = z.object({
+const nodeRoleStatusSchema = z.object({
   deviceId: z.string().optional(),
   name: z.string().optional(),
   auth: z.enum(["required", "authorized", "revoked"]),
@@ -63,7 +57,6 @@ export const nodeRoleStatusSchema = z.object({
   reconnects: z.number(),
   running: z.number(),
 });
-export type NodeRoleStatus = z.infer<typeof nodeRoleStatusSchema>;
 
 export const nodeStatusSchema = z.object({
   version: z.string(),
@@ -106,19 +99,15 @@ export const nodeConsoleDaemonStateSchema = z.enum([
 export type NodeConsoleDaemonState = z.infer<typeof nodeConsoleDaemonStateSchema>;
 
 export function nodeLogResultSchema<T extends z.ZodType>(row: T) {
-  return z.object({ rows: z.array(row), hasMore: z.boolean(), oldest: z.number().nullable() });
+  return z.object({ rows: z.array(row), hasMore: z.boolean() });
 }
 
 export type NodeActionQuery = {
   kind: "actions";
-  from?: number;
-  to?: number;
-  after?: number;
   before?: number;
   limit?: number;
   direction?: "in" | "out";
   peer?: string;
   outcome?: NodeOutcome[];
   text?: string;
-  minDurationMs?: number;
 };

@@ -1,7 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import { createRequire } from "node:module";
-import { arch, platform } from "node:os";
 import { join } from "node:path";
 import WebSocket, { WebSocketServer } from "ws";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
@@ -110,8 +109,7 @@ function actionEnd(response: ActionResponse, stdoutBytes?: number): ActionEnd {
 }
 
 function logQuery(params: Record<string, unknown>): LogQuery {
-  if (!["actions", "lifecycle", "summary"].includes(String(params.kind)))
-    throw new RpcError(-32602, "log.query requires kind actions, lifecycle, or summary.");
+  if (params.kind !== "actions") throw new RpcError(-32602, "log.query requires kind actions.");
   return params as unknown as LogQuery;
 }
 
@@ -133,7 +131,6 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
   };
   const startedAt = Date.now();
   let closing = false;
-  let stopReason = "signal";
   // The store opens only after the listener binds, so a losing daemon never touches the file.
   const store = new ObserveStore({
     path: join(config.directory, "observe.db"),
@@ -159,7 +156,6 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
         if (caller.onlineOnce) caller.reconnects++;
         caller.onlineOnce = true;
       }
-      if (!closing) store.recordLifecycle("caller", "connection", status, at);
       broadcast({ type: "connection", role: "caller", status, at });
     },
   });
@@ -387,7 +383,6 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
             break;
           case "daemon.stop":
             result = { stopped: true };
-            stopReason = "stop";
             setImmediate(close);
             break;
           case "node.status":
@@ -569,12 +564,6 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     });
   });
   store.open();
-  store.recordBoot({
-    version: NODE_CORE_VERSION,
-    platform: platform(),
-    arch: arch(),
-    pid: state.pid,
-  });
   const pruner = setInterval(() => store.prune(), PRUNE_INTERVAL_MS);
   pruner.unref();
   const heartbeat = setInterval(() => {
@@ -598,7 +587,6 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
     close();
     clearInterval(heartbeat);
     clearInterval(pruner);
-    store.recordLifecycle("daemon", "shutdown", stopReason);
     store.close();
     signal.removeEventListener("abort", close);
     // A successor replaces discovery after binding. Removing it here could erase the new owner.

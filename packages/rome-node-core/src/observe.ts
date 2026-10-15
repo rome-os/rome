@@ -1,12 +1,11 @@
 // The daemon's observation log, `<configDir>/observe.db`. The daemon is its only writer. Every
 // method swallows storage failures, because observation must never block or fail an action.
-import { closeSync, existsSync, openSync, renameSync, rmSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import {
   OUTCOMES,
   type ActionRow,
-  type ActionSummary,
-  type LifecycleRow,
   type LogQuery,
   type LogResult,
   type Outcome,
@@ -54,24 +53,19 @@ export interface ActionEnd {
 
 export class QueryError extends Error {}
 
+/** The file is not a sound SQLite database. */
+class CorruptDatabaseError extends Error {}
+/** The file is sound but was written by a daemon with another schema version. */
+class SchemaVersionError extends Error {}
+
+function isCorruption(error: unknown): boolean {
+  if (error instanceof CorruptDatabaseError) return true;
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  // SQLITE_CORRUPT and SQLITE_NOTADB, including their extended codes.
+  return typeof code === "number" && ((code & 0xff) === 11 || (code & 0xff) === 26);
+}
+
 const SCHEMA = `
-CREATE TABLE boots (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  started_at INTEGER NOT NULL,
-  version TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  arch TEXT NOT NULL,
-  pid INTEGER NOT NULL
-);
-CREATE INDEX boots_started_at ON boots(started_at);
-CREATE TABLE lifecycle (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  at INTEGER NOT NULL,
-  role TEXT NOT NULL,
-  event TEXT NOT NULL,
-  detail TEXT NOT NULL
-);
-CREATE INDEX lifecycle_at ON lifecycle(at);
 CREATE TABLE actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   direction TEXT NOT NULL,
@@ -189,7 +183,7 @@ function toActionRow(row: Row): ActionRow {
   return value;
 }
 
-const optionalTime = (value: unknown, name: string): number | undefined => {
+const optionalId = (value: unknown, name: string): number | undefined => {
   if (value === undefined) return undefined;
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
     throw new QueryError(`${name} must be a non-negative integer.`);
@@ -211,20 +205,13 @@ export class ObserveStore {
     this.now = options.now ?? Date.now;
   }
 
-  /** Opens or creates the database and marks actions a previous start left open as interrupted. */
+  /**
+   * Opens or creates the database and marks actions a previous start left open as interrupted.
+   * Never throws. When the file cannot be used, the store stays closed and records nothing.
+   */
   open(): void {
-    try {
-      this.db = this.connect();
-    } catch {
-      // A database that cannot be opened or checked is set aside, never repaired in place.
-      this.quarantine();
-      try {
-        this.db = this.connect();
-      } catch {
-        this.db = undefined;
-        return;
-      }
-    }
+    this.db = this.attach();
+    if (!this.db) return;
     this.guard(() => {
       this.run(
         "UPDATE actions SET ended_at = ?, outcome = 'interrupted' WHERE ended_at IS NULL",
@@ -232,6 +219,28 @@ export class ObserveStore {
       );
     });
     this.prune();
+  }
+
+  /**
+   * Connects, replacing a corrupt file or one from another schema version. Any other failure,
+   * such as a lock, a permission error, or a full disk, leaves the file as it is and returns
+   * undefined, so a sound log is never thrown away for a passing condition.
+   */
+  private attach(): DatabaseSync | undefined {
+    try {
+      return this.connect();
+    } catch (error) {
+      if (error instanceof SchemaVersionError) {
+        if (!this.discard(false)) return undefined;
+      } else if (isCorruption(error)) {
+        if (!this.discard(true)) return undefined;
+      } else return undefined;
+    }
+    try {
+      return this.connect();
+    } catch {
+      return undefined;
+    }
   }
 
   private connect(): DatabaseSync {
@@ -243,7 +252,7 @@ export class ObserveStore {
     try {
       db.exec("PRAGMA busy_timeout = 1000");
       const check = db.prepare("PRAGMA quick_check").get();
-      if (check?.quick_check !== "ok") throw new Error("observe.db failed its integrity check");
+      if (check?.quick_check !== "ok") throw new CorruptDatabaseError();
       const version = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
       if (version === 0) {
         // auto_vacuum only takes effect before the first table exists.
@@ -251,7 +260,7 @@ export class ObserveStore {
         db.exec("PRAGMA journal_mode = WAL");
         db.exec(`BEGIN; ${SCHEMA} PRAGMA user_version = ${SCHEMA_VERSION}; COMMIT;`);
       } else if (version !== SCHEMA_VERSION) {
-        throw new Error("observe.db has an unknown schema version");
+        throw new SchemaVersionError();
       } else db.exec("PRAGMA journal_mode = WAL");
       db.exec("PRAGMA synchronous = NORMAL");
       return db;
@@ -261,7 +270,13 @@ export class ObserveStore {
     }
   }
 
-  private quarantine() {
+  /**
+   * Closes the store and removes the database with its WAL and shared-memory files. With
+   * `keepCopy`, the file moves to `observe.db.corrupt-<ms>` and older copies are deleted, so at
+   * most one copy exists. Returns false and leaves logging off when any step fails, because a
+   * fresh file next to a stale WAL would replay the old frames into it.
+   */
+  private discard(keepCopy: boolean): boolean {
     const { path } = this.options;
     this.statements.clear();
     try {
@@ -269,27 +284,29 @@ export class ObserveStore {
     } catch {}
     this.db = undefined;
     try {
-      if (existsSync(path)) renameSync(path, `${path}.corrupt-${this.now()}`);
-    } catch {}
-    for (const suffix of ["-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
+      if (keepCopy) {
+        const prefix = `${basename(path)}.corrupt-`;
+        for (const name of readdirSync(dirname(path)))
+          if (name.startsWith(prefix)) rmSync(join(dirname(path), name), { force: true });
+        if (existsSync(path)) renameSync(path, `${path}.corrupt-${this.now()}`);
+      } else rmSync(path, { force: true });
+      for (const suffix of ["-wal", "-shm"]) rmSync(`${path}${suffix}`, { force: true });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  /** Runs `work` and turns any storage failure into `fallback`. Corruption starts a new file. */
+  /**
+   * Runs `work` and turns any storage failure into `fallback`. Never throws. Corruption sets the
+   * file aside and starts a new one.
+   */
   private guard<T>(work: () => T, fallback?: T): T | undefined {
     if (!this.db) return fallback;
     try {
       return work();
     } catch (error) {
-      const code = (error as { errcode?: number }).errcode;
-      // SQLITE_CORRUPT and SQLITE_NOTADB, including their extended codes.
-      if (code !== undefined && ((code & 0xff) === 11 || (code & 0xff) === 26)) {
-        this.quarantine();
-        try {
-          this.db = this.connect();
-        } catch {
-          this.db = undefined;
-        }
-      }
+      if (isCorruption(error)) this.db = this.discard(true) ? this.attach() : undefined;
       return fallback;
     }
   }
@@ -319,38 +336,6 @@ export class ObserveStore {
     for (const secret of this.secrets)
       masked = masked.split(secret).join("*".repeat(secret.length));
     return masked;
-  }
-
-  recordBoot(boot: { version: string; platform: string; arch: string; pid: number }) {
-    this.guard(() => {
-      const at = this.now();
-      this.run(
-        "INSERT INTO boots (started_at, version, platform, arch, pid) VALUES (?, ?, ?, ?, ?)",
-        at,
-        boot.version,
-        boot.platform,
-        boot.arch,
-        boot.pid,
-      );
-      this.recordLifecycle("daemon", "start", boot.version, at);
-    });
-  }
-
-  recordLifecycle(
-    role: LifecycleRow["role"],
-    event: LifecycleRow["event"],
-    detail: string,
-    at = this.now(),
-  ) {
-    this.guard(() =>
-      this.run(
-        "INSERT INTO lifecycle (at, role, event, detail) VALUES (?, ?, ?, ?)",
-        at,
-        role,
-        event,
-        detail,
-      ),
-    );
   }
 
   /** Returns the stored row, or null when storage is unavailable. */
@@ -428,23 +413,9 @@ export class ObserveStore {
   }
 
   /** Throws QueryError for an invalid query. Storage failures return an empty result. */
-  query(query: LogQuery): LogResult<ActionRow | LifecycleRow> | ActionSummary {
-    switch (query.kind) {
-      case "actions":
-        return this.queryActions(query);
-      case "lifecycle":
-        return this.queryLifecycle(query);
-      case "summary":
-        return this.summary(query);
-      default:
-        throw new QueryError("Unknown query kind.");
-    }
-  }
-
-  private oldest(table: "actions" | "lifecycle"): number | null {
-    const column = table === "actions" ? "started_at" : "at";
-    const value = this.all(`SELECT min(${column}) AS oldest FROM ${table}`)[0]?.oldest;
-    return value === null || value === undefined ? null : Number(value);
+  query(query: LogQuery): LogResult<ActionRow> {
+    if (query.kind !== "actions") throw new QueryError("Unknown query kind.");
+    return this.queryActions(query);
   }
 
   private limit(value: unknown, fallback: number): number {
@@ -457,15 +428,8 @@ export class ObserveStore {
   private queryActions(query: Extract<LogQuery, { kind: "actions" }>): LogResult<ActionRow> {
     const where: string[] = [];
     const params: SQLInputValue[] = [];
-    const from = optionalTime(query.from, "from");
-    const to = optionalTime(query.to, "to");
-    const after = optionalTime(query.after, "after");
-    const before = optionalTime(query.before, "before");
-    const minDuration = optionalTime(query.minDurationMs, "minDurationMs");
+    const before = optionalId(query.before, "before");
     const limit = this.limit(query.limit, 100);
-    if (from !== undefined) where.push("a.started_at >= ?"), params.push(from);
-    if (to !== undefined) where.push("a.started_at < ?"), params.push(to);
-    if (after !== undefined) where.push("a.id > ?"), params.push(after);
     if (before !== undefined) where.push("a.id < ?"), params.push(before);
     if (query.direction !== undefined) {
       if (query.direction !== "in" && query.direction !== "out")
@@ -488,10 +452,6 @@ export class ObserveStore {
       where.push(`a.outcome IN (${query.outcome.map(() => "?").join(", ")})`);
       params.push(...query.outcome);
     }
-    if (minDuration !== undefined) {
-      where.push("a.ended_at IS NOT NULL AND a.ended_at - a.started_at >= ?");
-      params.push(minDuration);
-    }
     let join = "";
     if (query.text !== undefined) {
       if (typeof query.text !== "string" || [...query.text].length < 3)
@@ -501,10 +461,9 @@ export class ObserveStore {
       // A quoted phrase makes every character literal, so user text cannot inject FTS syntax.
       params.push(`"${query.text.replaceAll('"', '""')}"`);
     }
-    const order = after !== undefined ? "ASC" : "DESC";
     const sql = `SELECT a.* FROM actions a ${join} ${
       where.length ? `WHERE ${where.join(" AND ")}` : ""
-    } ORDER BY a.id ${order} LIMIT ?`;
+    } ORDER BY a.id DESC LIMIT ?`;
     return (
       this.guard(
         () => {
@@ -521,105 +480,50 @@ export class ObserveStore {
             }
             rows.push(row);
           }
-          return { rows, hasMore, oldest: this.oldest("actions") };
+          return { rows, hasMore };
         },
-        { rows: [], hasMore: false, oldest: null },
-      ) ?? { rows: [], hasMore: false, oldest: null }
+        { rows: [], hasMore: false },
+      ) ?? { rows: [], hasMore: false }
     );
   }
 
-  private queryLifecycle(query: Extract<LogQuery, { kind: "lifecycle" }>): LogResult<LifecycleRow> {
-    const from = optionalTime(query.from, "from") ?? 0;
-    const to = optionalTime(query.to, "to") ?? Number.MAX_SAFE_INTEGER;
-    const limit = this.limit(query.limit, 100);
-    const empty: LogResult<LifecycleRow> = { rows: [], hasMore: false, oldest: null };
-    return (
-      this.guard((): LogResult<LifecycleRow> => {
-        const raw = this.all(
-          "SELECT * FROM lifecycle WHERE at >= ? AND at < ? ORDER BY id DESC LIMIT ?",
-          from,
-          to,
-          limit + 1,
-        );
-        return {
-          rows: raw.slice(0, limit).map(
-            (row): LifecycleRow => ({
-              id: Number(row.id),
-              at: Number(row.at),
-              role: row.role as LifecycleRow["role"],
-              event: row.event as LifecycleRow["event"],
-              detail: String(row.detail),
-            }),
-          ),
-          hasMore: raw.length > limit,
-          oldest: this.oldest("lifecycle"),
-        };
-      }, empty) ?? empty
-    );
-  }
-
-  private summary(query: Extract<LogQuery, { kind: "summary" }>): ActionSummary {
-    const from = optionalTime(query.from, "from");
-    const to = optionalTime(query.to, "to");
-    if (from === undefined || to === undefined || to <= from)
-      throw new QueryError("summary requires from < to.");
-    const empty: ActionSummary = { total: 0, running: 0, byOutcome: {}, byDirection: {} };
-    return (
-      this.guard(() => {
-        const summary: ActionSummary = { total: 0, running: 0, byOutcome: {}, byDirection: {} };
-        for (const row of this.all(
-          `SELECT direction, outcome, count(*) AS n FROM actions
-           WHERE started_at >= ? AND started_at < ? GROUP BY direction, outcome`,
-          from,
-          to,
-        )) {
-          const count = Number(row.n);
-          const direction = row.direction as "in" | "out";
-          summary.total += count;
-          summary.byDirection[direction] = (summary.byDirection[direction] ?? 0) + count;
-          if (row.outcome === null) summary.running += count;
-          else {
-            const outcome = row.outcome as Outcome;
-            summary.byOutcome[outcome] = (summary.byOutcome[outcome] ?? 0) + count;
-          }
-        }
-        return summary;
-      }, empty) ?? empty
-    );
-  }
-
-  /** Deletes entries past retention, then the oldest entries until the file fits its budget. */
+  /**
+   * Deletes actions past retention, then the oldest actions until the file fits its budget.
+   * Cost: the budget pass rewrites the whole search index, synchronously on the daemon's event
+   * loop, so it runs only when the file is over budget. Retention deletes leave their index
+   * tombstones to FTS5's incremental automerge.
+   */
   prune(): void {
     this.guard(() => {
       const cutoff = this.now() - this.retentionMs;
-      this.run("DELETE FROM actions WHERE started_at < ? AND ended_at IS NOT NULL", cutoff);
-      this.run("DELETE FROM lifecycle WHERE at < ?", cutoff);
-      this.run("DELETE FROM boots WHERE started_at < ?", cutoff);
-      for (let round = 0; round < 64 && this.usedBytes() > this.maxBytes; round++) {
-        // Each round drops the oldest tenth of each table, so a large overrun converges quickly
-        // without one huge delete holding the write lock.
-        for (const [table, key] of [
-          ["actions", "id"],
-          ["lifecycle", "id"],
-        ] as const) {
-          const count = Number(this.all(`SELECT count(*) AS n FROM ${table}`)[0]?.n ?? 0);
-          if (!count) continue;
-          const take = Math.max(1, Math.ceil(count / 10));
-          this.run(
-            `DELETE FROM ${table} WHERE ${key} IN (SELECT ${key} FROM ${table} ${
-              table === "actions" ? "WHERE ended_at IS NOT NULL" : ""
-            } ORDER BY ${key} LIMIT ?)`,
-            take,
-          );
-        }
+      let deleted = Number(
+        this.run("DELETE FROM actions WHERE started_at < ? AND ended_at IS NOT NULL", cutoff)
+          .changes,
+      );
+      if (this.usedBytes() > this.maxBytes) {
         this.compact();
+        for (let round = 0; round < 64 && this.usedBytes() > this.maxBytes; round++) {
+          // Each round drops the oldest tenth, so a large overrun converges quickly without one
+          // huge delete holding the write lock.
+          const count = Number(this.all("SELECT count(*) AS n FROM actions")[0]?.n ?? 0);
+          if (!count) break;
+          deleted += Number(
+            this.run(
+              `DELETE FROM actions WHERE id IN (SELECT id FROM actions WHERE ended_at IS NOT NULL
+                 ORDER BY id LIMIT ?)`,
+              Math.max(1, Math.ceil(count / 10)),
+            ).changes,
+          );
+          this.compact();
+        }
       }
-      this.compact();
+      if (!deleted) return;
+      this.db!.exec("PRAGMA incremental_vacuum");
       this.db!.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     });
   }
 
-  /** Releases space that deletes freed. FTS5 keeps deleted rows as tombstones until a merge. */
+  /** Merges the search index so its deleted rows release their pages, then frees those pages. */
   private compact() {
     this.db!.exec("INSERT INTO actions_fts(actions_fts) VALUES ('optimize')");
     this.db!.exec("PRAGMA incremental_vacuum");

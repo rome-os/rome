@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_ROW_CHARS, ObserveStore, QueryError } from "./observe.js";
-import type { ActionRow, ActionSummary, LogResult } from "./observe-protocol.js";
+import type { ActionRow, LogResult } from "./observe-protocol.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -87,7 +88,7 @@ describe("ObserveStore", () => {
     expect(row!.args).toEqual(["-H", `Authorization: Bearer ${"*".repeat(secret.length)}`]);
   });
 
-  it("pages newest first and fills gaps oldest first", async () => {
+  it("pages newest first", async () => {
     const { store: log } = await store();
     const ids = Array.from({ length: 5 }, (_, index) => log.startAction(exec(`c${index}`, []))!.id);
     const first = actions(log.query({ kind: "actions", limit: 2 }));
@@ -96,8 +97,7 @@ describe("ObserveStore", () => {
     const next = actions(log.query({ kind: "actions", before: ids[3], limit: 10 }));
     expect(next.rows.map((row) => row.id)).toEqual([ids[2], ids[1], ids[0]]);
     expect(next.hasMore).toBe(false);
-    const gap = actions(log.query({ kind: "actions", after: ids[2] }));
-    expect(gap.rows.map((row) => row.id)).toEqual([ids[3], ids[4]]);
+    expect(() => log.query({ kind: "summary" } as never)).toThrow(QueryError);
   });
 
   it("filters by outcome, peer, and substring text", async () => {
@@ -131,33 +131,15 @@ describe("ObserveStore", () => {
     expect(actions(log.query({ kind: "actions", text: "tail" })).rows).toHaveLength(1);
   });
 
-  it("summarizes outcomes and directions", async () => {
-    let now = 1000;
-    const { store: log } = await store({ now: () => now });
-    const done = log.startAction(exec("a", []))!;
-    log.endAction(done.id, { outcome: "error", errorCode: "busy" });
-    log.startAction(exec("b", []));
-    now = 5000;
-    expect(log.query({ kind: "summary", from: 0, to: 2000 }) as ActionSummary).toEqual({
-      total: 2,
-      running: 1,
-      byOutcome: { error: 1 },
-      byDirection: { out: 2 },
-    });
-  });
-
   it("deletes entries past retention", async () => {
     let now = 0;
     const { store: log } = await store({ now: () => now, retentionMs: 1000 });
     const old = log.startAction(exec("old", []))!;
     log.endAction(old.id, { outcome: "ok" });
-    log.recordLifecycle("caller", "connection", "online");
     now = 5000;
     const fresh = log.startAction(exec("fresh", []))!;
     log.prune();
     expect(actions(log.query({ kind: "actions" })).rows.map((row) => row.id)).toEqual([fresh.id]);
-    expect(actions(log.query({ kind: "actions" })).oldest).toBe(5000);
-    expect((log.query({ kind: "lifecycle" }) as LogResult<unknown>).rows).toEqual([]);
   });
 
   it("drops the oldest entries when the file exceeds its budget", async () => {
@@ -173,19 +155,59 @@ describe("ObserveStore", () => {
     expect(left[0]!.args).toContain("199");
   });
 
-  it("sets a corrupt file aside and starts a new one", async () => {
-    const { directory, path, store: first } = await store();
-    first.close();
-    await rm(path, { force: true });
-    await rm(`${path}-wal`, { force: true });
-    await rm(`${path}-shm`, { force: true });
-    await writeFile(path, "not a database".repeat(1000));
-    const log = new ObserveStore({ path });
+  async function emptyDirectory() {
+    const directory = await mkdtemp(join(tmpdir(), "rome-node-observe-"));
+    cleanup.push(() => rm(directory, { recursive: true, force: true }));
+    return { directory, path: join(directory, "observe.db") };
+  }
+  function opened(path: string) {
+    const log = new ObserveStore({ path, now: () => Date.now() + Math.random() });
     log.open();
     cleanup.push(async () => log.close());
+    return log;
+  }
+  const corruptCopies = async (directory: string) =>
+    (await readdir(directory)).filter((name) => name.startsWith("observe.db.corrupt-"));
+
+  it("sets a corrupt file aside, keeps only the newest copy, and starts a new one", async () => {
+    const { directory, path } = await emptyDirectory();
+    for (let round = 0; round < 3; round++) {
+      await writeFile(path, "not a database".repeat(1000));
+      const log = opened(path);
+      expect(log.startAction(exec("true", []))).not.toBeNull();
+      log.close();
+    }
+    expect(await corruptCopies(directory)).toHaveLength(1);
+  });
+
+  it("replaces a file from another schema version without keeping a copy", async () => {
+    const { directory, path } = await emptyDirectory();
+    const other = new DatabaseSync(path);
+    other.exec("CREATE TABLE future (x); PRAGMA user_version = 99;");
+    other.close();
+    const log = opened(path);
     expect(log.startAction(exec("true", []))).not.toBeNull();
-    expect((await readdir(directory)).some((name) => name.startsWith("observe.db.corrupt-"))).toBe(
-      true,
-    );
+    expect(await corruptCopies(directory)).toEqual([]);
+  });
+
+  it("leaves a file it cannot open untouched and records nothing", async () => {
+    const { directory, path } = await emptyDirectory();
+    await mkdir(path);
+    const log = opened(path);
+    expect(log.startAction(exec("true", []))).toBeNull();
+    expect(log.query({ kind: "actions" })).toEqual({ rows: [], hasMore: false });
+    expect((await stat(path)).isDirectory()).toBe(true);
+    expect(await corruptCopies(directory)).toEqual([]);
+  });
+
+  it("never throws when the WAL of a corrupt file cannot be removed", async () => {
+    const { path } = await emptyDirectory();
+    await writeFile(path, "not a database".repeat(1000));
+    await mkdir(`${path}-wal`);
+    await writeFile(join(`${path}-wal`, "keep"), "x");
+    const log = new ObserveStore({ path });
+    expect(() => log.open()).not.toThrow();
+    cleanup.push(async () => log.close());
+    expect(log.startAction(exec("true", []))).toBeNull();
   });
 });

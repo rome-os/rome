@@ -84,8 +84,7 @@ function serve(history: NodeActionRow[]) {
         params: { type: "snapshot", status, running: [] },
       });
       respond({ subscribed: true });
-    } else if (message.method === "log.query")
-      respond({ rows: history, hasMore: false, oldest: 0 });
+    } else if (message.method === "log.query") respond({ rows: history, hasMore: false });
     else if (message.method === "node.status") respond(status);
   };
 }

@@ -148,17 +148,20 @@ silently replaces an incompatible daemon.
 
 ## Activity log
 
-The daemon records what it does in `<configDir>/observe.db`, a SQLite file written
-with Node's built-in `node:sqlite`. The daemon is its only writer. The file has
-mode 0600 and uses WAL. A file that fails its integrity check is renamed to
-`observe.db.corrupt-<ms>` and replaced, and no storage failure blocks or fails an
-action.
+The daemon records each action it sends through `devices.run`,
+`devices.runBinary`, or `files.copy` in `<configDir>/observe.db`, a SQLite file
+written with Node's built-in `node:sqlite`. The daemon is its only writer. The
+file has mode 0600 and uses WAL. It holds history only: the daemon needs nothing
+in it to run, and losing it loses only past records.
 
-| Table | One row per |
+No storage failure blocks or fails an action. The daemon handles a file it cannot
+use by cause:
+
+| Cause | Result |
 | --- | --- |
-| `boots` | Daemon start, with version, platform, and architecture |
-| `lifecycle` | Daemon start and shutdown, and each caller connection change |
-| `actions` | Action sent through `devices.run`, `devices.runBinary`, or `files.copy` |
+| Corrupt file | Renamed to `observe.db.corrupt-<ms>` and replaced. Only the newest copy is kept. |
+| Another schema version | Deleted and replaced |
+| Lock, permission error, full disk, or a WAL that cannot be removed | File left as it is. Nothing is recorded until the next start. |
 
 An action row holds the device, the action, the full exec command, arguments, and
 working directory, the start and end times, and the outcome: `ok`, `error`,
@@ -167,15 +170,13 @@ running becomes `interrupted` at the next start. The row counts stdin, stdout, a
 stderr bytes and never stores their content. `system.info` requests, including
 reachability probes, are not recorded. The daemon replaces each occurrence of its
 own credentials with `*` of the same length. Rows older than 30 days are deleted,
-and the oldest rows go first when the file exceeds 64 MiB.
+and the oldest rows go first when the file exceeds 64 MiB. Only that size limit
+rebuilds the search index, because the rebuild runs on the daemon's event loop.
 
-`log.query` takes a structured query, never SQL:
-
-| `kind` | Parameters | Result |
-| --- | --- | --- |
-| `actions` | `from`, `to`, `before`, `after`, `limit` (100, at most 500), `direction`, `peer`, `outcome[]`, `text`, `minDurationMs` | `{ rows, hasMore, oldest }`, newest first, or oldest first with `after` |
-| `lifecycle` | `from`, `to`, `limit` | `{ rows, hasMore, oldest }`, newest first |
-| `summary` | `from`, `to` | Counts by outcome and direction |
+`log.query` takes a structured query, never SQL: `{ kind: "actions" }` with the
+optional filters `before` (an action id), `limit` (100, at most 500),
+`direction`, `peer`, `outcome[]`, and `text`. It returns `{ rows, hasMore }`,
+newest first.
 
 `text` matches a substring of the command, arguments, or working directory and
 needs at least three characters. One response stays under 1 MiB, and one action

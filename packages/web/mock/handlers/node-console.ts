@@ -145,7 +145,7 @@ function answer(method: unknown, params: Record<string, unknown>): unknown {
             .toLowerCase()
             .includes(text)),
     );
-    return { rows, hasMore: false, oldest: history.at(-1)!.startedAt };
+    return { rows, hasMore: false };
   }
   return undefined;
 }

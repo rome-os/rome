@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -42,7 +42,8 @@ async function listen(server: ReturnType<typeof createServer>) {
 }
 
 /** Runs a real daemon in this process against a fake Cloud and a Gateway that echoes frames. */
-async function fixture() {
+/** `prepare` runs on the configuration directory before the daemon starts. */
+async function fixture(prepare?: (directory: string) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), "rome-node-daemon-"));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const token = `romedev_${"a".repeat(43)}`;
@@ -145,6 +146,7 @@ async function fixture() {
     cloudUrl: `http://127.0.0.1:${cloudPort}`,
     token,
   });
+  await prepare?.(directory);
   const config = createNodeConfig({ directory, port: await freePort() });
   const controller = new AbortController();
   const serving = serveDaemon(config, controller.signal);
@@ -523,12 +525,23 @@ describe("caller daemon observation", () => {
         params: { kind: "actions", text: "ab" },
       }),
     ).toMatchObject({ error: { code: -32602 } });
-    const lifecycle = await raw.call({
-      jsonrpc: "2.0",
-      id: 4,
-      method: "log.query",
-      params: { kind: "lifecycle" },
+    expect(
+      await raw.call({ jsonrpc: "2.0", id: 4, method: "log.query", params: { kind: "lifecycle" } }),
+    ).toMatchObject({ error: { code: -32602 } });
+  });
+
+  it("serves actions when observe.db cannot be recovered", async () => {
+    const f = await fixture(async (directory) => {
+      await writeFile(join(directory, "observe.db"), "not a database".repeat(1000));
+      await mkdir(join(directory, "observe.db-wal"));
+      await writeFile(join(directory, "observe.db-wal", "keep"), "x");
     });
-    expect(lifecycle.result.rows).toMatchObject([{ role: "daemon", event: "start" }]);
+    expect(
+      (await f.client.run(device, "exec", { command: process.execPath, args: ["-v"] })).ok,
+    ).toBe(true);
+    const raw = await observer(f);
+    expect(
+      await raw.call({ jsonrpc: "2.0", id: 1, method: "log.query", params: { kind: "actions" } }),
+    ).toMatchObject({ result: { rows: [], hasMore: false } });
   });
 });

@@ -45,15 +45,6 @@ export interface ActionRow {
   truncated?: true;
 }
 
-export interface LifecycleRow {
-  id: number;
-  at: number;
-  role: "daemon" | "caller" | "host";
-  event: "start" | "connection" | "shutdown";
-  /** The connection status for `connection`, the reason for `shutdown`, the version for `start`. */
-  detail: string;
-}
-
 export interface RoleStatus {
   deviceId?: string;
   name?: string;
@@ -77,38 +68,20 @@ export type NodeEvent =
   | { type: "connection"; role: "caller" | "host"; status: ConnectionStatus; at: number }
   | { type: "action"; id: number; phase: "start" | "end"; row: ActionRow };
 
-export type LogQuery =
-  | {
-      kind: "actions";
-      from?: number;
-      to?: number;
-      /** Returns rows with a larger id, oldest first. Without it, rows come newest first. */
-      after?: number;
-      before?: number;
-      limit?: number;
-      direction?: "in" | "out";
-      peer?: string;
-      outcome?: Outcome[];
-      /** Substring match over command, args, and cwd. Needs at least three characters. */
-      text?: string;
-      minDurationMs?: number;
-    }
-  | { kind: "lifecycle"; from?: number; to?: number; limit?: number }
-  | { kind: "summary"; from: number; to: number };
-
-export interface ActionSummary {
-  total: number;
-  running: number;
-  byOutcome: Partial<Record<Outcome, number>>;
-  byDirection: Partial<Record<"in" | "out", number>>;
+/** Actions newest first. `before` pages to older ids. */
+export interface LogQuery {
+  kind: "actions";
+  before?: number;
+  limit?: number;
+  direction?: "in" | "out";
+  peer?: string;
+  outcome?: Outcome[];
+  /** Substring match over command, args, and cwd. Needs at least three characters. */
+  text?: string;
 }
 
-/**
- * `oldest` is the timestamp of the oldest retained entry of that kind, or null when there is
- * none. `hasMore` means the page stopped at its row or byte limit.
- */
+/** `hasMore` means the page stopped at its row or byte limit. */
 export interface LogResult<T> {
   rows: T[];
   hasMore: boolean;
-  oldest: number | null;
 }

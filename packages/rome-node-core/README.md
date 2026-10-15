@@ -123,9 +123,9 @@ The library does not select an environment implicitly.
 
 ## Activity console
 
-The daemon records the actions it sends and its connection changes in
-`observe.db`. Read them with `node.status`, `log.query`, and the `node`
-event topic of the [local protocol](../../docs/rome-node.md#activity-log).
+The daemon records the actions it sends in `observe.db`. Read them with
+`node.status`, `log.query`, and the `node` event topic of the
+[local protocol](../../docs/rome-node.md#activity-log).
 
 A backend that serves a browser console puts `openConsoleBridge` between the
 browser socket and the daemon:

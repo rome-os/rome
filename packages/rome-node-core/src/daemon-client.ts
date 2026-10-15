@@ -53,8 +53,6 @@ export {
 } from "./console.js";
 export type {
   ActionRow,
-  ActionSummary,
-  LifecycleRow,
   LogQuery,
   LogResult,
   NodeEvent,
