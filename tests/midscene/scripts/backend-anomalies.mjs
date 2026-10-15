@@ -9,8 +9,8 @@
 //   node scripts/backend-anomalies.mjs --rome-log <file> --events <file> \
 //     [--image <name@revision>] --out <dir>
 //
-// Writes <dir>/anomalies.json and <dir>/backend-summary.md, which the run
-// Summary includes, and prints the Markdown.
+// Writes <dir>/anomalies.json and <dir>/backend-summary.md, which the backend
+// job Summary includes, and prints the Markdown.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";

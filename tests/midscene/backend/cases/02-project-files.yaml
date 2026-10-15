@@ -1,7 +1,6 @@
 cases:
   - name: PROJECT-01 Write a project file and have Rome read it back
     tags:
-      - backend
       - files
       - chat
     steps:

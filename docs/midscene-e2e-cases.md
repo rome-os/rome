@@ -19,12 +19,12 @@ one report artifact.
 | backend | 2 | A real Rome container from the published image, with a real model | First-run onboarding, a project file read back by Rome |
 
 Every case starts with `app.open`, uses `aiAct` for user interaction, uses
-`aiAssert` for its visible outcome, and carries exactly one suite tag.
+`aiAssert` for its visible outcome.
 Navigation checks rely on visible page state, not the browser address bar.
 
-The secret-free collector checks each case name and suite against
-`tests/midscene/case-manifest.json` and this catalog. Deleting, renaming, or
-moving a case fails CI.
+Each suite's config selects its cases by path: `midscene.config.ts` reads
+`tests/midscene/cases/`, and `midscene.backend.config.ts` reads
+`tests/midscene/backend/cases/`.
 
 ## Case catalog
 
@@ -69,14 +69,13 @@ moving a case fails CI.
 | SHELL-02 | Search global chat history | mock |
 | SHELL-03 | Open the mobile navigation drawer | mock |
 
-The case names and suite assignments above match the executable YAML. Run
-`npm run collect` from `tests/midscene` to validate the catalog manifest.
+The case names and suite assignments above match the executable YAML.
 
 ## Backend suite
 
 The backend suite runs against a real Rome container started from the
 published image, with a real model. Its cases live in
-`tests/midscene/backend/cases/` and carry the `backend` tag. They share one
+`tests/midscene/backend/cases/`. They share one
 instance and run in path order, because ONBOARD-01 creates the account that
 PROJECT-01 signs in with. Each file is named for what it tests, and its
 numeric prefix fixes that order: `01-onboarding.yaml` holds ONBOARD-01, and
@@ -106,22 +105,15 @@ with its reason.
   and then `backend`, run on the upstream `main` branch or by manual dispatch
   in a fork using that fork's model secrets.
 - Each suite job uploads its report as `midscene-suite-<suite>`, including
-  failed runs. One report flow merges both into the combined report and the
-  run Summary. A repository with `MIDSCENE_PUBLISH_REPO` set to its full name
-  also publishes them through GitHub Pages. Each case has a screenshot and an
-  exact report-step link when available. If the native merge is incomplete,
-  the suite reports remain available and the Summary does not link to a
-  missing combined report.
+  failed runs, and writes Midscene's native result to its job Summary. The
+  upstream `main` branch, or a fork whose `MIDSCENE_PUBLISH_REPO` is its full
+  name, also publishes both HTML reports through GitHub Pages and links them
+  from the `publish` job Summary.
 
 ## Local run
 
-Start the strict E2E mock build from the repository root:
-
-```bash
-pnpm start:web:mock:e2e
-```
-
-Then run the suite from another shell:
+Run the mock suite from `tests/midscene`. Project setup starts the strict E2E
+mock build on port 3200, or uses one already running there:
 
 ```bash
 cd tests/midscene

@@ -4,7 +4,6 @@ cases:
       - poc
       - story
       - activity
-      - mock
     steps:
       - app.open:
           path: /chat/mock-chat-4

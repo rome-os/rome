@@ -3,7 +3,6 @@ cases:
     tags:
       - poc
       - auth
-      - mock
     steps:
       - app.open:
           path: /
@@ -16,7 +15,6 @@ cases:
   - name: AUTH-02 Login validation and failed submission preserve the form
     tags:
       - auth
-      - mock
     steps:
       - app.open:
           path: /dev/login

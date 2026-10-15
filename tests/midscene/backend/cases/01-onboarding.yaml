@@ -1,7 +1,6 @@
 cases:
   - name: ONBOARD-01 Finish first-run onboarding with a connected model
     tags:
-      - backend
       - onboarding
     steps:
       - app.open:
