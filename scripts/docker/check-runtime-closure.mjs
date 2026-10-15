@@ -19,6 +19,7 @@ const allowedWorkspaceGlobs = [
   "packages/discord-cli",
   "packages/rome-node-cli",
   "packages/rome-node-core",
+  "packages/rome-node-ui",
   "packages/ui",
   "packages/web",
   "packages/app-web-sdk",
@@ -130,6 +131,7 @@ function isAllowedWorkspacePackage(packagePath) {
     packagePath === "packages/discord-cli" ||
     packagePath === "packages/rome-node-cli" ||
     packagePath === "packages/rome-node-core" ||
+    packagePath === "packages/rome-node-ui" ||
     packagePath === "packages/ui" ||
     packagePath === "packages/web" ||
     packagePath === "packages/app-web-sdk" ||
@@ -152,6 +154,7 @@ async function assertImportBoundary() {
     "packages/discord-cli",
     "packages/rome-node-cli",
     "packages/rome-node-core",
+    "packages/rome-node-ui",
     "packages/ui",
     "packages/web",
     "packages/app-web-sdk",
