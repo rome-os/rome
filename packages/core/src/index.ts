@@ -353,7 +353,7 @@ async function main() {
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf: ChannelOf = (connection) =>
-    channelRecords.byConnection(connection.id)?.name ?? connection.service;
+    channelRecords.nameOf(connection.id) ?? connection.service;
   // The service a channel name belongs to. Whatever is keyed by service, such
   // as a descriptor or a channel policy, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);

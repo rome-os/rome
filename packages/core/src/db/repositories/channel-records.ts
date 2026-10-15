@@ -39,6 +39,10 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * Connection takes it back before a new name is minted.
  */
 export class ChannelRecordsRepository {
+  /** Channel name by Connection id, read on every port use. Emptied by every
+   *  write, so a rolled-back mint costs a re-read rather than a wrong name. */
+  private readonly names = new Map<string, string | null>();
+
   constructor(private readonly db: DrizzleDb) {}
 
   all(): ChannelRecord[] {
@@ -54,6 +58,16 @@ export class ChannelRecordsRepository {
    *  records it: a service's first channel carries the service's name. */
   serviceOf(name: string): string {
     return this.byName(name)?.service ?? name;
+  }
+
+  /** The name of the channel `connectionId` backs, or null for none. */
+  nameOf(connectionId: string): string | null {
+    let name = this.names.get(connectionId);
+    if (name === undefined) {
+      name = this.byConnection(connectionId)?.name ?? null;
+      this.names.set(connectionId, name);
+    }
+    return name;
   }
 
   byConnection(connectionId: string): ChannelRecord | null {
@@ -76,6 +90,7 @@ export class ChannelRecordsRepository {
   claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
+    this.names.clear();
 
     const service = connection.service;
     const vacant = exec
@@ -116,6 +131,7 @@ export class ChannelRecordsRepository {
 
   /** Release the channel `connectionId` backs. The row and its name stay. */
   vacate(exec: Exec, connectionId: string): void {
+    this.names.clear();
     exec
       .update(channels)
       .set({ connectionId: null })

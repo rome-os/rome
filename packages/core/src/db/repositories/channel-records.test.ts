@@ -75,6 +75,18 @@ describe("ChannelRecordsRepository", () => {
     expect(records.serviceOf("webchat")).toBe("webchat");
   });
 
+  it("keeps a Connection's channel name current across claims and releases", () => {
+    const records = repository();
+    const db = testDb!.db;
+    expect(records.nameOf("c1")).toBeNull();
+
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    expect(records.nameOf("c1")).toBe("feishu");
+
+    records.vacate(db, "c1");
+    expect(records.nameOf("c1")).toBeNull();
+  });
+
   it("lists the Connections no channel records yet", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "feishu" }, NOW);
