@@ -288,7 +288,7 @@ async function main() {
   // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
   // the same client, and needs no connection.
   const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
 

@@ -13,7 +13,7 @@ describe("guardian channel mapping", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, (channel) => channel);
     await repo.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
   });
 

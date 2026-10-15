@@ -99,11 +99,10 @@ export interface NewPersonData {
 export class PersonMappingRepository {
   /** `serviceOf` maps a channel to the service a link is keyed by: People keys
    *  an account by service, so a later channel of a service reads and writes
-   *  the service's links. The default maps every channel to itself, which is
-   *  right only while no service has a later channel. */
+   *  the service's links. */
   constructor(
     private db: DrizzleDb,
-    private readonly serviceOf: ServiceOfChannel = (channel) => channel,
+    private readonly serviceOf: ServiceOfChannel,
   ) {}
 
   private async generatePersonId(displayName: string): Promise<string> {
@@ -797,8 +796,4 @@ export class PersonMappingRepository {
       .run();
     return result.changes > 0;
   }
-}
-
-export function createPersonMappingRepository(db: DrizzleDb) {
-  return new PersonMappingRepository(db);
 }

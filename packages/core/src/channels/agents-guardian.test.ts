@@ -39,7 +39,7 @@ describe("linking same-account agents to the guardian", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    people = new PersonMappingRepository(testDb.db);
+    people = new PersonMappingRepository(testDb.db, (channel) => channel);
     settings = new SettingsRepository(testDb.db);
     await ensureSentinelPersons(people);
     testDb.db

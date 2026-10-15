@@ -77,7 +77,7 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("carries a person link across the merged account", async () => {
-    const persons = new PersonMappingRepository(db);
+    const persons = new PersonMappingRepository(db, (channel) => channel);
     await persons.create({
       displayName: "May",
       bondLevel: "acquaintance",
@@ -162,7 +162,7 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("annotates contacts linked to a person", async () => {
-    const persons = new PersonMappingRepository(db);
+    const persons = new PersonMappingRepository(db, (channel) => channel);
     await persons.create({
       displayName: "Alice Smith",
       bondLevel: "inner-circle",

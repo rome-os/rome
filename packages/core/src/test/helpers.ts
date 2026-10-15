@@ -156,7 +156,7 @@ export function createActionEngineRepos(
 ): ActionEngineRepositories {
   return {
     executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel)),
     journal: new ExecutionJournalRepository(db),
   };
 }
@@ -516,7 +516,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
+  const personMappingRepo = new PersonMappingRepository(db, (channel) => channel);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -526,7 +526,7 @@ export async function buildTestDeps(
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.

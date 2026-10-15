@@ -25,12 +25,18 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("add person → pending approval → approve → person.approved=true", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Verify pending approval exists
-    const approvalRepo = new ApprovalsRepository(testDb.db);
+    const approvalRepo = new ApprovalsRepository(
+      testDb.db,
+      new PersonMappingRepository(testDb.db, (channel) => channel),
+    );
     const approval = await approvalRepo.findById(result.approvalId);
     expect(approval).not.toBeNull();
     expect(approval!.status).toBe("pending");
@@ -44,7 +50,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
     // In the real system, an approval handler would update the person.
     // Simulate that by updating the person directly.
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     // We can update approved via raw DB since PersonMappingRepository doesn't have an update method
     const { persons } = await import("../../../../../packages/core/src/db/schema.js");
     const { eq } = await import("drizzle-orm");
@@ -56,18 +62,24 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("add person → reject → person stays approved=false", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
-    const approvalRepo = new ApprovalsRepository(testDb.db);
+    const approvalRepo = new ApprovalsRepository(
+      testDb.db,
+      new PersonMappingRepository(testDb.db, (channel) => channel),
+    );
     await approvalRepo.resolvePending(result.approvalId, "reject", "test-guardian");
 
     const updatedApproval = await approvalRepo.findById(result.approvalId);
     expect(updatedApproval!.status).toBe("rejected");
 
     // Person should remain unapproved
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     const person = await personRepo.findById(result.personId);
     expect(person!.approved).toBe(false);
   });
@@ -75,8 +87,11 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
   it("add duplicate display name triggers disambiguation flow", async () => {
     // Add first person
     await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Try to add another with the same display name — should throw
@@ -87,8 +102,11 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
           channelUserId: "alice-456",
         },
         {
-          personMappingRepo: new PersonMappingRepository(testDb.db),
-          approvalsRepo: new ApprovalsRepository(testDb.db),
+          personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+          approvalsRepo: new ApprovalsRepository(
+            testDb.db,
+            new PersonMappingRepository(testDb.db, (channel) => channel),
+          ),
         },
       ),
     ).rejects.toThrow('Person with display name "Alice" already exists');
@@ -101,24 +119,30 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
         channelUserId: "alice-456",
       },
       {
-        personMappingRepo: new PersonMappingRepository(testDb.db),
-        approvalsRepo: new ApprovalsRepository(testDb.db),
+        personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+        approvalsRepo: new ApprovalsRepository(
+          testDb.db,
+          new PersonMappingRepository(testDb.db, (channel) => channel),
+        ),
       },
     );
 
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     const person = await personRepo.findById(result.personId);
     expect(person!.displayName).toBe("Alice (work)");
   });
 
   it("add second channel mapping for existing person uses same personId", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Add a second channel mapping to the existing person
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     await personRepo.addChannelMapping(result.personId, "whatsapp", "alice-whatsapp");
 
     const person = await personRepo.findById(result.personId);
@@ -140,8 +164,11 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
 
   it("findByChannelUser returns correct person after approval", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Approve the person
@@ -150,7 +177,7 @@ describe("Person Mapping + Approval Flow (Integration)", () => {
     await testDb.db.update(persons).set({ approved: true }).where(eq(persons.id, result.personId));
 
     // Look up by channel user
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     const found = await personRepo.findByChannelUser("telegram", "alice-123");
 
     expect(found).not.toBeNull();

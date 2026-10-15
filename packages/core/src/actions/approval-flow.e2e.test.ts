@@ -16,6 +16,7 @@ import { ActionRegistryImpl } from "./registry.js";
 import { ApprovalHandler } from "./approval-handler.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import {
@@ -67,7 +68,10 @@ function makeAction(
 
 function buildHarness() {
   const testDb = createTestDb();
-  const approvalsRepo = new ApprovalsRepository(testDb.db);
+  const approvalsRepo = new ApprovalsRepository(
+    testDb.db,
+    new PersonMappingRepository(testDb.db, (channel) => channel),
+  );
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);
 

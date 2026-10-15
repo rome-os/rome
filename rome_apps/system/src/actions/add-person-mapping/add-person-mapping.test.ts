@@ -25,11 +25,14 @@ describe("addPersonMapping", () => {
 
   it("creates person record (approved=false)", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     const person = await personRepo.findById(result.personId);
     expect(person).not.toBeNull();
     expect(person!.displayName).toBe("Alice");
@@ -39,11 +42,14 @@ describe("addPersonMapping", () => {
 
   it("creates channel mapping", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     const person = await personRepo.findById(result.personId);
     expect(person).not.toBeNull();
     expect(person!.channelMappings).toHaveLength(1);
@@ -55,11 +61,17 @@ describe("addPersonMapping", () => {
 
   it("creates approval request", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
-    const approvalRepo = new ApprovalsRepository(testDb.db);
+    const approvalRepo = new ApprovalsRepository(
+      testDb.db,
+      new PersonMappingRepository(testDb.db, (channel) => channel),
+    );
     const approval = await approvalRepo.findById(result.approvalId);
     expect(approval).not.toBeNull();
     expect(approval!.type).toBe("person_mapping");
@@ -70,8 +82,11 @@ describe("addPersonMapping", () => {
   it("handles existing person with same display name", async () => {
     // Create a person first
     await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Trying to add the same display name should throw
@@ -79,8 +94,11 @@ describe("addPersonMapping", () => {
       addPersonMapping(
         { ...baseInput, channelUserId: "alice-456" },
         {
-          personMappingRepo: new PersonMappingRepository(testDb.db),
-          approvalsRepo: new ApprovalsRepository(testDb.db),
+          personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+          approvalsRepo: new ApprovalsRepository(
+            testDb.db,
+            new PersonMappingRepository(testDb.db, (channel) => channel),
+          ),
         },
       ),
     ).rejects.toThrow('Person with display name "Alice" already exists');
@@ -89,12 +107,15 @@ describe("addPersonMapping", () => {
   it("handles merging channel mappings for same person", async () => {
     // Create person first
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     // Add another channel mapping to the same person directly via repo
-    const personRepo = new PersonMappingRepository(testDb.db);
+    const personRepo = new PersonMappingRepository(testDb.db, (channel) => channel);
     await personRepo.addChannelMapping(result.personId, "whatsapp", "alice-whatsapp");
 
     // Verify person now has two mappings
@@ -110,8 +131,11 @@ describe("addPersonMapping", () => {
 
   it("returns personId and approvalId", async () => {
     const result = await addPersonMapping(baseInput, {
-      personMappingRepo: new PersonMappingRepository(testDb.db),
-      approvalsRepo: new ApprovalsRepository(testDb.db),
+      personMappingRepo: new PersonMappingRepository(testDb.db, (channel) => channel),
+      approvalsRepo: new ApprovalsRepository(
+        testDb.db,
+        new PersonMappingRepository(testDb.db, (channel) => channel),
+      ),
     });
 
     expect(result).toHaveProperty("personId");

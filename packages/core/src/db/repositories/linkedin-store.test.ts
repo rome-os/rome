@@ -616,7 +616,7 @@ describe("LinkedInStoreRepository", () => {
         );
 
       beforeEach(async () => {
-        people = new PersonMappingRepository(testDb.db);
+        people = new PersonMappingRepository(testDb.db, (channel) => channel);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });

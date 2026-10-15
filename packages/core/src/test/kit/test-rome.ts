@@ -208,11 +208,11 @@ async function buildHarness(
 
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel)),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    personMapping: new PersonMappingRepository(db),
+    personMapping: new PersonMappingRepository(db, (channel) => channel),
     policies: new PoliciesRepository(db),
   };
 

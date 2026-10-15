@@ -35,7 +35,7 @@ import {
 } from "../../connections/integrations/feishu.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { createTestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
@@ -96,7 +96,10 @@ function harness() {
   const manager = new SetupManager({ registry, personMappingRepo });
   const deps = {
     db,
-    approvalsRepo: new ApprovalsRepository(db),
+    approvalsRepo: new ApprovalsRepository(
+      db,
+      new PersonMappingRepository(db, (channel) => channel),
+    ),
     connectionRegistry: registry,
     setupManager: manager,
     personMappingRepo,

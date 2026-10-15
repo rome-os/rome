@@ -108,7 +108,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
   const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
   const sentinelLogRepo = new SentinelLogRepository(db);
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const webchatRepo = new WebChatRepository(db);
   const appRuntimeRepositories = createAppRuntimeRepositories({ settingsRepo, webchatRepo });
   const policiesRepo = new PoliciesRepository(db);

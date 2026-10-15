@@ -36,7 +36,7 @@ describe("LinkedIn message addressing", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PersonMappingRepository(testDb.db);
+    people = new PersonMappingRepository(testDb.db, (channel) => channel);
   });
 
   afterEach(() => {

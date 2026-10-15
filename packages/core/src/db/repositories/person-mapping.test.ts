@@ -12,7 +12,7 @@ describe("PersonMappingRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, (channel) => channel);
   });
 
   afterEach(() => {

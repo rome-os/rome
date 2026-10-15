@@ -83,7 +83,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PersonMappingRepository(db);
+  const repo = new PersonMappingRepository(db, (channel) => channel);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -127,7 +127,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
-  const repo = new ApprovalsRepository(db);
+  const repo = new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel));
 
   const pendingId = await repo.create({
     type: "action_execution",
