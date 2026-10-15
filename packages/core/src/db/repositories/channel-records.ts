@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { platformOf } from "../../channels/platform.js";
 import { channels } from "../schema.js";
-import type { DrizzleDb, DrizzleTx } from "../index.js";
+import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
  * A channel a Connection backs, as stored: its name, the service and platform
@@ -39,8 +39,9 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * Connection takes it back before a new name is minted.
  */
 export class ChannelRecordsRepository {
-  /** Channel name by Connection id, read on every port use. Emptied by every
-   *  write, so a rolled-back mint costs a re-read rather than a wrong name. */
+  /** Channel name by Connection id, read on every port use. Every write
+   *  empties it, and nothing is cached while a transaction is open, so a
+   *  rolled-back write leaves no name behind. */
   private readonly names = new Map<string, string | null>();
 
   constructor(private readonly db: DrizzleDb) {}
@@ -62,11 +63,10 @@ export class ChannelRecordsRepository {
 
   /** The name of the channel `connectionId` backs, or null for none. */
   nameOf(connectionId: string): string | null {
-    let name = this.names.get(connectionId);
-    if (name === undefined) {
-      name = this.byConnection(connectionId)?.name ?? null;
-      this.names.set(connectionId, name);
-    }
+    const cached = this.names.get(connectionId);
+    if (cached !== undefined) return cached;
+    const name = this.byConnection(connectionId)?.name ?? null;
+    if (!inTransaction(this.db)) this.names.set(connectionId, name);
     return name;
   }
 

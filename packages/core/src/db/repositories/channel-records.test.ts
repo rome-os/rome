@@ -87,6 +87,21 @@ describe("ChannelRecordsRepository", () => {
     expect(records.nameOf("c1")).toBeNull();
   });
 
+  it("caches no name read inside a transaction that rolls back", () => {
+    const records = repository();
+    const db = testDb!.db;
+
+    expect(() =>
+      db.transaction((tx) => {
+        records.claim(tx, { id: "c1", service: "feishu" }, NOW);
+        expect(records.nameOf("c1")).toBe("feishu");
+        throw new Error("rollback");
+      }),
+    ).toThrow("rollback");
+
+    expect(records.nameOf("c1")).toBeNull();
+  });
+
   it("lists the Connections no channel records yet", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "feishu" }, NOW);
