@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { asc, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { platformOf } from "../../channels/platform.js";
 import { channels } from "../schema.js";
 import type { DrizzleDb, DrizzleTx } from "../index.js";
@@ -35,8 +35,8 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
  * A channel's name is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a service's first channel carries
  * the service's name, which is what data stored before channels were recorded
- * spells. A row stays when its Connection goes, and its name is never given to
- * another Connection, so a new Connection never inherits an old one's history.
+ * spells. A row stays when its Connection goes, and the service's next
+ * Connection takes it back before a new name is minted.
  */
 export class ChannelRecordsRepository {
   constructor(private readonly db: DrizzleDb) {}
@@ -68,14 +68,35 @@ export class ChannelRecordsRepository {
   /**
    * The channel `connection` backs, recorded in `exec` (the transaction that
    * mints the Connection). A Connection that already has one keeps it. Else
-   * it gets the service's name if no channel has ever held it, and a fresh
-   * opaque id otherwise.
+   * it takes back the service's unbacked channel, the one carrying the
+   * service's name first, so a deleted and re-added bot keeps its channel.
+   * Failing that, it gets the service's name if no channel holds it, and a
+   * fresh opaque id otherwise.
    */
   claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
 
     const service = connection.service;
+    const vacant = exec
+      .select()
+      .from(channels)
+      .where(and(eq(channels.service, service), isNull(channels.connectionId)))
+      .all()
+      .sort(
+        (a, b) =>
+          Number(b.name === service) - Number(a.name === service) ||
+          a.createdAt.getTime() - b.createdAt.getTime(),
+      )[0];
+    if (vacant) {
+      exec
+        .update(channels)
+        .set({ connectionId: connection.id })
+        .where(eq(channels.name, vacant.name))
+        .run();
+      return toRecord({ ...vacant, connectionId: connection.id });
+    }
+
     const serviceNameTaken =
       exec
         .select({ name: channels.name })

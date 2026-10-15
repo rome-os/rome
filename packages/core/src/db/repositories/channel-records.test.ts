@@ -42,7 +42,7 @@ describe("ChannelRecordsRepository", () => {
     expect(records.all()).toHaveLength(1);
   });
 
-  it("never gives a released name to another Connection", () => {
+  it("gives a re-added bot the channel its deleted one held", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
@@ -50,8 +50,20 @@ describe("ChannelRecordsRepository", () => {
     records.vacate(db, "c1");
     expect(records.byName("feishu")).toMatchObject({ connectionId: null });
 
-    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).name).toMatch(UUID);
-    expect(records.byName("feishu")).toMatchObject({ connectionId: null });
+    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).name).toBe("feishu");
+    expect(records.all()).toHaveLength(1);
+  });
+
+  it("takes back the service-named channel before a later one", () => {
+    const records = repository();
+    const db = testDb!.db;
+    records.claim(db, { id: "c1", service: "feishu" }, NOW);
+    const later = records.claim(db, { id: "c2", service: "feishu" }, NOW).name;
+    records.vacate(db, "c2");
+    records.vacate(db, "c1");
+
+    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).name).toBe("feishu");
+    expect(records.claim(db, { id: "c4", service: "feishu" }, NOW).name).toBe(later);
   });
 
   it("names the service behind a channel, and passes an unrecorded name through", () => {
