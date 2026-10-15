@@ -28,7 +28,7 @@ describe("ChannelRecordsRepository", () => {
     expect(third).toMatch(UUID);
     expect(third).not.toBe(second);
     expect(records.claim(db, { id: "c4", service: "telegram_user" }, NOW)).toMatchObject({
-      name: "telegram_user",
+      id: "telegram_user",
       platform: "telegram",
     });
   });
