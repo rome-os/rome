@@ -8,6 +8,7 @@ import { ActionEngine } from "./engine.js";
 import { emitAgentMessage } from "./runtime-events.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -115,7 +116,12 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelsService = new ChannelsServiceProxy();
   const conversationSettings = new ConversationSettingsControlProxy();
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
+  const channelRecords = new ChannelRecordsRepository(db);
+  const policyEngine = new PolicyEngine(
+    policiesRepo,
+    settingsRepo,
+    (name) => channelRecords.byName(name)?.service ?? null,
+  );
 
   const actionEngine = new ActionEngine(
     actionRegistry,

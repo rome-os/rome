@@ -875,6 +875,22 @@ export const connections = sqliteTable("connections", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
+// One row per channel a Connection backs: Rome's presence on a platform, named
+// once and never renamed. The first channel of a service is named after it,
+// and later ones `<service>-<n>`. A row outlives its Connection, unbacked, so
+// the service's next Connection takes the name back.
+export const channels = sqliteTable(
+  "channels",
+  {
+    name: text("name").primaryKey(),
+    service: text("service").notNull(),
+    platform: text("platform").notNull(),
+    connectionId: text("connection_id"),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [uniqueIndex("channels_connection_unique").on(table.connectionId)],
+);
+
 // The grant ledger. Rows record outcomes only — never step/flow state
 // or scheme-specific columns. `credential` is a PersistedCredential envelope
 // stored as plain JSON (encryption was deliberately dropped); the envelope

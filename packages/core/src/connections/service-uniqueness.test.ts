@@ -68,6 +68,55 @@ describe("ConnectionRegistry Service uniqueness", () => {
     }
   });
 
+  it("runs the mint participant in the mint transaction and rolls back with it", async () => {
+    const { db, close } = createTestDb();
+    try {
+      const ledger = new DrizzleGrantLedger(db);
+      const minted: string[] = [];
+      let fail = true;
+      const registry = new ConnectionRegistry({
+        ledger,
+        onMint: (_tx, record) => {
+          if (fail) {
+            fail = false;
+            throw new Error("injected participant failure");
+          }
+          minted.push(record.service);
+        },
+      });
+      registry.register(makePasteTalk().descriptor);
+
+      await expect(registry.connect("fake-telegram")).rejects.toThrow(
+        "injected participant failure",
+      );
+      await expect(ledger.listConnections()).resolves.toEqual([]);
+
+      await registry.connect("fake-telegram");
+      expect(minted).toEqual(["fake-telegram"]);
+    } finally {
+      close();
+    }
+  });
+
+  it("runs the remove participant in the delete transaction", async () => {
+    const { db, close } = createTestDb();
+    try {
+      const removed: string[] = [];
+      const registry = new ConnectionRegistry({
+        ledger: new DrizzleGrantLedger(db),
+        onRemove: (_tx, id) => removed.push(id),
+      });
+      registry.register(makePasteTalk().descriptor);
+      const connection = await registry.connect("fake-telegram");
+
+      await registry.remove(connection.id);
+
+      expect(removed).toEqual([connection.id]);
+    } finally {
+      close();
+    }
+  });
+
   it("rolls back the connection row when initial grant creation fails", async () => {
     const { db, close } = createTestDb();
     class FailingGrantInitLedger extends DrizzleGrantLedger {

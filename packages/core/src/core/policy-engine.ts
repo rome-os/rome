@@ -28,10 +28,14 @@ function recordPolicyDecision(context: PolicyContext, rule: PolicyRule, scope: M
   });
 }
 
+/** The service a channel belongs to, or null for a name with no record. */
+export type ServiceOfChannel = (channel: string) => string | null;
+
 export class PolicyEngine {
   constructor(
     private policiesRepo: PoliciesRepository,
     private settingsRepo: SettingsRepository,
+    private serviceOf: ServiceOfChannel = () => null,
   ) {}
 
   /**
@@ -104,12 +108,19 @@ export class PolicyEngine {
       }
     }
 
-    for (const policy of channel) {
-      const scope = policy.scope as Extract<PolicyScope, { type: "channel" }>;
-      if (scope.channel === context.channel && policy.rules.length > 0) {
-        const rule = policy.rules[0];
-        recordPolicyDecision(context, rule, "channel");
-        return rule;
+    // A policy on a later channel's own name (`telegram-2`) wins; one on its
+    // service covers it otherwise, as People keys an account by service.
+    const service = this.serviceOf(context.channel);
+    for (const name of service && service !== context.channel
+      ? [context.channel, service]
+      : [context.channel]) {
+      for (const policy of channel) {
+        const scope = policy.scope as Extract<PolicyScope, { type: "channel" }>;
+        if (scope.channel === name && policy.rules.length > 0) {
+          const rule = policy.rules[0];
+          recordPolicyDecision(context, rule, "channel");
+          return rule;
+        }
       }
     }
 

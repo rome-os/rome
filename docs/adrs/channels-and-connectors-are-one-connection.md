@@ -78,6 +78,8 @@ This narrows the amendment above without withdrawing it. A channel's ports may s
 
 A service may hold several Connections, and the store does not limit it: the unique index on the service column, `connections_service_unique`, is dropped. The registry still guards every existing path. `ConnectionRegistry.connect` refuses a service that already holds a Connection, so the code that reads a service's one Connection keeps working. `connectAnother` is the only path that mints a second, and only a caller that asks for another account of a service uses it. A second Connection is a second presence, so it backs a second channel with its own name, as the amendment above requires.
 
+The first channel of a service carries the service's name, and later ones are named `<service>-<n>`. A channel name never passes to another service. When a Connection is removed, its channel keeps its name, and the next Connection of that service takes the lowest such name back before a new one is made. People, pairing and channel policies key an account by its service, so an address reached through `telegram-2` is the same account as on `telegram`.
+
 This narrows two earlier sentences. The decision above says "A service carries at most one Connection", and the 2026-10-08 amendment says "A service holds at most one Connection". Both now hold per channel: a channel's live ports have one Connection behind them, and a service may hold several.
 
 ### Alternatives

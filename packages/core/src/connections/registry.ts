@@ -48,6 +48,13 @@ export interface ConnectionRegistryDeps {
   backoff?: { baseMs: number; maxMs: number };
   /** Injectable sleep for Disconnected backoff waits; defaults to real timers. */
   sleep?: (ms: number) => Promise<void>;
+  /** Runs inside the transaction that mints a Connection, so whatever the
+   *  caller records for it (the channel it backs) commits or rolls back with
+   *  the row. */
+  onMint?: (tx: DrizzleTx, record: ConnectionRecord) => void;
+  /** Runs inside the transaction that deletes a Connection, before any
+   *  caller participant. */
+  onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 }
 
 const DEFAULT_BACKOFF = { baseMs: 1_000, maxMs: 60_000 };
@@ -150,6 +157,8 @@ export class ConnectionRegistry {
   private readonly clock: () => Date;
   private readonly backoff: { baseMs: number; maxMs: number };
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly onMint?: (tx: DrizzleTx, record: ConnectionRecord) => void;
+  private readonly onRemove?: (tx: DrizzleTx, id: ConnectionId) => void;
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
@@ -178,6 +187,8 @@ export class ConnectionRegistry {
     this.clock = deps.clock ?? (() => new Date());
     this.backoff = deps.backoff ?? DEFAULT_BACKOFF;
     this.sleep = deps.sleep ?? defaultSleep;
+    this.onMint = deps.onMint;
+    this.onRemove = deps.onRemove;
   }
 
   /** Declare a service integration. Boot-time only. Validates that every
@@ -301,6 +312,7 @@ export class ConnectionRegistry {
     ledger.runInTransaction((tx) => {
       ledger.writeConnection(tx, record);
       for (const grant of grants) ledger.writeEnsureGrant(tx, record.id, grant);
+      this.onMint?.(tx, record);
     });
   }
 
@@ -347,7 +359,10 @@ export class ConnectionRegistry {
     await this.connectionMutex.runExclusive(conn.service, async () => {
       const current = this.connections.get(id);
       if (!current) throw new Error(`unknown connection "${id}"`);
-      await this.ledger.deleteConnection(id, opts.inTx);
+      await this.ledger.deleteConnection(id, (tx) => {
+        this.onRemove?.(tx, id);
+        opts.inTx?.(tx);
+      });
       current.teardownAll();
       this.connections.delete(id);
     });
@@ -424,10 +439,12 @@ export class ConnectionRegistry {
     // placeholder), the credential/profile, and the caller's participant.
     ledger.runInTransaction((tx) => {
       if (minting) {
-        ledger.writeConnection(tx, { id, service, label: service, createdAt });
+        const record = { id, service, label: service, createdAt };
+        ledger.writeConnection(tx, record);
         for (const name of Object.keys(registered!.descriptor.auth)) {
           ledger.writeEnsureGrant(tx, id, name);
         }
+        this.onMint?.(tx, record);
       }
       ledger.writeGrant(tx, id, grant, patch);
       opts.inTx?.(tx);

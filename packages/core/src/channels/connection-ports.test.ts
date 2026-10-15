@@ -331,3 +331,44 @@ describe("connection-backed send, across epochs", () => {
     await expect(direct.conversationFor("7")).resolves.toBe("second");
   });
 });
+
+describe("connection ports for a service's later channels", () => {
+  it("hears and sends on each channel through its own Connection", async () => {
+    const { db } = createTestDb();
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    const fx = makePasteTalk();
+    registry.register(fx.descriptor);
+    const first = await registry.connect("fake-telegram");
+    const second = await registry.connectAnother("fake-telegram");
+    const names = new Map([
+      [first.id, "fake-telegram"],
+      [second.id, "fake-telegram-2"],
+    ]);
+    const deps: ConnectionPortsDeps = {
+      registry,
+      channelOf: (connection) => names.get(connection.id) ?? connection.service,
+    };
+    const ports = {
+      first: connectionPorts(deps, "fake-telegram"),
+      second: connectionPorts(deps, "fake-telegram", "fake-telegram-2"),
+    };
+    const heard: Array<{ channel: string; connectionId: string }> = [];
+    for (const port of Object.values(ports)) {
+      port?.inbound?.subscribe(async (event) => {
+        heard.push({ channel: event.message.channel, connectionId: event.ref.connectionId });
+      });
+    }
+    await registry.importCredential(first.id, "bot", fx.validCredential());
+    const firstTalker = fx.talkerFactory.instances.at(-1)!;
+    await registry.importCredential(second.id, "bot", fx.validCredential());
+    const secondTalker = fx.talkerFactory.instances.at(-1)!;
+
+    secondTalker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(heard).toEqual([{ channel: "fake-telegram-2", connectionId: second.id }]);
+
+    await ports.second?.send?.send("dm-1" as ConversationId, { text: "hi" });
+    expect(secondTalker.state.sends).toHaveLength(1);
+    expect(firstTalker.state.sends).toHaveLength(0);
+  });
+});

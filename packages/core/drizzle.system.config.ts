@@ -34,6 +34,7 @@ export default defineConfig({
     "execution_journal",
     "connections",
     "connection_grants",
+    "channels",
     "rome_sessions",
     "linkedin_threads",
     "linkedin_messages",

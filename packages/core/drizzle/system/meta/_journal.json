@@ -554,6 +554,13 @@
       "when": 1791865185442,
       "tag": "0079_several_connections_per_service",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1791865245442,
+      "tag": "0080_channel_records",
+      "breakpoints": true
     }
   ]
 }

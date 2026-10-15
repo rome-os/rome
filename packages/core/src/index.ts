@@ -79,6 +79,9 @@ import { WhatsAppAccounts } from "./channels/whatsapp-accounts.js";
 import { createAccountNames } from "./channels/account-names.js";
 import { agentsAccounts, externalAgents } from "./channels/agents-accounts.js";
 import { channelList } from "./channels/channel-list.js";
+import { claimChannels } from "./channels/claim-channels.js";
+import type { ChannelOf } from "./channels/connection-ports.js";
+import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { sendApprovalCard } from "./actions/approval-card.js";
 import { backingConnection, createChannelsService } from "./channels/channels-service.js";
 import { createAgentNames } from "./channels/agent-names.js";
@@ -337,7 +340,23 @@ async function main() {
   // Connection registry (use side). Descriptors are registered here at boot, but
   // the load()/import that hydrate + rebuild live connections run LATER — after
   // the message hook exists, so the first Talk unlock can attach its subscription.
-  const connectionRegistry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+  // Each Connection of a service with a Talk backs one channel, recorded and
+  // released in the same transaction as the Connection.
+  const channelRecords = new ChannelRecordsRepository(db);
+  const talks = (service: string) =>
+    connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
+  const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
+    ledger: new DrizzleGrantLedger(db),
+    onMint: (tx, record) => {
+      if (talks(record.service)) channelRecords.claim(tx, record, record.createdAt);
+    },
+    onRemove: (tx, id) => channelRecords.vacate(tx, id),
+  });
+  const channelOf: ChannelOf = (connection) =>
+    channelRecords.byConnection(connection.id)?.name ?? connection.service;
+  // The service a channel name belongs to (`feishu-2` is on `feishu`). Whatever
+  // is keyed by service, such as a descriptor or a channel policy, reads it.
+  const serviceOfChannel = (name: string) => channelRecords.byName(name)?.service ?? name;
   const pairingAdmission = createPairingAdmission({
     approvalsRepo,
     personMappingRepo,
@@ -363,6 +382,7 @@ async function main() {
   const channelsService = createChannelsService({
     channels: () => builtChannels,
     registry: connectionRegistry,
+    channelOf,
   });
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
@@ -540,7 +560,7 @@ async function main() {
     promptBuilder.invalidateAll();
   });
 
-  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo);
+  const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, serviceOfChannel);
 
   const actionEngine = new ActionEngine(
     actionRegistry,
@@ -668,6 +688,7 @@ async function main() {
   const conversationSettings = new ConversationSettingsService({
     repository: new ConversationSettingsRepository(db),
     connections: connectionRegistry,
+    channelOf,
     channels: () => builtChannels,
     listAgents: () => agentLoader.getAll().keys(),
     onChanged: async ({ ref, actor, fields, reset }) => {
@@ -770,7 +791,8 @@ async function main() {
         (await conversationSettings.get(ref)).effective.session.reset,
       usageRecorder,
       channelSurface: (channel) => {
-        const talker = connectionRegistry.getDescriptor(channel)?.capabilities.talker;
+        const talker = connectionRegistry.getDescriptor(serviceOfChannel(channel))?.capabilities
+          .talker;
         return talker ? talkerChannelSurface(talker) : null;
       },
     },
@@ -1149,10 +1171,13 @@ async function main() {
     whatsAppAccounts,
     linkedInAccounts,
     ...(wechatUserReader ? { wechatUserReader } : {}),
-    connections: { registry: connectionRegistry, admit },
+    connections: { registry: connectionRegistry, admit, channelOf },
     connectionAccounts: {
       [AGENTS_SERVICE]: agentsAccounts(listedAgents),
     },
+    laterChannels: channelRecords
+      .all()
+      .filter((record) => record.name !== record.service && talks(record.service)),
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
@@ -1215,6 +1240,13 @@ async function main() {
   // Hydrate connection/grant state without starting provider transports, so
   // the zero-grant connections exist before any Talk epoch can admit messages.
   await connectionRegistry.load({ deferCapabilities: true });
+  // Connections minted before channels were recorded get theirs now. Each
+  // service held one, so each takes its service's name.
+  claimChannels(
+    db,
+    channelRecords,
+    connectionRegistry.all().filter((c) => talks(c.service)),
+  );
   await ensureZeroGrantConnections(connectionRegistry);
   connectionRegistry.startCapabilities();
 

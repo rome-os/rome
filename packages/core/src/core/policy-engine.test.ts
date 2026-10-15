@@ -87,6 +87,19 @@ describe("PolicyEngine", () => {
     expect(result).toEqual({ action: "sentinel_review" });
   });
 
+  it("evaluate() applies a service's channel policy to its later channels", async () => {
+    engine = new PolicyEngine(policiesRepo, settingsRepo, (name) =>
+      name.startsWith("telegram") ? "telegram" : null,
+    );
+    await seedPolicy({ type: "channel", channel: "telegram" }, "block", 20);
+
+    const context = makeContext({ channel: "telegram-2", sender: null, bondLevel: "other" });
+    await expect(engine.evaluate(context)).resolves.toEqual({ action: "block" });
+
+    await seedPolicy({ type: "channel", channel: "telegram-2" }, "sentinel_review", 10);
+    await expect(engine.evaluate(context)).resolves.toEqual({ action: "sentinel_review" });
+  });
+
   it("evaluate() falls back to global policy", async () => {
     await seedPolicy({ type: "global" }, "block", 1);
 

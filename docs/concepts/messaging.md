@@ -42,14 +42,14 @@ A channel is one of Rome's presences on a platform, where Rome and a person can 
 - Every inbound message reaches routing in one shape, whatever platform it came from. A channel absorbs its own platform's wire format, so adding a channel changes nothing downstream.
 - Channel connection setup is uniform: enabling any channel drives the same server-owned setup protocol — there is no bespoke per-service connect flow ([channel invariants](../architecture/channels.md#invariants)).
 - Per-channel credentials are kept separate and are revoked independently.
-- A channel is named after its service, and links and stored messages name the channel. One platform can carry several channels, such as the `telegram` bot and the `telegram_user` signed-in account, and a second presence is always a second channel ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-08-a-channel-is-one-presence-on-a-platform)).
+- A channel's name is its identity, and links and stored messages name the channel. The first channel of a service is named after the service, and later ones are `<service>-<n>`. A name never passes to another service. One platform can carry several channels, such as the `telegram` bot, a second `telegram-2` bot and the `telegram_user` signed-in user. A second presence is always a second channel ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-10-15-several-connections-per-service)).
 
 **Not to be confused with:**
 
 - **[Message](#message)** — the message is what was said. The channel is what carried it.
 - **[Person](people.md#person)** — a channel is where a message arrives. The person is who sent it, resolved across channels.
 - **Platform** — the platform, such as Telegram, holds the conversations and the people's accounts. A channel is one of Rome's presences on it, and one platform can carry several.
-- **Connection** — a connection is what joins the Rome instance to a service, holding the authority the guardian granted. Carrying messages is one of the things that authority buys. The same connection to Slack can also let Rome act on the workspace without messaging anyone.
+- **Connection** — a connection is what joins the Rome instance to a service, holding the authority the guardian granted. A connection with a Talk backs exactly one channel. Carrying messages is one of the things that authority buys. The same connection to Slack can also let Rome act on the workspace without messaging anyone.
 - **[Hook](apps.md#hooks)** — the `channel-message` hook is how an inbound message enters app code. The channel is where the message came from.
 
 ## Policies
@@ -60,7 +60,7 @@ Evaluation order (first match wins):
 1. **Sender-specific** — exact [person](people.md#person) match
 2. **Thread-specific** — thread name + type match
 3. **Sender tier** — [bond level](people.md#bond-levels) match
-4. **Channel-specific** — [channel](#channels) match
+4. **Channel-specific** — [channel](#channels) match. A policy on a later channel's own name, such as `telegram-2`, wins, and a policy on its service covers it otherwise
 5. **Global** — catch-all
 
 Policy actions:

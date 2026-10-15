@@ -1,6 +1,6 @@
 import { eq, and, sql, ne, like, inArray, exists, notExists } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { persons, channelMappings } from "../schema.js";
+import { persons, channelMappings, channels } from "../schema.js";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../index.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import {
@@ -116,7 +116,20 @@ export class PersonMappingRepository {
     return nextAvailablePersonId(base, [base, ...conflicts.map((row) => row.id)]);
   }
 
+  /**
+   * The person `channelUserId` on `channel` is linked to. A later channel of a
+   * service (`telegram-2`) reads the service's links, which is where pairing
+   * writes them: People keys an account by service. Telegram and Discord give a
+   * person one id across bots. Feishu's open_id is issued per app, so a sender
+   * on a second Feishu bot pairs once there.
+   */
   async findByChannelUser(channel: string, channelUserId: string) {
+    channel =
+      this.db
+        .select({ service: channels.service })
+        .from(channels)
+        .where(eq(channels.name, channel))
+        .get()?.service ?? channel;
     const rows = await this.db
       .select({
         person: persons,
