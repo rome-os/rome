@@ -15,7 +15,7 @@ const nodeConnectionStatusSchema = z.enum([
 export type NodeConnectionStatus = z.infer<typeof nodeConnectionStatusSchema>;
 
 const nodeOutcomeSchema = z.enum(["ok", "error", "aborted", "unknown_outcome", "interrupted"]);
-export type NodeOutcome = z.infer<typeof nodeOutcomeSchema>;
+type NodeOutcome = z.infer<typeof nodeOutcomeSchema>;
 
 export const nodeActionRowSchema = z.object({
   id: z.number(),
@@ -102,6 +102,10 @@ export function nodeLogResultSchema<T extends z.ZodType>(row: T) {
   return z.object({ rows: z.array(row), hasMore: z.boolean() });
 }
 
+const nodeActionResultSchema = z.enum(["running", "succeeded", "failed", "no_result"]);
+/** What an action came to. The daemon defines it, and `resultOf` mirrors it for one row. */
+export type NodeActionResult = z.infer<typeof nodeActionResultSchema>;
+
 export type NodeActionQuery = {
   kind: "actions";
   before?: number;
@@ -109,5 +113,31 @@ export type NodeActionQuery = {
   direction?: "in" | "out";
   peer?: string;
   outcome?: NodeOutcome[];
+  result?: NodeActionResult[];
+  since?: number;
+  until?: number;
   text?: string;
 };
+
+export type NodeStatsQuery = {
+  since: number;
+  until?: number;
+  bucketMs: number;
+  direction?: "in" | "out";
+  peer?: string;
+};
+
+export const nodeStatsSchema = z.object({
+  since: z.number(),
+  until: z.number(),
+  bucketMs: z.number(),
+  groups: z.array(
+    z.object({
+      peer: z.string().nullable(),
+      bucket: z.number(),
+      result: nodeActionResultSchema,
+      count: z.number(),
+    }),
+  ),
+});
+export type NodeStats = z.infer<typeof nodeStatsSchema>;

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
-import { NodeConsole } from "@rome-os/node-ui";
+import { NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
 import {
   Measure,
   Section,
@@ -11,21 +11,49 @@ import {
   SectionDescription,
   SectionActions,
 } from "@rome-os/ui/page";
-import { Monitor, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusIndicator } from "@/lib/connection-status";
 import { fetchJson } from "@/lib/fetch-json";
 
-function nodeConsoleUrl(): string {
+export function nodeConsoleUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}${NODE_CONSOLE_PATH}`;
+}
+
+/** `/settings/devices`, a device's page under it, and `?command=` for one command there. */
+export function deviceHref(deviceId: string | null, commandId?: number): string {
+  if (deviceId === null) return "/settings/devices";
+  const path = `/settings/devices/${encodeURIComponent(deviceId)}`;
+  return commandId === undefined ? path : `${path}?command=${commandId}`;
+}
+
+/** The linked devices and the service's connection, read every 15 seconds. */
+export function useDevicesQuery() {
+  const { t } = useTranslation("settings");
+  return useQuery({
+    queryKey: ["node-devices"],
+    refetchInterval: 15_000,
+    retry: false,
+    queryFn: async ({ signal }) =>
+      devicesStatusSchema.parse(
+        await fetchJson<unknown>("/api/devices", { signal, fallback: t("devices.loadFailed") }),
+      ),
+  });
 }
 
 export function DevicesSection() {
   const { t, i18n } = useTranslation("settings");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const navigation = useMemo<NodeNavigation>(
+    () => ({ href: deviceHref, navigate: (href) => navigate(href) }),
+    [navigate],
+  );
   const start = useMutation({
     retry: false,
     mutationFn: () =>
@@ -35,25 +63,29 @@ export function DevicesSection() {
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["node-devices"] }),
   });
-  const query = useQuery({
-    queryKey: ["node-devices"],
-    refetchInterval: 15_000,
-    retry: false,
-    queryFn: async ({ signal }) =>
-      devicesStatusSchema.parse(
-        await fetchJson<unknown>("/api/devices", { signal, fallback: t("devices.loadFailed") }),
-      ),
-  });
+  const query = useDevicesQuery();
   const data = query.isError ? undefined : query.data;
   const connection = data?.connection ?? "unavailable";
   const unavailable = ["unavailable", "incompatible", "not_configured", "not_running"].includes(
     connection,
   );
   const devices = data?.devices ?? [];
-  const connected = devices.filter((device) => device.status === "connected").length;
-  const unknown = devices.filter((device) => device.status === "unknown").length;
-  const total = devices.filter((device) => device.status !== "revoked").length;
 
+  if (data && !unavailable)
+    return (
+      <NodeDevices
+        url={nodeConsoleUrl()}
+        devices={devices}
+        navigation={navigation}
+        locale={i18n.language}
+        checkedAt={Date.parse(data.checkedAt)}
+        refreshing={query.isFetching}
+        onRefresh={() => void query.refetch()}
+      />
+    );
+
+  // Without a working device service there is no activity to show, so the tab explains how to
+  // bring the service back and how to link a computer.
   return (
     <Measure className="space-y-6">
       <Section aria-labelledby="devices-title">
@@ -81,86 +113,23 @@ export function DevicesSection() {
         ) : (
           <Card>
             <CardContent>
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="space-y-2">
-                  <p className="text-ui">{t("devices.connectionLabel")}</p>
-                  <StatusIndicator
-                    status={{
-                      label: t(`devices.connection.${connection}`),
-                      tone:
-                        connection === "online"
-                          ? "success"
-                          : ["retrying", "revoked", "superseded", "incompatible"].includes(
-                                connection,
-                              )
-                            ? "attention"
-                            : "muted",
-                    }}
-                  />
-                </div>
-                <div className="space-y-2 text-right" aria-live="polite">
-                  <p className="text-ui">
-                    {unavailable || (unknown > 0 && connected === 0)
-                      ? "—"
-                      : t(unknown ? "devices.connectedAtLeast" : "devices.connectedCount", {
-                          count: connected,
-                        })}
-                  </p>
-                  {!unavailable && (
-                    <p className="text-aux text-muted-foreground">
-                      {t("devices.totalCount", { count: total })}
-                    </p>
-                  )}
-                </div>
+              <div className="space-y-2">
+                <p className="text-ui">{t("devices.connectionLabel")}</p>
+                <StatusIndicator
+                  status={{
+                    label: t(`devices.connection.${connection}`),
+                    tone: connection === "incompatible" ? "attention" : "muted",
+                  }}
+                />
               </div>
-              {connection === "stopped" && (
-                <p className="mt-4 text-ui text-muted-foreground">{t("devices.help.stopped")}</p>
-              )}
-              {unavailable ? (
-                <p
-                  role={connection === "unavailable" ? "alert" : undefined}
-                  className="mt-4 text-ui text-muted-foreground"
-                >
-                  {t(
-                    `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
-                  )}
-                </p>
-              ) : devices.length === 0 ? (
-                <p className="mt-4 text-ui text-muted-foreground">{t("devices.empty")}</p>
-              ) : (
-                <ul className="mt-6 divide-y divide-border" aria-label={t("devices.title")}>
-                  {devices.map((device) => (
-                    <li
-                      key={device.id}
-                      className="flex flex-wrap items-center justify-between gap-3 py-4 first:pt-0 last:pb-0"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Monitor
-                          className="size-4 shrink-0 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                        <div className="min-w-0">
-                          <p className="break-words text-ui">{device.name}</p>
-                          {device.platform && (
-                            <p className="text-aux text-muted-foreground">{device.platform}</p>
-                          )}
-                        </div>
-                      </div>
-                      <StatusIndicator
-                        status={{
-                          label: t(`devices.status.${device.status}`),
-                          tone:
-                            device.status === "connected"
-                              ? "success"
-                              : device.status === "unknown"
-                                ? "attention"
-                                : "muted",
-                        }}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p
+                role={connection === "unavailable" ? "alert" : undefined}
+                className="mt-4 text-ui text-muted-foreground"
+              >
+                {t(
+                  `devices.help.${connection as "unavailable" | "incompatible" | "not_configured" | "not_running"}`,
+                )}
+              </p>
               {connection === "not_running" && (
                 <div className="mt-4">
                   <Button size="sm" disabled={start.isPending} onClick={() => start.mutate()}>
@@ -168,7 +137,7 @@ export function DevicesSection() {
                   </Button>
                 </div>
               )}
-              {start.isError && unavailable && (
+              {start.isError && (
                 <p role="alert" className="mt-4 text-ui text-destructive-fg">
                   {start.error.message === "not_configured"
                     ? t("devices.help.not_configured")
@@ -177,30 +146,9 @@ export function DevicesSection() {
                       : t("devices.startFailed")}
                 </p>
               )}
-              {unknown > 0 && (
-                <p className="mt-4 text-aux text-muted-foreground">
-                  {t("devices.unknownCount", { count: unknown })}
-                </p>
-              )}
-              {!unavailable && data && (
-                <p className="mt-4 text-aux text-muted-foreground">
-                  {t("devices.checkedAt", {
-                    time: new Date(data.checkedAt).toLocaleTimeString(i18n.language),
-                  })}
-                </p>
-              )}
             </CardContent>
           </Card>
         )}
-      </Section>
-      <Section aria-labelledby="node-console-title">
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle id="node-console-title">{t("devices.console.title")}</SectionTitle>
-            <SectionDescription>{t("devices.console.description")}</SectionDescription>
-          </SectionHeading>
-        </SectionHeader>
-        <NodeConsole url={nodeConsoleUrl()} devices={devices} locale={i18n.language} />
       </Section>
       <Section aria-labelledby="connect-computer-title">
         <SectionHeader>

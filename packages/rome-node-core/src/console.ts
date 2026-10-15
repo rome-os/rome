@@ -24,11 +24,12 @@ export interface ConsoleBridge {
   close(): void;
 }
 
-const READ_METHODS = new Set(["node.status", "log.query"]);
+const READ_METHODS = new Set(["node.status", "log.query", "log.stats"]);
 
 /**
  * Opens a bridge to the daemon of `config` without starting one. Only the observation methods
- * pass: node.status, log.query, and events.subscribe or events.unsubscribe on the `node` topic.
+ * pass: node.status, log.query, log.stats, and events.subscribe or events.unsubscribe on the
+ * `node` topic.
  * Responses and `events.node` notifications reach the client in daemon order.
  */
 export function openConsoleBridge(config: NodeConfig, transport: ConsoleTransport): ConsoleBridge {

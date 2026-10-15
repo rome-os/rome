@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_ROW_CHARS, ObserveStore, QueryError } from "./observe.js";
-import type { ActionRow, LogResult } from "./observe-protocol.js";
+import type { ActionRow, LogQuery, LogResult } from "./observe-protocol.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -120,6 +120,73 @@ describe("ObserveStore", () => {
     );
     expect(() => log.query({ kind: "actions", text: "ab" })).toThrow(QueryError);
     expect(() => log.query({ kind: "actions", outcome: ["bad" as "ok"] })).toThrow(QueryError);
+  });
+
+  it("filters by result and start time", async () => {
+    let now = 1_000_000;
+    const { store: log } = await store({ now: () => now });
+    const end = (end: Parameters<ObserveStore["endAction"]>[1]) => {
+      const row = log.startAction(exec("true", []))!;
+      log.endAction(row.id, end);
+      return row.id;
+    };
+    const succeeded = end({ outcome: "ok", exitCode: 0 });
+    const exited = end({ outcome: "ok", exitCode: 2 });
+    const signaled = end({ outcome: "ok", signal: "SIGKILL" });
+    const errored = end({ outcome: "error", errorCode: "target_unavailable" });
+    const unknown = end({ outcome: "unknown_outcome" });
+    const aborted = end({ outcome: "aborted" });
+    now = 2_000_000;
+    const running = log.startAction(exec("sleep", ["9"]))!.id;
+    const ids = (query: Omit<LogQuery, "kind">) =>
+      actions(log.query({ kind: "actions", ...query }))
+        .rows.map((row) => row.id)
+        .sort((a, b) => a - b);
+    expect(ids({ result: ["succeeded"] })).toEqual([succeeded]);
+    expect(ids({ result: ["failed"] })).toEqual([exited, signaled, errored]);
+    expect(ids({ result: ["no_result"] })).toEqual([unknown, aborted]);
+    expect(ids({ result: ["running", "succeeded"] })).toEqual([succeeded, running]);
+    expect(ids({ since: 2_000_000 })).toEqual([running]);
+    expect(ids({ until: 2_000_000 })).toHaveLength(6);
+    expect(() => log.query({ kind: "actions", result: ["done" as "running"] })).toThrow(QueryError);
+    expect(() => log.query({ kind: "actions", since: -1 })).toThrow(QueryError);
+  });
+
+  it("counts actions per peer, bucket, and result", async () => {
+    let now = 60_000;
+    const { store: log } = await store({ now: () => now });
+    const at = (time: number, peer: string, end?: Parameters<ObserveStore["endAction"]>[1]) => {
+      now = time;
+      const row = log.startAction({ ...exec("true", []), peer })!;
+      if (end) log.endAction(row.id, end);
+    };
+    at(59_000, device, { outcome: "ok" });
+    at(60_000, device, { outcome: "ok" });
+    at(61_000, device, { outcome: "ok" });
+    at(62_000, device, { outcome: "ok", exitCode: 1 });
+    at(75_000, device, { outcome: "unknown_outcome" });
+    at(76_000, "other", { outcome: "ok" });
+    at(79_000, device);
+    now = 80_000;
+    expect(log.stats({ since: 60_000, bucketMs: 10_000 })).toEqual({
+      since: 60_000,
+      until: 80_000,
+      bucketMs: 10_000,
+      groups: expect.arrayContaining([
+        { peer: device, bucket: 0, result: "succeeded", count: 2 },
+        { peer: device, bucket: 0, result: "failed", count: 1 },
+        { peer: device, bucket: 1, result: "no_result", count: 1 },
+        { peer: "other", bucket: 1, result: "succeeded", count: 1 },
+        { peer: device, bucket: 1, result: "running", count: 1 },
+      ]),
+    });
+    expect(log.stats({ since: 60_000, bucketMs: 10_000 }).groups).toHaveLength(5);
+    expect(
+      log.stats({ since: 60_000, until: 70_000, bucketMs: 10_000, peer: "other" }).groups,
+    ).toEqual([]);
+    expect(() => log.stats({ since: 0, bucketMs: 10 })).toThrow(QueryError);
+    expect(() => log.stats({ since: 0, until: 80_000_000, bucketMs: 1000 })).toThrow(QueryError);
+    expect(() => log.stats({ bucketMs: 10_000 } as never)).toThrow(QueryError);
   });
 
   it("cuts long text in results but stores it in full", async () => {

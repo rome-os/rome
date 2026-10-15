@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
+import DeviceActivityPage from "./DeviceActivityPage";
 import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
@@ -46,14 +47,16 @@ it("counts connected devices, not authorized records, independently of the setti
       { id: "three", name: "Old computer", platform: "windows", status: "revoked" },
     ],
   }));
-  expect(await screen.findByText("1 connected device")).toBeTruthy();
-  expect(screen.getByText("2 authorized devices")).toBeTruthy();
+  expect(await screen.findByText("1 of 2 online")).toBeTruthy();
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
     "/settings/devices",
   );
-  expect(
-    within(screen.getByRole("list", { name: "Devices" })).getByText("Not connected"),
-  ).toBeTruthy();
+  expect(screen.getByText("Linux · Not connected")).toBeTruthy();
+  expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
+    "/settings/devices/two",
+  );
+  // A revoked device waits behind its toggle.
+  expect(screen.queryByText("Old computer")).toBeNull();
 });
 
 it("reports a lower bound when some devices could not be checked", async () => {
@@ -65,10 +68,8 @@ it("reports a lower bound when some devices could not be checked", async () => {
       { id: "two", name: "Desktop", platform: "linux", status: "unknown" },
     ],
   }));
-  expect(await screen.findByText("At least 1 connected device")).toBeTruthy();
-  expect(
-    screen.getByText("The connection status of 1 device could not be confirmed."),
-  ).toBeTruthy();
+  expect(await screen.findByText("at least 1 of 2 online")).toBeTruthy();
+  expect(screen.getByText("Linux · Unknown")).toBeTruthy();
 });
 
 it("clears a previous connected count when refreshing cannot read status", async () => {
@@ -82,12 +83,11 @@ it("clears a previous connected count when refreshing cannot read status", async
           devices: [{ id: "mac", name: "Mac", platform: "macos", status: "connected" }],
         },
   );
-  expect(await screen.findByText("1 connected device")).toBeTruthy();
+  expect(await screen.findByText("1 of 1 online")).toBeTruthy();
   failed = true;
-  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await userEvent.click(screen.getByRole("button", { name: "Check connections now" }));
   expect(await screen.findByRole("alert")).toBeTruthy();
-  expect(screen.queryByText("1 connected device")).toBeNull();
-  expect(screen.queryByText("0 connected devices")).toBeNull();
+  expect(screen.queryByText(/online/)).toBeNull();
 });
 
 it("explains missing authorization instead of reporting zero devices", async () => {
@@ -97,7 +97,7 @@ it("explains missing authorization instead of reporting zero devices", async () 
     devices: [],
   }));
   expect(await screen.findByText("Not configured")).toBeTruthy();
-  expect(screen.queryByText("0 connected devices")).toBeNull();
+  expect(screen.queryByText(/online/)).toBeNull();
 });
 
 it("clears device counts when the service stops and keeps refresh passive", async () => {
@@ -111,18 +111,16 @@ it("clears device counts when the service stops and keeps refresh passive", asyn
         }
       : { connection: "not_running", checkedAt: new Date().toISOString(), devices: [] },
   );
-  expect(await screen.findByText("1 connected device")).toBeTruthy();
+  expect(await screen.findByText("1 of 1 online")).toBeTruthy();
   running = false;
-  await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await userEvent.click(screen.getByRole("button", { name: "Check connections now" }));
   expect(await screen.findByText("Service not running")).toBeTruthy();
   expect(
     screen.getByText(
       "Start the service on this Rome instance to check linked computers. Refresh only checks status; it does not start the service.",
     ),
   ).toBeTruthy();
-  expect(screen.queryByText("1 connected device")).toBeNull();
-  expect(screen.queryByText("0 connected devices")).toBeNull();
-  expect(screen.queryByText("0 authorized devices")).toBeNull();
+  expect(screen.queryByText(/online/)).toBeNull();
   expect(screen.queryByText("Mac")).toBeNull();
   expect(screen.getByRole("button", { name: "Start service" })).toBeTruthy();
   expect(
@@ -136,26 +134,21 @@ it("does not present zero as the connected count when every check is unknown", a
     checkedAt: new Date().toISOString(),
     devices: [{ id: "mac", name: "Mac", platform: "macos", status: "unknown" }],
   }));
-  expect(await screen.findByText("Reconnecting")).toBeTruthy();
-  expect(screen.queryByText("At least 0 connected devices")).toBeNull();
-  expect(screen.getByText("1 authorized device")).toBeTruthy();
+  expect(await screen.findByText("Mac")).toBeTruthy();
+  expect(screen.getByText("macOS · Unknown")).toBeTruthy();
+  expect(screen.queryByText(/online/)).toBeNull();
 });
 
-it("explains an idle running service and offers computer setup without an error", async () => {
+it("offers computer setup for an idle running service without an error", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
     devices: [],
   }));
-  expect(await screen.findByText("Idle")).toBeTruthy();
-  expect(
-    screen.getByText(
-      "The device service is running. Its connection stays idle until a linked computer needs to be checked or used.",
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText("No computers are linked to this account.")).toBeTruthy();
-  expect(screen.getByText("0 connected devices")).toBeTruthy();
-  expect(screen.getByText("rome-node connect")).toBeTruthy();
+  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
+  expect(screen.getByText("0 of 0 online")).toBeTruthy();
+  await userEvent.click(screen.getByRole("button", { name: "Link device" }));
+  expect(await screen.findByText("rome-node connect")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
 });
@@ -190,7 +183,7 @@ it("starts only on explicit click and refreshes server truth after success", asy
   await userEvent.click(pending);
   expect(start).toHaveBeenCalledTimes(1);
   finish();
-  expect(await screen.findByText("Idle")).toBeTruthy();
+  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
 });
 
@@ -217,7 +210,7 @@ it.each([
   await userEvent.click(await screen.findByRole("button", { name: "Start service" }));
   expect((await screen.findByRole("alert")).textContent).toBe(message);
   expect(start).toHaveBeenCalledTimes(1);
-  expect(screen.queryByText("0 connected devices")).toBeNull();
+  expect(screen.queryByText(/online/)).toBeNull();
 });
 
 it("localizes the service recovery and computer setup in Chinese", async () => {
@@ -235,4 +228,33 @@ it("localizes the service recovery and computer setup in Chinese", async () => {
     cleanup();
     await i18n.changeLanguage("en");
   }
+});
+
+it("opens a device's page with the selected command from the URL", async () => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/devices"
+      ? new Response(
+          JSON.stringify({
+            connection: "online",
+            checkedAt: new Date().toISOString(),
+            devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        )
+      : new Response("{}", { status: 503 }),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/settings/devices/one?command=3"]}>
+        <Routes>
+          <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByRole("heading", { name: "MacBook" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
+    "/settings/devices",
+  );
 });

@@ -94,6 +94,7 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `files.copy` | Copy `{ direction, localPath, deviceId, remotePath }` between the daemon's computer and a device |
 | `node.status` | Read the daemon version, start time, and the state of each role |
 | `log.query` | Read the [activity log](#activity-log) with a structured query |
+| `log.stats` | Count [activity log](#activity-log) actions per device, time bucket, and result |
 | `events.subscribe` | Subscribe with `{ topic: "connection" }` or `{ topic: "node" }` |
 | `events.unsubscribe` | Remove the connection's subscription to that topic |
 
@@ -175,8 +176,27 @@ rebuilds the search index, because the rebuild runs on the daemon's event loop.
 
 `log.query` takes a structured query, never SQL: `{ kind: "actions" }` with the
 optional filters `before` (an action id), `limit` (100, at most 500),
-`direction`, `peer`, `outcome[]`, and `text`. It returns `{ rows, hasMore }`,
-newest first.
+`direction`, `peer`, `outcome[]`, `result[]`, `since`, `until`, and `text`. It
+returns `{ rows, hasMore }`, newest first. `since` and `until` bound the start
+time in milliseconds since the epoch, `since` inclusive and `until` exclusive.
+
+`result` sorts an action into one of four groups that the device pages count and
+filter by:
+
+| Result | Actions |
+|---|---|
+| `running` | Not ended yet |
+| `succeeded` | Outcome `ok`, exit code 0 or none, and no signal |
+| `failed` | Outcome `error`, or outcome `ok` with a non-zero exit code or a signal |
+| `no_result` | Outcome `unknown_outcome`, `aborted`, or `interrupted` |
+
+`log.stats` takes `{ since, until?, bucketMs, direction?, peer? }` and counts the
+actions that started in `[since, until)`. `until` defaults to now, `bucketMs` is
+at least 1,000, and the range holds at most 1,000 buckets. It returns
+`{ since, until, bucketMs, groups }`, where each group is
+`{ peer, bucket, result, count }` and `bucket` is the index from `since`. Empty
+buckets have no group. A daemon older than `log.stats` answers -32601, and the
+device pages then show the lists without counts or charts.
 
 `text` matches a substring of the command, arguments, or working directory and
 needs at least three characters. One response stays under 1 MiB, and one action
@@ -187,17 +207,21 @@ result and the running actions before the acknowledgement. Then `events.node`
 notifications carry `connection` and `action` (`start` and `end`) events.
 There is no replay. After a reconnect, a client fills the gap with `log.query`.
 
-Settings → Devices shows this log for the daemon on the Rome instance under
-**Activity**. The dashboard opens `/ws/node`, and Rome Core forwards the
-observation methods to the daemon unchanged through `openConsoleBridge` from
-`@rome-os/node-core/client`. A browser cannot send the daemon's Authorization
+Settings → Devices shows this log for the daemon on the Rome instance. Each
+device with commands in the last 24 hours gets a card with its counts, a load
+chart of 10-minute buckets, and its latest commands. The card links to the
+device's page at `/settings/devices/<id>`, which lists the commands with a result
+filter, search, and the detail of the selected command. The dashboard opens
+`/ws/node`, and Rome Core forwards the observation methods to the daemon
+unchanged through `openConsoleBridge` from `@rome-os/node-core/client`. A browser cannot send the daemon's Authorization
 header, so it never connects to the daemon directly. Other methods, such as
 `devices.run` and `daemon.stop`, do not pass. The socket admits only the
 guardian, as [access control](architecture/access-control.md) describes.
 
-The console UI lives in `@rome-os/node-ui` (`packages/rome-node-ui`), separate
-from the dashboard. A host mounts `<NodeConsole url devices locale />` with the
-WebSocket URL of a forwarding backend, and supplies the section heading.
+The device pages live in `@rome-os/node-ui` (`packages/rome-node-ui`), separate
+from the dashboard. A host mounts `<NodeDevices />` for the overview and
+`<NodeDeviceActivity />` for one device, with the WebSocket URL of a forwarding
+backend, the device list, and its own routing.
 
 ## Authorization and transport
 

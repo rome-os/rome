@@ -283,6 +283,8 @@ export const settingsHandlers = [
         { id: "mac", name: "MacBook Pro", platform: "macos", status: "connected" },
         { id: "linux", name: "Development workstation", platform: "linux", status: "connected" },
         { id: "windows", name: "Windows PC", platform: "windows", status: "not_connected" },
+        { id: "build", name: "Build server", platform: "linux", status: "not_connected" },
+        { id: "old-laptop", name: "Old laptop", platform: "darwin", status: "revoked" },
       ],
     } satisfies DevicesStatus),
   ),

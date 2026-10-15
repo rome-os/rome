@@ -4,10 +4,13 @@ import { closeSync, existsSync, openSync, readdirSync, renameSync, rmSync } from
 import { basename, dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import {
+  ACTION_RESULTS,
   OUTCOMES,
   type ActionRow,
   type LogQuery,
   type LogResult,
+  type LogStats,
+  type LogStatsQuery,
   type Outcome,
 } from "./observe-protocol.js";
 
@@ -17,6 +20,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const MAX_ROW_CHARS = 16 * 1024;
 const MAX_RESULT_BYTES = 768 * 1024;
 const MAX_LIMIT = 500;
+const MAX_BUCKETS = 1000;
+
+/** The `ActionResult` of the row aliased `a`. Matches the definition in observe-protocol.ts. */
+const RESULT_SQL = `CASE
+  WHEN a.ended_at IS NULL THEN 'running'
+  WHEN a.outcome = 'ok' AND coalesce(a.exit_code, 0) = 0 AND a.signal IS NULL THEN 'succeeded'
+  WHEN a.outcome IN ('ok', 'error') THEN 'failed'
+  ELSE 'no_result' END`;
 
 export interface ObserveStoreOptions {
   path: string;
@@ -189,6 +200,29 @@ const optionalId = (value: unknown, name: string): number | undefined => {
     throw new QueryError(`${name} must be a non-negative integer.`);
   return value;
 };
+
+/** Adds the filters `log.query` and `log.stats` share to `where` and `params`. */
+function commonFilters(
+  query: { direction?: unknown; peer?: unknown; since?: unknown; until?: unknown },
+  where: string[],
+  params: SQLInputValue[],
+) {
+  if (query.direction !== undefined) {
+    if (query.direction !== "in" && query.direction !== "out")
+      throw new QueryError("direction must be in or out.");
+    where.push("a.direction = ?");
+    params.push(query.direction);
+  }
+  if (query.peer !== undefined) {
+    if (typeof query.peer !== "string") throw new QueryError("peer must be a string.");
+    where.push("a.peer = ?");
+    params.push(query.peer);
+  }
+  const since = optionalId(query.since, "since");
+  const until = optionalId(query.until, "until");
+  if (since !== undefined) where.push("a.started_at >= ?"), params.push(since);
+  if (until !== undefined) where.push("a.started_at < ?"), params.push(until);
+}
 
 export class ObserveStore {
   private db?: DatabaseSync;
@@ -431,17 +465,7 @@ export class ObserveStore {
     const before = optionalId(query.before, "before");
     const limit = this.limit(query.limit, 100);
     if (before !== undefined) where.push("a.id < ?"), params.push(before);
-    if (query.direction !== undefined) {
-      if (query.direction !== "in" && query.direction !== "out")
-        throw new QueryError("direction must be in or out.");
-      where.push("a.direction = ?");
-      params.push(query.direction);
-    }
-    if (query.peer !== undefined) {
-      if (typeof query.peer !== "string") throw new QueryError("peer must be a string.");
-      where.push("a.peer = ?");
-      params.push(query.peer);
-    }
+    commonFilters(query, where, params);
     if (query.outcome !== undefined) {
       if (
         !Array.isArray(query.outcome) ||
@@ -451,6 +475,16 @@ export class ObserveStore {
         throw new QueryError("outcome must list known outcomes.");
       where.push(`a.outcome IN (${query.outcome.map(() => "?").join(", ")})`);
       params.push(...query.outcome);
+    }
+    if (query.result !== undefined) {
+      if (
+        !Array.isArray(query.result) ||
+        !query.result.length ||
+        !query.result.every((result) => ACTION_RESULTS.includes(result))
+      )
+        throw new QueryError("result must list known results.");
+      where.push(`${RESULT_SQL} IN (${query.result.map(() => "?").join(", ")})`);
+      params.push(...query.result);
     }
     let join = "";
     if (query.text !== undefined) {
@@ -485,6 +519,38 @@ export class ObserveStore {
         { rows: [], hasMore: false },
       ) ?? { rows: [], hasMore: false }
     );
+  }
+
+  /** Throws QueryError for an invalid query. Storage failures return no groups. */
+  stats(query: LogStatsQuery): LogStats {
+    const since = optionalId(query.since, "since");
+    if (since === undefined) throw new QueryError("since is required.");
+    const until = optionalId(query.until, "until") ?? this.now();
+    const bucketMs = query.bucketMs;
+    if (typeof bucketMs !== "number" || !Number.isSafeInteger(bucketMs) || bucketMs < 1000)
+      throw new QueryError("bucketMs must be an integer of at least 1000.");
+    if (until <= since || Math.ceil((until - since) / bucketMs) > MAX_BUCKETS)
+      throw new QueryError(`The range must hold between 1 and ${MAX_BUCKETS} buckets.`);
+    const where: string[] = [];
+    const params: SQLInputValue[] = [];
+    commonFilters({ ...query, since, until }, where, params);
+    // node:sqlite binds a JS number as REAL, so the division needs the cast to land on an index.
+    const sql = `SELECT a.peer AS peer, CAST((a.started_at - ?) / ? AS INTEGER) AS bucket,
+        ${RESULT_SQL} AS result, count(*) AS count
+      FROM actions a WHERE ${where.join(" AND ")}
+      GROUP BY peer, bucket, result ORDER BY bucket`;
+    const groups =
+      this.guard(
+        () =>
+          this.all(sql, since, bucketMs, ...params).map((row) => ({
+            peer: row.peer as string | null,
+            bucket: Number(row.bucket),
+            result: row.result as LogStats["groups"][number]["result"],
+            count: Number(row.count),
+          })),
+        [],
+      ) ?? [];
+    return { since, until, bucketMs, groups };
   }
 
   /**

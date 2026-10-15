@@ -94,9 +94,18 @@ describe("openConsoleBridge", () => {
         params: { topic: "node" },
       }),
     );
-    await c.until(() => c.messages.filter((message) => "id" in message).length === 5);
+    c.bridge.receive(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 6,
+        method: "log.stats",
+        params: { since: Date.now() - 60_000, bucketMs: 10_000 },
+      }),
+    );
+    await c.until(() => c.messages.filter((message) => "id" in message).length === 6);
     const byId = new Map(c.messages.filter((m) => "id" in m).map((m) => [m.id, m]));
     expect(byId.get(1)).toMatchObject({ result: { roles: { caller: {} } } });
+    expect(byId.get(6)).toMatchObject({ result: { bucketMs: 10_000, groups: [] } });
     for (const id of [2, 3, 4]) expect(byId.get(id)).toMatchObject({ error: { code: -32601 } });
     // The snapshot arrives before the acknowledgement.
     const snapshot = c.messages.findIndex((m) => m.method === "events.node");

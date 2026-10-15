@@ -6,7 +6,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
 import type { ConnectionStatus } from "./client.js";
 import { ObserveStore, QueryError, type ActionEnd, type ActionStart } from "./observe.js";
-import type { LogQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
+import type { LogQuery, LogStatsQuery, NodeEvent, NodeStatus } from "./observe-protocol.js";
 import { DeviceConnector } from "./connector.js";
 import { daemonStatePath, readCallerCredential, type NodeConfig } from "./local.js";
 import { writePrivateJson } from "./storage.js";
@@ -391,6 +391,14 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
           case "log.query":
             try {
               result = store.query(logQuery(params));
+            } catch (cause) {
+              if (cause instanceof QueryError) throw new RpcError(-32602, cause.message);
+              throw cause;
+            }
+            break;
+          case "log.stats":
+            try {
+              result = store.stats(params as unknown as LogStatsQuery);
             } catch (cause) {
               if (cause instanceof QueryError) throw new RpcError(-32602, cause.message);
               throw cause;

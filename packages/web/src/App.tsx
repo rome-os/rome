@@ -46,6 +46,7 @@ const NamedDesktopPage = lazy(() =>
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
+const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
 const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
@@ -190,6 +191,7 @@ export default function App() {
                 reaches ConnectionDetailPage's unknown-id redirect. */}
             <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
             <Route path="/settings/:tab" element={<SettingsTabPage />} />
           </Route>
 
