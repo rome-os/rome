@@ -190,4 +190,28 @@ describe("connections.service in a migrated store", () => {
       close();
     }
   });
+
+  it("keeps write order for connections minted in the same second", async () => {
+    const { db, close } = createTestDb();
+    try {
+      const ledger = new DrizzleGrantLedger(db);
+      ledger.writeConnection(db, {
+        id: "zzz-first",
+        service: "discord",
+        label: "A",
+        createdAt: new Date(1_000),
+      });
+      ledger.writeConnection(db, {
+        id: "aaa-later",
+        service: "discord",
+        label: "B",
+        createdAt: new Date(1_500),
+      });
+
+      const ids = (await ledger.listConnections()).map((record) => record.id);
+      expect(ids).toEqual(["zzz-first", "aaa-later"]);
+    } finally {
+      close();
+    }
+  });
 });

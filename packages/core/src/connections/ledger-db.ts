@@ -6,7 +6,7 @@
 // (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
 import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
@@ -73,10 +73,11 @@ export class DrizzleGrantLedger implements GrantLedger {
   async listConnections(): Promise<ConnectionRecord[]> {
     // Oldest first: a Service's first Connection is the one that backs its
     // first channel, and readers of `find(service)[0]` rely on that.
+    // `created_at` holds whole seconds, so rowid (write order) breaks a tie.
     const rows = await this.db
       .select()
       .from(connections)
-      .orderBy(asc(connections.createdAt), asc(connections.id));
+      .orderBy(asc(connections.createdAt), asc(sql`rowid`));
     return rows.map((row) => ({
       id: row.id,
       service: row.service,
