@@ -9,7 +9,6 @@
 // hook, so no service-owned profile field name is known here. No POST — minting
 // stays in the connect setup.
 
-import { and, eq, inArray, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
@@ -17,7 +16,6 @@ import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantRecord } from "../../connections/ledger.js";
 import type { DrizzleTx } from "../../db/index.js";
-import { connectionGrants, connections } from "../../db/schema.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -298,24 +296,9 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       // bound to its Connection after Talk is revoked and hears no one then.
       // The grant states are read through `tx`, so a teardown of the other
       // Connection that commits first is seen here.
-      const conferred = tx
-        .select({ custody: connectionGrants.custody, name: connectionGrants.name })
-        .from(connectionGrants)
-        .innerJoin(connections, eq(connections.id, connectionGrants.custody))
-        .where(
-          and(
-            eq(connections.service, conn.service),
-            ne(connections.id, conn.id),
-            inArray(connectionGrants.name, [...talker.needs]),
-            ne(connectionGrants.state, "unauthorized"),
-          ),
-        )
-        .all();
-      const needsHeld = new Map<string, Set<string>>();
-      for (const row of conferred) {
-        needsHeld.set(row.custody, (needsHeld.get(row.custody) ?? new Set()).add(row.name));
-      }
-      const stillTalks = [...needsHeld.values()].some((held) => held.size === talker.needs.length);
+      const stillTalks =
+        registry.getLedger().connectionsHoldingIn(tx, conn.service, talker.needs, conn.id).length >
+        0;
       if (!stillTalks) deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
     };
   };
