@@ -4,6 +4,7 @@ import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
 import { persons, channelMappings } from "../schema.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
+import { ChannelRecordsRepository } from "./channel-records.js";
 
 describe("PersonMappingRepository", () => {
   let testDb: TestDb;
@@ -123,6 +124,21 @@ describe("PersonMappingRepository", () => {
     // Without the transaction the person row would survive, unreachable: no
     // inbound message resolves to it and no API can repair or delete it.
     expect(await repo.findById("erin")).toBeNull();
+  });
+
+  it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
+    const records = new ChannelRecordsRepository(testDb.db);
+    const now = new Date();
+    records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
+    records.claim(testDb.db, { id: "c2", service: "telegram" }, now);
+    const personId = await repo.create({
+      displayName: "Erin",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "telegram", channelUserId: "tg-erin" }],
+    });
+
+    const found = await repo.findByChannelUser("telegram-2", "tg-erin");
+    expect(found?.id).toBe(personId);
   });
 
   it("findByChannelUser() returns person for channel+userId", async () => {
