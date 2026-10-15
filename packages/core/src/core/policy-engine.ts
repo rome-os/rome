@@ -109,9 +109,10 @@ export class PolicyEngine {
       }
     }
 
-    // A policy on a later channel's own name wins; one on its
-    // service covers it otherwise, as People keys an account by service.
-    const service = this.serviceOf(context.channel);
+    // A policy on a later channel's own name wins; one on its service covers
+    // it otherwise, as People keys an account by service. Most installs have
+    // no channel policy, so the service is only looked up when one exists.
+    const service = channel.length > 0 ? this.serviceOf(context.channel) : context.channel;
     for (const name of service !== context.channel
       ? [context.channel, service]
       : [context.channel]) {

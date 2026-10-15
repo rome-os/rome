@@ -160,6 +160,9 @@ describe("PersonMappingRepository", () => {
     expect((await repo.findById(personId))?.channelMappings).toEqual([
       expect.objectContaining({ channel: "telegram", channelUserId: "tg-erin" }),
     ]);
+
+    await expect(repo.unlinkAccount(personId, second, "tg-erin")).resolves.toBe(true);
+    expect(await repo.findByChannelUser("telegram", "tg-erin")).toBeNull();
   });
 
   it("findByChannelUser() returns person for channel+userId", async () => {

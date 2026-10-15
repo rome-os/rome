@@ -627,6 +627,7 @@ export class PersonMappingRepository {
    * subquery, so nothing executes outside `exec`.
    */
   writeDeleteGuardianChannelMappings(exec: SqliteExec, channel: string): void {
+    channel = this.serviceOf(channel);
     const guardianIds = this.db
       .select({ id: persons.id })
       .from(persons)
@@ -782,6 +783,7 @@ export class PersonMappingRepository {
    *  every other link they hold alone. Reports whether the link was theirs to
    *  drop, which is the only way a caller can tell an unlink from a no-op. */
   async unlinkAccount(personId: string, channel: string, channelUserId: string): Promise<boolean> {
+    channel = this.serviceOf(channel);
     const result = this.db
       .delete(channelMappings)
       .where(
