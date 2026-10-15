@@ -180,7 +180,6 @@ export const BASELINE = {
     "px-2.5": 1,
     "px-3.5": 1,
     "text-3xl": 1,
-    "text-base": 3,
     "text-xs": 2,
   },
   "rome_apps/showcases/src/web/components/PresetCard.tsx": {

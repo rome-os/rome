@@ -136,7 +136,7 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
         <div className="space-y-4">
           <section className={panelClass}>
             <div className="min-w-0">
-              <h2 className="mb-2 text-base font-semibold">Recaps</h2>
+              <h2 className="mb-2 text-section font-semibold">Recaps</h2>
               <p className="max-w-[560px] leading-relaxed text-muted-foreground">
                 Save a recap after each substantial WebChat turn. Each recap runs an extra model
                 call.
@@ -156,7 +156,7 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
             <>
               <section className={panelClass}>
                 <div className="min-w-0">
-                  <h2 className="mb-2 text-base font-semibold">Audio generation</h2>
+                  <h2 className="mb-2 text-section font-semibold">Audio generation</h2>
                   <p className="max-w-[560px] leading-relaxed text-muted-foreground">
                     Also save each recap as audio, spoken with Edge Text to Speech.
                   </p>
@@ -176,7 +176,7 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Gauge size={18} aria-hidden="true" />
-                      <h2 className="text-base font-semibold">Audio speed</h2>
+                      <h2 className="text-section font-semibold">Audio speed</h2>
                     </div>
                     <p className="leading-relaxed text-muted-foreground">
                       Set the speaking pace for newly generated recap audio.
@@ -207,7 +207,7 @@ export default function RecapApp({ bootstrap }: { bootstrap: RomeAppBootstrap })
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Gauge size={18} aria-hidden="true" />
-                    <h2 className="text-base font-semibold">Recap threshold</h2>
+                    <h2 className="text-section font-semibold">Recap threshold</h2>
                   </div>
                   <p className="leading-relaxed text-muted-foreground">
                     Choose how substantial a completed WebChat turn should be before saving a recap.
