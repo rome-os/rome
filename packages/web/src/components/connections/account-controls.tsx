@@ -1,16 +1,37 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { LINKABLE_SERVICES } from "@rome/api-types/linked-agents";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { type ApiConnection, createConnection } from "@/lib/connections-api";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { fetchJson } from "@/lib/fetch-json";
+import { type ApiConnection, createConnection, linkAccountAgent } from "@/lib/connections-api";
 import { type ConnectionCard, connectionRoute } from "@/lib/connection-cards";
 
 /**
  * Account controls on a channel card: "Add another account" for services that
- * offer several. It acts on the account (the card's channel), not on a slot,
- * so it sits below the slot cards.
+ * offer several, and the "Linked agent" picker for a linkable service's account
+ * whose Talk is connected. Both act on the account (the card's channel), not on
+ * a slot, so they sit below the slot cards.
  */
+
+/** Radix Select reserves the empty string, so "no linked agent" needs a value of its own. */
+const NO_AGENT = "__none__";
+
+const AGENTS_QUERY_KEY = ["connection-accounts", "agents"] as const;
+
+interface AgentOption {
+  name: string;
+}
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -23,20 +44,38 @@ function talkConnected(card: ConnectionCard): boolean {
 
 export function AccountControls({
   card,
+  onRefresh,
   onFlash,
   onOpenAccount,
 }: {
   card: ConnectionCard;
+  onRefresh: () => void;
   onFlash: (message: string) => void;
   /** Open another account's card by its route. Rejects when the account is
    *  not listed yet. Without it, the add button is hidden. */
   onOpenAccount?: (route: string) => void | Promise<void>;
 }) {
   const connected = talkConnected(card);
+  const showLink =
+    card.linkReported && card.channel !== null && connected && LINKABLE_SERVICES.has(card.service);
   // A second account only makes sense next to a first one that exists.
-  if (!card.severalAccounts || !connected || !onOpenAccount) return null;
+  const showAdd = card.severalAccounts && connected;
+  if (!showLink && !(showAdd && onOpenAccount)) return null;
+
   return (
-    <AddAccountButton service={card.service} onFlash={onFlash} onOpenAccount={onOpenAccount} />
+    <div className="space-y-4">
+      {showLink && card.channel && (
+        <LinkedAgentField
+          card={card}
+          channel={card.channel}
+          onRefresh={onRefresh}
+          onFlash={onFlash}
+        />
+      )}
+      {showAdd && onOpenAccount && (
+        <AddAccountButton service={card.service} onFlash={onFlash} onOpenAccount={onOpenAccount} />
+      )}
+    </div>
   );
 }
 
@@ -85,5 +124,102 @@ function AddAccountButton({
       <Plus data-icon="inline-start" aria-hidden />
       {t("connections.accounts.add")}
     </Button>
+  );
+}
+
+function LinkedAgentField({
+  card,
+  channel,
+  onRefresh,
+  onFlash,
+}: {
+  card: ConnectionCard;
+  channel: string;
+  onRefresh: () => void;
+  onFlash: (message: string) => void;
+}) {
+  const { t } = useTranslation("settings");
+  const [saving, setSaving] = useState(false);
+  // The choice the server accepted, with the link it replaced. It shows until
+  // the refreshed card reports a different link, so the trigger never falls
+  // back to the old link in between.
+  const [pending, setPending] = useState<{ value: string; replaced: string | null } | null>(null);
+  // Once the refreshed card reports another link, the server's value takes
+  // over. Dropping the choice then keeps a later move of the link from
+  // bringing it back.
+  if (pending && pending.replaced !== card.linkedAgent) setPending(null);
+  const shown = pending && pending.replaced === card.linkedAgent ? pending.value : null;
+  const current = shown ?? card.linkedAgent ?? NO_AGENT;
+  const agentsQuery = useQuery({
+    queryKey: AGENTS_QUERY_KEY,
+    // Loaded agents rarely change, so opening another account reuses the list.
+    staleTime: 60_000,
+    queryFn: async () => {
+      const payload = await fetchJson<{ agents: AgentOption[] }>("/api/agents", {
+        fallback: t("connections.accounts.agentsFailed"),
+      });
+      // Main answers wherever no agent is linked, so "None" stands for it.
+      return payload.agents
+        .map((agent) => agent.name)
+        .filter((name) => name !== "main" && name !== "core:main");
+    },
+  });
+
+  // Keep the current link selectable even when its agent is no longer loaded,
+  // so the trigger shows what the server holds.
+  const names = agentsQuery.data ?? [];
+  const options =
+    card.linkedAgent && !names.includes(card.linkedAgent) ? [card.linkedAgent, ...names] : names;
+
+  const change = async (value: string) => {
+    if (value === current) return;
+    const agent = value === NO_AGENT ? null : value;
+    setSaving(true);
+    setPending({ value, replaced: card.linkedAgent });
+    try {
+      const result = await linkAccountAgent(channel, agent, t("connections.accounts.linkFailed"));
+      const account = card.label;
+      // Confirmations, not errors, so they skip `onFlash`.
+      if (agent === null) {
+        toast(t("connections.accounts.linkCleared", { account }));
+      } else if (result.unlinkedFrom) {
+        toast(t("connections.accounts.linkMoved", { agent, account }));
+      } else {
+        toast(t("connections.accounts.linked", { agent, account }));
+      }
+      onRefresh();
+    } catch (error) {
+      setPending(null);
+      onFlash(errorMessage(error, t("connections.accounts.linkFailed")));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const triggerId = `linked-agent-${channel}`;
+  return (
+    <Field>
+      <FieldLabel htmlFor={triggerId}>{t("connections.accounts.linkedAgent")}</FieldLabel>
+      <Select value={current} onValueChange={(value) => void change(value)} disabled={saving}>
+        <SelectTrigger id={triggerId} className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NO_AGENT}>{t("connections.accounts.noAgent")}</SelectItem>
+          {options.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {agentsQuery.isError ? (
+        <FieldError
+          errors={[errorMessage(agentsQuery.error, t("connections.accounts.agentsFailed"))]}
+        />
+      ) : (
+        <FieldDescription>{t("connections.accounts.linkedAgentDescription")}</FieldDescription>
+      )}
+    </Field>
   );
 }

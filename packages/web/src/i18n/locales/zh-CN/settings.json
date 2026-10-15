@@ -56,7 +56,15 @@
     "accounts": {
       "add": "添加另一个账号",
       "addFailed": "无法添加账号",
-      "addedNotShown": "账号已添加，可在连接列表中找到。"
+      "addedNotShown": "账号已添加，可在连接列表中找到。",
+      "linkedAgent": "关联的智能体",
+      "linkedAgentDescription": "关联的智能体负责回复此账号上的消息。同一平台上，一个智能体只能关联一个账号。",
+      "noAgent": "无。由 Main 回复。",
+      "agentsFailed": "无法加载智能体",
+      "linked": "{{agent}} 现在负责回复 {{account}}。",
+      "linkMoved": "{{agent}} 现在负责回复 {{account}}。它与此平台上另一个账号的关联已移除，因为同一平台上一个智能体只能关联一个账号。",
+      "linkCleared": "现在由 Main 回复 {{account}}。",
+      "linkFailed": "无法关联智能体"
     },
     "headings": {
       "connected": "这个连接让你的 agent 能",
