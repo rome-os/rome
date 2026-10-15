@@ -21,9 +21,9 @@ describe("ChannelRecordsRepository", () => {
     const records = repository();
     const db = testDb!.db;
 
-    expect(records.claim(db, { id: "c1", service: "feishu" }, NOW).name).toBe("feishu");
-    const second = records.claim(db, { id: "c2", service: "feishu" }, NOW).name;
-    const third = records.claim(db, { id: "c3", service: "feishu" }, NOW).name;
+    expect(records.claim(db, { id: "c1", service: "feishu" }, NOW).id).toBe("feishu");
+    const second = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
+    const third = records.claim(db, { id: "c3", service: "feishu" }, NOW).id;
     expect(second).toMatch(UUID);
     expect(third).toMatch(UUID);
     expect(third).not.toBe(second);
@@ -38,7 +38,7 @@ describe("ChannelRecordsRepository", () => {
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
 
-    expect(records.claim(db, { id: "c1", service: "feishu" }, NOW).name).toBe("feishu");
+    expect(records.claim(db, { id: "c1", service: "feishu" }, NOW).id).toBe("feishu");
     expect(records.all()).toHaveLength(1);
   });
 
@@ -48,9 +48,9 @@ describe("ChannelRecordsRepository", () => {
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
 
     records.vacate(db, "c1");
-    expect(records.byName("feishu")).toMatchObject({ connectionId: null });
+    expect(records.byId("feishu")).toMatchObject({ connectionId: null });
 
-    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).name).toBe("feishu");
+    expect(records.claim(db, { id: "c2", service: "feishu" }, NOW).id).toBe("feishu");
     expect(records.all()).toHaveLength(1);
   });
 
@@ -58,18 +58,18 @@ describe("ChannelRecordsRepository", () => {
     const records = repository();
     const db = testDb!.db;
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    const later = records.claim(db, { id: "c2", service: "feishu" }, NOW).name;
+    const later = records.claim(db, { id: "c2", service: "feishu" }, NOW).id;
     records.vacate(db, "c2");
     records.vacate(db, "c1");
 
-    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).name).toBe("feishu");
-    expect(records.claim(db, { id: "c4", service: "feishu" }, NOW).name).toBe(later);
+    expect(records.claim(db, { id: "c3", service: "feishu" }, NOW).id).toBe("feishu");
+    expect(records.claim(db, { id: "c4", service: "feishu" }, NOW).id).toBe(later);
   });
 
   it("names the service behind a channel, and passes an unrecorded name through", () => {
     const records = repository();
     records.claim(testDb!.db, { id: "c1", service: "telegram" }, NOW);
-    const second = records.claim(testDb!.db, { id: "c2", service: "telegram" }, NOW).name;
+    const second = records.claim(testDb!.db, { id: "c2", service: "telegram" }, NOW).id;
 
     expect(records.serviceOf(second)).toBe("telegram");
     expect(records.serviceOf("webchat")).toBe("webchat");
@@ -78,13 +78,13 @@ describe("ChannelRecordsRepository", () => {
   it("keeps a Connection's channel name current across claims and releases", () => {
     const records = repository();
     const db = testDb!.db;
-    expect(records.nameOf("c1")).toBeNull();
+    expect(records.idOf("c1")).toBeNull();
 
     records.claim(db, { id: "c1", service: "feishu" }, NOW);
-    expect(records.nameOf("c1")).toBe("feishu");
+    expect(records.idOf("c1")).toBe("feishu");
 
     records.vacate(db, "c1");
-    expect(records.nameOf("c1")).toBeNull();
+    expect(records.idOf("c1")).toBeNull();
   });
 
   it("caches no name read inside a transaction that rolls back", () => {
@@ -94,12 +94,12 @@ describe("ChannelRecordsRepository", () => {
     expect(() =>
       db.transaction((tx) => {
         records.claim(tx, { id: "c1", service: "feishu" }, NOW);
-        expect(records.nameOf("c1")).toBe("feishu");
+        expect(records.idOf("c1")).toBe("feishu");
         throw new Error("rollback");
       }),
     ).toThrow("rollback");
 
-    expect(records.nameOf("c1")).toBeNull();
+    expect(records.idOf("c1")).toBeNull();
   });
 
   it("lists the Connections no channel records yet", () => {

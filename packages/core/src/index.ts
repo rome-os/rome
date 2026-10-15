@@ -353,7 +353,7 @@ async function main() {
     onRemove: (tx, id) => channelRecords.vacate(tx, id),
   });
   const channelOf: ChannelOf = (connection) =>
-    channelRecords.nameOf(connection.id) ?? connection.service;
+    channelRecords.idOf(connection.id) ?? connection.service;
   // The service a channel name belongs to. Whatever is keyed by service, such
   // as a descriptor or a channel policy, reads it.
   const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
@@ -1177,7 +1177,8 @@ async function main() {
     },
     laterChannels: channelRecords
       .all()
-      .filter((record) => record.name !== record.service && talks(record.service)),
+      .filter((record) => record.id !== record.service && talks(record.service))
+      .map((record) => ({ name: record.id, service: record.service })),
   });
   builtChannels = channels;
   const accountNames = createAccountNames({ channels, sentinelLogRepo });

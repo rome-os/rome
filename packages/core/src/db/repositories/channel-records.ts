@@ -5,12 +5,12 @@ import { channels } from "../schema.js";
 import { inTransaction, type DrizzleDb, type DrizzleTx } from "../index.js";
 
 /**
- * A channel a Connection backs, as stored: its name, the service and platform
+ * A channel a Connection backs, as stored: its id, the service and platform
  * it is on, and the Connection behind it now (null once that Connection is
  * gone). Vocabulary: docs/concepts/messaging.md#channels.
  */
 export interface ChannelRecord {
-  name: string;
+  id: string;
   service: string;
   platform: string;
   connectionId: string | null;
@@ -21,7 +21,7 @@ type Exec = DrizzleDb | DrizzleTx;
 
 function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
   return {
-    name: row.name,
+    id: row.id,
     service: row.service,
     platform: row.platform,
     connectionId: row.connectionId,
@@ -32,17 +32,17 @@ function toRecord(row: typeof channels.$inferSelect): ChannelRecord {
 /**
  * The channels the Connections back.
  *
- * A channel's name is minted once and never changes, since every stored row
+ * A channel's id is minted once and never changes, since every stored row
  * spells it. It is an opaque id, except that a service's first channel carries
  * the service's name, which is what data stored before channels were recorded
  * spells. A row stays when its Connection goes, and the service's next
- * Connection takes it back before a new name is minted.
+ * Connection takes it back before a new id is minted.
  */
 export class ChannelRecordsRepository {
-  /** Channel name by Connection id, read on every port use. Every write
+  /** Channel id by Connection id, read on every port use. Every write
    *  empties it, and nothing is cached while a transaction is open, so a
-   *  rolled-back write leaves no name behind. */
-  private readonly names = new Map<string, string | null>();
+   *  rolled-back write leaves no id behind. */
+  private readonly ids = new Map<string, string | null>();
 
   constructor(private readonly db: DrizzleDb) {}
 
@@ -50,24 +50,24 @@ export class ChannelRecordsRepository {
     return this.db.select().from(channels).orderBy(asc(channels.createdAt)).all().map(toRecord);
   }
 
-  byName(name: string): ChannelRecord | null {
-    const row = this.db.select().from(channels).where(eq(channels.name, name)).get();
+  byId(id: string): ChannelRecord | null {
+    const row = this.db.select().from(channels).where(eq(channels.id, id)).get();
     return row ? toRecord(row) : null;
   }
 
-  /** The service behind channel `name`, or `name` itself when no channel
-   *  records it: a service's first channel carries the service's name. */
-  serviceOf(name: string): string {
-    return this.byName(name)?.service ?? name;
+  /** The service behind channel `id`, or `id` itself when no channel
+   *  records it: a service's first channel's id is the service's name. */
+  serviceOf(id: string): string {
+    return this.byId(id)?.service ?? id;
   }
 
-  /** The name of the channel `connectionId` backs, or null for none. */
-  nameOf(connectionId: string): string | null {
-    const cached = this.names.get(connectionId);
+  /** The id of the channel `connectionId` backs, or null for none. */
+  idOf(connectionId: string): string | null {
+    const cached = this.ids.get(connectionId);
     if (cached !== undefined) return cached;
-    const name = this.byConnection(connectionId)?.name ?? null;
-    if (!inTransaction(this.db)) this.names.set(connectionId, name);
-    return name;
+    const id = this.byConnection(connectionId)?.id ?? null;
+    if (!inTransaction(this.db)) this.ids.set(connectionId, id);
+    return id;
   }
 
   byConnection(connectionId: string): ChannelRecord | null {
@@ -90,7 +90,7 @@ export class ChannelRecordsRepository {
   claim(exec: Exec, connection: { id: string; service: string }, now: Date): ChannelRecord {
     const held = exec.select().from(channels).where(eq(channels.connectionId, connection.id)).get();
     if (held) return toRecord(held);
-    this.names.clear();
+    this.ids.clear();
 
     const service = connection.service;
     const vacant = exec
@@ -100,26 +100,23 @@ export class ChannelRecordsRepository {
       .all()
       .sort(
         (a, b) =>
-          Number(b.name === service) - Number(a.name === service) ||
+          Number(b.id === service) - Number(a.id === service) ||
           a.createdAt.getTime() - b.createdAt.getTime(),
       )[0];
     if (vacant) {
       exec
         .update(channels)
         .set({ connectionId: connection.id })
-        .where(eq(channels.name, vacant.name))
+        .where(eq(channels.id, vacant.id))
         .run();
       return toRecord({ ...vacant, connectionId: connection.id });
     }
 
-    const serviceNameTaken =
-      exec
-        .select({ name: channels.name })
-        .from(channels)
-        .where(eq(channels.name, service))
-        .get() !== undefined;
+    const serviceIdTaken =
+      exec.select({ id: channels.id }).from(channels).where(eq(channels.id, service)).get() !==
+      undefined;
     const row = {
-      name: serviceNameTaken ? randomUUID() : service,
+      id: serviceIdTaken ? randomUUID() : service,
       service,
       platform: platformOf(service),
       connectionId: connection.id,
@@ -129,9 +126,9 @@ export class ChannelRecordsRepository {
     return toRecord(row);
   }
 
-  /** Release the channel `connectionId` backs. The row and its name stay. */
+  /** Release the channel `connectionId` backs. The row and its id stay. */
   vacate(exec: Exec, connectionId: string): void {
-    this.names.clear();
+    this.ids.clear();
     exec
       .update(channels)
       .set({ connectionId: null })

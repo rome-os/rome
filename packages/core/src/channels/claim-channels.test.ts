@@ -21,9 +21,9 @@ describe("claimChannels", () => {
       { id: "c3", service: "discord" },
     ]);
 
-    expect(records.byConnection("c1")?.name).toBe("feishu");
-    expect(records.byConnection("c2")?.name).toBe("telegram");
-    expect(records.byConnection("c3")?.name).toBe("discord");
+    expect(records.byConnection("c1")?.id).toBe("feishu");
+    expect(records.byConnection("c2")?.id).toBe("telegram");
+    expect(records.byConnection("c3")?.id).toBe("discord");
     expect(records.all()).toHaveLength(3);
   });
 });

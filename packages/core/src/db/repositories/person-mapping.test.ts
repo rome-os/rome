@@ -130,7 +130,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
-    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).name;
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
     const personId = await repo.create({
       displayName: "Erin",
       bondLevel: "guardian",
@@ -145,7 +145,7 @@ describe("PersonMappingRepository", () => {
     const records = new ChannelRecordsRepository(testDb.db);
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
-    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).name;
+    const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
     const personId = await repo.create({ displayName: "Erin", bondLevel: "inner-circle" });
 
     await repo.addChannelMapping(personId, second, "tg-erin");

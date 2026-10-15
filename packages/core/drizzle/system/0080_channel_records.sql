@@ -1,5 +1,5 @@
 CREATE TABLE `channels` (
-	`name` text PRIMARY KEY NOT NULL,
+	`id` text PRIMARY KEY NOT NULL,
 	`service` text NOT NULL,
 	`platform` text NOT NULL,
 	`connection_id` text,

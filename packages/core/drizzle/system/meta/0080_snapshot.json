@@ -346,8 +346,8 @@
     "channels": {
       "name": "channels",
       "columns": {
-        "name": {
-          "name": "name",
+        "id": {
+          "name": "id",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
