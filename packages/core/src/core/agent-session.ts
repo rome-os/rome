@@ -1548,7 +1548,7 @@ async function openSession(
   ): Promise<ModelSession> => {
     const params = buildSessionParams(resolution, resumeProviderId, resumeThreadId);
     sessionIdUnused = false;
-    const resumed = params.isNewSession === false;
+    const resumed = params.providerThreadId !== undefined;
     const openStartMs = Date.now();
     const session = await withRomeSpan(
       "model.session.open",
