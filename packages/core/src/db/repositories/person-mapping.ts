@@ -340,7 +340,7 @@ export class PersonMappingRepository {
         });
       }
       claims.push({
-        channel: mapping.channel,
+        channel: this.serviceOf(mapping.channel),
         channelUserId: mapping.channelUserId,
         // The name belongs to the channel, so a caller with none to offer
         // carries the dismissed row's forward rather than clearing it.

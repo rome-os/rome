@@ -163,6 +163,13 @@ describe("PersonMappingRepository", () => {
 
     await expect(repo.unlinkAccount(personId, second, "tg-erin")).resolves.toBe(true);
     expect(await repo.findByChannelUser("telegram", "tg-erin")).toBeNull();
+
+    const created = await repo.create({
+      displayName: "Finn",
+      bondLevel: "inner-circle",
+      channelMappings: [{ channel: second, channelUserId: "tg-finn" }],
+    });
+    expect((await repo.findByChannelUser(second, "tg-finn"))?.id).toBe(created);
   });
 
   it("findByChannelUser() returns person for channel+userId", async () => {
