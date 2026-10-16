@@ -24,7 +24,7 @@ import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./subagent-execution.js";
 import type { AgentEvent } from "../types.js";
 import { join } from "node:path";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { actionExecutionContext } from "../actions/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
@@ -2300,6 +2300,246 @@ describe("AgentRunner", () => {
         }),
       ]);
       expect(events.at(-1)).toMatchObject({ type: "turn_end", status: "error" });
+    });
+
+    describe("the outcome next() resolves with", () => {
+      // A real chain whose outermost middleware records what next() resolves
+      // with, so the chain's own next() is what is under test. `inner`, when
+      // given, is the body of each further middleware's handle(ctx, next),
+      // outermost first.
+      async function recordingChain(
+        inner?: string | string[],
+      ): Promise<{ chain: TurnMiddlewareChain; dir: string }> {
+        const dir = await mkdtemp(join(tmpdir(), "rome-turnmw-outcome-"));
+        const hookDir = (name: string) => join(dir, name);
+        const artifact = (name: string) => ({
+          kind: "hook",
+          publicName: "turn-middleware",
+          aliases: [],
+          ownerType: "app",
+          ownerId: `app.${name}`,
+          absolutePath: hookDir(name),
+        });
+        await mkdir(hookDir("recorder"));
+        await writeFile(
+          join(hookDir("recorder"), "index.js"),
+          `import { appendFile } from "node:fs/promises";
+          export function createHook() {
+            return {
+              order: 0,
+              async handle(ctx, next) {
+                const outcome = await next();
+                await appendFile(${JSON.stringify(join(dir, "outcomes.jsonl"))}, JSON.stringify(outcome) + "\\n");
+              },
+            };
+          }\n`,
+          "utf-8",
+        );
+        const artifacts = [artifact("recorder")];
+        const bodies = inner === undefined ? [] : [inner].flat();
+        for (const [i, body] of bodies.entries()) {
+          const name = `inner${i}`;
+          await mkdir(hookDir(name));
+          await writeFile(
+            join(hookDir(name), "index.js"),
+            `export function createHook() {
+              return { order: ${i + 1}, async handle(ctx, next) { ${body} } };
+            }\n`,
+            "utf-8",
+          );
+          artifacts.push(artifact(name));
+        }
+        const chain = createTurnMiddlewareChain();
+        const failures = await chain.loadFromCatalog({
+          get: () => null,
+          listArtifacts: (kind: string) => (kind === "hook" ? artifacts : []),
+        } as unknown as AppCatalog);
+        expect(failures).toEqual([]);
+        return { chain, dir };
+      }
+
+      async function outcomesIn(dir: string): Promise<unknown[]> {
+        const raw = await readFile(join(dir, "outcomes.jsonl"), "utf-8").catch(() => "");
+        return raw
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as unknown);
+      }
+
+      async function outcomeOf(
+        turnEvents: AgentEvent[],
+        options: {
+          inner?: string | string[];
+          agentName?: string;
+          provider?: MockModelProvider;
+        } = {},
+      ): Promise<{ outcome: unknown; events: AgentEvent[] }> {
+        mockProvider = options.provider ?? new MockModelProvider([turnEvents]);
+        const { chain, dir } = await recordingChain(options.inner);
+        try {
+          const session = await openMiddlewareSession(chain, options.agentName);
+          const events = await collectMessages(session.sendTurn({ prompt: "hi" }).events);
+          // The middleware resumes after the turn's events have ended.
+          let outcomes: unknown[] = [];
+          await rs.waitFor(async () => {
+            outcomes = await outcomesIn(dir);
+            expect(outcomes).toHaveLength(1);
+          });
+          return { outcome: outcomes[0], events };
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      }
+
+      // The outcome must say what the turn's turn_end says.
+      function expectOutcome(
+        { outcome, events }: { outcome: unknown; events: AgentEvent[] },
+        expected: { status: string; suspended: boolean },
+      ): void {
+        expect(outcome).toEqual(expected);
+        expect(events.at(-1)).toMatchObject({ type: "turn_end", status: expected.status });
+      }
+
+      it("reports a model turn that completes", async () => {
+        expectOutcome(await outcomeOf([{ type: "result", content: "done" }]), {
+          status: "completed",
+          suspended: false,
+        });
+      });
+
+      it("reports a model turn that fails", async () => {
+        expectOutcome(await outcomeOf([{ type: "error", error: "provider down" }]), {
+          status: "error",
+          suspended: false,
+        });
+      });
+
+      it("reports a model turn parked on a card", async () => {
+        expectOutcome(
+          await outcomeOf([
+            {
+              type: "tool_result",
+              toolUseId: "tu-park",
+              tool: "ask_question",
+              output: { pendingInteraction: true },
+            },
+            { type: "result", content: "" },
+          ]),
+          { status: "completed", suspended: true },
+        );
+      });
+
+      it("does not report a model turn that submitted an approval and finished as parked", async () => {
+        expectOutcome(
+          await outcomeOf([
+            {
+              type: "tool_result",
+              toolUseId: "tu-approval",
+              tool: "demo_action",
+              output: { pendingApproval: true },
+            },
+            { type: "result", content: "done" },
+          ]),
+          { status: "completed", suspended: false },
+        );
+      });
+
+      it("waits for the model when an inner middleware does not await next()", async () => {
+        // The model answers after the inner middleware has returned.
+        class SlowProvider extends MockModelProvider {
+          override async *run(params: Parameters<MockModelProvider["run"]>[0]) {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            yield* super.run(params);
+          }
+        }
+        expectOutcome(
+          await outcomeOf([], {
+            inner: "void next();",
+            provider: new SlowProvider([[{ type: "error", error: "provider down" }]]),
+          }),
+          { status: "error", suspended: false },
+        );
+      });
+
+      it("waits for a middleware further in that a middleware did not await", async () => {
+        // The middle middleware returns at once. The innermost one reaches the
+        // model only after its own I/O, so the outcome must wait for both.
+        expectOutcome(
+          await outcomeOf([{ type: "error", error: "provider down" }], {
+            inner: [
+              "void next();",
+              "await new Promise((resolve) => setTimeout(resolve, 50)); await next();",
+            ],
+          }),
+          { status: "error", suspended: false },
+        );
+      });
+
+      it("keeps the status turn_end reported when the send rejects after the terminal", async () => {
+        // The provider answers, then its send rejects once the turn has ended.
+        class LateRejectProvider extends MockModelProvider {
+          override async openSession(params: Parameters<MockModelProvider["openSession"]>[0]) {
+            const session = await super.openSession(params);
+            const send = session.sendUserInput.bind(session);
+            session.sendUserInput = async (input) => {
+              await send(input);
+              await new Promise((resolve) => setTimeout(resolve, 50));
+              throw new Error("transport closed late");
+            };
+            return session;
+          }
+        }
+        expectOutcome(
+          await outcomeOf([], {
+            provider: new LateRejectProvider([[{ type: "result", content: "done" }]]),
+          }),
+          { status: "completed", suspended: false },
+        );
+      });
+
+      it("reports an inner middleware's error terminal", async () => {
+        expectOutcome(
+          await outcomeOf([], { inner: `ctx.emit({ type: "error", error: "scripted failure" });` }),
+          { status: "error", suspended: false },
+        );
+      });
+
+      it("reports an inner middleware's terminal that says it was interrupted", async () => {
+        expectOutcome(
+          await outcomeOf([], {
+            inner: `ctx.emit({
+              type: "result",
+              content: "",
+              accounting: {
+                provider: "mock",
+                model: "mock-model",
+                usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+                stopReason: "interrupted",
+              },
+            });`,
+          }),
+          { status: "interrupted", suspended: false },
+        );
+      });
+
+      it("reports an inner middleware that parks the turn on a card", async () => {
+        expectOutcome(
+          await outcomeOf([], {
+            inner: `ctx.emit({ type: "tool_result", toolUseId: "tu-park", tool: "ask_question", output: { pendingInteraction: true } });`,
+          }),
+          { status: "completed", suspended: true },
+        );
+      });
+
+      it("reports the schema error for an inner middleware that emits no terminal", async () => {
+        expectOutcome(
+          await outcomeOf([], {
+            inner: `ctx.emit({ type: "text", content: "Pick one" });`,
+            agentName: "test-structured",
+          }),
+          { status: "error", suspended: false },
+        );
+      });
     });
 
     it.each([
