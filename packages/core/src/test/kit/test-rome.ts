@@ -207,13 +207,14 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
+  const personMapping = new PersonMappingRepository(db, recordedServiceOf(db));
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, recordedServiceOf(db))),
+    approvals: new ApprovalsRepository(db, personMapping),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    personMapping: new PersonMappingRepository(db, recordedServiceOf(db)),
+    personMapping,
     policies: new PoliciesRepository(db),
   };
 
