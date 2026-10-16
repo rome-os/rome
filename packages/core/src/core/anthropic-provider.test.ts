@@ -1594,6 +1594,17 @@ describe("AnthropicProvider", () => {
       );
     });
 
+    it.each([
+      ["discord-2", "discord-2"],
+      [undefined, undefined],
+    ])("puts channel %s in the agent env as ROME_CHANNEL", async (channel, expected) => {
+      const provider = new AnthropicProvider({ env: { PATH: "/usr/bin" } });
+      const session = await provider.openSession(buildParams({ channel }));
+      await collectEvents(session);
+      await session.close();
+      expect(queryMock.mock.calls[0]![0].options.env.ROME_CHANNEL).toBe(expected);
+    });
+
     it("passes stored Anthropic-compatible provider credentials to the Claude SDK env", async () => {
       const provider = new AnthropicProvider({
         env: { PATH: "/usr/bin", ANTHROPIC_AUTH_TOKEN: "old-token" },

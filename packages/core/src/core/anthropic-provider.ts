@@ -537,6 +537,7 @@ export class AnthropicProvider implements ModelProvider {
     const queryEnv: Record<string, string | undefined> = {
       ...queryContext.env,
       CLAUDE_CODE_EFFORT_LEVEL: effort,
+      ...(params.channel ? { ROME_CHANNEL: params.channel } : {}),
     };
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;

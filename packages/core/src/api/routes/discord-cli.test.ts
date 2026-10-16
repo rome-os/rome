@@ -236,4 +236,58 @@ describe("Discord CLI loopback broker routes", () => {
       error: { type: "response_too_large" },
     });
   });
+
+  describe("with two Discord bots", () => {
+    const bot = (id: string, invoked: string[]) => ({
+      id,
+      isUnlocked: () => true,
+      act: {
+        operations: () => [{ name: "discord.api.request" }],
+        invoke: async () => {
+          invoked.push(id);
+          return { response: { status: 200, headers: {}, body: { id } } };
+        },
+      },
+    });
+    const twoBots = (invoked: string[]) =>
+      discordCliRoutes(
+        {
+          connectionRegistry: {
+            find: () => [bot("conn-1", invoked), bot("conn-2", invoked)],
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+          channelRecords: {
+            byId: (id: string) =>
+              ({
+                "discord-2": { service: "discord", connectionId: "conn-2" },
+                "telegram-1": { service: "telegram", connectionId: "conn-2" },
+                "discord-3": { service: "discord", connectionId: "conn-gone" },
+              })[id] as never,
+          },
+        },
+        "127.0.0.1",
+      );
+
+    it.each([
+      ["acts as the bot backing the named channel", "discord-2", "conn-2"],
+      ["falls back to the first bot for a non-Discord channel", "telegram-1", "conn-1"],
+      ["falls back to the first bot for an unknown channel", "discord-9", "conn-1"],
+      ["falls back to the first bot without a channel", undefined, "conn-1"],
+    ])("%s", async (_name, channel, expected) => {
+      const invoked: string[] = [];
+      const response = await twoBots(invoked).request("/_internal/discord/auth", {
+        headers: channel ? { "x-rome-channel": channel } : {},
+      });
+      expect(response.status).toBe(200);
+      expect(invoked).toEqual([expected]);
+    });
+
+    it("never acts as another bot for a Discord channel whose bot is gone", async () => {
+      const invoked: string[] = [];
+      const response = await twoBots(invoked).request("/_internal/discord/auth", {
+        headers: { "x-rome-channel": "discord-3" },
+      });
+      expect(response.status).not.toBe(200);
+      expect(invoked).toEqual([]);
+    });
+  });
 });

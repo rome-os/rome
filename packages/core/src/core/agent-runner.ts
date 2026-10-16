@@ -146,6 +146,9 @@ export interface ModelSessionParams {
   maxTurns?: number;
   reasoningEffort?: ModelReasoningEffort;
   workingDir?: string;
+  /** The channel the session's turns are delivered on, from its key. Shell
+   *  tools such as the Discord CLI read it to act as that channel's account. */
+  channel?: string;
   externalMcpServers?: Record<string, McpServerConfig>;
   /**
    * The session identifier, a bare UUID. The Anthropic provider passes a new

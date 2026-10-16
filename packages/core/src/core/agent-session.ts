@@ -1522,6 +1522,7 @@ async function openSession(
     maxTurns: config.maxTurns,
     reasoningEffort,
     workingDir,
+    channel: sessionKeyChannel(key.channelThreadKey),
     externalMcpServers,
     sessionId,
     isNewSession: sessionIdUnused,

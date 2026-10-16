@@ -78,6 +78,7 @@ import { eventCatalogRoutes } from "./routes/event-catalog.js";
 import { favorRoutes } from "./routes/favors.js";
 import { sessionsRoutes } from "./routes/sessions.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { SessionQueryService } from "../sessions/query-service.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
@@ -92,7 +93,13 @@ export function buildApp(
 
   // Same-container Agent surface. This is deliberately outside `/api`, which
   // is Caddy-proxied, and refuses to register on a non-loopback listener.
-  app.route("/", discordCliRoutes(deps, config.host));
+  app.route(
+    "/",
+    discordCliRoutes(
+      { ...deps, channelRecords: new ChannelRecordsRepository(deps.db) },
+      config.host,
+    ),
+  );
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session
