@@ -1396,6 +1396,7 @@ function buildInteractiveTools(
         args: {
           type: "object",
           description: "A single argument object for the action. Not an array.",
+          additionalProperties: true,
         },
         activate: {
           type: "boolean",
