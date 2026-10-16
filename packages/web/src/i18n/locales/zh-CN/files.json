@@ -39,6 +39,12 @@
   },
   "status": {
     "uploading": "上传中…",
+    "uploadingFile": "正在上传 {{name}}",
+    "uploadingFiles_one": "正在上传 {{count}} 个文件",
+    "uploadingFiles_other": "正在上传 {{count}} 个文件",
+    "uploadFinishing": "正在处理…",
+    "uploadBytes": "{{loaded}} / {{total}}",
+    "uploadKeepOpen": "上传完成前请不要离开或关闭此页面",
     "creating": "创建中…",
     "deleting": "删除中…",
     "moving": "移动中…",

@@ -39,6 +39,12 @@
   },
   "status": {
     "uploading": "Uploading...",
+    "uploadingFile": "Uploading {{name}}",
+    "uploadingFiles_one": "Uploading {{count}} file",
+    "uploadingFiles_other": "Uploading {{count}} files",
+    "uploadFinishing": "Finishing…",
+    "uploadBytes": "{{loaded}} of {{total}}",
+    "uploadKeepOpen": "Keep this page open until the upload finishes.",
     "creating": "Creating...",
     "deleting": "Deleting...",
     "moving": "Moving...",

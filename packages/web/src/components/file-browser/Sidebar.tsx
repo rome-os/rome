@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import { Tree } from "./Tree";
+import { UploadProgress } from "./UploadProgress";
 import { useSidebarResize } from "./hooks/useSidebarResize";
 import { usePersistedSidebarWidth } from "./hooks/usePersistedSidebarWidth";
 import {
@@ -47,7 +48,7 @@ export function Sidebar({
   const deleting = useFileBrowserStore((s) => s.ui.deleting);
   const moving = useFileBrowserStore((s) => s.ui.moving);
   const renaming = useFileBrowserStore((s) => s.ui.renaming);
-  const uploading = useFileBrowserStore((s) => s.ui.uploading);
+  const uploadProgress = useFileBrowserStore((s) => s.ui.uploadProgress);
   const searchQuery = useFileBrowserStore((s) => s.ui.searchQuery);
   const searching = useFileBrowserStore((s) => s.ui.searching);
 
@@ -170,9 +171,13 @@ export function Sidebar({
             </Button>
           </div>
         </div>
-        {(uploading || creating || deleting || moving || renaming) && (
+        {uploadProgress && (
+          <div className="border-b border-border-subtle p-3">
+            <UploadProgress progress={uploadProgress} />
+          </div>
+        )}
+        {(creating || deleting || moving || renaming) && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border-subtle px-3 py-1 text-aux">
-            {uploading && <span className="text-muted-foreground">{t("status.uploading")}</span>}
             {creating && <span className="text-muted-foreground">{t("status.creating")}</span>}
             {deleting && <span className="text-muted-foreground">{t("status.deleting")}</span>}
             {moving && <span className="text-muted-foreground">{t("status.moving")}</span>}

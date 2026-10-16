@@ -228,6 +228,15 @@ export interface FileSlice {
   setSuppressNextBeforeUnload(value: boolean): void;
 }
 
+export interface FileUploadProgress {
+  fileCount: number;
+  firstFileName: string;
+  loaded: number;
+  /** Zero until the browser reports a computable request size, including multipart overhead. */
+  total: number;
+  phase: "uploading" | "finishing";
+}
+
 export interface UiSlice {
   history: HistoryEntry[];
   loadingHistory: boolean;
@@ -248,6 +257,7 @@ export interface UiSlice {
   moving: boolean;
   renaming: boolean;
   uploading: boolean;
+  uploadProgress: FileUploadProgress | null;
   /**
    * The folder that the sm-only `FilesPane` navigator is currently showing
    * (drilled into). Lifted into the store so the on-screen `[Overview |
