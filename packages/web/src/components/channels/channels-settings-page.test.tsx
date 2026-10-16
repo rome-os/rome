@@ -44,7 +44,7 @@ const defaults = {
 
 function item(input: {
   id: string;
-  service?: "discord" | "feishu" | "telegram_user";
+  service?: "discord" | "feishu";
   name: string;
   supportedFields?: string[];
   overrides?: object;
@@ -273,8 +273,6 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             connection("discord", { linkedAgent: null }),
             connection("feishu", { linkedAgent: "sales:agent" }),
-            // No page sets the personal account's link yet.
-            connection("telegram_user", { linkedAgent: null }),
           ],
         });
       }
@@ -288,7 +286,6 @@ describe("ChannelsSettingsPage", () => {
               overrides: { routing: { agentName: "coding:build" } },
             }),
             item({ id: "support", service: "feishu", name: "support" }),
-            item({ id: "ops", service: "telegram_user", name: "ops" }),
           ],
         });
       }
@@ -314,12 +311,6 @@ describe("ChannelsSettingsPage", () => {
       "article",
     ) as HTMLElement;
     expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
-
-    const personal = (await screen.findByRole("heading", { name: /ops/ })).closest(
-      "article",
-    ) as HTMLElement;
-    expect(within(personal).getByText("None. This account stays silent.")).toBeTruthy();
-    expect(within(personal).queryByRole("link")).toBeNull();
   });
 
   it("creates no override when an edit is undone before the debounce elapses", async () => {
