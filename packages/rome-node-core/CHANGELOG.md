@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/rome-os/rome/compare/node-core-v0.1.2...node-core-v0.1.3) (2026-10-16)
+
+
+### Features
+
+* **node:** give each device a load chart and its own activity page ([#1061](https://github.com/rome-os/rome/issues/1061)) ([68175f9](https://github.com/rome-os/rome/commit/68175f902dd92691241f5e2837f7a49d5924e501))
+* **node:** record daemon activity and show it in Settings → Devices ([#1032](https://github.com/rome-os/rome/issues/1032)) ([c3e6a8f](https://github.com/rome-os/rome/commit/c3e6a8f7f0c79de276fa43acfabb511b75dfc62c))
+
 ## [0.1.2](https://github.com/rome-os/rome/compare/node-core-v0.1.1...node-core-v0.1.2) (2026-10-10)
 
 
