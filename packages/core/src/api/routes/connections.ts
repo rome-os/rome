@@ -380,9 +380,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (registry.getDescriptor(service)?.severalAccounts !== true) {
       return c.json({ error: `"${service}" does not offer another account.` }, 400);
     }
-    // TODO: refuse a conferral whose bot is already another Connection of the
-    // service, so one token never runs two pollers. It lands before the
-    // dashboard offers adding an account.
     const { connection: conn, minted } = await registry.connectUnusedOrAnother(service);
     c.header("Cache-Control", "no-store");
     return c.json(

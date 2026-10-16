@@ -5,7 +5,12 @@ import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
 import type { ConnectionRecord, GrantLedger, GrantRecord, PersistedCredential } from "./ledger.js";
-import { CredentialRejected, Disconnected, DuplicateServiceConnectionsError } from "./errors.js";
+import {
+  AccountAlreadyConnectedError,
+  CredentialRejected,
+  Disconnected,
+  DuplicateServiceConnectionsError,
+} from "./errors.js";
 import type {
   Act,
   Actor,
@@ -450,6 +455,9 @@ export class ConnectionRegistry {
     }
 
     const id = conn?.id ?? crypto.randomUUID();
+    if (registered && profile !== undefined) {
+      await this.refuseAccountHeldElsewhere(registered.descriptor, id, grant, profile);
+    }
     const createdAt = this.clock();
     const patch = conferralPatch(this.now(), credential, profile);
     const ledger = this.ledger;
@@ -490,6 +498,33 @@ export class ConnectionRegistry {
       });
     }
     return conn as Connection;
+  }
+
+  /** Throws AccountAlreadyConnectedError when another Connection of the
+   *  service holds `grant`, in any state but "unauthorized", for the account
+   *  `profile` names. Call under the service's `connectionMutex`, so no confer
+   *  can fill another Connection between this read and the caller's write. */
+  private async refuseAccountHeldElsewhere(
+    descriptor: ConnectionDescriptor,
+    connectionId: ConnectionId,
+    grant: GrantName,
+    profile: ProfileRecord,
+  ): Promise<void> {
+    const accountIdOf = descriptor.accountIdOf;
+    const accountId = accountIdOf?.(grant, profile);
+    if (!accountIdOf || !accountId) return;
+    for (const other of this.find(descriptor.service)) {
+      if (other.id === connectionId) continue;
+      const held = await this.ledger.getGrant(other.id, grant);
+      if (
+        held &&
+        held.state !== "unauthorized" &&
+        held.profile !== undefined &&
+        accountIdOf(grant, held.profile) === accountId
+      ) {
+        throw new AccountAlreadyConnectedError(descriptor.service, accountId, other.id);
+      }
+    }
   }
 
   /** Headless conferral: skip confer(), inject a caller-supplied credential.

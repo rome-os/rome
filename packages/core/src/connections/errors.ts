@@ -37,6 +37,29 @@ export class DuplicateServiceConnectionsError extends Error {
 }
 
 /**
+ * `ConnectionRegistry.confer` refuses a conferral whose account another
+ * Connection of the service already holds, because two Connections of one bot
+ * run two transports that conflict. The message reads to the guardian on a
+ * failed setup, and the conferral writes nothing.
+ */
+export class AccountAlreadyConnectedError extends Error {
+  readonly service: string;
+  readonly accountId: string;
+  /** The Connection that already holds the account. */
+  readonly connectionId: ConnectionId;
+
+  constructor(service: string, accountId: string, connectionId: ConnectionId) {
+    super(
+      "This bot is already connected as another account. Set up a different bot, or remove that account first.",
+    );
+    this.name = "AccountAlreadyConnectedError";
+    this.service = service;
+    this.accountId = accountId;
+    this.connectionId = connectionId;
+  }
+}
+
+/**
  * Signals a refused credential (use → auth). The optional `grant` pins which
  * grant was refused when a capability needs several; without it, the runtime
  * treats every grant the capability needs as suspect.

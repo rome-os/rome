@@ -209,6 +209,8 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
     service: "telegram",
     severalAccounts: true,
     reviveProfile: (_grant, record) => reviveTelegramProfile(record),
+    accountIdOf: (_grant, record) =>
+      telegramGrantProfileSchema.safeParse(record).data?.botId ?? null,
     auth: {
       bot: botScheme,
     },
