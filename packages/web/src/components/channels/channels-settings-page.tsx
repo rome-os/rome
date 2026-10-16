@@ -616,7 +616,7 @@ function ConversationRow({
               />
               {agentOverridden &&
                 ` ${t("channels.conversationSettings.silentAccountOverride", {
-                  agent: agentLabel(snapshot.overrides.routing?.agentName ?? "main"),
+                  agent: overriddenAgentLabel(t, snapshot.overrides.routing?.agentName),
                 })}`}
             </p>
           </SettingRow>
@@ -649,6 +649,13 @@ function ConversationRow({
       </SettingSection>
     </article>
   );
+}
+
+/** A stored agent choice, where null and either spelling of main pin main. */
+function overriddenAgentLabel(t: TFunction<"settings">, name: string | null | undefined): string {
+  return !name || name === "main" || name === MAIN_AGENT_ID
+    ? t("channels.conversationSettings.mainAgent")
+    : agentLabel(name);
 }
 
 /** An agent's name and, unless it is core, its owner. */
