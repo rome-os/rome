@@ -132,6 +132,9 @@ export interface ApiDeps {
   feedback: FeedbackRelay;
   nodeDevices: Pick<ReturnType<typeof createNodeDevicesService>, "getStatus" | "start">;
   provisionNodeCaller?: () => Promise<void>;
+  /** Connects the Rome Cloud email inbox unless an email connection exists.
+   *  Never rejects. */
+  autoConnectEmail?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
   /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
   wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;

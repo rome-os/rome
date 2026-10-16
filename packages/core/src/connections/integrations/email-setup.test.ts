@@ -10,6 +10,8 @@
 //      /connections/email/grants/inbox/setup + poll, tear down via the
 //      registry-native DELETE /connections/:id/grants/inbox — including the
 //      lifecycle rule that `guardianEmail` config survives revoke.
+//   3. autoConnectEmail — the same terminal write without the Connect click,
+//      which never touches an existing email connection.
 
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
@@ -27,7 +29,7 @@ import { DrizzleGrantLedger } from "../ledger-db.js";
 import { SetupManager } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupConferral } from "../setup/types.js";
-import { makeEmailDescriptor, makeEmailSetup } from "./email.js";
+import { autoConnectEmail, makeEmailDescriptor, makeEmailSetup } from "./email.js";
 
 const EMAIL_ADDRESS = "slug@mail.romeos.cc";
 const EMAIL_SECRET = "setup-inbound-secret";
@@ -383,5 +385,70 @@ describe("Email cutover — generic setup routes + registry-native teardown", ()
     const after = registry.find("email")[0];
     expect(after.auth.grants().inbox).toBe("authorized");
     expect(after.isUnlocked("talk")).toBe(true);
+  });
+});
+
+describe("autoConnectEmail", () => {
+  const inbox = { address: EMAIL_ADDRESS, inboundSecret: EMAIL_SECRET };
+
+  it("provisions and confers the inbox grant when no email connection exists", async () => {
+    const { registry, settingsRepo } = makeSetupApp();
+    const provision = rs.fn(async () => inbox);
+
+    expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(true);
+
+    expect(provision).toHaveBeenCalledTimes(1);
+    const conns = registry.find("email");
+    expect(conns).toHaveLength(1);
+    expect(conns[0].auth.grants().inbox).toBe("authorized");
+    expect(conns[0].isUnlocked("talk")).toBe(true);
+    expect(await settingsRepo.get("email")).toEqual({ enabled: true });
+  });
+
+  it("leaves a revoked connection alone and provisions nothing", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    await runSetup(app);
+    const conn = registry.find("email")[0];
+    await app.request(`/connections/${conn.id}/grants/inbox`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    const provision = rs.fn(async () => inbox);
+
+    expect(await autoConnectEmail({ registry, provision, settings: settingsRepo })).toBe(false);
+
+    expect(provision).not.toHaveBeenCalled();
+    expect(registry.find("email")).toHaveLength(1);
+    expect(conn.auth.grants().inbox).toBe("unauthorized");
+  });
+
+  it("yields to a Connect click that commits while the provision is in flight", async () => {
+    const { app, registry, settingsRepo } = makeSetupApp();
+    const provision = deferred<{ address: string; inboundSecret: string }>();
+    const auto = autoConnectEmail({
+      registry,
+      provision: () => provision.promise,
+      settings: settingsRepo,
+    });
+
+    const { state } = await runSetup(app);
+    expect(state.status).toBe("done");
+    provision.resolve(inbox);
+
+    expect(await auto).toBe(false);
+    expect(registry.find("email")).toHaveLength(1);
+  });
+
+  it("rejects on a provision error and leaves no connection behind", async () => {
+    const { registry, settingsRepo } = makeSetupApp();
+    const provision = async () => {
+      throw new Error("Rome Cloud mail API /api/instance/mail/provision failed (409)");
+    };
+
+    await expect(autoConnectEmail({ registry, provision, settings: settingsRepo })).rejects.toThrow(
+      "failed (409)",
+    );
+    expect(registry.find("email")).toHaveLength(0);
+    expect(await settingsRepo.get("email")).toBeNull();
   });
 });

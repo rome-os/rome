@@ -15,6 +15,8 @@
  *     guardian seat exists it is created from the cloud account, setup finishes
  *     with defaults (the guardian name from the `name` claim or the email local
  *     part, a preset agent), and the browser lands on the welcome conversation.
+ *     Creating the seat also starts the email auto-connect; signing in to an
+ *     existing seat does not.
  *   - bound instance: a session is issued for the verified account, and that
  *     account is stamped as the binding (repairing a null/stale recorded owner).
  *     Ownership is enforced server-side at /authorize, so the verified `sub` is the
@@ -390,7 +392,12 @@ describe("/api/auth/cloud — vanilla instance", () => {
   });
 
   it("creates the guardian seat from the cloud account when none exists", async () => {
-    const deps = { ...(await buildTestDeps(testDb.db)), isCloudAuthEnabled: async () => true };
+    const autoConnectEmail = rs.fn(async () => {});
+    const deps = {
+      ...(await buildTestDeps(testDb.db)),
+      isCloudAuthEnabled: async () => true,
+      autoConnectEmail,
+    };
     const romeCloud = fakeRomeCloud((nonce) => ({
       id_token: signIdToken({ sub: "A", nonce, email: "alex@example.com" }),
       instance_token: "romeinst_new",
@@ -412,6 +419,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
     expect(row.userId).toBe("A");
     expect(row.accountId).toBe("A");
     expect(row.onboardingComplete).toBe(true);
+    expect(autoConnectEmail).toHaveBeenCalledTimes(1);
   });
 
   it("fails closed with no cookie when the token leg returns no instance token", async () => {
@@ -433,7 +441,8 @@ describe("/api/auth/cloud — bound instance", () => {
     insertGuardian({ accountId: "A" });
     setInstanceTokenInMemory("romeinst_existing");
     const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
-    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const autoConnectEmail = rs.fn(async () => {});
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch }, { autoConnectEmail });
 
     const { state, nonce } = await start(app);
     romeCloud.setNonce(nonce);
@@ -442,6 +451,7 @@ describe("/api/auth/cloud — bound instance", () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/?cloud=success");
     expect(sessionUserId(res)).toBe("A");
+    expect(autoConnectEmail).not.toHaveBeenCalled();
   });
 
   it.each([

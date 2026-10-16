@@ -318,6 +318,19 @@ describe("CodexAppServerProvider", () => {
     expect(start.config).toMatchObject({ "tools.update_plan.enabled": true });
   });
 
+  it.each([
+    ["discord", { "shell_environment_policy.set.ROME_CHANNEL": "discord" }],
+    [undefined, {}],
+  ])("passes channel %s to shell commands as ROME_CHANNEL", async (channel, expected) => {
+    await new CodexAppServerProvider().openSession(buildParams({ channel }));
+
+    const { config } = threadRequest("thread/start")!;
+    // Only the dotted key: a nested shell_environment_policy table would
+    // replace the server-wide exclude of ROME_CREDITS_TOKEN.
+    const policy = Object.entries(config).filter(([key]) => key.startsWith("shell_environment"));
+    expect(Object.fromEntries(policy)).toEqual(expected);
+  });
+
   it("applies the agent's builtins when it resumes a thread opened with more", async () => {
     await new CodexAppServerProvider().openSession(
       buildParams({ builtinTools: [], isNewSession: false, providerThreadId: "old-thread" }),
