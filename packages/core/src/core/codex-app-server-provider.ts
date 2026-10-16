@@ -181,6 +181,9 @@ function buildThreadConfigurationOverrides(
   if (params.externalMcpServers && Object.keys(params.externalMcpServers).length > 0) {
     config.mcp_servers = params.externalMcpServers;
   }
+  // The dotted key adds one variable. A nested shell_environment_policy table
+  // would replace the server-wide exclude that hides ROME_CREDITS_TOKEN.
+  if (params.channel) config["shell_environment_policy.set.ROME_CHANNEL"] = params.channel;
   return {
     model,
     cwd: params.workingDir ?? null,
