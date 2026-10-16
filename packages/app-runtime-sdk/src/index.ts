@@ -1918,7 +1918,7 @@ export interface ChannelMessageHookDeps {
    * Who answers on the channel named `channelName`, read when each message
    * arrives, since a relink changes it on the same channel:
    * - a canonical agent id (`<app-id>:<local-name>`, `core:main` for main):
-   *   that agent answers, except in a conversation that chose its own agent;
+   *   that agent answers, except in a group or channel that chose an agent other than main;
    * - null: the channel takes a linked agent but has none, or that agent is
    *   not loaded, so nothing answers;
    * - undefined: the channel takes no linked agent, such as webchat or email,
