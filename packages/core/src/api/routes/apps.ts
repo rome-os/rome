@@ -24,6 +24,7 @@ import { AppManagerError, SYSTEM_APP_ID } from "../../apps/manager.js";
 import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscriber.js";
 import { SpecSourceSchema } from "../../apps/lockfile.js";
 import { type ArtifactRef, isResolvedApp } from "../../apps/state.js";
+import type { AppOwnedArtifactLoadFailure } from "../../apps/types.js";
 import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
 import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
@@ -252,10 +253,24 @@ async function readArtifactSummary(ref: ArtifactRef): Promise<AppArtifactSummary
   };
 }
 
+function artifactKey(kind: string, ownerId: string, publicName: string): string {
+  return JSON.stringify([kind, ownerId, publicName]);
+}
+
 async function loadArtifactDetailsByApp(
   catalog: AppCatalog,
+  loadFailures: readonly AppOwnedArtifactLoadFailure[],
 ): Promise<Map<string, AppArtifactDetails>> {
   const byApp = new Map<string, AppArtifactDetails>();
+  // The loaders read the same catalog refs listed below, so kind, owner, and
+  // public name match exactly. Reading the artifact file here cannot tell that
+  // a loader rejected it, for example on the output-schema check.
+  const loadErrors = new Map(
+    loadFailures.map((failure) => [
+      artifactKey(failure.kind, failure.ownerId, failure.publicName),
+      failure.error,
+    ]),
+  );
 
   async function append(
     key: keyof AppArtifactDetails,
@@ -267,7 +282,10 @@ async function loadArtifactDetailsByApp(
         .map(async (ref) => {
           const details = byApp.get(ref.ownerId) ?? emptyArtifactDetails();
           byApp.set(ref.ownerId, details);
-          details[key].push(await readArtifactSummary(ref));
+          const summary = await readArtifactSummary(ref);
+          const loadError =
+            summary.loadError ?? loadErrors.get(artifactKey(ref.kind, ref.ownerId, ref.publicName));
+          details[key].push(loadError ? { ...summary, loadError } : summary);
         }),
     );
   }
@@ -451,7 +469,11 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const catalog = deps.appCatalog;
     const views = catalog.list();
     const publicAccess = await loadPublicAccessConfig(deps);
-    const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog);
+    const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
+      ...deps.agentLoader.getRegistryLoadFailures(),
+      ...deps.actionLoader.getRegistryLoadFailures(),
+      ...deps.skillCatalog.getRegistryLoadFailures(),
+    ]);
     const cards = views.map((view) =>
       toInstalledAppCard(
         view,

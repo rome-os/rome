@@ -183,7 +183,7 @@
     "unpin": "Unpin from sidebar",
     "pinNoUi": "App has no UI",
     "viewDetails": "View details",
-    "skillLoadFailed": "Failed to load",
+    "artifactLoadFailed": "Failed to load",
     "chatWithAgentTitle": "Chat with {{agent}}",
     "chatWithAgentAria": "Chat with {{agent}}",
     "noCapabilities": "No {{label}} declared.",

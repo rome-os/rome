@@ -14,6 +14,9 @@ import type {
   SubscriberHandler,
   Unsubscribe,
 } from "../../apps/state.js";
+import { ActionLoader } from "../../actions/loader.js";
+import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
+import { AgentLoader } from "../../core/agent-loader.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
@@ -326,6 +329,148 @@ describe("GET /apps", () => {
         legacy: null,
       });
     } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("GET /apps artifact load failures", () => {
+  function appWithArtifacts(appId: string, artifacts: Partial<ResolvedApp["artifacts"]>) {
+    const app = buildResolvedApp(appId);
+    return { ...app, artifacts: { ...app.artifacts, ...artifacts } };
+  }
+
+  async function listCapabilityDetails(
+    deps: Parameters<typeof appsRoutes>[0],
+  ): Promise<Record<string, Record<string, Array<{ name: string; loadError?: string }>>>> {
+    const res = await new Hono().route("/", appsRoutes(deps)).request("/apps");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      apps: Array<{
+        id: string;
+        capabilityDetails: Record<string, Array<{ name: string; loadError?: string }>>;
+      }>;
+    };
+    return Object.fromEntries(body.apps.map((card) => [card.id, card.capabilityDetails]));
+  }
+
+  it("flags an app agent the agent loader rejected", async () => {
+    const testDb = createTestDb();
+    const root = await mkdtemp(join(tmpdir(), "rome-app-agent-"));
+    try {
+      const agentPath = join(root, "reporter.yaml");
+      // Parses as YAML and carries a description, so a raw-file read looks
+      // healthy, but the portable output-schema check rejects it.
+      await writeFile(
+        agentPath,
+        [
+          "name: reporter",
+          "description: Writes the weekly report.",
+          "systemPromptPrefix: Write the report.",
+          "tools: []",
+          "permissionMode: default",
+          "outputSchema:",
+          "  type: object",
+          "  properties:",
+          "    summary:",
+          "      type: string",
+          "  required: [summary]",
+          "",
+        ].join("\n"),
+      );
+      const catalog = catalogWith(
+        appWithArtifacts("reports", {
+          agent: [
+            {
+              kind: "agent",
+              publicName: "reporter",
+              aliases: [],
+              ownerType: "app",
+              ownerId: "reports",
+              absolutePath: agentPath,
+              formatVersion: 2,
+            },
+          ],
+        }),
+      );
+      const agentLoader = new AgentLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
+      await agentLoader.loadFromCatalog(catalog);
+
+      const details = await listCapabilityDetails({
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalog,
+        agentLoader,
+      });
+
+      expect(details.reports.agents).toEqual([
+        {
+          name: "reporter",
+          description: "Writes the weekly report.",
+          loadError: expect.stringMatching(/Invalid agent config[\s\S]*additionalProperties/),
+        },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      testDb.close();
+    }
+  });
+
+  it("flags only the app action the action loader rejected", async () => {
+    const testDb = createTestDb();
+    const root = await mkdtemp(join(tmpdir(), "rome-app-action-"));
+    try {
+      const actionConfig = (name: string, extra: string[] = []) =>
+        [
+          `name: ${name}`,
+          "type: custom",
+          `description: Runs ${name}.`,
+          "complexity: simple",
+          "speed: fast",
+          "reliability: high",
+          "sideEffects: write",
+          ...extra,
+          "",
+        ].join("\n");
+      const actionRef = (publicName: string): ArtifactRef => ({
+        kind: "action",
+        publicName,
+        aliases: [],
+        ownerType: "app",
+        ownerId: "hooks-app",
+        absolutePath: join(root, publicName),
+        formatVersion: 2,
+      });
+      await mkdir(join(root, "healthy"), { recursive: true });
+      await writeFile(join(root, "healthy", "action.yaml"), actionConfig("healthy"));
+      await mkdir(join(root, "gated"), { recursive: true });
+      await writeFile(
+        join(root, "gated", "action.yaml"),
+        actionConfig("gated", ["webhook: true", "requiresApproval: true"]),
+      );
+      const catalog = catalogWith(
+        appWithArtifacts("hooks-app", { action: [actionRef("healthy"), actionRef("gated")] }),
+      );
+      const actionLoader = new ActionLoader({
+        legacyBindings: createEmptyLegacyArtifactBindings(),
+      });
+      await actionLoader.loadFromCatalog(catalog);
+
+      const details = await listCapabilityDetails({
+        ...(await buildTestDeps(testDb.db)),
+        appCatalog: catalog,
+        actionLoader,
+      });
+
+      expect(details["hooks-app"].actions).toEqual([
+        {
+          name: "gated",
+          description: "Runs gated.",
+          loadError: expect.stringMatching(/webhook actions cannot require approval/),
+        },
+        { name: "healthy", description: "Runs healthy." },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
       testDb.close();
     }
   });

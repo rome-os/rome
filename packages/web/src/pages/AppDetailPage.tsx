@@ -390,7 +390,7 @@ export default function AppDetailPage() {
                       </p>
                       {item.loadError ? (
                         <Badge variant="warning" className="ml-auto shrink-0">
-                          {t("installed.skillLoadFailed")}
+                          {t("installed.artifactLoadFailed")}
                         </Badge>
                       ) : null}
                     </div>
@@ -403,7 +403,7 @@ export default function AppDetailPage() {
                       {item.loadError ?? item.description}
                     </p>
                   </ListRowContent>
-                  {key === "agents" ? (
+                  {key === "agents" && !item.loadError ? (
                     <IconButton
                       size="sm"
                       label={t("installed.chatWithAgentAria", { agent: item.name })}

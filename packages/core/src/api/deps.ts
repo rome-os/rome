@@ -81,7 +81,7 @@ export interface ApiDeps {
   channelsService: ChannelsService;
   conversationSettings: ConversationSettingsControl;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get">;
+  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   personMappingRepo: PersonMappingRepository;
   /** Every channel Rome reads, each carrying its address book and what was said
