@@ -58,7 +58,7 @@
       "addFailed": "Could not add an account",
       "addedNotShown": "Account added. Find it in the Connections list.",
       "linkedAgent": "Linked agent",
-      "linkedAgentDescription": "The linked agent answers messages on this account. Without one, the account stays silent. Other agents link to one account per platform; main can link to several.",
+      "linkedAgentDescription": "The linked agent answers messages on this account. Without one, the account stays silent. Main can link to several accounts on a platform; any other agent links to one.",
       "noAgent": "None. This account stays silent.",
       "agentsFailed": "Could not load agents",
       "linked": "{{agent}} now answers on {{account}}.",

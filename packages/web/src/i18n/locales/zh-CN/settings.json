@@ -58,7 +58,7 @@
       "addFailed": "无法添加账号",
       "addedNotShown": "账号已添加，可在连接列表中找到。",
       "linkedAgent": "关联的智能体",
-      "linkedAgentDescription": "关联的智能体负责回复此账号上的消息。未关联时，此账号不回复。同一平台上，其他智能体只能关联一个账号；main 可以关联多个。",
+      "linkedAgentDescription": "关联的智能体负责回复此账号上的消息。未关联时，此账号不回复。同一平台上，main 可以关联多个账号；其他智能体只能关联一个。",
       "noAgent": "无。此账号不回复。",
       "agentsFailed": "无法加载智能体",
       "linked": "{{agent}} 现在负责回复 {{account}}。",

@@ -30,7 +30,9 @@ const NO_AGENT = "__none__";
 const AGENTS_QUERY_KEY = ["connection-accounts", "agents"] as const;
 
 /** Main's canonical id, which the link route stores. `/api/agents` and the
- *  route also know it as `main`. */
+ *  route also know it as `main`. Switch this and the alias handling in
+ *  `channels-settings-page.tsx` to `@rome/api-types/linked-agents` together
+ *  once it exports main's ids. */
 const MAIN_AGENT = "core:main";
 
 function canonicalAgent(name: string): string {
