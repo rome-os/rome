@@ -1,4 +1,4 @@
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
@@ -23,13 +23,15 @@ import {
 } from "@rome-os/ui/page";
 
 /**
- * Per-service Connection detail page (`/settings/connections/:serviceId`).
+ * Per-account Connection detail page (`/settings/connections/:serviceId`).
  *
  * Self-loads `GET /api/connections` (plus the Composio account status for the
  * broker card), folds it through the `buildConnectionCards` presentation
- * adapter, and resolves the card matching `:serviceId`. Unknown or unmatched
- * ids redirect back to the list. The connect ceremony + enablement copy is the
- * shared `ConnectionDetailBody` (also used by the in-list dialog).
+ * adapter, and resolves the card whose route matches `:serviceId`. A service's
+ * first account routes as the service (`feishu`), later ones by their channel
+ * id. Unknown or unmatched ids redirect back to the list. The connect ceremony
+ * + enablement copy is the shared `ConnectionDetailBody` (also used by the
+ * in-list dialog).
  */
 
 const BACK_TO_LIST = "/settings/connections";
@@ -60,6 +62,7 @@ function useComposioStatus() {
 
 export default function ConnectionDetailPage() {
   const { serviceId } = useParams<{ serviceId: string }>();
+  const navigate = useNavigate();
 
   const connectionsQuery = useConnections();
   const composioQuery = useComposioStatus();
@@ -71,6 +74,16 @@ export default function ConnectionDetailPage() {
     void composioQuery.refetch();
   };
   const flash = (message: string) => toast(message);
+  // A freshly added account has no card until the list refetches; navigating
+  // first would hit the unknown-route redirect. A refetch that still lacks it
+  // throws, so the add button reports the failure instead of the page
+  // silently falling back to the list.
+  const openAccount = async (route: string) => {
+    const { data } = await connectionsQuery.refetch();
+    const cards = buildConnectionCards(data ?? [], composioQuery.data ?? null);
+    if (!cards.some((entry) => entry.route === route)) throw new Error();
+    navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
+  };
 
   // The Telegram personal account folded onto the Telegram connection as a slot;
   // its old standalone route redirects to the merged Telegram detail.
@@ -111,9 +124,9 @@ export default function ConnectionDetailPage() {
 
   const composio = composioQuery.data ?? null;
   const cards = buildConnectionCards(connectionsQuery.data ?? [], composio);
-  const card = cards.find((entry) => entry.service === serviceId);
+  const card = cards.find((entry) => entry.route === serviceId);
 
-  // Unknown / unmatched service id — back to the list.
+  // Unknown / unmatched route — back to the list.
   if (!card) {
     return <Navigate to={BACK_TO_LIST} replace />;
   }
@@ -139,7 +152,14 @@ export default function ConnectionDetailPage() {
         </div>
       </PageHeader>
       <Measure>
-        <ConnectionDetailBody card={card} composio={composio} onRefresh={refresh} onFlash={flash} />
+        <ConnectionDetailBody
+          key={card.route}
+          card={card}
+          composio={composio}
+          onRefresh={refresh}
+          onFlash={flash}
+          onOpenAccount={openAccount}
+        />
       </Measure>
     </Page>
   );

@@ -1,4 +1,4 @@
-import { PersonMappingRepository } from "./person-mapping.js";
+import type { PersonMappingRepository } from "./person-mapping.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
 import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
@@ -31,8 +31,8 @@ export class ApprovalsRepository {
   private pairingKey?: Buffer;
   constructor(
     private db: DrizzleDb,
+    private readonly personMappingRepo: PersonMappingRepository,
     private readonly getPairingKey = loadPairingKey,
-    private readonly personMappingRepo = new PersonMappingRepository(db),
   ) {}
 
   supersedePairings(connectionId: string, exec: SqliteExec = this.db) {
@@ -532,8 +532,4 @@ export class ApprovalsRepository {
 
     return { outcome: "queued", approval: rows[0] };
   }
-}
-
-export function createApprovalsRepository(db: DrizzleDb) {
-  return new ApprovalsRepository(db);
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { sql } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../../test/helpers.js";
 import { LinkedInStoreRepository, linkedInMemberIdFromProfileUrl } from "./linkedin-store.js";
 import { PersonMappingRepository } from "./person-mapping.js";
 
@@ -616,7 +616,7 @@ describe("LinkedInStoreRepository", () => {
         );
 
       beforeEach(async () => {
-        people = new PersonMappingRepository(testDb.db);
+        people = new PersonMappingRepository(testDb.db, identityServiceOf);
         await repo.upsertThreads([thread("t1", new Date("2026-08-19T20:00:00Z"))]);
         await repo.upsertThreadParticipants("t1", [ada, self]);
       });

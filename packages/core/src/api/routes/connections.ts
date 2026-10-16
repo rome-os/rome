@@ -288,7 +288,21 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     if (!talker || (grant !== undefined && !talker.needs.includes(grant))) return undefined;
     return (tx) => {
       deps.approvalsRepo.supersedePairings(conn.id, tx);
-      deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
+      // Guardian links are keyed by service, so they stay while another
+      // Connection of the service still has every Talk grant conferred: the
+      // guardian can still reach Rome through that bot. A degraded grant
+      // counts, since its credential is still held and the link is needed when
+      // it recovers. Backing a channel does not count, because a channel stays
+      // bound to its Connection after Talk is revoked and hears no one then.
+      // The grant states are read through `tx`, so a teardown of the other
+      // Connection that commits first is seen here.
+      // This assumes a user's id is the same through every bot of the
+      // service. Where ids are per app (Feishu's open_id), a link paired only
+      // through the removed bot stays behind and never matches again.
+      const stillTalks =
+        registry.getLedger().connectionsHoldingIn(tx, conn.service, talker.needs, conn.id).length >
+        0;
+      if (!stillTalks) deps.personMappingRepo.writeDeleteGuardianChannelMappings(tx, conn.service);
     };
   };
 

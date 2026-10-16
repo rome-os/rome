@@ -9,6 +9,7 @@ import {
   installTestSpanHarness,
   type SpanHarness,
   type TestDb,
+  identityServiceOf,
 } from "../test/helpers.js";
 
 // PolicyEngine over real repositories on in-memory SQLite (edge-only fakes,
@@ -38,7 +39,7 @@ describe("PolicyEngine", () => {
     testDb = createTestDb();
     policiesRepo = new PoliciesRepository(testDb.db);
     settingsRepo = new SettingsRepository(testDb.db);
-    engine = new PolicyEngine(policiesRepo, settingsRepo);
+    engine = new PolicyEngine(policiesRepo, settingsRepo, identityServiceOf);
   });
 
   afterEach(() => {

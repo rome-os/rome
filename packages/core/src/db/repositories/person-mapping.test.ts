@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import {
+  createTestDb,
+  type TestDb,
+  identityServiceOf,
+  recordedServiceOf,
+} from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
 import { persons, channelMappings } from "../schema.js";
@@ -12,7 +17,7 @@ describe("PersonMappingRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, identityServiceOf);
   });
 
   afterEach(() => {
@@ -128,6 +133,7 @@ describe("PersonMappingRepository", () => {
 
   it("findByChannelUser() reads a later channel's sender from its service's links", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
     const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;
@@ -143,6 +149,7 @@ describe("PersonMappingRepository", () => {
 
   it("writes a later channel's links under its service", async () => {
     const records = new ChannelRecordsRepository(testDb.db);
+    repo = new PersonMappingRepository(testDb.db, recordedServiceOf(testDb.db));
     const now = new Date();
     records.claim(testDb.db, { id: "c1", service: "telegram" }, now);
     const second = records.claim(testDb.db, { id: "c2", service: "telegram" }, now).id;

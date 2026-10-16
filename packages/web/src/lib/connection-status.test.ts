@@ -168,6 +168,8 @@ describe("connectionStatus — Telegram fold row states", () => {
       },
       connect: null,
       setups: {},
+      channel: null,
+      severalAccounts: false,
     };
   }
 
@@ -187,6 +189,8 @@ describe("connectionStatus — Telegram fold row states", () => {
       },
       connect: null,
       setups: {},
+      channel: null,
+      severalAccounts: false,
     };
   }
 

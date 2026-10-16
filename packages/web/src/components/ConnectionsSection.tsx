@@ -8,7 +8,7 @@ import {
 } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
 import { PairingApprovals } from "./PairingApproval";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, RefreshCw, Unplug } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -51,17 +51,39 @@ export function ConnectionsSection({
   composio: ComposioCliStatus | null;
   loading: boolean;
   error: string | null;
-  /** Re-fetch `/api/connections` + the Composio status, after a load error or a ceremony. */
-  onRefresh: () => void | Promise<void>;
+  /** Re-fetch `/api/connections` + the Composio status, after a load error or a
+   *  ceremony. Resolves to the fresh list, or null when the fetch failed. A
+   *  background refresh keeps the list on screen while it loads. */
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>;
   onFlash: (message: string) => void;
 }) {
   const { t } = useTranslation("settings");
   const cards = buildConnectionCards(connections, composio);
 
-  // Which row's detail dialog is open (null = closed). Track the service, not
+  // Which row's detail dialog is open (null = closed). Track the route, not
   // the card object, so a refresh mid-dialog re-derives the LIVE card.
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-  const selected = cards.find((card) => card.service === selectedService) ?? null;
+  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  // Mirrors `selectedRoute` for code that resumes after an await.
+  const selectedRouteRef = useRef<string | null>(null);
+  const select = (route: string | null) => {
+    selectedRouteRef.current = route;
+    setSelectedRoute(route);
+  };
+  const selected = cards.find((card) => card.route === selectedRoute) ?? null;
+
+  // A freshly added account has no card until the list refetches, so refetch
+  // first and point the dialog at it only once its card exists. Otherwise the
+  // dialog would close, then reopen by itself when a later poll lists it.
+  // A dialog the guardian closed, or moved to another card, during the add
+  // stays where they left it.
+  const openAccount = async (route: string) => {
+    const from = selectedRouteRef.current;
+    const fresh = await onRefresh(true);
+    if (!fresh || !buildConnectionCards(fresh, composio).some((card) => card.route === route)) {
+      throw new Error(`Account ${route} is not listed yet.`);
+    }
+    if (from !== null && selectedRouteRef.current === from) select(route);
+  };
 
   return (
     <Measure className="space-y-6">
@@ -116,12 +138,12 @@ export function ConnectionsSection({
           ) : (
             cards.map((card) => (
               <Button
-                key={card.service}
+                key={card.route}
                 type="button"
                 variant="outline"
                 size="default"
                 align="between"
-                onClick={() => setSelectedService(card.service)}
+                onClick={() => select(card.route)}
                 className="h-auto w-full bg-surface py-3 text-left hover:bg-accent"
                 aria-label={`Open ${card.label}`}
               >
@@ -139,9 +161,10 @@ export function ConnectionsSection({
         <ConnectionDetailDialog
           card={selected}
           composio={composio}
-          onClose={() => setSelectedService(null)}
+          onClose={() => select(null)}
           onRefresh={() => void onRefresh()}
           onFlash={onFlash}
+          onOpenAccount={openAccount}
         />
       </Section>
     </Measure>

@@ -35,7 +35,7 @@ A conversation is the thread a [message](#message) was said in, named by the pla
 
 ## Channels
 
-A channel is one of Rome's presences on a platform, where Rome and a person can reach each other: Rome's Telegram bot, its signed-in WhatsApp, its mailbox, the chat built into the dashboard. Every [message](#message) arrives on one, and everyone Rome can talk to is reached through one. The platform owns the conversations. Rome's presence on it is the channel.
+A channel is one of Rome's presences on a platform, where Rome and a person can reach each other: Rome's Telegram bot, its signed-in WhatsApp, its mailbox, the chat built into the dashboard. Every [message](#message) arrives on one, and everyone Rome can talk to is reached through one. The platform owns the conversations. Rome's presence on it is the channel. On Rome's screens a channel is shown as an *account*. It is not the [account](people.md#account) on the person's side of a message.
 
 **Contracts:**
 

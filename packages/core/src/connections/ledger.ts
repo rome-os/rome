@@ -72,4 +72,13 @@ export interface GrantLedger {
   writeConnection(exec: SqliteExec, rec: ConnectionRecord): void;
   writeEnsureGrant(exec: SqliteExec, custody: string, name: GrantName): void;
   writeGrant(exec: SqliteExec, custody: string, name: GrantName, patch: GrantPatch): void;
+  /** Ids of the Connections of `service`, other than `exceptId`, that hold
+   *  every grant in `needs` in a state other than "unauthorized". Reads
+   *  through `tx`, so the answer holds for the rest of that transaction. */
+  connectionsHoldingIn(
+    tx: DrizzleTx,
+    service: string,
+    needs: readonly GrantName[],
+    exceptId: ConnectionId,
+  ): ConnectionId[];
 }

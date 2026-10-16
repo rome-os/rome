@@ -145,6 +145,8 @@ function apiConnection(
     },
     connect: options.connect ?? null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
   };
 }
 
@@ -359,7 +361,7 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
           mount-time effects). */}
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" inert>
         {cards.map((card) => (
-          <DialogFrame key={card.service} card={card} scenario={scenario} />
+          <DialogFrame key={card.route} card={card} scenario={scenario} />
         ))}
       </div>
     </section>

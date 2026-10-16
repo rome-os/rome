@@ -255,11 +255,13 @@ export default function SettingsPage() {
           setComposio(payload.composio ?? null);
         }
         setConnectionsError(null);
+        return connectionList;
       } catch (err) {
         console.error("Failed to load connections data", err);
         setConnectionsError(
           err instanceof Error ? err.message : t("connections.loadFailedFallback"),
         );
+        return null;
       } finally {
         if (!backgroundRefresh) setConnectionsLoading(false);
       }

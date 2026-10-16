@@ -1,12 +1,15 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -46,6 +49,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -106,6 +111,9 @@ function composioStatus(overrides: Partial<ComposioCliStatus> = {}): ComposioCli
 function renderSection(
   connections: ApiConnection[] = minimalConnections(),
   composio: ComposioCliStatus | null = null,
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null> = rs.fn(
+    async () => null,
+  ),
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -116,11 +124,32 @@ function renderSection(
           composio={composio}
           loading={false}
           error={null}
-          onRefresh={rs.fn()}
+          onRefresh={onRefresh}
           onFlash={rs.fn()}
         />
       </MemoryRouter>
     </QueryClientProvider>,
+  );
+}
+
+function sectionWith(
+  connections: ApiConnection[],
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null>,
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ConnectionsSection
+          connections={connections}
+          composio={null}
+          loading={false}
+          error={null}
+          onRefresh={onRefresh}
+          onFlash={rs.fn()}
+        />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -275,5 +304,108 @@ describe("ConnectionsSection — Composio row", () => {
     renderSection(minimalConnections(), composioStatus({ installed: true, loggedIn: false }));
     fireEvent.click(screen.getByRole("button", { name: "Open Composio" }));
     expect(screen.getByText("Connect")).toBeTruthy();
+  });
+});
+
+describe("ConnectionsSection — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  it("lists each account as its own row and opens the one clicked", () => {
+    renderSection([
+      feishu(),
+      feishu({
+        id: "conn-feishu-2",
+        channel: SECOND_FEISHU,
+        display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+      }),
+    ]);
+
+    expect(screen.getByRole("button", { name: "Open Feishu" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu · Sales Bot" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("moves the dialog to a new account once the refreshed list has it", async () => {
+    const second = feishu({
+      id: "conn-feishu-2",
+      channel: SECOND_FEISHU,
+      display: { app: grantDisplay({ displayName: "Sales Bot" }) },
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu(), second]);
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    // The parent re-renders with the refreshed list, as SettingsTabPage does.
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+    await waitFor(() =>
+      expect(within(screen.getByRole("dialog")).getByText("Feishu · Sales Bot")).toBeTruthy(),
+    );
+  });
+
+  it("keeps the dialog on the current account when the new one is not listed yet", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    const onRefresh = rs.fn(async () => [feishu()]);
+    renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+    expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
+  });
+
+  it("leaves the dialog closed when the guardian closed it during the add", async () => {
+    const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: second }), { status: 201 });
+      }
+      if (String(input) === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    let finishRefresh: (list: ApiConnection[]) => void = () => {};
+    const onRefresh = rs.fn(
+      () =>
+        new Promise<ApiConnection[] | null>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    const view = renderSection([feishu()], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Feishu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add another account" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    finishRefresh([feishu(), second]);
+    view.rerender(sectionWith([feishu(), second], onRefresh));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

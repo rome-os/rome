@@ -35,8 +35,8 @@ import {
 } from "../../connections/integrations/feishu.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import type { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb } from "../../test/helpers.js";
+import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
+import { createTestDb, identityServiceOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
@@ -96,7 +96,7 @@ function harness() {
   const manager = new SetupManager({ registry, personMappingRepo });
   const deps = {
     db,
-    approvalsRepo: new ApprovalsRepository(db),
+    approvalsRepo: new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf)),
     connectionRegistry: registry,
     setupManager: manager,
     personMappingRepo,
@@ -307,6 +307,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       registerAgentApp:
         fakes.registerAgentApp ??
         (async () => ({ appId: "cli_minted", appSecret: "minted", domain: "feishu" as const })),
+      fetchBotName: async () => null,
     });
   }
 
@@ -335,8 +336,12 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 
     const afterMode = await feed(app, cid, { mode: "manual", domain: "lark" });
     expect(afterMode.state.status).toBe("awaiting-input");
-    const afterCreds = await feed(app, cid, { appId: "cli_abc", appSecret: "shh" });
-    expect(afterCreds.state.status).toBe("done");
+    await feed(app, cid, { appId: "cli_abc", appSecret: "shh" });
+    // Setup goes on to read the bot's name, a step, after the credentials.
+    await rs.waitFor(async () => {
+      const poll = await app.request(`/setups/${cid}`);
+      expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
+    });
 
     const conn = registry.find("feishu")[0];
     expect(conn).toBeDefined();

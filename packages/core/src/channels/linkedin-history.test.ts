@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../test/helpers.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
 import { linkedInHistoryMessage } from "./linkedin-history.js";
 import type { LinkedInHistoryMessage } from "./linkedin-sync.js";
@@ -36,7 +36,7 @@ describe("LinkedIn message addressing", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    people = new PersonMappingRepository(testDb.db);
+    people = new PersonMappingRepository(testDb.db, identityServiceOf);
   });
 
   afterEach(() => {

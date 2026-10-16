@@ -22,6 +22,9 @@ const notConnected: ConnectionCard = {
     },
   ],
   connect: { url: "/api/connections/discord/start", available: true, unavailableReason: null },
+  route: "discord",
+  channel: null,
+  severalAccounts: false,
 };
 
 const connected: ConnectionCard = {

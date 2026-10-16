@@ -6,7 +6,7 @@
 // (encryption was deliberately dropped). The envelope shape is kept so
 // encryption can return later. The runtime never reads inside `material`.
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx, SqliteExec } from "../db/index.js";
 import { connectionGrants, connections } from "../db/schema/system.js";
 import type { ConnectionId, GrantName, ProfileRecord } from "./types.js";
@@ -144,5 +144,37 @@ export class DrizzleGrantLedger implements GrantLedger {
 
   async updateGrant(custody: string, name: GrantName, patch: GrantPatch): Promise<void> {
     this.writeGrant(this.db, custody, name, patch);
+  }
+
+  connectionsHoldingIn(
+    tx: DrizzleTx,
+    service: string,
+    needs: readonly GrantName[],
+    exceptId: ConnectionId,
+  ): ConnectionId[] {
+    if (needs.length === 0) {
+      return tx
+        .select({ id: connections.id })
+        .from(connections)
+        .where(and(eq(connections.service, service), ne(connections.id, exceptId)))
+        .all()
+        .map((row) => row.id);
+    }
+    return tx
+      .select({ id: connectionGrants.custody })
+      .from(connectionGrants)
+      .innerJoin(connections, eq(connections.id, connectionGrants.custody))
+      .where(
+        and(
+          eq(connections.service, service),
+          ne(connections.id, exceptId),
+          inArray(connectionGrants.name, [...needs]),
+          ne(connectionGrants.state, "unauthorized"),
+        ),
+      )
+      .groupBy(connectionGrants.custody)
+      .having(sql`count(*) = ${new Set(needs).size}`)
+      .all()
+      .map((row) => row.id);
   }
 }

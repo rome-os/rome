@@ -1222,6 +1222,52 @@ export const handlers = [
   http.get("/api/system/upgrade/status/snapshot", () => HttpResponse.json(upgradeStatus())),
   http.get("/api/agents", () => HttpResponse.json({ agents: [{ name: "build" }] })),
   http.get("/api/connections", () => HttpResponse.json(connections)),
+  // "Add another account": mint an unauthorized Connection under a fresh
+  // opaque channel id, as core does for every account after a service's first.
+  // Its setup ceremony is out of reach here (see "What mock mode cannot do"),
+  // so the new account stays unconnected until reload.
+  http.post("/api/connections", async ({ request }) => {
+    const body = (await request.json()) as { service?: string };
+    const service = body.service ?? "";
+    // Core decides this per service and reports it as `severalAccounts`, so
+    // the mock reads it off the service's first connection.
+    const first = connections.connections.find((candidate) => candidate.service === service);
+    if (!first?.severalAccounts) {
+      return HttpResponse.json(
+        { error: `${service || "This service"} does not offer several accounts.` },
+        { status: 400 },
+      );
+    }
+    // Like core, hand back an account that never received a grant before
+    // minting another.
+    const unfinished = connections.connections.find(
+      (candidate) =>
+        candidate.service === service &&
+        Object.values(candidate.grants).every((state) => state === "unauthorized"),
+    );
+    if (unfinished) return HttpResponse.json({ connection: unfinished }, { status: 200 });
+    const channel = crypto.randomUUID();
+    const grantNames = Object.keys(first.grants);
+    const grants = Object.fromEntries(grantNames.map((grant) => [grant, "unauthorized" as const]));
+    const connection: ApiConnection = {
+      id: `${channel}-mock`,
+      service,
+      label: first.label.split(" · ")[0] ?? service,
+      grants,
+      display: Object.fromEntries(grantNames.map((grant) => [grant, null])),
+      capabilities: {
+        talk: { state: "needs-auth", missingGrants: grantNames },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      connect: null,
+      setups: {},
+      channel,
+      severalAccounts: true,
+    };
+    connections.connections.push(connection);
+    return HttpResponse.json({ connection }, { status: 201 });
+  }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant
