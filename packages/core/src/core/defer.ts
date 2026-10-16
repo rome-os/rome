@@ -109,9 +109,9 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
 }
 
 /** Build the args `resume_session` fires with: which runtime session to continue,
- * where its reply is delivered, and the prompt the woken turn receives.
+ * where its reply is delivered, and `text`, the prompt the woken turn receives.
  * No trust fields — a continuation skips the inbound trust pipeline. */
-function buildResumeArgs(name: string, context: DeferContext): Record<string, unknown> {
+export function buildResumeArgs(context: DeferContext, text: string): Record<string, unknown> {
   const channelContext = context.channelContext;
   return {
     sessionId: context.sessionId,
@@ -119,10 +119,7 @@ function buildResumeArgs(name: string, context: DeferContext): Record<string, un
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
     agentName: context.agentName ?? "main",
-    // The woken agent resumes the same session with full context, so the wakeup
-    // needs no instructions — just a simple time's-up nudge naming what it was
-    // watching. The ⏰ prefix marks it in the thread.
-    text: `⏰ Time's up: ${name}`,
+    text,
   };
 }
 
@@ -158,7 +155,10 @@ export async function runDefer(input: DeferInput, deps: DeferDeps): Promise<Defe
       localTime: iso.slice(11, 16),
     },
     actionName: RESUME_SESSION_ACTION,
-    args: buildResumeArgs(parsed.name, deps.context),
+    // The woken agent resumes the same conversation, so the wakeup needs no
+    // instructions, just a nudge naming what it was watching. The ⏰ prefix
+    // marks it in the thread.
+    args: buildResumeArgs(deps.context, `⏰ Time's up: ${parsed.name}`),
   };
 
   const data = await deps.createRoutine(createArgs);

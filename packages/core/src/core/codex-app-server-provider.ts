@@ -400,6 +400,9 @@ interface ActiveTurn {
   errorReason?: TurnErrorEvent["reason"];
   /** `turn.status` from `turn/completed`, mapped to the terminal's `stop`. */
   nativeStatus: string | null;
+  /** Set when Rome asked Codex to interrupt this turn. Codex may still report
+   *  it completed if it finished before the interrupt landed. */
+  interruptRequested: boolean;
   /** Last reasoning part each in-flight reasoning item streamed, by item id.
    *  Lives and dies with the turn, so an unfinished item leaves nothing behind. */
   reasoningDeltaParts: Map<string, string>;
@@ -988,8 +991,51 @@ export class CodexAppServerProvider implements ModelProvider {
       const result = await turn.romeTools.callTool(call.tool, call.arguments, {
         toolUseId: call.callId,
       });
+      // Codex waits for a call before it ends the turn, except for a call that
+      // a yielded code-mode `exec` cell still awaits. That call is cancelled at
+      // turn end and its item already completed as failed, so the response
+      // below reaches nothing. Hand the result to the session instead.
+      if (turn.completed || activeTurn !== turn) {
+        reportOrphanedToolResult(call, turn, result.response);
+        return result.response;
+      }
       dynamicToolOutputs.set(call.callId, result.traceOutput);
       return result.response;
+    };
+
+    const reportOrphanedToolResult = (
+      call: DynamicToolCallParams,
+      turn: ActiveTurn,
+      response: DynamicToolCallResponse,
+    ): void => {
+      // A Stop counts even when the turn finished before Codex saw it.
+      const interrupted = turn.nativeStatus === "interrupted" || turn.interruptRequested;
+      log.info("codex dynamic tool call finished after its turn ended", {
+        tool: call.tool,
+        callId: call.callId,
+        interrupted,
+      });
+      // A borrowed exact fork runs its turn on this thread, but its result
+      // belongs to the fork, which ends with that turn.
+      if (turn.ownerSessionId !== params.sessionId || !params.onOrphanedToolResult) return;
+      try {
+        params.onOrphanedToolResult({
+          tool: call.tool,
+          callId: call.callId,
+          arguments: call.arguments,
+          success: response.success,
+          text: response.contentItems
+            .map((item) => (item.type === "inputText" ? item.text : `[${item.type}]`))
+            .join("\n"),
+          interrupted,
+        });
+      } catch (err) {
+        log.warn("orphaned tool result handler failed", {
+          tool: call.tool,
+          callId: call.callId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     };
 
     const binding: CodexThreadBinding = {
@@ -1111,6 +1157,7 @@ export class CodexAppServerProvider implements ModelProvider {
         errorMessage: null,
         errorCode: null,
         nativeStatus: null,
+        interruptRequested: false,
         reasoningDeltaParts: new Map(),
       };
       activeTurn = turn;
@@ -1308,6 +1355,9 @@ export class CodexAppServerProvider implements ModelProvider {
     const interruptOwnerTurn = async (ownerSessionId: string, reason?: string): Promise<void> => {
       if (closed || !threadId || !activeTurn?.turnId) return;
       if (activeTurn.ownerSessionId !== ownerSessionId) return;
+      // A Stop after Codex completed the turn stops nothing, so the turn's
+      // late results still count.
+      if (!activeTurn.completed) activeTurn.interruptRequested = true;
       log.info("codex app-server interrupt", { reason, ownerSessionId });
       try {
         await this.appServerManager.requestForThread(threadId, Method.turnInterrupt, {

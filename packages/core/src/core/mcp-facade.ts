@@ -586,7 +586,11 @@ function buildActionFacadeTools(
     },
     {
       name: "execute_action",
-      description: "Execute one available action with object arguments in json_args.",
+      description:
+        "Execute one available action with object arguments in json_args. Wait for the call to " +
+        "finish before you end your turn. If the turn ends first, the action keeps running even " +
+        "when the call is reported as cancelled, so do not run it again. Where `defer` is " +
+        "available, its result arrives as a new turn.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1141,11 +1145,14 @@ function askQuestionsToPromptText(questions: Record<string, unknown>[]): string 
 }
 
 const DEFER_DESCRIPTION =
-  "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
+  "Schedule a wake-up later in THIS SAME conversation — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
   "Give a short `name` for what you're watching (it becomes the routine's name) and one of `afterMinutes` or `at`. " +
   "When the time comes you're pinged back in this thread with the whole conversation still in context, so just " +
   "re-evaluate and either finish or `defer` again to check later (minimum one minute, no limit on re-defers). " +
+  "The wake-up keeps the conversation, not running work: a handle from this turn, such as a running " +
+  "`exec` cell id, is gone by then. An action still running when the turn ends delivers its result " +
+  "as a new turn of its own, without a defer. " +
   "After calling defer, write one short line confirming you'll keep watch, then end your turn.";
 
 function buildDeferFacadeTool(

@@ -43,7 +43,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./agent-runner.js";
-import { runDefer, type DeferInput } from "./defer.js";
+import { buildResumeArgs, RESUME_SESSION_ACTION, runDefer, type DeferInput } from "./defer.js";
 import type {
   ActionMcpDefinition,
   ModelSession,
@@ -53,6 +53,7 @@ import type {
   ModelTier,
   ModelToolDefinition,
   ModelToolCallContext,
+  OrphanedToolResult,
   ProviderId,
   SkillMcpDefinition,
 } from "./agent-runner.js";
@@ -832,6 +833,69 @@ interface ForkOpen {
 
 type BuildForkOpenParams = (fork: ForkTurnContext) => ForkOpen;
 
+// A late result becomes the prompt of a new turn. In its turn, the model
+// would have read it through `wait`, whose output Codex caps at 10,000 tokens
+// by default, so the cap here is about the same and the model loses no more.
+const ORPHANED_RESULT_TEXT_LIMIT = 40_000;
+
+function truncateOrphanedText(text: string): string {
+  if (text.length <= ORPHANED_RESULT_TEXT_LIMIT) return text;
+  const omitted = text.length - ORPHANED_RESULT_TEXT_LIMIT;
+  return `${text.slice(0, ORPHANED_RESULT_TEXT_LIMIT)}\n[result truncated: ${omitted} more characters not shown]`;
+}
+
+/** Tells the agent to ask in a plain message what a card it cannot show would have asked. */
+function askInWords(promptText: string): string {
+  return (
+    "Ask the guardian the following as a plain message, then wait for their reply before " +
+    `doing anything else:\n\n${promptText}`
+  );
+}
+
+/** The prompt of the turn that delivers a tool result which finished after its turn ended. */
+function formatOrphanedToolResult(orphan: OrphanedToolResult): string {
+  const args = orphan.arguments as { action_name?: unknown } | null | undefined;
+  const label =
+    orphan.tool === "execute_action" && typeof args?.action_name === "string"
+      ? `the action "${args.action_name}"`
+      : `the tool "${orphan.tool}"`;
+  const lead = `A call to ${label} (call ${orphan.callId}) that you started in an earlier turn`;
+  // Facade tools return JSON. An action failure is a normal return with
+  // `status: "error"`, so `success` alone does not mean the action succeeded.
+  let payload: unknown;
+  try {
+    payload = JSON.parse(orphan.text);
+  } catch {
+    payload = undefined;
+  }
+  // A card, handoff or widget mounts from the tool_result its turn streams,
+  // and a late result streams none, so its claim to be on screen is false.
+  if (
+    isRecord(payload) &&
+    (payload.pendingInteraction === true ||
+      payload.handoff === true ||
+      payload.placeWidget === true)
+  ) {
+    const app = typeof payload.appId === "string" ? ` from the "${payload.appId}" app` : "";
+    const notShown = `${lead} returned after that turn ended. It asked to show the guardian something${app}, but nothing was shown.`;
+    return typeof payload.promptText === "string"
+      ? `${notShown} Do not run it again. ${askInWords(payload.promptText)}`
+      : `${notShown} Continue without it.`;
+  }
+  // The model saw this call reported as cancelled, so say plainly that it
+  // returned. The result itself says what happened, such as a pending approval.
+  const failed = !orphan.success || (isRecord(payload) && payload.status === "error");
+  const outcome = failed
+    ? "failed after that turn ended. It is no longer running: decide from its result whether to retry."
+    : "returned after that turn ended. It is no longer running: do not run it again.";
+  return [
+    `${lead} ${outcome} Its result:`,
+    "<tool_result>",
+    truncateOrphanedText(orphan.text),
+    "</tool_result>",
+  ].join("\n");
+}
+
 /** The recorded dir when it still exists, else undefined. The default project is recreated. */
 async function reachableRecordedWorkingDir(recorded: string): Promise<string | undefined> {
   if (recorded === getDefaultAgentWorkingDir()) return await ensureDefaultAgentWorkingDir();
@@ -1226,10 +1290,7 @@ async function openSession(
           // the next turn, exactly like an ordinary clarifying question.
           if (!refs.supportsInteractiveSurface) {
             return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
+              message: `This surface cannot render an interactive UI. ${askInWords(promptText)}`,
             };
           }
           // Webchat: the chat client mounts the component off this tool_result
@@ -1240,6 +1301,8 @@ async function openSession(
             pendingInteraction: true,
             appId,
             render,
+            // For a late result, whose card is never shown.
+            promptText,
             message:
               `The "${render.componentId}" component has been shown to the guardian. It asks them to: ${promptText} ` +
               `Their response will arrive as the next turn's prompt — do not call any further tools ` +
@@ -1254,10 +1317,7 @@ async function openSession(
           // as prose, same as above.
           if (!refs.supportsInteractiveSurface) {
             return {
-              message:
-                "This surface cannot render an interactive UI. Ask the guardian the " +
-                "following as a plain message, then wait for their reply before doing " +
-                `anything else:\n\n${promptText}`,
+              message: `This surface cannot render an interactive UI. ${askInWords(promptText)}`,
             };
           }
           // Webchat: the drain loop persists a handoff card keyed by toolUseId and
@@ -1272,6 +1332,8 @@ async function openSession(
             payload,
             handback,
             handbackHint,
+            // For a late result, whose card is never shown.
+            promptText,
             message:
               `Control has been handed off to the "${appId}" surface. ` +
               `The guardian will work there and the outcome (the handed-back artifact, or a dismissal) will arrive as a new turn. ` +
@@ -1353,6 +1415,56 @@ async function openSession(
         }),
       );
   const executeDefer = deferEnabled ? makeExecuteDefer(sessionExecRefs) : undefined;
+
+  // A tool result that finished after its turn ended starts a new turn in this
+  // session, through the same resume_session wake-up `defer` schedules, so it
+  // is wired only where defer is. Without it, an action that outlived a
+  // yielded Codex `exec` cell would leave no trace the model could find.
+  const deliverOrphanedToolResult = (orphan: OrphanedToolResult): void => {
+    const logFields = {
+      sessionId,
+      agentName: key.agentName,
+      tool: orphan.tool,
+      callId: orphan.callId,
+    };
+    // A stopped turn stays stopped; its late result is not worth a new turn.
+    if (orphan.interrupted) {
+      log.info("dropping a tool result that finished after an interrupted turn", logFields);
+      return;
+    }
+    // The session may already be closed and reopened; either way its thread
+    // context still names the conversation this call belongs to.
+    const channelContext = impl.currentTurnThreadContextRef;
+    if (!channelContext?.channel || !channelContext.threadId) {
+      log.warn("cannot deliver a late tool result: the session has no thread", logFields);
+      return;
+    }
+    const args = buildResumeArgs(
+      { agentName: key.agentName, sessionId, channelContext },
+      formatOrphanedToolResult(orphan),
+    );
+    void deps.actionEngine
+      .run(RESUME_SESSION_ACTION, args, {
+        initiator: "system:orphaned-tool-result",
+        sessionId,
+        agentName: key.agentName,
+        channelThreadKey: key.channelThreadKey,
+        // Detached from any worker, so it may wait for a free one.
+        whenWorkersBusy: "queue",
+      })
+      .then((result) => {
+        if (result.status === "error") {
+          log.warn("late tool result delivery failed", { ...logFields, error: result.error });
+        }
+      })
+      .catch((err) => {
+        log.warn("late tool result delivery failed", {
+          ...logFields,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+  };
+  const onOrphanedToolResult = deferEnabled ? deliverOrphanedToolResult : undefined;
 
   const makeExecuteSubmitOutput =
     (refs: TurnExecRefs) =>
@@ -1530,6 +1642,7 @@ async function openSession(
     executeSubagent,
     executeSubmitOutput,
     executeDefer,
+    onOrphanedToolResult,
     routineActivation,
     supportsInteractiveSurface,
     interactiveSurfaceDetached: init.interactiveSurfaceDetached,
@@ -1703,6 +1816,9 @@ async function openSession(
         executeSubagent: makeExecuteSubagent(refs),
         executeSubmitOutput: conversationalHandback ? makeExecuteSubmitOutput(refs) : undefined,
         executeDefer: deferEnabled && !fork.continuable ? makeExecuteDefer(refs) : undefined,
+        // A fork's late result would resume the source session, which never
+        // saw the fork's call.
+        onOrphanedToolResult: undefined,
         // The spread keeps `supportsInteractiveSurface` (it shapes the
         // advertised catalog + system prompt, which must stay byte-identical
         // to the source); this flag makes the interactive *runtime* degrade

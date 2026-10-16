@@ -180,6 +180,14 @@ export interface ModelSessionParams {
    * one-off wakeup back into this same thread. Absent for sessions with no
    * live thread to wake. */
   executeDefer?: (input: DeferInput) => Promise<unknown>;
+  /**
+   * Called when a Rome tool call finishes after the provider turn that made
+   * it has ended, so its result never reached the model. Codex cancels a
+   * nested call that a yielded code-mode `exec` cell still awaits when the
+   * turn ends, but Rome keeps running it. Absent for sessions with no thread
+   * to deliver the result to.
+   */
+  onOrphanedToolResult?: (result: OrphanedToolResult) => void;
   /** See FacadeParams.routineActivation. */
   routineActivation?: RoutineActivationGate;
   /**
@@ -200,6 +208,21 @@ export interface ModelSessionParams {
    * delivered. See FacadeParams.interactiveSurfaceDetached.
    */
   interactiveSurfaceDetached?: boolean;
+}
+
+/** A Rome tool result that arrived after its provider turn ended. */
+export interface OrphanedToolResult {
+  /** Rome tool name, such as `execute_action`. */
+  tool: string;
+  /** Provider-issued id of the tool call. */
+  callId: string;
+  /** Arguments the model passed to the tool. */
+  arguments: unknown;
+  success: boolean;
+  /** The model-facing result text, in full. */
+  text: string;
+  /** True when the turn ended because it was interrupted, such as a user stop. */
+  interrupted: boolean;
 }
 
 export interface ModelUserInput {

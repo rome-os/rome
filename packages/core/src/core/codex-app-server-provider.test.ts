@@ -2884,3 +2884,162 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 });
+
+describe("CodexAppServerProvider tool calls that outlive their turn", () => {
+  beforeEach(() => {
+    rs.clearAllMocks();
+    getCodexCliStatusMock.mockResolvedValue({ loggedIn: true });
+    captured.onNotification = undefined;
+    captured.onServerRequest = undefined;
+    captured.lastStartedThreadId = undefined;
+  });
+
+  // One turn whose code-mode `exec` cell yielded while it awaited
+  // `execute_action`. Codex fails the nested call's item and ends the turn
+  // without waiting for the response; Rome's action finishes later.
+  async function runTurnWithSlowAction(
+    opts: {
+      settle?: "in_turn" | "after_turn" | "after_close";
+      status?: string;
+      /** Stop the turn while the call runs (Codex still reports `status`), or
+       *  after Codex completed it. */
+      stop?: "before_completion" | "after_completion";
+    } = {},
+  ) {
+    const settle = opts.settle ?? "after_turn";
+    let finishAction!: (value: unknown) => void;
+    const actionDone = new Promise((resolve) => {
+      finishAction = resolve;
+    });
+    const executeAction = rs.fn(async () => await actionDone);
+    const onOrphanedToolResult = rs.fn();
+    let toolResponse: Promise<unknown> | undefined;
+    let session!: Awaited<ReturnType<CodexAppServerProvider["openSession"]>>;
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") return { thread: { id: "thr-1" } };
+      if (method !== "turn/start") return {};
+      const n = captured.onNotification!;
+      n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+      n("item/started", {
+        threadId: "thr-1",
+        turnId: "turn-1",
+        item: { type: "dynamicToolCall", id: "call-slow", tool: "execute_action", arguments: {} },
+      });
+      toolResponse = captured.onServerRequest?.("item/tool/call", {
+        threadId: "thr-1",
+        turnId: "turn-1",
+        callId: "call-slow",
+        namespace: null,
+        tool: "execute_action",
+        arguments: { action_name: "slow_report", json_args: {} },
+      });
+      if (settle === "in_turn") {
+        finishAction({ report: "ready" });
+        await toolResponse;
+      }
+      if (opts.stop === "before_completion") await session.interrupt("user stop");
+      n("item/completed", {
+        threadId: "thr-1",
+        turnId: "turn-1",
+        item: {
+          type: "dynamicToolCall",
+          id: "call-slow",
+          tool: "execute_action",
+          arguments: {},
+          status: settle === "in_turn" ? "completed" : "failed",
+        },
+      });
+      n("turn/completed", {
+        threadId: "thr-1",
+        turn: { id: "turn-1", status: opts.status ?? "completed" },
+      });
+      if (opts.stop === "after_completion") await session.interrupt("user stop");
+      return { turn: { id: "turn-1" } };
+    });
+    session = await new CodexAppServerProvider().openSession(
+      buildParams({ executeAction, onOrphanedToolResult }),
+    );
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "start the report" });
+    const messages = await collected;
+    // The idle sweeper closes a quiescent session before a defer can fire.
+    if (settle === "after_close") await session.close();
+    finishAction({ report: "ready" });
+    const response = await toolResponse;
+    return { session, messages, response, executeAction, onOrphanedToolResult };
+  }
+
+  it("hands the result to the session once, after the turn's terminal", async () => {
+    const { session, messages, response, executeAction, onOrphanedToolResult } =
+      await runTurnWithSlowAction();
+
+    expect(messages.at(-1)).toMatchObject({ type: "result" });
+    expect(executeAction).toHaveBeenCalledTimes(1);
+    // The JSON-RPC request still settles.
+    expect(response).toMatchObject({ success: true });
+    expect(onOrphanedToolResult).toHaveBeenCalledTimes(1);
+    expect(onOrphanedToolResult).toHaveBeenCalledWith({
+      tool: "execute_action",
+      callId: "call-slow",
+      arguments: { action_name: "slow_report", json_args: {} },
+      success: true,
+      text: expect.stringContaining("ready"),
+      interrupted: false,
+    });
+    await session.close();
+  });
+
+  it("hands over a result that finishes after the session closed", async () => {
+    const { onOrphanedToolResult } = await runTurnWithSlowAction({ settle: "after_close" });
+
+    expect(requestMock).toHaveBeenCalledWith("thread/unsubscribe", expect.anything());
+    expect(onOrphanedToolResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks a result that outlived an interrupted turn", async () => {
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
+      status: "interrupted",
+    });
+
+    expect(onOrphanedToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-slow", interrupted: true }),
+    );
+    await session.close();
+  });
+
+  it("marks a result as interrupted when the turn finished before a Stop landed", async () => {
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
+      stop: "before_completion",
+    });
+
+    expect(requestMock).toHaveBeenCalledWith("turn/interrupt", expect.anything());
+    expect(onOrphanedToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-slow", interrupted: true }),
+    );
+    await session.close();
+  });
+
+  it("delivers a result whose turn Codex completed before the Stop", async () => {
+    const { session, onOrphanedToolResult } = await runTurnWithSlowAction({
+      stop: "after_completion",
+    });
+
+    expect(onOrphanedToolResult).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-slow", interrupted: false }),
+    );
+    await session.close();
+  });
+
+  it("returns a result that settles inside its turn to the model only", async () => {
+    const { session, messages, onOrphanedToolResult } = await runTurnWithSlowAction({
+      settle: "in_turn",
+    });
+
+    expect(onOrphanedToolResult).not.toHaveBeenCalled();
+    const traced = messages.find((m) => m.type === "tool_result") as
+      | { output?: { content?: Array<{ text?: string }> } }
+      | undefined;
+    expect(traced?.output?.content?.[0]?.text).toContain("ready");
+    await session.close();
+  });
+});
