@@ -604,21 +604,23 @@ function ConversationRow({
       <SettingSection title={t("channels.conversationSettings.sections.routing")}>
         {supported.has("routing.agentName") && silent && (
           <SettingRow field="agent" overridden={false}>
-            <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
-            <p className="mt-1 text-aux text-muted-foreground">
-              {t("channels.conversationSettings.silentAccount")}{" "}
-              <Trans
-                t={t}
-                i18nKey="channels.conversationSettings.silentAccountLink"
-                components={{
-                  account: <Link to={silentAccount} className="underline underline-offset-2" />,
-                }}
-              />
-              {agentOverridden &&
-                ` ${t("channels.conversationSettings.silentAccountOverride", {
-                  agent: overriddenAgentLabel(t, snapshot.overrides.routing?.agentName),
-                })}`}
-            </p>
+            <div className="sm:max-w-xs">
+              <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
+              <p className="mt-1 text-aux text-muted-foreground">
+                {t("channels.conversationSettings.silentAccount")}{" "}
+                <Trans
+                  t={t}
+                  i18nKey="channels.conversationSettings.silentAccountLink"
+                  components={{
+                    account: <Link to={silentAccount} className="underline underline-offset-2" />,
+                  }}
+                />
+                {agentOverridden &&
+                  ` ${t("channels.conversationSettings.silentAccountOverride", {
+                    agent: overriddenAgentLabel(snapshot.overrides.routing?.agentName),
+                  })}`}
+              </p>
+            </div>
           </SettingRow>
         )}
         {supported.has("routing.agentName") && !silent && (
@@ -652,10 +654,8 @@ function ConversationRow({
 }
 
 /** A stored agent choice, where null and either spelling of main pin main. */
-function overriddenAgentLabel(t: TFunction<"settings">, name: string | null | undefined): string {
-  return !name || name === "main" || name === MAIN_AGENT_ID
-    ? t("channels.conversationSettings.mainAgent")
-    : agentLabel(name);
+function overriddenAgentLabel(name: string | null | undefined): string {
+  return !name || name === "main" || name === MAIN_AGENT_ID ? "main" : agentLabel(name);
 }
 
 /** An agent's name and, unless it is core, its owner. */
