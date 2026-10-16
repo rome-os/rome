@@ -20,7 +20,7 @@ test.use({ viewport: IPAD, hasTouch: true, isMobile: true });
 // holds its scroller.
 const PAGES = [
   // The search field and the editor raise the keyboard here.
-  { name: "the file browser", path: "/projects", frame: 'main:has(input[data-slot="input"])' },
+  { name: "the file browser", path: "/files", frame: 'main:has(input[data-slot="input"])' },
   // A top-level visit to the full-mode inventory, whose search field raises
   // the keyboard. As a workspace tile it runs in an iframe, which sizes it.
   {

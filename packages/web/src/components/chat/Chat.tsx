@@ -43,6 +43,7 @@ import {
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { ChatTitle } from "@/components/chat/ChatTitle";
 import { prettyAgentName } from "@/lib/agent-name";
 import { artifactLocalName } from "@/lib/artifact-name";
 import {
@@ -377,6 +378,7 @@ export function Chat({
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     pinnedAt,
+    projectPath: identityProjectPath,
   } = useSessionIdentity(mainSessionId);
   // The agent a draft's first send picked stands in until the new session's
   // identity loads, so its chip does not drop out when the composer locks.
@@ -1834,9 +1836,10 @@ export function Chat({
                 size="sm"
                 className="shrink-0"
               />
-              <span className="truncate text-ui text-foreground">
-                {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
-              </span>
+              <ChatTitle
+                title={sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+                projectPath={identityProjectPath}
+              />
               <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
               {sessionName?.trim() && pinnedAgentMention && (
                 <span className="shrink-0 truncate text-aux text-muted-foreground">

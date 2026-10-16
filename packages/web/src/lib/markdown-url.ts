@@ -19,10 +19,13 @@ export const transformMarkdownUrl: NonNullable<MarkdownProps["urlTransform"]> = 
 
   // File browser routes serve the dashboard HTML, not the image bytes.
   const pathname = toInternalPath(transformedUrl).split(/[?#]/, 1)[0];
-  const match = /^\/(projects|memory)\/(.+)$/.exec(pathname);
+  // `/files` is the page route for the `projects` root; agent-authored links
+  // still address it as `/projects`.
+  const match = /^\/(projects|files|memory)\/(.+)$/.exec(pathname);
   if (!match) return transformedUrl;
 
-  const [, root, routePath] = match;
+  const [, route, routePath] = match;
+  const root = route === "files" ? "projects" : route;
   const logicalPath = getFileBrowserRouteLogicalPath(root, routePath);
   if (!logicalPath) return "";
 

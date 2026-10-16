@@ -5,6 +5,8 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { useSessionsChanged } from "@/lib/session-events";
+import { projectPathForChat } from "@/hooks/use-chat-projects";
+import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 
 export interface SessionIdentity {
   /** The session's display name, or null while loading / unnamed. */
@@ -18,6 +20,16 @@ export interface SessionIdentity {
   archivedAt: string | null;
   /** ISO timestamp when the session was pinned, or null when not pinned. */
   pinnedAt: string | null;
+  /** The project folder the chat works in, or null for the default one. */
+  projectPath: string | null;
+}
+
+function namedProjectPath(
+  session: { projectPath?: string | null; projectName?: string } | null,
+): string | null {
+  if (!session) return null;
+  const path = projectPathForChat(session);
+  return path === DEFAULT_PROJECT_NAME ? null : path;
 }
 
 /**
@@ -41,6 +53,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null>(null);
+  const [projectPath, setProjectPath] = useState<string | null>(null);
 
   useEffect(() => {
     sessionGeneration.current += 1;
@@ -51,6 +64,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setSessionName(null);
       setArchivedAt(null);
       setPinnedAt(null);
+      setProjectPath(null);
       return;
     }
     setModel(null);
@@ -68,6 +82,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
+        setProjectPath(namedProjectPath(session));
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -93,6 +108,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setPinnedAgentMention(null);
           setArchivedAt(null);
           setPinnedAt(null);
+          setProjectPath(null);
         }
       }
     })();
@@ -120,6 +136,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
+        setProjectPath(namedProjectPath(session));
       } catch {
         // Best effort; the next mount / event reconciles.
       }
@@ -133,5 +150,6 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
     pinnedAt,
+    projectPath,
   };
 }

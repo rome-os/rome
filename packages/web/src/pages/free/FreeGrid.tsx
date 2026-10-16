@@ -23,6 +23,7 @@ import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { useApps } from "@/hooks/use-apps";
 import { SessionModelLabel } from "@/components/chat/SessionModelLabel";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { ChatTitle } from "@/components/chat/ChatTitle";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { SlotContent } from "@/components/slot";
 import {
@@ -312,7 +313,7 @@ export function FreeGrid() {
   // Session identity for the mobile header bar (the desktop chat navbar resolves
   // its own copy inside Chat). Both read the same hook; see its note on the
   // intentional double-fetch.
-  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt } =
+  const { sessionName, model, reasoningEffort, pinnedAgentMention, pinnedAt, projectPath } =
     useSessionIdentity(chatSessionId);
   // The chat a guardian names is the one they keep a tab on, so the name
   // outranks the route's own title. Claimed here rather than in FreePage so it
@@ -383,9 +384,12 @@ export function FreeGrid() {
                 className="shrink-0"
               />
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-ui text-foreground">
-                  {sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                </span>
+                <ChatTitle
+                  title={
+                    sessionName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")
+                  }
+                  projectPath={projectPath}
+                />
                 <div className="flex min-w-0 items-center gap-2">
                   <SessionModelLabel model={model} reasoningEffort={reasoningEffort} />
                   {sessionName?.trim() && pinnedAgentMention && (

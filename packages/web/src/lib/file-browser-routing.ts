@@ -35,16 +35,24 @@ export function getFileBrowserRouteLogicalPath(
   return decodedPath ? `${logicalRootPath}/${decodedPath}` : null;
 }
 
-export function getFileBrowserUrlPath(logicalRootPath: string, path: string | null): string {
+/**
+ * The page URL for a logical path. The route usually shares the logical root's
+ * name, but need not: the Files page browses the `projects` root at `/files`.
+ */
+export function getFileBrowserUrlPath(
+  logicalRootPath: string,
+  path: string | null,
+  routeBasePath = `/${logicalRootPath}`,
+): string {
   if (!path || path === logicalRootPath) {
-    return `/${logicalRootPath}`;
+    return routeBasePath;
   }
 
   const relativePath = path.startsWith(`${logicalRootPath}/`)
     ? path.slice(logicalRootPath.length + 1)
     : path;
   const encodedPath = relativePath.split("/").map(encodeURIComponent).join("/");
-  return `/${logicalRootPath}/${encodedPath}`;
+  return `${routeBasePath}/${encodedPath}`;
 }
 
 export function getFileBrowserDirectoryAncestors(path: string, logicalRootPath: string): string[] {

@@ -60,7 +60,7 @@ test("recent chats stay reachable when the panels fill a short viewport", async 
 }) => {
   await page.setViewportSize({ width: 1280, height: 700 });
   await mockDashboard(context);
-  await page.goto("/projects");
+  await page.goto("/files");
 
   const firstChat = page.getByRole("link", { name: /^Chat 0 / });
   await firstChat.scrollIntoViewIfNeeded();
@@ -72,7 +72,7 @@ test("recent chats stay reachable when the panels fill a short viewport", async 
 test("the provider period control fits a phone-width dashboard", async ({ context, page }) => {
   await page.setViewportSize({ width: 375, height: 800 });
   await mockDashboard(context);
-  await page.goto("/projects");
+  await page.goto("/files");
   // Phones open the Files tab first.
   await page.getByRole("radio", { name: "Overview" }).click();
 
@@ -91,7 +91,7 @@ test("the provider period control fits a phone-width dashboard", async ({ contex
 
 async function openPhoneOverview(page: Page, width: number) {
   await page.setViewportSize({ width, height: 800 });
-  await page.goto("/projects");
+  await page.goto("/files");
   // Phones open the Files tab first.
   await page.getByRole("radio", { name: "Overview" }).click();
   return page.getByRole("table", { name: /^Usage by provider/ });
@@ -137,7 +137,7 @@ test("a phone dashboard keeps tokens when no run reported a cost", async ({ cont
 test("a wide dashboard shows every provider column", async ({ context, page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await mockDashboard(context);
-  await page.goto("/projects");
+  await page.goto("/files");
 
   const table = page.getByRole("table", { name: /^Usage by provider/ });
   const headers = table.getByRole("columnheader");
@@ -173,7 +173,7 @@ test("a dashboard just wide enough for every column keeps long figures inside th
     longFigures("google", 1_234.56),
   ]);
   await page.setViewportSize({ width: 700, height: 900 });
-  await page.goto("/projects");
+  await page.goto("/files");
   await page.getByRole("radio", { name: "Overview" }).click();
   const dashboard = page.locator(".\\@container\\/project-dashboard");
   // The breakpoint measures the dashboard, so size the viewport until the dashboard is

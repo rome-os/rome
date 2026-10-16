@@ -57,8 +57,8 @@ describe("routeTitle", () => {
       key: "nav.memory",
       detail: "17.md",
     });
-    expect(routeTitle("/projects/rome/README.md", APP_NAV)).toEqual({
-      key: "nav.projects",
+    expect(routeTitle("/files/rome/README.md", APP_NAV)).toEqual({
+      key: "nav.files",
       detail: "README.md",
     });
     expect(routeTitle("/memory", APP_NAV)).toEqual({ key: "nav.memory", detail: null });

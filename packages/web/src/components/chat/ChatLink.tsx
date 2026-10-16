@@ -12,10 +12,13 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 // two link shapes the agent emits lives here, and everything else falls through
 // to the default react-router link.
 //
-//   /projects/<project>/<path> or an absolute same-origin form
-//                              → open the projects panel + select the file
+//   /projects/<project>/<path>, /files[/<path>], or an absolute
+//   same-origin form           → open the projects panel + select the file
 //                                (reuses the same follow signal ChatWidget
 //                                publishes when an agent links a file).
+//                                `/projects` and `/projects/<project>` are
+//                                the Projects pages, so react-router takes
+//                                them.
 //   /apps/<appId>[/<route>][?q]  → open that app's workspace tile, preserving
 //                                 the in-app sub-route and query params so the
 //                                 tile lands on the exact linked page.
@@ -23,8 +26,21 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 // Both reuse the exact mechanisms FreeGrid already drives for agent-linked
 // files and installed apps, just triggered by an explicit click.
 
+// A file under a project: `/projects/<project>/<path>`. Agents still emit these
+// links for files.
 function isProjectsHref(href: string): boolean {
-  return href === "/projects" || href.startsWith("/projects/");
+  if (!href.startsWith("/projects/")) return false;
+  const rest = href.slice("/projects/".length);
+  const slash = rest.indexOf("/");
+  return slash > 0 && slash < rest.length - 1;
+}
+
+// `/files` is the Files page's route for the same `projects` root, so its
+// links address the same files as `/projects` ones.
+function filesHrefToProjectsHref(href: string): string | null {
+  return href === "/files" || href.startsWith("/files/")
+    ? `/projects${href.slice("/files".length)}`
+    : null;
 }
 
 // Return the raw path+query+hash of an href that addresses a `/projects` route
@@ -57,7 +73,8 @@ function getProjectsRouteHref(href: string): string | null {
   const rawPath = getInternalRawPath(href);
   if (rawPath === null) return null;
   const filePath = stripQueryAndFragment(rawPath);
-  return isProjectsHref(filePath) ? filePath : null;
+  if (isProjectsHref(filePath)) return filePath;
+  return filesHrefToProjectsHref(filePath);
 }
 
 // Drop everything from the first literal `?` or `#`. Operates on the raw

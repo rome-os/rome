@@ -23,6 +23,8 @@ interface RomeInputDialogProps {
   title: string;
   /** Optional content rendered below the input (e.g. a sync-source picker). */
   children?: ReactNode;
+  /** The confirm is running: its button is disabled and marked busy. */
+  busy?: boolean;
 }
 
 export function RomeInputDialog({
@@ -39,6 +41,7 @@ export function RomeInputDialog({
   open,
   title,
   children,
+  busy = false,
 }: RomeInputDialogProps) {
   const { t } = useTranslation("files");
   const resolvedCancelLabel = cancelLabel ?? t("dialog.cancel");
@@ -127,7 +130,9 @@ export function RomeInputDialog({
           <Button type="button" variant="outline" onClick={onCancel}>
             {resolvedCancelLabel}
           </Button>
-          <Button type="submit">{confirmLabel}</Button>
+          <Button type="submit" disabled={busy} aria-busy={busy || undefined}>
+            {confirmLabel}
+          </Button>
         </div>
       </form>
     </Dialog>

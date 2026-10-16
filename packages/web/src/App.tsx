@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";
 import { AuthGate } from "./shell/AuthGate";
@@ -27,7 +27,9 @@ const PeopleIndexRedirect = lazy(() =>
 );
 const PersonDetailPage = lazy(() => import("./pages/PersonDetailPage"));
 const MemoryPage = lazy(() => import("./pages/MemoryPage"));
-const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
+const FilesPage = lazy(() => import("./pages/FilesPage"));
+const ProjectsIndexPage = lazy(() => import("./pages/projects/ProjectsIndexPage"));
+const ProjectDetailPage = lazy(() => import("./pages/projects/ProjectDetailPage"));
 const RoutinesPage = lazy(() => import("./pages/RoutinesPage"));
 const RoutineDetailPage = lazy(() => import("./pages/RoutineDetailPage"));
 const SessionsPage = lazy(() => import("./pages/SessionsPage"));
@@ -57,6 +59,18 @@ const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 const DevIndexPage = import.meta.env.DEV
   ? lazy(() => import("./pages/dev/DevIndexPage"))
   : () => null;
+
+// A deep /projects link names a file in a project's folder, which the Files page
+// now shows. The rest of the path, query and hash carry over unchanged.
+function LegacyProjectFileRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={`/files${location.pathname.slice("/projects".length)}${location.search}${location.hash}`}
+      replace
+    />
+  );
+}
 
 export default function App() {
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
@@ -156,7 +170,12 @@ export default function App() {
             <Route path="/people/directory" element={<PeoplePage view="directory" />} />
             <Route path="/people/person/:personId" element={<PersonDetailPage />} />
             <Route path="/memory/*" element={<MemoryPage />} />
-            <Route path="/projects/*" element={<ProjectsPage />} />
+            <Route path="/files/*" element={<FilesPage />} />
+            <Route path="/projects" element={<ProjectsIndexPage />} />
+            <Route path="/projects/:projectPath" element={<ProjectDetailPage />} />
+            {/* The Files page used to live here, and agent-authored links still
+                address a file as /projects/<folder>/<path>. */}
+            <Route path="/projects/:projectPath/*" element={<LegacyProjectFileRedirect />} />
             <Route path="/sessions/*" element={<SessionsPage />} />
             <Route path="/routines" element={<RoutinesPage />} />
             <Route path="/routines/:id" element={<RoutineDetailPage />} />

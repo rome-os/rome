@@ -476,7 +476,7 @@ describe("RecentChats", () => {
     });
   });
 
-  it("sorts project groups and sessions by activity time", async () => {
+  it("lists chats from every project as one list, newest activity first", async () => {
     mockSessions([
       {
         id: "old-active",
@@ -498,19 +498,73 @@ describe("RecentChats", () => {
         projectName: "beta",
         projectPath: "beta",
       },
+      {
+        id: "default-chat",
+        name: "Default chat",
+        createdAt: "2026-07-05T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
     ]);
 
     const { container } = renderRecentChats();
 
-    await screen.findByText("Old but active");
-    expect(textIndex(container, "alpha")).toBeLessThan(textIndex(container, "beta"));
-    expect(textIndex(container, "Old but active")).toBeLessThan(
-      textIndex(container, "New but inactive"),
-    );
+    const list = await screen.findByRole("region", { name: "Recent" });
+    expect(
+      within(list)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Default chat", "Old but active", "New but inactive"]);
+    // No project folders or group headings between the rows.
+    expect(screen.queryByRole("button", { name: "alpha" })).toBeNull();
+    expect(textIndex(container, "beta")).toBe(-1);
     expect(screen.getAllByRole("img", { name: "Done · new replies" })).toHaveLength(1);
   });
 
-  it("hides the Projects heading when nothing is pinned", async () => {
+  it("keeps pinned chats in their own block above the list", async () => {
+    mockSessions([
+      {
+        id: "pinned-chat",
+        name: "Pinned chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-01T00:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "alpha",
+        projectPath: "alpha",
+        pinnedAt: "2026-07-09T13:00:00.000Z",
+      },
+      {
+        id: "regular-chat",
+        name: "Regular chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "beta",
+        projectPath: "beta",
+      },
+    ]);
+    const user = userEvent.setup();
+
+    renderRecentChats();
+
+    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
+    const recentSection = screen.getByRole("region", { name: "Recent" });
+    expect(within(pinnedSection).getByRole("link", { name: "Pinned chat" })).toBeTruthy();
+    expect(within(recentSection).queryByRole("link", { name: "Pinned chat" })).toBeNull();
+    expect(within(recentSection).getByRole("link", { name: "Regular chat" })).toBeTruthy();
+    // With something pinned, the list below names itself.
+    expect(screen.getByRole("heading", { name: "Recent" })).toBeTruthy();
+
+    await user.click(within(pinnedSection).getByRole("button", { name: "Pinned" }));
+    expect(within(pinnedSection).queryByText("Pinned chat")).toBeNull();
+  });
+
+  it("names the list without a visible heading when nothing is pinned", async () => {
     mockSessions([
       {
         id: "regular-chat",
@@ -526,164 +580,9 @@ describe("RecentChats", () => {
 
     renderRecentChats();
 
-    const projectsSection = await screen.findByRole("region", { name: "Projects" });
-    expect(screen.queryByRole("heading", { name: "Projects" })).toBeNull();
-    expect(within(projectsSection).getByRole("link", { name: "Regular chat" })).toBeTruthy();
-  });
-
-  it("groups by date using activity time instead of created time", async () => {
-    localStorage.setItem("rome-recent-chats-group-mode", "date");
-    rs.useFakeTimers();
-    rs.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
-    mockSessions([
-      {
-        id: "today-activity",
-        name: "Today activity",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: "2026-07-09T09:00:00.000Z",
-        unread: true,
-        projectName: "alpha",
-        projectPath: "alpha",
-      },
-    ]);
-
-    renderRecentChats();
-
-    await act(async () => {
-      await rs.advanceTimersByTimeAsync(0);
-    });
-    expect(screen.getByText("Today")).toBeTruthy();
-    expect(screen.getByText("Today activity")).toBeTruthy();
-  });
-
-  it("shows pinned projects in a shared Pinned section without pin status icons", async () => {
-    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["alpha"]));
-    mockSessions([
-      {
-        id: "project-chat",
-        name: "Project chat",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: null,
-        unread: false,
-        projectName: "Alpha project",
-        projectPath: "alpha",
-      },
-    ]);
-    const user = userEvent.setup();
-    const { container } = renderRecentChats();
-
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
-    expect(
-      await within(pinnedSection).findByRole("button", { name: "Alpha project" }),
-    ).toBeTruthy();
-    expect(container.querySelector(".lucide-pin")).toBeNull();
-    expect(container.querySelector(".lucide-pin-off")).toBeNull();
-
-    await user.click(within(pinnedSection).getByRole("button", { name: "Project actions" }));
-    const unpinItem = screen.getByRole("menuitem", { name: "Unpin" });
-    expect(unpinItem.querySelector(".lucide-pin-off")).toBeTruthy();
-    await user.click(unpinItem);
-    await waitFor(() => expect(screen.queryByRole("region", { name: "Pinned" })).toBeNull());
-    expect(
-      within(screen.getByRole("region", { name: "Projects" })).getByRole("link", {
-        name: "Project chat",
-      }),
-    ).toBeTruthy();
-  });
-
-  it("keeps default chats grouped under the default project", async () => {
-    localStorage.setItem("rome-recent-chats-pinned-projects", JSON.stringify(["alpha"]));
-    mockSessions([
-      {
-        id: "pinned-chat",
-        name: "Pinned standalone chat",
-        createdAt: "2026-07-04T00:00:00.000Z",
-        activityAt: "2026-07-09T12:00:00.000Z",
-        lastSeenActivityAt: null,
-        unread: false,
-        projectName: "default",
-        projectPath: "default",
-        pinnedAt: "2026-07-09T13:00:00.000Z",
-      },
-      {
-        id: "pinned-project-chat",
-        name: "Pinned project child",
-        createdAt: "2026-07-03T00:00:00.000Z",
-        activityAt: "2026-07-09T11:00:00.000Z",
-        lastSeenActivityAt: null,
-        unread: false,
-        projectName: "Alpha project",
-        projectPath: "alpha",
-      },
-      {
-        id: "standalone-chat",
-        name: "Standalone chat",
-        createdAt: "2026-07-02T00:00:00.000Z",
-        activityAt: "2026-07-09T10:00:00.000Z",
-        lastSeenActivityAt: null,
-        unread: false,
-        projectName: "default",
-        projectPath: "default",
-      },
-      {
-        id: "regular-project-chat",
-        name: "Regular project child",
-        createdAt: "2026-07-01T00:00:00.000Z",
-        activityAt: "2026-07-09T09:00:00.000Z",
-        lastSeenActivityAt: null,
-        unread: false,
-        projectName: "Beta project",
-        projectPath: "beta",
-      },
-    ]);
-    const user = userEvent.setup();
-
-    renderRecentChats();
-
-    const pinnedSection = await screen.findByRole("region", { name: "Pinned" });
-    const projectsSection = screen.getByRole("region", { name: "Projects" });
-
-    expect(
-      within(pinnedSection).getByRole("link", { name: "Pinned standalone chat" }),
-    ).toBeTruthy();
-    const pinnedProjectButton = within(pinnedSection).getByRole("button", {
-      name: "Alpha project",
-    });
-    expect(pinnedProjectButton.querySelector(".lucide-folder-open")).toBeTruthy();
-    const pinnedProjectChat = within(pinnedSection).getByRole("link", {
-      name: "Pinned project child",
-    });
-    expect(pinnedProjectChat.classList.contains("pl-4")).toBe(true);
-    expect(pinnedProjectChat.classList.contains("pl-12")).toBe(false);
-    expect(
-      within(pinnedSection).getByRole("button", { name: "New chat in this project" }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Chats" })).toBeNull();
-    const defaultProjectButton = within(projectsSection).getByRole("button", {
-      name: "default",
-    });
-    expect(defaultProjectButton.querySelector(".lucide-folder-open")).toBeTruthy();
-    expect(within(projectsSection).getByRole("link", { name: "Standalone chat" })).toBeTruthy();
-    expect(within(projectsSection).getByRole("button", { name: "Beta project" })).toBeTruthy();
-    expect(
-      within(projectsSection).getByRole("link", { name: "Regular project child" }),
-    ).toBeTruthy();
-    expect(screen.getAllByText("Alpha project")).toHaveLength(1);
-
-    await user.click(pinnedProjectButton);
-    expect(within(pinnedSection).queryByText("Pinned project child")).toBeNull();
-    expect(pinnedProjectButton.querySelector(".lucide-folder")).toBeTruthy();
-    expect(pinnedProjectButton.querySelector(".lucide-folder-open")).toBeNull();
-
-    await user.click(pinnedProjectButton);
-    expect(within(pinnedSection).getByText("Pinned project child")).toBeTruthy();
-    expect(pinnedProjectButton.querySelector(".lucide-folder-open")).toBeTruthy();
-
-    await user.click(within(pinnedSection).getByRole("button", { name: "Pinned" }));
-    expect(within(pinnedSection).queryByText("Pinned standalone chat")).toBeNull();
-    expect(within(pinnedSection).queryByText("Pinned project child")).toBeNull();
+    const recentSection = await screen.findByRole("region", { name: "Recent" });
+    expect(screen.queryByRole("heading", { name: "Recent" })).toBeNull();
+    expect(within(recentSection).getByRole("link", { name: "Regular chat" })).toBeTruthy();
   });
 
   it("does not render unread dots for the active session", async () => {
@@ -706,12 +605,43 @@ describe("RecentChats", () => {
     expect(container.querySelectorAll(".bg-info")).toHaveLength(0);
   });
 
-  it("loads project chats in batches of ten", async () => {
-    const sessions = Array.from({ length: 25 }, (_, index) => ({
+  it("loads chats twenty at a time", async () => {
+    const sessions = Array.from({ length: 45 }, (_, index) => ({
       id: `session-${index + 1}`,
       name: `Session ${index + 1}`,
-      createdAt: new Date(Date.UTC(2026, 6, 25 - index)).toISOString(),
-      activityAt: new Date(Date.UTC(2026, 6, 25 - index)).toISOString(),
+      createdAt: new Date(Date.UTC(2026, 6, 30, 0, 45 - index)).toISOString(),
+      activityAt: new Date(Date.UTC(2026, 6, 30, 0, 45 - index)).toISOString(),
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: index % 2 ? "alpha" : "beta",
+      projectPath: index % 2 ? "alpha" : "beta",
+    }));
+    mockSessions(sessions);
+    const user = userEvent.setup();
+
+    renderRecentChats();
+
+    expect(await screen.findByText("Session 20")).toBeTruthy();
+    expect(screen.queryByText("Session 21")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Load 20 more" }));
+    expect(screen.getByText("Session 40")).toBeTruthy();
+    expect(screen.queryByText("Session 41")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Load 5 more" }));
+    expect(screen.getByText("Session 45")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Load \d+ more/ })).toBeNull();
+  });
+
+  it.each([
+    ["scope", "My chats"],
+    ["status", "Active"],
+  ])("shows one page again after a %s change", async (_label, item) => {
+    const sessions = Array.from({ length: 45 }, (_, index) => ({
+      id: `session-${index + 1}`,
+      name: `Session ${index + 1}`,
+      createdAt: new Date(Date.UTC(2026, 6, 30, 0, 45 - index)).toISOString(),
+      activityAt: new Date(Date.UTC(2026, 6, 30, 0, 45 - index)).toISOString(),
       lastSeenActivityAt: null,
       unread: false,
       projectName: "alpha",
@@ -721,21 +651,15 @@ describe("RecentChats", () => {
     const user = userEvent.setup();
 
     renderRecentChats();
+    await screen.findByText("Session 20");
+    await user.click(screen.getByRole("button", { name: "Load 20 more" }));
+    expect(screen.getByText("Session 40")).toBeTruthy();
 
-    expect(await screen.findByText("Session 4")).toBeTruthy();
-    expect(screen.queryByText("Session 5")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: item }));
 
-    await user.click(screen.getByRole("button", { name: "Load 21 more" }));
-    expect(screen.getByText("Session 14")).toBeTruthy();
-    expect(screen.queryByText("Session 15")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Load 11 more" }));
-    expect(screen.getByText("Session 24")).toBeTruthy();
-    expect(screen.queryByText("Session 25")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Load 1 more" }));
-    expect(screen.getByText("Session 25")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Load \d+ more/ })).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Session 21")).toBeNull());
+    expect(screen.getByText("Session 20")).toBeTruthy();
   });
 
   it("refetches with a status query when the status filter changes", async () => {

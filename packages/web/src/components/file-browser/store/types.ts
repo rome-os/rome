@@ -131,6 +131,9 @@ export type DeleteDescriptionResolver = (ctx: {
 export interface FileBrowserConfig {
   apiBasePath: string;
   logicalRootPath: string;
+  /** The page route the browser keeps its selection in. Defaults to
+   *  `/<logicalRootPath>`. */
+  routeBasePath?: string;
   rootLabel: string;
   autoSave?: AutoSaveResolver;
   initialSelectedFolderPath: string | null;

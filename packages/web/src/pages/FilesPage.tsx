@@ -39,7 +39,9 @@ function getProjectName(path: string): string {
   return path.slice("projects/".length);
 }
 
-export default function ProjectsPage() {
+// The file browser over the `projects` root. Projects themselves (the chats a
+// folder holds) live on the Projects page; this page is the folders' files.
+export default function FilesPage() {
   const { t } = useTranslation("files");
   const navigate = useNavigate();
   const location = useLocation();
@@ -118,6 +120,7 @@ export default function ProjectsPage() {
         getDeleteDescription={getDeleteDescription}
         initialSelectedFolderPath="projects"
         logicalRootPath="projects"
+        routeBasePath="/files"
         onStartChatFromFolder={startChatFromFolder}
         onPathsDeleted={handlePathsDeleted}
         onFolderCreated={handleFolderCreated}

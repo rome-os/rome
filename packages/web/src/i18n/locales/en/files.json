@@ -17,7 +17,7 @@
     }
   },
   "projects": {
-    "title": "Projects",
+    "title": "Files",
     "rootLabel": "~/.rome/<profile>/projects",
     "searchPlaceholder": "Search project files...",
     "allHeroTitle": "All projects",
