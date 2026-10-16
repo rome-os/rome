@@ -12,7 +12,12 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { DrizzleGrantLedger } from "../../connections/ledger-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
-import { makeGatedWatch, makePasteTalk, makeTwoGrant } from "../../connections/test-fixtures.js";
+import {
+  makeGatedWatch,
+  makePasteTalk,
+  makeTwoGrant,
+  makeZeroGrantTalk,
+} from "../../connections/test-fixtures.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
@@ -545,6 +550,32 @@ describe("guardian links across Connections of one service", () => {
 
     expect((await del(`/connections/${first.id}`)).status).toBe(200);
     expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+  });
+
+  it("keeps the guardian link when one of two Connections whose Talk needs no grant is removed", async () => {
+    const { db, close } = createTestDb();
+    openDbs.push(close);
+    const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
+    registry.register(makeZeroGrantTalk().descriptor);
+    const first = await registry.connect("fake-webchat");
+    await registry.connectAnother("fake-webchat");
+    const personMappingRepo = new PersonMappingRepository(db);
+    await personMappingRepo.create({
+      displayName: "Guardian",
+      bondLevel: "guardian",
+      channelMappings: [{ channel: "fake-webchat", channelUserId: "guardian" }],
+    });
+    const app = makeApp(registry, personMappingRepo, {
+      db,
+      approvalsRepo: new ApprovalsRepository(db),
+    });
+
+    const removed = await app.request(`/connections/${first.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+    expect(removed.status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("fake-webchat", "guardian")).not.toBeNull();
   });
 
   it("deletes the guardian link when the last bot is removed", async () => {

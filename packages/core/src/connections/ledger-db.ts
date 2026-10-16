@@ -152,7 +152,14 @@ export class DrizzleGrantLedger implements GrantLedger {
     needs: readonly GrantName[],
     exceptId: ConnectionId,
   ): ConnectionId[] {
-    if (needs.length === 0) return [];
+    if (needs.length === 0) {
+      return tx
+        .select({ id: connections.id })
+        .from(connections)
+        .where(and(eq(connections.service, service), ne(connections.id, exceptId)))
+        .all()
+        .map((row) => row.id);
+    }
     return tx
       .select({ id: connectionGrants.custody })
       .from(connectionGrants)
