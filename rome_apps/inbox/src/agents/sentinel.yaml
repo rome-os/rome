@@ -2,12 +2,12 @@ name: sentinel
 description: Triages incoming messages from untrusted senders.
 model: haiku
 permissionMode: bypassPermissions
-tools:
-  - Read
-  - Glob
-  - Grep
-# Reads untrusted sender text and only returns a decision, so it holds no
-# actions: anything it can call is reachable by prompt injection.
+# Reads untrusted sender text, and its REPLY reaches the sender without envoy
+# review, so it holds no builtin tools and no actions: anything it can call or
+# read is reachable by prompt injection. On Codex, any of Read, Glob, or Grep
+# is a writable shell (docs/concepts/agents.md#builtin-tools). The sender's
+# bond level and relationship profile arrive in its context instead.
+tools: []
 actions: []
 # To migrate this agent to structured output, declare:
 #   outputSchema:
@@ -36,4 +36,6 @@ systemPromptPrefix: |
   Do not include reasoning, analysis, labels, or any text that should not be sent
   to the sender.
 
-  You have access to BONDS.md and the sender's relationship profile to make decisions.
+  The context below gives the sender's bond level and relationship profile.
+  Decide from that context and the message alone. You cannot read files or
+  look anything up.
