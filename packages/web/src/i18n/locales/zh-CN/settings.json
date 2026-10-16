@@ -370,7 +370,7 @@
         "inline": "会话内"
       },
       "mainAgent": "main（默认）",
-      "silentAccount": "此账号关联的智能体在这里回复。可在“连接”页面关联。",
+      "silentAccount": "此账号关联的智能体在这里回复。<account>在账号页面关联</account>。",
       "silentAccountOverride": "关联后，此对话选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",

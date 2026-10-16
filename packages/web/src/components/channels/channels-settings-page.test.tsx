@@ -44,7 +44,7 @@ const defaults = {
 
 function item(input: {
   id: string;
-  service?: "discord" | "feishu";
+  service?: "discord" | "feishu" | "telegram";
   name: string;
   supportedFields?: string[];
   overrides?: object;
@@ -273,10 +273,14 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             connection("discord", { linkedAgent: null }),
             connection("feishu", { linkedAgent: "sales:agent" }),
+            // Linked to an agent whose app was removed, so core keeps it silent.
+            connection("telegram", { linkedAgent: "gone:agent" }),
           ],
         });
       }
-      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url === "/api/agents") {
+        return ok({ agents: [{ name: "core:main" }, { name: "sales:agent" }] });
+      }
       if (url.startsWith("/api/conversation-settings?")) {
         return ok({
           items: [
@@ -286,6 +290,7 @@ describe("ChannelsSettingsPage", () => {
               overrides: { routing: { agentName: "coding:build" } },
             }),
             item({ id: "support", service: "feishu", name: "support" }),
+            item({ id: "ops", service: "telegram", name: "ops" }),
           ],
         });
       }
@@ -296,6 +301,9 @@ describe("ChannelsSettingsPage", () => {
     const silent = await findCard();
     expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
     expect(within(silent).getByText("None. This account stays silent.")).toBeTruthy();
+    expect(
+      within(silent).getByRole("link", { name: "Link one on the account" }).getAttribute("href"),
+    ).toBe("/settings/connections/discord");
     // The stored agent choice has no effect yet, so it is not counted, but the
     // card says it applies once an agent is linked.
     expect(within(silent).queryByText(/override/)).toBeNull();
@@ -308,6 +316,11 @@ describe("ChannelsSettingsPage", () => {
       "article",
     ) as HTMLElement;
     expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
+
+    const unloaded = (await screen.findByRole("heading", { name: /ops/ })).closest(
+      "article",
+    ) as HTMLElement;
+    expect(within(unloaded).getByText("None. This account stays silent.")).toBeTruthy();
   });
 
   it("creates no override when an edit is undone before the debounce elapses", async () => {
