@@ -70,7 +70,8 @@ export interface ConnectionCard {
   /** The account's channel id; null for placeholders and services without a
    *  Talk. Never shown on screens. */
   channel: string | null;
-  /** Canonical id of the agent linked to this account, or null when main answers. */
+  /** Canonical id of the agent linked to this account, or null when the account
+   *  stays silent. */
   linkedAgent: string | null;
   /** Whether the server reports links, so the link route exists. A core that
    *  serves accounts before agent links omits `linkedAgent`, and the picker

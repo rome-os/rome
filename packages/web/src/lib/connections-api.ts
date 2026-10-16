@@ -108,8 +108,8 @@ export async function createConnection(service: string, fallback: string): Promi
   return payload.connection;
 }
 
-/** Link an agent to an account by its channel id, or pass null so main
- *  answers there. `fallback` is the error message when the server gives none. */
+/** Link an agent to an account by its channel id, or pass null so the account
+ *  stays silent. `fallback` is the error message when the server gives none. */
 export async function linkAccountAgent(
   id: string,
   agent: string | null,
