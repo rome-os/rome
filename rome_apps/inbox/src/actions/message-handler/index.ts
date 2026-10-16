@@ -669,13 +669,15 @@ export function createMessageHandlerAction(
           projectPath: selectedProjectPath,
         });
         // Root conversations retain their persisted override, and native
-        // thread sessions are refreshed from their parent's. An override wins
-        // over the account's linked agent, which answers the rest and is never
-        // stored, so a relink takes effect on the next message.
-        const override =
+        // thread sessions are refreshed from their parent's. A group's or
+        // channel's override wins over the account's linked agent, which
+        // answers private chats and the rest, and is never stored, so a relink
+        // takes effect on the next message.
+        const storedAgent =
           conversation.agentName && !isCoreMainAgentId(conversation.agentName)
             ? conversation.agentName
             : undefined;
+        const override = answeringAgent && threadType === "private" ? undefined : storedAgent;
         const targetAgent = override ?? answeringAgent ?? "main";
         const platformMessageId =
           typeof args.messageId === "string" && args.messageId

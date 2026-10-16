@@ -1057,6 +1057,27 @@ describe("linked agent", () => {
     }
   });
 
+  it("answers a private chat with the linked agent over its stored agent", async () => {
+    const { deps, agentRunner, conversations } = guardianDeps([
+      "main",
+      "sentinel",
+      "envoy",
+      "sales:agent",
+      "pm:assistant",
+    ]);
+    conversations.ensureChannelConversation.mockImplementation(async () => ({
+      id: "channel:feishu-2:g-feishu",
+      agentName: "pm:assistant",
+    }));
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(
+      inbound({ threadId: "g-feishu", threadType: "private", linkedAgentName: "sales:agent" }),
+    );
+
+    expect(agentRunner.calls[0].agentName).toBe("sales:agent");
+  });
+
   it("stores a group's choice on a linked account's conversation", async () => {
     const { deps, conversations } = guardianDeps([
       "main",
