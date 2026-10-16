@@ -9,6 +9,14 @@ if (
   ["chat", "build", "apps"].includes(new URLSearchParams(window.location.search).get("tour") ?? "")
 ) {
   document.documentElement.dataset.embeddedTour = "true";
+  // The host page owns focus until the visitor interacts with the demo.
+  // Otherwise an autofocus here, like the empty-chat composer's, moves
+  // keyboard focus into this frame on load and scrolls the host page down to
+  // it. The frame's `inert` doesn't stop that in Chrome across origins.
+  const focus = HTMLElement.prototype.focus;
+  HTMLElement.prototype.focus = function (options) {
+    if (navigator.userActivation?.hasBeenActive) focus.call(this, options);
+  };
 }
 
 // Register the interception worker before the app boots, so the AuthGate's
