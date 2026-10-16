@@ -119,6 +119,12 @@ export function resolveAppToOpen(appId: string): string {
   return CARRIER_REDIRECTS[appId] ?? appId;
 }
 
+/** Carriers stay installed (their skills must reach the catalog) but get no
+ * launcher tile or search result: the app they redirect to is the way in. */
+export function isCarrierApp(appId: string): boolean {
+  return Object.hasOwn(CARRIER_REDIRECTS, appId);
+}
+
 export function sameApproval(a: ApprovalRecord | null, b: ApprovalRecord): boolean {
   if (!a) return false;
   return (

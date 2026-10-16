@@ -453,6 +453,26 @@ describe("AppsIndexPage reactivity", () => {
     ).toBe(true);
   });
 
+  it("hides the user-skills carrier: no tile, not counted, not searchable", async () => {
+    const user = userEvent.setup();
+    mockBackend({
+      installed: [
+        installedCard({ id: "weather", displayName: "Weather", origin: "local" }),
+        installedCard({ id: "user-skills", displayName: "User Skills", origin: "local" }),
+      ],
+    });
+
+    renderPage();
+
+    await screen.findByText("Weather");
+    const mySection = screen.getByRole("region", { name: "My apps" });
+    expect(within(mySection).getByText("1")).toBeTruthy();
+    expect(screen.queryByText("User Skills")).toBeNull();
+
+    await user.type(screen.getByLabelText("Search apps"), "skills");
+    expect(screen.queryByText("User Skills")).toBeNull();
+  });
+
   it("hides a section that has no matches while searching", async () => {
     const user = userEvent.setup();
     mockBackend({

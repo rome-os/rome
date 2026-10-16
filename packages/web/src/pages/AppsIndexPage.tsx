@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { AppStoreSheet } from "@/components/AppStoreSheet";
 import { TileIcon } from "@/components/app-tile-icon";
 import { getHostAppRoute } from "@/lib/auth-routing";
+import { isCarrierApp } from "@/lib/chat-helpers";
 import { isImeCompositionEvent } from "@/lib/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { ListToolbar } from "@rome-os/ui/layout-list";
@@ -330,7 +331,9 @@ export default function AppsIndexPage() {
   // `null` while the installed list is still loading — kept distinct from the
   // empty array so the skeleton (loading) and the empty state (no matches) don't
   // collide. Filtering applies live once the list lands.
-  const visibleApps = apps === null ? null : apps.filter(matchesApp);
+  // Carrier apps (e.g. user-skills) are installed plumbing, not destinations.
+  const launcherApps = apps === null ? null : apps.filter((app) => !isCarrierApp(app.id));
+  const visibleApps = launcherApps === null ? null : launcherApps.filter(matchesApp);
   // The grid is sectioned by the server-derived provenance (`AppOrigin`):
   // apps built on this instance, App Store installs, and the built-in group,
   // which pairs first-party apps with Rome's own surfaces (APP_NAV).
@@ -477,20 +480,21 @@ export default function AppsIndexPage() {
       ? null
       : isSearching
         ? visibleMyApps.length
-        : apps.filter((app) => app.origin === "local").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "local").length;
   const storeAppsCount =
     apps === null
       ? null
       : isSearching
         ? visibleStoreApps.length
-        : apps.filter((app) => app.origin === "appstore").length;
+        : (launcherApps ?? []).filter((app) => app.origin === "appstore").length;
   // Built-in = Rome's own surfaces plus the first-party apps shipped with it.
   const builtinCount =
     apps === null
       ? null
       : isSearching
         ? visibleBuiltins.length + visibleBuiltinApps.length
-        : builtinPages.length + apps.filter((app) => app.origin === "builtin").length;
+        : builtinPages.length +
+          (launcherApps ?? []).filter((app) => app.origin === "builtin").length;
   const updatesCount = lifecycle.upgradeTargets.length;
 
   return (

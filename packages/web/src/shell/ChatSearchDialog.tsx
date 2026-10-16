@@ -29,6 +29,7 @@ import {
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
 import { useAppsList } from "@/hooks/use-apps";
+import { isCarrierApp } from "@/lib/chat-helpers";
 import { filterAgentCatalog } from "@/lib/agent-catalog-filter";
 import { prettyAgentName } from "@/lib/agent-name";
 import { getHostAppRoute } from "@/lib/auth-routing";
@@ -95,6 +96,7 @@ function matchingOpenableApps(apps: InstalledAppCard[], normalizedQuery: string)
 
   return apps
     .map((app, originalIndex) => {
+      if (isCarrierApp(app.id)) return null;
       const href = openableAppHref(app);
       if (!href) return null;
       const name = normalizeSearchText(app.displayName);
