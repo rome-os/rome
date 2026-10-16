@@ -1813,11 +1813,21 @@ export class WebChatRepository {
   /**
    * End the turns a stopped Rome process left open. A crash writes no
    * `turn_end`, so the turn would look unfinished forever. Each trace started
-   * since `since` whose last `turn_start` has no later `turn_end` gets an
-   * `error` block and a `turn_end` with status `error`. Older traces stay as
-   * they are. Returns how many turns it ended.
+   * within `windowMs` of the newest trace whose last `turn_start` has no later
+   * `turn_end` gets an `error` block and a `turn_end` with status `error`.
+   * Counting from the newest trace, not from now, keeps the stopped process's
+   * turns in range however long Rome was down. Older traces stay as they are.
+   * Returns how many turns it ended.
    */
-  async endInterruptedTurns(now: Date, since: Date): Promise<number> {
+  async endInterruptedTurns(windowMs: number): Promise<number> {
+    const newest = await this.db
+      .select({ createdAt: sql<number | null>`max(${romeAgentMessages.createdAt})` })
+      .from(romeAgentMessages)
+      .where(eq(romeAgentMessages.role, "trace"))
+      .get();
+    if (newest?.createdAt == null) return 0;
+    // `created_at` is stored in seconds.
+    const since = new Date(newest.createdAt * 1000 - windowMs);
     const blockSeq = (type: string) => sql<number | null>`(
       select max(b."seq") from "rome_agent_trace_blocks" b
       where b."message_id" = ${romeAgentMessages.id}
@@ -1828,7 +1838,6 @@ export class WebChatRepository {
         id: romeAgentMessages.id,
         sessionId: romeAgentMessages.sessionId,
         turnId: romeAgentMessages.turnId,
-        createdAt: romeAgentMessages.createdAt,
         lastStart: blockSeq("turn_start"),
         lastEnd: blockSeq("turn_end"),
         lastSeq: sql<number>`(
@@ -1869,7 +1878,8 @@ export class WebChatRepository {
             type: "turn_end",
             turnId: turnStart.turnId ?? trace.turnId,
             status: "error",
-            durationMs: Math.max(0, now.getTime() - trace.createdAt.getTime()),
+            // The turn's real duration is unknown; elapsed time would count the downtime.
+            durationMs: 0,
             ...agent,
           },
         ],

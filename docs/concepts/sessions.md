@@ -49,7 +49,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 - Failed and interrupted turns still count as turns.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
-- A turn that a backend restart cuts off fails when Rome starts again, with an error that names the restart. It is not resumed. A turn that started more than a day before that start stays open.
+- A turn that a backend restart cuts off fails when Rome starts again, with an error that names the restart. It is not resumed. A turn that started more than a day before the most recent turn stays open.
 - Cancelling provider execution does not close the conversation. The next message opens usable execution state and resumes available history without replaying the cancelled message.
 - A turn's outcome and wall-clock duration come from the [event](#event) that closes it, and its model attribution and token cost come from the accounting on its terminal event. Neither is read from fields mirrored onto individual messages.
 

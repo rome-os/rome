@@ -316,13 +316,9 @@ async function main() {
   const policiesRepo = new PoliciesRepository(db);
   const webchatRepo = new WebChatRepository(db);
   await webchatRepo.recoverInterruptedInputs();
-  // Only turns from the last day, so a crash ends its own turns without
-  // touching traces older crashes left open.
-  const bootAt = new Date();
-  const endedTurns = await webchatRepo.endInterruptedTurns(
-    bootAt,
-    new Date(bootAt.getTime() - 24 * 60 * 60 * 1000),
-  );
+  // Only turns within a day of the newest one, so the stopped process's turns
+  // end however long Rome was down, and traces older crashes left open stay.
+  const endedTurns = await webchatRepo.endInterruptedTurns(24 * 60 * 60 * 1000);
   if (endedTurns > 0) {
     log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
   }

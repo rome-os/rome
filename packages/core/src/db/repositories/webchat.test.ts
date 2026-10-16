@@ -315,7 +315,7 @@ describe("WebChatRepository", () => {
     ]);
   });
 
-  it("ends the turns a stopped process left open, from the last day only", async () => {
+  it("ends the turns a stopped process left open, however long Rome was down", async () => {
     const start = (turnId: string) => ({ type: "turn_start", turnId, agent: "main" });
     const end = (turnId: string) => ({
       type: "turn_end",
@@ -330,9 +330,9 @@ describe("WebChatRepository", () => {
     }
     rs.useFakeTimers({ toFake: ["Date"] });
     try {
-      rs.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+      rs.setSystemTime(new Date("2026-09-25T12:00:00Z"));
       await trace("sess-old", "trace-old", [start("turn-old"), { type: "text", content: "…" }]);
-      rs.setSystemTime(new Date("2026-10-15T11:00:00Z"));
+      rs.setSystemTime(new Date("2026-10-01T11:00:00Z"));
       await trace("sess-crashed", "trace-crashed", [
         start("turn-crashed"),
         { type: "tool_use", id: "tu-1", tool: "execute_action", input: {} },
@@ -343,9 +343,10 @@ describe("WebChatRepository", () => {
       rs.useRealTimers();
     }
 
-    const now = new Date("2026-10-15T12:00:00Z");
-    const since = new Date("2026-10-14T12:00:00Z");
-    await expect(repo.endInterruptedTurns(now, since)).resolves.toBe(2);
+    // Rome comes back with real timers, weeks after these traces: the window
+    // counts from the newest trace, not from now.
+    const day = 24 * 60 * 60 * 1000;
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(2);
 
     const blocks = async (sessionId: string) =>
       JSON.parse((await repo.getTraceContents(sessionId))[0]!.content) as Record<string, unknown>[];
@@ -355,7 +356,7 @@ describe("WebChatRepository", () => {
         type: "turn_end",
         turnId: "turn-crashed",
         status: "error",
-        durationMs: 60 * 60 * 1000,
+        durationMs: 0,
         agent: "main",
       },
     ]);
@@ -376,7 +377,7 @@ describe("WebChatRepository", () => {
       "sess-done": false,
       "sess-old": false,
     });
-    await expect(repo.endInterruptedTurns(now, since)).resolves.toBe(0);
+    await expect(repo.endInterruptedTurns(day)).resolves.toBe(0);
   });
 
   it("lists sessions with message counts and project names", async () => {
