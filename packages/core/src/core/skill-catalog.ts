@@ -29,6 +29,11 @@ export interface LoadedSkill {
 
 export interface SkillMcpDefinition {
   name: string;
+  /**
+   * Bare names the legacy bindings resolve to `name`. `read_skill` accepts
+   * them as input. Absent when no bare name is bound to this skill.
+   */
+  legacyNames?: string[];
   description: string;
   tools?: string[];
   content: string;
@@ -96,15 +101,28 @@ export class SkillCatalog {
   }
 
   getMcpDefinitions(): SkillMcpDefinition[] {
-    return this.skills.map((skill) => ({
-      name: skill.name,
-      description: skill.description,
-      tools: skill.tools,
-      content: stripSkillStructuredSection(skill.content),
-      ...(skill.directory ? { directory: skill.directory, files: skill.files } : {}),
-      ownerType: skill.metadata.ownerType,
-      ownerId: skill.metadata.ownerId,
-    }));
+    // Derive the aliases from the binding map, not from frontmatter names: the
+    // map is what resolveArtifactId reads, and it alone records which skill won
+    // a contested bare name.
+    const legacyNamesById = new Map<string, string[]>();
+    for (const [legacyName, artifactId] of Object.entries(this.identity.legacyBindings.skill)) {
+      const names = legacyNamesById.get(artifactId);
+      if (names) names.push(legacyName);
+      else legacyNamesById.set(artifactId, [legacyName]);
+    }
+    return this.skills.map((skill) => {
+      const legacyNames = legacyNamesById.get(skill.name);
+      return {
+        name: skill.name,
+        ...(legacyNames ? { legacyNames } : {}),
+        description: skill.description,
+        tools: skill.tools,
+        content: stripSkillStructuredSection(skill.content),
+        ...(skill.directory ? { directory: skill.directory, files: skill.files } : {}),
+        ownerType: skill.metadata.ownerType,
+        ownerId: skill.metadata.ownerId,
+      };
+    });
   }
 
   private resolveName(name: string): string {
