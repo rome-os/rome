@@ -521,6 +521,9 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       settingsRepo: deps.settingsRepo,
       reactivateFloating: () => deps.routineEngine.reactivateFloating(),
     });
+    // Not awaited: the provision can take up to MAIL_REQUEST_TIMEOUT_MS, and
+    // the guardian lands on the welcome conversation without waiting for it.
+    void deps.autoConnectEmail?.();
   }
 
   // The row is created BEFORE the cookie so a session never outruns a backing

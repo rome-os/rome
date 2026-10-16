@@ -204,6 +204,7 @@ import {
 import { ConnectionRegistry, DrizzleGrantLedger } from "./connections/index.js";
 import { SetupManager } from "./connections/setup/manager.js";
 import { AGENTS_SERVICE } from "./connections/integrations/agents.js";
+import { autoConnectEmail } from "./connections/integrations/email.js";
 import { registerBuiltinConnections } from "./connections/integrations/index.js";
 import {
   ConversationSettingsRepository,
@@ -1135,6 +1136,7 @@ async function main() {
   // Register every built-in descriptor now (before load()/import), threading the
   // runtime deps the factories need from here where the repos/adapters exist.
   const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
+  const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,
     conversationSettings,
@@ -1156,7 +1158,7 @@ async function main() {
         });
       });
     },
-    mailProvider: new RomeCloudMailProvider(),
+    mailProvider,
     // Keep the prompt-builder's "our own inbox address" ref pointed at the
     // current email epoch (birth, relock/re-authorize, Disconnected rebuild).
     onEmailAdapterBuilt: (adapter) => {
@@ -1467,6 +1469,20 @@ async function main() {
     const apiDeps: ApiDeps = {
       feedback: feedbackClient,
       provisionNodeCaller,
+      autoConnectEmail: async () => {
+        try {
+          const connected = await autoConnectEmail({
+            registry: connectionRegistry,
+            provision: () => mailProvider.provision(),
+            settings: settingsRepo,
+          });
+          if (connected) log.info("email connected on first cloud sign-in");
+        } catch (err) {
+          log.warn("email auto-connect failed; the guardian can connect it in settings", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
       nodeDevices,
       notifyPairingResolution: (approval) => notifyPairingResolution(connectionRegistry, approval),
       channelsService,
