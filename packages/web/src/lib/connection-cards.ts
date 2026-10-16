@@ -209,6 +209,8 @@ function toCard(connection: ApiConnection): ConnectionCard {
     connect: connection.connect,
     // Read defensively: a core that predates accounts omits these fields.
     channel: connection.channel ?? null,
+    // The bot's link only. A folded personal account (`telegram_user`) keeps
+    // its own link, which this card does not show or set yet.
     linkedAgent: connection.linkedAgent ?? null,
     linkReported: connection.linkedAgent !== undefined,
     severalAccounts: connection.severalAccounts === true,
