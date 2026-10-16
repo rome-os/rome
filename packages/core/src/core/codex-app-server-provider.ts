@@ -217,6 +217,8 @@ This is an isolated side-channel turn. Do not invoke any tool, even if provider 
  * them, while the fork remains usable for recap/title side-channel turns.
  * Codex's own tools do follow thread/fork overrides, so the fork drops them
  * whatever builtins the open params declare.
+ * The inherited dynamic tools it disables are expected, so the catalog check
+ * logs them at debug rather than warning.
  */
 function constrainIsolatedFork(
   overrides: ThreadConfigurationOverrides,
@@ -618,11 +620,22 @@ export class CodexAppServerProvider implements ModelProvider {
       const droppedConfiguredToolNames = configuredRomeTools.definitions
         .map((definition) => definition.name)
         .filter((name) => !inheritedToolNames.has(name));
-      if (disabledInheritedToolNames.length > 0 || droppedConfiguredToolNames.length > 0) {
+      // An isolated fork configures no tools, so disabling the inherited ones
+      // is the intended degrade. Only an exact fork's mismatch, or a tool an
+      // isolated fork asked for and cannot get, is a catalog defect.
+      const unexpected = !inheritedFork.isolated || droppedConfiguredToolNames.length > 0;
+      if (
+        unexpected &&
+        (disabledInheritedToolNames.length > 0 || droppedConfiguredToolNames.length > 0)
+      ) {
         log.warn("codex native fork dynamic tool catalogs differ", {
           isolated: inheritedFork.isolated,
           disabledInheritedToolNames,
           droppedConfiguredToolNames,
+        });
+      } else if (disabledInheritedToolNames.length > 0) {
+        log.debug("codex isolated fork disabled inherited dynamic tools", {
+          disabledInheritedToolNames,
         });
       }
     }

@@ -18,6 +18,7 @@ const {
   notifyMock,
   startMock,
   closeMock,
+  logMock,
   captured,
 } = rs.hoisted(() => ({
   getCodexCliStatusMock: rs.fn(),
@@ -26,6 +27,7 @@ const {
   notifyMock: rs.fn(),
   startMock: rs.fn(),
   closeMock: rs.fn(),
+  logMock: { debug: rs.fn(), info: rs.fn(), warn: rs.fn(), error: rs.fn() },
   captured: {
     onNotification: undefined as undefined | ((m: string, p: unknown) => void),
     onExit: undefined as undefined | ((error: Error) => void),
@@ -39,6 +41,13 @@ const {
 rs.mock("../lib/codex-cli-auth.js", () => ({
   getCodexCliStatus: getCodexCliStatusMock,
   markCodexAuthRevoked: markCodexAuthRevokedMock,
+}));
+
+// Every logger in the module graph shares these no-op spies, so a test can
+// assert which level a provider message lands at.
+rs.mock("../logger.js", () => ({
+  createLogger: () => logMock,
+  createAppLogger: () => logMock,
 }));
 
 rs.mock("./codex/app-server-client.js", () => ({
@@ -692,6 +701,77 @@ describe("CodexAppServerProvider", () => {
     expect(switchedOff(threadRequest("thread/fork")!.config)).toEqual(CODEX_TOOLS_OFF);
     expect(switchedOff(threadRequest("thread/resume")!.config)).toEqual(CODEX_TOOLS_OFF);
     expect(sourceExecuteSubagent).not.toHaveBeenCalled();
+    // The isolated fork disables its inherited catalog on purpose, so the
+    // mismatch is logged at debug, not as a catalog defect.
+    expect(logMock.warn).not.toHaveBeenCalledWith(
+      "codex native fork dynamic tool catalogs differ",
+      expect.anything(),
+    );
+    expect(logMock.debug).toHaveBeenCalledWith(
+      "codex isolated fork disabled inherited dynamic tools",
+      { disabledInheritedToolNames: expect.arrayContaining(["source_researcher"]) },
+    );
+
+    await forkSession.close();
+    await source.close();
+  });
+
+  it("warns when an exact native fork's dynamic tool catalog differs from its source", async () => {
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        return { thread: { id: "source-thread", historyMode: "paginated" } };
+      }
+      if (method === "thread/fork") {
+        return { thread: { id: "exact-child", historyMode: "paginated" } };
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const source = await provider.openSession(
+      buildParams({
+        sessionId: "source-session",
+        subagentTools: [
+          {
+            name: "source_researcher",
+            description: "Research for the source",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      }),
+    );
+    const fork = await source.fork({
+      sessionId: "exact-session",
+      mode: "ephemeral",
+      configurationMode: "exact",
+    });
+    // A model change sends the exact fork down the native thread/fork path.
+    const forkSession = await fork.open(
+      buildForkOpenParams({
+        model: "gpt-5.4-mini",
+        subagentTools: [
+          {
+            name: "fork_reviewer",
+            description: "Review for the fork",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+      }),
+    );
+
+    expect(requestMock).toHaveBeenCalledWith(
+      "thread/fork",
+      expect.objectContaining({ threadId: "source-thread" }),
+    );
+    expect(logMock.warn).toHaveBeenCalledWith("codex native fork dynamic tool catalogs differ", {
+      isolated: false,
+      disabledInheritedToolNames: ["source_researcher"],
+      droppedConfiguredToolNames: ["fork_reviewer"],
+    });
+    expect(logMock.debug).not.toHaveBeenCalledWith(
+      "codex isolated fork disabled inherited dynamic tools",
+      expect.anything(),
+    );
 
     await forkSession.close();
     await source.close();
