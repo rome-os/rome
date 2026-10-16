@@ -286,7 +286,9 @@ describe("Discord CLI loopback broker routes", () => {
       const response = await twoBots(invoked).request("/_internal/discord/auth", {
         headers: { "x-rome-channel": "discord-3" },
       });
+      // The other bots are never asked about, so the error names this one.
       expect(response.status).not.toBe(200);
+      expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
       expect(invoked).toEqual([]);
     });
   });

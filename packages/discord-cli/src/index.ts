@@ -370,7 +370,8 @@ function defaultDeps(overrides: Partial<DiscordCliDeps>): DiscordCliDeps {
     stdout: overrides.stdout ?? ((text) => process.stdout.write(text)),
     stderr: overrides.stderr ?? ((text) => process.stderr.write(text)),
     internalApiPort: overrides.internalApiPort ?? process.env.INTERNAL_API_PORT,
-    channel: overrides.channel ?? process.env.ROME_CHANNEL,
+    // An explicit undefined keeps the ambient channel out, as tests need.
+    channel: "channel" in overrides ? overrides.channel : process.env.ROME_CHANNEL,
     now: overrides.now ?? Date.now,
   };
 }

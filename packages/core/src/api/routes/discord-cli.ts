@@ -114,9 +114,10 @@ async function execute(
   const startedAt = Date.now();
   let discordStatus: number | undefined;
   try {
-    const act = discordBotFor(deps, channel)?.act;
+    const { bot, candidates } = discordBotFor(deps, channel);
+    const act = bot?.act;
     if (!act || !act.operations().some((operation) => operation.name === "discord.api.request")) {
-      return unavailableDiscordAuth(deps);
+      return unavailableDiscordAuth(deps, candidates);
     }
 
     const result = (await act.invoke({
@@ -178,11 +179,15 @@ async function execute(
 function discordBotFor(
   deps: DiscordCliRouteDeps,
   channel: string | undefined,
-): Connection | undefined {
+): { bot: Connection | undefined; candidates: Connection[] | null } {
   const bots = deps.connectionRegistry?.find("discord") ?? [];
   const record = channel ? deps.channelRecords?.byId(channel) : null;
-  if (record?.service === "discord") return bots.find((bot) => bot.id === record.connectionId);
-  return bots.find((bot) => bot.isUnlocked("act")) ?? bots[0];
+  if (record?.service === "discord") {
+    const own = bots.find((bot) => bot.id === record.connectionId);
+    // A failure then describes the channel's own bot, not every Discord bot.
+    return { bot: own, candidates: own ? [own] : [] };
+  }
+  return { bot: bots.find((bot) => bot.isUnlocked("act")) ?? bots[0], candidates: null };
 }
 
 function projectFailure(result: Extract<ChannelApiResult, { error: unknown }>): {
@@ -244,27 +249,30 @@ function credentialRejected(): { status: number; body: DiscordBrokerEnvelope } {
   };
 }
 
-function unavailableDiscordAuth(deps: DiscordCliRouteDeps): {
+/** Why no bot can act. `candidates` narrows the diagnosis to a channel's own
+ *  bot, and null means every Discord bot, including one still being set up. */
+function unavailableDiscordAuth(
+  deps: DiscordCliRouteDeps,
+  candidates: Connection[] | null,
+): {
   status: number;
   body: DiscordBrokerEnvelope;
 } {
-  if (hasActiveDiscordSetup(deps)) return notPaired();
-  const rejected =
-    deps.connectionRegistry
-      ?.find("discord")
-      .some((connection) => connection.auth.grants().bot === "degraded") ?? false;
+  const bots = candidates ?? deps.connectionRegistry?.find("discord") ?? [];
+  if (hasActiveDiscordSetup(deps, bots, candidates === null)) return notPaired();
+  const rejected = bots.some((connection) => connection.auth.grants().bot === "degraded");
   return rejected ? credentialRejected() : notAuthenticated();
 }
 
-function hasActiveDiscordSetup(deps: DiscordCliRouteDeps): boolean {
+function hasActiveDiscordSetup(
+  deps: DiscordCliRouteDeps,
+  bots: Connection[],
+  includeNewAccount: boolean,
+): boolean {
   const manager = deps.setupManager;
   if (!manager) return false;
-  if (manager.activeFor("discord", "bot")) return true;
-  return (
-    deps.connectionRegistry
-      ?.find("discord")
-      .some((connection) => Boolean(manager.activeFor(connection.id, "bot"))) ?? false
-  );
+  if (includeNewAccount && manager.activeFor("discord", "bot")) return true;
+  return bots.some((connection) => Boolean(manager.activeFor(connection.id, "bot")));
 }
 
 function errorEnvelope(error: DiscordBrokerError): DiscordBrokerEnvelope {
