@@ -536,6 +536,17 @@ describe("guardian links across Connections of one service", () => {
     expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
   });
 
+  it("keeps the guardian link while the other bot's Talk is only degraded", async () => {
+    const { registry, personMappingRepo, first, second, del } = await twoBots();
+    await registry.getLedger().updateGrant(second.id, "bot", {
+      state: "degraded",
+      degraded: { at: new Date(0), reason: "renewal rejected" },
+    });
+
+    expect((await del(`/connections/${first.id}`)).status).toBe(200);
+    expect(await personMappingRepo.findByChannelUser("telegram", "guardian")).not.toBeNull();
+  });
+
   it("deletes the guardian link when the last bot is removed", async () => {
     const { personMappingRepo, first, second, del } = await twoBots();
 
