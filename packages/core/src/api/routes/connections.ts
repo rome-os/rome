@@ -10,6 +10,7 @@
 // the connect setup, except a later account of a service, which
 // `POST /connections` mints before its setup runs.
 
+import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
@@ -69,7 +70,8 @@ interface ConnectHint {
   unavailableReason: string | null;
 }
 
-interface ConnectionView {
+interface ConnectionView
+  extends Required<Pick<ConnectionAccountFields, "channel" | "severalAccounts">> {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  service the guardian has never connected (nothing to address or tear down
    *  yet; the connect setup mints the row). */
@@ -86,11 +88,6 @@ interface ConnectionView {
    *  setup (if any), so a reopened dashboard re-attaches to it instead of
    *  starting a fresh one. Empty when no setup is in progress. */
   setups: Record<GrantName, string>;
-  /** The id of the channel this Connection backs, for grouping; opaque and not
-   *  for display. Null for a placeholder and for a service with no Talk. */
-  channel: string | null;
-  /** Whether the guardian can add another account of this service. */
-  severalAccounts: boolean;
 }
 
 /** Per-grant extras for the detail view — ledger envelope fields the list
