@@ -11,8 +11,9 @@ import {
   createChannelsService,
   type ChannelsServiceDeps,
 } from "./channels-service.js";
-import { recordedChannelOf, type ChannelOf } from "./connection-ports.js";
+import { recordedChannelOf } from "./connection-ports.js";
 import type { Connection } from "../connections/types.js";
+import { serviceChannelOf } from "../test/helpers.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It finds the Connection itself.
@@ -34,8 +35,6 @@ function line(id: string, at: number): ChannelMessage {
     timestamp: new Date(at),
   };
 }
-
-const serviceChannelOf: ChannelOf = (connection) => connection.service;
 
 const RECEIPT: MessageReceipt = { messageId: "m1", conversationId: "c1" as ConversationId };
 

@@ -394,20 +394,20 @@ describe("a Connection with no channel record", () => {
         () => true,
       ),
     };
-    const ports = connectionPorts(deps, "fake-telegram");
+    const ports = connectionPorts(deps, "fake-telegram")!;
     const heard: string[] = [];
-    ports?.inbound?.subscribe(async (event) => {
+    ports.inbound!.subscribe(async (event) => {
       heard.push(event.ref.connectionId);
     });
     await registry.importCredential(unrecorded.id, "bot", fx.validCredential());
     const talker = fx.talkerFactory.instances.at(-1)!;
 
-    talker.state.deliver?.({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
+    talker.state.deliver!({ ...said("m1", "dm-1", 0), channel: "fake-telegram" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(heard).toEqual([]);
-    await expect(
-      ports?.send?.send("dm-1" as ConversationId, { text: "hi" }),
-    ).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(ports.send!.send("dm-1" as ConversationId, { text: "hi" })).rejects.toBeInstanceOf(
+      ChannelNotConnected,
+    );
     expect(talker.state.sends).toHaveLength(0);
   });
 });
