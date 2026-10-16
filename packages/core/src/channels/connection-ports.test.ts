@@ -385,14 +385,11 @@ describe("a Connection with no channel record", () => {
     const registry = new ConnectionRegistry({ ledger: new DrizzleGrantLedger(db) });
     const fx = makePasteTalk();
     registry.register(fx.descriptor);
-    const recorded = await registry.connect("fake-telegram");
-    const unrecorded = await registry.connectAnother("fake-telegram");
+    // The service's only Connection, so nothing else could back the channel.
+    const unrecorded = await registry.connect("fake-telegram");
     const deps: ConnectionPortsDeps = {
       registry,
-      channelOf: recordedChannelOf(
-        { idOf: (id) => (id === recorded.id ? "fake-telegram" : null) },
-        () => true,
-      ),
+      channelOf: recordedChannelOf({ idOf: () => null }, () => true),
     };
     const ports = connectionPorts(deps, "fake-telegram")!;
     const heard: string[] = [];
