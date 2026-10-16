@@ -90,9 +90,10 @@ export interface CreateRoutineDeps {
    * injected per process, so this action never knows where it runs. */
   routineEngine: RoutineEngine;
   /** The action registry of the executing process. Used to reject a routine
-   * bound to an action that doesn't exist — otherwise the routine persists and
-   * fails the `actionEngine.run` lookup on every fire. Both the main process
-   * and the action worker put a fully-populated registry in the action deps. */
+   * bound to an action that doesn't exist, or with args its input schema
+   * rejects — otherwise the routine persists and fails on every fire. Both the
+   * main process and the action worker put a fully-populated registry in the
+   * action deps. */
   actionRegistry: ActionExistenceChecker;
   /** Core's resolver that stores "once at the next localTime" as a dated
    * one-off, the same one POST /routines uses. Each process binds it to its own
@@ -103,14 +104,16 @@ export interface CreateRoutineDeps {
   agentRunner?: Pick<AgentRunnerInterface, "hasAction">;
 }
 
-/** The single capability create_routine needs from the action registry: ask
- * whether an action name is registered. Named (rather than an inline shape) so
- * the dependency reads as a contract; the runtime passes the full registry,
- * which satisfies it. */
+/** What create_routine asks the action registry about a target action: whether
+ * it is registered, whether it is explicit, and whether args fit its input
+ * schema. Named (rather than an inline shape) so the dependency reads as a
+ * contract; the runtime passes the full registry, which satisfies it. */
 export interface ActionExistenceChecker {
   has(name: string): boolean | Promise<boolean>;
   /** True when the action is `visibility: explicit`. */
   isExplicit(name: string): boolean | Promise<boolean>;
+  /** An error message when `args` fail the action's input schema, else null. */
+  validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
@@ -425,6 +428,12 @@ export async function createRoutine(
       };
     }
   }
+  // Every fire passes these stored args to the action, so args its input
+  // schema rejects would fail every fire.
+  const argsError = await deps.actionRegistry.validateArgs(actionName, args);
+  if (argsError) {
+    return { status: "error", error: argsError };
+  }
 
   // `name` is the human-readable display label; trim and reject blank so a
   // whitespace-only " " isn't persisted as a routine with no visible title.
@@ -514,9 +523,12 @@ export function createAction(
   }
   if (
     typeof deps.actionRegistry?.has !== "function" ||
-    typeof deps.actionRegistry.isExplicit !== "function"
+    typeof deps.actionRegistry.isExplicit !== "function" ||
+    typeof deps.actionRegistry.validateArgs !== "function"
   ) {
-    throw new Error("create_routine requires an actionRegistry dep with has() and isExplicit()");
+    throw new Error(
+      "create_routine requires an actionRegistry dep with has(), isExplicit() and validateArgs()",
+    );
   }
   if (!deps.agentRunner) {
     throw new Error("create_routine requires an agentRunner dep");

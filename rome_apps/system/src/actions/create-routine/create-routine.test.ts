@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
 import { RoutinesRepository } from "../../../../../packages/core/src/db/repositories/routines.js";
+import { ActionRegistryImpl } from "../../../../../packages/core/src/actions/registry.js";
 // Importing the store also registers the current-action-context resolver
 // (module side effect), so `getCurrentActionContext()` inside create_routine
 // reads whatever store we wrap the call in.
@@ -42,7 +43,7 @@ function makeThrowingEngine(): RoutineEngine {
 
 /** Registry stub that recognizes every action — the default for tests whose
  * subject isn't action-existence validation. */
-const allActions = { has: () => true, isExplicit: () => false };
+const allActions = { has: () => true, isExplicit: () => false, validateArgs: () => null };
 
 /** Core's one-off resolver with the guardian in UTC, for tests that don't
  * depend on the zone. */
@@ -369,6 +370,18 @@ describe("create_routine — action factory", () => {
     ).toThrow(/actionRegistry/);
   });
 
+  it("createAction refuses to load without an actionRegistry exposing validateArgs()", () => {
+    expect(() =>
+      createAction(actionConfig, {
+        routinesRepo: repo,
+        routineEngine: makeFakeEngine(),
+        actionRegistry: { has: () => true, isExplicit: () => false },
+        agentRunner: { hasAction: () => true },
+        resolveOneOffDate,
+      } as unknown as Parameters<typeof createAction>[1]),
+    ).toThrow(/validateArgs/);
+  });
+
   it("createAction refuses to load without a resolveOneOffDate dep", () => {
     expect(() =>
       createAction(actionConfig, {
@@ -388,6 +401,7 @@ describe("create_routine — validation and fail-closed", () => {
     const registry = {
       has: (n: string) => n === "summon" || n === "send_message",
       isExplicit: () => false,
+      validateArgs: () => null,
     };
 
     const result = await createRoutine(
@@ -416,7 +430,11 @@ describe("create_routine — validation and fail-closed", () => {
 
   it("accepts a routine bound to a built-in action the registry knows", async () => {
     const engine = makeFakeEngine();
-    const registry = { has: (n: string) => n === "summon", isExplicit: () => false };
+    const registry = {
+      has: (n: string) => n === "summon",
+      isExplicit: () => false,
+      validateArgs: () => null,
+    };
 
     const result = await createRoutine(
       {
@@ -447,6 +465,9 @@ describe("create_routine — validation and fail-closed", () => {
       async isExplicit() {
         return false;
       },
+      async validateArgs() {
+        return null;
+      },
     };
 
     const result = await createRoutine(
@@ -467,6 +488,118 @@ describe("create_routine — validation and fail-closed", () => {
 
     expect(result.status).toBe("ok");
     expect(await repo.findAll()).toHaveLength(1);
+  });
+
+  describe("args against the target action's input schema", () => {
+    /** The main-process registry with one action that requires a non-blank prompt. */
+    function registryWithPromptAction(): ActionRegistryImpl {
+      const registry = new ActionRegistryImpl();
+      registry.register({
+        config: {
+          name: "coding_task",
+          type: "custom",
+          description: "Run coding work",
+          complexity: "complex",
+          speed: "slow",
+          reliability: "high",
+          sideEffects: "write",
+        },
+        inputSchema: {
+          type: "object",
+          properties: { prompt: { type: "string", minLength: 1, pattern: "\\S" } },
+          required: ["prompt"],
+        },
+        execute: async () => ({ status: "ok" }),
+      });
+      return registry;
+    }
+    const daily = {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "07:00",
+      rrule: "FREQ=DAILY",
+    };
+
+    it("rejects args that fail the target action's input schema and saves nothing", async () => {
+      const engine = makeFakeEngine();
+
+      const result = await createRoutine(
+        { name: "nightly-fix", trigger: daily, actionName: "coding_task", args: {} },
+        {
+          routinesRepo: repo,
+          actionRegistry: registryWithPromptAction(),
+          routineEngine: engine,
+          resolveOneOffDate,
+        },
+      );
+
+      if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+      expect(result.error).toMatch(
+        /args do not satisfy the input schema for action "coding_task": .*prompt/,
+      );
+      expect(await repo.findAll()).toHaveLength(0);
+      expect(engine.activated).toHaveLength(0);
+    });
+
+    it("rejects a blank prompt the action itself would reject on every fire", async () => {
+      const result = await createRoutine(
+        { name: "nightly-fix", trigger: daily, actionName: "coding_task", args: { prompt: " " } },
+        {
+          routinesRepo: repo,
+          actionRegistry: registryWithPromptAction(),
+          routineEngine: makeFakeEngine(),
+          resolveOneOffDate,
+        },
+      );
+
+      expect(result.status).toBe("error");
+      expect(await repo.findAll()).toHaveLength(0);
+    });
+
+    it("saves and activates a routine whose args fit the schema", async () => {
+      const engine = makeFakeEngine();
+
+      const result = await createRoutine(
+        {
+          name: "nightly-fix",
+          trigger: daily,
+          actionName: "coding_task",
+          args: { prompt: "fix the flaky test" },
+        },
+        {
+          routinesRepo: repo,
+          actionRegistry: registryWithPromptAction(),
+          routineEngine: engine,
+          resolveOneOffDate,
+        },
+      );
+
+      expect(result.status).toBe("ok");
+      const [row] = await repo.findAll();
+      expect(row?.args).toEqual({ prompt: "fix the flaky test" });
+      expect(engine.activated).toHaveLength(1);
+    });
+
+    it("awaits an async args check, as the action worker's registry proxy answers", async () => {
+      const result = await createRoutine(
+        { name: "nightly-fix", trigger: daily, actionName: "coding_task", args: {} },
+        {
+          routinesRepo: repo,
+          actionRegistry: {
+            has: async () => true,
+            isExplicit: async () => false,
+            validateArgs: async () => "prompt is required",
+          },
+          routineEngine: makeFakeEngine(),
+          resolveOneOffDate,
+        },
+      );
+
+      if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+      expect(result.error).toBe("prompt is required");
+      expect(await repo.findAll()).toHaveLength(0);
+    });
   });
 
   it("rejects a malformed localTime without persisting a dead schedule", async () => {
@@ -1434,7 +1567,11 @@ describe("create_routine — key dedup", () => {
 
 describe("create_routine — explicit action targets (#679)", () => {
   const rootScript = "system:execute_root_script";
-  const explicitRoot = { has: () => true, isExplicit: (n: string) => n === rootScript };
+  const explicitRoot = {
+    has: () => true,
+    isExplicit: (n: string) => n === rootScript,
+    validateArgs: () => null,
+  };
   const input = {
     name: "root-once",
     trigger: {

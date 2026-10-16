@@ -1365,6 +1365,7 @@ async function main() {
     hasAgent: (name) => agentLoader.has(name),
     hasRegisteredAction: (name) => actionRegistry.has(name),
     isExplicitAction: (name) => actionRegistry.isExplicit(name),
+    validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
     // Same allow-list resolution as the agent session's tool gate.
     hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
