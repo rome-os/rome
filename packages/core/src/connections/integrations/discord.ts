@@ -236,8 +236,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     // request names no Connection, so a second bot's turns would act as the
     // first.
     reviveProfile: (_grant, record) => reviveDiscordProfile(record),
-    accountIdOf: (_grant, record) =>
-      discordGrantProfileSchema.safeParse(record).data?.botId ?? null,
+    accountIdOf: (_grant, record) => (typeof record.botId === "string" && record.botId) || null,
     auth: {
       bot: botScheme,
     },

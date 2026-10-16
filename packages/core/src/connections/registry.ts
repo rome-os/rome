@@ -511,8 +511,9 @@ export class ConnectionRegistry {
     profile: ProfileRecord,
   ): Promise<void> {
     const accountIdOf = descriptor.accountIdOf;
-    const accountId = accountIdOf?.(grant, profile);
-    if (!accountIdOf || !accountId) return;
+    if (!accountIdOf) return;
+    const accountId = accountIdOf(grant, profile);
+    if (!accountId) return;
     for (const other of this.find(descriptor.service)) {
       if (other.id === connectionId) continue;
       const held = await this.ledger.getGrant(other.id, grant);
