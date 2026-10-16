@@ -251,6 +251,65 @@ describe("ChannelsSettingsPage", () => {
     );
   });
 
+  it("shows a silent account instead of the agent picker", async () => {
+    const connection = (service: string, linked: { linkedAgent?: string | null }) => ({
+      id: `${service}-1`,
+      service,
+      label: service,
+      grants: {},
+      display: {},
+      capabilities: {
+        talk: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      connect: null,
+      ...linked,
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/connections") {
+        return ok({
+          connections: [
+            connection("discord", { linkedAgent: null }),
+            connection("feishu", { linkedAgent: "sales:agent" }),
+          ],
+        });
+      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
+      if (url.startsWith("/api/conversation-settings?")) {
+        return ok({
+          items: [
+            item({
+              id: "engineering",
+              name: "engineering",
+              overrides: { routing: { agentName: "coding:build" } },
+            }),
+            item({ id: "support", service: "feishu", name: "support" }),
+          ],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const silent = await findCard();
+    expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
+    expect(within(silent).getByText("None. This account stays silent.")).toBeTruthy();
+    // The stored agent choice has no effect yet, so it is not counted, but the
+    // card says it applies once an agent is linked.
+    expect(within(silent).queryByText(/override/)).toBeNull();
+    expect(
+      within(silent).getByText(/This conversation's choice, build · coding, applies/),
+    ).toBeTruthy();
+
+    // A chat's own choice wins over a linked agent, so the picker stays.
+    const linked = (await screen.findByRole("heading", { name: /support/ })).closest(
+      "article",
+    ) as HTMLElement;
+    expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
+  });
+
   it("creates no override when an edit is undone before the debounce elapses", async () => {
     const { patchBodies } = mockApi();
     renderPage();

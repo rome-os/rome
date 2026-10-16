@@ -370,6 +370,8 @@
         "inline": "Inline"
       },
       "mainAgent": "main (default)",
+      "silentAccount": "The agent linked to this account answers here. Link one on the Connections page.",
+      "silentAccountOverride": "This conversation's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
         "afterInactivity": "After inactivity",
