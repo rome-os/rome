@@ -52,6 +52,7 @@ import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -138,6 +139,12 @@ function migratedSystemImage(): Buffer {
 /** Maps every channel to itself. Valid only where no service has a later channel. */
 export const identityServiceOf: ServiceOfChannel = (channel) => channel;
 
+/** Maps a channel to its service through `db`'s channel records, as Rome does. */
+export function recordedServiceOf(db: DrizzleDb): ServiceOfChannel {
+  const records = new ChannelRecordsRepository(db);
+  return (channel) => records.serviceOf(channel);
+}
+
 /** Opens a private in-memory database at the latest system schema. Each call
  *  starts from the same freshly migrated state, unaffected by writes to any
  *  other instance. */
@@ -160,7 +167,7 @@ export function createActionEngineRepos(
 ): ActionEngineRepositories {
   return {
     executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf)),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, recordedServiceOf(db))),
     journal: new ExecutionJournalRepository(db),
   };
 }
@@ -520,7 +527,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
+  const personMappingRepo = new PersonMappingRepository(db, recordedServiceOf(db));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
