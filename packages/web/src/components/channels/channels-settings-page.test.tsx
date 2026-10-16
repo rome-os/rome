@@ -44,7 +44,7 @@ const defaults = {
 
 function item(input: {
   id: string;
-  service?: "discord" | "feishu" | "telegram";
+  service?: "discord" | "feishu" | "telegram_user";
   name: string;
   supportedFields?: string[];
   overrides?: object;
@@ -273,14 +273,12 @@ describe("ChannelsSettingsPage", () => {
           connections: [
             connection("discord", { linkedAgent: null }),
             connection("feishu", { linkedAgent: "sales:agent" }),
-            // Linked to an agent whose app was removed, so core keeps it silent.
-            connection("telegram", { linkedAgent: "gone:agent" }),
+            // No page sets the personal account's link yet.
+            connection("telegram_user", { linkedAgent: null }),
           ],
         });
       }
-      if (url === "/api/agents") {
-        return ok({ agents: [{ name: "core:main" }, { name: "sales:agent" }] });
-      }
+      if (url === "/api/agents") return ok({ agents: [{ name: "core:main" }] });
       if (url.startsWith("/api/conversation-settings?")) {
         return ok({
           items: [
@@ -290,7 +288,7 @@ describe("ChannelsSettingsPage", () => {
               overrides: { routing: { agentName: "coding:build" } },
             }),
             item({ id: "support", service: "feishu", name: "support" }),
-            item({ id: "ops", service: "telegram", name: "ops" }),
+            item({ id: "ops", service: "telegram_user", name: "ops" }),
           ],
         });
       }
@@ -317,10 +315,11 @@ describe("ChannelsSettingsPage", () => {
     ) as HTMLElement;
     expect(within(linked).getByLabelText(/Agent/)).toBeTruthy();
 
-    const unloaded = (await screen.findByRole("heading", { name: /ops/ })).closest(
+    const personal = (await screen.findByRole("heading", { name: /ops/ })).closest(
       "article",
     ) as HTMLElement;
-    expect(within(unloaded).getByText("None. This account stays silent.")).toBeTruthy();
+    expect(within(personal).getByText("None. This account stays silent.")).toBeTruthy();
+    expect(within(personal).queryByRole("link")).toBeNull();
   });
 
   it("creates no override when an edit is undone before the debounce elapses", async () => {

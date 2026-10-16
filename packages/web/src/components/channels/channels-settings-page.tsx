@@ -136,25 +136,29 @@ export function ChannelsSettingsPage() {
     [connections],
   );
 
-  // A linkable account answers nothing, whatever agent a conversation on it
-  // picks, when no agent is linked or the linked one is not loaded. A core that
-  // predates links omits `linkedAgent`. Keyed by Connection id, valued by the
-  // account's detail route.
+  // A linkable account with no linked agent answers nothing, whatever agent a
+  // conversation on it picks. A core that predates links omits `linkedAgent`.
+  // Each maps to the page that links its agent; the Telegram card folds the
+  // personal account in but sets only the bot's link, so that one has none.
   const silentAccounts = useMemo(
     () =>
       new Map(
         connections.flatMap((connection) =>
           connection.id !== null &&
           LINKABLE_SERVICES.has(connection.service) &&
-          connection.linkedAgent !== undefined &&
-          (connection.linkedAgent === null ||
-            (connection.linkedAgent !== MAIN_AGENT_ID &&
-              !agentNames.includes(connection.linkedAgent)))
-            ? [[connection.id, connectionRoute(connection)]]
+          connection.linkedAgent === null
+            ? [
+                [
+                  connection.id,
+                  connection.service === "telegram_user"
+                    ? null
+                    : `/settings/connections/${encodeURIComponent(connectionRoute(connection))}`,
+                ],
+              ]
             : [],
         ),
       ),
-    [agentNames, connections],
+    [connections],
   );
 
   // Stable identity: every card takes this as a dependency, so an inline
@@ -268,9 +272,7 @@ export function ChannelsSettingsPage() {
                 key={`${item.snapshot.conversation.ref.connectionId}:${item.snapshot.conversation.ref.conversationId}`}
                 item={item}
                 agentNames={agentNames}
-                silentAccountRoute={
-                  silentAccounts.get(item.snapshot.conversation.ref.connectionId) ?? null
-                }
+                silentAccount={silentAccounts.get(item.snapshot.conversation.ref.connectionId)}
                 onSaved={handleSaved}
               />
             ))}
@@ -295,13 +297,14 @@ export function ChannelsSettingsPage() {
 function ConversationRow({
   item,
   agentNames,
-  silentAccountRoute,
+  silentAccount,
   onSaved,
 }: {
   item: ConversationSettingsListItem;
   agentNames: string[];
-  /** The detail route of the conversation's account when it stays silent. */
-  silentAccountRoute: string | null;
+  /** Set when the conversation's account stays silent: the page that links
+   *  its agent, or null when none does yet. */
+  silentAccount: string | null | undefined;
   onSaved: (snapshot: ConversationSettingsSnapshot) => void;
 }) {
   const { t } = useTranslation("settings");
@@ -311,7 +314,7 @@ function ConversationRow({
   const { snapshot } = item;
   const conversation = snapshot.conversation;
   const supported = new Set(snapshot.supportedFields);
-  const silent = silentAccountRoute !== null;
+  const silent = silentAccount !== undefined;
   const agentOverridden = settingSource(snapshot, "routing.agentName") === "overridden";
   const overrideCount = snapshot.supportedFields.filter(
     (field) =>
@@ -606,18 +609,19 @@ function ConversationRow({
           <SettingRow field="agent" overridden={false}>
             <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
             <p className="mt-1 text-aux text-muted-foreground">
-              <Trans
-                t={t}
-                i18nKey="channels.conversationSettings.silentAccount"
-                components={{
-                  account: (
-                    <Link
-                      to={`/settings/connections/${encodeURIComponent(silentAccountRoute ?? "")}`}
-                      className="underline underline-offset-2"
-                    />
-                  ),
-                }}
-              />
+              {t("channels.conversationSettings.silentAccount")}
+              {silentAccount && (
+                <>
+                  {" "}
+                  <Trans
+                    t={t}
+                    i18nKey="channels.conversationSettings.silentAccountLink"
+                    components={{
+                      account: <Link to={silentAccount} className="underline underline-offset-2" />,
+                    }}
+                  />
+                </>
+              )}
               {agentOverridden &&
                 ` ${t("channels.conversationSettings.silentAccountOverride", {
                   agent: agentLabel(snapshot.overrides.routing?.agentName ?? "main"),
