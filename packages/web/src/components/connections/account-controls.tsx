@@ -29,6 +29,20 @@ const NO_AGENT = "__none__";
 
 const AGENTS_QUERY_KEY = ["connection-accounts", "agents"] as const;
 
+/** Main's canonical id, which the link route stores. `/api/agents` and the
+ *  route also know it as `main`. Switch this and the alias handling in
+ *  `channels-settings-page.tsx` to `@rome/api-types/linked-agents` together
+ *  once it exports main's ids. */
+const MAIN_AGENT = "core:main";
+
+function canonicalAgent(name: string): string {
+  return name === "main" ? MAIN_AGENT : name;
+}
+
+function agentLabel(name: string): string {
+  return name === MAIN_AGENT ? "main" : name;
+}
+
 interface AgentOption {
   name: string;
 }
@@ -149,7 +163,8 @@ function LinkedAgentField({
   // bringing it back.
   if (pending && pending.replaced !== card.linkedAgent) setPending(null);
   const shown = pending && pending.replaced === card.linkedAgent ? pending.value : null;
-  const current = shown ?? card.linkedAgent ?? NO_AGENT;
+  const linked = card.linkedAgent === null ? null : canonicalAgent(card.linkedAgent);
+  const current = shown ?? linked ?? NO_AGENT;
   const agentsQuery = useQuery({
     queryKey: AGENTS_QUERY_KEY,
     // Loaded agents rarely change, so opening another account reuses the list.
@@ -158,18 +173,15 @@ function LinkedAgentField({
       const payload = await fetchJson<{ agents: AgentOption[] }>("/api/agents", {
         fallback: t("connections.accounts.agentsFailed"),
       });
-      // Main answers wherever no agent is linked, so "None" stands for it.
-      return payload.agents
-        .map((agent) => agent.name)
-        .filter((name) => name !== "main" && name !== "core:main");
+      // Main links like any agent. An account with no linked agent stays silent.
+      return [...new Set(payload.agents.map((agent) => canonicalAgent(agent.name)))];
     },
   });
 
   // Keep the current link selectable even when its agent is no longer loaded,
   // so the trigger shows what the server holds.
   const names = agentsQuery.data ?? [];
-  const options =
-    card.linkedAgent && !names.includes(card.linkedAgent) ? [card.linkedAgent, ...names] : names;
+  const options = linked && !names.includes(linked) ? [linked, ...names] : names;
 
   const change = async (value: string) => {
     if (value === current) return;
@@ -183,9 +195,9 @@ function LinkedAgentField({
       if (agent === null) {
         toast(t("connections.accounts.linkCleared", { account }));
       } else if (result.unlinkedFrom) {
-        toast(t("connections.accounts.linkMoved", { agent, account }));
+        toast(t("connections.accounts.linkMoved", { agent: agentLabel(agent), account }));
       } else {
-        toast(t("connections.accounts.linked", { agent, account }));
+        toast(t("connections.accounts.linked", { agent: agentLabel(agent), account }));
       }
       onRefresh();
     } catch (error) {
@@ -208,7 +220,7 @@ function LinkedAgentField({
           <SelectItem value={NO_AGENT}>{t("connections.accounts.noAgent")}</SelectItem>
           {options.map((name) => (
             <SelectItem key={name} value={name}>
-              {name}
+              {agentLabel(name)}
             </SelectItem>
           ))}
         </SelectContent>

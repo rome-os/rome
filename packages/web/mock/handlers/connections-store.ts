@@ -59,7 +59,8 @@ export const connections: { connections: ApiConnection[] } = {
         connect: null,
         setups: {},
         channel: service,
-        linkedAgent: null,
+        // Core links main to every existing linkable bot on upgrade.
+        linkedAgent: service === "feishu" ? "core:main" : null,
         severalAccounts,
       }),
     ),
@@ -79,7 +80,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "discord",
-      linkedAgent: null,
+      linkedAgent: "core:main",
       severalAccounts: true,
     },
     {
@@ -98,7 +99,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "telegram",
-      linkedAgent: null,
+      linkedAgent: "core:main",
       severalAccounts: true,
     },
     {

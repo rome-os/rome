@@ -58,12 +58,12 @@
       "addFailed": "Could not add an account",
       "addedNotShown": "Account added. Find it in the Connections list.",
       "linkedAgent": "Linked agent",
-      "linkedAgentDescription": "The linked agent answers messages on this account. An agent links to one account per platform.",
-      "noAgent": "None. Main answers here.",
+      "linkedAgentDescription": "The linked agent answers messages on this account. Without one, the account stays silent. Main can link to several accounts on a platform; any other agent links to one.",
+      "noAgent": "None. This account stays silent.",
       "agentsFailed": "Could not load agents",
       "linked": "{{agent}} now answers on {{account}}.",
-      "linkMoved": "{{agent}} now answers on {{account}}. Its link to another account on this platform was removed, since an agent links to one account per platform.",
-      "linkCleared": "Main now answers on {{account}}.",
+      "linkMoved": "{{agent}} now answers on {{account}}. Its link to another account on this platform was removed, since an agent other than main links to one account per platform.",
+      "linkCleared": "{{account}} now stays silent.",
       "linkFailed": "Could not link the agent"
     },
     "headings": {
