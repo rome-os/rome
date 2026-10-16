@@ -65,6 +65,7 @@ import {
   SortableOverlay,
 } from "@/components/ui/sortable";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
+import { isCarrierApp } from "@/lib/chat-helpers";
 import { RecentAppsRail, RecentAppsZone } from "./RecentAppsZone";
 import {
   ACTIVE_CLASS,
@@ -182,7 +183,7 @@ function readLocalApps(): CachedApp[] {
     const stored = localStorage.getItem(APPS_CACHE_KEY);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter((app) => !isCarrierApp(app?.id)) : [];
   } catch {
     return [];
   }
@@ -274,8 +275,10 @@ export function AppGrid({ headerControlsHost, collapsed, onSearch }: AppGridProp
 
   useEffect(() => {
     if (!appsFromQuery) return;
-    setInstalledApps(appsFromQuery);
-    writeLocalApps(appsFromQuery);
+    // Carriers (e.g. user-skills) never reach Recent, pins or the pin picker.
+    const sidebarApps = appsFromQuery.filter((app) => !isCarrierApp(app.id));
+    setInstalledApps(sidebarApps);
+    writeLocalApps(sidebarApps);
   }, [appsFromQuery]);
 
   useEffect(() => {

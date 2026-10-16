@@ -408,6 +408,8 @@ describe("ChatSearchDialog", () => {
           href: null,
           fullHref: null,
         }),
+        // A carrier opens fine but is plumbing, not a destination.
+        installedApp("user-skills", "Notes Skills"),
       ],
     );
     const user = userEvent.setup();
