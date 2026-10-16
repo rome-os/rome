@@ -49,6 +49,9 @@ import type {
   Talker,
 } from "../types.js";
 import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("feishu-setup");
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -223,6 +226,20 @@ function agentReadyQrView(qr: FeishuAgentReadyQr): SetupView {
   };
 }
 
+/** How long setup waits for the bot's name before going on without it. */
+const BOT_NAME_TIMEOUT_MS = 5_000;
+
+/** `work`, or a rejection once `signal` aborts, whichever comes first. A
+ *  fetcher that ignores its signal still cannot hold the setup past it. */
+function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
     const { mode, domain: domainChoice } = await interact.prompt(FEISHU_MODE_FORM);
@@ -275,10 +292,17 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
     let botName: string | undefined;
     try {
       botName =
-        (await ctx.step("bot-name", (signal) => deps.fetchBotName(pending, signal))) ?? undefined;
+        (await ctx.step("bot-name", (signal) => {
+          const bounded = AbortSignal.any([signal, AbortSignal.timeout(BOT_NAME_TIMEOUT_MS)]);
+          return settledBefore(bounded, deps.fetchBotName(pending, bounded));
+        })) ?? undefined;
     } catch (err) {
       // A cancel unwinds the setup; any other failure only costs the name.
       if (ctx.signal.aborted) throw err;
+      log.warn("feishu_setup.bot_name_unread", {
+        appId: pending.appId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     const profile =
       feishuProfileFromSettings({
@@ -328,9 +352,6 @@ async function feishuClient(material: FeishuPendingMaterial) {
   });
 }
 
-/** How long setup waits for the bot's name before going on without it. */
-const BOT_NAME_TIMEOUT_MS = 5_000;
-
 /** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
  *  which mints the tenant access token it needs. */
 async function fetchFeishuBotName(
@@ -341,7 +362,7 @@ async function fetchFeishuBotName(
   const res = await client.request<{ bot?: { app_name?: string } }>({
     method: "GET",
     url: "/open-apis/bot/v3/info",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(BOT_NAME_TIMEOUT_MS)]),
+    signal,
   });
   return res.bot?.app_name?.trim() || null;
 }
