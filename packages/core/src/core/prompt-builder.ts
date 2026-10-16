@@ -388,7 +388,7 @@ export class PromptBuilder {
    * @-mentionable core agent gets the same behavior.
    *
    * Gated on the agent holding the `*` action grant — the conversational agents
-   * (main, assistant, planning, coding, explore) that actually talk to the
+   * (main, assistant, coding, explore) that actually talk to the
    * guardian. The tool itself is registered per-session on interactive surfaces
    * (`supportsInteractiveSurface`); the cached prefix can't see the surface, so
    * `*` is the closest stable per-agent proxy for "should reach for the card".
