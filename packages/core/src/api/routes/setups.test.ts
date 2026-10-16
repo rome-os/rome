@@ -336,8 +336,12 @@ describe("Feishu setup through the generic routes (#1607)", () => {
 
     const afterMode = await feed(app, cid, { mode: "manual", domain: "lark" });
     expect(afterMode.state.status).toBe("awaiting-input");
-    const afterCreds = await feed(app, cid, { appId: "cli_abc", appSecret: "shh" });
-    expect(afterCreds.state.status).toBe("done");
+    await feed(app, cid, { appId: "cli_abc", appSecret: "shh" });
+    // Setup goes on to read the bot's name, a step, after the credentials.
+    await rs.waitFor(async () => {
+      const poll = await app.request(`/setups/${cid}`);
+      expect(((await poll.json()) as { state: { status: string } }).state.status).toBe("done");
+    });
 
     const conn = registry.find("feishu")[0];
     expect(conn).toBeDefined();
