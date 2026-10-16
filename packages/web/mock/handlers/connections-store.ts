@@ -1,4 +1,5 @@
 import type { ApiConnection } from "@/lib/connections-api";
+import { MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
 
 // The connection ledger. In its own module because two surfaces read it and one
 // of them writes it: the Connections page revokes a grant, and the send routes
@@ -60,7 +61,7 @@ export const connections: { connections: ApiConnection[] } = {
         setups: {},
         channel: service,
         // Core links main to every existing linkable bot on upgrade.
-        linkedAgent: service === "feishu" ? "core:main" : null,
+        linkedAgent: service === "feishu" ? MAIN_AGENT_ID : null,
         severalAccounts,
       }),
     ),
@@ -80,7 +81,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "discord",
-      linkedAgent: "core:main",
+      linkedAgent: MAIN_AGENT_ID,
       severalAccounts: true,
     },
     {
@@ -99,7 +100,7 @@ export const connections: { connections: ApiConnection[] } = {
       connect: null,
       setups: {},
       channel: "telegram",
-      linkedAgent: "core:main",
+      linkedAgent: MAIN_AGENT_ID,
       severalAccounts: true,
     },
     {

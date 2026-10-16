@@ -46,6 +46,7 @@ import { Switch } from "@/components/ui/switch";
 import { artifactLocalName, artifactOwnerId } from "@/lib/artifact-name";
 import { serviceLabel } from "@/lib/connection-cards";
 import { fetchConnections, type ApiConnection } from "@/lib/connections-api";
+import { MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
 
 interface PageResponse {
   items: ConversationSettingsListItem[];
@@ -293,7 +294,7 @@ function ConversationRow({
   const routingOptions = Array.from(
     new Set(
       ["main", ...agentNames, ...(draft.routing.agentName ? [draft.routing.agentName] : [])].map(
-        (name) => (name === "core:main" ? "main" : name),
+        (name) => (name === MAIN_AGENT_ID ? "main" : name),
       ),
     ),
   );

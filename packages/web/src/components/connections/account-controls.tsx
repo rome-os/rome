@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { LINKABLE_SERVICES } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -29,18 +29,13 @@ const NO_AGENT = "__none__";
 
 const AGENTS_QUERY_KEY = ["connection-accounts", "agents"] as const;
 
-/** Main's canonical id, which the link route stores. `/api/agents` and the
- *  route also know it as `main`. Switch this and the alias handling in
- *  `channels-settings-page.tsx` to `@rome/api-types/linked-agents` together
- *  once it exports main's ids. */
-const MAIN_AGENT = "core:main";
-
+/** `/api/agents` and the link route also know main as `main`. */
 function canonicalAgent(name: string): string {
-  return name === "main" ? MAIN_AGENT : name;
+  return name === "main" ? MAIN_AGENT_ID : name;
 }
 
 function agentLabel(name: string): string {
-  return name === MAIN_AGENT ? "main" : name;
+  return name === MAIN_AGENT_ID ? "main" : name;
 }
 
 interface AgentOption {

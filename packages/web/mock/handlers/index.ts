@@ -43,7 +43,7 @@ import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
-import { LINKABLE_SERVICES } from "@rome/api-types/linked-agents";
+import { LINKABLE_SERVICES, MAIN_AGENT_ID } from "@rome/api-types/linked-agents";
 import { platformOf } from "@rome/api-types/platform";
 import { connections } from "./connections-store";
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
@@ -804,7 +804,7 @@ const chatAgents: AgentCatalogGroup[] = [
 
 /** The loaded agents `GET /api/agents` lists, which the account link picker
  *  offers and its PUT accepts. */
-const mockAgentNames = ["core:main", "build", "sales:agent"];
+const mockAgentNames = [MAIN_AGENT_ID, "build", "sales:agent"];
 
 // Long enough to overflow the project picker's 260px list, so the pinned
 // "no project selected" row can be exercised against a scrolling list.
@@ -1284,7 +1284,7 @@ export const handlers = [
     const id = String(params.id);
     const body = (await request.json()) as { agent: string | null };
     // Core stores main by its canonical id and accepts the short name.
-    const agent = body.agent === "main" ? "core:main" : body.agent;
+    const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
     const target = connections.connections.find((candidate) => candidate.channel === id);
     if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
     if (agent !== null && !mockAgentNames.includes(agent)) {
@@ -1306,7 +1306,7 @@ export const handlers = [
     const platform = platformOf(target.service);
     let unlinkedFrom: string | null = null;
     // Main may answer on several accounts, so only other agents move.
-    if (agent !== null && agent !== "core:main") {
+    if (agent !== null && agent !== MAIN_AGENT_ID) {
       for (const other of connections.connections) {
         if (other === target || other.linkedAgent !== agent) continue;
         if (platformOf(other.service) !== platform) continue;
