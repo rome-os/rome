@@ -53,6 +53,29 @@ describe("Feishu credential setup", () => {
     });
   });
 
+  it("finishes without a name when the bot's name cannot be read", async () => {
+    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const session = new SetupSession({
+      fn: makeFeishuSetup({
+        probeCredentials: async () => {},
+        registerAgentApp: async () => {
+          throw new Error("Unexpected QR setup");
+        },
+        fetchBotName: async () => {
+          throw new Error("bot info unavailable");
+        },
+      }),
+      commit,
+    });
+    await session.started();
+    await session.provideInput({ mode: "manual", domain: "feishu" });
+    await session.provideInput({ appId: "app", appSecret: "secret" });
+    await rs.waitFor(() => expect(session.state.status).toBe("done"));
+    const profile = commit.mock.calls[0][0].profile!;
+    expect(profile).not.toHaveProperty("botName");
+    expect(reviveFeishuProfile(profile).handle).toBe("app");
+  });
+
   it("keeps QR registration cancellable with no durable write", async () => {
     const registerAgentApp = rs.fn(
       ({ signal }: { signal: AbortSignal }) =>

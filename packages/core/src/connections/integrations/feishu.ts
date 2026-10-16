@@ -162,9 +162,9 @@ export interface FeishuSetupDeps {
   /** Probe-validate pasted credentials (mint a tenant access token). Throws
    *  with a guardian-readable message when the pair is refused. */
   probeCredentials: (material: FeishuPendingMaterial, signal?: AbortSignal) => Promise<void>;
-  /** The bot's name as Feishu shows it, or null when it cannot be read. A
-   *  missing name never fails the setup: the account then reads as its appId. */
-  fetchBotName: (material: FeishuPendingMaterial) => Promise<string | null>;
+  /** The bot's name as Feishu shows it, or null when it has none. Setup goes
+   *  on without a name when this rejects: the account then reads as its appId. */
+  fetchBotName: (material: FeishuPendingMaterial, signal: AbortSignal) => Promise<string | null>;
   /**
    * The agent-ready dance: drive the SDK's `registerApp` QR flow (which MINTS
    * fresh app credentials — it runs against no adapter and no prior
@@ -272,7 +272,14 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       domain: pending.domain,
       appType,
     };
-    const botName = (await deps.fetchBotName(pending)) ?? undefined;
+    let botName: string | undefined;
+    try {
+      botName =
+        (await ctx.step("bot-name", (signal) => deps.fetchBotName(pending, signal))) ?? undefined;
+    } catch (err) {
+      // A cancel unwinds the setup; any other failure only costs the name.
+      if (ctx.signal.aborted) throw err;
+    }
     const profile =
       feishuProfileFromSettings({
         appId: pending.appId,
@@ -297,12 +304,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
  *  (targets the right host for the chosen domain). A non-zero response code
  *  means the pair is refused. */
 async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<void> {
-  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
-  const client = new Client({
-    appId: material.appId,
-    appSecret: material.appSecret,
-    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
-  });
+  const client = await feishuClient(material);
   let res: { code?: number; msg?: string };
   try {
     res = await client.auth.v3.tenantAccessToken.internal({
@@ -316,24 +318,32 @@ async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<
   }
 }
 
-/** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
- *  which mints the tenant access token it needs. */
-async function fetchFeishuBotName(material: FeishuPendingMaterial): Promise<string | null> {
+/** An SDK client for `material`'s app, on the host of its domain. */
+async function feishuClient(material: FeishuPendingMaterial) {
   const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
-  const client = new Client({
+  return new Client({
     appId: material.appId,
     appSecret: material.appSecret,
     domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
   });
-  try {
-    const res = await client.request<{ bot?: { app_name?: string } }>({
-      method: "GET",
-      url: "/open-apis/bot/v3/info",
-    });
-    return res.bot?.app_name || null;
-  } catch {
-    return null;
-  }
+}
+
+/** How long setup waits for the bot's name before going on without it. */
+const BOT_NAME_TIMEOUT_MS = 5_000;
+
+/** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
+ *  which mints the tenant access token it needs. */
+async function fetchFeishuBotName(
+  material: FeishuPendingMaterial,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const client = await feishuClient(material);
+  const res = await client.request<{ bot?: { app_name?: string } }>({
+    method: "GET",
+    url: "/open-apis/bot/v3/info",
+    signal: AbortSignal.any([signal, AbortSignal.timeout(BOT_NAME_TIMEOUT_MS)]),
+  });
+  return res.bot?.app_name?.trim() || null;
 }
 
 function feishuAccountDomain(domain: "feishu" | "lark"): string {
