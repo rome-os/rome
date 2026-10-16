@@ -76,3 +76,21 @@ The actor is the authenticated session identity accountable for an action execut
 
 - **Initiator** — the initiator names the triggering mechanism (an app, an agent, a routine). The actor names the accountable session. Both are recorded, and they are never interchangeable.
 - **[Caller identity](apps.md#caller-identity)** — the caller is what one app observes for the request it handles. The actor is stamped on every execution in the chain, including hops no app observes.
+
+## Placement
+
+Placement decides which process runs an action: the main process, or an action worker that main forks. A worker isolates app code and lets a cancellable action be killed, and every worker draws on one capped budget ([only main creates action workers](../adrs/workers-never-fork-workers.md)).
+
+**Contracts:**
+
+- A root action that main dispatches runs in an action worker, except for the actions on core's main-process allowlist: `system:create_routine`, `system:send_user_message`, and `system:send_feedback`.
+- An allowlisted action runs in main only while it is not `cancellable`. Main matches it by the app that owns it, so another app's action with the same local name runs in a worker.
+- An allowlisted root takes no worker slot, so it succeeds while every worker is busy. An agent can therefore schedule its own wake-up, start a webchat turn, or file feedback under full load.
+- An allowlisted root cannot be cancelled. The execution cancel endpoint reports that no execution is running. A routine Stop marks the run cancelled until the action's real outcome is recorded.
+- An error that escapes an allowlisted handler reaches the main process instead of ending a worker.
+- A nested call under an allowlisted root runs in an action worker, never in main, and fails at once when no worker is free. It is still recorded as a child of that root, even when it starts after the root has finished.
+- A nested call that a worker makes runs in that worker unless it is `cancellable`, which gives it a worker of its own.
+
+**Not to be confused with:**
+
+- **Queued admission** — a root whose caller holds no worker can wait for a free slot (`whenWorkersBusy: "queue"`). It still runs in a worker. An allowlisted root never waits, because it needs no slot.

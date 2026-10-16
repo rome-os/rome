@@ -64,3 +64,20 @@ Alternatives rejected for this amendment:
 - **Raise the cap.** Rejected because a burst of long agent roots fills any fixed cap, and the cap exists to bound memory on the smallest instance.
 
 This amends the consequence that reaching the cap fails the call immediately. Future diffs must respect: a caller opts into queueing only when it holds no worker and no worker waits on it synchronously, and the queue never admits a root into a reserved slot.
+
+## Amendment (2026-10-13): allowlisted coordination roots run in main
+
+The 2026-10-07 amendment keeps agent tool calls fail-fast. That left an agent at the worker cap unable to schedule its own wake-up (`defer`, which runs `system:create_routine`), start a guardian webchat turn (`system:send_user_message`), or file feedback (`system:send_feedback`). Each failed with the capacity error before its handler ran, so no routine row was written ([#830](https://github.com/rome-os/rome/issues/830)). The cap worked as designed. These actions did not need a worker: their handlers only call main-owned services, which a worker reaches back into over RPC anyway.
+
+Main now runs a root from a core-owned allowlist of canonical action ids in its own process, so the root takes no worker slot. Core holds the allowlist and matches each action by the app that owns it, because a manifest field would let any app claim main. A `cancellable` action never qualifies, and when the check is absent or throws, the root takes a worker.
+
+Main never runs a nested call under such a root in-process. The root's handler leaves its replay context on everything it starts, including its timers and the subscribers to events it publishes, so a nested call reached that way may be third-party code. Every nested call under an allowlisted root takes a worker and fails fast at the cap. This guard only decides where the call runs. The call is still recorded as a child of the allowlisted root, even after that root has finished, so an allowlisted handler must not leave its context on work that outlives it.
+
+Alternatives rejected for this amendment:
+
+- **Queue the tool call.** Rejected by the 2026-10-07 amendment, because the turn's driver usually holds a worker.
+- **Reserve slots for scheduling.** Rejected because a reserve only moves the cap, and other fail-fast callers can take the reserved slots.
+- **Persist a scheduling intent and admit it later.** Rejected because the caller needs the routine id, and a deferred creation can miss a wake-up only minutes away.
+- **Run every first-party `type: system` root in main.** Rejected because `summon` and other turn-driving system actions would leave their replay context on the agent's tool calls, so third-party actions would run nested in main.
+
+The trade-offs are that an allowlisted root cannot be cancelled and an error escaping its handler reaches main. Future diffs must respect: an action joins the allowlist only when it is a first-party, non-cancellable leaf whose handler calls main-owned services, and main runs no nested call in-process under a root that runs in main.

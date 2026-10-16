@@ -225,6 +225,14 @@ interface ActionEngineOptions {
   ) => Promise<ActionResult | undefined>;
   /** Main-only process factory. Worker engines intentionally receive none. */
   actionWorkerFork?: (entryPath: string, options: ForkOptions) => ChildProcess;
+  /**
+   * Main-only placement check, called with a root action's registered name.
+   * True runs that root in main instead of in a worker, so it takes no worker
+   * slot and cannot be cancelled. The engine also requires the action to be
+   * non-cancellable. When the check is absent or throws, the root takes a
+   * worker.
+   */
+  runsRootInMain?: (actionName: string) => boolean;
 }
 
 interface ExecutionInvocation {
@@ -334,6 +342,7 @@ export class ActionEngine {
   private actionWorkerCoordinator: ActionWorkerCoordinator | null = null;
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
+  private runsRootInMainCheck: ActionEngineOptions["runsRootInMain"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
   private clock: Clock;
@@ -362,6 +371,7 @@ export class ActionEngine {
     this.clock = options?.clock ?? systemClock;
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
+    this.runsRootInMainCheck = options?.runsRootInMain;
     this.workerWarmPoolSize =
       this.processRole === "main"
         ? Math.max(0, Math.floor(options?.workerWarmPoolSize ?? DEFAULT_WORKER_WARM_POOL_SIZE))
@@ -861,7 +871,11 @@ export class ActionEngine {
   ): Promise<ActionResult> {
     const { action, name, args, executionId, rootExecutionId, parentId, initiator, actor, isRoot } =
       invocation;
-    const mode = this.resolveExecutionMode(action, isRoot);
+    const replayStore = replayContext.getStore();
+    const mode = this.resolveExecutionMode(action, isRoot, replayStore);
+    if (isRoot && mode === "in_process" && this.processRole === "main" && replayStore) {
+      replayStore.rootRunsInMain = true;
+    }
     const startedAt = this.clock.now();
     await this.ensureExecutionStarted({
       executionId,
@@ -1636,11 +1650,36 @@ export class ActionEngine {
     });
   }
 
-  private resolveExecutionMode(action: Action, isRoot: boolean): "in_process" | "subprocess" {
+  private resolveExecutionMode(
+    action: Action,
+    isRoot: boolean,
+    replayStore: ReplayStore | undefined,
+  ): "in_process" | "subprocess" {
     if (isRoot) {
-      return this.processRole === "main" ? "subprocess" : "in_process";
+      if (this.processRole !== "main") return "in_process";
+      return this.runsRootInMain(action) ? "in_process" : "subprocess";
     }
+    // A root running in main leaves its replay context on everything its
+    // handler starts, including its timers and the subscribers to events it
+    // publishes. A nested call reached through that context may be third-party
+    // code, so it takes a worker rather than running in main. This decides
+    // placement only: the call is still journaled under that root, even after
+    // the root has settled.
+    if (this.processRole === "main" && replayStore?.rootRunsInMain) return "subprocess";
     return action.config.cancellable ? "subprocess" : "in_process";
+  }
+
+  private runsRootInMain(action: Action): boolean {
+    if (action.config.cancellable || !this.runsRootInMainCheck) return false;
+    try {
+      return this.runsRootInMainCheck(action.config.name);
+    } catch (err) {
+      log.warn("root placement check failed; using an action worker", {
+        action: action.config.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 
   private emitRuntimeEvent(
