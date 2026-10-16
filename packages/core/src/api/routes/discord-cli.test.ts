@@ -291,5 +291,27 @@ describe("Discord CLI loopback broker routes", () => {
       expect(await response.json()).toMatchObject({ error: { type: "not_authenticated" } });
       expect(invoked).toEqual([]);
     });
+
+    it("reports a Discord channel whose bot is being re-added as not paired", async () => {
+      const invoked: string[] = [];
+      const response = await discordCliRoutes(
+        {
+          setupManager: {
+            activeFor: (idOrService: string, grant: string) =>
+              idOrService === "discord" && grant === "bot" ? "setup-1" : null,
+          } as NonNullable<ApiDeps["setupManager"]>,
+          connectionRegistry: {
+            find: () => [bot("conn-1", invoked)],
+          } as unknown as NonNullable<ApiDeps["connectionRegistry"]>,
+          channelRecords: {
+            byId: () => ({ service: "discord", connectionId: null }) as never,
+          },
+        },
+        "127.0.0.1",
+      ).request("/_internal/discord/auth", { headers: { "x-rome-channel": "discord-4" } });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { type: "not_paired" } });
+      expect(invoked).toEqual([]);
+    });
   });
 });

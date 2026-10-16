@@ -114,10 +114,10 @@ async function execute(
   const startedAt = Date.now();
   let discordStatus: number | undefined;
   try {
-    const { bot, candidates } = discordBotFor(deps, channel);
+    const { bot, candidates, includeNewAccount } = discordBotFor(deps, channel);
     const act = bot?.act;
     if (!act || !act.operations().some((operation) => operation.name === "discord.api.request")) {
-      return unavailableDiscordAuth(deps, candidates);
+      return unavailableDiscordAuth(deps, candidates, includeNewAccount);
     }
 
     const result = (await act.invoke({
@@ -175,19 +175,26 @@ async function execute(
  * a reconnect re-backs a channel with a new Connection. A Discord channel never
  * acts as another bot, so one whose bot is missing or locked is unavailable.
  * A caller on no Discord channel gets the first bot that can act, so an
- * unfinished account never hides a live one. */
+ * unfinished account never hides a live one. The channel is the caller's
+ * claim, so this picks a bot rather than enforcing a boundary between them. */
 function discordBotFor(
   deps: DiscordCliRouteDeps,
   channel: string | undefined,
-): { bot: Connection | undefined; candidates: Connection[] | null } {
+): { bot: Connection | undefined; candidates: Connection[] | null; includeNewAccount: boolean } {
   const bots = deps.connectionRegistry?.find("discord") ?? [];
   const record = channel ? deps.channelRecords?.byId(channel) : null;
   if (record?.service === "discord") {
     const own = bots.find((bot) => bot.id === record.connectionId);
     // A failure then describes the channel's own bot, not every Discord bot.
-    return { bot: own, candidates: own ? [own] : [] };
+    // A channel with no Connection waits for the service's next one, which
+    // may be mid-setup.
+    return { bot: own, candidates: own ? [own] : [], includeNewAccount: !record.connectionId };
   }
-  return { bot: bots.find((bot) => bot.isUnlocked("act")) ?? bots[0], candidates: null };
+  return {
+    bot: bots.find((bot) => bot.isUnlocked("act")) ?? bots[0],
+    candidates: null,
+    includeNewAccount: true,
+  };
 }
 
 function projectFailure(result: Extract<ChannelApiResult, { error: unknown }>): {
@@ -250,16 +257,17 @@ function credentialRejected(): { status: number; body: DiscordBrokerEnvelope } {
 }
 
 /** Why no bot can act. `candidates` narrows the diagnosis to a channel's own
- *  bot, and null means every Discord bot, including one still being set up. */
+ *  bot, and null means every Discord bot. */
 function unavailableDiscordAuth(
   deps: DiscordCliRouteDeps,
   candidates: Connection[] | null,
+  includeNewAccount: boolean,
 ): {
   status: number;
   body: DiscordBrokerEnvelope;
 } {
   const bots = candidates ?? deps.connectionRegistry?.find("discord") ?? [];
-  if (hasActiveDiscordSetup(deps, bots, candidates === null)) return notPaired();
+  if (hasActiveDiscordSetup(deps, bots, includeNewAccount)) return notPaired();
   const rejected = bots.some((connection) => connection.auth.grants().bot === "degraded");
   return rejected ? credentialRejected() : notAuthenticated();
 }
