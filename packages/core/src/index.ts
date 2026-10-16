@@ -1253,7 +1253,9 @@ async function main() {
     hookChannels.push(...added);
     const hook = messageHook;
     // A hook without `addChannels` re-registers, as the app-keys reloader
-    // does, and its register() reads the grown channel list.
+    // does, and its register() reads the grown channel list. Events waiting
+    // on its other subscriptions are dropped, which beats never hearing the
+    // new account until the next reload.
     const subscribe = hook.addChannels
       ? () => hook.addChannels?.(added)
       : () => {

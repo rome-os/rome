@@ -1925,8 +1925,9 @@ export interface ChannelMessageHook {
   register(): Promise<void>;
   /** Subscribe to `channels`, which the host has just appended to the deps'
    *  `channels`, such as a second bot whose Talk first unlocked. The host
-   *  calls it only on a hook that defines it. A hook without it hears those
-   *  channels from its next `register()`. */
+   *  calls it only on a hook that defines it. On a hook without it, the host
+   *  calls `unregister()` then `register()` at once, which drops events still
+   *  waiting on the hook's existing subscriptions. */
   addChannels?(channels: readonly Channel[]): Promise<void>;
   /** Detach every subscription `register` took out, so
    * the host can swap in a replacement instance (e.g. after an app-keys
