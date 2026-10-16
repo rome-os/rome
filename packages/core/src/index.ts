@@ -1255,13 +1255,20 @@ async function main() {
     // A hook without `addChannels` re-registers, as the app-keys reloader
     // does, and its register() reads the grown channel list. Events waiting
     // on its other subscriptions are dropped, which beats never hearing the
-    // new account until the next reload.
+    // new account until the next reload. A hook that cannot unregister is
+    // left alone, as the reloader leaves it, since registering it again would
+    // double its existing subscriptions.
     const subscribe = hook.addChannels
       ? () => hook.addChannels?.(added)
-      : () => {
-          hook.unregister?.();
-          return hook.register();
-        };
+      : hook.unregister
+        ? () => {
+            hook.unregister?.();
+            return hook.register();
+          }
+        : () =>
+            log.warn("channel-message hook can neither add channels nor unregister", {
+              channel: channel.name,
+            });
     // Subscribe before the new talker starts. A hook built outside this repo
     // may throw synchronously or return no promise.
     const failed = (error: unknown) => {
