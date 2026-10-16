@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 import { firstPartyApps } from "./first-party-apps";
 
 const appsDir = fileURLToPath(new URL("../../../../rome_apps/", import.meta.url));
@@ -14,28 +15,26 @@ function packedIds(): string[] {
     .sort();
 }
 
-function topLevelScalar(manifest: string, key: string): string | undefined {
-  return manifest.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1].trim();
-}
-
 describe("first-party app fixtures", () => {
   it("lists exactly the apps boot installs", () => {
     expect(firstPartyApps.map((app) => app.id).sort()).toEqual(packedIds());
   });
 
-  it("matches each app.yaml's name, version, and web entry", () => {
+  it("matches each app.yaml's name, version, description, and web entry", () => {
     for (const app of firstPartyApps) {
-      const manifest = readFileSync(join(appsDir, app.id, "app.yaml"), "utf8");
+      const manifest = parseYaml(readFileSync(join(appsDir, app.id, "app.yaml"), "utf8"));
       expect({
         id: app.id,
         displayName: app.displayName,
         version: app.version,
+        description: app.description,
         hasFrontend: app.hasFrontend,
       }).toEqual({
         id: app.id,
-        displayName: topLevelScalar(manifest, "name"),
-        version: topLevelScalar(manifest, "version"),
-        hasFrontend: /^web:/m.test(manifest),
+        displayName: manifest.name,
+        version: manifest.version,
+        description: manifest.description,
+        hasFrontend: manifest.web !== undefined,
       });
     }
   });
