@@ -80,26 +80,24 @@ export function claimLegacyArtifactName(
   return { claimed: false, conflict: existing };
 }
 
+/**
+ * Binds each free name to `artifactId`, even when another name in the list is
+ * held. A held name stays with its holder and is listed in `conflicts`.
+ */
 export function claimLegacyArtifactNames(
   bindings: LegacyArtifactBindings,
   kind: NamespacedArtifactKind,
   legacyNames: readonly string[],
   artifactId: ArtifactId,
 ): { claimed: boolean; conflicts: Array<{ legacyName: string; artifactId: ArtifactId }> } {
-  const names = [...new Set(legacyNames.filter((name) => name && !name.includes(":")))];
-  const conflicts = names.flatMap((legacyName) => {
-    const existing = bindings[kind][legacyName];
-    return existing !== undefined && existing !== artifactId
-      ? [{ legacyName, artifactId: existing }]
-      : [];
-  });
-  if (conflicts.length > 0) return { claimed: false, conflicts };
-
+  const conflicts: Array<{ legacyName: string; artifactId: ArtifactId }> = [];
   let claimed = false;
-  for (const legacyName of names) {
-    claimed = claimLegacyArtifactName(bindings, kind, legacyName, artifactId).claimed || claimed;
+  for (const legacyName of new Set(legacyNames)) {
+    const claim = claimLegacyArtifactName(bindings, kind, legacyName, artifactId);
+    claimed = claim.claimed || claimed;
+    if (claim.conflict !== undefined) conflicts.push({ legacyName, artifactId: claim.conflict });
   }
-  return { claimed, conflicts: [] };
+  return { claimed, conflicts };
 }
 
 /**

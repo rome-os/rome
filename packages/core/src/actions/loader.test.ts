@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { ActionLoader } from "./loader.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
+import type { AppCatalog } from "../apps/catalog.js";
 
 type TestActionConfig = {
   webhook?: boolean;
@@ -173,5 +174,40 @@ describe("ActionLoader", () => {
     await expect(
       (loader as unknown as ActionLoaderPrivate).readActionConfig(favorActionYaml("reportUrl")),
     ).rejects.toThrow('must be a JSONPath into the action args, e.g. "$.reportUrl"');
+  });
+
+  it("loads two version-1 apps that each ship actions/run", async () => {
+    const refs = ["app-a", "app-b"].map((appId) => {
+      const yamlPath = writeActionYaml(
+        [
+          `name: ${appId.replace("-", "_")}_run`,
+          "type: custom",
+          "description: Run the app",
+          "complexity: simple",
+          "speed: fast",
+          "reliability: high",
+          "sideEffects: read-only",
+        ].join("\n"),
+      );
+      return {
+        formatVersion: 1,
+        kind: "action",
+        publicName: "run",
+        aliases: [],
+        ownerType: "app",
+        ownerId: appId,
+        absolutePath: dirname(yamlPath),
+      };
+    });
+    const catalog = { listArtifacts: () => refs } as unknown as AppCatalog;
+    const loader = new ActionLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
+
+    await loader.loadFromCatalog(catalog);
+
+    expect(loader.getRegistryLoadFailures()).toEqual([]);
+    expect(loader.get("app-a:app_a_run")?.name).toBe("app_a_run");
+    expect(loader.get("app-b:app_b_run")?.name).toBe("app_b_run");
+    expect(loader.get("app_a_run")?.name).toBe("app_a_run");
+    expect(loader.get("app_b_run")?.name).toBe("app_b_run");
   });
 });
