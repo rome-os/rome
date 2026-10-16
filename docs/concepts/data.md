@@ -44,6 +44,8 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 - Every fire is recorded as a routine run linked to its action execution, so a routine's history is inspectable.
 - A routine with an active run (executing, or parked awaiting [guardian approval](messaging.md#approvals)) cannot be deleted out from under it. The active-run check and the delete are atomic.
 - A run still executing when Rome stops is recorded as an error at the next start, so it does not block a delete. A run awaiting approval stays active.
+- A run awaiting approval settles when its approval resolves, and then reports the outcome of its execution. After an approval, that is the outcome of the action that then runs. A rejection cancels the execution. While another approval can still resume the execution, the run keeps waiting.
+- An approved action that Rome stopped in the middle of leaves its run as an error at the next start. Retrying a failed approval makes its run wait again until the retry settles it.
 - An app-managed routine can only be deleted by the managing app, never by a user.
 - A schedule trigger states its timezone binding explicitly. *Floating* resolves against the guardian's current timezone, so the routine follows them when it changes. *Fixed* pins the stored zone forever.
 

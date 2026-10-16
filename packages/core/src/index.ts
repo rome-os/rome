@@ -141,6 +141,11 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
+import {
+  routineRunApprovalHooks,
+  settleParkedRun,
+  settleResolvedParkedRuns,
+} from "./routines/settle-parked-run.js";
 import { mapGuardianToChannel } from "./channels/guardian-mapping.js";
 import type { EmailInboundResult } from "./channels/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -152,6 +157,7 @@ import { PublicAccessState } from "./lib/public-access-state.js";
 import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
+import { recoverInterruptedApprovals } from "./actions/approval-recovery.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
 import { emitAgentMessage } from "./actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
@@ -345,6 +351,28 @@ async function main() {
   );
   if (interrupted.executions > 0 || interrupted.routineRuns > 0) {
     log.warn("Ended runs a stopped Rome process left running", interrupted);
+  }
+
+  // Nothing executes an approval yet, so a `queued` or `running` one belongs to
+  // the stopped process.
+  const interruptedApprovals = await recoverInterruptedApprovals(
+    { approvals: approvalsRepo, executions: actionExecutionsRepo },
+    new Date(),
+  );
+  if (interruptedApprovals > 0) {
+    log.warn("Failed approved actions a stopped Rome process left unfinished", {
+      count: interruptedApprovals,
+    });
+  }
+
+  // After the sweeps above, which settle roots an approved replay left running
+  // and fail the approvals behind them.
+  const settledParkedRuns = await settleResolvedParkedRuns(
+    { executions: actionExecutionsRepo, approvals: approvalsRepo, routineRuns: routineRunsRepo },
+    new Date(),
+  );
+  if (settledParkedRuns > 0) {
+    log.info("Settled routine runs whose approvals had resolved", { count: settledParkedRuns });
   }
 
   await ensureSentinelPersons(personMappingRepo);
@@ -667,6 +695,17 @@ async function main() {
     actionEngine,
     30_000,
     systemClock,
+    async (rootExecutionId) => {
+      await settleParkedRun(
+        {
+          executions: actionExecutionsRepo,
+          approvals: approvalsRepo,
+          routineRuns: routineRunsRepo,
+        },
+        rootExecutionId,
+        new Date(),
+      );
+    },
   );
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
     resolveGuardianTimezone(settingsRepo),
@@ -874,6 +913,14 @@ async function main() {
     agentRunner,
     backendTurnRunner,
     resolveContinuationWorkingDir,
+    {
+      executions: actionExecutionsRepo,
+      ...routineRunApprovalHooks({
+        executions: actionExecutionsRepo,
+        approvals: approvalsRepo,
+        routineRuns: routineRunsRepo,
+      }),
+    },
   );
 
   // Real push sender in the main process (holds the durable instance token);

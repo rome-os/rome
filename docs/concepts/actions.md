@@ -10,6 +10,8 @@ An action is the primary unit of executable behavior: app-owned code that reads 
 - An action without an input schema stays outside every agent catalog. It runs only when a [routine](data.md#routines) fires, a [hook](apps.md#hooks) routes to it, or another action calls it.
 - Visibility gates both agent discovery and agent execution. It does not restrict routines, hooks, app APIs, or calls from another action.
 - An approval-gated action never executes before the guardian's decision ([approvals](messaging.md#approvals)).
+- An execution with a nested call awaiting approval waits on that approval, whatever its own code returned.
+- A rejection ends the execution waiting on it as cancelled, unless another approval can still resume that execution.
 - A nested action call shares its caller's root and cancellation lifetime, and the caller must wait for its result. Fire-and-forget of a nested call is invalid: the caller may finish and release its resources while the callee is still running.
 - Intentionally independent work starts **detached**: it becomes a new root execution with no parent. Cancelling the caller does not cancel it, and it can be cancelled separately by its own execution id.
 - A detached start returns only an acceptance receipt, never the eventual result. Acceptance is not durable across a restart.

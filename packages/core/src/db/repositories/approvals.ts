@@ -1,7 +1,7 @@
 import type { PersonMappingRepository } from "./person-mapping.js";
 import { STRANGER_PERSON_ID } from "../../constants.js";
 import { loadPairingKey, pairingCode, matchesPairingCode } from "../../channels/pairing-code.js";
-import { and, eq, or, desc, sql, ne, count, gte } from "drizzle-orm";
+import { and, eq, or, desc, sql, ne, count, gte, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals, channelMappings, connections, connectionGrants } from "../schema.js";
 import type { DrizzleDb, SqliteExec } from "../index.js";
@@ -16,6 +16,20 @@ import {
 
 type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
+
+/** An action_execution approval that can still run or change its root: one
+ * pending, or approved and not executed yet. A failed execution stays
+ * retryable, so it counts. */
+const activeActionApproval = and(
+  eq(approvals.type, "action_execution"),
+  or(
+    eq(approvals.status, "pending"),
+    and(
+      eq(approvals.status, "approved"),
+      inArray(approvals.executionState, ["idle", "queued", "running", "failed"]),
+    ),
+  ),
+);
 
 export type ResolvePendingResult =
   | { outcome: "resolved"; approval: ApprovalRow }
@@ -473,23 +487,7 @@ export class ApprovalsRepository {
     const rows = await this.db
       .select({ payload: approvals.payload })
       .from(approvals)
-      .where(
-        and(
-          eq(approvals.type, "action_execution"),
-          or(
-            eq(approvals.status, "pending"),
-            and(
-              eq(approvals.status, "approved"),
-              or(
-                eq(approvals.executionState, "idle"),
-                eq(approvals.executionState, "queued"),
-                eq(approvals.executionState, "running"),
-                eq(approvals.executionState, "failed"),
-              ),
-            ),
-          ),
-        ),
-      );
+      .where(activeActionApproval);
     const ids: string[] = [];
     for (const row of rows) {
       const payload = row.payload as Record<string, unknown> | null;
@@ -498,6 +496,74 @@ export class ApprovalsRepository {
       }
     }
     return ids;
+  }
+
+  /** Whether an action_execution approval for the root can still run or change
+   * it: one pending, or approved and not executed yet. A failed execution
+   * stays retryable, so it counts unless `countFailed` is false. */
+  hasActiveApprovalForRoot(
+    rootExecutionId: string,
+    { countFailed = true }: { countFailed?: boolean } = {},
+  ): boolean {
+    const row = this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          activeActionApproval,
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+          countFailed ? undefined : ne(approvals.executionState, "failed"),
+        ),
+      )
+      .limit(1)
+      .get();
+    return row !== undefined;
+  }
+
+  /** Whether the guardian rejected any action_execution approval for the root. */
+  hasRejectedApprovalForRoot(rootExecutionId: string): boolean {
+    const row = this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          eq(approvals.type, "action_execution"),
+          eq(approvals.status, "rejected"),
+          sql`json_extract(${approvals.payload}, '$.rootExecutionId') = ${rootExecutionId}`,
+        ),
+      )
+      .limit(1)
+      .get();
+    return row !== undefined;
+  }
+
+  /**
+   * Fails every approved action_execution approval a stopped process left
+   * `queued` or `running`, so the guardian can retry it. Returns how many it
+   * failed, and the roots the `running` ones were replaying. Call only at
+   * boot, before any approval executes: nothing claims or runs one then.
+   */
+  async failInterruptedExecutions(): Promise<{ failed: number; replayedRoots: string[] }> {
+    const fail = (state: "queued" | "running", error: string) =>
+      this.db
+        .update(approvals)
+        .set({ executionState: "failed", executionError: error })
+        .where(
+          and(
+            eq(approvals.type, "action_execution"),
+            eq(approvals.status, "approved"),
+            eq(approvals.executionState, state),
+          ),
+        )
+        .returning({ payload: approvals.payload });
+    const unclaimed = await fail("queued", "Rome stopped before the approved action started");
+    const started = await fail("running", "Rome stopped while the approved action was running");
+    const replayedRoots = new Set<string>();
+    for (const row of started) {
+      const rootExecutionId = (row.payload as Record<string, unknown> | null)?.rootExecutionId;
+      if (typeof rootExecutionId === "string") replayedRoots.add(rootExecutionId);
+    }
+    return { failed: unclaimed.length + started.length, replayedRoots: [...replayedRoots] };
   }
 
   async retryFailedExecution(id: string): Promise<RetryExecutionResult> {
