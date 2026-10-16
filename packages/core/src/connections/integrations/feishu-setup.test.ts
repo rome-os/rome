@@ -76,6 +76,28 @@ describe("Feishu credential setup", () => {
     expect(reviveFeishuProfile(profile).handle).toBe("app");
   });
 
+  it("commits nothing when cancelled while the bot's name is read", async () => {
+    const fetchBotName = rs.fn(() => new Promise<never>(() => {}));
+    const commit = rs.fn(async (_value: SetupConferral) => {});
+    const session = new SetupSession({
+      fn: makeFeishuSetup({
+        probeCredentials: async () => {},
+        registerAgentApp: async () => {
+          throw new Error("Unexpected QR setup");
+        },
+        fetchBotName,
+      }),
+      commit,
+    });
+    await session.started();
+    await session.provideInput({ mode: "manual", domain: "feishu" });
+    const input = session.provideInput({ appId: "app", appSecret: "secret" });
+    await rs.waitFor(() => expect(fetchBotName).toHaveBeenCalled());
+    await session.cancel();
+    await input;
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it("keeps QR registration cancellable with no durable write", async () => {
     const registerAgentApp = rs.fn(
       ({ signal }: { signal: AbortSignal }) =>

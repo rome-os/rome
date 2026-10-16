@@ -290,6 +290,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       appType,
     };
     let botName: string | undefined;
+    interact.show({ title: "Finishing setup", body: ["Reading the bot's name…"], progress: true });
     try {
       botName =
         (await ctx.step("bot-name", (signal) => {
@@ -342,6 +343,17 @@ async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<
   }
 }
 
+/** Discards the SDK's own logging. Its default logs a failed request's whole
+ *  error, whose headers carry the tenant access token; callers report the
+ *  failure themselves. */
+const silentSdkLogger = {
+  error: () => {},
+  warn: () => {},
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+};
+
 /** An SDK client for `material`'s app, on the host of its domain. */
 async function feishuClient(material: FeishuPendingMaterial) {
   const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
@@ -349,6 +361,7 @@ async function feishuClient(material: FeishuPendingMaterial) {
     appId: material.appId,
     appSecret: material.appSecret,
     domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
+    logger: silentSdkLogger,
   });
 }
 
