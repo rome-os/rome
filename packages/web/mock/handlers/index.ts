@@ -804,7 +804,7 @@ const chatAgents: AgentCatalogGroup[] = [
 
 /** The loaded agents `GET /api/agents` lists, which the account link picker
  *  offers and its PUT accepts. */
-const mockAgentNames = ["build", "sales:agent"];
+const mockAgentNames = ["core:main", "build", "sales:agent"];
 
 // Long enough to overflow the project picker's 260px list, so the pinned
 // "no project selected" row can be exercised against a scrolling list.
@@ -1277,18 +1277,27 @@ export const handlers = [
     connections.connections.push(connection);
     return HttpResponse.json({ connection }, { status: 201 });
   }),
-  // Link an agent to an account. On one platform an agent links to at most
-  // one account, so linking it here takes the link off the other one.
+  // Link an agent to an account. On one platform an agent other than main
+  // links to at most one account, so linking it here takes the link off the
+  // other one.
   http.put("/api/channels/accounts/:id/agent", async ({ params, request }) => {
     const id = String(params.id);
-    const { agent } = (await request.json()) as { agent: string | null };
+    const body = (await request.json()) as { agent: string | null };
+    // Core stores main by its canonical id and accepts the short name.
+    const agent = body.agent === "main" ? "core:main" : body.agent;
     const target = connections.connections.find((candidate) => candidate.channel === id);
     if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
     if (agent !== null && !mockAgentNames.includes(agent)) {
       return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
     }
+    if (!LINKABLE_SERVICES.has(target.service)) {
+      return HttpResponse.json(
+        { error: `${target.service} accounts do not take a linked agent.` },
+        { status: 400 },
+      );
+    }
     const connected = Object.values(target.grants).some((state) => state !== "unauthorized");
-    if (!LINKABLE_SERVICES.has(target.service) || !connected) {
+    if (!connected) {
       return HttpResponse.json(
         { error: "This account does not receive messages." },
         { status: 409 },
@@ -1296,7 +1305,8 @@ export const handlers = [
     }
     const platform = platformOf(target.service);
     let unlinkedFrom: string | null = null;
-    if (agent !== null) {
+    // Main may answer on several accounts, so only other agents move.
+    if (agent !== null && agent !== "core:main") {
       for (const other of connections.connections) {
         if (other === target || other.linkedAgent !== agent) continue;
         if (platformOf(other.service) !== platform) continue;

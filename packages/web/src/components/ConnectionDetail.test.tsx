@@ -407,14 +407,14 @@ describe("ConnectionDetailBody — accounts", () => {
 
   type FetchCall = { url: string; method: string; body: unknown };
 
-  function mockAccountsFetch(linkResponse: unknown) {
+  function mockAccountsFetch(linkResponse: unknown, agents: string[] = ["sales:agent"]) {
     const calls: FetchCall[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
       calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
       if (url === "/api/agents") {
-        return new Response(JSON.stringify({ agents: [{ name: "sales:agent" }] }), {
+        return new Response(JSON.stringify({ agents: agents.map((name) => ({ name })) }), {
           status: 200,
         });
       }
@@ -489,7 +489,7 @@ describe("ConnectionDetailBody — accounts", () => {
     const user = userEvent.setup();
 
     const picker = screen.getByRole("combobox", { name: "Linked agent" });
-    expect(picker.textContent).toContain("None. Main answers here.");
+    expect(picker.textContent).toContain("None. This account stays silent.");
     await user.click(picker);
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
 
@@ -527,7 +527,7 @@ describe("ConnectionDetailBody — accounts", () => {
 
     await waitFor(() =>
       expect(toast).toHaveBeenCalledWith(
-        "sales:agent now answers on Feishu · Support Bot. Its link to another account on this platform was removed, since an agent links to one account per platform.",
+        "sales:agent now answers on Feishu · Support Bot. Its link to another account on this platform was removed, since an agent other than main links to one account per platform.",
       ),
     );
   });
@@ -570,7 +570,7 @@ describe("ConnectionDetailBody — accounts", () => {
     rerenderCard(cardFor([feishu({ linkedAgent: null })], "feishu"));
 
     expect(screen.getByRole("combobox", { name: "Linked agent" }).textContent).toContain(
-      "None. Main answers here.",
+      "None. This account stays silent.",
     );
   });
 
@@ -584,7 +584,9 @@ describe("ConnectionDetailBody — accounts", () => {
     await user.click(await screen.findByRole("option", { name: "sales:agent" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
     await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
-    await user.click(await screen.findByRole("option", { name: "None. Main answers here." }));
+    await user.click(
+      await screen.findByRole("option", { name: "None. This account stays silent." }),
+    );
 
     await waitFor(() =>
       expect(calls.filter((call) => call.method === "PUT").map((call) => call.body)).toEqual([
@@ -592,6 +594,40 @@ describe("ConnectionDetailBody — accounts", () => {
         { agent: null },
       ]),
     );
+  });
+
+  it("offers main once under its short name and links it by its canonical id", async () => {
+    const calls = mockAccountsFetch(linkResult("core:main"), ["core:main", "main", "sales:agent"]);
+    const onRefresh = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onRefresh });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("combobox", { name: "Linked agent" }));
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "None. This account stays silent.",
+      "main",
+      "sales:agent",
+    ]);
+    await user.click(screen.getByRole("option", { name: "main" }));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    expect(calls.find((call) => call.method === "PUT")?.body).toEqual({ agent: "core:main" });
+    expect(toast).toHaveBeenCalledWith("main now answers on Feishu.");
+  });
+
+  it("shows main once when the server reports it by its short name", async () => {
+    mockAccountsFetch(linkResult("core:main"), ["core:main", "sales:agent"]);
+    renderAccountBody(cardFor([feishu({ linkedAgent: "main" })], "feishu"));
+    const user = userEvent.setup();
+
+    const picker = screen.getByRole("combobox", { name: "Linked agent" });
+    expect(picker.textContent).toContain("main");
+    await user.click(picker);
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "None. This account stays silent.",
+      "main",
+      "sales:agent",
+    ]);
   });
 
   it("says the agents could not load instead of offering only None", async () => {
@@ -623,9 +659,11 @@ describe("ConnectionDetailBody — accounts", () => {
     const picker = screen.getByRole("combobox", { name: "Linked agent" });
     expect(picker.textContent).toContain("sales:agent");
     await user.click(picker);
-    await user.click(await screen.findByRole("option", { name: "None. Main answers here." }));
+    await user.click(
+      await screen.findByRole("option", { name: "None. This account stays silent." }),
+    );
 
-    await waitFor(() => expect(toast).toHaveBeenCalledWith("Main now answers on Feishu."));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Feishu now stays silent."));
     expect(calls.find((call) => call.method === "PUT")?.body).toEqual({ agent: null });
   });
 
