@@ -15,11 +15,12 @@ import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb, identityServiceOf } from "../../test/helpers.js";
 import type { MailProvider, RomeMailEvent, RomeMailMessage } from "../../lib/rome-cloud-mail.js";
 import { ConnectionRegistry } from "../registry.js";
 import { DrizzleGrantLedger } from "../ledger-db.js";
@@ -261,7 +262,10 @@ function makeSetupApp() {
     connectionRegistry: registry,
     setupManager,
     db: testDb,
-    approvalsRepo: new ApprovalsRepository(testDb),
+    approvalsRepo: new ApprovalsRepository(
+      testDb,
+      new PersonMappingRepository(testDb, identityServiceOf),
+    ),
     personMappingRepo,
   } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));

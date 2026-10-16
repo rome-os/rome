@@ -269,7 +269,11 @@ async function main() {
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
+  const channelRecords = new ChannelRecordsRepository(db);
+  // The service a channel name belongs to. Whatever is keyed by service, such
+  // as a descriptor, a channel policy, or a person's link, reads it.
+  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
+  const personMappingRepo = new PersonMappingRepository(db, serviceOfChannel);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -284,7 +288,7 @@ async function main() {
   // The WeChat app on its own desktop, opened from /desktop/wechat. It drives
   // the same client, and needs no connection.
   const wechatApp = wechatUserRuntime ? new WechatApp(wechatUserRuntime) : null;
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
 
@@ -342,7 +346,6 @@ async function main() {
   // the message hook exists, so the first Talk unlock can attach its subscription.
   // Each Connection of a service with a Talk backs one channel, recorded and
   // released in the same transaction as the Connection.
-  const channelRecords = new ChannelRecordsRepository(db);
   const talks = (service: string) =>
     connectionRegistry.getDescriptor(service)?.capabilities.talker !== undefined;
   const connectionRegistry: ConnectionRegistry = new ConnectionRegistry({
@@ -354,9 +357,6 @@ async function main() {
   });
   const channelOf: ChannelOf = (connection) =>
     channelRecords.idOf(connection.id) ?? connection.service;
-  // The service a channel name belongs to. Whatever is keyed by service, such
-  // as a descriptor or a channel policy, reads it.
-  const serviceOfChannel = (name: string) => channelRecords.serviceOf(name);
   const pairingAdmission = createPairingAdmission({
     approvalsRepo,
     personMappingRepo,

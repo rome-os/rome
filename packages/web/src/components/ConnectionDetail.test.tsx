@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -8,6 +9,21 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { buildConnectionCards, type ConnectionCard } from "@/lib/connection-cards";
 import type { ApiConnection, ConnectHint, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import { toast } from "sonner";
+
+rs.mock("sonner", () => ({
+  toast: Object.assign(
+    rs.fn(() => "toast-id"),
+    {
+      success: rs.fn(),
+      error: rs.fn(),
+      dismiss: rs.fn(),
+    },
+  ),
+}));
+
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -58,6 +74,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -366,5 +384,160 @@ describe("ConnectionDetailBody — webchat and remaining channels", () => {
 
     const bullet = "Reply when people message @mybot";
     expect(within(container).getAllByText(bullet)).toHaveLength(1);
+  });
+});
+
+describe("ConnectionDetailBody — accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      display: { app: grantDisplay({ displayName: "Support Bot" }) },
+      capabilities: {
+        talk: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  type FetchCall = { url: string; method: string; body: unknown };
+
+  function mockAccountsFetch() {
+    const calls: FetchCall[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (url === "/api/connections" && method === "POST") {
+        return new Response(
+          JSON.stringify({ connection: feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU }) }),
+          { status: 201 },
+        );
+      }
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      return new Response("{}", { status: 200 });
+    });
+    return calls;
+  }
+
+  function renderAccountBody(
+    card: ConnectionCard,
+    handlers: {
+      onRefresh?: () => void;
+      onFlash?: (message: string) => void;
+      onOpenAccount?: (route: string) => void;
+    } = {},
+  ) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ConnectionDetailBody
+            card={card}
+            composio={null}
+            onRefresh={handlers.onRefresh ?? (() => {})}
+            onFlash={handlers.onFlash ?? (() => {})}
+            onOpenAccount={handlers.onOpenAccount}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("adds another account and opens it by its route", async () => {
+    const calls = mockAccountsFetch();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onOpenAccount).toHaveBeenCalledWith(SECOND_FEISHU));
+    expect(calls.find((call) => call.method === "POST")).toEqual({
+      url: "/api/connections",
+      method: "POST",
+      body: { service: "feishu" },
+    });
+  });
+
+  it("says the account was added when it cannot be opened yet", async () => {
+    mockAccountsFetch();
+    const onFlash = rs.fn();
+    const onOpenAccount = rs.fn(async () => {
+      throw new Error("not listed");
+    });
+    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+    );
+    expect(onFlash).not.toHaveBeenCalledWith("Could not add an account");
+  });
+
+  it("does not open the first account when the new one comes back without a channel", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response(JSON.stringify({ connection: feishu({ channel: null }) }), {
+          status: 201,
+        });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const onFlash = rs.fn();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith("Account added. Find it in the Connections list."),
+    );
+    expect(onOpenAccount).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed add with the localized fallback", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input) === "/api/connections" && init?.method === "POST") {
+        return new Response("", { status: 500 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const onFlash = rs.fn();
+    const onOpenAccount = rs.fn();
+    renderAccountBody(cardFor([feishu()], "feishu"), { onFlash, onOpenAccount });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => expect(onFlash).toHaveBeenCalledWith("Could not add an account"));
+    expect(onOpenAccount).not.toHaveBeenCalled();
+  });
+
+  it("hides the account controls until the Talk is connected", () => {
+    renderAccountBody(cardFor([feishu({ grants: { app: "unauthorized" } })], "feishu"), {
+      onOpenAccount: rs.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
+  });
+
+  it("offers no second account when the server omits severalAccounts", () => {
+    const { severalAccounts: _omitted, ...older } = feishu();
+    renderAccountBody(cardFor([older], "feishu"), { onOpenAccount: rs.fn() });
+    expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
+  });
+
+  it("offers no second account for a service that holds one", () => {
+    renderAccountBody(cardFor([feishu({ severalAccounts: false })], "feishu"), {
+      onOpenAccount: rs.fn(),
+    });
+    expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 });

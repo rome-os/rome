@@ -52,6 +52,7 @@ import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { SessionsRepository } from "../db/repositories/sessions.js";
 import { PersonMappingRepository } from "../db/repositories/person-mapping.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { OutboxRepository } from "../db/repositories/outbox.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -66,6 +67,7 @@ import { channelList } from "../channels/channel-list.js";
 import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -134,6 +136,15 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** Maps every channel to itself. Valid only where no service has a later channel. */
+export const identityServiceOf: ServiceOfChannel = (channel) => channel;
+
+/** Maps a channel to its service through `db`'s channel records, as Rome does. */
+export function recordedServiceOf(db: DrizzleDb): ServiceOfChannel {
+  const records = new ChannelRecordsRepository(db);
+  return (channel) => records.serviceOf(channel);
+}
+
 /** Opens a private in-memory database at the latest system schema. Each call
  *  starts from the same freshly migrated state, unaffected by writes to any
  *  other instance. */
@@ -156,7 +167,7 @@ export function createActionEngineRepos(
 ): ActionEngineRepositories {
   return {
     executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, recordedServiceOf(db))),
     journal: new ExecutionJournalRepository(db),
   };
 }
@@ -516,7 +527,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db);
+  const personMappingRepo = new PersonMappingRepository(db, recordedServiceOf(db));
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -526,7 +537,7 @@ export async function buildTestDeps(
   const connections = createTestConnections(transports);
   const channels = testChannels({ db, whatsAppAccounts, linkedInAccounts }, connections);
   const accountNames = createAccountNames({ channels, sentinelLogRepo });
-  const approvalsRepo = new ApprovalsRepository(db, undefined, personMappingRepo);
+  const approvalsRepo = new ApprovalsRepository(db, personMappingRepo);
   const settingsRepo = new SettingsRepository(db);
   // A private env object per deps bag: route tests exercise apply/remove
   // without touching the real process.env of the test runner.

@@ -49,6 +49,9 @@ import type {
   Talker,
 } from "../types.js";
 import { addressIsConversationFeature, directoryPage } from "./talk-features.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("feishu-setup");
 
 /** The `app` grant material — the custom-app credentials (see feishu.ts). */
 export interface FeishuAppMaterial {
@@ -61,24 +64,27 @@ export interface FeishuAppMaterial {
 }
 
 // The `app` grant's profile — the non-secret half of the custom-app identity
-// (appId + which tenant domain + app type). Declared next to the material shape;
-// parse-then-store, and the same schema re-runs on revive (fail-closed). `appId`
-// is the sole display field; `domain`/`appType` stay owner-side. All optional so
-// a bridge-era grant with no captured identity stays sparse-but-valid.
+// (appId, the bot's name, which tenant domain, app type). Declared next to the
+// material shape; parse-then-store, and the same schema re-runs on revive
+// (fail-closed). `botName` and `appId` are the display fields; `domain`/`appType`
+// stay owner-side. All optional so a bridge-era grant with no captured identity
+// stays sparse-but-valid.
 export const feishuGrantProfileSchema = z
   .object({
     appId: z.string().min(1).optional(),
+    botName: z.string().min(1).optional(),
     domain: z.enum(["feishu", "lark"]).optional(),
     appType: z.string().min(1).optional(),
   })
   .strict();
 export type FeishuGrantProfile = z.infer<typeof feishuGrantProfileSchema>;
 
-/** Pure display projection: the appId reads as the handle. `domain`/`appType` are
- *  owner-side and never widen the display surface. */
+/** Pure display projection: the bot's name reads as the display name and the
+ *  appId as the handle. `domain`/`appType` are owner-side and never widen the
+ *  display surface. */
 export function toFeishuDisplay(profile: FeishuGrantProfile): ProfileDisplay {
   return Object.freeze({
-    displayName: undefined,
+    displayName: profile.botName,
     handle: profile.appId,
     email: undefined,
     avatarUrl: undefined,
@@ -96,6 +102,7 @@ export function reviveFeishuProfile(record: ProfileRecord): ProfileDisplay {
  *  enum parse instead of being dropped before it. */
 export interface FeishuProfileSource {
   appId?: string;
+  botName?: string;
   domain?: unknown;
   appType?: string;
 }
@@ -110,6 +117,7 @@ export function feishuProfileFromSettings(
 ): FeishuGrantProfile | null {
   const raw: Record<string, unknown> = {};
   if (settings.appId != null && settings.appId !== "") raw.appId = settings.appId;
+  if (settings.botName != null && settings.botName !== "") raw.botName = settings.botName;
   if (settings.domain != null && settings.domain !== "") raw.domain = settings.domain;
   if (settings.appType != null && settings.appType !== "") raw.appType = settings.appType;
   if (Object.keys(raw).length === 0) return null;
@@ -131,6 +139,7 @@ export interface FeishuDescriptorDeps {
    *  network / SDK long connection. Production uses the defaults below. */
   probeCredentials?: FeishuSetupDeps["probeCredentials"];
   registerAgentApp?: FeishuSetupDeps["registerAgentApp"];
+  fetchBotName?: FeishuSetupDeps["fetchBotName"];
 }
 
 /** The credential fields a Feishu setup holds before conferral (the pending,
@@ -156,6 +165,9 @@ export interface FeishuSetupDeps {
   /** Probe-validate pasted credentials (mint a tenant access token). Throws
    *  with a guardian-readable message when the pair is refused. */
   probeCredentials: (material: FeishuPendingMaterial, signal?: AbortSignal) => Promise<void>;
+  /** The bot's name as Feishu shows it, or null when it has none. Setup goes
+   *  on without a name when this rejects: the account then reads as its appId. */
+  fetchBotName: (material: FeishuPendingMaterial, signal: AbortSignal) => Promise<string | null>;
   /**
    * The agent-ready dance: drive the SDK's `registerApp` QR flow (which MINTS
    * fresh app credentials — it runs against no adapter and no prior
@@ -214,6 +226,20 @@ function agentReadyQrView(qr: FeishuAgentReadyQr): SetupView {
   };
 }
 
+/** How long setup waits for the bot's name before going on without it. */
+const BOT_NAME_TIMEOUT_MS = 5_000;
+
+/** `work`, or a rejection once `signal` aborts, whichever comes first. A
+ *  fetcher that ignores its signal still cannot hold the setup past it. */
+function settledBefore<T>(signal: AbortSignal, work: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
   return async (interact, ctx) => {
     const { mode, domain: domainChoice } = await interact.prompt(FEISHU_MODE_FORM);
@@ -263,9 +289,29 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       domain: pending.domain,
       appType,
     };
+    let botName: string | undefined;
+    interact.show({ title: "Finishing setup", body: ["Reading the bot's name…"], progress: true });
+    try {
+      botName =
+        (await ctx.step("bot-name", (signal) => {
+          const bounded = AbortSignal.any([signal, AbortSignal.timeout(BOT_NAME_TIMEOUT_MS)]);
+          return settledBefore(bounded, deps.fetchBotName(pending, bounded));
+        })) ?? undefined;
+    } catch (err) {
+      // A cancel unwinds the setup; any other failure only costs the name.
+      if (ctx.signal.aborted) throw err;
+      log.warn("feishu_setup.bot_name_unread", {
+        appId: pending.appId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     const profile =
-      feishuProfileFromSettings({ appId: pending.appId, domain: pending.domain, appType }) ??
-      undefined;
+      feishuProfileFromSettings({
+        appId: pending.appId,
+        botName,
+        domain: pending.domain,
+        appType,
+      }) ?? undefined;
     return {
       credential: { material, expiresAt: "never" },
       profile,
@@ -283,12 +329,7 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
  *  (targets the right host for the chosen domain). A non-zero response code
  *  means the pair is refused. */
 async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<void> {
-  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
-  const client = new Client({
-    appId: material.appId,
-    appSecret: material.appSecret,
-    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
-  });
+  const client = await feishuClient(material);
   let res: { code?: number; msg?: string };
   try {
     res = await client.auth.v3.tenantAccessToken.internal({
@@ -300,6 +341,43 @@ async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<
   if (res.code !== 0) {
     throw new Error(res.msg || "Invalid App ID or App Secret");
   }
+}
+
+/** Discards the SDK's own logging. Its default logs a failed request's whole
+ *  error, whose headers carry the tenant access token; callers report the
+ *  failure themselves. */
+const silentSdkLogger = {
+  error: () => {},
+  warn: () => {},
+  info: () => {},
+  debug: () => {},
+  trace: () => {},
+};
+
+/** An SDK client for `material`'s app, on the host of its domain. */
+async function feishuClient(material: FeishuPendingMaterial) {
+  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
+  return new Client({
+    appId: material.appId,
+    appSecret: material.appSecret,
+    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
+    logger: silentSdkLogger,
+  });
+}
+
+/** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
+ *  which mints the tenant access token it needs. */
+async function fetchFeishuBotName(
+  material: FeishuPendingMaterial,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const client = await feishuClient(material);
+  const res = await client.request<{ bot?: { app_name?: string } }>({
+    method: "GET",
+    url: "/open-apis/bot/v3/info",
+    signal,
+  });
+  return res.bot?.app_name?.trim() || null;
 }
 
 function feishuAccountDomain(domain: "feishu" | "lark"): string {
@@ -400,6 +478,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   const createChannel = deps.createChannel ?? defaultCreateChannel;
   const probeCredentials = deps.probeCredentials ?? probeFeishuCredentials;
   const registerAgentApp = deps.registerAgentApp ?? registerFeishuAgentApp;
+  const fetchBotName = deps.fetchBotName ?? fetchFeishuBotName;
   const appScheme = credentialsPaste({
     instructions: "Paste your Feishu/Lark custom-app App ID and App Secret.",
     fields: [
@@ -428,6 +507,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   appScheme.setup = makeFeishuSetup({
     probeCredentials,
     registerAgentApp,
+    fetchBotName,
   });
 
   return {

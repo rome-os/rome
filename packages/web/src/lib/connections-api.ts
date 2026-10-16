@@ -7,6 +7,7 @@
  * `connection-cards.ts`, not here.
  */
 
+import type { ConnectionAccountFields } from "@rome/api-types/channel-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -47,7 +48,7 @@ export interface ConnectHint {
   unavailableReason: string | null;
 }
 
-export interface ApiConnection {
+export interface ApiConnection extends ConnectionAccountFields {
   /** Ledger connection id, or null for an offerable placeholder — a registered
    *  service the guardian has never connected. */
   id: string | null;
@@ -89,4 +90,16 @@ export async function revokeConnectionGrant(
     return { ok: false, error: payload?.error || "Failed to disconnect." };
   }
   return { ok: true };
+}
+
+/** Mint a fresh, unauthorized Connection for a service that offers several
+ *  accounts. The dashboard then runs the ordinary setup against its id.
+ *  `fallback` is the error message when the server gives none. */
+export async function createConnection(service: string, fallback: string): Promise<ApiConnection> {
+  const payload = await fetchJson<{ connection: ApiConnection }>("/api/connections", {
+    method: "POST",
+    json: { service },
+    fallback,
+  });
+  return payload.connection;
 }

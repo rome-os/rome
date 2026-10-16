@@ -22,7 +22,7 @@ import type { Credential, ProfileRecord } from "../../connections/types.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb, identityServiceOf } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
 
@@ -54,7 +54,10 @@ function makeApp(
     "/",
     connectionsRoutes({
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(
+        db,
+        new PersonMappingRepository(db, identityServiceOf),
+      ),
       connectionRegistry: registry,
       personMappingRepo,
       ...overrides,
@@ -529,6 +532,19 @@ describe("POST /connections", () => {
     expect(registry.find("fake-telegram")).toEqual([]);
   });
 
+  it("refuses a null body", async () => {
+    const registry = telegramRegistry();
+
+    const res = await makeApp(registry).request("/connections", {
+      method: "POST",
+      headers: { ...SAME_ORIGIN, "content-type": "application/json" },
+      body: "null",
+    });
+
+    expect(res.status).toBe(400);
+    expect(registry.find("telegram")).toEqual([]);
+  });
+
   it("rejects cross-site requests without minting", async () => {
     const registry = telegramRegistry();
 
@@ -641,7 +657,7 @@ describe("guardian links across Connections of one service", () => {
     const second = await registry.connectAnother("telegram");
     await registry.importCredential(first.id, "bot", fixture.validCredential());
     await registry.importCredential(second.id, "bot", fixture.validCredential());
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -649,7 +665,7 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
     const del = (path: string) => app.request(path, { method: "DELETE", headers: SAME_ORIGIN });
     return { registry, personMappingRepo, first, second, del };
@@ -687,7 +703,7 @@ describe("guardian links across Connections of one service", () => {
     registry.register(makeZeroGrantTalk().descriptor);
     const first = await registry.connect("fake-webchat");
     await registry.connectAnother("fake-webchat");
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
@@ -695,7 +711,7 @@ describe("guardian links across Connections of one service", () => {
     });
     const app = makeApp(registry, personMappingRepo, {
       db,
-      approvalsRepo: new ApprovalsRepository(db),
+      approvalsRepo: new ApprovalsRepository(db, personMappingRepo),
     });
 
     const removed = await app.request(`/connections/${first.id}`, {
@@ -742,13 +758,17 @@ describe("connection pairing teardown", () => {
     const conn = await registry.connect("discord");
     await registry.importCredential(conn.id, "bot", fixture.botCredential());
     await registry.importCredential(conn.id, "user", fixture.userCredential());
-    const personMappingRepo = new PersonMappingRepository(db);
+    const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
     await personMappingRepo.create({
       displayName: "Guardian",
       bondLevel: "guardian",
       channelMappings: [{ channel: "discord", channelUserId: "paired" }],
     });
-    const approvalsRepo = new ApprovalsRepository(db, () => Buffer.alloc(32, 1));
+    const approvalsRepo = new ApprovalsRepository(
+      db,
+      new PersonMappingRepository(db, identityServiceOf),
+      () => Buffer.alloc(32, 1),
+    );
     const input = {
       connectionId: conn.id,
       channel: "discord" as const,

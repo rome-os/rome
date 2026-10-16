@@ -8,6 +8,9 @@ import ConnectionDetailPage from "@/pages/ConnectionDetailPage";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 
+/** A later account's channel id, opaque as core mints it. */
+const SECOND_FEISHU = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
+
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
@@ -32,6 +35,8 @@ function connection(
     },
     connect: null,
     setups: {},
+    channel: null,
+    severalAccounts: false,
     ...overrides,
   };
 }
@@ -251,5 +256,139 @@ describe("ConnectionDetailPage — enablement bullets", () => {
     renderDetail("google");
 
     expect(await screen.findByText("Work across your Google services as you")).toBeTruthy();
+  });
+});
+
+describe("ConnectionDetailPage — several accounts", () => {
+  function feishu(overrides: Partial<ApiConnection> = {}): ApiConnection {
+    return connection({
+      service: "feishu",
+      channel: "feishu",
+      grants: { app: "authorized" },
+      capabilities: {
+        talk: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      severalAccounts: true,
+      ...overrides,
+    });
+  }
+
+  const secondFeishu = () =>
+    feishu({
+      id: "conn-feishu-2",
+      channel: SECOND_FEISHU,
+      display: {
+        app: { displayName: "Sales Bot", handle: null, email: null, avatarUrl: null },
+      },
+    });
+
+  function renderWithLocation(initial: string) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const locations: string[] = [];
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[initial]}>
+          <Routes>
+            <Route
+              path="/settings/connections/:serviceId"
+              element={
+                <>
+                  <ConnectionDetailPage />
+                  <LocationCapture onLocation={(p) => locations.push(p)} />
+                </>
+              }
+            />
+            <Route
+              path="/settings/connections"
+              element={<LocationCapture onLocation={(p) => locations.push(p)} />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { locations };
+  }
+
+  it("opens the second account at its channel id", async () => {
+    mockApi([feishu(), secondFeishu()]);
+    renderDetail(SECOND_FEISHU);
+
+    expect(await screen.findByText("Feishu · Sales Bot")).toBeTruthy();
+  });
+
+  it("keeps the service route on the first account", async () => {
+    mockApi([feishu(), secondFeishu()]);
+    renderDetail("feishu");
+
+    const title = await screen.findByRole("heading", { level: 1 });
+    expect(title.textContent).toBe("Feishu");
+  });
+
+  it("adds another account, then navigates to its route", async () => {
+    const accounts = [feishu()];
+    const posts: unknown[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/connections" && init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)));
+        const created = feishu({
+          id: "conn-feishu-2",
+          channel: SECOND_FEISHU,
+          grants: { app: "unauthorized" },
+        });
+        accounts.push(created);
+        return new Response(JSON.stringify({ connection: created }), { status: 201 });
+      }
+      if (url === "/api/connections") {
+        return new Response(JSON.stringify({ connections: accounts }), { status: 200 });
+      }
+      if (url === "/api/integrations/composio/status") {
+        return new Response(JSON.stringify({ composio: null }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const { locations } = renderWithLocation("/settings/connections/feishu");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add another account" }));
+
+    await waitFor(() => {
+      expect(locations).toContain(`/settings/connections/${SECOND_FEISHU}`);
+    });
+    expect(posts).toEqual([{ service: "feishu" }]);
+    expect(await screen.findByText("Not connected")).toBeTruthy();
+  });
+
+  it("stays on the account when the refetched list lacks the new one", async () => {
+    let posted = false;
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/connections" && init?.method === "POST") {
+        posted = true;
+        const created = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
+        return new Response(JSON.stringify({ connection: created }), { status: 201 });
+      }
+      if (url === "/api/connections") {
+        return new Response(JSON.stringify({ connections: [feishu()] }), { status: 200 });
+      }
+      if (url === "/api/integrations/composio/status") {
+        return new Response(JSON.stringify({ composio: null }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    });
+    const { locations } = renderWithLocation("/settings/connections/feishu");
+
+    const add = await screen.findByRole("button", { name: "Add another account" });
+    fireEvent.click(add);
+
+    await waitFor(() => {
+      expect(posted).toBe(true);
+      expect((add as HTMLButtonElement).disabled).toBe(false);
+    });
+    expect(locations).not.toContain(`/settings/connections/${SECOND_FEISHU}`);
+    expect(locations).not.toContain("/settings/connections");
   });
 });

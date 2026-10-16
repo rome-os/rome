@@ -373,3 +373,107 @@ describe("buildConnectionCards — kind and labels", () => {
     expect(cards[0].connect).toEqual(hint);
   });
 });
+
+// Every account after a service's first has an opaque channel id.
+const SECOND = "c7d1a0e2-5b3f-4e8a-9c61-2f0b7d4e8a13";
+const THIRD = "0a9e4b6d-2c18-4f7e-b3a5-8d6c1e9f0b27";
+
+describe("buildConnectionCards — several accounts per service", () => {
+  it("gives each Feishu connection its own card, routed by its channel id", () => {
+    const cards = buildConnectionCards([
+      conn({
+        service: "feishu",
+        id: "conn-feishu-2",
+        channel: SECOND,
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Sales Bot" }) },
+        severalAccounts: true,
+      }),
+      conn({
+        service: "feishu",
+        id: "conn-feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        severalAccounts: true,
+      }),
+    ]);
+
+    expect(cards.map((card) => card.route)).toEqual(["feishu", SECOND]);
+    const [first, second] = cards;
+    expect(first.label).toBe("Feishu");
+    expect(first.channel).toBe("feishu");
+    expect(second.label).toBe("Feishu · Sales Bot");
+    expect(second.service).toBe("feishu");
+    expect(second.slots[0].connectionId).toBe("conn-feishu-2");
+    expect(second.severalAccounts).toBe(true);
+  });
+
+  it("names every account by its bot once a service has several, never by its id", () => {
+    const cards = buildConnectionCards([
+      conn({
+        service: "feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Support Bot" }) },
+      }),
+      conn({ service: "feishu", id: "conn-2", channel: SECOND, grants: { app: "unauthorized" } }),
+    ]);
+    expect(cards.map((card) => card.label)).toEqual(["Feishu · Support Bot", "Feishu"]);
+  });
+
+  it("keeps the plain label for a service with one account", () => {
+    const cards = buildConnectionCards([
+      conn({
+        service: "feishu",
+        channel: "feishu",
+        grants: { app: "authorized" },
+        display: { app: display({ displayName: "Support Bot" }) },
+      }),
+    ]);
+    expect(cards[0].label).toBe("Feishu");
+  });
+
+  it("puts the first account first and keeps the server's order for the rest", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "feishu", id: "c3", channel: THIRD }),
+      conn({ service: "telegram", id: "t1", channel: "telegram" }),
+      conn({ service: "feishu", id: "c2", channel: SECOND }),
+      conn({ service: "feishu", id: "c1", channel: "feishu" }),
+    ]);
+    expect(cards.map((card) => card.route)).toEqual(["telegram", "feishu", THIRD, SECOND]);
+  });
+
+  it("folds the personal account onto the first account only", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "telegram", id: "t1", channel: "telegram", grants: { bot: "authorized" } }),
+      conn({ service: "telegram", id: "t2", channel: SECOND, grants: { bot: "authorized" } }),
+      conn({
+        service: "telegram_user",
+        id: "tu",
+        channel: "telegram_user",
+        grants: { session: "unauthorized" },
+      }),
+    ]);
+    const first = cards.find((card) => card.route === "telegram");
+    const second = cards.find((card) => card.route === SECOND);
+    expect(first?.slots.map((slot) => slot.key)).toEqual(["bot", "session"]);
+    expect(second?.slots.map((slot) => slot.key)).toEqual(["bot"]);
+  });
+
+  it("routes a placeholder by its service", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "discord", id: null, channel: null, grants: { bot: "unauthorized" } }),
+    ]);
+    expect(cards[0].route).toBe("discord");
+    expect(cards[0].label).toBe("Discord");
+  });
+
+  it("renders as before when the server omits the account fields", () => {
+    const cards = buildConnectionCards([
+      conn({ service: "feishu", grants: { app: "authorized" } }),
+    ]);
+    expect(cards[0].route).toBe("feishu");
+    expect(cards[0].channel).toBeNull();
+    expect(cards[0].severalAccounts).toBe(false);
+  });
+});

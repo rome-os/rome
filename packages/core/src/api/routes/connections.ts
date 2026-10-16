@@ -373,10 +373,8 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "Cross-site requests are not allowed." }, 403);
     }
     const registry = requireConnectionRegistry(deps);
-    const body = await c.req
-      .json<{ service?: unknown }>()
-      .catch(() => ({}) as { service?: unknown });
-    const service = typeof body.service === "string" ? body.service : "";
+    const body = await c.req.json<{ service?: unknown } | null>().catch(() => null);
+    const service = typeof body?.service === "string" ? body.service : "";
     if (registry.getDescriptor(service)?.severalAccounts !== true) {
       return c.json({ error: `"${service}" does not offer another account.` }, 400);
     }
