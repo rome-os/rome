@@ -307,6 +307,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
       registerAgentApp:
         fakes.registerAgentApp ??
         (async () => ({ appId: "cli_minted", appSecret: "minted", domain: "feishu" as const })),
+      fetchBotName: async () => null,
     });
   }
 
