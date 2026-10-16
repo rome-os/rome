@@ -142,7 +142,11 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     const snapshot = await this.conversationSettings.get(ref);
     const enabled = snapshot.effective.enabled;
     // A group's own agent choice, which wins over the account's linked agent.
-    const routedAgentName = snapshot.effective.routing.agentName ?? undefined;
+    // An explicit pin to main is stored as null, apart from no choice at all.
+    const routedAgentName =
+      snapshot.overrides.routing?.agentName === null
+        ? "core:main"
+        : (snapshot.effective.routing.agentName ?? undefined);
     if (!enabled) {
       log.debug("conversation disabled", { connectionId, conversationId: message.conversationId });
       return;

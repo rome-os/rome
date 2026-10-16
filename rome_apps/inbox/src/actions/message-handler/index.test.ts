@@ -1075,6 +1075,15 @@ describe("linked agent", () => {
     expect(agentRunner.calls[0].agentName).toBe("sales:agent");
   });
 
+  it("answers with main in a group pinned to main on an account linked elsewhere", async () => {
+    const { deps, agentRunner } = guardianDeps(["main", "sentinel", "envoy", "sales:agent"]);
+    const action = createAction(actionConfig, deps);
+
+    await action.execute(inbound({ routedAgentName: "core:main", linkedAgentName: "sales:agent" }));
+
+    expect(agentRunner.calls[0].agentName).toBe("main");
+  });
+
   it("answers a private chat with the linked agent over its stored agent", async () => {
     const { deps, agentRunner, conversations } = guardianDeps([
       "main",

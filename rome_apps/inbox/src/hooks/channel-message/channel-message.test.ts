@@ -485,6 +485,19 @@ describe("ChannelMessageHook", () => {
       expect(linkedAgentOf).toHaveBeenCalledWith("feishu-2");
     });
 
+    it("passes a group's explicit pin to main as its choice", async () => {
+      harness.get.mockImplementation(async ({ connectionId, conversationId }) => ({
+        ...snapshot(connectionId, conversationId),
+        overrides: { routing: { agentName: null } },
+      }));
+
+      await harness.emit(FEISHU_2_ID, message());
+
+      expect(harness.run).toHaveBeenCalledWith(
+        ...passed({ linkedAgentName: "sales:agent", routedAgentName: "core:main" }),
+      );
+    });
+
     it("answers nothing on an account with no linked agent", async () => {
       linked = null;
 

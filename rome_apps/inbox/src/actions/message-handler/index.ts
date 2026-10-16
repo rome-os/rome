@@ -677,7 +677,17 @@ export function createMessageHandlerAction(
           conversation.agentName && !isCoreMainAgentId(conversation.agentName)
             ? conversation.agentName
             : undefined;
-        const override = answeringAgent && threadType === "private" ? undefined : storedAgent;
+        // The conversation row stores main as null, so only the hook's routing
+        // tells a group pinned to main apart from one with no choice.
+        const pinnedMain =
+          typeof args.routedAgentName === "string" &&
+          isCoreMainAgentId(args.routedAgentName.trim());
+        const override =
+          answeringAgent && threadType === "private"
+            ? undefined
+            : pinnedMain
+              ? "main"
+              : storedAgent;
         // An override whose app was removed falls back to the linked agent.
         const targetAgent = !override
           ? (answeringAgent ?? "main")
