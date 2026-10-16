@@ -41,6 +41,8 @@ export interface ChannelsServiceDeps {
   channels: () => Channels | undefined;
   /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all">;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no channel and is skipped. */
   channelOf: ChannelOf;
 }
 

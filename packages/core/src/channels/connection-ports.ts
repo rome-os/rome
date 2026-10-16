@@ -31,6 +31,10 @@ import { MAX_QUERY_LIMIT, queryLimit, type Messages } from "./messages.js";
 
 const log = createLogger("channel-ports");
 
+/** Talk Connections already reported as unlocking with no channel record, so
+ *  each is reported once, not once per port of its service. */
+const reportedUnrecorded = new Set<string>();
+
 export interface ConnectionPortsDeps {
   registry: Pick<
     ConnectionRegistry,
@@ -41,6 +45,8 @@ export interface ConnectionPortsDeps {
    *  is admitted. */
   admit?: Admission;
   admission?: OrderedAdmissionOptions;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no port. */
   channelOf: ChannelOf;
 }
 
@@ -396,8 +402,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
 
   // Fires now for each Connection already unlocked, then at every unlock.
   deps.registry.onUnlocked("talk", (connection) => {
-    if (connection.service === backing.service && deps.channelOf(connection) === channel) {
-      attach(connection);
+    if (connection.service !== backing.service) return;
+    const named = deps.channelOf(connection);
+    if (named === channel) attach(connection);
+    // A record is claimed before a Talk Connection first unlocks, so a missing
+    // one is a wiring fault, and this Connection's messages go unheard.
+    if (named === null && !reportedUnrecorded.has(connection.id)) {
+      reportedUnrecorded.add(connection.id);
+      log.warn("channel_ports.unrecorded_connection", {
+        connectionId: connection.id,
+        service: connection.service,
+      });
     }
   });
 
