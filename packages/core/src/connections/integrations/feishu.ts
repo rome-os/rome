@@ -61,24 +61,27 @@ export interface FeishuAppMaterial {
 }
 
 // The `app` grant's profile — the non-secret half of the custom-app identity
-// (appId + which tenant domain + app type). Declared next to the material shape;
-// parse-then-store, and the same schema re-runs on revive (fail-closed). `appId`
-// is the sole display field; `domain`/`appType` stay owner-side. All optional so
-// a bridge-era grant with no captured identity stays sparse-but-valid.
+// (appId, the bot's name, which tenant domain, app type). Declared next to the
+// material shape; parse-then-store, and the same schema re-runs on revive
+// (fail-closed). `botName` and `appId` are the display fields; `domain`/`appType`
+// stay owner-side. All optional so a bridge-era grant with no captured identity
+// stays sparse-but-valid.
 export const feishuGrantProfileSchema = z
   .object({
     appId: z.string().min(1).optional(),
+    botName: z.string().min(1).optional(),
     domain: z.enum(["feishu", "lark"]).optional(),
     appType: z.string().min(1).optional(),
   })
   .strict();
 export type FeishuGrantProfile = z.infer<typeof feishuGrantProfileSchema>;
 
-/** Pure display projection: the appId reads as the handle. `domain`/`appType` are
- *  owner-side and never widen the display surface. */
+/** Pure display projection: the bot's name reads as the display name and the
+ *  appId as the handle. `domain`/`appType` are owner-side and never widen the
+ *  display surface. */
 export function toFeishuDisplay(profile: FeishuGrantProfile): ProfileDisplay {
   return Object.freeze({
-    displayName: undefined,
+    displayName: profile.botName,
     handle: profile.appId,
     email: undefined,
     avatarUrl: undefined,
@@ -96,6 +99,7 @@ export function reviveFeishuProfile(record: ProfileRecord): ProfileDisplay {
  *  enum parse instead of being dropped before it. */
 export interface FeishuProfileSource {
   appId?: string;
+  botName?: string;
   domain?: unknown;
   appType?: string;
 }
@@ -110,6 +114,7 @@ export function feishuProfileFromSettings(
 ): FeishuGrantProfile | null {
   const raw: Record<string, unknown> = {};
   if (settings.appId != null && settings.appId !== "") raw.appId = settings.appId;
+  if (settings.botName != null && settings.botName !== "") raw.botName = settings.botName;
   if (settings.domain != null && settings.domain !== "") raw.domain = settings.domain;
   if (settings.appType != null && settings.appType !== "") raw.appType = settings.appType;
   if (Object.keys(raw).length === 0) return null;
@@ -131,6 +136,7 @@ export interface FeishuDescriptorDeps {
    *  network / SDK long connection. Production uses the defaults below. */
   probeCredentials?: FeishuSetupDeps["probeCredentials"];
   registerAgentApp?: FeishuSetupDeps["registerAgentApp"];
+  fetchBotName?: FeishuSetupDeps["fetchBotName"];
 }
 
 /** The credential fields a Feishu setup holds before conferral (the pending,
@@ -156,6 +162,9 @@ export interface FeishuSetupDeps {
   /** Probe-validate pasted credentials (mint a tenant access token). Throws
    *  with a guardian-readable message when the pair is refused. */
   probeCredentials: (material: FeishuPendingMaterial, signal?: AbortSignal) => Promise<void>;
+  /** The bot's name as Feishu shows it, or null when it cannot be read. A
+   *  missing name never fails the setup: the account then reads as its appId. */
+  fetchBotName: (material: FeishuPendingMaterial) => Promise<string | null>;
   /**
    * The agent-ready dance: drive the SDK's `registerApp` QR flow (which MINTS
    * fresh app credentials — it runs against no adapter and no prior
@@ -263,9 +272,14 @@ export function makeFeishuSetup(deps: FeishuSetupDeps): SetupFn {
       domain: pending.domain,
       appType,
     };
+    const botName = (await deps.fetchBotName(pending)) ?? undefined;
     const profile =
-      feishuProfileFromSettings({ appId: pending.appId, domain: pending.domain, appType }) ??
-      undefined;
+      feishuProfileFromSettings({
+        appId: pending.appId,
+        botName,
+        domain: pending.domain,
+        appType,
+      }) ?? undefined;
     return {
       credential: { material, expiresAt: "never" },
       profile,
@@ -299,6 +313,26 @@ async function probeFeishuCredentials(material: FeishuPendingMaterial): Promise<
   }
   if (res.code !== 0) {
     throw new Error(res.msg || "Invalid App ID or App Secret");
+  }
+}
+
+/** Default bot-name read: `GET /open-apis/bot/v3/info` through the SDK client,
+ *  which mints the tenant access token it needs. */
+async function fetchFeishuBotName(material: FeishuPendingMaterial): Promise<string | null> {
+  const { Client, Domain: SdkDomain } = await import("@larksuiteoapi/node-sdk");
+  const client = new Client({
+    appId: material.appId,
+    appSecret: material.appSecret,
+    domain: material.domain === "lark" ? SdkDomain.Lark : SdkDomain.Feishu,
+  });
+  try {
+    const res = await client.request<{ bot?: { app_name?: string } }>({
+      method: "GET",
+      url: "/open-apis/bot/v3/info",
+    });
+    return res.bot?.app_name || null;
+  } catch {
+    return null;
   }
 }
 
@@ -400,6 +434,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   const createChannel = deps.createChannel ?? defaultCreateChannel;
   const probeCredentials = deps.probeCredentials ?? probeFeishuCredentials;
   const registerAgentApp = deps.registerAgentApp ?? registerFeishuAgentApp;
+  const fetchBotName = deps.fetchBotName ?? fetchFeishuBotName;
   const appScheme = credentialsPaste({
     instructions: "Paste your Feishu/Lark custom-app App ID and App Secret.",
     fields: [
@@ -428,6 +463,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
   appScheme.setup = makeFeishuSetup({
     probeCredentials,
     registerAgentApp,
+    fetchBotName,
   });
 
   return {
