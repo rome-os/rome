@@ -124,7 +124,7 @@ import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-se
 import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
 import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
-import { AgentSessionBridge } from "./core/agent-session-bridge.js";
+import { AgentSessionBridge, resolveAgentAppDataDir } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
@@ -808,12 +808,12 @@ async function main() {
   );
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
-  const agentSessionBridge = new AgentSessionBridge(
-    agentSessionManager,
+  const agentSessionBridge = new AgentSessionBridge(agentSessionManager, {
     webchatRepo,
     actionWorkerCoordinator,
-    agentTurnStreamRegistry,
-  );
+    turnStreams: agentTurnStreamRegistry,
+    appDataDirForAgent: (agentName) => resolveAgentAppDataDir(agentLoader, agentName),
+  });
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
   const agentRunner = new AgentRunner(

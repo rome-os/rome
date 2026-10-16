@@ -85,36 +85,76 @@ function isStrictSubpath(fromRoot: string): boolean {
   );
 }
 
+/** A working dir that exists but whose real path falls outside the root it was checked against. */
+export class WorkingDirOutsideRootError extends Error {
+  constructor(requestedPath: string, rootPath: string, rootLabel: string) {
+    super(`Working directory "${requestedPath}" is not inside ${rootLabel} (${rootPath})`);
+    this.name = "WorkingDirOutsideRootError";
+  }
+}
+
+export interface WorkingDirRoot {
+  path: string;
+  /** Names the root in the error message, such as "the projects root". */
+  label: string;
+  /** Accept the root itself as a working dir. */
+  allowRoot?: boolean;
+}
+
 /**
- * Resolve a caller-supplied project directory to the real path of a working dir
- * inside the projects root, with every symlink resolved. Accepts a path relative
- * to the root (`landingpage/content`) or an absolute path inside it. Throws when
- * the path is the root itself, falls outside it (including through a symlink),
- * or is not an existing directory. Never creates the directory.
+ * Resolve a caller-supplied directory to the real path of a working dir inside
+ * `root`, with every symlink resolved. Accepts a path relative to the root or
+ * an absolute path. Throws `WorkingDirOutsideRootError` when the real path
+ * falls outside the root, including through a symlink, or is the root itself
+ * without `allowRoot`. Throws a plain `Error` when the path does not exist or
+ * is not a directory. Never creates the directory.
  */
-export async function resolveProjectWorkingDirWithinRoot(
+export async function resolveWorkingDirWithinRoot(
   requestedPath: string,
-  rootPath: string = getWebchatProjectsRoot(),
+  root: WorkingDirRoot,
 ): Promise<string> {
   const trimmed = requestedPath.trim();
   // Containment is judged only on real paths, so a root reached through a
-  // symlink still contains the real absolute path of each of its projects.
-  const workingDir = isAbsolute(trimmed) ? trimmed : resolveWebchatProjectPath(trimmed, rootPath);
+  // symlink still contains the real absolute path of each of its children.
+  const workingDir = isAbsolute(trimmed) ? trimmed : resolveWebchatProjectPath(trimmed, root.path);
 
   let realWorkingDir: string;
-  let realRoot: string;
   try {
-    [realWorkingDir, realRoot] = await Promise.all([realpath(workingDir), realpath(rootPath)]);
+    realWorkingDir = await realpath(workingDir);
   } catch {
     throw new Error(`Working directory "${requestedPath}" does not exist`);
   }
-  if (!isStrictSubpath(relative(realRoot, realWorkingDir))) {
-    throw new Error(`Working directory "${requestedPath}" is not inside the projects root`);
+  let realRoot: string;
+  try {
+    realRoot = await realpath(root.path);
+  } catch {
+    // A root that does not exist contains nothing.
+    throw new WorkingDirOutsideRootError(requestedPath, root.path, root.label);
+  }
+  const fromRoot = relative(realRoot, realWorkingDir);
+  if (!(isStrictSubpath(fromRoot) || (root.allowRoot === true && fromRoot === ""))) {
+    throw new WorkingDirOutsideRootError(requestedPath, root.path, root.label);
   }
   if (!(await stat(realWorkingDir)).isDirectory()) {
     throw new Error(`Working directory "${requestedPath}" is not a directory`);
   }
   return realWorkingDir;
+}
+
+/**
+ * Resolve a caller-supplied project directory to the real path of a working dir
+ * strictly inside the projects root, as `resolveWorkingDirWithinRoot` does.
+ * Accepts a path relative to the root (`landingpage/content`) or an absolute
+ * path inside it. The root itself is not a project.
+ */
+export async function resolveProjectWorkingDirWithinRoot(
+  requestedPath: string,
+  rootPath: string = getWebchatProjectsRoot(),
+): Promise<string> {
+  return await resolveWorkingDirWithinRoot(requestedPath, {
+    path: rootPath,
+    label: "the projects root",
+  });
 }
 
 export async function ensureWebchatProjectWorkspace(

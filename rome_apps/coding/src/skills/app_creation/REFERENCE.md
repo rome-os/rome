@@ -1174,8 +1174,13 @@ in the same system SQLite (`~/.rome/<profile>/rome.db`), isolated via a
   `__drizzle_migrations_app_<tablePrefix>`, isolated from other apps' and
   the system's migration records.
 - Non-DB file data (caches, uploads, …) lives at
-  `~/.rome/<profile>/apps/data/<appId>/`. That is a separate path and has
+  `~/.rome/<profile>/apps/data/<appId>/`, with the app id URL-encoded
+  (`@handle/slug` is `%40handle%2Fslug`). That is a separate path and has
   nothing to do with the table-prefix mechanism.
+- `agentRunner.run({ workingDir })` accepts a folder under the projects root,
+  or an absolute path to this data directory or a folder inside it when the
+  agent belongs to this app. Create the folder before the run. Rome rejects
+  any other directory, including `/tmp`, before the agent starts.
 - `system:app_management { op: "uninstall", purge: true }` drops the
   `<tablePrefix>__*` tables and the migration table, and removes
   `apps/data/<appId>/`.
