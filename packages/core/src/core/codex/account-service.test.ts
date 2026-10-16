@@ -157,6 +157,159 @@ describe("SharedCodexAccountService", () => {
     service.close();
   });
 
+  it("marks the login when account/read fails workspace routing discovery", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", new Error("workspace routing discovery unauthorized (401)"));
+    let marked = false;
+    const markAuthRevoked = rs.fn(async () => {
+      marked = true;
+    });
+    const service = createService(rpc, {
+      markAuthRevoked,
+      readFileStatus: async () =>
+        marked
+          ? { loggedIn: false, authMode: "chatgpt", planType: "plus", needsReauth: true }
+          : { loggedIn: true, authMode: "chatgpt", planType: "plus" },
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      loggedIn: false,
+      authMode: "chatgpt",
+      needsReauth: true,
+    });
+    expect(markAuthRevoked).toHaveBeenCalledTimes(1);
+    service.close();
+  });
+
+  it("marks a saved ChatGPT login that Codex reports as signed out", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: null, requiresOpenaiAuth: true });
+    let marked = false;
+    const markAuthRevoked = rs.fn(async () => {
+      marked = true;
+    });
+    const service = createService(rpc, {
+      markAuthRevoked,
+      readFileStatus: async () =>
+        marked
+          ? { loggedIn: false, authMode: "chatgpt", planType: "plus", needsReauth: true }
+          : { loggedIn: true, authMode: "chatgpt", planType: "plus" },
+    });
+
+    await expect(service.getStatus()).resolves.toMatchObject({
+      loggedIn: false,
+      authMode: "chatgpt",
+      needsReauth: true,
+    });
+    expect(markAuthRevoked).toHaveBeenCalledTimes(1);
+
+    // Under the credits payer Codex hides the account, and the marker keeps
+    // the same login reading as needing re-login.
+    rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });
+    await expect(service.getStatus()).resolves.toMatchObject({
+      loggedIn: false,
+      needsReauth: true,
+    });
+    expect(markAuthRevoked).toHaveBeenCalledTimes(1);
+    service.close();
+  });
+
+  it("does not mark a signed-out account that has no saved ChatGPT login", async () => {
+    for (const fileStatus of [
+      { loggedIn: false, authMode: null },
+      { loggedIn: true, authMode: "apikey", accountType: "api_key" },
+    ] as const) {
+      const rpc = new FakeAccountRpc();
+      rpc.queue("account/read", { account: null, requiresOpenaiAuth: true });
+      const markAuthRevoked = rs.fn(async () => {});
+      const service = createService(rpc, {
+        markAuthRevoked,
+        readFileStatus: async () => fileStatus,
+      });
+
+      await expect(service.getStatus()).resolves.toEqual({
+        loggedIn: false,
+        authMode: fileStatus.authMode,
+      });
+      expect(markAuthRevoked).not.toHaveBeenCalled();
+      service.close();
+    }
+  });
+
+  it("does not mark the saved ChatGPT login while a login is in progress", async () => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/login/start", {
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    rpc.queue("account/read", { account: null, requiresOpenaiAuth: true });
+    const markAuthRevoked = rs.fn(async () => {});
+    const service = createService(rpc, { markAuthRevoked });
+
+    await service.startDeviceLogin();
+    await expect(service.getStatus()).resolves.toEqual({
+      loggedIn: false,
+      authMode: "chatgpt",
+    });
+    expect(markAuthRevoked).not.toHaveBeenCalled();
+    service.close();
+  });
+
+  it("does not mark tokens from a login that finished during account/read", async () => {
+    const rpc = new FakeAccountRpc();
+    let answerRead!: (value: unknown) => void;
+    rpc.queue(
+      "account/read",
+      new Promise((resolve) => {
+        answerRead = resolve;
+      }),
+    );
+    rpc.queue("account/login/start", {
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    const markAuthRevoked = rs.fn(async () => {});
+    const service = createService(rpc, { markAuthRevoked });
+
+    const status = service.getStatus();
+    await service.startDeviceLogin();
+    rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
+    answerRead({ account: null, requiresOpenaiAuth: true });
+
+    await expect(status).resolves.toEqual({ loggedIn: false, authMode: "chatgpt" });
+    expect(markAuthRevoked).not.toHaveBeenCalled();
+    service.close();
+  });
+
+  it("does not mark tokens from a login that finished during a failed account/read", async () => {
+    const rpc = new FakeAccountRpc();
+    let failRead!: (error: Error) => void;
+    rpc.queue(
+      "account/read",
+      new Promise((_resolve, reject) => {
+        failRead = reject;
+      }),
+    );
+    rpc.queue("account/login/start", {
+      loginId: "device-1",
+      userCode: "ABCD-EFGH",
+      verificationUrl: "https://auth.openai.com/codex/device",
+    });
+    const markAuthRevoked = rs.fn(async () => {});
+    const service = createService(rpc, { markAuthRevoked });
+
+    const status = service.getStatus();
+    await service.startDeviceLogin();
+    rpc.notify("account/login/completed", { loginId: "device-1", success: true, error: null });
+    failRead(new Error("workspace routing discovery unauthorized (401)"));
+
+    await expect(status).resolves.toMatchObject({ loggedIn: true, authMode: "chatgpt" });
+    expect(markAuthRevoked).not.toHaveBeenCalled();
+    service.close();
+  });
+
   it("uses auth.json when the credits default hides the guardian's OpenAI account", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/read", { account: null, requiresOpenaiAuth: false });

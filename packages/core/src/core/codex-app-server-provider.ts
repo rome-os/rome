@@ -414,7 +414,8 @@ interface CodexAppServerProviderOptions {
   onAuthRevoked?: () => Promise<void> | void;
   /** Mark quota before the usage-limit terminal is exposed to AgentSession. */
   onQuotaExhausted?: () => void;
-  /** Only the Rome credits payer may classify its 402 as exhausted credits. */
+  /** Only the Rome credits payer may classify its 402 as exhausted credits, and
+   *  only the ChatGPT payer may mark the saved login as needing re-login. */
   isUsingRomeCredits?: () => boolean;
   /** The Rome credits gateway refused a model it no longer serves. */
   onRomeCreditsModelNotServed?: () => Promise<void> | void;
@@ -534,7 +535,7 @@ function classifyCodexFailure(
     options.onQuotaExhausted?.();
     return { code: "usage_limit" };
   }
-  if (isCodexAuthRevokedError(turnError)) {
+  if (!options.isUsingRomeCredits?.() && isCodexAuthRevokedError(turnError)) {
     return {
       code: CODEX_AUTH_REVOKED_CODE,
       pending: persistCodexAuthRevoked(options.onAuthRevoked),
