@@ -36,6 +36,7 @@ function connection(
     connect: null,
     setups: {},
     channel: null,
+    linkedAgent: null,
     severalAccounts: false,
     ...overrides,
   };
@@ -348,6 +349,9 @@ describe("ConnectionDetailPage — several accounts", () => {
       }
       if (url === "/api/integrations/composio/status") {
         return new Response(JSON.stringify({ composio: null }), { status: 200 });
+      }
+      if (url === "/api/agents") {
+        return new Response(JSON.stringify({ agents: [] }), { status: 200 });
       }
       return new Response("{}", { status: 200 });
     });

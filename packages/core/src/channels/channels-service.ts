@@ -41,9 +41,9 @@ export interface ChannelsServiceDeps {
   channels: () => Channels | undefined;
   /** The Connections that back sending. */
   registry: Pick<ConnectionRegistry, "all">;
-  /** The channel a Connection backs. Absent, every Connection backs the
-   *  channel named after its service. */
-  channelOf?: ChannelOf;
+  /** Names the channel each Connection backs. A Connection it answers null
+   *  for backs no channel and is skipped. */
+  channelOf: ChannelOf;
 }
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
@@ -56,7 +56,7 @@ function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
 export function backingConnection(
   registry: Pick<ConnectionRegistry, "all">,
   channel: string,
-  channelOf: ChannelOf = (connection) => connection.service,
+  channelOf: ChannelOf,
 ): Connection | undefined {
   return talking(registry).find((connection) => channelOf(connection) === channel);
 }
@@ -74,9 +74,9 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     {
       async list(): Promise<ChannelSummary[]> {
         const summaries = new Map<string, ChannelSummary>();
-        const channelOf = deps.channelOf ?? ((connection) => connection.service);
         for (const connection of talking(deps.registry)) {
-          const name = channelOf(connection);
+          const name = deps.channelOf(connection);
+          if (name === null) continue;
           summaries.set(name, { name, sendable: true });
         }
         for (const channel of deps.channels() ?? []) {

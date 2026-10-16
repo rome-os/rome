@@ -11,7 +11,7 @@ import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleGrantLedger } from "../connections/ledger-db.js";
 import { tokenPaste } from "../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../connections/types.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, serviceChannelOf, type TestDb } from "../test/helpers.js";
 import type { Accounts } from "./accounts.js";
 import { ChannelNotConnected } from "./channel.js";
 import { channelList, joinLaterChannel } from "./channel-list.js";
@@ -123,7 +123,12 @@ describe("channelList", () => {
       db: testDb.db,
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
-      connections: { registry: watched, admit, ...(admission ? { admission } : {}) },
+      connections: {
+        registry: watched,
+        admit,
+        channelOf: serviceChannelOf,
+        ...(admission ? { admission } : {}),
+      },
       ...(connectionAccounts ? { connectionAccounts } : {}),
     });
     return { registry, channels, subscribed };

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../channels/email-control.js";
 import { backingConnection } from "../channels/channels-service.js";
+import type { ChannelOf } from "../channels/connection-ports.js";
 import type {
   BackendTurnRunner,
   ConversationId,
@@ -175,6 +176,7 @@ export interface WorkerRpcServices {
   /** How a worker's actions send and read on channels (`channels.*`). */
   channelsService: ChannelsService;
   connectionRegistry: ConnectionRegistry;
+  channelOf: ChannelOf;
   conversationSettings: ConversationSettingsControl;
   /** Live routine engine + repo — the action worker has no in-process engine,
    * so it persists a routine then calls `routines.schedule` to activate it here. */
@@ -410,7 +412,11 @@ export class WorkerRpcServer {
       EmailIngestInboundParams,
       params,
     );
-    const email = backingConnection(this.services.connectionRegistry, "email");
+    const email = backingConnection(
+      this.services.connectionRegistry,
+      "email",
+      this.services.channelOf,
+    );
     if (!email) return { status: "skipped", reason: "channel_inactive" };
     return (await this.services.connectionRegistry.ingest(email.id, {
       rawBody,

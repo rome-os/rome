@@ -50,6 +50,7 @@ function connection(
     connect: null,
     setups: {},
     channel: null,
+    linkedAgent: null,
     severalAccounts: false,
     ...overrides,
   };

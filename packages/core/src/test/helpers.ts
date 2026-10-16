@@ -61,7 +61,7 @@ import { WhatsAppAccounts } from "../channels/whatsapp-accounts.js";
 import { createAccountNames } from "../channels/account-names.js";
 import type { Accounts } from "../channels/accounts.js";
 import type { Channel, Channels } from "../channels/channel.js";
-import type { ConnectionPortsDeps } from "../channels/connection-ports.js";
+import type { ChannelOf, ConnectionPortsDeps } from "../channels/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../channels/channel-list.js";
 import { createChannelsService } from "../channels/channels-service.js";
@@ -280,6 +280,10 @@ export class FakeTransport {
   }
 }
 
+/** Every Connection backs the channel named after its service, as when each
+ *  service holds one Connection. */
+export const serviceChannelOf: ChannelOf = (connection) => connection.service;
+
 /** What a test Connection's live talker offers: sending and its features. */
 export type TestTalker = Omit<Talker, "start" | "stop">;
 
@@ -365,7 +369,7 @@ export function testChannels(
     db: deps.db,
     whatsAppAccounts: deps.whatsAppAccounts,
     linkedInAccounts: deps.linkedInAccounts,
-    connections: { registry: connections },
+    connections: { registry: connections, channelOf: serviceChannelOf },
   });
 }
 
@@ -694,6 +698,7 @@ export async function buildTestDeps(
   const channelsService = createChannelsService({
     channels: () => channels,
     registry: connections,
+    channelOf: serviceChannelOf,
   });
 
   return {

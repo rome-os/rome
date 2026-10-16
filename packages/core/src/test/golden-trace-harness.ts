@@ -28,6 +28,7 @@ import {
   createTestDb,
   FakeTransport,
   noAccounts,
+  serviceChannelOf,
   type TestDb,
   createActionEngineRepos,
 } from "./helpers.js";
@@ -131,7 +132,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
       db: testDb.db,
       whatsAppAccounts: noAccounts,
       linkedInAccounts: noAccounts,
-      connections: { registry: createTestConnections(transports) },
+      connections: { registry: createTestConnections(transports), channelOf: serviceChannelOf },
     }),
     "channel-message",
   );

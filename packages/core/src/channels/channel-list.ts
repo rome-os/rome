@@ -122,7 +122,7 @@ export function laterChannel(
 /**
  * The channel a Connection backs, added to `channels` when its Talk unlocks
  * and none of them is that channel yet. Null when one already is, or when the
- * service has no Talk.
+ * service has no Talk, or the Connection backs no channel.
  *
  * Call it from the registry's `onUnlocked("talk")`. The new channel's inbound
  * port registers its own unlock handler while that one is still firing, so the
@@ -134,7 +134,7 @@ export function joinLaterChannel(
   connection: Pick<Connection, "id" | "service">,
 ): Channel | null {
   const name = deps.channelOf(connection);
-  if (deps.channels.some((channel) => channel.name === name)) return null;
+  if (name === null || deps.channels.some((channel) => channel.name === name)) return null;
   const channel = laterChannel(deps, connection.service, name);
   if (channel) deps.channels.push(channel);
   return channel;

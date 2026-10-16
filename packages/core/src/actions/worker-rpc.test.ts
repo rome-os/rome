@@ -115,6 +115,7 @@ function makeServer(
     feedback: overrides.feedback ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
+    channelOf: (connection: { service: string }) => connection.service,
     agentNames: overrides.agentNames,
   } as unknown as WorkerRpcServices;
   return {
