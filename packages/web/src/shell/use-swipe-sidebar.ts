@@ -20,8 +20,8 @@ import { flushSync } from "react-dom";
  * there a swipe starts a little way in.
  */
 
-/** The sidebar's `w-64`. */
-const WIDTH = 256;
+/** The sidebar's `w-68`. */
+const WIDTH = 272;
 /** Travel before the gesture commits to an axis. */
 const LOCK = 10;
 /** Share of the width past which a release opens the sidebar. */

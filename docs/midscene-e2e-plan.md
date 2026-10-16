@@ -52,7 +52,7 @@ GitHub Actions (job: mock)
        └─ Playwright Chromium (1440×900, en-US)
             └─ fresh BrowserContext per case
                  ├─ localStorage: rome.lang=en
-                 ├─ localStorage: rome-sidebar-pins=<full set>
+                 ├─ localStorage: rome-sidebar-more-expanded=1
                  └─ in-memory MSW state reset with the context
 ```
 
@@ -76,10 +76,11 @@ GitHub Actions (job: mock)
 - **Pinned English UI**: an init script writes `rome.lang=en`, so a zh-CN CI
   machine locale cannot drift the copy. A localized Chinese-shell case is
   future coverage. None is included in the current 38-case suite.
-- **Full sidebar-pin injection**: the mock guardian pins only Apps/Chat/
-  Projects by default. Other entries live behind the "all apps" popover. Cases
-  write `rome-sidebar-pins` (the shell's own localStorage contract) so every
-  built-in entry is expanded and cross-page sidebar clicks are deterministic.
+- **Sidebar fold opened up front**: the sidebar's fixed menu shows Apps, Chat,
+  Projects and Routines. People, Usage, Memory, Activity and Browser sit under
+  a fold. Cases write `rome-sidebar-more-expanded=1` (the shell's own
+  localStorage contract) so every built-in page is visible and cross-page
+  sidebar clicks are deterministic.
 - **AI-native interaction**: `aiAct` performs navigation, typing, scrolling,
   menu selection, and other user actions from a goal. `aiAssert` checks visible
   outcomes. `app.open` handles isolated setup.
@@ -93,7 +94,7 @@ local reference for the full node list.
 
 | Node | Purpose |
 | --- | --- |
-| `app.open` | Open a route in a fresh context, seed language/pins, wait for the sidebar or login page |
+| `app.open` | Open a route in a fresh context, seed the language and the open fold, wait for the sidebar or login page |
 | `app.expectRenameConflict` | Check that FILE-03's rename request received HTTP 409 after `aiAct` submitted it |
 
 ## 3. Mock-Mode Contract (for Case Authors)

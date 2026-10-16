@@ -43,13 +43,13 @@ function mockIdentity(identity: DashboardIdentity) {
   });
 }
 
-function renderMenu() {
+function renderMenu(showIdentity = false) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <MemoryRouter initialEntries={["/"]}>
-          <ProfileMenu />
+          <ProfileMenu showIdentity={showIdentity} />
           <LocationProbe />
         </MemoryRouter>
       </ThemeProvider>
@@ -73,6 +73,13 @@ describe("ProfileMenu", () => {
       screen.getByRole("menuitem", { name }),
     );
     expect(menuItems.every((item) => item.className.includes("text-ui"))).toBe(true);
+  });
+
+  it("names the wide button by the name and role it shows", async () => {
+    mockIdentity({ kind: "guardian", userId: "u1", displayName: "Evan", avatarUrl: null });
+    renderMenu(true);
+
+    expect(await screen.findByRole("button", { name: "Evan, Guardian, Account" })).toBeTruthy();
   });
 
   it("opens the feedback dialog from the Feedback menu item", async () => {

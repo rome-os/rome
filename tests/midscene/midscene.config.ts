@@ -84,30 +84,17 @@ const setup = defineProjectSetup<ProjectContext>({
   },
 });
 
-// The mock user starts with only Apps/Chat/Projects pinned. Product stories
-// cross between pages through the sidebar, so pin every built-in destination
-// up front (rome-sidebar-pins, the shell's own localStorage contract). This
-// also avoids the "all apps" popover and keeps clicks deterministic.
-const DEFAULT_PINS = [
-  "apps",
-  "projects",
-  "sessions",
-  "memory",
-  "people",
-  "routines",
-  "activity",
-  "desktop",
-  "chat",
-  "settings",
-] as const;
+// Product stories cross between pages through the sidebar. Its fixed menu
+// carries Apps, Chat, Projects and Routines, and the rest of Rome's own pages
+// sit under a fold, so open the fold up front (rome-sidebar-more-expanded, the
+// shell's own localStorage contract) to keep every destination one click away.
+const SIDEBAR_MORE_EXPANDED_KEY = "rome-sidebar-more-expanded";
 
 const openInput = z.strictObject({
   path: z.string().min(1),
   // 'shell' waits for the authenticated sidebar (mock guardian), 'login' for
   // the login route, and 'any' only waits for the document to load.
   waitUntil: z.enum(["shell", "login", "any"]).default("shell"),
-  // Extra built-in nav ids to pin in addition to the default set.
-  pins: z.array(z.string()).optional(),
   // 'mobile' opens a phone-sized viewport (sidebar becomes a drawer).
   viewport: z.enum(["desktop", "mobile"]).default("desktop"),
 });
@@ -150,25 +137,21 @@ const appOpen = defineNode<typeof openInput, void, ProjectContext>({
     // third-party dependency. Model calls are made by the Node-side agent and
     // are therefore outside this browser request guard.
     await installBrowserNetworkGuard(browserContext, BASE_URL);
-    // Pin the i18n language and sidebar entries before the app bundle runs.
-    const pins = [...DEFAULT_PINS, ...(input.pins ?? [])].map((id) => ({
-      type: "builtin" as const,
-      id,
-    }));
+    // Pin the i18n language and open the sidebar fold before the app bundle runs.
     await browserContext.addInitScript(
-      ({ lang, sidebarPins }) => {
+      ({ lang, moreExpandedKey }) => {
         // Seed defaults only when the app has not stored a value: cases run
-        // in a fresh context start in English with every built-in pinned,
-        // but a case that switches the language (or edits pins) keeps its
-        // choice across in-context navigations instead of being reset here.
+        // in a fresh context start in English with the fold open, but a case
+        // that switches the language (or folds the group) keeps its choice
+        // across in-context navigations instead of being reset here.
         if (!window.localStorage.getItem("rome.lang")) {
           window.localStorage.setItem("rome.lang", lang);
         }
-        if (!window.localStorage.getItem("rome-sidebar-pins")) {
-          window.localStorage.setItem("rome-sidebar-pins", JSON.stringify(sidebarPins));
+        if (!window.localStorage.getItem(moreExpandedKey)) {
+          window.localStorage.setItem(moreExpandedKey, "1");
         }
       },
-      { lang: LOCALE, sidebarPins: pins },
+      { lang: LOCALE, moreExpandedKey: SIDEBAR_MORE_EXPANDED_KEY },
     );
     const page = await browserContext.newPage();
     context.browserContext = browserContext;

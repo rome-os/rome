@@ -40,9 +40,15 @@ for (const { width, height, hasTouch } of [
       );
       await page.keyboard.up("ArrowRight");
 
-      if (width < 768)
+      if (width < 768) {
         await page.getByRole("button", { name: "Open sidebar", exact: true }).click();
-      await page.getByRole("button", { name: "Account", exact: true }).click();
+        // Activity sits under the sidebar fold, which opens on its pages.
+        const fold = page.getByRole("button", { name: "Show fewer pages", exact: true });
+        expect((await fold.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      }
+      // The wide sidebar names the button after the guardian ("Rome Demo, Guardian,
+      // Account"); the rail calls it "Account".
+      await page.getByRole("button", { name: /Account$/ }).click();
       const settings = page.getByRole("menuitem", { name: "Settings", exact: true });
       await expect(settings).toBeVisible();
       const menuHeight = (await settings.boundingBox())!.height;

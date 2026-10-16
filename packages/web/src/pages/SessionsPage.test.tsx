@@ -9,6 +9,7 @@ import {
   useNavigationType,
 } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import i18n from "@/i18n";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as sessionEventsModule from "@/lib/session-events" with { rstest: "importActual" };
 import {
@@ -322,6 +323,21 @@ describe("SessionsPage landmarks", () => {
         expect(mains[0].hasAttribute("data-safe-area-bounded")).toBe(true);
       });
       cleanup();
+    }
+  });
+
+  it("titles the list Usage, the name the sidebar gives the page", async () => {
+    renderIndex("/sessions/all");
+    expect(await screen.findByRole("heading", { name: "Usage" })).toBeTruthy();
+  });
+
+  it("titles the list with the sidebar's label in every locale", async () => {
+    await i18n.changeLanguage("zh-CN");
+    try {
+      renderIndex("/sessions/all");
+      expect(await screen.findByRole("heading", { name: "用量" })).toBeTruthy();
+    } finally {
+      await i18n.changeLanguage("en");
     }
   });
 

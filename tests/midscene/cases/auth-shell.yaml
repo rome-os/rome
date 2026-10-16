@@ -7,8 +7,8 @@ cases:
       - app.open:
           path: /
       - aiAct: >-
-          Click the visible "Account" button at the bottom of the application sidebar once, then
-          stop.
+          Click the account button at the bottom of the application sidebar, the one showing the
+          signed-in user's name and role, once, then stop.
       - aiAssert: >-
           The account menu identifies the signed-in user as "Rome Demo" with the "Guardian" role
           and offers Settings, Feedback, and Log out actions.

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Ellipsis, Pin } from "lucide-react";
+import { Ellipsis, Pin } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { SidebarDisclosure, SidebarDivider } from "./SidebarDisclosure";
 import {
   ACTIVE_CLASS,
   IDLE_CLASS,
@@ -57,8 +58,8 @@ interface RecentAppsZoneProps<T extends RecentSidebarApp> {
 }
 
 // The system-managed half of the sidebar: apps the guardian built or opened
-// lately and has not pinned. It owns no data. An empty list renders nothing at
-// all, divider included, so a sidebar with no recent apps is unchanged.
+// lately and has not pinned. It owns no data. AppGrid draws the divider above
+// it; the zone draws the one below. An empty list renders nothing at all.
 export function RecentAppsZone<T extends RecentSidebarApp>({
   apps,
   unopenedIds,
@@ -79,8 +80,11 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
 
   return (
     <>
-      <div className="mx-5 my-2 border-t border-border-subtle" />
-      <nav aria-label={t("sidebar.recentApps")} className="flex flex-col gap-1 px-3">
+      <nav
+        id="sidebar-recent-apps"
+        aria-label={t("sidebar.recentApps")}
+        className="flex flex-col gap-1 px-3"
+      >
         <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">{t("sidebar.recent")}</div>
         {visible.map((app) => {
           if (!app.href) return null;
@@ -125,27 +129,20 @@ export function RecentAppsZone<T extends RecentSidebarApp>({
             </div>
           );
         })}
-        {hasMore ? (
-          <button
-            type="button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((prev) => !prev)}
-            className={cn(
-              LINK_CLASS,
-              "text-subtle-foreground hover:bg-surface-hover hover:text-foreground",
-            )}
-          >
-            {expanded ? (
-              <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
-            ) : (
-              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
-            )}
-            <span className="flex-1 truncate">
-              {expanded ? t("sidebar.showLess") : t("sidebar.showMore")}
-            </span>
-          </button>
-        ) : null}
       </nav>
+      {/* The zone closes on the rule before the next section; with more apps
+          than fit, that rule is the one that drops it open. */}
+      {hasMore ? (
+        <SidebarDisclosure
+          expanded={expanded}
+          onToggle={() => setExpanded((prev) => !prev)}
+          controls="sidebar-recent-apps"
+          showLabel={t("sidebar.showMoreRecentApps")}
+          hideLabel={t("sidebar.showFewerRecentApps")}
+        />
+      ) : (
+        <SidebarDivider />
+      )}
     </>
   );
 }
