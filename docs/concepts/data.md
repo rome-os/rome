@@ -61,6 +61,7 @@ The database holds Rome's operational state — sessions, persons, policies, app
 
 - App tables are namespaced by a per-app prefix, so apps cannot collide with each other or with system tables.
 - Migrations run automatically on startup.
+- After a migration, every system table and column that the previous release declares still exists. Other migrations can still break the previous release: a rewritten value, a new required column, or a new constraint. Rolling back across one of those needs a copy of the database from before the upgrade, which Rome does not take for you. A release that starts on a database migrated by a newer release logs an error and keeps starting.
 
 **Not to be confused with:**
 

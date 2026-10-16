@@ -59,6 +59,7 @@
     "db:push:apps": "for d in rome_apps/*/drizzle.config.ts; do [ -f \"$d\" ] && (cd \"$(dirname \"$d\")\" && pnpm exec drizzle-kit push); done",
     "db:push": "echo '⚠ Dev-only: pushes schema directly without migrations (excludes authoring DB)' && pnpm db:push:system && pnpm db:push:apps",
     "db:check": "scripts/check-db-schema.sh",
+    "db:check:destructive": "pnpm --filter @rome/core db:check:destructive",
     "db:migrate": "pnpm --filter @rome/core db:migrate",
     "db:studio": "pnpm --filter @rome/core db:studio",
     "seed:sessions-explorer": "pnpm --filter @rome/core seed:sessions-explorer",
