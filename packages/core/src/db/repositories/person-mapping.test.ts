@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb, identityServiceOf } from "../../test/helpers.js";
 import { AccountHeldError, PersonMappingRepository } from "./person-mapping.js";
 import { eq } from "drizzle-orm";
 import { persons, channelMappings } from "../schema.js";
@@ -12,7 +12,7 @@ describe("PersonMappingRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new PersonMappingRepository(testDb.db, (channel) => channel);
+    repo = new PersonMappingRepository(testDb.db, identityServiceOf);
   });
 
   afterEach(() => {

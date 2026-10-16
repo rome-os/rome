@@ -14,6 +14,7 @@ import {
   createTestConnections,
   noAccounts,
   type TestConnections,
+  identityServiceOf,
 } from "../helpers.js";
 import type { Channels } from "../../channels/channel.js";
 import { channelList } from "../../channels/channel-list.js";
@@ -208,11 +209,11 @@ async function buildHarness(
 
   const repos: TestRomeRepos = {
     sessions: new SessionsRepository(db),
-    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel)),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf)),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
     settings: new SettingsRepository(db),
-    personMapping: new PersonMappingRepository(db, (channel) => channel),
+    personMapping: new PersonMappingRepository(db, identityServiceOf),
     policies: new PoliciesRepository(db),
   };
 

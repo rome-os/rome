@@ -8,6 +8,7 @@ import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocat
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
+import { identityServiceOf } from "./helpers.js";
 
 /**
  * Unified, deterministic baseline seed.
@@ -83,7 +84,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PersonMappingRepository(db, (channel) => channel);
+  const repo = new PersonMappingRepository(db, identityServiceOf);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {
@@ -127,7 +128,7 @@ async function seedPersonsBaseline(db: DrizzleDb) {
 }
 
 async function seedApprovalsBaseline(db: DrizzleDb) {
-  const repo = new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel));
+  const repo = new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf));
 
   const pendingId = await repo.create({
     type: "action_execution",

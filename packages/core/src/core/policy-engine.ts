@@ -33,7 +33,7 @@ export class PolicyEngine {
   constructor(
     private policiesRepo: PoliciesRepository,
     private settingsRepo: SettingsRepository,
-    private serviceOf: ServiceOfChannel = (channel) => channel,
+    private serviceOf: ServiceOfChannel,
   ) {}
 
   /**

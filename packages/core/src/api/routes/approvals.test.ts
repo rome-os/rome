@@ -2,7 +2,7 @@ import { runWithSessionActor } from "../../lib/session-actor.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
-import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
+import { createTestDb, buildTestDeps, type TestDb, identityServiceOf } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { PersonMappingRepository } from "../../db/repositories/person-mapping.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
@@ -46,7 +46,7 @@ describe("Approvals API", () => {
   ])("returns approval success while notification %s never settles", async (stage) => {
     const repo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, (channel) => channel),
+      new PersonMappingRepository(testDb.db, identityServiceOf),
     );
     const request = repo.requestPairing({
       channel: "telegram",
@@ -85,7 +85,7 @@ describe("Approvals API", () => {
     expect((await repo.findById(request.approval.id))?.status).toBe("approved");
     const person = await new PersonMappingRepository(
       testDb.db,
-      (channel) => channel,
+      identityServiceOf,
     ).findByChannelUser("telegram", "123");
     expect(person?.bondLevel).toBe("guardian");
     expect(stage === "send" ? send : conversationFor).toHaveBeenCalledTimes(1);
@@ -94,9 +94,9 @@ describe("Approvals API", () => {
   it("returns a conflict when an account is linked after its pairing request", async () => {
     const repo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, (channel) => channel),
+      new PersonMappingRepository(testDb.db, identityServiceOf),
     );
-    const people = new PersonMappingRepository(testDb.db, (channel) => channel);
+    const people = new PersonMappingRepository(testDb.db, identityServiceOf);
     const request = repo.requestPairing({
       channel: "telegram",
       connectionId: "test-bot",
@@ -131,7 +131,7 @@ describe("Approvals API", () => {
   ])("rejects foreign or missing origin evidence for %s without changing state", async (action) => {
     const repo = new ApprovalsRepository(
       testDb.db,
-      new PersonMappingRepository(testDb.db, (channel) => channel),
+      new PersonMappingRepository(testDb.db, identityServiceOf),
     );
     const id =
       action === "retry" ? baseline.approvals.failedExecutionId : baseline.approvals.pendingId;
@@ -228,7 +228,7 @@ describe("Approvals API", () => {
     it("shares pairing records and atomic resolution across route aliases", async () => {
       const repo = new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, (channel) => channel),
+        new PersonMappingRepository(testDb.db, identityServiceOf),
         () => Buffer.alloc(32, 3),
       );
       const deps = { ...(await buildTestDeps(testDb.db)), approvalsRepo: repo, approvalHandler };
@@ -326,7 +326,7 @@ describe("Approvals API", () => {
       const id = baseline.approvals.pendingId;
       const repo = new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, (channel) => channel),
+        new PersonMappingRepository(testDb.db, identityServiceOf),
       );
 
       await app.request(`/approvals/${id}`);
@@ -343,7 +343,7 @@ describe("Approvals API", () => {
       const id = baseline.approvals.pendingId;
       const repo = new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, (channel) => channel),
+        new PersonMappingRepository(testDb.db, identityServiceOf),
       );
 
       const affirmationBodies = [
@@ -370,7 +370,7 @@ describe("Approvals API", () => {
       const id = baseline.approvals.pendingId;
       const repo = new ApprovalsRepository(
         testDb.db,
-        new PersonMappingRepository(testDb.db, (channel) => channel),
+        new PersonMappingRepository(testDb.db, identityServiceOf),
       );
 
       const before = await repo.findById(id);

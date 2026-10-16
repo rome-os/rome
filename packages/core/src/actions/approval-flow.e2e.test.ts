@@ -24,6 +24,7 @@ import {
   buildTestDeps,
   FakeTransport,
   createMockAgentRunner,
+  identityServiceOf,
 } from "../test/helpers.js";
 import { buildApp } from "../api/index.js";
 import { COOKIE_NAME, createSession } from "../lib/auth.js";
@@ -70,7 +71,7 @@ function buildHarness() {
   const testDb = createTestDb();
   const approvalsRepo = new ApprovalsRepository(
     testDb.db,
-    new PersonMappingRepository(testDb.db, (channel) => channel),
+    new PersonMappingRepository(testDb.db, identityServiceOf),
   );
   const journalRepo = new ExecutionJournalRepository(testDb.db);
   const executionsRepo = new ActionExecutionsRepository(testDb.db);

@@ -66,6 +66,7 @@ import { channelList } from "../channels/channel-list.js";
 import { createChannelsService } from "../channels/channels-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ServiceOfChannel } from "../db/repositories/channel-records.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../db/repositories/app-keys.js";
 import { AppKeyInjector } from "../app-keys/injector.js";
@@ -134,6 +135,9 @@ function migratedSystemImage(): Buffer {
   return migratedImage;
 }
 
+/** Maps every channel to itself. Valid only where no service has a later channel. */
+export const identityServiceOf: ServiceOfChannel = (channel) => channel;
+
 /** Opens a private in-memory database at the latest system schema. Each call
  *  starts from the same freshly migrated state, unaffected by writes to any
  *  other instance. */
@@ -156,7 +160,7 @@ export function createActionEngineRepos(
 ): ActionEngineRepositories {
   return {
     executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, (channel) => channel)),
+    approvals: new ApprovalsRepository(db, new PersonMappingRepository(db, identityServiceOf)),
     journal: new ExecutionJournalRepository(db),
   };
 }
@@ -516,7 +520,7 @@ export async function buildTestDeps(
   }
 
   const sessionsRepo = new SessionsRepository(db);
-  const personMappingRepo = new PersonMappingRepository(db, (channel) => channel);
+  const personMappingRepo = new PersonMappingRepository(db, identityServiceOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const outboxRepo = new OutboxRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
