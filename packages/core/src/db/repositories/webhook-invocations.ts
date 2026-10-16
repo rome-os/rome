@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { webhookInvocations } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import type { ActionResult } from "../../actions/types.js";
@@ -12,6 +12,15 @@ export type WebhookInvocationStatus =
   | "cancelled";
 
 export type WebhookCallbackStatus = "not_requested" | "pending" | "succeeded" | "failed";
+
+/** Statuses a row holds only while the run that the webhook route started is live. */
+const UNSETTLED_STATUSES = ["accepted", "running"] as const;
+
+export interface WebhookInvocationOutcome {
+  status: WebhookInvocationStatus;
+  error: string | null;
+  finishedAt: Date;
+}
 
 export interface WebhookInvocationRecord {
   executionId: string;
@@ -124,5 +133,55 @@ export class WebhookInvocationsRepository {
         updatedAt: data.updatedAt ?? new Date(),
       })
       .where(eq(webhookInvocations.executionId, executionId));
+  }
+
+  /**
+   * Gives every `accepted` or `running` invocation the outcome `outcomeFor`
+   * returns for its execution id, and returns how many it settled. `result`
+   * becomes null. Call only at boot, before the webhook route can start a run:
+   * a row settled here must not belong to a live run.
+   */
+  async settleInterrupted(
+    now: Date,
+    outcomeFor: (executionId: string) => Promise<WebhookInvocationOutcome>,
+  ): Promise<number> {
+    const rows = await this.db
+      .select({ executionId: webhookInvocations.executionId })
+      .from(webhookInvocations)
+      .where(inArray(webhookInvocations.status, [...UNSETTLED_STATUSES]));
+    for (const { executionId } of rows) {
+      const outcome = await outcomeFor(executionId);
+      await this.db
+        .update(webhookInvocations)
+        .set({
+          status: outcome.status,
+          result: null,
+          error: outcome.error,
+          finishedAt: outcome.finishedAt,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(webhookInvocations.executionId, executionId),
+            inArray(webhookInvocations.status, [...UNSETTLED_STATUSES]),
+          ),
+        );
+    }
+    return rows.length;
+  }
+
+  /** Execution ids of settled invocations whose requested callback was never attempted, oldest first. */
+  async listUndeliveredCallbacks(): Promise<string[]> {
+    const rows = await this.db
+      .select({ executionId: webhookInvocations.executionId })
+      .from(webhookInvocations)
+      .where(
+        and(
+          eq(webhookInvocations.callbackStatus, "pending"),
+          notInArray(webhookInvocations.status, [...UNSETTLED_STATUSES]),
+        ),
+      )
+      .orderBy(webhookInvocations.createdAt);
+    return rows.map((row) => row.executionId);
   }
 }
